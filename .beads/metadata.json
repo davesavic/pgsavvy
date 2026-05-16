@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "dbsavvy",
+  "project_id": "2471cda5-3d06-4838-be6b-097ca39a5dfc"
+}
