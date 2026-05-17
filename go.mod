@@ -2,6 +2,8 @@ module github.com/davesavic/dbsavvy
 
 go 1.25
 
+toolchain go1.25.8
+
 require (
 	github.com/Xuanwo/go-locale v1.1.3
 	github.com/adrg/xdg v0.5.3

@@ -34,6 +34,12 @@ tasks:
     cmds:
       - 'echo "generate: not yet wired (see E12)"'
 
+  vulncheck:
+    desc: Install (pinned) and run govulncheck across the module (D-DEPS1).
+    cmds:
+      - go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - govulncheck ./...
+
   release:
     desc: Cut a release (stub until release pipeline lands).
     cmds:
