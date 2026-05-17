@@ -3,11 +3,27 @@ version: "2"
 linters:
   default: none
   enable:
+    - depguard
     - errcheck
     - govet
     - ineffassign
     - staticcheck
     - unused
+  settings:
+    depguard:
+      rules:
+        models:
+          files:
+            - '**/pkg/models/**'
+          deny:
+            - pkg: github.com/davesavic/dbsavvy/pkg/gui
+              desc: pkg/models must not depend on the gui layer (Appendix A)
+            - pkg: github.com/davesavic/dbsavvy/pkg/drivers
+              desc: pkg/models must not depend on the drivers layer (Appendix A)
+            - pkg: github.com/davesavic/dbsavvy/pkg/session
+              desc: pkg/models must not depend on the session layer (Appendix A)
+            - pkg: github.com/davesavic/dbsavvy/pkg/query
+              desc: pkg/models must not depend on the query layer (Appendix A)
 
 formatters:
   enable:
