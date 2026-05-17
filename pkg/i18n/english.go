@@ -82,6 +82,14 @@ type ActionTranslations struct {
 	RailTables  string
 	RailColumns string
 	RailIndexes string
+
+	// Cursor movement and confirmation primitives used by every side
+	// rail controller. Added by T7a (enn.8) to satisfy the M11i rule
+	// that every KeyBinding.Description sources from Tr.Actions.*.
+	Down    string
+	Up      string
+	Confirm string
+	Cancel  string
 }
 
 // EnglishTranslationSet returns a freshly allocated TranslationSet populated
@@ -146,6 +154,11 @@ func EnglishTranslationSet() *TranslationSet {
 			RailTables:  "Tables",
 			RailColumns: "Columns",
 			RailIndexes: "Indexes",
+
+			Down:    "Down",
+			Up:      "Up",
+			Confirm: "Select",
+			Cancel:  "Cancel",
 		},
 	}
 }

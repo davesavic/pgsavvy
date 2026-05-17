@@ -34,6 +34,12 @@ linters:
               desc: pkg/drivers root must stay engine-neutral (epic dbsavvy-921 D9); pgconn imports belong in pkg/drivers/pg.
             - pkg: github.com/davesavic/dbsavvy/pkg/drivers/pg
               desc: pkg/drivers root must not depend on a concrete driver implementation (epic dbsavvy-921 D9).
+        drivers-all:
+          files:
+            - '**/pkg/drivers/**'
+          deny:
+            - pkg: github.com/jesseduffield/lazygit
+              desc: pkg/drivers/** must not depend on the gui/tui layer (epic dbsavvy-enn T0); lazygit (pkg/gocui) imports belong in pkg/gui/** + main.go.
 
 formatters:
   enable:

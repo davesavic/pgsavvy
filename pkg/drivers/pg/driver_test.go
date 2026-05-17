@@ -114,7 +114,7 @@ func TestConnectionAcquireSessionErrorsWithoutLivePool(t *testing.T) {
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	require.NoError(t, err)
 	c := &Connection{pool: pool, serverVersion: "test"}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()

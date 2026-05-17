@@ -27,7 +27,6 @@ type Session struct {
 	conn       *pgxpool.Conn
 	id         models.SessionID
 	backendPID uint32 // D19 — sized to match pgconn.PgConn.PID()
-	profile    models.Connection
 	parent     *Connection
 	closed     atomic.Bool
 	inFlight   atomic.Int32

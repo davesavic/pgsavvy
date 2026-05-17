@@ -205,10 +205,17 @@ func (h *ConnectHelper) LoadSchemas(ctx context.Context, db string) ([]models.Sc
 		if err != nil {
 			return err
 		}
-		out, err = sess.ListSchemas(ctx, db)
-		return err
+		result, err := sess.ListSchemas(ctx, db)
+		if err != nil {
+			return err
+		}
+		out = result
+		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // LoadTables wraps drivers.Session.ListTables. Returns a pointer slice per
@@ -221,10 +228,17 @@ func (h *ConnectHelper) LoadTables(ctx context.Context, schema string) ([]*model
 		if err != nil {
 			return err
 		}
-		out, err = sess.ListTables(ctx, schema)
-		return err
+		result, err := sess.ListTables(ctx, schema)
+		if err != nil {
+			return err
+		}
+		out = result
+		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // LoadColumns wraps drivers.Session.ListColumns.
@@ -235,10 +249,17 @@ func (h *ConnectHelper) LoadColumns(ctx context.Context, schema, table string) (
 		if err != nil {
 			return err
 		}
-		out, err = sess.ListColumns(ctx, schema, table)
-		return err
+		result, err := sess.ListColumns(ctx, schema, table)
+		if err != nil {
+			return err
+		}
+		out = result
+		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // LoadIndexes wraps drivers.Session.ListIndexes.
@@ -249,10 +270,17 @@ func (h *ConnectHelper) LoadIndexes(ctx context.Context, schema, table string) (
 		if err != nil {
 			return err
 		}
-		out, err = sess.ListIndexes(ctx, schema, table)
-		return err
+		result, err := sess.ListIndexes(ctx, schema, table)
+		if err != nil {
+			return err
+		}
+		out = result
+		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // requireSession returns the current Session or errNotConnected. It must be
@@ -273,6 +301,12 @@ func (h *ConnectHelper) requireSession() (drivers.Session, error) {
 // submit enqueues run on the current Session's worker and blocks until either
 // the worker invokes the closure and the closure returns, or ctx is canceled,
 // or the queue is closed (Disconnect / reconnect) before the closure ran.
+//
+// Caller invariant: when submit returns a non-nil error, the worker may still
+// be running the closure concurrently. Callers MUST treat any closure-captured
+// state (variables written by `run`) as undefined in that branch — reading it
+// races with the worker. Only the success path (nil error) provides a
+// happens-before edge to closure writes via the done-channel receive.
 func (h *ConnectHelper) submit(ctx context.Context, run func(context.Context) error) error {
 	if ctx == nil {
 		ctx = context.Background()
