@@ -139,10 +139,20 @@ func (g *Gui) UseDriverForTest(d types.GuiDriver) error {
 // driver, controllers, registers every keyboard binding, optionally
 // wires mouse bindings, registers the swap-hook arm-cancel and pushes
 // the initial CONNECTIONS context.
+//
+// SetManager is called FIRST (before any binding registration) because
+// gocui.Gui.SetManager wipes g.keybindings, g.views, and g.currentView
+// in its body — calling it after Register would silently delete every
+// binding we just installed and leave the TUI unresponsive to input
+// (the original symptom of dbsavvy bug "no keys fire, not even q").
 func (g *Gui) wireWithDriver() error {
 	if g.driver == nil {
 		return fmt.Errorf("gui: wireWithDriver: nil driver")
 	}
+
+	// Install the Manager (g.Layout) before anything that touches the
+	// runtime's binding/view tables; see godoc above.
+	g.driver.SetManager(g)
 
 	tr := g.deps.Common.Tr
 	provider := g.deps.ConnectionsProvider
@@ -219,8 +229,42 @@ func (g *Gui) wireWithDriver() error {
 	// Cancel any pending one-shot arm whenever the focus stack changes.
 	g.tree.RegisterSwapHook(g.arm.Cancel)
 
+	// Plumb the focus stack into gocui.SetCurrentView so view-specific
+	// keybindings (the ones whose BindingsOpts had ViewName != "") can
+	// match — gocui.execKeybindings rejects view-specific bindings when
+	// g.currentView is nil or its name doesn't match. The actual call is
+	// deferred via driver.Update so it runs on the next MainLoop tick,
+	// AFTER Layout has had a chance to create the new view; calling it
+	// here on first push would error with ErrUnknownView because the
+	// initial push happens before MainLoop's first flush() pass.
+	g.tree.RegisterSwapHook(g.syncCurrentViewFromFocus)
+
 	// Push the initial CONNECTIONS context.
 	return g.tree.Push(g.registry.Connections)
+}
+
+// syncCurrentViewFromFocus enqueues a SetCurrentView call for the
+// current top of the focus stack. Viewless contexts (GLOBAL_CONTEXT
+// with GetViewName == "") are skipped so they don't clobber the
+// previous focus. Errors from SetCurrentView (typically
+// gocui.ErrUnknownView when the view hasn't been created yet on the
+// initial push) are tolerated — the next swap will retry.
+func (g *Gui) syncCurrentViewFromFocus() {
+	if g.driver == nil || g.tree == nil {
+		return
+	}
+	top := g.tree.Current()
+	if top == nil {
+		return
+	}
+	viewName := top.GetViewName()
+	if viewName == "" {
+		return
+	}
+	g.driver.Update(func() error {
+		_, _ = g.driver.SetCurrentView(viewName)
+		return nil
+	})
 }
 
 // RunAndHandleError is the production entry. It builds the driver,
@@ -230,7 +274,8 @@ func (g *Gui) RunAndHandleError() error {
 	if err := g.initGocui(); err != nil {
 		return err
 	}
-	g.driver.SetManager(g)
+	// SetManager is performed inside wireWithDriver before bindings are
+	// registered; do not call it again here (it would wipe them).
 	err := g.driver.MainLoop()
 	if err == nil || err == gocui.ErrQuit {
 		return nil
