@@ -1,6 +1,9 @@
 package types
 
-import "github.com/davesavic/dbsavvy/pkg/common"
+import (
+	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/models"
+)
 
 // IGuiCommon is the minimum aggregator surface every gui-layer collaborator
 // receives. It exposes the shared cross-cutting bag declared in
@@ -21,5 +24,36 @@ type HelperCommon interface {
 // (concrete contexts). It carries hooks for empty-state predicates,
 // presentation callbacks, and i18n lookups that the concrete Context
 // implementations need but which the stack semantics in T1 do not.
-// Empty today; populated by T2.
-type ContextTreeDeps struct{}
+//
+// All fields are optional (zero value is safe). Concrete contexts MUST
+// nil-check every hook before invoking it. The GuiDriver field is the
+// sole seam through which contexts perform view writes — no pkg/gui/context
+// file is permitted to import gocui directly (see DESIGN.md §8 and the
+// AC fix in dbsavvy-enn.3).
+//
+// Downstream tasks supply concrete implementations:
+//   - T6 (enn.7) provides EmptyStateHook (connections empty state hint).
+//   - T8 (enn.9) provides PresentationHook (confirmation popup styling),
+//     PerRowDecorationHook (connection-picker rows), and LimitText.
+//   - T5 (enn.6) consumes the SchemasContext show-hidden accessors.
+type ContextTreeDeps struct {
+	// GuiDriver is the runtime seam contexts use to schedule writes via
+	// Update / UpdateContentOnly. Nil-safe: contexts must nil-check.
+	GuiDriver GuiDriver
+
+	// EmptyStateHook is invoked by ConnectionsContext.HandleRender. When
+	// renderEmpty is true the context writes hint instead of the row list.
+	EmptyStateHook func(common *common.Common) (renderEmpty bool, hint string)
+
+	// PresentationHook is invoked by ConfirmationContext.HandleRender to
+	// fetch border style and header text for the connection-color popup.
+	PresentationHook func(conn *models.Connection) (borderStyle TextStyle, headerText string)
+
+	// PerRowDecorationHook is invoked by ConnectionsContext per row in the
+	// picker rendering pass to fetch the icon, label, and color string.
+	PerRowDecorationHook func(conn *models.Connection) (icon, label, color string)
+
+	// LimitText returns the text rendered by LimitContext for the
+	// terminal-too-small overlay (typically Tr.TerminalTooSmall).
+	LimitText func() string
+}

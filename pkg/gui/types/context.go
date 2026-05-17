@@ -26,6 +26,13 @@ const (
 	// DISPLAY_CONTEXT is a pure render target with no input focus
 	// semantics (e.g. transient which-key popup).
 	DISPLAY_CONTEXT
+	// STUB is a placeholder Context kind used by StubContext to keep
+	// ContextTree iteration safe for deferred contexts (QUERY_EDITOR,
+	// TABLE_DATA_EDITOR, RESULT_GRID, PLAN, WHICH_KEY, HISTORY) that ship
+	// later. The layout manager filters views whose context Kind == STUB
+	// so SetView is never called for them (DESIGN.md §8, D11 resolution
+	// in dbsavvy-enn.3).
+	STUB
 )
 
 // ContextKey is the stable identity of a Context. See DESIGN.md §8 table
