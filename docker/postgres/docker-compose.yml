@@ -16,8 +16,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -U dbsavvy -d dbsavvy_test"]
       interval: 5s
       timeout: 5s
-      retries: 6
-      start_period: 10s
+      retries: 10
+      start_period: 30s
 
 volumes:
   pgdata:
