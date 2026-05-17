@@ -9,6 +9,22 @@ type UserConfig struct {
 	Leader        string             `yaml:"leader"`
 	Timeout       time.Duration      `yaml:"timeout"`
 	Keybindings   []KeybindingConfig `yaml:"keybindings"`
+	UI            UIConfig           `yaml:"ui"`
+}
+
+// UIConfig groups settings that govern UI behaviour (vs. data /
+// connection settings). Today it only carries the mouse-enabled toggle
+// (dbsavvy-zro T7b mouse wiring); future epics may add scrollback,
+// double-click TTL, etc.
+type UIConfig struct {
+	Mouse MouseConfig `yaml:"mouse"`
+}
+
+// MouseConfig controls the optional mouse wiring registered by the
+// controllers at startup. When Enabled is false, the mouse-binding
+// registration block is skipped entirely (per dbsavvy-zro AC).
+type MouseConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // KeybindingConfig describes a single user-defined keybinding.
@@ -87,6 +103,9 @@ func GetDefaultConfig() *UserConfig {
 		Keybindings: []KeybindingConfig{
 			{Mode: "normal", Scope: "global", Sequence: []string{"<c-c>"}, ActionID: "app.quit", Description: "Quit"},
 			{Mode: "normal", Scope: "global", Sequence: []string{"<leader>", "q"}, ActionID: "app.quit", Description: "Quit via leader"},
+		},
+		UI: UIConfig{
+			Mouse: MouseConfig{Enabled: true},
 		},
 	}
 }

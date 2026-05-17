@@ -28,8 +28,17 @@ var ErrPopAtBottom = errors.New("gui: cannot pop the root context")
 //     fire).
 //   - Replace swaps the top entry without firing pop/push lifecycle
 //     hooks.
+//
+// SwapHooks are functions invoked by Push/Pop/Replace whenever the stack
+// composition changes (specifically: after a successful Push that did not
+// short-circuit on duplicate-top, after Pop, and after Replace). Hooks
+// receive no arguments and are intended for cross-cutting cancellation
+// concerns (e.g. keys.OneshotArm cancels any pending arm on context
+// switch). Added per dbsavvy-zro T7b — keeps the OneshotArm cancel path
+// simple without polling on every keypress.
 type ContextTree struct {
-	stack []types.IBaseContext
+	stack     []types.IBaseContext
+	swapHooks []func()
 }
 
 // NewContextTree returns an empty ContextTree. Callers are expected to
@@ -64,6 +73,7 @@ func (t *ContextTree) Push(c types.IBaseContext) error {
 	if err := c.HandleFocus(types.OnFocusOpts{NewContextKey: c.GetKey()}); err != nil {
 		return err
 	}
+	t.fireSwapHooks()
 	return nil
 }
 
@@ -80,7 +90,11 @@ func (t *ContextTree) Pop() error {
 	if err := popped.HandleFocusLost(types.OnFocusLostOpts{NewContextKey: newTop.GetKey()}); err != nil {
 		return err
 	}
-	return newTop.HandleFocus(types.OnFocusOpts{NewContextKey: newTop.GetKey()})
+	if err := newTop.HandleFocus(types.OnFocusOpts{NewContextKey: newTop.GetKey()}); err != nil {
+		return err
+	}
+	t.fireSwapHooks()
+	return nil
 }
 
 // Replace swaps the top entry with c without firing pop/push lifecycle
@@ -88,10 +102,34 @@ func (t *ContextTree) Pop() error {
 func (t *ContextTree) Replace(c types.IBaseContext) error {
 	if len(t.stack) == 0 {
 		t.stack = append(t.stack, c)
+		t.fireSwapHooks()
 		return nil
 	}
 	t.stack[len(t.stack)-1] = c
+	t.fireSwapHooks()
 	return nil
+}
+
+// RegisterSwapHook appends fn to the list of callbacks invoked when the
+// stack composition changes (Push that actually pushed, Pop, Replace). A
+// nil fn is silently dropped. Hooks are called in registration order on
+// the same goroutine that performed the mutation (the MainLoop in
+// production). Used by keys.OneshotArm to cancel any pending arm when
+// the active context switches.
+func (t *ContextTree) RegisterSwapHook(fn func()) {
+	if fn == nil {
+		return
+	}
+	t.swapHooks = append(t.swapHooks, fn)
+}
+
+// fireSwapHooks invokes every registered swap hook in registration
+// order. Hooks panicking is treated as a programming error and will
+// propagate; that matches the rest of pkg/gui's MainLoop-only contract.
+func (t *ContextTree) fireSwapHooks() {
+	for _, fn := range t.swapHooks {
+		fn()
+	}
 }
 
 // Current returns the top context, or nil if the stack is empty.

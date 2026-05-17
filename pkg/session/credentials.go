@@ -146,7 +146,7 @@ func resolveExplicitPgpass(path, dsn string) (string, error) {
 		return "", err
 	}
 
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimRight(line, "\r")
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
