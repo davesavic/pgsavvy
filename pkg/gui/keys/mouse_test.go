@@ -24,6 +24,7 @@ func (m *mouseFakeDriver) SetViewClickBinding(b *types.ViewMouseBinding) error {
 
 // The rest of GuiDriver — all panic so unintended use is loud.
 func (m *mouseFakeDriver) Write(_ string, _ []byte) (int, error) { panic("not used") }
+func (m *mouseFakeDriver) SetContent(_ string, _ string) error   { panic("not used") }
 func (m *mouseFakeDriver) GetViewBuffer(_ string) string         { panic("not used") }
 func (m *mouseFakeDriver) SetView(_ string, _, _, _, _ int, _ byte) (types.View, error) {
 	panic("not used")

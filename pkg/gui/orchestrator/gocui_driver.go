@@ -28,6 +28,15 @@ func (d *gocuiDriver) Write(viewName string, b []byte) (int, error) {
 	return v.Write(b)
 }
 
+func (d *gocuiDriver) SetContent(viewName string, str string) error {
+	v, err := d.g.View(viewName)
+	if err != nil {
+		return err
+	}
+	v.SetContent(str)
+	return nil
+}
+
 func (d *gocuiDriver) GetViewBuffer(viewName string) string {
 	v, err := d.g.View(viewName)
 	if err != nil {
@@ -44,7 +53,9 @@ func (d *gocuiDriver) SetView(name string, x0, y0, x1, y1 int, overlaps byte) (t
 func (d *gocuiDriver) SetKeybinding(viewName string, key types.Key, mod types.Modifier, handler func() error) error {
 	// gocui's SetKeybinding handler takes (*Gui, *View). Wrap the
 	// handler closure so callers can pass a parameterless func() error.
-	wrapped := func(*gocui.Gui, *gocui.View) error { return handler() }
+	wrapped := func(_ *gocui.Gui, _ *gocui.View) error {
+		return handler()
+	}
 	_ = mod // gocui.SetKeybinding takes (viewname, Key, handler); the modifier is folded into Key per gocui's tcell layer.
 	return d.g.SetKeybinding(viewName, key, wrapped)
 }

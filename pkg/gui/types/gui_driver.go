@@ -5,8 +5,16 @@ package types
 // (tests). Keeping the surface explicit lets context/controller code be
 // unit-tested without instantiating a real terminal Gui.
 type GuiDriver interface {
-	// Write appends bytes to the named view's content buffer.
+	// Write appends bytes to the named view's content buffer. Reserved
+	// for streaming/append-only sinks (e.g. LOG); full-redraw render
+	// passes must use SetContent so the buffer doesn't grow per frame.
 	Write(viewName string, b []byte) (int, error)
+
+	// SetContent replaces the named view's content with str (gocui's
+	// View.SetContent clears the buffer under the view's writeMutex and
+	// writes str in one critical section). This is the correct primitive
+	// for any HandleRender that re-renders the whole view from scratch.
+	SetContent(viewName string, str string) error
 
 	// GetViewBuffer returns the current text content of the named view.
 	GetViewBuffer(viewName string) string

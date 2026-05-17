@@ -41,8 +41,7 @@ func (c *ConnectionsContext) HandleRender() error {
 		renderEmpty, hint := deps.EmptyStateHook(nil)
 		if renderEmpty {
 			writeView(deps, func() error {
-				_, err := deps.GuiDriver.Write(viewName, []byte(hint))
-				return err
+				return deps.GuiDriver.SetContent(viewName, hint)
 			})
 			return nil
 		}
@@ -50,8 +49,7 @@ func (c *ConnectionsContext) HandleRender() error {
 
 	rows := c.renderRows()
 	writeView(deps, func() error {
-		_, err := deps.GuiDriver.Write(viewName, []byte(rows))
-		return err
+		return deps.GuiDriver.SetContent(viewName, rows)
 	})
 	return nil
 }

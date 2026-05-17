@@ -21,6 +21,7 @@ type updateRecordingDriver struct {
 }
 
 func (d *updateRecordingDriver) Write(_ string, _ []byte) (int, error) { panic("not used") }
+func (d *updateRecordingDriver) SetContent(_ string, _ string) error   { panic("not used") }
 func (d *updateRecordingDriver) GetViewBuffer(_ string) string         { panic("not used") }
 func (d *updateRecordingDriver) SetView(_ string, _, _, _, _ int, _ byte) (types.View, error) {
 	panic("not used")

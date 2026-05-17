@@ -24,8 +24,7 @@ func (l *LimitContext) HandleRender() error {
 	text := l.deps.LimitText()
 	viewName := l.GetViewName()
 	writeView(l.deps, func() error {
-		_, err := l.deps.GuiDriver.Write(viewName, []byte(text))
-		return err
+		return l.deps.GuiDriver.SetContent(viewName, text)
 	})
 	return nil
 }

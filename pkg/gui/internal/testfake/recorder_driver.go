@@ -177,6 +177,17 @@ func (r *RecorderGuiDriver) Write(viewName string, b []byte) (int, error) {
 	return len(b), nil
 }
 
+func (r *RecorderGuiDriver) SetContent(viewName string, str string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	v, ok := r.views[viewName]
+	if !ok {
+		return gocui.ErrUnknownView
+	}
+	v.buf = append(v.buf[:0], []byte(str)...)
+	return nil
+}
+
 func (r *RecorderGuiDriver) GetViewBuffer(viewName string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
