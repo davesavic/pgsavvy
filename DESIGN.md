@@ -1438,6 +1438,8 @@ rejected at load.
 (`jackc/pgx/v5`):
 
 - `pgxpool.Pool` per Connection.
+- Read-only and `statement_timeout` are applied via `pgxpool.Config.AfterConnect`. They survive pool-conn recycle (forced by `pg_terminate_backend` from a separate side connection) — verified by `TestReadOnlyPersistsAfterPoolRecycle` and `TestStatementTimeoutPersistsAfterPoolRecycle` in `test/integration/`.
+- `statement_timeout` values are validated at config-load by the regex `^(0|\d+\s*(ms|s|min|h|d))$`, then canonicalized via (number, unit) → known-safe format before interpolating into the SET statement. Property+vector fuzz tests in `pkg/session/profile_test.go` cover injection vectors. The regex IS the SQL-injection defense (SET commands do not accept bind parameters in Postgres).
 - `pgxpool.Acquire()` per Session — gives us a dedicated `*pgxpool.Conn`
   that owns transaction state.
 - Cancellation: `pg_cancel_backend(pid)` from a *separate* connection
@@ -1445,6 +1447,7 @@ rejected at load.
   query start.
 - Streaming: `Conn.Query(...)`, then `Rows.Next()`. For *huge* results,
   open a server-side cursor (`DECLARE c CURSOR FOR ...; FETCH 1000 FROM c`).
+- Driver registration: factories are constructed eagerly. `pg.New(prompter session.Prompter)` returns a `drivers.Factory` closure that captures the prompter. `main.go` calls `drivers.Register("postgres", pg.New(session.TerminalPrompter{}))`. No side-effect imports.
 
 Loader files mirror lazygit's `branch_loader.go`:
 
@@ -1509,6 +1512,12 @@ func (l *TableLoader) enrichWithStats(
 
 Embedded SQL files (`//go:embed sql/*.sql`) keep big queries out of Go
 strings — easier to copy into psql to debug.
+
+**v1 introspection performance.** `ListColumns` / `ListIndexes` / `ListConstraints` take (`$1=schema`, `$2=table`) per-table parameters — N round-trips for N tables. The TUI's lazy-loading model masks this for typical sizes. Bulk variants taking only `$1=schema` are tracked for v0.2; the v1 acceptance is per-table I/O. Queries target the Postgres 17 catalog. `Connection.MajorVersion` is parsed from `SELECT version()` at Open; major ≥ 18 logs a stderr WARN once-per-Connection — catalog drift not yet validated.
+
+**Layering note.** `pkg/session/profile.go` is pgx-flavored in v1 because per-driver pool config is unavoidable. MySQL/SQLite drivers will add sibling helpers (e.g. `pkg/session/profile_mysql.go`) when those drivers land in E12/E13. This is a known coupling, not a generic-pool abstraction.
+
+**Version pin.** v1 pins `github.com/jackc/pgx/v5 v5.7.2` (exact, no `^`/`~`) in `go.mod`. The Loader file sketched above lives at `pkg/drivers/pg/tables_loader.go`.
 
 ### 11.4 Extensibility (when adding MySQL, SQLite, ...)
 
