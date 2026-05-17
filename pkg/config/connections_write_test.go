@@ -1,0 +1,164 @@
+package config
+
+import (
+	"bytes"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/spf13/afero"
+
+	"github.com/davesavic/dbsavvy/pkg/models"
+)
+
+type renameFailFs struct {
+	afero.Fs
+}
+
+func (r *renameFailFs) Rename(oldname, newname string) error {
+	return errors.New("simulated rename failure")
+}
+
+// withWarnWriter swaps warnWriter and restores it on test cleanup. Returns the
+// buffer to inspect.
+func withWarnWriter(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	prev := warnWriter
+	warnWriter = buf
+	t.Cleanup(func() { warnWriter = prev })
+	return buf
+}
+
+func TestSaveConnections_RoundTrip(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	conns := []models.Connection{
+		{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"},
+		{Name: "prod", Driver: "postgres", DSN: "postgres://localhost/prod"},
+	}
+	if err := SaveConnections(fs, "/c.yml", conns); err != nil {
+		t.Fatalf("SaveConnections: %v", err)
+	}
+	got, err := LoadConnections(fs, "/c.yml")
+	if err != nil {
+		t.Fatalf("LoadConnections (KnownFields strict): %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].Name != "dev" || got[1].Name != "prod" {
+		t.Errorf("names = %q,%q; want dev,prod", got[0].Name, got[1].Name)
+	}
+}
+
+func TestSaveConnections_RenameFailureRemovesTmp(t *testing.T) {
+	base := afero.NewMemMapFs()
+	fs := &renameFailFs{Fs: base}
+	conns := []models.Connection{{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}}
+	err := SaveConnections(fs, "/c.yml", conns)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if exists, _ := afero.Exists(base, "/c.yml.tmp"); exists {
+		t.Errorf("tmp file remains after rename failure")
+	}
+	if exists, _ := afero.Exists(base, "/c.yml"); exists {
+		t.Errorf("final file unexpectedly created after rename failure")
+	}
+}
+
+func TestSaveConnections_WarnOnInlinePassword(t *testing.T) {
+	buf := withWarnWriter(t)
+	fs := afero.NewMemMapFs()
+	conns := []models.Connection{
+		{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev", Password: "hunter2"},
+	}
+	if err := SaveConnections(fs, "/c.yml", conns); err != nil {
+		t.Fatalf("SaveConnections: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "plaintext password") {
+		t.Errorf("warning output = %q; want it to mention plaintext password", out)
+	}
+}
+
+func TestSaveConnections_NoWarnWhenClean(t *testing.T) {
+	buf := withWarnWriter(t)
+	fs := afero.NewMemMapFs()
+	conns := []models.Connection{{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}}
+	if err := SaveConnections(fs, "/c.yml", conns); err != nil {
+		t.Fatalf("SaveConnections: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("expected no warning, got %q", buf.String())
+	}
+}
+
+func TestAppendConnection_MissingFileCreates(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	c := models.Connection{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}
+	if err := AppendConnection(fs, "/c.yml", c); err != nil {
+		t.Fatalf("AppendConnection: %v", err)
+	}
+	got, err := LoadConnections(fs, "/c.yml")
+	if err != nil {
+		t.Fatalf("LoadConnections: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "dev" {
+		t.Errorf("loaded = %+v; want one profile 'dev'", got)
+	}
+}
+
+func TestAppendConnection_DuplicateName(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	c := models.Connection{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}
+	if err := AppendConnection(fs, "/c.yml", c); err != nil {
+		t.Fatalf("first AppendConnection: %v", err)
+	}
+	dup := models.Connection{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/other"}
+	err := AppendConnection(fs, "/c.yml", dup)
+	if !errors.Is(err, ErrDuplicateConnectionName) {
+		t.Fatalf("err = %v; want ErrDuplicateConnectionName", err)
+	}
+	// Ensure no overwrite happened.
+	got, _ := LoadConnections(fs, "/c.yml")
+	if len(got) != 1 || got[0].DSN != "postgres://localhost/dev" {
+		t.Errorf("file mutated after duplicate rejection: %+v", got)
+	}
+}
+
+func TestAppendConnection_PropagatesLoadError(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	// Legacy flat form — LoadConnections rejects it loudly (M10f).
+	body := "- name: dev\n  driver: postgres\n  dsn: postgres://localhost/dev\n"
+	if err := afero.WriteFile(fs, "/c.yml", []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := AppendConnection(fs, "/c.yml", models.Connection{Name: "new", Driver: "postgres", DSN: "postgres://x"})
+	if err == nil {
+		t.Fatal("expected load error from legacy flat form, got nil")
+	}
+	if !strings.Contains(err.Error(), "legacy flat") {
+		t.Errorf("err = %v; want legacy-flat load error propagated", err)
+	}
+}
+
+func TestIsInlinePasswordPresent(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []models.Connection
+		want bool
+	}{
+		{"empty", nil, false},
+		{"none", []models.Connection{{Name: "a"}, {Name: "b"}}, false},
+		{"first", []models.Connection{{Name: "a", Password: "x"}, {Name: "b"}}, true},
+		{"last", []models.Connection{{Name: "a"}, {Name: "b", Password: "x"}}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := IsInlinePasswordPresent(c.in); got != c.want {
+				t.Errorf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}
