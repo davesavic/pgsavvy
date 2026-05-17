@@ -21,7 +21,7 @@ func NewColumnsController(c *common.Common, helpers HelperBag, cursor SideListCu
 }
 
 // GetKeybindings returns the columns rail bindings.
-func (c *ColumnsController) GetKeybindings(_ types.KeybindingsOpts) []*types.KeyBinding {
+func (c *ColumnsController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	tr := c.tr()
 	view := viewName(types.COLUMNS)
 	out := c.baseBindings()

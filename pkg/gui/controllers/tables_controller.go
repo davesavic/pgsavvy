@@ -36,7 +36,7 @@ func NewTablesController(
 }
 
 // GetKeybindings returns the tables rail bindings.
-func (c *TablesController) GetKeybindings(_ types.KeybindingsOpts) []*types.KeyBinding {
+func (c *TablesController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	tr := c.tr()
 	view := viewName(types.TABLES)
 	out := c.baseBindings()

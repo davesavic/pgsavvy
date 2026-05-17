@@ -1,8 +1,6 @@
 package controllers
 
 import (
-	"github.com/jesseduffield/lazygit/pkg/gocui"
-
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
@@ -37,21 +35,21 @@ func (m *MenuController) Close() error {
 }
 
 // GetKeybindings returns the menu popup bindings.
-func (m *MenuController) GetKeybindings(_ types.KeybindingsOpts) []*types.KeyBinding {
+func (m *MenuController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	tr := m.tr()
 	view := viewName(types.MENU)
-	return []*types.KeyBinding{
+	return []*types.ChordBinding{
 		{
 			ViewName:    view,
-			Key:         gocui.NewKeyName(gocui.KeyEnter),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Special: types.KeyEnter}},
+			Scope:       types.MENU,
 			Handler:     m.Select,
 			Description: tr.Actions.Confirm,
 		},
 		{
 			ViewName:    view,
-			Key:         gocui.NewKeyName(gocui.KeyEsc),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Special: types.KeyEsc}},
+			Scope:       types.MENU,
 			Handler:     m.Close,
 			Description: tr.Actions.Cancel,
 		},

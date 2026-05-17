@@ -3,8 +3,6 @@ package controllers_test
 import (
 	"testing"
 
-	"github.com/jesseduffield/lazygit/pkg/gocui"
-
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -29,23 +27,23 @@ func TestConnectionsControllerBindingsShape(t *testing.T) {
 		"4":       false,
 	}
 	for _, kb := range bindings {
-		if kb.Key.Equals(gocui.NewKeyRune('j')) {
+		if isRune(kb, 'j') {
 			want["j"] = true
 		}
-		if kb.Key.Equals(gocui.NewKeyRune('k')) {
+		if isRune(kb, 'k') {
 			want["k"] = true
 		}
-		if kb.Key.Equals(gocui.NewKeyRune('a')) {
+		if isRune(kb, 'a') {
 			want["a"] = true
 		}
-		if kb.Key.Equals(gocui.NewKeyName(gocui.KeyEnter)) {
+		if isSpecial(kb, types.KeyEnter) {
 			want["<enter>"] = true
 		}
-		if kb.Key.Equals(gocui.NewKeyName(gocui.KeyTab)) {
+		if isSpecial(kb, types.KeyTab) {
 			want["<tab>"] = true
 		}
 		for _, d := range []rune{'1', '2', '3', '4'} {
-			if kb.Key.Equals(gocui.NewKeyRune(d)) {
+			if isRune(kb, d) {
 				want[string(d)] = true
 			}
 		}
@@ -68,7 +66,7 @@ func TestConnectionsControllerConfirmCallsConnect(t *testing.T) {
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 	var confirm func() error
 	for _, kb := range bindings {
-		if kb.Key.Equals(gocui.NewKeyName(gocui.KeyEnter)) {
+		if isSpecial(kb, types.KeyEnter) {
 			confirm = kb.Handler
 		}
 	}
@@ -90,7 +88,7 @@ func TestConnectionsControllerConfirmEmptyRailNoop(t *testing.T) {
 	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 	for _, kb := range bindings {
-		if kb.Key.Equals(gocui.NewKeyName(gocui.KeyEnter)) {
+		if isSpecial(kb, types.KeyEnter) {
 			_ = kb.Handler()
 		}
 	}
@@ -107,7 +105,7 @@ func TestConnectionsControllerAddCallsConnectionForm(t *testing.T) {
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 	var add func() error
 	for _, kb := range bindings {
-		if kb.Key.Equals(gocui.NewKeyRune('a')) {
+		if isRune(kb, 'a') {
 			add = kb.Handler
 		}
 	}
@@ -130,7 +128,7 @@ func TestConnectionsControllerAddAllowedWithSelection(t *testing.T) {
 	cur := &fakeCursor{idx: 0, items: []any{b.ConnPicker.sel}}
 	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyRune('a')) {
+		if isRune(kb, 'a') {
 			_ = kb.Handler()
 		}
 	}
@@ -145,7 +143,7 @@ func TestConnectionsControllerDescriptionsSourceFromTrActions(t *testing.T) {
 	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if kb.Description == "" {
-			t.Fatalf("empty Description on binding key=%v (M11i: must source from Tr.Actions.*)", kb.Key)
+			t.Fatalf("empty Description on binding sequence=%v (M11i: must source from Tr.Actions.*)", kb.Sequence)
 		}
 	}
 }

@@ -59,28 +59,28 @@ func (q *QuitController) ShowMenu() error {
 //
 // GLOBAL_CONTEXT has no view, so ViewName is empty (gocui binds
 // globally when viewname == "").
-func (q *QuitController) GetKeybindings(_ types.KeybindingsOpts) []*types.KeyBinding {
+func (q *QuitController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	tr := q.tr()
 	const globalView = "" // gocui's "bind globally" sentinel.
-	return []*types.KeyBinding{
+	return []*types.ChordBinding{
 		{
 			ViewName:    globalView,
-			Key:         gocui.NewKeyRune('q'),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Code: 'q'}},
+			Scope:       types.GLOBAL,
 			Handler:     q.Quit,
 			Description: tr.Actions.QuitApp,
 		},
 		{
 			ViewName:    globalView,
-			Key:         gocui.NewKeyRune(':'),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Code: ':'}},
+			Scope:       types.GLOBAL,
 			Handler:     q.ArmColon,
 			Description: tr.Actions.QuitApp,
 		},
 		{
 			ViewName:    globalView,
-			Key:         gocui.NewKeyRune('?'),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Code: '?'}},
+			Scope:       types.GLOBAL,
 			Handler:     q.ShowMenu,
 			Description: tr.Actions.ShowMenu,
 		},

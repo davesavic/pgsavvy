@@ -116,7 +116,7 @@ func (m *minimalCtx) HandleQuit() error                             { return nil
 func (m *minimalCtx) NeedsRerenderOnHeightChange() bool             { return false }
 func (m *minimalCtx) NeedsRerenderOnWidthChange() bool              { return false }
 func (m *minimalCtx) AddKeybindingsFn(_ types.KeybindingsFn)        {}
-func (m *minimalCtx) GetKeybindings(_ types.KeybindingsOpts) []*types.KeyBinding {
+func (m *minimalCtx) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	return nil
 }
 

@@ -3,8 +3,6 @@ package controllers_test
 import (
 	"testing"
 
-	"github.com/jesseduffield/lazygit/pkg/gocui"
-
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
@@ -19,7 +17,7 @@ func TestSchemasControllerHideCallsSchemasHelper(t *testing.T) {
 	cur := &fakeCursor{}
 	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyRune('H')) {
+		if isRune(kb, 'H') {
 			if err := kb.Handler(); err != nil {
 				t.Fatalf("H: %v", err)
 			}
@@ -39,7 +37,7 @@ func TestSchemasControllerUnhideOnErrNeedsConfirmationOpensConfirm(t *testing.T)
 	cur := &fakeCursor{}
 	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyRune('U')) {
+		if isRune(kb, 'U') {
 			if err := kb.Handler(); err != nil {
 				t.Fatalf("U: %v", err)
 			}
@@ -75,7 +73,7 @@ func TestSchemasControllerLeaderArmReadsCommonCfgLeader(t *testing.T) {
 	ctrl := controllers.NewSchemasController(c, b.HelperBag, cur, b.SchemaPicker)
 	// Find the leader binding (space, rune ' ').
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyRune(' ')) {
+		if isRune(kb, ' ') {
 			if err := kb.Handler(); err != nil {
 				t.Fatalf("leader: %v", err)
 			}
@@ -108,7 +106,7 @@ func TestSchemasControllerLeaderFallbacksToSpaceWhenCfgEmpty(t *testing.T) {
 	cur := &fakeCursor{}
 	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyRune(' ')) {
+		if isRune(kb, ' ') {
 			if err := kb.Handler(); err != nil {
 				t.Fatalf("leader: %v", err)
 			}

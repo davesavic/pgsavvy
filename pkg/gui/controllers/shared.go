@@ -1,8 +1,6 @@
 package controllers
 
 import (
-	"github.com/jesseduffield/lazygit/pkg/gocui"
-
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 )
@@ -29,41 +27,42 @@ func viewName(k types.ContextKey) string { return string(k) }
 // Per the AC list ("Each side-rail controller registers j/k/digit/<tab>")
 // the controller MUST publish these bindings so the bindings menu (?)
 // can list them. The actual switch action is wired downstream.
-func railSwitchBindings(view string, tr *i18n.TranslationSet) []*types.KeyBinding {
+func railSwitchBindings(view string, tr *i18n.TranslationSet) []*types.ChordBinding {
 	noop := func() error { return nil }
-	return []*types.KeyBinding{
+	scope := types.ContextKey(view)
+	return []*types.ChordBinding{
 		{
 			ViewName:    view,
-			Key:         gocui.NewKeyRune('1'),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Code: '1'}},
+			Scope:       scope,
 			Handler:     noop,
 			Description: tr.Actions.RailSchemas,
 		},
 		{
 			ViewName:    view,
-			Key:         gocui.NewKeyRune('2'),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Code: '2'}},
+			Scope:       scope,
 			Handler:     noop,
 			Description: tr.Actions.RailTables,
 		},
 		{
 			ViewName:    view,
-			Key:         gocui.NewKeyRune('3'),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Code: '3'}},
+			Scope:       scope,
 			Handler:     noop,
 			Description: tr.Actions.RailColumns,
 		},
 		{
 			ViewName:    view,
-			Key:         gocui.NewKeyRune('4'),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Code: '4'}},
+			Scope:       scope,
 			Handler:     noop,
 			Description: tr.Actions.RailIndexes,
 		},
 		{
 			ViewName:    view,
-			Key:         gocui.NewKeyName(gocui.KeyTab),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Special: types.KeyTab}},
+			Scope:       scope,
 			Handler:     noop,
 			Description: tr.Actions.RailSchemas,
 		},

@@ -15,7 +15,7 @@ func TestQuitControllerQReturnsErrQuit(t *testing.T) {
 	b := newBag()
 	ctrl := controllers.NewQuitController(nil, b.HelperBag)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyRune('q')) {
+		if isRune(kb, 'q') {
 			if err := kb.Handler(); !errors.Is(err, gocui.ErrQuit) {
 				t.Fatalf("q handler returned %v, want gocui.ErrQuit", err)
 			}
@@ -29,7 +29,7 @@ func TestQuitControllerColonArmsOneShotWithQSuffix(t *testing.T) {
 	b := newBag()
 	ctrl := controllers.NewQuitController(nil, b.HelperBag)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyRune(':')) {
+		if isRune(kb, ':') {
 			if err := kb.Handler(); err != nil {
 				t.Fatalf("colon: %v", err)
 			}
@@ -60,7 +60,7 @@ func TestQuitControllerQuestionMarkOpensMenu(t *testing.T) {
 	b := newBag()
 	ctrl := controllers.NewQuitController(nil, b.HelperBag)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyRune('?')) {
+		if isRune(kb, '?') {
 			if err := kb.Handler(); err != nil {
 				t.Fatalf("?: %v", err)
 			}
@@ -80,7 +80,7 @@ func TestQuitControllerColonArmsOnlyQSuffix(t *testing.T) {
 	b := newBag()
 	ctrl := controllers.NewQuitController(nil, b.HelperBag)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyRune(':')) {
+		if isRune(kb, ':') {
 			_ = kb.Handler()
 		}
 	}

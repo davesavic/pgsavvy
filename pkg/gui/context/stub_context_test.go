@@ -59,8 +59,8 @@ func TestStubContextRerenderHooksAreFalse(t *testing.T) {
 func TestStubContextKeybindingsEmpty(t *testing.T) {
 	s := NewStubContext(types.WHICH_KEY, "which_key")
 	// AddKeybindingsFn must be a no-op (cannot bind to a deferred context).
-	s.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.KeyBinding {
-		return []*types.KeyBinding{{Description: "should-be-dropped"}}
+	s.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.ChordBinding {
+		return []*types.ChordBinding{{Description: "should-be-dropped"}}
 	})
 	got := s.GetKeybindings(types.KeybindingsOpts{})
 	if got == nil {

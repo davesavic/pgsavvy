@@ -67,7 +67,12 @@ type KeybindingsOpts struct{}
 
 // KeybindingsFn is the signature a Controller registers via
 // IBaseContext.AddKeybindingsFn to contribute keybindings to a Context.
-type KeybindingsFn func(KeybindingsOpts) []*KeyBinding
+//
+// Returns *ChordBinding (the chord-aware binding shape). The Handler
+// and ViewName fields are transitional shims (dlp.8a) that let the
+// orchestrator's single-key registration loop keep working while the
+// master Editor / commands.Registry dispatch path lands in dlp.8b/c.
+type KeybindingsFn func(KeybindingsOpts) []*ChordBinding
 
 // IBaseContext is the lifecycle + identity contract every Context
 // satisfies. Signature mirrors DESIGN.md §8 lines 608-630.
@@ -87,6 +92,6 @@ type IBaseContext interface {
 	NeedsRerenderOnWidthChange() bool
 
 	AddKeybindingsFn(fn KeybindingsFn)
-	GetKeybindings(opts KeybindingsOpts) []*KeyBinding
+	GetKeybindings(opts KeybindingsOpts) []*ChordBinding
 	GetMouseKeybindings(opts KeybindingsOpts) []MouseBinding
 }

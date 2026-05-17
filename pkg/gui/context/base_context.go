@@ -111,8 +111,8 @@ func (b *BaseContext) AddKeybindingsFn(fn types.KeybindingsFn) {
 // any de-duplication here.
 //
 // Returns a non-nil empty slice when no controllers are attached.
-func (b *BaseContext) GetKeybindings(opts types.KeybindingsOpts) []*types.KeyBinding {
-	out := make([]*types.KeyBinding, 0)
+func (b *BaseContext) GetKeybindings(opts types.KeybindingsOpts) []*types.ChordBinding {
+	out := make([]*types.ChordBinding, 0)
 	for _, fn := range b.keybindingsFns {
 		out = append(out, fn(opts)...)
 	}

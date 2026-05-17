@@ -9,6 +9,7 @@
 package orchestrator
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
@@ -202,10 +203,21 @@ func (g *Gui) wireWithDriver() error {
 	}
 	g.controllers = controllers.AttachControllers(g.registry, g.deps.Common, helperBag)
 
-	// Register every controller-published binding via keys.Register.
+	// Register every controller-published binding via keys.RegisterChord
+	// (the dlp.8a shim wrapper around keys.Register). Multi-key
+	// sequences and nil-handler bindings are logged and skipped so a
+	// single misconfigured controller does not fail gui startup —
+	// dispatch for multi-key bindings lands in dlp.8b/c via the master
+	// Editor + Matcher.
 	for _, ctx := range g.registry.Flatten() {
 		for _, kb := range ctx.GetKeybindings(types.KeybindingsOpts{}) {
-			if err := keys.Register(g.driver, g.deps.Common.Log, kb.ViewName, kb.Key, kb.Mod, kb.Handler, kb.Description); err != nil {
+			if err := keys.RegisterChord(g.driver, g.deps.Common.Log, kb); err != nil {
+				if errors.Is(err, keys.ErrSequenceTooLong) || errors.Is(err, keys.ErrNilHandler) {
+					if g.deps.Common.Log != nil {
+						g.deps.Common.Log.Warnf("gui: skipping binding %q on %q: %v", kb.Description, kb.ViewName, err)
+					}
+					continue
+				}
 				return fmt.Errorf("gui: register %q on %q: %w", kb.Description, kb.ViewName, err)
 			}
 		}

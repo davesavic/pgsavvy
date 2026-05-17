@@ -71,8 +71,8 @@ func (s *StubContext) AddKeybindingsFn(_ types.KeybindingsFn) {}
 
 // GetKeybindings returns an empty, non-nil slice for stubs (AC: empty
 // slice not nil).
-func (s *StubContext) GetKeybindings(_ types.KeybindingsOpts) []*types.KeyBinding {
-	return []*types.KeyBinding{}
+func (s *StubContext) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
+	return []*types.ChordBinding{}
 }
 
 // GetMouseKeybindings returns nil for stubs — mouse handling is not

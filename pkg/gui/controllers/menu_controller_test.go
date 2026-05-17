@@ -3,8 +3,6 @@ package controllers_test
 import (
 	"testing"
 
-	"github.com/jesseduffield/lazygit/pkg/gocui"
-
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
@@ -13,7 +11,7 @@ func TestMenuControllerEscPopsMenu(t *testing.T) {
 	b := newBag()
 	ctrl := controllers.NewMenuController(nil, b.HelperBag)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyName(gocui.KeyEsc)) {
+		if isSpecial(kb, types.KeyEsc) {
 			if err := kb.Handler(); err != nil {
 				t.Fatalf("esc: %v", err)
 			}
@@ -29,10 +27,10 @@ func TestMenuControllerHasEnterAndEsc(t *testing.T) {
 	ctrl := controllers.NewMenuController(nil, b.HelperBag)
 	hasEnter, hasEsc := false, false
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyName(gocui.KeyEnter)) {
+		if isSpecial(kb, types.KeyEnter) {
 			hasEnter = true
 		}
-		if kb.Key.Equals(gocui.NewKeyName(gocui.KeyEsc)) {
+		if isSpecial(kb, types.KeyEsc) {
 			hasEsc = true
 		}
 	}

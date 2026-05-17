@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -218,3 +219,25 @@ type fakeCursor struct {
 func (f *fakeCursor) Cursor() int     { return f.idx }
 func (f *fakeCursor) SetCursor(i int) { f.idx = i }
 func (f *fakeCursor) Items() []any    { return f.items }
+
+// isRune reports whether b is a single-keystroke ChordBinding whose
+// first key is the bare rune r (no modifiers, no SpecialKey). Used by
+// controller tests to find specific bindings post-dlp.8a (ChordBinding
+// replaces the old gocui.Key field).
+func isRune(b *types.ChordBinding, r rune) bool {
+	if b == nil || len(b.Sequence) != 1 {
+		return false
+	}
+	k := b.Sequence[0]
+	return k.Special == types.KeyNone && k.Mod == 0 && k.Code == r
+}
+
+// isSpecial reports whether b is a single-keystroke ChordBinding whose
+// first key is the given SpecialKey (no modifiers, no rune).
+func isSpecial(b *types.ChordBinding, sp types.SpecialKey) bool {
+	if b == nil || len(b.Sequence) != 1 {
+		return false
+	}
+	k := b.Sequence[0]
+	return k.Special == sp && k.Mod == 0 && k.Code == 0
+}

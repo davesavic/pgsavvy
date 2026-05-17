@@ -1,8 +1,6 @@
 package controllers
 
 import (
-	"github.com/jesseduffield/lazygit/pkg/gocui"
-
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
@@ -86,27 +84,28 @@ func (l *ListControllerTrait[T]) Confirm() error {
 // baseBindings returns the j/k/<CR> bindings every side rail shares.
 // Concrete controllers append rail-specific bindings (digit switch,
 // H/U, a, etc.).
-func (l *ListControllerTrait[T]) baseBindings() []*types.KeyBinding {
+func (l *ListControllerTrait[T]) baseBindings() []*types.ChordBinding {
 	tr := l.tr()
-	return []*types.KeyBinding{
+	scope := types.ContextKey(l.viewName)
+	return []*types.ChordBinding{
 		{
 			ViewName:    l.viewName,
-			Key:         gocui.NewKeyRune('j'),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Code: 'j'}},
+			Scope:       scope,
 			Handler:     l.Down,
 			Description: tr.Actions.Down,
 		},
 		{
 			ViewName:    l.viewName,
-			Key:         gocui.NewKeyRune('k'),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Code: 'k'}},
+			Scope:       scope,
 			Handler:     l.Up,
 			Description: tr.Actions.Up,
 		},
 		{
 			ViewName:    l.viewName,
-			Key:         gocui.NewKeyName(gocui.KeyEnter),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Special: types.KeyEnter}},
+			Scope:       scope,
 			Handler:     l.Confirm,
 			Description: tr.Actions.Confirm,
 		},

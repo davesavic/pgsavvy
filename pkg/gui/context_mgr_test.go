@@ -41,7 +41,7 @@ func (f *fakeContext) HandleQuit() error                      { return nil }
 func (f *fakeContext) NeedsRerenderOnHeightChange() bool      { return false }
 func (f *fakeContext) NeedsRerenderOnWidthChange() bool       { return false }
 func (f *fakeContext) AddKeybindingsFn(_ types.KeybindingsFn) {}
-func (f *fakeContext) GetKeybindings(_ types.KeybindingsOpts) []*types.KeyBinding {
+func (f *fakeContext) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	return nil
 }
 

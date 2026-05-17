@@ -20,7 +20,7 @@ func NewIndexesController(c *common.Common, helpers HelperBag, cursor SideListCu
 }
 
 // GetKeybindings returns the indexes rail bindings.
-func (c *IndexesController) GetKeybindings(_ types.KeybindingsOpts) []*types.KeyBinding {
+func (c *IndexesController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	tr := c.tr()
 	view := viewName(types.INDEXES)
 	out := c.baseBindings()

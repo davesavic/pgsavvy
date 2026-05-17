@@ -3,8 +3,6 @@ package controllers_test
 import (
 	"testing"
 
-	"github.com/jesseduffield/lazygit/pkg/gocui"
-
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
@@ -19,13 +17,13 @@ func TestListControllerTraitDownAndUp(t *testing.T) {
 
 	jFired, kFired := false, false
 	for _, kb := range bindings {
-		if kb.Key.Equals(gocui.NewKeyRune('j')) {
+		if isRune(kb, 'j') {
 			if err := kb.Handler(); err != nil {
 				t.Fatalf("j: %v", err)
 			}
 			jFired = true
 		}
-		if kb.Key.Equals(gocui.NewKeyRune('k')) {
+		if isRune(kb, 'k') {
 			if err := kb.Handler(); err != nil {
 				t.Fatalf("k: %v", err)
 			}
@@ -52,7 +50,7 @@ func TestListControllerTraitConfirmDelegates(t *testing.T) {
 	ctrl := controllers.NewColumnsController(nil, b.HelperBag, cur)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 	for _, kb := range bindings {
-		if kb.Key.Equals(gocui.NewKeyName(gocui.KeyEnter)) {
+		if isSpecial(kb, types.KeyEnter) {
 			if err := kb.Handler(); err != nil {
 				t.Fatalf("<CR> on columns: %v", err)
 			}

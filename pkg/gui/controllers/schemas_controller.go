@@ -3,8 +3,6 @@ package controllers
 import (
 	"errors"
 
-	"github.com/jesseduffield/lazygit/pkg/gocui"
-
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -124,23 +122,23 @@ func (s *SchemasController) armLeader() error {
 }
 
 // GetKeybindings returns the schemas rail bindings.
-func (s *SchemasController) GetKeybindings(_ types.KeybindingsOpts) []*types.KeyBinding {
+func (s *SchemasController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	tr := s.tr()
 	view := viewName(types.SCHEMAS)
 	out := s.baseBindings()
 
 	out = append(out,
-		&types.KeyBinding{
+		&types.ChordBinding{
 			ViewName:    view,
-			Key:         gocui.NewKeyRune('H'),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Code: 'H'}},
+			Scope:       types.SCHEMAS,
 			Handler:     s.HideSchema,
 			Description: tr.Actions.HideSchema,
 		},
-		&types.KeyBinding{
+		&types.ChordBinding{
 			ViewName:    view,
-			Key:         gocui.NewKeyRune('U'),
-			Mod:         gocui.ModNone,
+			Sequence:    []types.ChordKey{{Code: 'U'}},
+			Scope:       types.SCHEMAS,
 			Handler:     s.UnhideSchema,
 			Description: tr.Actions.UnhideSchema,
 		},
@@ -149,11 +147,10 @@ func (s *SchemasController) GetKeybindings(_ types.KeybindingsOpts) []*types.Key
 	// <leader> binding. The OneshotArmer interface is supplied by T7b;
 	// when absent (early boot / unit tests) the binding is still
 	// registered but the arm() returns no-op.
-	leaderKey := s.leaderKey()
-	out = append(out, &types.KeyBinding{
+	out = append(out, &types.ChordBinding{
 		ViewName:    view,
-		Key:         leaderKey,
-		Mod:         gocui.ModNone,
+		Sequence:    []types.ChordKey{s.leaderChordKey()},
+		Scope:       types.SCHEMAS,
 		Handler:     s.armLeader,
 		Description: tr.Actions.ToggleShowHidden,
 	})
@@ -170,20 +167,20 @@ func (s *SchemasController) AttachToContext(ctx attachable) {
 	ctx.AddKeybindingsFn(s.GetKeybindings)
 }
 
-// leaderKey resolves the configured leader label to the gocui.Key value
-// the runtime will dispatch on. Only the labels permitted by G1-C are
-// honored here ("<space>", " ", ""); any other label falls back to
-// space (because custom leader strings are an E5 chord-system feature)
-// and emits a single Warnf so the silent collision surfaces at runtime
-// before E5 ships real leader expansion.
-func (s *SchemasController) leaderKey() types.Key {
+// leaderChordKey resolves the configured leader label to a ChordKey.
+// Only the labels permitted by G1-C are honored here ("<space>", " ",
+// ""); any other label falls back to space (because custom leader
+// strings are an E5 chord-system feature) and emits a single Warnf so
+// the silent collision surfaces at runtime before E5 ships real leader
+// expansion.
+func (s *SchemasController) leaderChordKey() types.ChordKey {
 	label := s.leader()
 	switch label {
 	case "<space>", " ", "":
-		return gocui.NewKeyRune(' ')
+		return types.ChordKey{Code: ' '}
 	}
 	if s.c != nil && s.c.Log != nil {
 		s.c.Log.Warnf("schemas_controller: unrecognized leader label %q; falling back to <space>", label)
 	}
-	return gocui.NewKeyRune(' ')
+	return types.ChordKey{Code: ' '}
 }

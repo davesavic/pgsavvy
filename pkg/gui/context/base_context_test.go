@@ -68,15 +68,15 @@ func TestBaseContextLifecycleHooksReturnNil(t *testing.T) {
 func TestAddKeybindingsFnAppendsAndGetReturnsConcatenation(t *testing.T) {
 	b := NewBaseContext(BaseContextOpts{Key: types.SCHEMAS, Kind: types.SIDE_CONTEXT})
 
-	bindA := &types.KeyBinding{ViewName: "schemas", Description: "A"}
-	bindB := &types.KeyBinding{ViewName: "schemas", Description: "B"}
-	bindC := &types.KeyBinding{ViewName: "schemas", Description: "C"}
+	bindA := &types.ChordBinding{ViewName: "schemas", Description: "A"}
+	bindB := &types.ChordBinding{ViewName: "schemas", Description: "B"}
+	bindC := &types.ChordBinding{ViewName: "schemas", Description: "C"}
 
-	b.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.KeyBinding {
-		return []*types.KeyBinding{bindA}
+	b.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.ChordBinding {
+		return []*types.ChordBinding{bindA}
 	})
-	b.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.KeyBinding {
-		return []*types.KeyBinding{bindB, bindC}
+	b.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.ChordBinding {
+		return []*types.ChordBinding{bindB, bindC}
 	})
 
 	got := b.GetKeybindings(types.KeybindingsOpts{})
@@ -100,14 +100,14 @@ func TestAddKeybindingsFnAppendsAndGetReturnsConcatenation(t *testing.T) {
 func TestGetKeybindingsLastAttachedWinsOrdering(t *testing.T) {
 	b := NewBaseContext(BaseContextOpts{Key: types.SCHEMAS, Kind: types.SIDE_CONTEXT})
 
-	earlier := &types.KeyBinding{ViewName: "schemas", Description: "old-H-handler"}
-	later := &types.KeyBinding{ViewName: "schemas", Description: "new-H-handler"}
+	earlier := &types.ChordBinding{ViewName: "schemas", Description: "old-H-handler"}
+	later := &types.ChordBinding{ViewName: "schemas", Description: "new-H-handler"}
 
-	b.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.KeyBinding {
-		return []*types.KeyBinding{earlier}
+	b.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.ChordBinding {
+		return []*types.ChordBinding{earlier}
 	})
-	b.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.KeyBinding {
-		return []*types.KeyBinding{later}
+	b.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.ChordBinding {
+		return []*types.ChordBinding{later}
 	})
 
 	got := b.GetKeybindings(types.KeybindingsOpts{})

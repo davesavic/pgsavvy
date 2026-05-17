@@ -3,8 +3,6 @@ package controllers_test
 import (
 	"testing"
 
-	"github.com/jesseduffield/lazygit/pkg/gocui"
-
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -19,7 +17,7 @@ func TestTablesControllerConfirmCallsDoubleClickStub(t *testing.T) {
 	cur := &fakeCursor{}
 	ctrl := controllers.NewTablesController(nil, b.HelperBag, cur, b.TablePicker)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyName(gocui.KeyEnter)) {
+		if isSpecial(kb, types.KeyEnter) {
 			if err := kb.Handler(); err != nil {
 				t.Fatalf("<CR>: %v", err)
 			}
@@ -35,7 +33,7 @@ func TestTablesControllerEnterEmptyRailIsNoop(t *testing.T) {
 	cur := &fakeCursor{}
 	ctrl := controllers.NewTablesController(nil, b.HelperBag, cur, b.TablePicker)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if kb.Key.Equals(gocui.NewKeyName(gocui.KeyEnter)) {
+		if isSpecial(kb, types.KeyEnter) {
 			_ = kb.Handler()
 		}
 	}

@@ -3,8 +3,6 @@ package controllers
 import (
 	"context"
 
-	"github.com/jesseduffield/lazygit/pkg/gocui"
-
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
@@ -56,16 +54,16 @@ func (c *ConnectionsController) AddConnection() error {
 }
 
 // GetKeybindings returns the connections rail bindings.
-func (c *ConnectionsController) GetKeybindings(_ types.KeybindingsOpts) []*types.KeyBinding {
+func (c *ConnectionsController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	tr := c.tr()
 	view := viewName(types.CONNECTIONS)
 
 	out := c.baseBindings()
 	// `a` -> add connection (M11c).
-	out = append(out, &types.KeyBinding{
+	out = append(out, &types.ChordBinding{
 		ViewName:    view,
-		Key:         gocui.NewKeyRune('a'),
-		Mod:         gocui.ModNone,
+		Sequence:    []types.ChordKey{{Code: 'a'}},
+		Scope:       types.CONNECTIONS,
 		Handler:     c.AddConnection,
 		Description: tr.Actions.AddConnection,
 	})
