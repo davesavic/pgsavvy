@@ -14,6 +14,7 @@ require (
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/afero v1.15.0
 	github.com/stretchr/testify v1.11.1
+	go.uber.org/goleak v1.3.0
 	golang.org/x/term v0.43.0
 	golang.org/x/text v0.36.0
 	gopkg.in/yaml.v3 v3.0.1

@@ -31,9 +31,10 @@ type KbRecord struct {
 
 // ClickRecord captures one SetViewClickBinding call.
 type ClickRecord struct {
-	View string
-	Key  types.KeyName
-	Mod  types.Modifier
+	View    string
+	Key     types.KeyName
+	Mod     types.Modifier
+	Handler func(types.ViewMouseBindingOpts) error
 }
 
 // LayoutRunner is the optional interface the recorder calls from SetSize
@@ -213,9 +214,42 @@ func (r *RecorderGuiDriver) SetViewClickBinding(b *types.ViewMouseBinding) error
 		return nil
 	}
 	r.mu.Lock()
-	r.clicks = append(r.clicks, ClickRecord{View: b.ViewName, Key: b.Key, Mod: b.Modifier})
+	r.clicks = append(r.clicks, ClickRecord{View: b.ViewName, Key: b.Key, Mod: b.Modifier, Handler: b.Handler})
 	r.mu.Unlock()
 	return nil
+}
+
+// errMouseNotFound is returned by FeedMouse when no recorded click
+// binding matches the requested (view, key, mod).
+var errMouseNotFound = errors.New("recorder: no mouse binding for (view, key, mod)")
+
+// FeedMouse locates the first recorded click binding matching (view, key,
+// mod) and invokes its handler with opts. Returns errMouseNotFound when
+// no match exists or the matching record has a nil handler.
+func (r *RecorderGuiDriver) FeedMouse(view string, key types.KeyName, mod types.Modifier, opts types.ViewMouseBindingOpts) error {
+	r.mu.Lock()
+	var handler func(types.ViewMouseBindingOpts) error
+	for i := range r.clicks {
+		c := r.clicks[i]
+		if c.View == view && c.Key == key && c.Mod == mod {
+			handler = c.Handler
+			break
+		}
+	}
+	r.mu.Unlock()
+	if handler == nil {
+		return errMouseNotFound
+	}
+	return handler(opts)
+}
+
+// AllClicks returns a defensive copy of the recorded click bindings.
+func (r *RecorderGuiDriver) AllClicks() []ClickRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]ClickRecord, len(r.clicks))
+	copy(out, r.clicks)
+	return out
 }
 
 func (r *RecorderGuiDriver) Update(fn func() error) {
