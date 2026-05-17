@@ -24,6 +24,16 @@ linters:
               desc: pkg/models must not depend on the session layer (Appendix A)
             - pkg: github.com/davesavic/dbsavvy/pkg/query
               desc: pkg/models must not depend on the query layer (Appendix A)
+        drivers-root:
+          files:
+            - '**/pkg/drivers/*.go'
+          deny:
+            - pkg: github.com/jackc/pgx
+              desc: pkg/drivers root must stay engine-neutral (epic dbsavvy-921 D9); pgx imports belong in pkg/drivers/pg.
+            - pkg: github.com/jackc/pgconn
+              desc: pkg/drivers root must stay engine-neutral (epic dbsavvy-921 D9); pgconn imports belong in pkg/drivers/pg.
+            - pkg: github.com/davesavic/dbsavvy/pkg/drivers/pg
+              desc: pkg/drivers root must not depend on a concrete driver implementation (epic dbsavvy-921 D9).
 
 formatters:
   enable:
