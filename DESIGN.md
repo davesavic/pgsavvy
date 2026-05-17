@@ -1270,7 +1270,7 @@ type Session interface {
     // Schema introspection
     ListDatabases(ctx context.Context) ([]Database, error)
     ListSchemas(ctx context.Context, db string) ([]Schema, error)
-    ListTables(ctx context.Context, schema string) ([]Table, error)
+    ListTables(ctx context.Context, schema string) ([]*Table, error)
     ListColumns(ctx context.Context, schema, table string) ([]Column, error)
     ListIndexes(ctx context.Context, schema, table string) ([]Index, error)
     ListConstraints(ctx context.Context, schema, table string) ([]Constraint, error)
@@ -1314,6 +1314,10 @@ type Capabilities struct {
     MaxIdentifierLen   int
 }
 ```
+
+Types with `sync/atomic` fields (`Table.EstimatedRows`, `Table.SizeBytes`)
+are passed by pointer everywhere; copying a `Table` would trigger
+`go vet copylocks`. Drivers return `[]*Table`.
 
 ### 11.2 ConnectionProfile
 
@@ -2630,6 +2634,10 @@ reload:
 5. `theme.Apply(newConfig)` — color globals reassigned.
 6. Toast: "Config reloaded."
 
+**Caller contract:** all consumers MUST `Load()` the atomic pointer at point
+of use; the `*UserConfig` value MUST NOT be cached across reload boundaries.
+`pkg/common.Common.Cfg()` is the canonical accessor.
+
 ### 15.4 Migrations
 
 `pkg/config/migrations.go` — versioned YAML transforms applied before
@@ -2870,27 +2878,27 @@ one — the user resolves edits first, transactions second.
 ### 16.1 Theme
 
 ```go
-// pkg/theme/theme.go — package-level globals reassigned on reload
-var (
-    ActiveBorderColor   *style.TextStyle
-    InactiveBorderColor *style.TextStyle
-    SelectedRowBg       *style.TextStyle
-    NullValueFg         *style.TextStyle
-    NumericFg           *style.TextStyle
-    StringFg            *style.TextStyle
-    KeywordFg           *style.TextStyle
+// pkg/theme/theme.go — single atomic snapshot reassigned on reload
+type themeState struct {
+    ActiveBorder, InactiveBorder, SelectedRowBg *Style
+    NullValueFg, NumericFg, StringFg, KeywordFg *Style
     // ... ~40 named styles
-)
+}
 
-func Apply(cfg *config.ThemeConfig) {
-    ActiveBorderColor = parseColors(cfg.ActiveBorder)
-    // ...
+var current atomic.Pointer[themeState]
+
+func Current() *themeState        { return current.Load() }
+func Apply(cfg *config.ThemeConfig) error {
+    current.Store(buildState(cfg))
+    return nil
 }
 ```
 
-Direct port of lazygit's `theme.go`. Built-in themes ship in
-`pkg/theme/builtin/`: `default-dark`, `default-light`, `solarized-dark`,
-`gruvbox`, `nord`.
+Single-pointer swap is race-safe on all architectures. Readers `Load()` once
+per frame and read all fields from the same snapshot.
+
+Built-in themes ship in `pkg/theme/builtin/`: `default-dark`,
+`default-light`, `solarized-dark`, `gruvbox`, `nord`.
 
 ### 16.2 Style builder
 
@@ -2948,9 +2956,14 @@ func EnglishTranslationSet() *TranslationSet {
 ```
 
 Translations are JSON files embedded via `go:embed`, merged on top of
-English with `mergo.Merge(.., WithOverride)`. Same pattern lazygit uses.
+English by cloning `EnglishTranslationSet()` then calling `json.Unmarshal`
+on the overlay bytes into that clone. The standard library's "only set
+fields present in the JSON token stream" behavior gives the desired
+override-where-set, preserve-otherwise semantics with no third-party dep.
 
-Detection via `cloudfoundry-attic/jibber_jabber.DetectIETF()`.
+Detection via `github.com/Xuanwo/go-locale.Detect()` returning
+`golang.org/x/text/language.Tag`. On any error OR if the parsed Tag is
+`language.Und`, the app falls back silently to `language.English`.
 
 ### 16.4 AppState (persisted runtime state)
 
@@ -2980,6 +2993,10 @@ write via tmp file + rename, same as today.
 
 Persisted to `~/.local/state/dbsavvy/state.yml`. Atomic write (tmp file
 + rename). Loaded once at startup and held in `Common.AppState`.
+**v1 OS support: Linux and macOS only.** POSIX rename semantics required
+for atomic replace; Windows support is deferred to a later epic. The temp
+file is written with mode 0600; the parent directory is created with mode
+0700.
 
 ---
 
@@ -3174,7 +3191,8 @@ Session, Query   may depend on  Drivers, Models, Common
 
 Editor, Grid     may depend on  Common, Models, gocui
 
-Config, i18n     may depend on  nothing else dbsavvy
+Config           may depend on  Models only
+i18n             may depend on  nothing else dbsavvy
 ```
 
 Violations get caught at PR time. Add a `tools/lint-deps/` script that
