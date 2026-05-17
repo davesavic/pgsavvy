@@ -62,3 +62,21 @@ func TestRunLayoutCreatesSideRails(t *testing.T) {
 		}
 	}
 }
+
+// TestRunLayoutNoQueuedWriteErrors regresses the startup crash where
+// LimitContext.HandleRender ran in the normal-size flatten pass and
+// queued a Write to the "limit" view, which the layout never created.
+// Real gocui surfaces that ErrUnknownView out of the MainLoop and kills
+// the TUI on the first frame; the RecorderGuiDriver previously dropped
+// the error silently, so this assertion locks the behaviour in.
+func TestRunLayoutNoQueuedWriteErrors(t *testing.T) {
+	g, rec := buildTestGui(t)
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if errs := rec.UpdateErrors(); len(errs) > 0 {
+		for _, e := range errs {
+			t.Errorf("queued Update closure returned error: %v", e)
+		}
+	}
+}

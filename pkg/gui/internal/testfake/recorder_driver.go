@@ -55,6 +55,7 @@ type RecorderGuiDriver struct {
 	DeleteViews       []string
 	UpdateCalls       int
 	ContentOnlyCalls  int
+	updateErrors      []error
 
 	bindings []KbRecord
 	clicks   []ClickRecord
@@ -256,8 +257,14 @@ func (r *RecorderGuiDriver) Update(fn func() error) {
 	r.mu.Lock()
 	r.UpdateCalls++
 	r.mu.Unlock()
-	if fn != nil {
-		_ = fn()
+	if fn == nil {
+		return
+	}
+	err := fn()
+	if err != nil {
+		r.mu.Lock()
+		r.updateErrors = append(r.updateErrors, err)
+		r.mu.Unlock()
 	}
 }
 
@@ -265,9 +272,27 @@ func (r *RecorderGuiDriver) UpdateContentOnly(fn func() error) {
 	r.mu.Lock()
 	r.ContentOnlyCalls++
 	r.mu.Unlock()
-	if fn != nil {
-		_ = fn()
+	if fn == nil {
+		return
 	}
+	err := fn()
+	if err != nil {
+		r.mu.Lock()
+		r.updateErrors = append(r.updateErrors, err)
+		r.mu.Unlock()
+	}
+}
+
+// UpdateErrors returns a defensive copy of every non-nil error returned
+// by Update / UpdateContentOnly closures. The real gocui MainLoop kills
+// the TUI when a queued closure returns a non-nil error, so any entry
+// here is a real production-affecting bug that should fail the test.
+func (r *RecorderGuiDriver) UpdateErrors() []error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]error, len(r.updateErrors))
+	copy(out, r.updateErrors)
+	return out
 }
 
 func (r *RecorderGuiDriver) SetCurrentView(viewName string) (types.View, error) {

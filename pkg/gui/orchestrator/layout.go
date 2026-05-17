@@ -67,9 +67,13 @@ func (g *Gui) RunLayout(w, h int) error {
 		_, _ = g.driver.SetViewOnTop(name)
 	}
 
-	// Best-effort render pass on every live context.
+	// Best-effort render pass on every live context. DISPLAY_CONTEXT
+	// (LimitContext) is rendered exclusively from renderLimitOverlay in
+	// the too-small branch; invoking its HandleRender here would queue a
+	// Write to the "limit" view, which is not created in the normal-size
+	// layout, surfacing gocui.ErrUnknownView out of the MainLoop.
 	for _, ctx := range g.registry.Flatten() {
-		if ctx == nil || ctx.GetKind() == types.STUB {
+		if ctx == nil || ctx.GetKind() == types.STUB || ctx.GetKind() == types.DISPLAY_CONTEXT {
 			continue
 		}
 		_ = ctx.HandleRender()
