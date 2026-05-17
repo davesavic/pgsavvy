@@ -7,7 +7,11 @@ type UserConfig struct {
 	ConfigVersion int                `yaml:"config_version"`
 	Theme         ThemeConfig        `yaml:"theme"`
 	Leader        string             `yaml:"leader"`
+	LocalLeader   string             `yaml:"local_leader"`
 	Timeout       time.Duration      `yaml:"timeout"`
+	TimeoutLen    time.Duration      `yaml:"timeout_len"`
+	TtimeoutLen   time.Duration      `yaml:"ttimeout_len"`
+	WhichKeyDelay time.Duration      `yaml:"whichkey_delay"`
 	Keybindings   []KeybindingConfig `yaml:"keybindings"`
 	UI            UIConfig           `yaml:"ui"`
 }
@@ -27,13 +31,34 @@ type MouseConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
 
-// KeybindingConfig describes a single user-defined keybinding.
+// KeybindingConfig describes a single user-defined keybinding entry.
+//
+// Mode is "n" or a comma-separated subset of "n,i,v,V,<c-v>,o,x,c"
+// (normal, insert, visual, visual-line, visual-block, operator-pending,
+// command-line variants per the dbsavvy-dlp design).
+//
+// Scope is one of: a ContextKey value, "global", or "all".
+//
+// Key is a single sequence label (e.g. "<leader>tr", "gg", "<c-w>v")
+// — the parser in ParseKeySequence splits it into tokens.
+//
+// Exactly one of Action or Command must be set (Action XOR Command).
+// OriginFile/OriginLine are populated by the loader (not YAML); zero
+// values are acceptable when no loader is involved.
 type KeybindingConfig struct {
-	Mode        string   `yaml:"mode"`
-	Scope       string   `yaml:"scope"`
-	Sequence    []string `yaml:"sequence"`
-	ActionID    string   `yaml:"action_id"`
-	Description string   `yaml:"description"`
+	Mode        string `yaml:"mode"`
+	Scope       string `yaml:"scope"`
+	Key         string `yaml:"key"`
+	Action      string `yaml:"action,omitempty"`
+	Command     string `yaml:"command,omitempty"`
+	OpensMenu   bool   `yaml:"opens_menu,omitempty"`
+	ShowInBar   bool   `yaml:"show_in_bar,omitempty"`
+	Description string `yaml:"description,omitempty"`
+	Tag         string `yaml:"tag,omitempty"`
+
+	// Populated by the loader; not present in YAML.
+	OriginFile string `yaml:"-"`
+	OriginLine int    `yaml:"-"`
 }
 
 // ThemeConfig holds named color strings (color name or hex). Each field is
@@ -89,8 +114,12 @@ type ThemeConfig struct {
 func GetDefaultConfig() *UserConfig {
 	return &UserConfig{
 		ConfigVersion: 1,
-		Leader:        "<space>",
+		Leader:        " ",
+		LocalLeader:   ",",
 		Timeout:       1 * time.Second,
+		TimeoutLen:    1 * time.Second,
+		TtimeoutLen:   50 * time.Millisecond,
+		WhichKeyDelay: 300 * time.Millisecond,
 		Theme: ThemeConfig{
 			ActiveBorder:   "white",
 			InactiveBorder: "gray",
@@ -101,11 +130,25 @@ func GetDefaultConfig() *UserConfig {
 			KeywordFg:      "magenta",
 		},
 		Keybindings: []KeybindingConfig{
-			{Mode: "normal", Scope: "global", Sequence: []string{"<c-c>"}, ActionID: "app.quit", Description: "Quit"},
-			{Mode: "normal", Scope: "global", Sequence: []string{"<leader>", "q"}, ActionID: "app.quit", Description: "Quit via leader"},
+			{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit", Description: "Quit"},
+			{Mode: "n", Scope: "global", Key: "<leader>q", Action: "app.quit", Description: "Quit via leader"},
 		},
 		UI: UIConfig{
 			Mouse: MouseConfig{Enabled: true},
 		},
+	}
+}
+
+// Sanitize applies SafeText to user-facing string fields on each
+// keybinding (Description, Tag, Key) to strip control bytes that could
+// corrupt the terminal. Callers SHOULD invoke this after YAML decode.
+func (c *UserConfig) Sanitize() {
+	if c == nil {
+		return
+	}
+	for i := range c.Keybindings {
+		c.Keybindings[i].Description = SafeText(c.Keybindings[i].Description)
+		c.Keybindings[i].Tag = SafeText(c.Keybindings[i].Tag)
+		c.Keybindings[i].Key = SafeText(c.Keybindings[i].Key)
 	}
 }

@@ -43,8 +43,8 @@ func TestLoadUserConfig_ScalarOverlayMergesOverDefaults(t *testing.T) {
 	if cfg.Theme.ActiveBorder != "blue" {
 		t.Errorf("ActiveBorder = %q, want %q", cfg.Theme.ActiveBorder, "blue")
 	}
-	if cfg.Leader != "<space>" {
-		t.Errorf("Leader = %q, want default %q", cfg.Leader, "<space>")
+	if cfg.Leader != " " {
+		t.Errorf("Leader = %q, want default %q", cfg.Leader, " ")
 	}
 	if cfg.Theme.NullValueFg != "gray" {
 		t.Errorf("NullValueFg = %q, want default %q", cfg.Theme.NullValueFg, "gray")
@@ -82,7 +82,7 @@ func TestLoadUserConfig_MissingFileReturnsError(t *testing.T) {
 func TestLoadUserConfig_KeybindingsOverlayReplacesSlice(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	const path = "/cfg.yml"
-	yaml := "keybindings:\n  - mode: normal\n    sequence: [q]\n    action_id: app.quit\n"
+	yaml := "keybindings:\n  - mode: n\n    scope: global\n    key: q\n    action: app.quit\n"
 	if err := afero.WriteFile(fs, path, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -93,8 +93,8 @@ func TestLoadUserConfig_KeybindingsOverlayReplacesSlice(t *testing.T) {
 	if len(cfg.Keybindings) != 1 {
 		t.Fatalf("len(Keybindings) = %d, want 1 (overlay replaces, does not merge)", len(cfg.Keybindings))
 	}
-	if cfg.Keybindings[0].ActionID != "app.quit" {
-		t.Errorf("ActionID = %q, want %q", cfg.Keybindings[0].ActionID, "app.quit")
+	if cfg.Keybindings[0].Action != "app.quit" {
+		t.Errorf("Action = %q, want %q", cfg.Keybindings[0].Action, "app.quit")
 	}
 }
 

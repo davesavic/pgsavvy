@@ -132,3 +132,75 @@ func TestParseKeyLabel_SpecialNames(t *testing.T) {
 		}
 	}
 }
+
+func TestParseKeySequence_LeaderTr(t *testing.T) {
+	got, err := ParseKeySequence("<leader>tr")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3 (<leader>, t, r): %#v", len(got), got)
+	}
+	if got[0].Key != "leader" || got[1].Key != "t" || got[2].Key != "r" {
+		t.Errorf("got %#v", got)
+	}
+}
+
+func TestParseKeySequence_DoubleG(t *testing.T) {
+	got, err := ParseKeySequence("gg")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 || got[0].Key != "g" || got[1].Key != "g" {
+		t.Errorf("got %#v, want [g g]", got)
+	}
+}
+
+func TestParseKeySequence_CtrlWThenV(t *testing.T) {
+	got, err := ParseKeySequence("<c-w>v")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2: %#v", len(got), got)
+	}
+	if got[0].Key != "w" || len(got[0].Mods) != 1 || got[0].Mods[0] != "ctrl" {
+		t.Errorf("token 0 = %#v, want ctrl+w", got[0])
+	}
+	if got[1].Key != "v" || len(got[1].Mods) != 0 {
+		t.Errorf("token 1 = %#v, want v", got[1])
+	}
+}
+
+func TestParseKeySequence_EscOnly(t *testing.T) {
+	got, err := ParseKeySequence("<esc>")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].Key != "esc" {
+		t.Errorf("got %#v, want [esc]", got)
+	}
+}
+
+func TestParseKeySequence_Empty(t *testing.T) {
+	if _, err := ParseKeySequence(""); err == nil {
+		t.Fatal("expected error for empty sequence")
+	}
+}
+
+func TestParseKeySequence_Unterminated(t *testing.T) {
+	if _, err := ParseKeySequence("<leader"); err == nil {
+		t.Fatal("expected error for unterminated bracket")
+	}
+}
+
+func TestParseKeySequence_TooManyTokens(t *testing.T) {
+	// 33 bare runes → exceeds cap of 32.
+	s := ""
+	for range 33 {
+		s += "a"
+	}
+	if _, err := ParseKeySequence(s); err == nil {
+		t.Fatal("expected error for > 32 tokens")
+	}
+}

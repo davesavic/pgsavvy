@@ -97,6 +97,59 @@ func ParseKeyLabel(label string) (KeyLabel, error) {
 	return KeyLabel{Mods: mods, Key: key}, nil
 }
 
+// maxSequenceTokens caps the number of tokens a single Key string may
+// expand into. The cap (32) is a security guardrail per the dbsavvy-dlp
+// review-plan amendment so a hostile config can't blow up the trie.
+const maxSequenceTokens = 32
+
+// ParseKeySequence splits s into raw key-label tokens and parses each one
+// via ParseKeyLabel.
+//
+// Tokenisation rules:
+//   - A "<...>" chunk is one token (greedy until the matching '>').
+//   - Outside brackets, each rune is its own token.
+//
+// Errors:
+//   - empty s → "empty sequence"
+//   - unterminated '<...' → propagated from ParseKeyLabel
+//   - more than maxSequenceTokens tokens → error
+func ParseKeySequence(s string) ([]KeyLabel, error) {
+	if s == "" {
+		return nil, errors.New("keyname: empty sequence")
+	}
+	var tokens []string
+	i := 0
+	for i < len(s) {
+		if s[i] == '<' {
+			end := strings.IndexByte(s[i:], '>')
+			if end < 0 {
+				return nil, fmt.Errorf("keyname: unterminated bracket in %q", s)
+			}
+			tokens = append(tokens, s[i:i+end+1])
+			i += end + 1
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size <= 1 {
+			return nil, fmt.Errorf("keyname: invalid utf-8 in %q", s)
+		}
+		tokens = append(tokens, s[i:i+size])
+		i += size
+	}
+	if len(tokens) > maxSequenceTokens {
+		return nil, fmt.Errorf("keyname: sequence %q has %d tokens, max %d", s, len(tokens), maxSequenceTokens)
+	}
+	out := make([]KeyLabel, 0, len(tokens))
+	for _, tok := range tokens {
+		lbl, err := ParseKeyLabel(tok)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, lbl)
+	}
+	return out, nil
+}
+
 func sortMods(mods []string) {
 	for i := 1; i < len(mods); i++ {
 		for j := i; j > 0 && modOrder[mods[j]] < modOrder[mods[j-1]]; j-- {

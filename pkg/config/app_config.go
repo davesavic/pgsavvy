@@ -25,5 +25,6 @@ func LoadUserConfig(fs afero.Fs, files []string) (*UserConfig, error) {
 			return nil, fmt.Errorf("config: parse %q: %w", path, err)
 		}
 	}
+	cfg.Sanitize()
 	return cfg, nil
 }
