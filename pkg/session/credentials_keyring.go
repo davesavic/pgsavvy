@@ -68,10 +68,36 @@ func resolveKeyring(ctx context.Context, ref string, prompter Prompter) (string,
 	return string(item.Data), nil
 }
 
+// errKeyringPassphraseRequiredInTUI is returned by passphraseFunc when
+// DBSAVVY_KEYRING_PASSPHRASE is unset (or set-but-empty) AND the active
+// Prompter is TUIRefusePrompter. It is a SEPARATE typed sentinel from
+// errInteractivePromptNotSupported: the keyring path has a different
+// remediation message ("set DBSAVVY_KEYRING_PASSPHRASE before launching
+// dbsavvy") than the generic prompter-refusal, and the toast layer renders
+// them as distinct strings.
+//
+// The sentinel is unexported; callers detect via
+// IsKeyringPassphraseRequiredInTUI.
+var errKeyringPassphraseRequiredInTUI = errors.New(
+	"session: keyring passphrase required in TUI mode; " +
+		"set DBSAVVY_KEYRING_PASSPHRASE before launching dbsavvy")
+
+// IsKeyringPassphraseRequiredInTUI reports whether err (or anything it wraps)
+// is the typed keyring-passphrase-in-TUI sentinel.
+func IsKeyringPassphraseRequiredInTUI(err error) bool {
+	return errors.Is(err, errKeyringPassphraseRequiredInTUI)
+}
+
 // passphraseFunc returns the PromptFunc the keyring library uses to obtain
 // the file-backend passphrase. Resolution order: env first
 // (DBSAVVY_KEYRING_PASSPHRASE, set-and-non-empty) → prompter → error.
 // Set-but-empty env is treated as unset (Critic resolution).
+//
+// TUI-mode short-circuit: when env is unset/empty AND prompter is
+// TUIRefusePrompter, the function returns errKeyringPassphraseRequiredInTUI
+// instead of forwarding to the prompter's generic refusal. This lets the UI
+// layer render a remediation specific to the keyring path (G3-G(iii) from the
+// dbsavvy-enn review-plan resolutions).
 func passphraseFunc(ctx context.Context, prompter Prompter) keyring.PromptFunc {
 	return func(prompt string) (string, error) {
 		if v, ok := os.LookupEnv(keyringPassphraseEnv); ok && v != "" {
@@ -82,6 +108,12 @@ func passphraseFunc(ctx context.Context, prompter Prompter) keyring.PromptFunc {
 				})
 			}
 			return v, nil
+		}
+		// TUI-mode keyring-specific refusal. Type-switch (not errors.Is) is
+		// the right tool here: we are inspecting the static identity of the
+		// prompter, not unwrapping an error chain.
+		if _, isTUI := prompter.(TUIRefusePrompter); isTUI {
+			return "", errKeyringPassphraseRequiredInTUI
 		}
 		if prompter == nil {
 			return "", errors.New("no keyring passphrase: env unset and no prompter provided")
