@@ -5,6 +5,9 @@ import (
 	"os"
 
 	"github.com/davesavic/dbsavvy/pkg/app"
+	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
+	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
 var (
@@ -13,6 +16,10 @@ var (
 	version     string
 	buildSource string
 )
+
+func init() {
+	drivers.Register("postgres", pg.New(session.TerminalPrompter{}))
+}
 
 func main() {
 	buildInfo := &app.BuildInfo{

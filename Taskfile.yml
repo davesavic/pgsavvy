@@ -19,6 +19,18 @@ tasks:
     cmds:
       - go test {{.CLI_ARGS | default "./..."}}
 
+  test:integration:
+    desc: Run integration tests against a live Postgres (requires DBSAVVY_TEST_PG + docker fixture).
+    cmds:
+      - env GOFLAGS=-count=1 go test -tags=integration ./...
+      - 'echo "tip: bring postgres up with: docker compose -f docker/postgres/docker-compose.yml up -d"'
+
+  test:all:
+    desc: Run unit + integration tests.
+    cmds:
+      - task: test
+      - task: test:integration
+
   lint:
     desc: Run golangci-lint v2 (5 linters; see .golangci.yml).
     cmds:

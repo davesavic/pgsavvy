@@ -30,3 +30,47 @@ jobs:
       - run: task test ./...
       - run: task lint
       - run: task vulncheck
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: dbsavvy
+          POSTGRES_PASSWORD: dbsavvy
+          POSTGRES_DB: dbsavvy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd=pg_isready
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.39.2
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for postgres
+        run: until pg_isready -h localhost -U dbsavvy; do sleep 1; done
+        timeout-minutes: 2
+
+      - name: Apply fixture
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          PGPASSWORD=dbsavvy psql -h localhost -U dbsavvy -d dbsavvy_test -f docker/postgres/init/01_fixture.sql
+
+      - name: Run integration tests
+        env:
+          DBSAVVY_TEST_PG: 'postgres://dbsavvy:dbsavvy@localhost:5432/dbsavvy_test?sslmode=disable'
+        run: task test:integration
