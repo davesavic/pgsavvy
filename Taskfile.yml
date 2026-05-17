@@ -1,0 +1,40 @@
+# Taskfile for dbsavvy (go-task v3).
+# Install go-task: go install github.com/go-task/task/v3/cmd/task@latest
+# Install golangci-lint v2: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.7.0
+version: '3'
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build dbsavvy binary into bin/dbsavvy with -ldflags-injected version metadata.
+    cmds:
+      - go build -ldflags "-X main.version=dev -X main.buildSource=task" -o bin/dbsavvy .
+
+  test:
+    desc: Run unit tests across all packages (forwards extra args, e.g. `task test -- -run TestX`).
+    cmds:
+      - go test {{.CLI_ARGS | default "./..."}}
+
+  lint:
+    desc: Run golangci-lint v2 (5 linters; see .golangci.yml).
+    cmds:
+      - golangci-lint run ./...
+
+  fmt:
+    desc: Format Go files via golangci-lint v2 formatters (gofumpt + goimports).
+    cmds:
+      - golangci-lint fmt
+
+  generate:
+    desc: Run code generation (stub until E12 wires JSON-schema generation).
+    cmds:
+      - 'echo "generate: not yet wired (see E12)"'
+
+  release:
+    desc: Cut a release (stub until release pipeline lands).
+    cmds:
+      - 'echo "release: not yet wired"'
