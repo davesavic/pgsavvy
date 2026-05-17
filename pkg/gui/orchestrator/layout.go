@@ -1,0 +1,146 @@
+package orchestrator
+
+import (
+	"errors"
+
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
+)
+
+// limitThreshold is the smallest terminal dimension (in either axis)
+// that supports a full layout. Below this the layout pass renders the
+// LIMIT overlay only.
+const limitThreshold = 10
+
+// Layout satisfies gocui.Manager. The runtime invokes it on every
+// frame; we delegate to RunLayout so the same code path is testable
+// without a real *gocui.Gui.
+func (g *Gui) Layout(ng *gocui.Gui) error {
+	w, h := ng.Size()
+	return g.RunLayout(w, h)
+}
+
+// RunLayout positions every live (non-STUB) Context's view inside a
+// terminal of the supplied dimensions. Below the limit threshold the
+// pass renders only the LIMIT overlay (D11 / terminal-too-small AC).
+//
+// Errors from SetView returning gocui.ErrUnknownView are tolerated:
+// gocui surfaces that sentinel as "newly created" on first SetView,
+// not as a fatal condition.
+func (g *Gui) RunLayout(w, h int) error {
+	if g.driver == nil {
+		return nil
+	}
+	if w < limitThreshold || h < limitThreshold {
+		return g.renderLimitOverlay(w, h)
+	}
+
+	dims := ui.GetWindowDimensions(w, h)
+
+	// Compute a centred popup rectangle covering ~50% of the available
+	// canvas inside popup-overlay.
+	popup := centeredRect(dims["popup-overlay"], 0.5, 0.5)
+
+	for _, name := range orderedViewNames() {
+		ctx := g.registry.ByKey(types.ContextKey(name))
+		if ctx == nil || ctx.GetKind() == types.STUB {
+			continue
+		}
+		rect, ok := chooseRect(name, dims, popup)
+		if !ok {
+			continue
+		}
+		if _, err := g.driver.SetView(name, rect.X0, rect.Y0, rect.X1, rect.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+	}
+
+	// Limit overlay is not active at this size; best-effort delete it
+	// so it doesn't linger from a previous tiny-terminal frame.
+	_ = g.driver.DeleteView(string(types.LIMIT))
+
+	// Raise everything to its declared z-order. Failures here are not
+	// load-bearing — a missing view simply hasn't been created yet.
+	for _, name := range orderedViewNames() {
+		_, _ = g.driver.SetViewOnTop(name)
+	}
+
+	// Best-effort render pass on every live context.
+	for _, ctx := range g.registry.Flatten() {
+		if ctx == nil || ctx.GetKind() == types.STUB {
+			continue
+		}
+		_ = ctx.HandleRender()
+	}
+	return nil
+}
+
+// renderLimitOverlay sizes a single LIMIT view to the full canvas and
+// invokes the LimitContext's HandleRender to fill in the message.
+func (g *Gui) renderLimitOverlay(w, h int) error {
+	if w < 1 || h < 1 {
+		return nil
+	}
+	if _, err := g.driver.SetView(string(types.LIMIT), 0, 0, w-1, h-1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		return err
+	}
+	if g.registry != nil && g.registry.Limit != nil {
+		_ = g.registry.Limit.HandleRender()
+	}
+	_, _ = g.driver.SetViewOnTop(string(types.LIMIT))
+	return nil
+}
+
+// rect is the (X0, Y0, X1, Y1) tuple Layout passes to SetView.
+type rect struct {
+	X0, Y0, X1, Y1 int
+}
+
+// chooseRect maps a view name onto the window-arrangement output. The
+// popup overlay rect is shared by every popup view; side rails resolve
+// to their named dims entry.
+func chooseRect(name string, dims map[string]ui.Dimensions, popup rect) (rect, bool) {
+	switch name {
+	case string(types.MENU),
+		string(types.CONFIRMATION),
+		string(types.PROMPT),
+		string(types.SUGGESTIONS):
+		return popup, true
+	case string(types.LOG):
+		d, ok := dims["extras"]
+		if !ok {
+			return rect{}, false
+		}
+		return rect{X0: d.X0, Y0: d.Y0, X1: d.X1, Y1: d.Y1}, true
+	default:
+		d, ok := dims[name]
+		if !ok {
+			return rect{}, false
+		}
+		return rect{X0: d.X0, Y0: d.Y0, X1: d.X1, Y1: d.Y1}, true
+	}
+}
+
+// centeredRect returns the subrect occupying (frac w x frac h) of the
+// canvas, centred. Minimum dimensions of 1×1 keep gocui happy on small
+// but above-threshold terminals.
+func centeredRect(canvas ui.Dimensions, fracW, fracH float64) rect {
+	w := canvas.X1 - canvas.X0
+	h := canvas.Y1 - canvas.Y0
+	if w < 2 || h < 2 {
+		return rect{X0: canvas.X0, Y0: canvas.Y0, X1: canvas.X1, Y1: canvas.Y1}
+	}
+	pw := int(float64(w) * fracW)
+	ph := int(float64(h) * fracH)
+	if pw < 1 {
+		pw = 1
+	}
+	if ph < 1 {
+		ph = 1
+	}
+	x0 := canvas.X0 + (w-pw)/2
+	y0 := canvas.Y0 + (h-ph)/2
+	return rect{X0: x0, Y0: y0, X1: x0 + pw, Y1: y0 + ph}
+}

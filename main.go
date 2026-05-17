@@ -18,7 +18,7 @@ var (
 )
 
 func init() {
-	drivers.Register("postgres", pg.New(session.TerminalPrompter{}))
+	drivers.Register("postgres", pg.New(session.TUIRefusePrompter{}))
 }
 
 func main() {
