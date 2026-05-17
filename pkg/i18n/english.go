@@ -17,6 +17,43 @@ type TranslationSet struct {
 	Rows             string
 	NullValue        string
 
+	// Toast and refusal messages.
+	CredentialsMissing    string
+	TableDataEditDeferred string
+	TerminalTooSmall      string
+
+	// First-run tip popup.
+	FirstRunTipTitle string
+	FirstRunTipBody  string
+
+	// Empty-state hint shown inside the CONNECTIONS view when no connections
+	// are configured.
+	EmptyConnectionsHint string
+
+	// Confirmation popup shown when unhiding a previously hidden schema.
+	UnhideConfirmationTitle string
+	UnhideConfirmationBody  string
+
+	// Validation errors raised by the connection editor.
+	DuplicateConnectionName string
+	InvalidDSN              string
+
+	// Inline visual tags.
+	ReadOnlyTag string
+
+	// Schemas pane titles.
+	SchemasTitle             string
+	SchemasTitleHiddenSuffix string
+	SchemaHiddenSuffix       string
+
+	// Credentials safety bundle (G3-G).
+	PlaintextPasswordInProfileWarn string
+	DSNInlinePassword              string
+	KeyringPassphraseRequired      string
+
+	// Status bar fragments.
+	OptionsBarMore string
+
 	Actions ActionTranslations
 }
 
@@ -26,6 +63,25 @@ type ActionTranslations struct {
 	OpenTable   string
 	RunQuery    string
 	CancelQuery string
+
+	// Connection lifecycle.
+	AddConnection  string
+	OpenConnection string
+
+	// Schema visibility.
+	HideSchema       string
+	UnhideSchema     string
+	ToggleShowHidden string
+
+	// Global app commands.
+	QuitApp  string
+	ShowMenu string
+
+	// Side rail navigation.
+	RailSchemas string
+	RailTables  string
+	RailColumns string
+	RailIndexes string
 }
 
 // EnglishTranslationSet returns a freshly allocated TranslationSet populated
@@ -43,10 +99,53 @@ func EnglishTranslationSet() *TranslationSet {
 		QueryCancelled:   "Query cancelled.",
 		Rows:             "rows",
 		NullValue:        "NULL",
+
+		CredentialsMissing:    "Credentials are not available; the action was refused.",
+		TableDataEditDeferred: "Table data editing is not yet available.",
+		TerminalTooSmall:      "Terminal too small. Please resize the window to continue.",
+
+		FirstRunTipTitle: "Welcome to dbsavvy",
+		FirstRunTipBody:  "Press ? at any time to see available keys. Press a to add your first connection.",
+
+		EmptyConnectionsHint: "No connections yet.\nPress a to add a connection, or ? for help.",
+
+		UnhideConfirmationTitle: "Unhide schema?",
+		UnhideConfirmationBody:  "⚠ This schema was previously hidden. Unhide and show it again?",
+
+		DuplicateConnectionName: "A connection with that name already exists.",
+		InvalidDSN:              "The DSN is not valid.",
+
+		ReadOnlyTag: "[RO]",
+
+		SchemasTitle:             "Schemas",
+		SchemasTitleHiddenSuffix: " [+hidden]",
+		SchemaHiddenSuffix:       " (hidden)",
+
+		PlaintextPasswordInProfileWarn: "WARNING: storing plaintext passwords in the connection profile is insecure; prefer the system keyring.",
+		DSNInlinePassword:              "DSN contains an inline password; please remove it and supply the password separately.",
+		KeyringPassphraseRequired:      "A keyring passphrase is required; please unlock the keyring from your desktop session.",
+
+		OptionsBarMore: "?: more",
+
 		Actions: ActionTranslations{
 			OpenTable:   "Open Table",
 			RunQuery:    "Run Query",
 			CancelQuery: "Cancel Query",
+
+			AddConnection:  "Add Connection",
+			OpenConnection: "Open Connection",
+
+			HideSchema:       "Hide Schema",
+			UnhideSchema:     "Unhide Schema",
+			ToggleShowHidden: "Toggle Show Hidden",
+
+			QuitApp:  "Quit",
+			ShowMenu: "Show Menu",
+
+			RailSchemas: "Schemas",
+			RailTables:  "Tables",
+			RailColumns: "Columns",
+			RailIndexes: "Indexes",
 		},
 	}
 }
