@@ -3,3 +3,23 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# Build artifacts
+bin/
+dist/
+/dbsavvy
+
+# Test & coverage artifacts
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Editor / IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+*.swp
+*.swo
