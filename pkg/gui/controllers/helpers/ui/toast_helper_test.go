@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
@@ -28,6 +30,10 @@ func (d *updateRecordingDriver) SetView(_ string, _, _, _, _ int, _ byte) (types
 }
 
 func (d *updateRecordingDriver) SetKeybinding(_ string, _ types.Key, _ types.Modifier, _ func() error) error {
+	panic("not used")
+}
+
+func (d *updateRecordingDriver) SetMasterEditor(_ string, _ gocui.Editor) error {
 	panic("not used")
 }
 

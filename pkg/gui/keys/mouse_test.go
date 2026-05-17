@@ -33,8 +33,9 @@ func (m *mouseFakeDriver) SetView(_ string, _, _, _, _ int, _ byte) (types.View,
 func (m *mouseFakeDriver) SetKeybinding(_ string, _ types.Key, _ types.Modifier, _ func() error) error {
 	panic("not used")
 }
-func (m *mouseFakeDriver) Update(_ func() error)            {}
-func (m *mouseFakeDriver) UpdateContentOnly(_ func() error) {}
+func (m *mouseFakeDriver) SetMasterEditor(_ string, _ gocui.Editor) error { panic("not used") }
+func (m *mouseFakeDriver) Update(_ func() error)                          {}
+func (m *mouseFakeDriver) UpdateContentOnly(_ func() error)               {}
 func (m *mouseFakeDriver) SetCurrentView(_ string) (types.View, error) {
 	panic("not used")
 }

@@ -1,5 +1,7 @@
 package types
 
+import "github.com/jesseduffield/lazygit/pkg/gocui"
+
 // GuiDriver is the minimum gocui-runtime surface the rest of pkg/gui
 // depends on. Concrete impls wrap *gocui.Gui (production) or a fake
 // (tests). Keeping the surface explicit lets context/controller code be
@@ -26,6 +28,11 @@ type GuiDriver interface {
 	// SetKeybinding registers a key handler scoped to viewName. An empty
 	// viewName binds the handler globally.
 	SetKeybinding(viewName string, key Key, mod Modifier, handler func() error) error
+
+	// SetMasterEditor installs ed as the per-view gocui.Editor for the
+	// named view (and marks the view editable). Used by dlp.8b to route
+	// every keystroke for a view through the chord Matcher.
+	SetMasterEditor(view string, ed gocui.Editor) error
 
 	// SetViewClickBinding registers a mouse/click handler. The gocui
 	// surface is SetViewClickBinding (NOT SetMouseBinding); see decision

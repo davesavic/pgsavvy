@@ -35,6 +35,7 @@ func (f *fakeDriver) GetViewBuffer(_ string) string         { panic("not used") 
 func (f *fakeDriver) SetView(_ string, _, _, _, _ int, _ byte) (types.View, error) {
 	panic("not used")
 }
+func (f *fakeDriver) SetMasterEditor(_ string, _ gocui.Editor) error      { panic("not used") }
 func (f *fakeDriver) SetViewClickBinding(_ *types.ViewMouseBinding) error { panic("not used") }
 func (f *fakeDriver) Update(_ func() error)                               {}
 func (f *fakeDriver) UpdateContentOnly(_ func() error)                    {}

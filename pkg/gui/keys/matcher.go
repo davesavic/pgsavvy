@@ -192,6 +192,14 @@ func (m *Matcher) OnInsertPendingFlush(fn InsertPendingFlush) {
 	m.flushMu.Unlock()
 }
 
+// CurrentMode returns the Mode currently recorded for scope. The master
+// Editor (dlp.8b) calls this to decide whether a Passthrough result
+// should delegate to gocui.DefaultEditor (ModeInsert / ModeCommand) or
+// be dropped (other modes).
+func (m *Matcher) CurrentMode(scope types.ContextKey) types.Mode {
+	return m.modes.Get(scope)
+}
+
 // Registers returns the underlying RegisterStore. Handlers that need to
 // read/write vim registers reach them through this accessor.
 func (m *Matcher) Registers() *RegisterStore {

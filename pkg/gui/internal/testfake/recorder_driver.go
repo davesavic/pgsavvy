@@ -11,8 +11,26 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
+
+// ErrNoEditor is returned by FeedChord when no master Editor has been
+// installed for the requested view.
+var ErrNoEditor = errors.New("testfake: no master editor installed for view")
+
+// ErrEditorNotDispatcher is returned by FeedChord when the installed
+// editor does not satisfy the Dispatcher side-channel interface (i.e.
+// is not a *orchestrator.masterEditor).
+var ErrEditorNotDispatcher = errors.New("testfake: installed editor does not implement keys.DispatchResult Dispatcher")
+
+// chordDispatcher mirrors orchestrator.Dispatcher. Declared locally so
+// the testfake package does not depend on the orchestrator package
+// (which would introduce an import cycle: orchestrator already imports
+// testfake from other tests).
+type chordDispatcher interface {
+	Dispatch(v *gocui.View, key gocui.Key) (keys.DispatchResult, error)
+}
 
 // SetViewCall records one SetView invocation.
 type SetViewCall struct {
@@ -60,6 +78,8 @@ type RecorderGuiDriver struct {
 	bindings []KbRecord
 	clicks   []ClickRecord
 
+	editors map[string]gocui.Editor
+
 	views   map[string]*viewState
 	manager types.Manager
 }
@@ -71,9 +91,10 @@ type viewState struct {
 // NewRecorderGuiDriver builds an empty recorder. Default size 80x24.
 func NewRecorderGuiDriver() *RecorderGuiDriver {
 	return &RecorderGuiDriver{
-		width:  80,
-		height: 24,
-		views:  map[string]*viewState{},
+		width:   80,
+		height:  24,
+		views:   map[string]*viewState{},
+		editors: map[string]gocui.Editor{},
 	}
 }
 
@@ -140,6 +161,109 @@ func (r *RecorderGuiDriver) AllKeybindings() []KbRecord {
 	defer r.mu.Unlock()
 	out := make([]KbRecord, len(r.bindings))
 	copy(out, r.bindings)
+	return out
+}
+
+// SetMasterEditor records ed as the master Editor for view. A second
+// call for the same view replaces the first (idempotent — matches the
+// production driver's behaviour of overwriting v.Editor).
+func (r *RecorderGuiDriver) SetMasterEditor(view string, ed gocui.Editor) error {
+	r.mu.Lock()
+	r.editors[view] = ed
+	r.mu.Unlock()
+	return nil
+}
+
+// InstalledEditors returns a defensive copy of the editors recorded by
+// SetMasterEditor. Mutating the returned map does not affect the
+// recorder.
+func (r *RecorderGuiDriver) InstalledEditors() map[string]gocui.Editor {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]gocui.Editor, len(r.editors))
+	for k, v := range r.editors {
+		out[k] = v
+	}
+	return out
+}
+
+// FeedChord drives seq through the master Editor installed for view by
+// type-asserting to the chordDispatcher interface. Returns
+// ErrNoEditor when no editor is installed, ErrEditorNotDispatcher
+// when the installed editor cannot be driven directly, or the final
+// DispatchResult of the last key in seq.
+//
+// seq is empty → returns (keys.FellThrough, nil) with no editor call.
+func (r *RecorderGuiDriver) FeedChord(view string, seq []keys.Key) (keys.DispatchResult, error) {
+	r.mu.Lock()
+	ed, ok := r.editors[view]
+	r.mu.Unlock()
+	if !ok {
+		return keys.FellThrough, ErrNoEditor
+	}
+	disp, isDisp := ed.(chordDispatcher)
+	if !isDisp {
+		return keys.FellThrough, ErrEditorNotDispatcher
+	}
+	if len(seq) == 0 {
+		return keys.FellThrough, nil
+	}
+	var (
+		result keys.DispatchResult
+		err    error
+	)
+	for _, k := range seq {
+		gk, gmod, encErr := encodeKeyForFeed(k)
+		if encErr != nil {
+			return keys.FellThrough, encErr
+		}
+		_ = gmod // gocui folds mod into the Key (NewKeyStrMod / NewKey).
+		result, err = disp.Dispatch(nil, gk)
+		if err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+// encodeKeyForFeed converts a chord Key back to a gocui.Key for
+// feeding through the master editor. It reuses the same forward
+// mapping helpers RegisterChord uses, then folds the modifier back
+// into the Key via gocui.NewKeyStrMod (rune) / gocui.NewKey (special).
+func encodeKeyForFeed(k keys.Key) (gocui.Key, gocui.Modifier, error) {
+	// Bare rune (no special).
+	if k.Special == keys.KeyNone {
+		gmod := chordModForFeed(k.Mod)
+		if k.Mod == 0 {
+			return gocui.NewKeyRune(k.Code), 0, nil
+		}
+		return gocui.NewKeyStrMod(string(k.Code), gmod), gmod, nil
+	}
+	name, err := keys.SpecialKeyToGocui(k.Special)
+	if err != nil {
+		return gocui.Key{}, 0, err
+	}
+	gmod := chordModForFeed(k.Mod)
+	return gocui.NewKey(name, "", gmod), gmod, nil
+}
+
+// chordModForFeed translates keys.Modifier bits to gocui.Modifier.
+// Kept local so testfake does not need to re-export the (private)
+// chordModifierToGocui in pkg/gui/keys.
+func chordModForFeed(m keys.Modifier) gocui.Modifier {
+	var out gocui.Modifier
+	if m&keys.ModCtrl != 0 {
+		out |= gocui.ModCtrl
+	}
+	if m&keys.ModAlt != 0 {
+		out |= gocui.ModAlt
+	}
+	if m&keys.ModShift != 0 {
+		out |= gocui.ModShift
+	}
+	if m&keys.ModMeta != 0 {
+		out |= gocui.ModAlt
+	}
 	return out
 }
 

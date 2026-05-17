@@ -225,8 +225,11 @@ func TestMatcher_CancelClearsPendingAndTimer(t *testing.T) {
 	gTop := recordingCmd("line.top", &fired, &mu, nil)
 	ts := buildTrieSet(t, []trieEntry{
 		{types.ModeNormal, types.QUERY_EDITOR, []Key{keyOf('g')}, gTop},
-		{types.ModeNormal, types.QUERY_EDITOR, []Key{keyOf('g'), keyOf('g')},
-			recordingCmd("buffer.top", &fired, &mu, nil)},
+		{
+			types.ModeNormal, types.QUERY_EDITOR,
+			[]Key{keyOf('g'), keyOf('g')},
+			recordingCmd("buffer.top", &fired, &mu, nil),
+		},
 	})
 	m := shortMatcher(t, ts, types.QUERY_EDITOR, types.ModeNormal)
 
@@ -386,8 +389,11 @@ func TestMatcher_LeaderDigitRejected(t *testing.T) {
 
 func TestMatcher_IsPartialReportsPending(t *testing.T) {
 	ts := buildTrieSet(t, []trieEntry{
-		{types.ModeNormal, types.QUERY_EDITOR, []Key{keyOf('g'), keyOf('g')},
-			fixtureCmd("buffer.top")},
+		{
+			types.ModeNormal, types.QUERY_EDITOR,
+			[]Key{keyOf('g'), keyOf('g')},
+			fixtureCmd("buffer.top"),
+		},
 	})
 	m := shortMatcher(t, ts, types.QUERY_EDITOR, types.ModeNormal)
 	if m.IsPartial() {
@@ -418,8 +424,11 @@ func TestMatcher_EscUsesTtimeoutlen(t *testing.T) {
 	escLeaf := recordingCmd("esc.action", &fired, &mu, nil)
 	ts := buildTrieSet(t, []trieEntry{
 		{types.ModeNormal, types.QUERY_EDITOR, []Key{specialKey(KeyEsc)}, escLeaf},
-		{types.ModeNormal, types.QUERY_EDITOR, []Key{specialKey(KeyEsc), keyOf('a')},
-			fixtureCmd("esc.a")},
+		{
+			types.ModeNormal, types.QUERY_EDITOR,
+			[]Key{specialKey(KeyEsc), keyOf('a')},
+			fixtureCmd("esc.a"),
+		},
 	})
 	store := NewModeStore()
 	store.Set(types.QUERY_EDITOR, types.ModeNormal)
@@ -712,8 +721,11 @@ func TestMatcher_AfterFuncStaleFireSuppressed(t *testing.T) {
 	gTop := recordingCmd("line.top", &fired, &mu, nil)
 	ts := buildTrieSet(t, []trieEntry{
 		{types.ModeNormal, types.QUERY_EDITOR, []Key{keyOf('g')}, gTop},
-		{types.ModeNormal, types.QUERY_EDITOR, []Key{keyOf('g'), keyOf('g')},
-			fixtureCmd("buffer.top")},
+		{
+			types.ModeNormal, types.QUERY_EDITOR,
+			[]Key{keyOf('g'), keyOf('g')},
+			fixtureCmd("buffer.top"),
+		},
 	})
 	// Long enough that we control when the timer would fire.
 	store := NewModeStore()

@@ -60,6 +60,16 @@ func (d *gocuiDriver) SetKeybinding(viewName string, key types.Key, mod types.Mo
 	return d.g.SetKeybinding(viewName, key, wrapped)
 }
 
+func (d *gocuiDriver) SetMasterEditor(view string, ed gocui.Editor) error {
+	v, err := d.g.View(view)
+	if err != nil {
+		return err
+	}
+	v.Editable = true
+	v.Editor = ed
+	return nil
+}
+
 func (d *gocuiDriver) SetViewClickBinding(b *types.ViewMouseBinding) error {
 	return d.g.SetViewClickBinding(b)
 }

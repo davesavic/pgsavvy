@@ -93,6 +93,25 @@ type TrieSet struct {
 	tries map[TrieSetKey]*ChordTrie
 }
 
+// NewTrieSet returns an empty TrieSet. Production code routes through
+// KeybindingService.Build, which produces a fully-populated TrieSet
+// from controller defaults; this constructor exists so tests outside
+// the keys package (master Editor, orchestrator wiring) can hand the
+// Matcher a small synthetic TrieSet without invoking the full Build
+// pipeline.
+func NewTrieSet() *TrieSet {
+	return &TrieSet{tries: map[TrieSetKey]*ChordTrie{}}
+}
+
+// Set installs trie at (mode, scope). Intended for the same test
+// scenarios NewTrieSet serves; production Build never calls this.
+func (s *TrieSet) Set(mode types.Mode, scope types.ContextKey, trie *ChordTrie) {
+	if s.tries == nil {
+		s.tries = map[TrieSetKey]*ChordTrie{}
+	}
+	s.tries[TrieSetKey{Mode: mode, Scope: scope}] = trie
+}
+
 // Get returns the trie for (mode, scope), or (nil, false) if no
 // bindings target that combination.
 func (s *TrieSet) Get(mode types.Mode, scope types.ContextKey) (*ChordTrie, bool) {
