@@ -1,0 +1,93 @@
+package pg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/session"
+)
+
+// pgCapabilities is the single-source-of-truth Capabilities value for the
+// Postgres driver. Tests assert deep-equality against this var rather than a
+// literal so a future field addition can't silently drift the public surface.
+// See epic dbsavvy-921 D17 (HasLiveCancel=false in v1; flips true in E6 when
+// pg_cancel_backend lands) and Adv-B ADV-16.
+var pgCapabilities = drivers.Capabilities{
+	HasSchemas:           true,
+	HasMaterializedViews: true,
+	HasArrayTypes:        true,
+	HasJSONTypes:         true,
+	HasLiveCancel:        false,
+	HasExplainAnalyze:    true,
+	HasNotice:            true,
+	HasListenNotify:      true,
+	SupportsCursor:       true,
+	MaxIdentifierLen:     63,
+}
+
+// Driver is the Postgres implementation of drivers.Driver. It captures the
+// session.Prompter passed to New so that Open can run the credentials
+// waterfall against an interactive fallback.
+type Driver struct {
+	prompter session.Prompter
+}
+
+// New returns a drivers.Factory closure that, when invoked, yields a
+// *Driver wrapping prompter. The closure shape (rather than returning
+// *Driver directly) lets main.go register the factory before any per-process
+// configuration is read — see epic dbsavvy-921 D16.
+func New(prompter session.Prompter) drivers.Factory {
+	return func(_ context.Context) (drivers.Driver, error) {
+		return &Driver{prompter: prompter}, nil
+	}
+}
+
+// Name returns the canonical engine identifier registered with drivers.Register.
+func (d *Driver) Name() string { return "postgres" }
+
+// Capabilities returns the static feature flags advertised by the Postgres
+// driver. The returned struct equals pgCapabilities (deep-equality testable).
+func (d *Driver) Capabilities() drivers.Capabilities { return pgCapabilities }
+
+// Open resolves the profile's credentials, builds a pgxpool.Config via
+// session.BuildPgxConfig, opens a pool, pings it, and caches SELECT version()
+// in the returned *Connection.
+//
+// Errors that may embed a DSN (pgxpool.NewWithConfig / pool.Ping) are passed
+// through session.RedactDSN before being returned so inline credentials do
+// not leak into logs or the TUI. Errors from ResolvePassword and
+// BuildPgxConfig propagate unchanged (they never include the DSN literal).
+func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (drivers.Connection, error) {
+	password, err := session.ResolvePassword(ctx, profile, d.prompter)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg, err := session.BuildPgxConfig(ctx, profile, password)
+	if err != nil {
+		return nil, err
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("pg: open: %s", session.RedactDSN(err.Error()))
+	}
+
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("pg: ping: %s", session.RedactDSN(err.Error()))
+	}
+
+	var version string
+	if err := pool.QueryRow(ctx, "SELECT version()").Scan(&version); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("pg: server version: %w", err)
+	}
+
+	return &Connection{pool: pool, serverVersion: version}, nil
+}
+
+var _ drivers.Driver = (*Driver)(nil)
