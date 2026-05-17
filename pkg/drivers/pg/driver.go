@@ -3,6 +3,7 @@ package pg
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -87,7 +88,36 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 		return nil, fmt.Errorf("pg: server version: %w", err)
 	}
 
-	return &Connection{pool: pool, serverVersion: version}, nil
+	return &Connection{
+		pool:          pool,
+		serverVersion: version,
+		majorVersion:  parseMajorVersion(version),
+	}, nil
+}
+
+// parseMajorVersion extracts the leading numeric major from a "PostgreSQL X.Y …"
+// version() string. Returns 0 when the prefix is missing or the digits don't
+// parse — callers MUST treat 0 as "unknown" and suppress version-driven
+// warnings.
+func parseMajorVersion(s string) int {
+	const prefix = "PostgreSQL "
+	if !strings.HasPrefix(s, prefix) {
+		return 0
+	}
+	rest := s[len(prefix):]
+	n := 0
+	digits := 0
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+		digits++
+	}
+	if digits == 0 {
+		return 0
+	}
+	return n
 }
 
 var _ drivers.Driver = (*Driver)(nil)

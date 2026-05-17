@@ -23,10 +23,12 @@ import (
 // a single stderr WARN is emitted and pool.Close is invoked regardless. See
 // epic dbsavvy-921 Arch-6 (review-plan resolutions).
 type Connection struct {
-	pool          *pgxpool.Pool
-	serverVersion string
-	sessions      atomic.Int32
-	closeOnce     sync.Once
+	pool              *pgxpool.Pool
+	serverVersion     string
+	majorVersion      int
+	sessions          atomic.Int32
+	closeOnce         sync.Once
+	pgVersionWarnOnce sync.Once
 }
 
 // Close releases the underlying pgxpool.Pool. Idempotent: second and
@@ -54,11 +56,31 @@ func (c *Connection) ServerVersion() string {
 	return c.serverVersion
 }
 
-// AcquireSession returns drivers.ErrNotImplemented in v1; epic task
-// dbsavvy-921.9 implements *pg.Session and replaces this stub with a real
-// pgxpool.Acquire-backed checkout that increments c.sessions.
-func (c *Connection) AcquireSession(_ context.Context) (drivers.Session, error) {
-	return nil, drivers.ErrNotImplemented
+// AcquireSession checks out a pgxpool connection and wraps it in a *Session.
+// The Session takes ownership of the pooled connection; the caller MUST call
+// Session.Close() to return it to the pool. AcquireSession increments the
+// outstanding-sessions counter; Session.Close decrements it.
+func (c *Connection) AcquireSession(ctx context.Context) (drivers.Session, error) {
+	pgxConn, err := c.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("pg: acquire session: %w", err)
+	}
+	c.sessions.Add(1)
+	return newSession(pgxConn, c), nil
+}
+
+// warnIfPostgresGE18 emits at most one stderr WARN per Connection when the
+// server reports PostgreSQL 18 or newer. Called by every Session list-method
+// so the operator learns about catalog drift the first time they browse
+// schema metadata, but is not spammed on every keystroke. See epic
+// dbsavvy-921.9 scope expansion #2.
+func (c *Connection) warnIfPostgresGE18() {
+	if c.majorVersion < 18 {
+		return
+	}
+	c.pgVersionWarnOnce.Do(func() {
+		_, _ = fmt.Fprintf(os.Stderr, "WARN: pg: server reports PostgreSQL %d which is newer than tested; introspection queries target Postgres 17 catalogs\n", c.majorVersion)
+	})
 }
 
 // Cancel returns drivers.ErrNotImplemented in v1 — Capabilities.HasLiveCancel

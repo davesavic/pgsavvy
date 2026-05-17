@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -102,11 +103,26 @@ func TestConnectionCancelReturnsErrNotImplemented(t *testing.T) {
 	require.ErrorIs(t, err, drivers.ErrNotImplemented)
 }
 
-func TestConnectionAcquireSessionReturnsErrNotImplemented(t *testing.T) {
-	c := &Connection{}
-	sess, err := c.AcquireSession(context.Background())
+func TestConnectionAcquireSessionErrorsWithoutLivePool(t *testing.T) {
+	// pgxpool.NewWithConfig is lazy; the first Acquire is what actually
+	// dials. Without a live server, Acquire surfaces a dial error, which
+	// AcquireSession MUST wrap with the documented "pg: acquire session:"
+	// prefix. The happy live-Session path is covered by 921.10 integration
+	// tests.
+	cfg, err := pgxpool.ParseConfig("postgres://u:p@127.0.0.1:1/dbsavvy_unit_test")
+	require.NoError(t, err)
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	require.NoError(t, err)
+	c := &Connection{pool: pool, serverVersion: "test"}
+	defer c.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	sess, err := c.AcquireSession(ctx)
 	require.Nil(t, sess)
-	require.ErrorIs(t, err, drivers.ErrNotImplemented)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "pg: acquire session:")
 }
 
 func TestConnectionServerVersionReturnsCachedValue(t *testing.T) {

@@ -13,5 +13,6 @@ SELECT
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 LEFT JOIN pg_roles r ON r.oid = c.relowner
-WHERE c.relkind IN ('r','m','v','p')
+WHERE n.nspname = $1
+  AND c.relkind IN ('r','m','v','p')
 ORDER BY n.nspname, c.relname
