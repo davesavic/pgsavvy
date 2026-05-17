@@ -29,7 +29,7 @@ var modAliases = map[string]string{
 var modOrder = map[string]int{"ctrl": 0, "alt": 1, "shift": 2, "meta": 3}
 
 var specialNames = map[string]struct{}{
-	"leader": {}, "esc": {}, "cr": {}, "enter": {}, "tab": {}, "bs": {},
+	"leader": {}, "localleader": {}, "esc": {}, "cr": {}, "enter": {}, "tab": {}, "bs": {},
 	"backspace": {}, "space": {}, "up": {}, "down": {}, "left": {}, "right": {},
 	"home": {}, "end": {}, "pgup": {}, "pgdn": {}, "del": {}, "ins": {},
 	"f1": {}, "f2": {}, "f3": {}, "f4": {}, "f5": {}, "f6": {},

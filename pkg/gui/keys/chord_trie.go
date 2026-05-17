@@ -1,0 +1,310 @@
+package keys
+
+import (
+	"fmt"
+
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+)
+
+// trieNode is the unexported node of a ChordTrie. After Builder.Build
+// completes the node graph is treated as immutable; Matcher / Walk /
+// Lookup read it without locking.
+type trieNode struct {
+	children map[Key]*trieNode
+	action   *commands.Command
+	source   Source
+	origin   string
+}
+
+// LookupResult is what Lookup returns. It is a value type so callers
+// cannot mutate the trie through the returned reference.
+//
+// Action is the resolved Command pointer (nil for interior nodes). For a
+// `<nop>` leaf, Action == commands.NopCommand.
+//
+// Source / Origin are populated for leaves (interior nodes carry the
+// zero values). IsLeaf == (Action != nil); HasChildren reports whether
+// the matched node has continuations.
+//
+// Found is true when the supplied sequence corresponds to a node in the
+// trie (leaf OR interior). Lookup of the empty sequence returns
+// Found=true with the root node.
+type LookupResult struct {
+	Action      *commands.Command
+	Source      Source
+	Origin      string
+	IsLeaf      bool
+	HasChildren bool
+	Found       bool
+}
+
+// ChordTrie holds the chord prefix tree for a single (Mode, Scope)
+// pair. It is built once by TrieBuilder and never mutated again, so
+// concurrent readers (Matcher + cheatsheet walker) require no
+// synchronisation.
+type ChordTrie struct {
+	root *trieNode
+}
+
+// Lookup walks seq from the root. Per AC dlp.4:
+//   - Lookup([]) returns Found=true on the root with IsLeaf=false and
+//     HasChildren reflecting whether the trie has any bindings.
+//   - Lookup of an unknown prefix returns Found=false (all other fields
+//     zero).
+//   - Lookup of an interior prefix returns Found=true with IsLeaf=false.
+//   - Lookup of a leaf returns Found=true with IsLeaf=true and the
+//     resolved Action / Source / Origin populated.
+func (t *ChordTrie) Lookup(seq []Key) LookupResult {
+	node := t.root
+	for _, k := range seq {
+		next, ok := node.children[k]
+		if !ok {
+			return LookupResult{}
+		}
+		node = next
+	}
+	res := LookupResult{
+		Action:      node.action,
+		Source:      node.source,
+		Origin:      node.origin,
+		IsLeaf:      node.action != nil,
+		HasChildren: len(node.children) > 0,
+		Found:       true,
+	}
+	return res
+}
+
+// Walk visits every LEAF in t (interior nodes are skipped) in
+// deterministic DFS order. fn is called with the resolved Sequence (a
+// fresh slice for each leaf) plus a LookupResult describing the leaf.
+//
+// Used by the cheatsheet generator (dlp.10) and the completeness test
+// (dlp.11). Walk on the empty trie is a no-op.
+func (t *ChordTrie) Walk(fn func(seq []Key, leaf LookupResult)) {
+	if t == nil || t.root == nil {
+		return
+	}
+	walkNode(t.root, nil, fn)
+}
+
+func walkNode(node *trieNode, prefix []Key, fn func([]Key, LookupResult)) {
+	if node.action != nil {
+		seq := make([]Key, len(prefix))
+		copy(seq, prefix)
+		fn(seq, LookupResult{
+			Action:      node.action,
+			Source:      node.source,
+			Origin:      node.origin,
+			IsLeaf:      true,
+			HasChildren: len(node.children) > 0,
+			Found:       true,
+		})
+	}
+	// Deterministic ordering: sort children by stringified Key so test
+	// output is stable. The trie is built infrequently so this is fine.
+	keys := sortedKeys(node.children)
+	for _, k := range keys {
+		walkNode(node.children[k], append(prefix, k), fn)
+	}
+}
+
+func sortedKeys(m map[Key]*trieNode) []Key {
+	out := make([]Key, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	// Sort by String(): cheap, total order, stable for testing.
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j].String() < out[j-1].String(); j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
+}
+
+// TrieBuilder accumulates ChordBindings into one ChordTrie. The two
+// insertion entry points enforce the layering rule from D8:
+// InsertDefault inserts first (Source=ShippedDefault); InsertUser then
+// overlays (Source=UserOverride / CustomCmd, last-wins on conflict).
+//
+// Build is idempotent — call it once. Subsequent inserts after Build are
+// safe but pointless (the snapshot has already been returned).
+type TrieBuilder struct {
+	root     *trieNode
+	warnings []Warning
+}
+
+// NewTrieBuilder constructs an empty builder.
+func NewTrieBuilder() *TrieBuilder {
+	return &TrieBuilder{root: &trieNode{children: map[Key]*trieNode{}}}
+}
+
+// InsertDefault inserts cb as a shipped default. If a leaf already
+// exists at the same Sequence with a DIFFERENT action, a Warning of
+// Code="collision" is emitted and the LATER write wins (matches the
+// vim/lazygit convention).
+//
+// cb.Source is overwritten to ShippedDefault to enforce the layering
+// rule. cb.Sequence MUST NOT contain KeyLeader / KeyLocalLeader (the
+// caller is responsible for expansion).
+//
+// cmd MUST be the *commands.Command this binding resolves to (the
+// service has already looked it up against the Registry). A nil cmd
+// indicates an orphan-action skip and InsertDefault returns early — it
+// is the service's responsibility to emit the orphan_action warning.
+func (b *TrieBuilder) InsertDefault(cb *ChordBinding, cmd *commands.Command) {
+	if cmd == nil {
+		return
+	}
+	cb.Source = ShippedDefault
+	b.insert(cb, cmd)
+}
+
+// InsertUser inserts cb on top of any existing default. Source is set
+// from cb (UserOverride for `action:` shorthand, CustomCmd for
+// `command:` shorthand) — the caller MUST populate cb.Source before
+// calling.
+//
+// User inserts overwrite the leaf unconditionally; no collision warning
+// is emitted (overlaying defaults is the whole point). User-vs-user
+// collisions (two cfg entries on the same Sequence) DO emit a collision
+// warning — the second cfg entry wins, mirroring InsertDefault.
+func (b *TrieBuilder) InsertUser(cb *ChordBinding, cmd *commands.Command) {
+	if cmd == nil {
+		return
+	}
+	b.insertUser(cb, cmd)
+}
+
+// Build finalises the trie. It walks the root looking for ambiguous
+// prefixes (an interior node that ALSO carries a leaf action) and emits
+// one Warning per finding. The returned ChordTrie and warning slice are
+// independent of the Builder — further inserts are not propagated.
+func (b *TrieBuilder) Build() (*ChordTrie, []Warning) {
+	b.detectAmbiguousPrefixes(b.root, nil)
+	warns := b.warnings
+	b.warnings = nil
+	return &ChordTrie{root: b.root}, warns
+}
+
+func (b *TrieBuilder) insert(cb *ChordBinding, cmd *commands.Command) {
+	if len(cb.Sequence) == 0 {
+		return
+	}
+	node := b.root
+	for _, k := range cb.Sequence {
+		if k.IsLeaderPlaceholder() {
+			b.warnings = append(b.warnings, Warning{
+				Level:   WarnLevel,
+				Code:    "unexpanded_leader",
+				Message: fmt.Sprintf("binding %q contains an unexpanded %s placeholder", SequenceString(cb.Sequence), k.String()),
+				Origin:  cb.Origin,
+			})
+			return
+		}
+		child, ok := node.children[k]
+		if !ok {
+			child = &trieNode{children: map[Key]*trieNode{}}
+			node.children[k] = child
+		}
+		node = child
+	}
+	// Leaf assignment. Collision only fires when the existing action
+	// differs from the incoming one; identical inserts (same cmd) are
+	// idempotent and silent.
+	if node.action != nil && node.action != cmd {
+		b.warnings = append(b.warnings, Warning{
+			Level: WarnLevel,
+			Code:  "collision",
+			Message: fmt.Sprintf(
+				"binding %q collides at (mode=0x%x, scope=%s): %q overwrites %q",
+				SequenceString(cb.Sequence), uint32(cb.Mode), cb.Scope, cmd.ID, node.action.ID,
+			),
+			Origin: cb.Origin,
+		})
+	}
+	node.action = cmd
+	node.source = cb.Source
+	node.origin = cb.Origin
+}
+
+// insertUser is the user-tier path. It runs the same collision-detection
+// rules as insert but only when the existing leaf is itself a user
+// entry (UserOverride / CustomCmd) — overwriting a default with a user
+// binding is the intended overlay, NOT a collision.
+func (b *TrieBuilder) insertUser(cb *ChordBinding, cmd *commands.Command) {
+	if len(cb.Sequence) == 0 {
+		return
+	}
+	node := b.root
+	for _, k := range cb.Sequence {
+		if k.IsLeaderPlaceholder() {
+			b.warnings = append(b.warnings, Warning{
+				Level:   WarnLevel,
+				Code:    "unexpanded_leader",
+				Message: fmt.Sprintf("binding %q contains an unexpanded %s placeholder", SequenceString(cb.Sequence), k.String()),
+				Origin:  cb.Origin,
+			})
+			return
+		}
+		child, ok := node.children[k]
+		if !ok {
+			child = &trieNode{children: map[Key]*trieNode{}}
+			node.children[k] = child
+		}
+		node = child
+	}
+	if node.action != nil && node.action != cmd && (node.source == UserOverride || node.source == CustomCmd) {
+		b.warnings = append(b.warnings, Warning{
+			Level: WarnLevel,
+			Code:  "collision",
+			Message: fmt.Sprintf(
+				"binding %q collides at (mode=0x%x, scope=%s): %q overwrites %q",
+				SequenceString(cb.Sequence), uint32(cb.Mode), cb.Scope, cmd.ID, node.action.ID,
+			),
+			Origin: cb.Origin,
+		})
+	}
+	node.action = cmd
+	node.source = cb.Source
+	node.origin = cb.Origin
+}
+
+func (b *TrieBuilder) detectAmbiguousPrefixes(node *trieNode, prefix []Key) {
+	if node.action != nil && len(node.children) > 0 && node.action != commands.NopCommand {
+		// Collect descendant leaf origins for an actionable warning.
+		var descOrigins []string
+		collectLeafOrigins(node, &descOrigins, 4)
+		b.warnings = append(b.warnings, Warning{
+			Level: WarnLevel,
+			Code:  "ambiguous_prefix",
+			Message: fmt.Sprintf(
+				"sequence %q is a leaf AND a prefix of longer sequences (descendants: %v); vim timeoutlen rule applies",
+				SequenceString(prefix), descOrigins,
+			),
+			Origin: node.origin,
+		})
+	}
+	keys := sortedKeys(node.children)
+	for _, k := range keys {
+		detectChildPrefix := append(prefix, k)
+		b.detectAmbiguousPrefixes(node.children[k], detectChildPrefix)
+	}
+}
+
+func collectLeafOrigins(node *trieNode, out *[]string, cap int) {
+	if len(*out) >= cap {
+		return
+	}
+	keys := sortedKeys(node.children)
+	for _, k := range keys {
+		child := node.children[k]
+		if child.action != nil {
+			if len(*out) >= cap {
+				return
+			}
+			*out = append(*out, child.origin)
+		}
+		collectLeafOrigins(child, out, cap)
+	}
+}
