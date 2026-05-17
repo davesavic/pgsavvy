@@ -1513,6 +1513,36 @@ type QueryError struct {
 Postgres errors via `pgconn.PgError` map directly. The QueryEditor
 underlines the bad token at `Position` and shows `Hint` in a tooltip.
 
+**`drivers.ErrNotImplemented` rationale.** `drivers.ErrNotImplemented`
+is a fresh sentinel (`errors.New("driver: operation not yet
+implemented")`), **NOT an alias of** `errors.ErrUnsupported`. Aliasing
+would cause `errors.Is(drivers.ErrNotImplemented,
+errors.ErrUnsupported)` to be true throughout the codebase, conflating
+driver-not-yet-implemented with stdlib unsupported-operation errors —
+two semantically distinct failure modes that the UI, telemetry, and
+error-routing layers need to distinguish. The plan-review notes for v1
+cover the rationale in full.
+
+**Capabilities source-of-truth.** The concrete Capabilities literal
+lives in `pkg/drivers/pg/driver.go` as `var pgCapabilities =
+drivers.Capabilities{ … }`. `Capabilities()` (defined on the Driver
+interface in §11.1) returns this var; tests assert deep-equality. v1
+sets `HasLiveCancel: false` because `Cancel()` returns
+`drivers.ErrNotImplemented`; the flag flips to true in E6 when
+`pg_cancel_backend` lands. The invariant "every Capabilities flag set
+true has a non-sentinel impl" is enforced by
+`TestEveryTrueCapabilityHasImpl` in
+`test/integration/pg_driver_test.go`.
+
+**Sentinel-stubbed method contract.** When a Session method returns
+`drivers.ErrNotImplemented`, its first return value is the typed zero
+of the result interface — specifically the **untyped nil** for
+interface-typed returns (`Transaction`, `RowStream`). Callers MUST
+check `err` before touching the value; otherwise `tx.Rollback()` on
+the untyped-nil interface panics. Tests in
+`pkg/drivers/pg/session_test.go` assert `err != nil && tx == nil` for
+each stubbed method.
+
 ### 11.6 Connection visual identity
 
 The `color`, `label`, and `icon` fields (§11.2) drive **five visual
