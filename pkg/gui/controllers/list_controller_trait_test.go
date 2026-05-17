@@ -35,8 +35,9 @@ func TestListControllerTraitDownAndUp(t *testing.T) {
 	if !jFired || !kFired {
 		t.Fatalf("expected both j and k bindings, jFired=%v kFired=%v", jFired, kFired)
 	}
-	// Net: +1 then -1 -> idx unchanged at 5. SetCursor clamps to len-1
-	// so after j (->6) and k (->5) we end at 5.
+	// Net: +1 then -1 -> idx unchanged at 5 (fakeCursor stores raw, no
+	// clamping; the trait itself doesn't clamp either in T7a, that lives
+	// in the real side-list contexts).
 	if cur.idx != 5 {
 		t.Fatalf("cursor idx after j,k = %d, want 5", cur.idx)
 	}

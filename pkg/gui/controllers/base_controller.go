@@ -58,8 +58,16 @@ type DebugLogger interface {
 	Debugf(format string, args ...any)
 }
 
-// ConnectInvoker is the slice of *data.ConnectHelper the connections
-// controller actually calls.
+// ConnectInvoker is the narrow surface the connections controller calls
+// to open a connection. The shape is INTENTIONALLY error-only: the real
+// data.ConnectHelper.Connect returns (drivers.Connection, drivers.Session,
+// error), but the controller never touches the Connection / Session
+// directly. The T10 bootstrap (dbsavvy-enn.11) supplies a thin facade
+// closure that calls the real Connect, stashes the returned Connection
+// and Session in shared helper state (so refresh/disconnect can reach
+// them), and surfaces only the error here.
+//
+// Tests inject a recording fake; production injects the closure.
 type ConnectInvoker interface {
 	Connect(ctx context.Context, profile *models.Connection) error
 }
@@ -70,8 +78,12 @@ type SchemasInvoker interface {
 	UnhideSchema(connID, schemaName string, builtin, profile []string) error
 }
 
-// ConnectionFormInvoker is the WalkAddConnection surface used by
-// connections_controller.
+// ConnectionFormInvoker is the narrow surface connections_controller
+// invokes from `a`. The real data.ConnectionFormHelper.WalkAddConnection
+// takes a ChainedPrompter and an onComplete callback; the T10 bootstrap
+// (dbsavvy-enn.11) closes over those collaborators (T7b's prompt helper
+// drives the prompter, and onComplete reloads + reselects the new row)
+// and exposes the simpler WalkAdd(ctx) shape here.
 type ConnectionFormInvoker interface {
 	WalkAdd(ctx context.Context) error
 }

@@ -149,7 +149,7 @@ func (s *SchemasController) GetKeybindings(_ types.KeybindingsOpts) []*types.Key
 	// <leader> binding. The OneshotArmer interface is supplied by T7b;
 	// when absent (early boot / unit tests) the binding is still
 	// registered but the arm() returns no-op.
-	leaderKey := leaderKeyFromLabel(s.leader())
+	leaderKey := s.leaderKey()
 	out = append(out, &types.KeyBinding{
 		ViewName:    view,
 		Key:         leaderKey,
@@ -170,15 +170,20 @@ func (s *SchemasController) AttachToContext(ctx attachable) {
 	ctx.AddKeybindingsFn(s.GetKeybindings)
 }
 
-// leaderKeyFromLabel maps a leader label string (e.g. "<space>") to
-// the gocui.Key value the runtime will dispatch on. Only the two
-// labels permitted by G1-C are honored here ("<space>" + the bare
-// "<space>" fallback); any other label falls back to space because
-// custom leader strings are an E5 (chord) feature.
-func leaderKeyFromLabel(label string) types.Key {
+// leaderKey resolves the configured leader label to the gocui.Key value
+// the runtime will dispatch on. Only the labels permitted by G1-C are
+// honored here ("<space>", " ", ""); any other label falls back to
+// space (because custom leader strings are an E5 chord-system feature)
+// and emits a single Warnf so the silent collision surfaces at runtime
+// before E5 ships real leader expansion.
+func (s *SchemasController) leaderKey() types.Key {
+	label := s.leader()
 	switch label {
 	case "<space>", " ", "":
 		return gocui.NewKeyRune(' ')
+	}
+	if s.c != nil && s.c.Log != nil {
+		s.c.Log.Warnf("schemas_controller: unrecognized leader label %q; falling back to <space>", label)
 	}
 	return gocui.NewKeyRune(' ')
 }

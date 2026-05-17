@@ -55,17 +55,6 @@ func (c *ConnectionsController) AddConnection() error {
 	return c.wrapErr("connections.add", err)
 }
 
-// DismissTip is the tip-popup dismissal handler. Bound to both <esc>
-// and <cr> on the TIP popup view. When no TipHelper is wired the call
-// is a silent no-op (early-boot ordering).
-func (c *ConnectionsController) DismissTip() error {
-	if c.helpers.Tip == nil {
-		return nil
-	}
-	err := c.helpers.Tip.DismissStartupTip()
-	return c.wrapErr("connections.dismiss_tip", err)
-}
-
 // GetKeybindings returns the connections rail bindings.
 func (c *ConnectionsController) GetKeybindings(_ types.KeybindingsOpts) []*types.KeyBinding {
 	tr := c.tr()
