@@ -1396,6 +1396,42 @@ The connection store has full credential helpers (`pkg/session/credentials.go`):
 4. `pgpass` file (Postgres-specific).
 5. Interactive prompt — last resort.
 
+**Helper details (v1 contract):**
+
+- **Inline `password`.** v0 dev fallback only. If present, `connections.yml`
+  mode is verified: `mode & 0o077 != 0` logs a single stderr WARN. The
+  decoder uses `KnownFields(true)` so misspellings (e.g. `readonly: true`)
+  are rejected, not silently dropped.
+- **`password_command`.** Executed via `$SHELL` → `/bin/bash` → `/bin/sh`
+  fallback chain on Unix; `cmd /C` on Windows. Timeout = global
+  `config.Timeout`. Stdin closed. On exit 0, stderr is discarded silently.
+  On exit ≠ 0, stderr is included in the returned error capped at 4 KiB,
+  with substring-scrub of any resolved stdout (defense against `set -x`
+  leaks). `DBSAVVY_KEYRING_PASSPHRASE` is scrubbed from child env before
+  exec.
+- **Keyring.** Keyring file-backend is the v1 implementation (CGO-free).
+  Path resolved via `github.com/adrg/xdg` (handles macOS/Linux fallbacks).
+  File `chmod 0o600` + parent dir `0o700` enforced on first write; existing
+  looser modes WARN at startup. Passphrase from
+  `DBSAVVY_KEYRING_PASSPHRASE` first (treats set-but-empty as unset),
+  prompter second. On a TTY with the env var set, dbsavvy logs a single
+  stderr WARN — also note the env var is visible via
+  `/proc/<pid>/environ` and is inherited by spawned commands.
+- **pgpass.** pgx v5 auto-discovery of `~/.pgpass` applies when
+  `profile.password`, `profile.password_command`, and `profile.keyring`
+  are all unset. Explicit `profile.pgpass`: dbsavvy pre-stats the file;
+  `mode & 0o077 != 0` returns a typed error WITHOUT reading the file
+  (libpq parity).
+- **Prompter.** `TerminalPrompter` uses `golang.org/x/term` to suppress
+  echo. When stdin is not a TTY, it returns a typed `no-TTY` error
+  immediately rather than blocking.
+
+`connections.yml` requires the `connections:` wrapper key. The legacy
+top-level-sequence form is rejected with an error message that includes
+a paste-ready wrapper-form snippet. The YAML decoder runs in strict mode
+(`KnownFields(true)`) — typos like `readonly` or `read-only` are
+rejected at load.
+
 ### 11.3 Postgres driver (v1)
 
 `pkg/drivers/pg/driver.go` implements `Driver` using **pgx v5**
