@@ -345,6 +345,10 @@ func (g *Gui) wireWithDriver() error {
 	// Register every controller's action handlers with the registry.
 	g.controllers.RegisterActions(g.cmdRegistry)
 
+	// Rail-switch (1-4, Tab) needs the focus tree + context registry,
+	// which the Controllers aggregate does not hold; register here.
+	controllers.RegisterRailSwitchActions(g.cmdRegistry, g.tree, g.registry)
+
 	// Cheatsheet popup: capture the focused scope, hand it to the
 	// CheatsheetContext, then push the context onto the focus stack.
 	// RunLayout's Tier-3 popup pass (layout.go) renders the popup on
@@ -445,6 +449,16 @@ func (g *Gui) wireWithDriver() error {
 		Log:      g.deps.Common.Log,
 	}
 	_ = g.exRegistry.Register(keys.ReloadCommand(reloadDeps))
+
+	// :q / :quit — vim-style quit ex-commands. Return gocui.ErrQuit so
+	// the submit dispatcher can propagate it up through the gocui main
+	// loop. CommandSubmitCommand recognises ErrQuit specifically and
+	// skips its default toast-and-swallow path.
+	quitExHandler := func(_ []string, _ commands.ExecCtx) error {
+		return gocui.ErrQuit
+	}
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "q", Description: "Quit", Handler: quitExHandler})
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "quit", Description: "Quit", Handler: quitExHandler})
 
 	// Master Editor on editable views (today only COMMAND_LINE) +
 	// per-key SetKeybinding shims on every non-editable view.

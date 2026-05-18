@@ -1,7 +1,9 @@
 package controllers
 
 import (
+	"github.com/davesavic/dbsavvy/pkg/gui"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 )
@@ -60,27 +62,80 @@ func railSwitchBindings(view string, tr *i18n.TranslationSet) []*types.ChordBind
 	}
 }
 
-// registerRailSwitchActions registers the five rail-switch action IDs
-// with reg using no-op handlers. The real cross-rail focus push is
-// owned by the global controller and lands in a downstream epic; today
-// we only need every shipped binding's ActionID to resolve to a Command
-// during Build so the trie has a leaf to dispatch.
+// RegisterRailSwitchActions registers the five rail-switch action IDs
+// with reg, each wired to Replace() the focus-stack top with the named
+// rail context. tree owns the focus stack; ctxTree holds the rail
+// Context instances. 1/2/3/4 jump to Schemas/Tables/Columns/Indexes;
+// Tab cycles connections→schemas→tables→columns→indexes→connections.
 //
-// Idempotent: ErrDuplicateAction from a re-registration is swallowed,
-// matching the orchestrator's "controllers may register on top of each
-// other" contract.
-func registerRailSwitchActions(reg *commands.Registry) {
+// Idempotent: ErrDuplicateAction from a re-registration is swallowed.
+// nil reg/tree/ctxTree falls back to a no-op registration so tests that
+// build a partial wiring continue to compile.
+func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ctxTree *context.ContextTree) {
 	if reg == nil {
 		return
 	}
-	noop := func(commands.ExecCtx) error { return nil }
-	for _, id := range []string{
-		commands.RailSwitchSchemas,
-		commands.RailSwitchTables,
-		commands.RailSwitchColumns,
-		commands.RailSwitchIndexes,
-		commands.RailSwitchNext,
-	} {
-		_ = reg.Register(&commands.Command{ID: id, Description: id, Handler: noop})
+	if tree == nil || ctxTree == nil {
+		noop := func(commands.ExecCtx) error { return nil }
+		for _, id := range []string{
+			commands.RailSwitchSchemas,
+			commands.RailSwitchTables,
+			commands.RailSwitchColumns,
+			commands.RailSwitchIndexes,
+			commands.RailSwitchNext,
+		} {
+			_ = reg.Register(&commands.Command{ID: id, Description: id, Handler: noop})
+		}
+		return
 	}
+
+	jumpTo := func(target types.IBaseContext) func(commands.ExecCtx) error {
+		return func(commands.ExecCtx) error {
+			if target == nil {
+				return nil
+			}
+			return tree.Replace(target)
+		}
+	}
+
+	_ = reg.Register(&commands.Command{ID: commands.RailSwitchSchemas, Description: commands.RailSwitchSchemas, Handler: jumpTo(ctxTree.Schemas)})
+	_ = reg.Register(&commands.Command{ID: commands.RailSwitchTables, Description: commands.RailSwitchTables, Handler: jumpTo(ctxTree.Tables)})
+	_ = reg.Register(&commands.Command{ID: commands.RailSwitchColumns, Description: commands.RailSwitchColumns, Handler: jumpTo(ctxTree.Columns)})
+	_ = reg.Register(&commands.Command{ID: commands.RailSwitchIndexes, Description: commands.RailSwitchIndexes, Handler: jumpTo(ctxTree.Indexes)})
+
+	// Tab cycles linearly through every rail. Lookup the next rail from
+	// the current view name; if the current view is not a rail (e.g.
+	// focus is on a popup that somehow leaked Tab through), fall through
+	// to Schemas as a safe default.
+	cycle := []types.IBaseContext{
+		ctxTree.Connections,
+		ctxTree.Schemas,
+		ctxTree.Tables,
+		ctxTree.Columns,
+		ctxTree.Indexes,
+	}
+	_ = reg.Register(&commands.Command{
+		ID:          commands.RailSwitchNext,
+		Description: commands.RailSwitchNext,
+		Handler: func(commands.ExecCtx) error {
+			cur := tree.Current()
+			if cur == nil {
+				return tree.Replace(ctxTree.Schemas)
+			}
+			curName := cur.GetViewName()
+			for i, c := range cycle {
+				if c == nil {
+					continue
+				}
+				if c.GetViewName() == curName {
+					next := cycle[(i+1)%len(cycle)]
+					if next == nil {
+						return nil
+					}
+					return tree.Replace(next)
+				}
+			}
+			return tree.Replace(ctxTree.Schemas)
+		},
+	})
 }

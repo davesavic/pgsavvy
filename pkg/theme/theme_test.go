@@ -9,7 +9,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/theme/builtin"
 )
 
-func TestApply_DefaultDark_SetsActiveBorderCyan(t *testing.T) {
+func TestApply_DefaultDark_SetsActiveBorderToHighContrast(t *testing.T) {
 	if err := Apply(builtin.DefaultDark()); err != nil {
 		t.Fatalf("Apply returned err: %v", err)
 	}
@@ -20,8 +20,8 @@ func TestApply_DefaultDark_SetsActiveBorderCyan(t *testing.T) {
 	if got.ActiveBorder == nil {
 		t.Fatal("ActiveBorder is nil")
 	}
-	if got.ActiveBorder.Fg != "cyan" {
-		t.Fatalf("ActiveBorder.Fg = %q, want %q", got.ActiveBorder.Fg, "cyan")
+	if got.ActiveBorder.Fg != "yellow" {
+		t.Fatalf("ActiveBorder.Fg = %q, want %q", got.ActiveBorder.Fg, "yellow")
 	}
 }
 

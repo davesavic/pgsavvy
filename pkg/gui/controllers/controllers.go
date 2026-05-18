@@ -92,7 +92,9 @@ func AttachControllers(
 // The trait actions (ListUp / ListDown / ListConfirm) are registered once
 // via the Connections controller's embedded trait so they exist in the
 // Registry without each rail-controller fighting for the same IDs.
-// Rail-switch actions are registered via shared.registerRailSwitchActions.
+// Rail-switch actions are registered by the orchestrator via
+// controllers.RegisterRailSwitchActions (it needs the focus tree +
+// context registry which this aggregate does not hold).
 //
 // Subsequent re-registrations of the same ID are silently swallowed via
 // commands.Registry.Register returning ErrDuplicateAction.
@@ -124,7 +126,6 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	if b.Menu != nil {
 		b.Menu.RegisterActions(reg)
 	}
-	registerRailSwitchActions(reg)
 }
 
 // Null-picker fallbacks. Returning nil/empty from every accessor is the

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
@@ -71,7 +72,14 @@ func (e *masterEditor) Edit(v *gocui.View, key gocui.Key) bool {
 		return false
 	}
 	k := keys.KeyFromGocui(key)
-	result, _ := e.matcher.Dispatch(e.scope, k)
+	result, err := e.matcher.Dispatch(e.scope, k)
+	// gocui.Editor.Edit returns only bool, so a Dispatched handler
+	// returning gocui.ErrQuit (e.g. the :q ex-command) would otherwise
+	// be silently dropped. Re-schedule the quit on the MainLoop via
+	// Gui.Update so the gocui run loop unwinds.
+	if errors.Is(err, gocui.ErrQuit) && e.gui != nil {
+		e.gui.Update(func(*gocui.Gui) error { return gocui.ErrQuit })
+	}
 	return e.applyResult(v, key, k, result)
 }
 

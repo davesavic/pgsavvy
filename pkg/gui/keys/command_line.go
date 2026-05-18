@@ -1,8 +1,11 @@
 package keys
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -134,6 +137,11 @@ func CommandSubmitCommand(deps CommandLineCommandDeps) *commands.Command {
 				return nil
 			}
 			if err := cmd.Handler(args, ctx); err != nil {
+				// gocui.ErrQuit must escape the submit handler so the
+				// main loop unwinds; toasting it would swallow the quit.
+				if errors.Is(err, gocui.ErrQuit) {
+					return err
+				}
 				if deps.Toaster != nil {
 					deps.Toaster(err.Error())
 				}

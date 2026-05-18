@@ -9,8 +9,8 @@ import "github.com/davesavic/dbsavvy/pkg/config"
 // catch newly-added ThemeConfig fields that forget a default.
 func DefaultDark() *config.ThemeConfig {
 	return &config.ThemeConfig{
-		ActiveBorder:    "cyan",
-		InactiveBorder:  "white",
+		ActiveBorder:    "yellow",
+		InactiveBorder:  "gray",
 		SelectedRowBg:   "#3a3a3a",
 		SelectedRowFg:   "white",
 		NullValueFg:     "red",
