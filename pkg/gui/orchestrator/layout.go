@@ -132,6 +132,9 @@ func (g *Gui) RunLayout(w, h int) error {
 			// ":" prompt and plumb the view handle through to the
 			// CommandLineContext so command.submit can read v.TextArea.
 			if ctx.GetKey() == types.COMMAND_LINE && g.commandLineEditor != nil {
+				if view != nil {
+					view.Frame = false
+				}
 				_ = g.driver.SetMasterEditor(name, g.commandLineEditor)
 				if view != nil {
 					if freshView && view.TextArea != nil {
@@ -372,7 +375,7 @@ func commandLineRect(dims map[string]ui.Dimensions) rect {
 		X0: canvas.X0,
 		Y0: canvas.Y1 - 1,
 		X1: canvas.X1,
-		Y1: canvas.Y1,
+		Y1: canvas.Y1 + 1,
 	}
 }
 
