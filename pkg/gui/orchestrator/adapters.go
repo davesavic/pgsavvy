@@ -2,12 +2,16 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/gui"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/query"
+	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
 // connectionsPickerAdapter exposes the CONNECTIONS rail's selected
@@ -92,22 +96,88 @@ func (a *activeConnAdapter) ActiveConnectionID() string {
 }
 
 // connectInvoker is the controllers.ConnectInvoker facade. It calls the
-// real data.ConnectHelper.Connect and stashes the active connection ID
-// on the Gui so SchemasInvoker can scope its AppState keys.
+// real data.ConnectHelper.Connect, stashes the active connection ID on
+// the Gui so SchemasInvoker can scope its AppState keys, and wires the
+// fresh SQLSession into the orchestrator-owned QueryRunner (dbsavvy-66p.16).
+//
+// The query SQLSession runs on a SECOND drivers.Session acquired from
+// the same Connection — the first session is owned by ConnectHelper for
+// schema-rail traffic. This keeps SQLSession's queue (Execute / Stream /
+// Explain serializer) disjoint from ConnectHelper's worker queue so a
+// long-running query never blocks a schema refresh and vice-versa.
 type connectInvoker struct {
-	g      *Gui
-	helper *data.ConnectHelper
+	g       *Gui
+	helper  *data.ConnectHelper
+	runner  *data.QueryRunner
+	history *query.History
 }
 
 func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection) error {
 	if c == nil || c.helper == nil {
 		return nil
 	}
-	_, _, err := c.helper.Connect(ctx, profile)
-	if err == nil && profile != nil && c.g != nil {
+	conn, _, err := c.helper.Connect(ctx, profile)
+	if err != nil {
+		return err
+	}
+	if profile != nil && c.g != nil {
 		c.g.activeConnID = profile.Name
 	}
-	return err
+	if err := c.wireQueryRuntime(ctx, conn, profile); err != nil {
+		// Roll back the ConnectHelper.Connect so we don't leak the schema-
+		// rail session in a half-wired state. The user sees the wiring
+		// error verbatim; a follow-up reconnect goes through the same
+		// path cleanly.
+		c.helper.Disconnect()
+		if c.g != nil {
+			c.g.activeConnID = ""
+		}
+		return err
+	}
+	return nil
+}
+
+// wireQueryRuntime acquires the second drivers.Session, derives the
+// driver capabilities, builds the SQLSession with the orchestrator's
+// History as recorder, and Bind()s the QueryRunner. Stashes the
+// SQLSession on the Gui so Close can cancel an in-flight Stream.
+func (c *connectInvoker) wireQueryRuntime(ctx context.Context, conn drivers.Connection, profile *models.Connection) error {
+	if c.runner == nil || conn == nil || profile == nil {
+		return nil
+	}
+	caps, capsErr := capsForDriver(ctx, profile.Driver)
+	if capsErr != nil {
+		return fmt.Errorf("orchestrator: derive capabilities: %w", capsErr)
+	}
+	sessInner, err := conn.AcquireSession(ctx)
+	if err != nil {
+		return fmt.Errorf("orchestrator: acquire query session: %w", err)
+	}
+	opts := session.Options{}
+	if c.history != nil {
+		opts.HistoryRecorder = c.history.AsSessionRecorder(profile.Name)
+	}
+	sqlSess := session.New(conn, sessInner, opts)
+	c.runner.Bind(sqlSess, caps)
+	if c.g != nil {
+		c.g.activeSQLSession = sqlSess
+	}
+	return nil
+}
+
+// capsForDriver constructs a throwaway driver via the registered Factory
+// to read its Capabilities. Cheap — Factory just allocates a struct;
+// Open is NOT called.
+func capsForDriver(ctx context.Context, name string) (drivers.Capabilities, error) {
+	factory, err := drivers.Get(name)
+	if err != nil {
+		return drivers.Capabilities{}, err
+	}
+	drv, err := factory(ctx)
+	if err != nil {
+		return drivers.Capabilities{}, err
+	}
+	return drv.Capabilities(), nil
 }
 
 // connectionFormInvoker is the controllers.ConnectionFormInvoker facade.

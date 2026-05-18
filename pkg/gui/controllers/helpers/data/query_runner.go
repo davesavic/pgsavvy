@@ -40,6 +40,15 @@ type RunOptions struct {
 	NewTx bool
 }
 
+// runnerBinding is the (sess, caps) pair swapped atomically by Bind /
+// Unbind. Stored as an immutable value pointed at by binding so reads
+// see a consistent snapshot — partial publication of one field without
+// the other is impossible.
+type runnerBinding struct {
+	sess RunnerSession
+	caps drivers.Capabilities
+}
+
 // QueryRunner orchestrates the streaming-query lifecycle on behalf of
 // the QueryEditorController: it dispatches Execute/Stream/Explain via
 // the SQLSession queue and exposes a single Cancel handle that targets
@@ -51,10 +60,11 @@ type RunOptions struct {
 //
 // Threading: every method delegates to SQLSession, which serialises
 // against the per-session queue. Concurrent calls into QueryRunner are
-// safe; they queue inside SQLSession.
+// safe; they queue inside SQLSession. Bind / Unbind swap the inner
+// session atomically so a controller value-copy of the helper bag (the
+// runner pointer) keeps seeing the freshest binding after a Connect.
 type QueryRunner struct {
-	sess RunnerSession
-	caps drivers.Capabilities
+	binding atomic.Pointer[runnerBinding]
 
 	last atomic.Pointer[session.RunHandle]
 }
@@ -67,9 +77,20 @@ type QueryRunner struct {
 // bootstrap → fresh QueryRunner).
 //
 // sess may be nil; every method nil-checks and returns ErrNoSession
-// (or, for Cancel, silently no-ops).
+// (or, for Cancel, silently no-ops). The orchestrator builds an empty
+// QueryRunner at wireWithDriver time and later calls Bind from the
+// connectInvoker once the SQLSession is ready (dbsavvy-66p.16).
 func NewQueryRunner(sess RunnerSession, caps drivers.Capabilities) *QueryRunner {
-	return &QueryRunner{sess: sess, caps: caps}
+	r := &QueryRunner{}
+	if sess != nil {
+		r.binding.Store(&runnerBinding{sess: sess, caps: caps})
+	} else {
+		// Preserve caps even when sess is nil so callers that pre-set
+		// capabilities before binding (production bootstrap path) still
+		// observe them via Capabilities().
+		r.binding.Store(&runnerBinding{caps: caps})
+	}
+	return r
 }
 
 // NewQueryRunnerForSession is the production constructor that accepts a
@@ -83,13 +104,61 @@ func NewQueryRunnerForSession(sess *session.SQLSession, caps drivers.Capabilitie
 	return NewQueryRunner(sess, caps)
 }
 
-// Capabilities returns the driver capabilities captured at construction.
-func (r *QueryRunner) Capabilities() drivers.Capabilities { return r.caps }
+// Bind atomically swaps the runner's (sess, caps) to point at the
+// supplied SQLSession. Called by the orchestrator's connectInvoker
+// after ConnectHelper.Connect succeeds. Safe to call concurrently with
+// Run / Explain / Cancel — readers see either the prior binding or the
+// new one, never a torn pair.
+func (r *QueryRunner) Bind(sess *session.SQLSession, caps drivers.Capabilities) {
+	if r == nil {
+		return
+	}
+	if sess == nil {
+		r.binding.Store(&runnerBinding{caps: caps})
+		return
+	}
+	r.binding.Store(&runnerBinding{sess: sess, caps: caps})
+}
+
+// Unbind atomically swaps the runner back to a nil session and zeroed
+// caps. Called by the orchestrator on disconnect / Gui.Close so HasSession
+// flips back to false and the controller short-circuits with the
+// no-connection toast on the next <leader>r.
+func (r *QueryRunner) Unbind() {
+	if r == nil {
+		return
+	}
+	r.binding.Store(&runnerBinding{})
+	r.last.Store(nil)
+}
+
+// load returns the current binding snapshot. Never returns nil — the
+// constructor always seeds a binding so the atomic.Pointer is non-nil
+// from the first call.
+func (r *QueryRunner) load() *runnerBinding {
+	if r == nil {
+		return nil
+	}
+	return r.binding.Load()
+}
+
+// Capabilities returns the driver capabilities captured at construction
+// or via the most recent Bind.
+func (r *QueryRunner) Capabilities() drivers.Capabilities {
+	b := r.load()
+	if b == nil {
+		return drivers.Capabilities{}
+	}
+	return b.caps
+}
 
 // HasSession reports whether a SQLSession is wired. Tests / the
 // controller use this to short-circuit before invoking a binding's
 // handler so users see a "no connection" toast instead of an error.
-func (r *QueryRunner) HasSession() bool { return r != nil && r.sess != nil }
+func (r *QueryRunner) HasSession() bool {
+	b := r.load()
+	return b != nil && b.sess != nil
+}
 
 // Run streams sql via the SQLSession queue. When opts.NewTx is true a
 // BEGIN is issued via Execute immediately before the Stream; both
@@ -100,15 +169,16 @@ func (r *QueryRunner) HasSession() bool { return r != nil && r.sess != nil }
 // hand it to ResultTabsHelper.OpenResultTab; the tab owns the row
 // drain afterwards.
 func (r *QueryRunner) Run(ctx context.Context, sql string, opts RunOptions) (*session.RunHandle, error) {
-	if r == nil || r.sess == nil {
+	b := r.load()
+	if b == nil || b.sess == nil {
 		return nil, ErrNoSession
 	}
 	if opts.NewTx {
-		if _, err := r.sess.Execute(session.WithoutLogging(ctx), models.Query{SQL: "BEGIN"}); err != nil {
+		if _, err := b.sess.Execute(session.WithoutLogging(ctx), models.Query{SQL: "BEGIN"}); err != nil {
 			return nil, err
 		}
 	}
-	rh, err := r.sess.Stream(ctx, models.Query{SQL: sql})
+	rh, err := b.sess.Stream(ctx, models.Query{SQL: sql})
 	if err != nil {
 		return nil, err
 	}
@@ -122,21 +192,22 @@ func (r *QueryRunner) Run(ctx context.Context, sql string, opts RunOptions) (*se
 // transaction is already open the wrap is skipped — the caller's tx
 // retains control over commit/rollback.
 func (r *QueryRunner) Explain(ctx context.Context, sql string, analyze bool) (models.Plan, error) {
-	if r == nil || r.sess == nil {
+	b := r.load()
+	if b == nil || b.sess == nil {
 		return models.Plan{}, ErrNoSession
 	}
-	if !analyze || r.sess.InTransaction() {
-		return r.sess.Explain(ctx, models.Query{SQL: sql}, analyze)
+	if !analyze || b.sess.InTransaction() {
+		return b.sess.Explain(ctx, models.Query{SQL: sql}, analyze)
 	}
 
-	if _, err := r.sess.Execute(session.WithoutLogging(ctx), models.Query{SQL: "BEGIN"}); err != nil {
+	if _, err := b.sess.Execute(session.WithoutLogging(ctx), models.Query{SQL: "BEGIN"}); err != nil {
 		return models.Plan{}, err
 	}
-	plan, explainErr := r.sess.Explain(ctx, models.Query{SQL: sql}, analyze)
+	plan, explainErr := b.sess.Explain(ctx, models.Query{SQL: sql}, analyze)
 	// Always issue ROLLBACK even if Explain errored — the BEGIN would
 	// otherwise leak. The rollback error is swallowed because the
 	// user-visible failure is the Explain error.
-	_, _ = r.sess.Execute(session.WithoutLogging(ctx), models.Query{SQL: "ROLLBACK"})
+	_, _ = b.sess.Execute(session.WithoutLogging(ctx), models.Query{SQL: "ROLLBACK"})
 	return plan, explainErr
 }
 
@@ -145,15 +216,16 @@ func (r *QueryRunner) Explain(ctx context.Context, sql string, analyze bool) (mo
 // live-cancel support (the controller already gates <leader>x via
 // DisabledReasonStatic; Cancel remains safe to call regardless).
 func (r *QueryRunner) Cancel() error {
-	if r == nil || r.sess == nil {
+	b := r.load()
+	if b == nil || b.sess == nil {
 		return nil
 	}
-	if !r.caps.HasLiveCancel {
+	if !b.caps.HasLiveCancel {
 		return nil
 	}
 	rh := r.last.Load()
 	if rh == nil {
 		return nil
 	}
-	return r.sess.Cancel(rh.QueryID())
+	return b.sess.Cancel(rh.QueryID())
 }

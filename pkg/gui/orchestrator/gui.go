@@ -10,6 +10,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -19,7 +20,9 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/cheatsheet"
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
+	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
+	"github.com/davesavic/dbsavvy/pkg/env"
 	"github.com/davesavic/dbsavvy/pkg/gui"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -30,6 +33,8 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/presentation"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/query"
+	"github.com/davesavic/dbsavvy/pkg/session"
 	"github.com/davesavic/dbsavvy/pkg/tasks"
 )
 
@@ -56,6 +61,17 @@ type Deps struct {
 	// DriverNamesFn returns registered driver names. Defaults to
 	// drivers.Names when nil; tests override.
 	DriverNamesFn func() []string
+
+	// HistoryProvider opens (and owns the close of) the process-wide
+	// *query.History the orchestrator wires into every SQLSession the
+	// connectInvoker builds. Called at most once per Gui — the first
+	// wireWithDriver pass triggers the open; Gui.Close calls History.Close
+	// during shutdown.
+	//
+	// Nil collapses to the default which opens
+	// filepath.Join(env.GetStateDir(), "history.sqlite"). Tests inject a
+	// temp-dir variant so they don't litter the XDG state dir.
+	HistoryProvider func() (*query.History, error)
 }
 
 // Option mutates a *Gui at construction time. Functional-option pattern
@@ -105,15 +121,15 @@ type Gui struct {
 	refreshHelper *data.RefreshHelper
 
 	// Built by wireWithDriver.
-	registry      *guicontext.ContextTree
-	controllers   *controllers.Controllers
-	confirmHelp   *ui.ConfirmHelper
-	promptHelp    *ui.PromptHelper
-	toastHelp     *ui.ToastHelper
-	tablesHelp    *ui.TablesHelper
-	tipHelp       *ui.TipHelper
-	resultTabsH   *ui.ResultTabsHelper
-	noticeHelp    *ui.NoticeHelper
+	registry    *guicontext.ContextTree
+	controllers *controllers.Controllers
+	confirmHelp *ui.ConfirmHelper
+	promptHelp  *ui.PromptHelper
+	toastHelp   *ui.ToastHelper
+	tablesHelp  *ui.TablesHelper
+	tipHelp     *ui.TipHelper
+	resultTabsH *ui.ResultTabsHelper
+	noticeHelp  *ui.NoticeHelper
 
 	// Keybinding system (built by wireWithDriver).
 	cmdRegistry *commands.Registry
@@ -144,6 +160,17 @@ type Gui struct {
 
 	// Connection state surfaced by the activeConnAdapter.
 	activeConnID string
+
+	// Query runtime (dbsavvy-66p.16). queryRunner is built empty in
+	// wireWithDriver and stashed in the HelperBag so controllers' value-
+	// copy of the bag stays valid across Bind / Unbind. history is a
+	// process-wide singleton opened lazily on first wireWithDriver and
+	// closed in Gui.Close. activeSQLSession is the SQLSession the most
+	// recent connectInvoker.Connect built; Close cancels any in-flight
+	// run via its Close().
+	queryRunner      *data.QueryRunner
+	history          *query.History
+	activeSQLSession *session.SQLSession
 
 	// closed is true once Close has run; idempotent guard.
 	closed bool
@@ -362,6 +389,32 @@ func (g *Gui) wireWithDriver() error {
 
 	tablePicker := tablesPickerAdapter{registry: g.registry.Tables}
 
+	// Open the per-process query history on the first wireWithDriver. The
+	// open is best-effort — a sqlite open failure (e.g. read-only home)
+	// degrades to "no history" rather than blocking the TUI from coming
+	// up. The Warn line gives the operator a thread to pull on. Subsequent
+	// wireWithDriver calls (test seam re-runs) reuse the open handle.
+	if g.history == nil {
+		hp := g.deps.HistoryProvider
+		if hp == nil {
+			hp = defaultHistoryProvider
+		}
+		h, hErr := hp()
+		if hErr != nil {
+			if g.deps.Common.Log != nil {
+				g.deps.Common.Log.Warnf("gui: history open: %v", hErr)
+			}
+		} else {
+			g.history = h
+		}
+	}
+
+	// Build the empty QueryRunner shell that survives Connect / Disconnect
+	// cycles. connectInvoker.Bind swaps the inner session atomically.
+	if g.queryRunner == nil {
+		g.queryRunner = data.NewQueryRunner(nil, drivers.Capabilities{})
+	}
+
 	helperBag := controllers.HelperBag{
 		Driver:           g.driver,
 		Logger:           g.deps.Common.Log,
@@ -369,7 +422,7 @@ func (g *Gui) wireWithDriver() error {
 		Schemas:          schemasPickerAdapter{registry: g.registry.Schemas},
 		Tables:           tablePicker,
 		ActiveConnection: &activeConnAdapter{g: g},
-		Connect:          &connectInvoker{g: g, helper: g.connectHelper},
+		Connect:          &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history},
 		SchemasHelper:    g.schemasHelper,
 		ConnectionForm:   &connectionFormInvoker{g: g, helper: g.formHelper, prompter: stubPrompter{}},
 		Confirm:          g.confirmHelp,
@@ -381,6 +434,8 @@ func (g *Gui) wireWithDriver() error {
 		Menu:             &menuPushHelper{tree: g.tree, menu: g.registry.Menu},
 		ResultTabs:       g.resultTabsH,
 		Notice:           g.noticeHelp,
+		QueryRunner:      g.queryRunner,
+		EditorBuffer:     newEditorBufferAdapter(g.driver),
 		HiddenPatterns:   defaultHiddenPatterns,
 		KbRuntime:        runtime,
 		// Threading helpers (DESIGN.md §17 / dbsavvy-66p.1). Bound to the
@@ -691,6 +746,29 @@ func (g *Gui) Close() error {
 	// sync.WaitGroup.Wait on a zero counter returns immediately.
 	g.workersWG.Wait()
 	var firstErr error
+	// Close the active SQLSession FIRST so an in-flight Stream gets
+	// cancelled (SQLSession.Close cancels the live RunHandle and waits
+	// briefly for it to terminate) before the history writer drains.
+	// Without this ordering a finishing run could push one more
+	// historyEntry into a channel whose receiver has already exited.
+	if g.activeSQLSession != nil {
+		if err := g.activeSQLSession.Close(); err != nil {
+			firstErr = err
+		}
+		g.activeSQLSession = nil
+	}
+	// Unbind so any controller that still holds the runner sees
+	// HasSession() == false. Also resets the runner's `last` handle so
+	// Cancel after Close is a silent no-op.
+	if g.queryRunner != nil {
+		g.queryRunner.Unbind()
+	}
+	if g.history != nil {
+		if err := g.history.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		g.history = nil
+	}
 	if g.deps.Store != nil {
 		if err := g.deps.Store.Flush(); err != nil {
 			firstErr = err
@@ -706,6 +784,30 @@ func (g *Gui) Close() error {
 	}
 	return firstErr
 }
+
+// defaultHistoryProvider opens the per-user history sqlite at the XDG
+// state dir. Used when Deps.HistoryProvider is nil (production wiring).
+func defaultHistoryProvider() (*query.History, error) {
+	return query.New(filepath.Join(env.GetStateDir(), "history.sqlite"))
+}
+
+// HelperBagForTest returns the HelperBag the most recent wireWithDriver
+// installed on the controllers, by reconstructing the surface from the
+// orchestrator's own fields. Test-only — used by wiring_query_test.go to
+// assert that connectInvoker.Connect causes HelperBag.QueryRunner to
+// flip to HasSession() == true. Returns the zero HelperBag before any
+// wireWithDriver pass has run.
+func (g *Gui) HelperBagForTest() controllers.HelperBag {
+	return controllers.HelperBag{
+		Connect:      &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history},
+		QueryRunner:  g.queryRunner,
+		EditorBuffer: newEditorBufferAdapter(g.driver),
+	}
+}
+
+// ActiveSQLSessionForTest returns the SQLSession the most recent Connect
+// installed, or nil. Test-only.
+func (g *Gui) ActiveSQLSessionForTest() *session.SQLSession { return g.activeSQLSession }
 
 // QuitOnSignal asks the gocui MainLoop to exit cleanly by enqueueing a
 // gocui.ErrQuit-returning closure on the Update queue.
