@@ -75,6 +75,11 @@ type ToastHelper struct {
 	gen       uint64 // monotonic: timer fires whose gen doesn't match are stale
 	clearTime time.Time
 	history   []string // bounded ring of every redacted message passed to Show
+	// key tags the currently visible toast for ShowOrUpdate. "" means
+	// untagged (last writer was a plain Show). Cleared on auto-clear /
+	// Clear() so a subsequent ShowOrUpdate with the same key starts a
+	// fresh toast rather than silently replacing nothing.
+	key string
 }
 
 // toastHistoryCap caps the in-memory message history. The history is a
@@ -105,6 +110,7 @@ func (h *ToastHelper) Show(message string, ttl time.Duration) {
 	gen := h.gen
 	h.current = redacted
 	h.level = level
+	h.key = "" // plain Show clears any active key tag.
 	if ttl > 0 {
 		h.clearTime = time.Now().Add(ttl)
 	} else {
@@ -116,12 +122,53 @@ func (h *ToastHelper) Show(message string, ttl time.Duration) {
 	}
 	h.mu.Unlock()
 
+	h.scheduleAutoClear(gen, ttl)
+}
+
+// ShowOrUpdate replaces the message in place if a toast tagged with the
+// given key is currently active; otherwise it behaves like Show and
+// tags the new toast with key. ttl is applied (or refreshed) on every
+// call so a steady stream of updates keeps the toast visible. Passing
+// key == "" delegates to Show (untagged emission).
+//
+// Threading: same contract as Show — the message is redacted via
+// session.RedactDSN, stored under the mutex, and the auto-clear timer
+// is bumped via the gen counter so any in-flight clear becomes a
+// no-op. dbsavvy-66p.13.
+func (h *ToastHelper) ShowOrUpdate(key, message string, ttl time.Duration) {
+	if key == "" {
+		h.Show(message, ttl)
+		return
+	}
+	redacted := session.RedactDSN(message)
+	level := classifyToastLevel(redacted)
+	h.mu.Lock()
+	h.gen++
+	gen := h.gen
+	h.current = redacted
+	h.level = level
+	h.key = key
+	if ttl > 0 {
+		h.clearTime = time.Now().Add(ttl)
+	} else {
+		h.clearTime = time.Time{}
+	}
+	h.history = append(h.history, redacted)
+	if len(h.history) > toastHistoryCap {
+		h.history = h.history[len(h.history)-toastHistoryCap:]
+	}
+	h.mu.Unlock()
+
+	h.scheduleAutoClear(gen, ttl)
+}
+
+// scheduleAutoClear arms the auto-clear AfterFunc shared by Show and
+// ShowOrUpdate. The gen check inside the driver.Update closure makes
+// stale timer-fires a no-op.
+func (h *ToastHelper) scheduleAutoClear(gen uint64, ttl time.Duration) {
 	if ttl <= 0 || h.driver == nil {
 		return
 	}
-	// Schedule the clear via the driver's Update queue. The closure
-	// re-checks gen under the mutex so a re-toast that bumped gen wins
-	// over a stale timer-fire.
 	time.AfterFunc(ttl, func() {
 		h.driver.Update(func() error {
 			h.mu.Lock()
@@ -129,6 +176,7 @@ func (h *ToastHelper) Show(message string, ttl time.Duration) {
 				h.current = ""
 				h.level = ToastInfo
 				h.clearTime = time.Time{}
+				h.key = ""
 			}
 			h.mu.Unlock()
 			return nil
@@ -174,5 +222,15 @@ func (h *ToastHelper) Clear() {
 	h.current = ""
 	h.level = ToastInfo
 	h.clearTime = time.Time{}
+	h.key = ""
 	h.mu.Unlock()
+}
+
+// CurrentKey returns the key tag of the currently visible toast (the
+// empty string when no toast is active or the toast was emitted via
+// Show without a key). Test accessor.
+func (h *ToastHelper) CurrentKey() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.key
 }

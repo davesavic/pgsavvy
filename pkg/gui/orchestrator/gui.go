@@ -113,6 +113,7 @@ type Gui struct {
 	tablesHelp    *ui.TablesHelper
 	tipHelp       *ui.TipHelper
 	resultTabsH   *ui.ResultTabsHelper
+	noticeHelp    *ui.NoticeHelper
 
 	// Keybinding system (built by wireWithDriver).
 	cmdRegistry *commands.Registry
@@ -346,6 +347,19 @@ func (g *Gui) wireWithDriver() error {
 		},
 	})
 
+	// NoticeHelper routes server NOTICE / WARNING messages from streaming
+	// queries to the command_log panel and a first-of-run toast. The
+	// command_log sink hops driver.Write onto the UI thread via
+	// OnUIThreadContentOnly so the helper itself can run from a worker
+	// goroutine (DESIGN.md §17). dbsavvy-66p.13.
+	commandLogSink := ui.NewDefaultCommandLogSink(g.driver, g.OnUIThreadContentOnly)
+	g.noticeHelp = ui.NewNoticeHelper(ui.NoticeHelperDeps{
+		Sink:     commandLogSink,
+		Toaster:  g.toastHelp,
+		OnWorker: g.OnWorker,
+		Tr:       tr,
+	})
+
 	tablePicker := tablesPickerAdapter{registry: g.registry.Tables}
 
 	helperBag := controllers.HelperBag{
@@ -366,6 +380,7 @@ func (g *Gui) wireWithDriver() error {
 		TableDouble:      g.tablesHelp,
 		Menu:             &menuPushHelper{tree: g.tree, menu: g.registry.Menu},
 		ResultTabs:       g.resultTabsH,
+		Notice:           g.noticeHelp,
 		HiddenPatterns:   defaultHiddenPatterns,
 		KbRuntime:        runtime,
 		// Threading helpers (DESIGN.md §17 / dbsavvy-66p.1). Bound to the

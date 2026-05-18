@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -14,6 +15,15 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
+
+// newRunID mints a short identifier scoping a single
+// QueryEditorController action invocation (one <leader>r / <leader>R /
+// <leader>!). NoticeHelper uses it as the ShowOrUpdate key so each run
+// gets a fresh first-of-run toast. UnixNano is sufficient for keying
+// within a single process; no cross-process uniqueness required.
+func newRunID() string {
+	return fmt.Sprintf("run-%d", time.Now().UnixNano())
+}
 
 // queryToastTTL is the lifetime of toasts the QueryEditorController
 // surfaces (no-statement, no-session, disabled-by-driver, ...). 4s is
@@ -173,10 +183,21 @@ func (q *QueryEditorController) runOne(_ commands.ExecCtx, newTx bool) error {
 		q.toast("no active connection")
 		return nil
 	}
+	runID := newRunID()
+	if q.helpers.Notice != nil {
+		q.helpers.Notice.OnRunStart(runID)
+	}
 	rh, err := runner.Run(context.Background(), stmt, data.RunOptions{NewTx: newTx})
 	if err != nil {
+		if q.helpers.Notice != nil {
+			q.helpers.Notice.OnRunEnd(runID)
+		}
 		q.surfaceErr(stmt, err)
 		return nil
+	}
+	if q.helpers.Notice != nil {
+		q.helpers.Notice.AttachStream(rh)
+		q.helpers.Notice.Finish(runID)
 	}
 	q.openResultTab(stmt, rh)
 	return nil
@@ -194,6 +215,11 @@ func (q *QueryEditorController) handleRunAll(_ commands.ExecCtx) error {
 		q.toast("no active connection")
 		return nil
 	}
+	runID := newRunID()
+	if q.helpers.Notice != nil {
+		q.helpers.Notice.OnRunStart(runID)
+	}
+	attached := 0
 	for _, raw := range stmts {
 		stmt := strings.TrimSpace(raw)
 		if stmt == "" {
@@ -204,7 +230,20 @@ func (q *QueryEditorController) handleRunAll(_ commands.ExecCtx) error {
 			q.surfaceErr(stmt, err)
 			continue
 		}
+		if q.helpers.Notice != nil {
+			q.helpers.Notice.AttachStream(rh)
+			attached++
+		}
 		q.openResultTab(stmt, rh)
+	}
+	if q.helpers.Notice != nil {
+		if attached == 0 {
+			// Nothing attached → no drain worker will fire OnRunEnd.
+			// Tear down the run scope directly to avoid stranding state.
+			q.helpers.Notice.OnRunEnd(runID)
+		} else {
+			q.helpers.Notice.Finish(runID)
+		}
 	}
 	return nil
 }

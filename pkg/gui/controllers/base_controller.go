@@ -54,6 +54,11 @@ type HelperBag struct {
 	ResultTabs   ResultTabsHelper
 	EditorBuffer EditorBufferReader
 
+	// Notice routes server NOTICE/WARNING messages from streaming
+	// queries to the command_log and a first-of-run toast
+	// (dbsavvy-66p.13). Nil-safe: the controller no-ops when unwired.
+	Notice NoticeReporter
+
 	// HiddenPatterns supplies the (builtin, profile) glob lists for
 	// SchemasInvoker.UnhideSchema. Resolved per-call so a hot-reloaded
 	// profile change takes effect on the next U keystroke.

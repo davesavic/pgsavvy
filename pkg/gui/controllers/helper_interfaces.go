@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/session"
@@ -124,6 +126,20 @@ type ResultTabsHelper interface {
 type EditorBufferReader interface {
 	BufferText() string
 	CursorOffset() int
+}
+
+// NoticeReporter routes server NOTICE / WARNING messages from
+// streaming queries to the command_log panel and a first-of-run toast.
+// QueryEditorController calls OnRunStart before launching a run,
+// AttachStream for each RunHandle the run produces, and Finish once
+// no more streams will attach; OnRunEnd then fires automatically when
+// the last attached stream's notice channel drains. dbsavvy-66p.13.
+type NoticeReporter interface {
+	OnRunStart(runID string)
+	OnRunEnd(runID string)
+	OnNotice(n pgconn.Notice)
+	AttachStream(rh *session.RunHandle)
+	Finish(runID string)
 }
 
 // Compile-time sanity check: data.ErrNeedsConfirmation must remain an

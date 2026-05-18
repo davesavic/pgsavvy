@@ -83,6 +83,16 @@ type TranslationSet struct {
 	CheatsheetEmpty           string
 	CheatsheetScopeAllLabel   string
 
+	// NOTICE/WARNING UI strings (dbsavvy-66p.13). The toast format
+	// strings accept a single %d argument (the per-run notice count);
+	// the "first" and "subsequent" variants exist so localisations can
+	// distinguish singular from plural phrasing if needed.
+	NoticeToastFirst      string
+	NoticeToastSubsequent string
+	SeverityNotice        string
+	SeverityWarning       string
+	SeverityInfo          string
+
 	Actions ActionTranslations
 }
 
@@ -196,6 +206,12 @@ func EnglishTranslationSet() *TranslationSet {
 		CheatsheetLegend:          "·=default  ✱=override  ★=custom",
 		CheatsheetEmpty:           "(no bindings)",
 		CheatsheetScopeAllLabel:   "(non-popup)",
+
+		NoticeToastFirst:      "Server NOTICE (%d)",
+		NoticeToastSubsequent: "Server NOTICE (%d)",
+		SeverityNotice:        "NOTICE",
+		SeverityWarning:       "WARNING",
+		SeverityInfo:          "INFO",
 
 		Actions: ActionTranslations{
 			OpenTable:   "Open Table",
