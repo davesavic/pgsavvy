@@ -302,3 +302,118 @@ func TestPgStreamLargeResultDoesNotAccumulate(t *testing.T) {
 		t.Fatalf("row count = %d, want 200000", count)
 	}
 }
+
+// TestPgStreamEOFReleasesGuardForReStream — dbsavvy-zzy regression.
+//
+// Draining a stream to clean EOF must release the parent Session's inFlight
+// guard without requiring an explicit Close, so the next Stream call on the
+// same session proceeds without the "session: concurrent use" panic. Mirrors
+// the in-app multi-statement <leader>R flow: handleRunAll issues N sequential
+// Streams on one session; the inter-Stream cleanup is the EOF-release path.
+func TestPgStreamEOFReleasesGuardForReStream(t *testing.T) {
+	sess := requirePGSession(t)
+	ctx := context.Background()
+
+	first, err := sess.Stream(ctx, models.Query{SQL: "SELECT generate_series(1, 3)"})
+	if err != nil {
+		t.Fatalf("first Stream: %v", err)
+	}
+	// Drain to EOF without ever calling Close.
+	for {
+		_, ok, nerr := first.Next(ctx)
+		if nerr != nil {
+			t.Fatalf("first.Next: %v", nerr)
+		}
+		if !ok {
+			break
+		}
+	}
+
+	// A follow-up Stream on the SAME session must not panic with
+	// "session: concurrent use". Pre-fix behavior: inFlight was still held
+	// by the EOF-drained first stream until an explicit Close.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("second Stream after EOF panicked (guard not released): %v", r)
+			}
+		}()
+		second, serr := sess.Stream(ctx, models.Query{SQL: "SELECT 1"})
+		if serr != nil {
+			t.Fatalf("second Stream: %v", serr)
+		}
+		// Drain the second stream so its EOF-release runs too — keeps the
+		// session usable for subsequent tests sharing the fixture.
+		for {
+			_, ok, nerr := second.Next(ctx)
+			if nerr != nil {
+				t.Fatalf("second.Next: %v", nerr)
+			}
+			if !ok {
+				break
+			}
+		}
+	}()
+
+	// Explicit Close on the EOF-drained first stream must remain a safe
+	// no-op (idempotency contract).
+	if err := first.Close(); err != nil {
+		t.Errorf("first.Close after EOF: %v", err)
+	}
+}
+
+// TestPgStreamTerminalNextErrorReleasesGuard — dbsavvy-zzy companion.
+//
+// A Next that surfaces a terminal pgx error (e.g. a query that errors after
+// the first batch has been pulled) must release inFlight the same way clean
+// EOF does. Exercised by canceling the surrounding context mid-stream: pgx
+// surfaces context.Canceled from Next, and the release must fire before the
+// consumer can re-Stream.
+func TestPgStreamTerminalNextErrorReleasesGuard(t *testing.T) {
+	sess := requirePGSession(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	stream, err := sess.Stream(ctx, models.Query{
+		SQL: "SELECT generate_series(1, 1000000)",
+	})
+	if err != nil {
+		cancel()
+		t.Fatalf("Stream: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		_, ok, nerr := stream.Next(ctx)
+		if nerr != nil || !ok {
+			cancel()
+			t.Fatalf("warm-up Next i=%d: ok=%v err=%v", i, ok, nerr)
+		}
+	}
+	cancel()
+
+	for {
+		_, ok, nerr := stream.Next(ctx)
+		if nerr != nil {
+			break
+		}
+		if !ok {
+			break
+		}
+	}
+
+	// Even without an explicit stream.Close, a follow-up Stream on the same
+	// session must succeed (or fail with a non-guard pgx error — the pool
+	// conn may be poisoned by the prior ctx cancel, which is out of scope
+	// for this AC). A "session: concurrent use" panic would mean the
+	// release-on-terminal-error path failed to fire.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("Stream after terminal Next error panicked (guard not released): %v", r)
+			}
+		}()
+		s2, serr := sess.Stream(context.Background(), models.Query{SQL: "SELECT 1"})
+		if serr == nil && s2 != nil {
+			_ = s2.Close()
+		}
+	}()
+}

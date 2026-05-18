@@ -398,14 +398,16 @@ func (s *Session) Execute(ctx context.Context, q models.Query) (models.Result, e
 }
 
 // Stream issues q and returns a *pgRowStream that lazily walks the result set.
-// The Session inFlight guard is acquired by Stream and held by the returned
-// stream until its Close() is invoked — consequently, calling Session.Stream
-// (or any other Session method) again before Close panics with
-// "session: concurrent use". Caller-side serialization of multiple streams on
-// a single Session is the responsibility of the calling layer (see
-// pkg/session.SQLSession, task 66p.7). The QueryID returned by the stream is
-// fully populated (SessionID, BackendPID, Started, Nonce all non-zero) BEFORE
-// the first Next() call returns; QueryID() may safely be read up front.
+// The Session inFlight guard is acquired by Stream and released by the
+// returned stream on whichever of (a) explicit Close, (b) a Next call that
+// observes clean EOF, or (c) a Next call that observes a terminal pgx error
+// happens first. Calling Session.Stream (or any other Session method) again
+// before one of those release events fires panics with "session: concurrent
+// use". Caller-side serialization of multiple streams on a single Session is
+// the responsibility of the calling layer (see pkg/session.SQLSession, task
+// 66p.7). The QueryID returned by the stream is fully populated (SessionID,
+// BackendPID, Started, Nonce all non-zero) BEFORE the first Next() call
+// returns; QueryID() may safely be read up front.
 func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream, error) {
 	s.acquireInFlight()
 

@@ -315,43 +315,71 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 	t.Run("step02_leader_R_opens_three_tabs", func(t *testing.T) {
 		// AC: "<leader>R on a 3-statement buffer opens 3 result tabs
 		// sequentially on the same session"
-		// DESIGN GAP: pg.Session.Stream (D18 inFlight guard) requires
-		// callers to Close the prior stream before issuing the next.
-		// SQLSession.Stream releases streamMu on finish() (clean EOF)
-		// but NEVER closes pgRowStream. ResultBufferManager only closes
-		// the underlying stream when its task exits via Stop — which
-		// the user-facing flow triggers via <leader>X tab-close. Inside
-		// QueryEditorController.handleRunAll the for loop issues N
-		// sequential Run() calls with no tab-close in between, so the
-		// SECOND Stream() panics "session: concurrent use" before the
-		// first tab's worker has cleaned up. Reaching three completed
-		// tabs in one <leader>R requires either:
-		//   a) SQLSession.Stream to close-the-prior-stream before
-		//      relinquishing streamMu (out-of-scope refactor); or
-		//   b) handleRunAll to close each tab between iterations
-		//      (out-of-scope refactor).
-		// This is the design gap the 66p.15 issue's "plan-invalidating
-		// drift" note implicitly anticipated. The shipped surfaces ARE
-		// wired and the per-Run pipe IS exercised by step01 + step09 +
-		// step10; the missing link is the inter-Run cleanup the AC
-		// implicitly requires. Issue this finding to bd for a 66p.18.
 		//
-		// Adapted assertion: verify the QueryRunAll handler exists, the
-		// SplitStatements primitive yields 3 segments for the canonical
-		// buffer, and the controller's wiring path to the helper bag
-		// passes the EditorBuffer reader through. The actual three-tab
-		// outcome under the current code base is not reachable without
-		// the missing refactor.
-		cmd, ok := s.g.CommandRegistry().Get(commands.QueryRunAll)
-		if !ok || cmd == nil {
-			t.Fatal("query.run_all not registered")
+		// dbsavvy-zzy fix: pgRowStream releases the Session inFlight
+		// guard on observed EOF / terminal error (not only on explicit
+		// Close), so handleRunAll's synchronous per-statement loop is
+		// now reachable end-to-end. Iteration N's stream drains during
+		// initial-fill (each LIMIT-3 / single-row stmt fits well below
+		// the 200-row default); EOF auto-releases inFlight and
+		// wrappedRowStream.finish releases streamMu — iteration N+1's
+		// SQLSession.Stream then proceeds without the "session:
+		// concurrent use" panic.
+
+		// Clean slate so we know exactly which tabs were produced by
+		// this step (step01 already closed its tab, but defensive).
+		for helper.Count() > 0 {
+			if err := helper.CloseActive(); err != nil {
+				t.Fatalf("CloseActive (pre-step02 cleanup): %v", err)
+			}
 		}
-		if reason, disabled := cmd.Disabled(commands.ExecCtx{
-			Mode: types.ModeNormal, Scope: types.QUERY_EDITOR,
-		}); disabled {
-			t.Fatalf("query.run_all unexpectedly disabled: %s", reason)
+
+		buf := "SELECT 1; SELECT 2; SELECT 3;"
+		seedEditor(t, s.rec, buf)
+
+		before := helper.Count()
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("<leader>R panicked on multi-statement run: %v", r)
+				}
+			}()
+			runCommand(t, s.g, commands.QueryRunAll)
+		}()
+
+		if got := helper.Count(); got != before+3 {
+			t.Fatalf("tab count = %d, want %d after <leader>R on 3-stmt buffer", got, before+3)
 		}
-		t.Log("AC item adapted: multi-statement <leader>R panics on pg.Session inFlight guard mid-iteration; needs SQLSession-or-controller stream-close refactor (file a 66p.18). Per-statement <leader>r is exercised in step01.")
+
+		// Every tab streamed exactly one row. RBM workers park on the
+		// chan loop post-EOF (lazy-pagination design — same as step01),
+		// so tabs remain in StateRunning rather than StateComplete; the
+		// load-bearing observable is RowCount==1 per tab.
+		tabs := helper.Tabs()
+		if len(tabs) != 3 {
+			t.Fatalf("helper.Tabs() len = %d, want 3", len(tabs))
+		}
+		for i, tab := range tabs {
+			if !eventuallyQE(t, 5*time.Second, func() bool {
+				return tab.RowCount() >= 1
+			}) {
+				t.Fatalf("tab %d (slot %d): RowCount did not reach 1 in 5s; state=%v rows=%d err=%v",
+					i, tab.Slot(), tab.State(), tab.RowCount(), tab.Err())
+			}
+			if got := tab.RowCount(); got != 1 {
+				t.Fatalf("tab %d (slot %d): RowCount = %d, want 1", i, tab.Slot(), got)
+			}
+			if tab.Err() != nil {
+				t.Fatalf("tab %d (slot %d): Err = %v, want nil", i, tab.Slot(), tab.Err())
+			}
+		}
+
+		// Cleanup so step03's eviction logic starts from a known state.
+		for helper.Count() > 0 {
+			if err := helper.CloseActive(); err != nil {
+				t.Fatalf("CloseActive (post-step02): %v", err)
+			}
+		}
 	})
 
 	t.Run("step03_jump_cycle_close_pin_evict", func(t *testing.T) {
@@ -690,24 +718,97 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 	t.Run("step10_in_flight_leader_r_queues_new_tab", func(t *testing.T) {
 		// AC: "One in-flight query per connection invariant: a <leader>r
 		// while a query is running queues or preempts per §12.2"
-		// DESIGN GAP: same as step02 — handleRun is synchronous, and
-		// SQLSession.Stream's streamMu serializes Stream calls. A
-		// second <leader>r from the same goroutine deadlocks at
-		// streamMu.Lock waiting for the first stream's finish() to
-		// fire (which itself depends on a worker reaching EOF — fine
-		// for fast queries, BUT pg.Session's inFlight guard would
-		// still panic on the second acquire because pgRowStream.Close
-		// has never run). The "queue" semantic at the helper layer
-		// (D7: <leader>r-while-in-flight → StateQueued) is unreachable
-		// today through the controller — it requires either an async
-		// dispatch in QueryEditorController.handleRun or a per-Run
-		// stream-close ahead of the next acquireInFlight.
 		//
-		// Adapted assertion: verify the helper's StateQueued constant
-		// exists and that the queueBehind code path is exercised by
-		// unit tests in result_tabs_helper_test.go.
-		_ = ui.StateQueued // type-check the queued sentinel
-		t.Log("AC item adapted: in-flight queue semantics requires async dispatch refactor (see step02 note); helper.queueBehind is unit-tested in result_tabs_helper_test.go")
+		// dbsavvy-zzy fix: pgRowStream auto-releases inFlight on EOF,
+		// so a second <leader>r against the same session no longer
+		// panics on the second acquireInFlight. handleRun remains
+		// synchronous (handleRun returns after openResultTab, well
+		// before the stream's RBM worker has finished). The first tab
+		// stays in StateRunning post-EOF (its worker parks on the chan
+		// loop), so the SECOND <leader>r's openTab observes a prior
+		// running tab and exercises helper.queueBehind — that is the
+		// "queued → running" transition the AC names. The Done() of
+		// the first tab has already fired by then (EOF observed during
+		// its initial-fill), so queueBehind's waiter unblocks
+		// immediately and the queued tab transitions to running.
+		//
+		// Observability note: in this synchronous flow the StateQueued
+		// window is too brief to assert directly (queueBehind's goroutine
+		// fires synchronously off a prior.rh.Done() that's already
+		// closed). The load-bearing AC observable is "without panic" +
+		// both tabs reach the running state with rows delivered. The
+		// state-machine "Queued → Running" transition is verified at
+		// unit level in result_tabs_helper_test.go.
+
+		// Clean slate.
+		for helper.Count() > 0 {
+			if err := helper.CloseActive(); err != nil {
+				t.Fatalf("CloseActive (pre-step10 cleanup): %v", err)
+			}
+		}
+
+		seedEditor(t, s.rec, "SELECT 1")
+		runCommand(t, s.g, commands.QueryRun)
+		if got := helper.Count(); got != 1 {
+			t.Fatalf("after first <leader>r: tab count = %d, want 1", got)
+		}
+		firstTab := helper.Active()
+		if firstTab == nil {
+			t.Fatal("Active() = nil after first <leader>r")
+		}
+		// Wait for the first tab's RBM worker to reach EOF — at which
+		// point inFlight is released and a second Stream is safe.
+		if !eventuallyQE(t, 5*time.Second, func() bool {
+			return firstTab.RowCount() >= 1
+		}) {
+			t.Fatalf("first tab RowCount did not reach 1 in 5s; state=%v rows=%d err=%v",
+				firstTab.State(), firstTab.RowCount(), firstTab.Err())
+		}
+
+		// Second <leader>r while the first tab is still parked on the
+		// chan loop (StateRunning). Pre-fix this panicked on
+		// pg.Session.acquireInFlight; with the fix it succeeds and
+		// routes through helper.queueBehind.
+		seedEditor(t, s.rec, "SELECT 2")
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("second <leader>r panicked: %v", r)
+				}
+			}()
+			runCommand(t, s.g, commands.QueryRun)
+		}()
+
+		if got := helper.Count(); got != 2 {
+			t.Fatalf("after second <leader>r: tab count = %d, want 2", got)
+		}
+
+		tabs := helper.Tabs()
+		if len(tabs) != 2 {
+			t.Fatalf("helper.Tabs() len = %d, want 2", len(tabs))
+		}
+		for i, tab := range tabs {
+			if !eventuallyQE(t, 5*time.Second, func() bool {
+				return tab.RowCount() >= 1
+			}) {
+				t.Fatalf("tab %d (slot %d): RowCount did not reach 1 in 5s; state=%v rows=%d err=%v",
+					i, tab.Slot(), tab.State(), tab.RowCount(), tab.Err())
+			}
+			if tab.Err() != nil {
+				t.Fatalf("tab %d (slot %d): Err = %v, want nil", i, tab.Slot(), tab.Err())
+			}
+		}
+
+		// The queued sentinel still must exist as a stable public type
+		// (referenced by helper unit tests and downstream UI styling).
+		_ = ui.StateQueued
+
+		// Cleanup.
+		for helper.Count() > 0 {
+			if err := helper.CloseActive(); err != nil {
+				t.Fatalf("CloseActive (post-step10): %v", err)
+			}
+		}
 	})
 
 	// --- Post-test invariants ---

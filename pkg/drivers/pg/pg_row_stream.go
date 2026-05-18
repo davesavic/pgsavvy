@@ -22,9 +22,13 @@ var ErrRowStreamClosed = errors.New("pg: row stream closed")
 // pgRowStream is the concrete drivers.RowStream returned by Session.Stream.
 //
 // Lifetime: the session's inFlight guard is acquired by Session.Stream and
-// released exactly once by Close (via releaseInFlight, which is idempotent at
-// the closed-flag level). Until Close runs, the parent Session refuses any
-// further methods with a "concurrent use" panic.
+// released exactly once — by whichever of (a) explicit Close, (b) Next
+// observing clean EOF, or (c) Next observing a terminal pgx error happens
+// first. The closed flag is the CAS-guarded single-release sentinel, so
+// follow-on Close calls are no-ops. The EOF-release path exists so the
+// wrapping layer (pkg/session.SQLSession) can issue a fresh Stream on the
+// same session immediately after observing EOF, without first round-tripping
+// through an explicit consumer Close (dbsavvy-zzy).
 //
 // Allocation profile: Next reuses staging across iterations — pgx returns a
 // fresh []any from rows.Values() per row, which we copy into a stable buffer
@@ -82,10 +86,17 @@ func (s *pgRowStream) Next(_ context.Context) (models.Row, bool, error) {
 		return models.Row{}, false, ErrRowStreamClosed
 	}
 	if !s.rows.Next() {
+		var nextErr error
 		if err := s.rows.Err(); err != nil {
-			return models.Row{}, false, wrapPgError(err)
+			nextErr = wrapPgError(err)
 		}
-		return models.Row{}, false, nil
+		// EOF or terminal stream error — the underlying pgx.Rows can yield
+		// no more rows, so drop the session inFlight guard now rather than
+		// stranding it until the consumer eventually calls Close. The
+		// release path is CAS-guarded by `closed`, so a later Close is a
+		// safe no-op (dbsavvy-zzy).
+		s.release()
+		return models.Row{}, false, nextErr
 	}
 	vals, err := s.rows.Values()
 	if err != nil {
@@ -95,18 +106,28 @@ func (s *pgRowStream) Next(_ context.Context) (models.Row, bool, error) {
 }
 
 // Close releases the underlying pgx.Rows and drops the parent Session's
-// inFlight guard. Idempotent: a second call is a no-op and returns nil. The
+// inFlight guard. Idempotent: a second call (or a call after Next observed
+// EOF / terminal error and already released) is a no-op and returns nil. The
 // closed flag is set BEFORE rows.Close so a concurrent Next observes the
 // sentinel rather than a pgx "rows are closed" string.
 func (s *pgRowStream) Close() error {
+	s.release()
+	return nil
+}
+
+// release is the single-shot release path shared by Close and the EOF /
+// terminal-error branch of Next. The CAS on closed makes both call sites
+// idempotent: the first caller to win the swap runs the cleanup; every
+// subsequent caller observes closed=true and returns without touching
+// rows.Close or releaseGuard.
+func (s *pgRowStream) release() {
 	if !s.closed.CompareAndSwap(false, true) {
-		return nil
+		return
 	}
 	s.rows.Close()
 	if s.releaseGuard != nil {
 		s.releaseGuard()
 	}
-	return nil
 }
 
 var _ drivers.RowStream = (*pgRowStream)(nil)
