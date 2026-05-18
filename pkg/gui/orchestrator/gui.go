@@ -593,6 +593,11 @@ func (g *Gui) wireWithDriver() error {
 	g.tree.RegisterSwapHook(matcher.Cancel)
 	g.tree.RegisterSwapHook(g.whichkey.Hide)
 
+	// Cancel the active result-tab stream when the user navigates out
+	// of the QueryEditor / result-tab pane while a query is still
+	// Running. dbsavvy-66p.17.
+	installResultTabsSwapHook(g.tree, g.resultTabsH)
+
 	// Push the initial CONNECTIONS context.
 	return g.tree.Push(g.registry.Connections)
 }
