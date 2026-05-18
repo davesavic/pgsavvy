@@ -124,8 +124,19 @@ func (s *SQLSession) Execute(ctx context.Context, q models.Query) (models.Result
 	if err == nil {
 		rows = res.RowsAffected
 	}
-	s.recordHistory(q.SQL, durMs, rows, err == nil)
+	if !LoggingSuppressed(ctx) {
+		s.recordHistory(q.SQL, durMs, rows, err == nil)
+	}
 	return res, err
+}
+
+// Explain delegates to the inner driver session's Explain. The queue mutex
+// is held for the duration of the call so an EXPLAIN cannot interleave
+// with an in-flight Execute / Stream on the same session.
+func (s *SQLSession) Explain(ctx context.Context, q models.Query, analyze bool) (models.Plan, error) {
+	s.streamMu.Lock()
+	defer s.streamMu.Unlock()
+	return s.inner.Explain(ctx, q, analyze)
 }
 
 // Stream issues q on the inner session and returns a RunHandle whose Rows()
@@ -136,12 +147,16 @@ func (s *SQLSession) Execute(ctx context.Context, q models.Query) (models.Result
 func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, error) {
 	s.streamMu.Lock()
 
+	suppressLog := LoggingSuppressed(ctx)
+
 	rs, err := s.inner.Stream(ctx, q)
 	if err != nil {
 		s.streamMu.Unlock()
 		// A Stream that fails before producing a RowStream still counts as
 		// a terminated run for the recorder.
-		s.recordHistory(q.SQL, 0, 0, false)
+		if !suppressLog {
+			s.recordHistory(q.SQL, 0, 0, false)
+		}
 		return nil, err
 	}
 
@@ -158,7 +173,9 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 		durMs := time.Since(start).Milliseconds()
 		// Clean EOF reports succeeded=true; any other termination is a
 		// failure for history purposes (ctx.Canceled, driver errors, ...).
-		s.recordHistory(q.SQL, durMs, rh.rowsObserved.Load(), termErr == nil)
+		if !suppressLog {
+			s.recordHistory(q.SQL, durMs, rh.rowsObserved.Load(), termErr == nil)
+		}
 		s.streamMu.Unlock()
 	}
 
