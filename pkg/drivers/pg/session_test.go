@@ -45,19 +45,37 @@ func TestSessionIDIsMonotonic(t *testing.T) {
 	require.Greater(t, b.ID(), a.ID(), "second Session ID must be greater than the first")
 }
 
-func TestSessionExecuteReturnsErrNotImplemented(t *testing.T) {
+// Execute and Stream are wired against a live pgx connection in task
+// dbsavvy-66p.3. Their happy-path semantics live in the //go:build integration
+// suites at pkg/drivers/pg/{execute,stream}_test.go. We keep two unit-level
+// invariants here:
+//   1. The guard machinery panics on concurrent use / use-after-Close (already
+//      covered by TestSessionConcurrentUsePanics + TestSessionUseAfterClosePanics,
+//      which exercise DescribeFunction — every guarded method shares the same
+//      acquireInFlight code path).
+//   2. acquireInFlight/releaseInFlight is symmetric: a release allows a
+//      subsequent acquire to succeed.
+
+func TestSessionInFlightAcquireReleaseSymmetry(t *testing.T) {
 	s := newStubSession()
-	res, err := s.Execute(context.Background(), models.Query{SQL: "SELECT 1"})
-	require.ErrorIs(t, err, drivers.ErrNotImplemented)
-	require.Equal(t, models.Result{}, res)
+	s.acquireInFlight()
+	s.releaseInFlight()
+	// Second acquire must succeed; releaseInFlight stored 0.
+	require.NotPanics(t, func() { s.acquireInFlight() })
+	s.releaseInFlight()
 }
 
-func TestSessionStreamReturnsUntypedNilOnErrNotImplemented(t *testing.T) {
+func TestSessionReleaseInFlightIdempotent(t *testing.T) {
 	s := newStubSession()
-	stream, err := s.Stream(context.Background(), models.Query{SQL: "SELECT 1"})
-	require.ErrorIs(t, err, drivers.ErrNotImplemented)
-	require.Nil(t, stream)
-	require.True(t, stream == nil, "RowStream must be untyped nil, not a typed nil interface")
+	// Releasing without ever acquiring is a no-op — Store(0) on a 0 is fine.
+	s.releaseInFlight()
+	s.releaseInFlight()
+	require.NotPanics(t, func() { s.acquireInFlight() })
+	s.releaseInFlight()
+	// Double-release after a real acquire is also safe.
+	s.acquireInFlight()
+	s.releaseInFlight()
+	s.releaseInFlight()
 }
 
 func TestSessionExplainReturnsErrNotImplemented(t *testing.T) {

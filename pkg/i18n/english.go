@@ -22,6 +22,13 @@ type TranslationSet struct {
 	TableDataEditDeferred string
 	TerminalTooSmall      string
 
+	// Disabled-binding reasons surfaced by Matcher.Dispatch when a
+	// Command's Disabled() predicate refuses execution. The exact
+	// reason string is rendered in the toast via the "<action>:
+	// <reason>" template (see pkg/gui/keys/matcher.go).
+	DisabledByDriver     string
+	DisabledNoLiveCancel string
+
 	// First-run tip popup.
 	FirstRunTipTitle string
 	FirstRunTipBody  string
@@ -133,6 +140,9 @@ func EnglishTranslationSet() *TranslationSet {
 		CredentialsMissing:    "Credentials are not available; the action was refused.",
 		TableDataEditDeferred: "Table data editing is not yet available.",
 		TerminalTooSmall:      "Terminal too small. Please resize the window to continue.",
+
+		DisabledByDriver:     "The active driver does not support this action.",
+		DisabledNoLiveCancel: "The active driver cannot cancel a running query.",
 
 		FirstRunTipTitle: "Welcome to dbsavvy",
 		FirstRunTipBody:  "Press ? at any time to see available keys. Press a to add your first connection.",

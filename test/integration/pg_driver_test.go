@@ -633,14 +633,9 @@ func TestCredentialsResolveAll(t *testing.T) {
 	})
 }
 
-func TestExecuteIsNotImplemented(t *testing.T) {
-	requirePG(t)
-	_, sess := openConnSession(t, defaultProfile(), nil)
-	_, err := sess.Execute(context.Background(), models.Query{})
-	if !errors.Is(err, drivers.ErrNotImplemented) {
-		t.Fatalf("Execute err = %v, want errors.Is(ErrNotImplemented)", err)
-	}
-}
+// TestExecuteIsNotImplemented was superseded by execute_test.go in task
+// dbsavvy-66p.3 — Session.Execute is now wired to pgx. The new tests live
+// in pkg/drivers/pg/execute_test.go and stream_test.go.
 
 // TestEveryTrueCapabilityHasImpl encodes the D17 invariant: every advertised
 // capability MUST have an implementation that does not return ErrNotImplemented.

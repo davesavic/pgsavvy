@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -51,6 +53,17 @@ type HelperBag struct {
 	// RegisterActions and to reach the Matcher when needed. Nil during
 	// unit tests that do not exercise dispatch.
 	KbRuntime *keys.Runtime
+
+	// Threading helpers (DESIGN.md §17). Controllers call these to
+	// schedule UI-thread work and to spawn background workers without
+	// importing the orchestrator (which would close the import cycle:
+	// orchestrator imports controllers). In production wiring all three
+	// closures delegate to *orchestrator.Gui's methods of the same name;
+	// nil-safe so unit tests that do not exercise async paths can leave
+	// them unset.
+	OnUIThread            func(fn func() error)
+	OnUIThreadContentOnly func(fn func() error)
+	OnWorker              func(fn func(gocui.Task) error)
 }
 
 // DebugLogger is the minimal logging surface controllers expect.

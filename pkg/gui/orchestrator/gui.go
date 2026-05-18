@@ -10,6 +10,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
@@ -143,6 +144,20 @@ type Gui struct {
 
 	// closed is true once Close has run; idempotent guard.
 	closed bool
+
+	// Threading-model state (DESIGN.md §17). See threading.go for the
+	// OnUIThread / OnUIThreadContentOnly / OnWorker methods that consume
+	// these fields.
+	//
+	//   - busy is the in-flight-worker counter (atomic; ticked by
+	//     OnWorker, read by BusyCount for the bottom spinner).
+	//   - workersWG joins live OnWorker goroutines on shutdown so the
+	//     goleak smoke tests have a deterministic quiescence point.
+	//   - mutexes is the named-mutex bag (RefreshingMutex / PopupMutex /
+	//     FetchMutex). Downstream tasks (66p.5/9/12/13/14) plug into it.
+	busy      int64
+	workersWG sync.WaitGroup
+	mutexes   types.Mutexes
 }
 
 // NewGui builds every collaborator that doesn't depend on the live
@@ -339,6 +354,12 @@ func (g *Gui) wireWithDriver() error {
 		Menu:             &menuPushHelper{tree: g.tree, menu: g.registry.Menu},
 		HiddenPatterns:   defaultHiddenPatterns,
 		KbRuntime:        runtime,
+		// Threading helpers (DESIGN.md §17 / dbsavvy-66p.1). Bound to the
+		// Gui's methods so controllers can schedule UI-thread work and
+		// spawn background workers without importing the orchestrator.
+		OnUIThread:            g.OnUIThread,
+		OnUIThreadContentOnly: g.OnUIThreadContentOnly,
+		OnWorker:              g.OnWorker,
 	}
 	g.controllers = controllers.AttachControllers(g.registry, g.deps.Common, helperBag)
 
@@ -635,6 +656,11 @@ func (g *Gui) Close() error {
 		return nil
 	}
 	g.closed = true
+	// Drain any in-flight OnWorker goroutines before the store/driver
+	// teardown so the goleak smoke tests see a quiescent goroutine pool
+	// (DESIGN.md §17). Safe to call when no workers were ever spawned —
+	// sync.WaitGroup.Wait on a zero counter returns immediately.
+	g.workersWG.Wait()
 	var firstErr error
 	if g.deps.Store != nil {
 		if err := g.deps.Store.Flush(); err != nil {

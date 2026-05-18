@@ -3,12 +3,18 @@ package pg
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
+
+// queryNonceCounter is the process-global monotonic source for QueryID.Nonce.
+// Stamped on every Execute/Stream so that two queries on the same Session at
+// the same instant remain distinguishable. See epic dbsavvy-66p §D5.
+var queryNonceCounter atomic.Uint64
 
 // sessionIDCounter is the process-global monotonic source for Session.ID().
 // Incremented atomically at construction. See epic dbsavvy-921 D11.
@@ -53,17 +59,32 @@ func (s *Session) Conn() *pgxpool.Conn { return s.conn }
 // ID returns the monotonic per-process session identifier.
 func (s *Session) ID() models.SessionID { return s.id }
 
-// guard panics on use-after-Close or concurrent use. Returns a release
-// function that must be deferred. Every public Session method that touches
-// s.conn MUST start with: defer s.guard()().
-func (s *Session) guard() func() {
+// acquireInFlight panics on use-after-Close or concurrent use. On success the
+// inFlight flag is set; callers MUST eventually invoke releaseInFlight (either
+// directly, as Stream does for the lifetime of pgRowStream, or via the guard()
+// defer wrapper for synchronous list-methods).
+func (s *Session) acquireInFlight() {
 	if s.closed.Load() {
 		panic("session: use after Close")
 	}
 	if !s.inFlight.CompareAndSwap(0, 1) {
 		panic("session: concurrent use")
 	}
-	return func() { s.inFlight.Store(0) }
+}
+
+// releaseInFlight clears the inFlight flag. Safe to call repeatedly — Store(0)
+// on an already-zero value is a no-op. Streams call this exactly once from
+// pgRowStream.Close (which is itself idempotent), so the at-most-once contract
+// is enforced at the caller level.
+func (s *Session) releaseInFlight() { s.inFlight.Store(0) }
+
+// guard panics on use-after-Close or concurrent use. Returns a release
+// function that must be deferred. Every synchronous public Session method that
+// touches s.conn MUST start with: defer s.guard()(). Long-lived holders
+// (Stream) call acquireInFlight / releaseInFlight directly instead.
+func (s *Session) guard() func() {
+	s.acquireInFlight()
+	return s.releaseInFlight
 }
 
 // Close releases the pooled connection. Idempotent: second and subsequent
@@ -266,19 +287,81 @@ func (s *Session) DescribeFunction(_ context.Context, _, _ string) (models.Funct
 	return models.FunctionDetail{}, drivers.ErrNotImplemented
 }
 
-// Execute returns drivers.ErrNotImplemented in v1 — query execution wiring
-// lands in a later epic.
-func (s *Session) Execute(_ context.Context, _ models.Query) (models.Result, error) {
+// Execute runs q.SQL with q.Args and materializes the entire result set into
+// a models.Result. Columns is populated from pgx FieldDescriptions; Rows is a
+// row-major copy of pgx.Rows.Values(); RowsAffected is taken from the command
+// tag; Duration spans the wall-clock from query dispatch to materialization.
+// A *pgconn.PgError is mapped to *drivers.QueryError via wrapPgError. The
+// inFlight guard is held for the entire call. Cancel/NOTICE/EXPLAIN are out
+// of scope (see epic dbsavvy-66p §D5; tasks 66p.4–66p.6).
+func (s *Session) Execute(ctx context.Context, q models.Query) (models.Result, error) {
 	defer s.guard()()
-	return models.Result{}, drivers.ErrNotImplemented
+
+	if q.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, q.Timeout)
+		defer cancel()
+	}
+
+	start := time.Now()
+	rows, err := s.conn.Query(ctx, q.SQL, q.Args...)
+	if err != nil {
+		return models.Result{}, wrapPgError(err)
+	}
+	defer rows.Close()
+
+	cols := fieldDescriptionsToColumns(rows.FieldDescriptions())
+
+	var out []*models.Row
+	for rows.Next() {
+		vals, vErr := rows.Values()
+		if vErr != nil {
+			return models.Result{}, wrapPgError(vErr)
+		}
+		out = append(out, &models.Row{Values: vals})
+	}
+	if err := rows.Err(); err != nil {
+		return models.Result{}, wrapPgError(err)
+	}
+
+	return models.Result{
+		Columns:      cols,
+		Rows:         out,
+		RowsAffected: rows.CommandTag().RowsAffected(),
+		Duration:     time.Since(start),
+	}, nil
 }
 
-// Stream returns a nil RowStream and drivers.ErrNotImplemented in v1. The
-// returned interface value is intentionally untyped-nil so callers may
-// short-circuit on `stream == nil` without an unwrap.
-func (s *Session) Stream(_ context.Context, _ models.Query) (drivers.RowStream, error) {
-	defer s.guard()()
-	return nil, drivers.ErrNotImplemented
+// Stream issues q and returns a *pgRowStream that lazily walks the result set.
+// The Session inFlight guard is acquired by Stream and held by the returned
+// stream until its Close() is invoked — consequently, calling Session.Stream
+// (or any other Session method) again before Close panics with
+// "session: concurrent use". Caller-side serialization of multiple streams on
+// a single Session is the responsibility of the calling layer (see
+// pkg/session.SQLSession, task 66p.7). The QueryID returned by the stream is
+// fully populated (SessionID, BackendPID, Started, Nonce all non-zero) BEFORE
+// the first Next() call returns; QueryID() may safely be read up front.
+func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream, error) {
+	s.acquireInFlight()
+
+	// q.Timeout is intentionally NOT applied here in v1: a derived ctx
+	// would require a cancel func captured by the stream so Close can
+	// release it; that plumbing belongs with task 66p.4 (Cancel).
+	started := time.Now()
+	rows, err := s.conn.Query(ctx, q.SQL, q.Args...)
+	if err != nil {
+		s.releaseInFlight()
+		return nil, wrapPgError(err)
+	}
+
+	qid := models.QueryID{
+		SessionID:  s.id,
+		BackendPID: s.backendPID,
+		Started:    started,
+		Nonce:      queryNonceCounter.Add(1),
+	}
+
+	return newPgRowStream(rows, qid, s.releaseInFlight), nil
 }
 
 // Explain returns a zero-value Plan and drivers.ErrNotImplemented in v1.

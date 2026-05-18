@@ -106,6 +106,7 @@ type Matcher struct {
 	registers *RegisterStore
 	whichkey  WhichKeyNotifier
 	log       DebugLogger
+	toaster   ToastFunc
 
 	mu       sync.Mutex
 	pending  []Key
@@ -132,6 +133,12 @@ type MatcherConfig struct {
 	Registers     *RegisterStore
 	WhichKey      WhichKeyNotifier
 	Log           DebugLogger
+
+	// Toaster surfaces refusal messages when Matcher.Dispatch
+	// intercepts a disabled command (per epic D10 / 66p.2). nil
+	// means refusals are silent — handy for unit tests that do not
+	// care about toast emissions.
+	Toaster ToastFunc
 }
 
 // NewMatcher constructs a Matcher with the supplied configuration and
@@ -163,6 +170,7 @@ func NewMatcher(initial *TrieSet, cfg MatcherConfig) (*Matcher, error) {
 		registers: regs,
 		whichkey:  cfg.WhichKey,
 		log:       cfg.Log,
+		toaster:   cfg.Toaster,
 	}
 	m.trieSet.Store(initial)
 	return m, nil
@@ -480,10 +488,39 @@ func (m *Matcher) invokeHandler(cmd *commands.Command, scope types.ContextKey, m
 		Mode:     mode,
 		Scope:    scope,
 	}
+	// Disabled-binding intercept (66p.2): a Command may refuse
+	// execution at dispatch time via its Disabled predicate. When it
+	// does, we emit a toast carrying the reason and report Dispatched
+	// (the key was consumed; the Handler is intentionally skipped).
+	if reason, disabled := cmd.Disabled(ctx); disabled {
+		m.emitDisabledToast(cmd, reason)
+		return Dispatched, nil
+	}
 	if err := cmd.Handler(ctx); err != nil {
 		return Dispatched, err
 	}
 	return Dispatched, nil
+}
+
+// emitDisabledToast renders the "<action>: <reason>" template via the
+// configured ToastFunc. Empty reason collapses to a generic "disabled"
+// fallback per AC. No-op when no Toaster is configured (test default).
+func (m *Matcher) emitDisabledToast(cmd *commands.Command, reason string) {
+	if m.toaster == nil {
+		return
+	}
+	if reason == "" {
+		reason = "disabled"
+	}
+	label := "<unknown>"
+	if cmd != nil {
+		if cmd.Description != "" {
+			label = cmd.Description
+		} else if cmd.ID != "" {
+			label = cmd.ID
+		}
+	}
+	m.toaster(label + ": " + reason)
 }
 
 // scheduleTimerLocked starts the inactivity / leaf-ambiguity timer.

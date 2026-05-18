@@ -3,10 +3,18 @@ package orchestrator
 import (
 	"sort"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 )
+
+// disabledSuffix is appended to the rendered segment of a ShowInBar
+// leaf whose Command reports Disabled at frame-build time. The marker
+// is deliberately textual (not a glyph) because the options-bar surface
+// is a plain []string consumed by status.BuildStatusLine — no styling
+// layer exists between CollectOptionsForScope and the final render.
+const disabledSuffix = " (disabled)"
 
 // optionsBarMax is the hard cap on options entries shown in the status
 // bar. The 9th+ ShowInBar leaf is silently truncated; the trailing
@@ -42,6 +50,7 @@ func CollectOptionsForScope(
 		tag         string
 		key         string
 		description string
+		disabled    bool
 	}
 
 	var entries []entry
@@ -53,10 +62,18 @@ func CollectOptionsForScope(
 			if !leaf.ShowInBar || leaf.Action == nil {
 				return
 			}
+			// Probe Disabled with the zero ExecCtx — the options bar
+			// renders per-frame and has no dispatch context. Static
+			// disables (DisabledReasonStatic) are unconditional and
+			// dynamic predicates that need richer state must tolerate
+			// a zero ctx (or remain enabled until the actual dispatch
+			// re-evaluates them).
+			_, disabled := leaf.Action.Disabled(commands.ExecCtx{})
 			entries = append(entries, entry{
 				tag:         leaf.Action.Tag,
 				key:         keys.SequenceString(seq),
 				description: leaf.Action.Description,
+				disabled:    disabled,
 			})
 		})
 	}
@@ -84,7 +101,11 @@ func CollectOptionsForScope(
 
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, e.description+": "+e.key)
+		segment := e.description + ": " + e.key
+		if e.disabled {
+			segment += disabledSuffix
+		}
+		out = append(out, segment)
 	}
 	return out
 }
