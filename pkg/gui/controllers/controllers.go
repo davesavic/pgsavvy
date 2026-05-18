@@ -19,6 +19,7 @@ type Controllers struct {
 	Menu        *MenuController
 	Quit        *QuitController
 	QueryEditor *QueryEditorController
+	ResultTabs  *ResultTabsController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -86,6 +87,20 @@ func AttachControllers(
 	// wiring lights up automatically once the stub is replaced.
 	queryEditor.AttachToContext(tree.QueryEditor)
 
+	// ResultTabsController publishes RESULT_GRID + GLOBAL bindings; it
+	// reaches the trie via AllDefaultBindings. The manager surface is
+	// supplied by the orchestrator's HelperBag.ResultTabs (a concrete
+	// ui.ResultTabsHelper implementing ResultTabsManager). Tests that
+	// don't exercise dispatch leave the manager nil.
+	var tabsMgr ResultTabsManager
+	if helpers.ResultTabs != nil {
+		if m, ok := helpers.ResultTabs.(ResultTabsManager); ok {
+			tabsMgr = m
+		}
+	}
+	resultTabs := NewResultTabsController(c, helpers, tabsMgr)
+	resultTabs.AttachToContext(tree.ResultGrid)
+
 	return &Controllers{
 		Connections: connections,
 		Schemas:     schemas,
@@ -95,6 +110,7 @@ func AttachControllers(
 		Menu:        menu,
 		Quit:        quit,
 		QueryEditor: queryEditor,
+		ResultTabs:  resultTabs,
 	}
 }
 
@@ -138,6 +154,9 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.QueryEditor != nil {
 		b.QueryEditor.RegisterActions(reg)
+	}
+	if b.ResultTabs != nil {
+		b.ResultTabs.RegisterActions(reg)
 	}
 }
 

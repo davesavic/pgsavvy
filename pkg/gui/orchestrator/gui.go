@@ -30,6 +30,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/presentation"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/tasks"
 )
 
 // Deps is the dependency bag NewGui consumes. Composed by the entry
@@ -104,13 +105,14 @@ type Gui struct {
 	refreshHelper *data.RefreshHelper
 
 	// Built by wireWithDriver.
-	registry    *guicontext.ContextTree
-	controllers *controllers.Controllers
-	confirmHelp *ui.ConfirmHelper
-	promptHelp  *ui.PromptHelper
-	toastHelp   *ui.ToastHelper
-	tablesHelp  *ui.TablesHelper
-	tipHelp     *ui.TipHelper
+	registry      *guicontext.ContextTree
+	controllers   *controllers.Controllers
+	confirmHelp   *ui.ConfirmHelper
+	promptHelp    *ui.PromptHelper
+	toastHelp     *ui.ToastHelper
+	tablesHelp    *ui.TablesHelper
+	tipHelp       *ui.TipHelper
+	resultTabsH   *ui.ResultTabsHelper
 
 	// Keybinding system (built by wireWithDriver).
 	cmdRegistry *commands.Registry
@@ -333,6 +335,17 @@ func (g *Gui) wireWithDriver() error {
 	g.tablesHelp = ui.NewTablesHelper(g.toastHelp, tr)
 	g.tipHelp = ui.NewTipHelper(g.tree, g.deps.Store)
 
+	// ResultTabsHelper owns the multi-tab pane in the secondary slot.
+	// Each tab gets its own ResultBufferManager built against the
+	// orchestrator's threading helpers. dbsavvy-66p.12.
+	g.resultTabsH = ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{
+		Driver: g.driver,
+		Toast:  g.toastHelp,
+		StreamFactory: func() ui.StreamRunner {
+			return tasks.New(g.OnWorker, g.OnUIThreadContentOnly)
+		},
+	})
+
 	tablePicker := tablesPickerAdapter{registry: g.registry.Tables}
 
 	helperBag := controllers.HelperBag{
@@ -352,6 +365,7 @@ func (g *Gui) wireWithDriver() error {
 		Tip:              g.tipHelp,
 		TableDouble:      g.tablesHelp,
 		Menu:             &menuPushHelper{tree: g.tree, menu: g.registry.Menu},
+		ResultTabs:       g.resultTabsH,
 		HiddenPatterns:   defaultHiddenPatterns,
 		KbRuntime:        runtime,
 		// Threading helpers (DESIGN.md §17 / dbsavvy-66p.1). Bound to the
@@ -721,6 +735,11 @@ func (g *Gui) Warnings() []keys.Warning { return g.lastWarnings }
 // ToastHelper returns the toast helper. Test accessor — dlp.14 reads
 // History() to assert reload / toast emissions.
 func (g *Gui) ToastHelper() *ui.ToastHelper { return g.toastHelp }
+
+// ResultTabsHelper returns the live result-tabs helper, or nil before
+// wireWithDriver runs. Test accessor — dbsavvy-66p.12 smoke walks
+// through Open/Pin/eviction via this surface.
+func (g *Gui) ResultTabsHelper() *ui.ResultTabsHelper { return g.resultTabsH }
 
 // leaderRunesFromCfg extracts the leader / localleader runes from cfg,
 // using the same fallbacks as keys.KeybindingService.Build.

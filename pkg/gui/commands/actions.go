@@ -74,6 +74,25 @@ const (
 	QueryExplainAnalyze = "query.explain_analyze"
 	QueryCancel         = "query.cancel"
 	QueryRunInNewTx     = "query.run_in_new_tx"
+
+	// Result-tab family — owned by ResultTabsController (dbsavvy-66p.12).
+	// Jump bindings are GLOBAL-scoped so <leader>1..9 work from any
+	// focused view; the close / pin / cancel / cycle bindings are
+	// RESULT_GRID-scoped so they only fire when a result tab is active.
+	ResultTabJump1  = "result.tab.jump.1"
+	ResultTabJump2  = "result.tab.jump.2"
+	ResultTabJump3  = "result.tab.jump.3"
+	ResultTabJump4  = "result.tab.jump.4"
+	ResultTabJump5  = "result.tab.jump.5"
+	ResultTabJump6  = "result.tab.jump.6"
+	ResultTabJump7  = "result.tab.jump.7"
+	ResultTabJump8  = "result.tab.jump.8"
+	ResultTabJump9  = "result.tab.jump.9"
+	ResultTabNext   = "result.tab.next"
+	ResultTabPrev   = "result.tab.prev"
+	ResultTabClose  = "result.tab.close"
+	ResultTabPin    = "result.tab.pin"
+	ResultTabCancel = "result.tab.cancel"
 )
 
 // AllActionIDs returns every ID declared in this file in declaration
@@ -108,5 +127,19 @@ func AllActionIDs() []string {
 		QueryExplainAnalyze,
 		QueryCancel,
 		QueryRunInNewTx,
+		ResultTabJump1,
+		ResultTabJump2,
+		ResultTabJump3,
+		ResultTabJump4,
+		ResultTabJump5,
+		ResultTabJump6,
+		ResultTabJump7,
+		ResultTabJump8,
+		ResultTabJump9,
+		ResultTabNext,
+		ResultTabPrev,
+		ResultTabClose,
+		ResultTabPin,
+		ResultTabCancel,
 	}
 }

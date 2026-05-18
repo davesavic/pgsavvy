@@ -110,6 +110,17 @@ func (g *Gui) RunLayout(w, h int) error {
 		_ = ctx.HandleRender()
 	}
 
+	// Tier 1.5: result-tab pane (dbsavvy-66p.12). The ResultTabsHelper
+	// owns dynamic views named `result_tab_<slot>`; for each open tab
+	// we SetView at the "secondary" slot rectangle, the active tab is
+	// raised to the top via SetViewOnTop. A nil helper or empty tab
+	// list collapses to a no-op so the layout pass works pre-wire.
+	if g.resultTabsH != nil {
+		if d, ok := dims["secondary"]; ok && d.X1 > d.X0 && d.Y1 > d.Y0 {
+			g.resultTabsH.LayoutPaint(g.driver, d.X0, d.Y0, d.X1, d.Y1)
+		}
+	}
+
 	// Focus-frame swap (dbsavvy-tro.1): every Tier-1 rail repaints its
 	// FrameColor each frame — focused rail gets theme.ActiveBorder, the
 	// rest get theme.InactiveBorder. Popups (Tier-3) are NOT touched and

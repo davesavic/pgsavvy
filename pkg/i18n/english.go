@@ -99,6 +99,14 @@ type ActionTranslations struct {
 	QueryExplainAnalyze string
 	QueryRunInNewTx     string
 
+	// Result-tab family (dbsavvy-66p.12).
+	ResultTabJump   string
+	ResultTabNext   string
+	ResultTabPrev   string
+	ResultTabClose  string
+	ResultTabPin    string
+	ResultTabCancel string
+
 	// Connection lifecycle.
 	AddConnection  string
 	OpenConnection string
@@ -198,6 +206,13 @@ func EnglishTranslationSet() *TranslationSet {
 			QueryExplain:        "Explain",
 			QueryExplainAnalyze: "Explain (analyze)",
 			QueryRunInNewTx:     "Run in new transaction",
+
+			ResultTabJump:   "Jump to result tab",
+			ResultTabNext:   "Next result tab",
+			ResultTabPrev:   "Previous result tab",
+			ResultTabClose:  "Close result tab",
+			ResultTabPin:    "Pin / unpin result tab",
+			ResultTabCancel: "Cancel result tab stream",
 
 			AddConnection:  "Add Connection",
 			OpenConnection: "Open Connection",
