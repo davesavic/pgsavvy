@@ -46,6 +46,12 @@ type Connection struct {
 
 	cancelMu   sync.RWMutex
 	cancelKeys map[uint32]uint32 // BackendPID -> SecretKey
+
+	// notices is the pool-level NOTICE/WARNING/INFO router (epic dbsavvy-66p.5).
+	// cfg.ConnConfig.OnNotice is set to notices.route exactly once at pool
+	// creation in Driver.Open. Per-session subscription and pgconn↔SessionID
+	// bookkeeping is performed by newSession / Session.Close.
+	notices *NoticeRouter
 }
 
 // Close releases the underlying pgxpool.Pool. Idempotent: second and

@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
@@ -33,8 +34,9 @@ var sessionIDCounter atomic.Uint64
 type Session struct {
 	conn       *pgxpool.Conn
 	id         models.SessionID
-	backendPID uint32 // D19 — sized to match pgconn.PgConn.PID()
-	secretKey  uint32 // 66p.4 cancel-request authentication; captured from pgconn at construction
+	backendPID uint32         // D19 — sized to match pgconn.PgConn.PID()
+	secretKey  uint32         // 66p.4 cancel-request authentication; captured from pgconn at construction
+	pgConn     *pgconn.PgConn // 66p.5 captured at newSession so Close can unbind from NoticeRouter
 	parent     *Connection
 	closed     atomic.Bool
 	inFlight   atomic.Int32
@@ -47,16 +49,21 @@ type Session struct {
 // pgconn. The session is registered with parent.registerCancel so that
 // Connection.Cancel can look it up by BackendPID.
 func newSession(pgxConn *pgxpool.Conn, parent *Connection) *Session {
-	pid := pgxConn.Conn().PgConn().PID()
-	secret := pgxConn.Conn().PgConn().SecretKey()
+	pgc := pgxConn.Conn().PgConn()
+	pid := pgc.PID()
+	secret := pgc.SecretKey()
 	s := &Session{
 		conn:       pgxConn,
 		id:         models.SessionID(sessionIDCounter.Add(1)),
 		backendPID: pid,
 		secretKey:  secret,
+		pgConn:     pgc,
 		parent:     parent,
 	}
 	parent.registerCancel(pid, secret)
+	if parent.notices != nil {
+		parent.notices.bindConn(pgc, s.id)
+	}
 	return s
 }
 
@@ -117,9 +124,46 @@ func (s *Session) Close() error {
 		return nil
 	}
 	s.parent.unregisterCancel(s.backendPID)
+	if s.parent.notices != nil {
+		// Order matters: unbind the pgconn → sid mapping FIRST so any
+		// notice currently in flight can no longer find a subscriber
+		// after this point; then Unsubscribe so the subscriber map no
+		// longer references the (possibly soon-closed) caller channel.
+		s.parent.notices.unbindConn(s.pgConn)
+		s.parent.notices.Unsubscribe(s.id)
+	}
 	s.conn.Release()
 	s.parent.sessions.Add(-1)
 	return nil
+}
+
+// AttachNotice registers ch as the destination for NOTICE / WARNING / INFO
+// messages received on this Session's underlying connection. The channel is
+// sent values (not pointers) — pgx delivers *pgconn.Notice and the router
+// dereferences exactly once per delivered notice. Sends are non-blocking:
+// when ch is full, the notice is dropped and DroppedNotices increments.
+//
+// AttachNotice may be called at any time after AcquireSession; it is
+// automatically Unsubscribe'd by Session.Close. A second AttachNotice
+// overwrites the prior channel. The caller owns ch and is responsible for
+// closing it (if at all) AFTER Session.Close returns — Close does not close
+// the channel.
+func (s *Session) AttachNotice(ch chan<- pgconn.Notice) {
+	if s.parent.notices == nil {
+		return
+	}
+	s.parent.notices.Subscribe(s.id, ch)
+}
+
+// DroppedNotices reports the count of notices that arrived while the
+// subscriber channel was full and were therefore discarded. Useful as a
+// diagnostic in the command_log writer (epic dbsavvy-66p.13). Zero when no
+// notices have been dropped (including when AttachNotice was never called).
+func (s *Session) DroppedNotices() uint64 {
+	if s.parent.notices == nil {
+		return 0
+	}
+	return s.parent.notices.droppedFor(s.id)
 }
 
 // ListDatabases runs the embedded list_databases.sql against the underlying

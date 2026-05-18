@@ -74,6 +74,15 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 		return nil, err
 	}
 
+	// NOTICE/WARNING plumbing (epic dbsavvy-66p.5): the per-Connection router
+	// is constructed BEFORE pool creation so cfg.ConnConfig.OnNotice can be
+	// wired exactly once — the pgconn handler is captured at pool dial time
+	// and cannot be replaced thereafter. session.BuildPgxConfig does NOT set
+	// OnNotice itself, by design: the router is a per-Connection object and
+	// belongs at the pg-driver wiring layer.
+	router := NewNoticeRouter()
+	cfg.ConnConfig.OnNotice = router.route
+
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("pg: open: %s", session.RedactDSN(err.Error()))
@@ -94,6 +103,7 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 		pool:          pool,
 		serverVersion: version,
 		majorVersion:  parseMajorVersion(version),
+		notices:       router,
 	}, nil
 }
 
