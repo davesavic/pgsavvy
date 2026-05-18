@@ -53,6 +53,17 @@ func (g *Gui) RunLayout(w, h int) error {
 		return g.renderLimitOverlay(w, h)
 	}
 
+	// Clear the tcell back buffer at the start of every frame. gocui's
+	// flush() in the lazygit fork does NOT clear (the line is commented
+	// out at gocui.gui.go:1146), so DeleteView'd popup cells would
+	// otherwise persist on screen. tcell does cell-level diffing in
+	// Screen.Show(), so this is cheap and doesn't introduce flicker.
+	// Nil-check guards tests where the tcell screen isn't initialised
+	// (RecorderGuiDriver doesn't construct a tcell screen).
+	if gocui.Screen != nil {
+		gocui.Screen.Clear()
+	}
+
 	dims := ui.GetWindowDimensions(w, h)
 
 	// Limit overlay is not active at this size; best-effort delete it
@@ -174,20 +185,10 @@ func (g *Gui) RunLayout(w, h int) error {
 	// Focus the gocui current-view on the top of the focus stack. This
 	// replaces the swap-hook indirection that previously queued a
 	// SetCurrentView via driver.Update and fought the SetViewOnTop pass.
-	//
-	// dbsavvy-lc2 Bug C diagnostic: log the SetCurrentView target +
-	// error only when the focus changes between frames, so a real-
-	// terminal repro can confirm the focus handoff lands on the
-	// cheatsheet view when `?` opens it without spamming once-per-frame.
-	// Remove once verified.
 	if g.tree != nil {
 		if top := g.tree.Current(); top != nil {
 			if vn := top.GetViewName(); vn != "" {
-				_, err := g.driver.SetCurrentView(vn)
-				if vn != g.lastFocusedView && g.deps.Common != nil && g.deps.Common.Log != nil {
-					g.deps.Common.Log.Warnf("dbsavvy-lc2: SetCurrentView -> %q (err=%v)", vn, err)
-				}
-				g.lastFocusedView = vn
+				_, _ = g.driver.SetCurrentView(vn)
 			}
 		}
 	}

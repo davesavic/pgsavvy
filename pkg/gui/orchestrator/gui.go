@@ -136,12 +136,6 @@ type Gui struct {
 	// Connection state surfaced by the activeConnAdapter.
 	activeConnID string
 
-	// lastFocusedView caches the most recent SetCurrentView target so
-	// the dbsavvy-lc2 diagnostic log only fires on focus transitions
-	// (per-frame logging would be unreadable). Remove with the rest of
-	// the lc2 Warnf diagnostics once Bug C is confirmed fixed.
-	lastFocusedView string
-
 	// closed is true once Close has run; idempotent guard.
 	closed bool
 }
@@ -342,17 +336,7 @@ func (g *Gui) wireWithDriver() error {
 	// user returns to the prior context (e.g. MENU or TABLES) intact.
 	// Installed directly via the driver because CHEATSHEET is a
 	// DISPLAY_CONTEXT and does not flow through the Matcher.
-	//
-	// dbsavvy-lc2 Bug C diagnostic: the layout unit test confirms
-	// SetCurrentView("cheatsheet") fires when the context is pushed, so
-	// if Esc still fails to dismiss in a real terminal the problem is in
-	// gocui's binding dispatch (likely the modifier-discard Bug A — fixed
-	// in gocui_driver.go — but kept logged here in case a second issue
-	// hides downstream). Remove this Warnf once verified working.
 	_ = g.driver.SetKeybinding(string(types.CHEATSHEET), gocui.NewKeyName(gocui.KeyEsc), gocui.ModNone, func() error {
-		if g.deps.Common != nil && g.deps.Common.Log != nil {
-			g.deps.Common.Log.Warnf("dbsavvy-lc2: CHEATSHEET esc handler fired")
-		}
 		return g.tree.Pop()
 	})
 
@@ -589,7 +573,7 @@ func (g *Gui) Close() error {
 	g.closed = true
 	var firstErr error
 	if g.deps.Store != nil {
-		if err := g.deps.Store.Flush(); err != nil && firstErr == nil {
+		if err := g.deps.Store.Flush(); err != nil {
 			firstErr = err
 		}
 		if err := g.deps.Store.Close(); err != nil && firstErr == nil {
