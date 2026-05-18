@@ -106,6 +106,7 @@ type ThemeConfig struct {
 	DiffAddedFg     string `yaml:"diff_added_fg"`
 	DiffRemovedFg   string `yaml:"diff_removed_fg"`
 	DiffChangedFg   string `yaml:"diff_changed_fg"`
+	PromptFg        string `yaml:"prompt_fg"`
 }
 
 // GetDefaultConfig returns the built-in default UserConfig. The returned

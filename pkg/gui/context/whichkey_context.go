@@ -11,6 +11,20 @@ import (
 // a single character of right padding.
 const whichKeyMaxRowWidth = 38
 
+// whichKeyBodyRows is the number of newline-separated rows the popup
+// body is padded to when sparse, so the WHICH_KEY view's SetContent
+// payload spans the popup's interior height. Without this, a body with
+// (say) 3 binding rows produces only 3 lines and the rect's remaining
+// rows hold whatever the underlying gocui view layer happened to paint
+// last — gocui's clearRunes() handles this in the lazygit fork today,
+// but the padding is the orchestrator-level invariant that locks the
+// popup-rect = popup-body equivalence regardless of downstream changes.
+//
+// Mirrors `whichKeyMaxRows - 2` from pkg/gui/orchestrator/layout.go
+// (popup rect height minus the 2-row gocui frame). If the orchestrator
+// constant changes, update this one too.
+const whichKeyBodyRows = 10
+
 // WhichKeyContext renders the which-key popup (DISPLAY_CONTEXT). It
 // reads visibility + (scope, prefix) from a types.WhichKeyState and
 // resolves the rows via a deps.WhichKeyRows closure. Both inputs are
@@ -77,9 +91,33 @@ func (w *WhichKeyContext) AddKeybindingsFn(_ types.KeybindingsFn) {}
 // invoking HandleRender). Returns nil when not yet wired.
 func (w *WhichKeyContext) Notifier() types.WhichKeyState { return w.notifier }
 
+// SetRows installs the rows-resolver closure post-construction. The
+// orchestrator wires the production resolver after the matcher /
+// registry is live; tests use this seam to inject a deterministic row
+// set so HandleRender renders against the layout pass.
+func (w *WhichKeyContext) SetRows(rows func(scope types.ContextKey, prefix []types.ChordKey) []types.ChildRow) {
+	w.rows = rows
+}
+
+// HasRows reports whether the wired resolver yields at least one row
+// for (scope, prefix). The orchestrator's layout pass calls this to
+// decide whether to render the popup or DeleteView it for the next
+// frame — without this guard, a notifier that flipped Visible() for a
+// chord prefix with no children would leave an empty popup rect
+// onscreen until the notifier's TTL elapsed. Returns false when the
+// resolver is nil so the popup defaults to hidden until wired.
+func (w *WhichKeyContext) HasRows(scope types.ContextKey, prefix []types.ChordKey) bool {
+	if w.rows == nil {
+		return false
+	}
+	return len(w.rows(scope, prefix)) > 0
+}
+
 // formatWhichKeyRows renders rows as "key   label" lines. Keys are
 // right-padded to the widest key string so labels line up; each line
-// is truncated to whichKeyMaxRowWidth to fit the popup.
+// is truncated to whichKeyMaxRowWidth to fit the popup. The output is
+// padded with blank trailing lines so it always spans whichKeyBodyRows
+// lines (or len(rows) if larger) — see whichKeyBodyRows for rationale.
 func formatWhichKeyRows(rows []types.ChildRow) string {
 	keyWidth := 0
 	for _, r := range rows {
@@ -100,6 +138,15 @@ func formatWhichKeyRows(rows []types.ChildRow) string {
 			line = line[:whichKeyMaxRowWidth]
 		}
 		b.WriteString(line)
+	}
+	// Bleed-through fix (dbsavvy-tro.11): pad the body with blank lines
+	// so the SetContent payload always covers the popup's interior height.
+	// gocui's view.draw() / clearRunes() handles this at the cell level
+	// in the lazygit fork, but the buffer-level padding is what the
+	// orchestrator's regression test asserts — it locks the invariant
+	// independent of gocui internals.
+	for emitted := len(rows); emitted < whichKeyBodyRows; emitted++ {
+		b.WriteByte('\n')
 	}
 	return b.String()
 }

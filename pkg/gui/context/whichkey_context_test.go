@@ -22,6 +22,7 @@ func (f *fakeWhichKeyState) Snapshot() (types.ContextKey, []types.ChordKey, bool
 	cp := append([]types.ChordKey(nil), f.prefix...)
 	return f.scope, cp, f.visible
 }
+func (f *fakeWhichKeyState) Hide() { f.visible = false }
 
 // captureDriver implements types.GuiDriver minimally — only SetContent
 // is exercised by WhichKeyContext.HandleRender, and Update runs the fn
@@ -153,8 +154,11 @@ func TestWhichKeyContext_RendersRowsAligned(t *testing.T) {
 		t.Errorf("view = %q, want %q", drv.lastView, string(types.WHICH_KEY))
 	}
 	lines := strings.Split(drv.lastContent, "\n")
-	if len(lines) != 2 {
-		t.Fatalf("lines = %d, want 2: %q", len(lines), drv.lastContent)
+	// dbsavvy-tro.11: body is padded to whichKeyBodyRows lines so the
+	// popup rect is fully covered (defends against cells from views
+	// beneath bleeding through the empty rows of the popup).
+	if len(lines) != whichKeyBodyRows {
+		t.Fatalf("lines = %d, want %d (padded): %q", len(lines), whichKeyBodyRows, drv.lastContent)
 	}
 	// Widest key is "<esc>" (5 chars). 'a' is padded to 5 chars then "  " separator.
 	if !strings.HasPrefix(lines[0], "a    ") {
@@ -165,6 +169,12 @@ func TestWhichKeyContext_RendersRowsAligned(t *testing.T) {
 	}
 	if !strings.HasPrefix(lines[1], "<esc>") {
 		t.Errorf("lines[1] = %q; expected to start with <esc>", lines[1])
+	}
+	// Trailing padding lines must be empty.
+	for i := 2; i < len(lines); i++ {
+		if lines[i] != "" {
+			t.Errorf("lines[%d] = %q; expected empty padding", i, lines[i])
+		}
 	}
 }
 
@@ -179,8 +189,12 @@ func TestWhichKeyContext_TruncatesLongRows(t *testing.T) {
 	if err := c.HandleRender(); err != nil {
 		t.Fatalf("HandleRender: %v", err)
 	}
-	if got := len(drv.lastContent); got > whichKeyMaxRowWidth {
-		t.Errorf("rendered length = %d, want <= %d", got, whichKeyMaxRowWidth)
+	// Per-line truncation: every non-empty row must fit within
+	// whichKeyMaxRowWidth (the padding added in dbsavvy-tro.11 emits
+	// empty trailing newlines, so we measure the first content row).
+	firstLine := strings.SplitN(drv.lastContent, "\n", 2)[0]
+	if got := len(firstLine); got > whichKeyMaxRowWidth {
+		t.Errorf("first-line length = %d, want <= %d", got, whichKeyMaxRowWidth)
 	}
 }
 
@@ -198,6 +212,33 @@ func TestWhichKeyContext_AddKeybindingsFnIsDropped(t *testing.T) {
 
 func TestWhichKeyContext_SatisfiesIBaseContext(t *testing.T) {
 	var _ types.IBaseContext = &WhichKeyContext{}
+}
+
+// TestWhichKeyContext_HasRows guards the empty-rows policy seam
+// (dbsavvy-tro.4): the orchestrator's layout pass calls HasRows to
+// decide whether to dismiss a notifier whose prefix has no trie
+// continuations. Nil resolver and empty-resolver must both report
+// false; a non-empty resolver must report true.
+func TestWhichKeyContext_HasRows(t *testing.T) {
+	cases := []struct {
+		name string
+		rows func(types.ContextKey, []types.ChordKey) []types.ChildRow
+		want bool
+	}{
+		{name: "nil resolver", rows: nil, want: false},
+		{name: "empty resolver", rows: func(types.ContextKey, []types.ChordKey) []types.ChildRow { return nil }, want: false},
+		{name: "one row", rows: func(types.ContextKey, []types.ChordKey) []types.ChildRow {
+			return []types.ChildRow{{Key: types.ChordKey{Code: 'a'}, Label: "alpha"}}
+		}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestWhichKey(&fakeWhichKeyState{}, tc.rows, nil)
+			if got := c.HasRows(types.GLOBAL, nil); got != tc.want {
+				t.Errorf("HasRows = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestWhichKeyContext_NilDriverNoOps(t *testing.T) {

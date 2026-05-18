@@ -65,6 +65,7 @@ type themeState struct {
 	DiffAddedFg     *Style
 	DiffRemovedFg   *Style
 	DiffChangedFg   *Style
+	PromptFg        *Style
 }
 
 var (
@@ -137,6 +138,7 @@ func Apply(cfg *config.ThemeConfig) error {
 		DiffAddedFg:     parseStyle(cfg.DiffAddedFg),
 		DiffRemovedFg:   parseStyle(cfg.DiffRemovedFg),
 		DiffChangedFg:   parseStyle(cfg.DiffChangedFg),
+		PromptFg:        parseStyle(cfg.PromptFg),
 	}
 	current.Store(next)
 	return nil

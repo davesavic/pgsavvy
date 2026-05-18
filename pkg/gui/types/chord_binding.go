@@ -256,10 +256,18 @@ type ChildRow struct {
 	Source Source
 }
 
-// WhichKeyState is the read-only surface a renderer queries to draw the
-// which-key popup. Implemented by *keys.WhichKey. The Matcher-facing
-// WhichKeyNotifier interface lives in pkg/gui/keys and stays distinct.
+// WhichKeyState is the renderer-facing surface for the which-key popup.
+// Implemented by *keys.WhichKey. The Matcher-facing WhichKeyNotifier
+// interface lives in pkg/gui/keys and stays distinct.
+//
+// Hide is exposed here (despite being mutating) so the orchestrator's
+// layout pass can dismiss a notifier that flipped visible for a chord
+// prefix with no trie continuations — i.e. the "empty popup" case the
+// renderer would otherwise be forced to paint. Calling Hide from the
+// layout pass is safe because layout already runs OUTSIDE the Matcher
+// mutex (the WhichKeyNotifier contract is therefore upheld).
 type WhichKeyState interface {
 	Visible() bool
 	Snapshot() (scope ContextKey, prefix []ChordKey, visible bool)
+	Hide()
 }

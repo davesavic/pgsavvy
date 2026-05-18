@@ -23,7 +23,13 @@ import (
 //	UserOverride   → '✱'
 //	CustomCmd      → '★'
 const (
-	GlyphDefault  = '·'
+	GlyphDefault = '·'
+	// GlyphOverride: U+2731. Legend (pkg/i18n/english.go CheatsheetLegend)
+	// and binding rows both emit this exact rune via glyphFor → Row.Glyph;
+	// there is no source-level divergence. If a terminal renders the
+	// legend's ✱ but shows '*' on binding rows (or vice versa), that is
+	// font fallback in the host terminal, not a code bug — the rune is
+	// identical at the byte level.
 	GlyphOverride = '✱'
 	GlyphCustom   = '★'
 )

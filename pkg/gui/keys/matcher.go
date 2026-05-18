@@ -349,6 +349,13 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 	ts := m.trieSet.Load()
 	scopeTrie, _ := ts.Get(mode, scope)
 
+	// hadChordPartial records whether we dropped a non-empty pending
+	// CHORD prefix below. If dispatch ultimately falls through (no
+	// global match either) we must Hide the which-key popup that was
+	// shown for the abandoned prefix. Hide MUST be called outside
+	// m.mu, hence the deferred flag instead of an inline call here.
+	hadChordPartial := false
+
 	if scopeTrie != nil {
 		seq := append(append([]Key(nil), m.pending...), k)
 		res := scopeTrie.Lookup(seq)
@@ -360,6 +367,7 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 		// pending was non-empty we drop it now.
 		if len(m.pending) > 0 {
 			m.cancelPendingLocked()
+			hadChordPartial = true
 		}
 	}
 
@@ -392,6 +400,15 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 		m.cancelLocked()
 	}
 	m.mu.Unlock()
+	// dbsavvy-tro.5: if a CHORD prefix was pending (scope-trie pending
+	// was just dropped above) AND dispatch is falling through (no
+	// global match found either), pull down the which-key popup that
+	// was shown for the abandoned prefix. Hide is called OUTSIDE m.mu
+	// per the WhichKeyNotifier contract. handleLookup's own Hide path
+	// is not exercised here because Found=false in both attempts.
+	if (hadPartial || hadChordPartial) && m.whichkey != nil {
+		m.whichkey.Hide()
+	}
 	return FellThrough, nil
 }
 

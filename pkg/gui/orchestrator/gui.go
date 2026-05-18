@@ -270,6 +270,33 @@ func (g *Gui) wireWithDriver() error {
 		return cheatsheet.Render(out, tr, cheatsheet.ScopeLabel(scope, tr))
 	}
 
+	// WhichKey rows resolver (dbsavvy-tro.4). Captures the live matcher +
+	// modeStore so WhichKeyContext.HandleRender pulls the immediate
+	// children of the current (scope, prefix) on every render frame.
+	// Returns nil when the matcher hasn't published a TrieSet yet, when
+	// the (mode, scope) tuple has no trie, or when prefix doesn't resolve
+	// inside that trie — the context's HandleRender treats nil rows as a
+	// silent no-op (see whichkey_context.go:73-76).
+	whichKeyRows := func(scope types.ContextKey, prefix []types.ChordKey) []types.ChildRow {
+		if g.matcher == nil || g.modeStore == nil {
+			return nil
+		}
+		ts := g.matcher.TrieSet()
+		if ts == nil {
+			return nil
+		}
+		mode := g.modeStore.Get(scope)
+		trie, ok := ts.Get(mode, scope)
+		if !ok || trie == nil {
+			return nil
+		}
+		rows, ok := trie.ChildrenAt(prefix)
+		if !ok {
+			return nil
+		}
+		return rows
+	}
+
 	// Build the context registry with hooks closed over the driver.
 	ctxDeps := types.ContextTreeDeps{
 		GuiDriver:            g.driver,
@@ -279,6 +306,7 @@ func (g *Gui) wireWithDriver() error {
 		LimitText:            presentation.NewLimitText(tr),
 		ModeStore:            g.modeStore,
 		WhichKey:             g.whichkey,
+		WhichKeyRows:         whichKeyRows,
 		CheatsheetRender:     cheatsheetRender,
 	}
 	g.registry = guicontext.NewContextTree(ctxDeps)

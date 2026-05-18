@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
@@ -170,6 +171,24 @@ func (g *Gui) RunLayout(w, h int) error {
 						cl.SetView(view)
 					}
 				}
+				// Overlay the COMMAND_LINE buffer with a styled ':' prompt
+				// (dbsavvy-tro.12). The TextArea is the source of truth for
+				// the typed line; gocui's RenderTextArea writes the raw
+				// content (leading ':' + typed text) into the view buffer.
+				// We re-write the cell content via SetContent each frame so
+				// the ':' carries PromptFg styling. SetViewCursor below is a
+				// separate gocui API that positions the caret independently
+				// of the buffer bytes, so the caret tracking continues to
+				// work. Under the RecorderGuiDriver SetView returns nil, so
+				// fall back to ctx.Buffer() (which already strips the
+				// leading ':').
+				buffer := ""
+				if view != nil && view.TextArea != nil {
+					buffer = strings.TrimPrefix(view.TextArea.GetContent(), ":")
+				} else if bufHolder, ok := ctx.(interface{ Buffer() string }); ok {
+					buffer = bufHolder.Buffer()
+				}
+				_ = g.driver.SetContent(name, promptStyledLine(theme.Current().PromptFg, buffer))
 				// Anchor the visible caret to the TextArea's actual cursor
 				// each frame. gocui's DefaultEditor moves TextArea.cursor on
 				// Left/Right/Backspace/Delete/Home/End but does not call
@@ -372,6 +391,17 @@ func (g *Gui) renderWhichKeyOverlay(w, h int, dims map[string]ui.Dimensions) err
 		_ = g.driver.DeleteView(string(types.WHICH_KEY))
 		return nil
 	}
+	// Empty-rows policy (dbsavvy-tro.4): if the wired resolver yields no
+	// children for the current (scope, prefix), hide the notifier and
+	// delete the view so we don't paint an empty popup rect onscreen. A
+	// chord prefix with no continuations is "dead air" — the user would
+	// otherwise see an empty box hover for the notifier's TTL.
+	scope, prefix, _ := notifier.Snapshot()
+	if !g.registry.WhichKey.HasRows(scope, prefix) {
+		notifier.Hide()
+		_ = g.driver.DeleteView(string(types.WHICH_KEY))
+		return nil
+	}
 	canvas, ok := dims["popup-overlay"]
 	if !ok {
 		canvas = ui.Dimensions{X0: 0, Y0: 0, X1: w - 1, Y1: h - 1}
@@ -485,6 +515,54 @@ func applyFocusFrameColors(rails map[string]*gocui.View, focusedName string, act
 		} else {
 			v.FrameColor = inactive
 		}
+	}
+}
+
+// promptStyledLine builds the COMMAND_LINE cell content: a ':' prefix
+// wrapped in the PromptFg ANSI SGR escape, followed by the typed buffer
+// rendered with default styling. The ANSI reset between prompt and
+// buffer ensures the user-typed text isn't accidentally restyled.
+// gocui's escape interpreter parses the inline SGR and lifts it to
+// per-cell Attribute values; the recorder driver stores the raw bytes
+// so tests can assert on the wrapper directly (dbsavvy-tro.12).
+//
+// A nil style or unrecognised colour collapses to a default-fg ':' —
+// callers still get a visible prompt, just without the brighten.
+func promptStyledLine(style *theme.Style, buffer string) string {
+	prefix := ansiSGRForStyle(style)
+	if prefix == "" {
+		return ":" + buffer
+	}
+	return prefix + ":" + ansiResetSGR + buffer
+}
+
+// ansiSGRForStyle returns the ANSI SGR escape for the foreground colour
+// described by style. Recognises the standard 8 colour names; everything
+// else (hex, unknown name, nil) returns "" so callers can fall back to
+// the default foreground.
+func ansiSGRForStyle(s *theme.Style) string {
+	if s == nil {
+		return ""
+	}
+	switch strings.ToLower(s.Fg) {
+	case "black":
+		return "\x1b[30m"
+	case "red":
+		return "\x1b[31m"
+	case "green":
+		return "\x1b[32m"
+	case "yellow":
+		return "\x1b[33m"
+	case "blue":
+		return "\x1b[34m"
+	case "magenta":
+		return "\x1b[35m"
+	case "cyan":
+		return "\x1b[36m"
+	case "white":
+		return "\x1b[37m"
+	default:
+		return ""
 	}
 }
 

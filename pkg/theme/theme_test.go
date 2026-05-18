@@ -140,6 +140,42 @@ func TestApply_Concurrent_ReadersAndWriter(t *testing.T) {
 	}
 }
 
+// TestApply_PromptFg pins the dbsavvy-tro.12 PromptFg wiring: Apply
+// must parse cfg.PromptFg into the themeState's PromptFg field.
+func TestApply_PromptFg(t *testing.T) {
+	cfg := builtin.DefaultDark()
+	cfg.PromptFg = "yellow"
+	if err := Apply(cfg); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got := Current()
+	if got == nil {
+		t.Fatal("Current returned nil")
+	}
+	if got.PromptFg == nil {
+		t.Fatal("PromptFg is nil; Apply did not populate the field")
+	}
+	if got.PromptFg.Fg != "yellow" {
+		t.Errorf("PromptFg.Fg = %q, want %q", got.PromptFg.Fg, "yellow")
+	}
+}
+
+// TestApply_PromptFgDefault asserts the built-in dark theme supplies a
+// non-empty PromptFg so RunLayout's COMMAND_LINE overlay always has a
+// brightenable colour to use when no user override is configured.
+func TestApply_PromptFgDefault(t *testing.T) {
+	if err := Apply(builtin.DefaultDark()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got := Current()
+	if got == nil || got.PromptFg == nil {
+		t.Fatal("default-dark PromptFg is nil")
+	}
+	if got.PromptFg.Fg == "" {
+		t.Fatal("default-dark PromptFg.Fg is empty; expected a colour name")
+	}
+}
+
 func TestParseStyle_AlwaysNonNil(t *testing.T) {
 	cases := []string{"", "red", "#123456", "notacolor"}
 	for _, c := range cases {

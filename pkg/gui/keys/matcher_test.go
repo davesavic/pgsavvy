@@ -988,3 +988,174 @@ func TestIsEditorSafeSpecial(t *testing.T) {
 		}
 	}
 }
+
+// --- dbsavvy-tro.5: which-key dismissal on unmatched continuation / esc --
+
+// recordingNotifier is a minimal WhichKeyNotifier fake that counts
+// ShowAfter / Hide calls. Safe for concurrent use.
+type recordingNotifier struct {
+	mu        sync.Mutex
+	showCalls int
+	hideCalls int
+}
+
+func (r *recordingNotifier) ShowAfter(_ time.Duration, _ types.ContextKey, _ []Key) {
+	r.mu.Lock()
+	r.showCalls++
+	r.mu.Unlock()
+}
+
+func (r *recordingNotifier) Hide() {
+	r.mu.Lock()
+	r.hideCalls++
+	r.mu.Unlock()
+}
+
+func (r *recordingNotifier) hides() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.hideCalls
+}
+
+func (r *recordingNotifier) shows() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.showCalls
+}
+
+// matcherWithNotifier builds a Matcher wired to the supplied notifier
+// with a non-zero WhichKeyDelay so notifyWhichKeyLocked actually calls
+// ShowAfter.
+func matcherWithNotifier(t *testing.T, ts *TrieSet, scope types.ContextKey, mode types.Mode, nf WhichKeyNotifier) *Matcher {
+	t.Helper()
+	store := NewModeStore()
+	store.Set(scope, mode)
+	m, err := NewMatcher(ts, MatcherConfig{
+		Modes:         store,
+		TimeoutLen:    30 * time.Millisecond,
+		TtimeoutLen:   10 * time.Millisecond,
+		WhichKeyDelay: 5 * time.Millisecond,
+		WhichKey:      nf,
+	})
+	if err != nil {
+		t.Fatalf("NewMatcher: %v", err)
+	}
+	return m
+}
+
+// TestMatcher_DispatchUnmatchedAfterChordPrefix_HidesWhichKey covers the
+// .5 regression: Space-prefix pending → unknown continuation key →
+// popup must be hidden after dispatch (no waiting for auto-timeout).
+func TestMatcher_DispatchUnmatchedAfterChordPrefix_HidesWhichKey(t *testing.T) {
+	var fired []string
+	var mu sync.Mutex
+	cmd := recordingCmd("editor.write", &fired, &mu, nil)
+	// Chord <space>w in QUERY_EDITOR scope; nothing else bound.
+	ts := buildTrieSet(t, []trieEntry{
+		{types.ModeNormal, types.QUERY_EDITOR, []Key{specialKey(KeySpace), keyOf('w')}, cmd},
+	})
+	nf := &recordingNotifier{}
+	m := matcherWithNotifier(t, ts, types.QUERY_EDITOR, types.ModeNormal, nf)
+
+	// Enter the prefix.
+	res, err := m.Dispatch(types.QUERY_EDITOR, specialKey(KeySpace))
+	if err != nil {
+		t.Fatalf("Dispatch <space>: %v", err)
+	}
+	if res != Pending {
+		t.Fatalf("after <space>: res = %v, want Pending", res)
+	}
+	if !m.IsPartial() {
+		t.Fatalf("IsPartial after <space> = false; want true")
+	}
+	if nf.shows() != 1 {
+		t.Fatalf("ShowAfter calls after <space> = %d, want 1", nf.shows())
+	}
+
+	// Press an unmatched continuation key.
+	res, err = m.Dispatch(types.QUERY_EDITOR, keyOf('z'))
+	if err != nil {
+		t.Fatalf("Dispatch z: %v", err)
+	}
+	if res != FellThrough {
+		t.Fatalf("after <space>z: res = %v, want FellThrough", res)
+	}
+	if m.IsPartial() {
+		t.Fatalf("IsPartial after fall-through = true; want false (state must reset)")
+	}
+	if got := nf.hides(); got != 1 {
+		t.Errorf("Hide calls = %d, want exactly 1 after unmatched continuation", got)
+	}
+	mu.Lock()
+	gotLen := len(fired)
+	mu.Unlock()
+	if gotLen != 0 {
+		t.Errorf("handler fired during fall-through; got %d", gotLen)
+	}
+}
+
+// TestMatcher_CancelEscAfterChordPrefix_HidesWhichKey is the <esc> path
+// regression — Cancel() must hide the popup exactly once when a chord
+// prefix is pending.
+func TestMatcher_CancelEscAfterChordPrefix_HidesWhichKey(t *testing.T) {
+	cmd := recordingCmd("editor.write", &[]string{}, &sync.Mutex{}, nil)
+	ts := buildTrieSet(t, []trieEntry{
+		{types.ModeNormal, types.QUERY_EDITOR, []Key{specialKey(KeySpace), keyOf('w')}, cmd},
+	})
+	nf := &recordingNotifier{}
+	m := matcherWithNotifier(t, ts, types.QUERY_EDITOR, types.ModeNormal, nf)
+
+	if _, err := m.Dispatch(types.QUERY_EDITOR, specialKey(KeySpace)); err != nil {
+		t.Fatalf("Dispatch <space>: %v", err)
+	}
+	if !m.IsPartial() {
+		t.Fatalf("expected IsPartial after <space>")
+	}
+	if nf.shows() != 1 {
+		t.Fatalf("ShowAfter calls = %d, want 1", nf.shows())
+	}
+
+	m.Cancel()
+
+	if m.IsPartial() {
+		t.Errorf("IsPartial after Cancel = true; want false")
+	}
+	if got := nf.hides(); got != 1 {
+		t.Errorf("Hide calls after Cancel = %d, want exactly 1", got)
+	}
+}
+
+// TestMatcher_DispatchMatchedAfterChordPrefix_DoesNotHideSpuriously
+// makes sure the matched-continuation path keeps firing its leaf and
+// only calls Hide once (handleLookup's own Hide on leaf fire) — the new
+// FellThrough Hide branch must not double-fire on a successful match.
+func TestMatcher_DispatchMatchedAfterChordPrefix_DoesNotHideSpuriously(t *testing.T) {
+	var fired []string
+	var mu sync.Mutex
+	cmd := recordingCmd("editor.write", &fired, &mu, nil)
+	ts := buildTrieSet(t, []trieEntry{
+		{types.ModeNormal, types.QUERY_EDITOR, []Key{specialKey(KeySpace), keyOf('w')}, cmd},
+	})
+	nf := &recordingNotifier{}
+	m := matcherWithNotifier(t, ts, types.QUERY_EDITOR, types.ModeNormal, nf)
+
+	if _, err := m.Dispatch(types.QUERY_EDITOR, specialKey(KeySpace)); err != nil {
+		t.Fatalf("Dispatch <space>: %v", err)
+	}
+	res, err := m.Dispatch(types.QUERY_EDITOR, keyOf('w'))
+	if err != nil {
+		t.Fatalf("Dispatch w: %v", err)
+	}
+	if res != Dispatched {
+		t.Fatalf("res = %v, want Dispatched", res)
+	}
+	mu.Lock()
+	gotFired := append([]string(nil), fired...)
+	mu.Unlock()
+	if len(gotFired) != 1 || gotFired[0] != "editor.write" {
+		t.Errorf("fired = %v, want [editor.write]", gotFired)
+	}
+	if got := nf.hides(); got != 1 {
+		t.Errorf("Hide calls on matched continuation = %d, want exactly 1 (no double-hide)", got)
+	}
+}

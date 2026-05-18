@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
@@ -142,6 +143,145 @@ func TestRunLayoutCheatsheetFocusedAfterPush(t *testing.T) {
 	}
 }
 
+// TestRunLayoutWhichKeyOverlayFillsRectBody (dbsavvy-tro.11): with the
+// WHICH_KEY notifier visible and only a couple of binding rows wired,
+// the SetContent payload written into the WHICH_KEY view must span the
+// popup's interior height — no fewer lines than the body-row spec.
+// Without the padding, a sparse binding set produces 2-3 newlines and
+// the popup rect's remaining rows hold whatever cells the underlying
+// (stub-rect / extras / status) views happened to leave behind:
+// "bleed-through" from the user's perspective.
+//
+// Asserts the orchestrator-level invariant: popup body row count >=
+// (whichKeyMaxRows - 2) (the popup's interior height after subtracting
+// the gocui frame). Also asserts the original binding rows survive at
+// the top of the payload so a trivial "always emit empty" reward-hack
+// in formatWhichKeyRows wouldn't pass.
+func TestRunLayoutWhichKeyOverlayFillsRectBody(t *testing.T) {
+	g, rec := buildTestGui(t)
+
+	// Wire a deterministic 2-row resolver so HandleRender produces a
+	// concrete payload instead of no-opping on a nil rows callback.
+	wk := g.Registry().WhichKey
+	if wk == nil {
+		t.Fatal("registry.WhichKey is nil")
+	}
+	wk.SetRows(func(scope types.ContextKey, prefix []types.ChordKey) []types.ChildRow {
+		return []types.ChildRow{
+			{Key: types.ChordKey{Code: 'a'}, Label: "alpha", IsLeaf: true},
+			{Key: types.ChordKey{Code: 'b'}, Label: "bravo", IsLeaf: true},
+		}
+	})
+
+	// Flip the notifier visible. zero-delay ShowAfter makes Visible()
+	// return true synchronously.
+	g.WhichKey().ShowAfter(0, types.GLOBAL, nil)
+
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if !rec.HasSetView(string(types.WHICH_KEY)) {
+		t.Fatal("WHICH_KEY SetView not invoked while notifier reports visible")
+	}
+
+	body := rec.GetViewBuffer(string(types.WHICH_KEY))
+	if body == "" {
+		t.Fatalf("WHICH_KEY view buffer is empty; HandleRender did not write content")
+	}
+	lines := strings.Split(body, "\n")
+	// Popup rect height is whichKeyMaxRows+1 cells (inclusive). The gocui
+	// frame consumes 2 of those rows, leaving the interior height that
+	// the body must cover.
+	const wantMinLines = 10 // matches context.whichKeyBodyRows
+	if len(lines) < wantMinLines {
+		t.Errorf("popup body has %d lines, want >= %d (padding missing — bleed-through fix regressed); body=%q",
+			len(lines), wantMinLines, body)
+	}
+	// The first two lines must be the real binding rows — guards
+	// against a reward-hack where formatWhichKeyRows emits only blanks.
+	if !strings.Contains(lines[0], "alpha") {
+		t.Errorf("lines[0] = %q; expected 'alpha' label", lines[0])
+	}
+	if len(lines) > 1 && !strings.Contains(lines[1], "bravo") {
+		t.Errorf("lines[1] = %q; expected 'bravo' label", lines[1])
+	}
+}
+
+// TestWhichKeyRowsResolverWiredAtBoot (dbsavvy-tro.4): the orchestrator
+// MUST install a non-nil WhichKeyRows closure on the WhichKeyContext at
+// boot so HandleRender can resolve children for the live trie. Without
+// the wiring, the popup would render an empty body even when the trie
+// has children for the current (scope, prefix). HasRows(GLOBAL, nil)
+// must return true because the GLOBAL scope owns top-level chord roots
+// (e.g. <leader>, ?) and every wired controller contributes at least
+// one binding.
+func TestWhichKeyRowsResolverWiredAtBoot(t *testing.T) {
+	g, _ := buildTestGui(t)
+	wk := g.Registry().WhichKey
+	if wk == nil {
+		t.Fatal("registry.WhichKey is nil")
+	}
+	// Empty prefix on GLOBAL scope: should resolve to the top-level
+	// chord roots (one ChildRow per root key). If the closure is nil
+	// the HasRows guard returns false and we'd fail here.
+	if !wk.HasRows(types.GLOBAL, nil) {
+		t.Fatal("HasRows(GLOBAL, nil) = false; WhichKeyRows closure not wired or trie empty")
+	}
+}
+
+// TestRunLayoutWhichKeyOverlayEmptyRowsHidesPopup (dbsavvy-tro.4): when
+// the WHICH_KEY notifier flips visible but the wired rows-resolver
+// returns no children for the current (scope, prefix), the layout pass
+// must dismiss the notifier and DeleteView the popup. Without this
+// guard the user would see an empty popup rect hover until the
+// notifier's TTL elapsed.
+func TestRunLayoutWhichKeyOverlayEmptyRowsHidesPopup(t *testing.T) {
+	g, rec := buildTestGui(t)
+
+	// Wire an empty resolver so HasRows returns false even though the
+	// notifier reports visible.
+	wk := g.Registry().WhichKey
+	if wk == nil {
+		t.Fatal("registry.WhichKey is nil")
+	}
+	wk.SetRows(func(scope types.ContextKey, prefix []types.ChordKey) []types.ChildRow {
+		return nil
+	})
+
+	// Flip the notifier visible with zero-delay so Visible() returns
+	// true synchronously.
+	g.WhichKey().ShowAfter(0, types.GLOBAL, nil)
+	if !g.WhichKey().Visible() {
+		t.Fatal("notifier did not flip visible after ShowAfter(0, …)")
+	}
+
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+
+	// Notifier must be hidden by the layout pass.
+	if g.WhichKey().Visible() {
+		t.Error("notifier still visible after empty-rows layout pass; Hide() not called")
+	}
+	// View must be DeleteView'd so no empty rect persists.
+	found := false
+	for _, name := range rec.DeleteViews {
+		if name == string(types.WHICH_KEY) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("WHICH_KEY DeleteView not invoked; DeleteViews = %v", rec.DeleteViews)
+	}
+	// SetContent must NOT have been called on WHICH_KEY (the empty
+	// branch returns before HandleRender writes any body).
+	if rec.GetViewBuffer(string(types.WHICH_KEY)) != "" {
+		t.Errorf("WHICH_KEY buffer non-empty (%q); empty-rows path should not write content",
+			rec.GetViewBuffer(string(types.WHICH_KEY)))
+	}
+}
+
 // TestRunLayoutCreatesPopupOnStack pushes MENU onto the focus stack
 // and asserts the Tier-3 popup pass creates the view. After Pop, the
 // next RunLayout pass must DeleteView the now-orphan popup.
@@ -279,6 +419,167 @@ func TestRunLayoutCommandLineCaretTracksBufferLength(t *testing.T) {
 	}
 	if last.X != 4 || last.Y != 0 {
 		t.Errorf("SetViewCursor(COMMAND_LINE) = (%d, %d), want (4, 0)", last.X, last.Y)
+	}
+}
+
+// TestRunLayoutCommandLinePromptStyled (dbsavvy-tro.12): each Layout
+// pass while COMMAND_LINE is on the focus stack must write a buffer
+// content that opens with the PromptFg ANSI SGR escape, then ':', then
+// the reset. Without the wrapper, the prompt renders in the terminal's
+// default foreground — too dim against the CommandLine background.
+func TestRunLayoutCommandLinePromptStyled(t *testing.T) {
+	g, rec := buildTestGui(t)
+	cl := g.Registry().CommandLine
+	if cl == nil {
+		t.Fatal("registry.CommandLine is nil")
+	}
+	if err := g.ContextTree().Push(cl); err != nil {
+		t.Fatalf("Push(CommandLine): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	body := rec.GetViewBuffer(string(types.COMMAND_LINE))
+	if body == "" {
+		t.Fatal("COMMAND_LINE view buffer is empty after RunLayout")
+	}
+	// PromptFg default is "yellow" → \x1b[33m. The buffer must start
+	// with an SGR foreground escape immediately followed by ':'.
+	if !strings.HasPrefix(body, "\x1b[") {
+		t.Errorf("COMMAND_LINE buffer does not start with ANSI SGR escape; body=%q", body)
+	}
+	if !strings.Contains(body, "\x1b[33m:\x1b[0m") {
+		t.Errorf("COMMAND_LINE buffer missing styled prompt %q; body=%q",
+			"\x1b[33m:\x1b[0m", body)
+	}
+}
+
+// TestRunLayoutCommandLinePromptStyled_BufferAppended asserts the typed
+// text follows the styled ':' prompt unchanged. Regression-guards the
+// scenario where the SetContent overlay accidentally drops the buffer.
+func TestRunLayoutCommandLinePromptStyled_BufferAppended(t *testing.T) {
+	g, rec := buildTestGui(t)
+	cl := g.Registry().CommandLine
+	if cl == nil {
+		t.Fatal("registry.CommandLine is nil")
+	}
+	if err := g.ContextTree().Push(cl); err != nil {
+		t.Fatalf("Push(CommandLine): %v", err)
+	}
+	cl.SetBuffer("quit")
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	body := rec.GetViewBuffer(string(types.COMMAND_LINE))
+	wantSuffix := "quit"
+	if !strings.HasSuffix(body, wantSuffix) {
+		t.Errorf("COMMAND_LINE buffer suffix = %q, want suffix %q; body=%q",
+			body, wantSuffix, body)
+	}
+}
+
+// row0Artifact returns the first SetView call whose declared rectangle
+// touches row 0 (Y0 == 0) under a normal-size layout pass. Only LIMIT
+// is permitted to span row 0 (and only in the tiny-terminal branch,
+// which never executes here). Any other hit indicates a candidate
+// source of the "thin blue line at canvas top" artifact described in
+// dbsavvy-tro.13: a Frame=true gocui view's top border lands at row 0,
+// outside the slot the boxlayout reserved for "options" (which the
+// orchestrator deliberately leaves un-SetView'd).
+func row0Artifact(calls []testfake.SetViewCall) (testfake.SetViewCall, bool) {
+	for _, c := range calls {
+		if c.Name == string(types.LIMIT) {
+			continue
+		}
+		if c.Y0 == 0 {
+			return c, true
+		}
+	}
+	return testfake.SetViewCall{}, false
+}
+
+// TestRunLayoutRow0_NoArtifact_FirstFrame (dbsavvy-tro.13, hypothesis 4):
+// the very first RunLayout pass after wireWithDriver must not create
+// any view whose declared rectangle touches row 0. The orchestrator
+// reserves row 0 for the "options" boxlayout slot but never calls
+// SetView on it; any other view at Y0=0 would paint a frame border at
+// the canvas top — the suspected source of the intermittent blue line.
+//
+// Locks in: hypothesis 1 (Tier-1 rail at Y0=0+Frame=true) has no
+// matching code path; hypothesis 2 (bottomRightRect off-by-one) does
+// not fire on a 120x40 first frame; hypothesis 3 (transient first-frame
+// border) does not occur because no popup is on the stack.
+func TestRunLayoutRow0_NoArtifact_FirstFrame(t *testing.T) {
+	g, rec := buildTestGui(t)
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if c, hit := row0Artifact(rec.AllSetViewCalls()); hit {
+		t.Errorf("first frame: view %q SetView'd with Y0=0 (rect=%+v) — blue-line candidate", c.Name, c)
+	}
+}
+
+// TestRunLayoutRow0_NoArtifact_AfterPopupCycle (dbsavvy-tro.13): a
+// popup show → hide cycle must not leave any view with Y0=0 in the
+// final SetView log slice. Walks the scenario from the walkthrough:
+// push MENU, run a frame, pop, run another frame. After the final
+// frame, no popup view should occupy row 0; with dbsavvy-b1a
+// Screen.Clear() in place, no stale row-0 cells survive either, so
+// the only way row 0 could now show paint is via a SetView call we
+// missed — which this assertion fails on.
+func TestRunLayoutRow0_NoArtifact_AfterPopupCycle(t *testing.T) {
+	g, rec := buildTestGui(t)
+	menu := g.Registry().Menu
+	if menu == nil {
+		t.Fatal("registry.Menu is nil")
+	}
+	if err := g.ContextTree().Push(menu); err != nil {
+		t.Fatalf("Push(menu): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout post-push: %v", err)
+	}
+	if err := g.ContextTree().Pop(); err != nil {
+		t.Fatalf("Pop: %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout post-pop: %v", err)
+	}
+	if c, hit := row0Artifact(rec.AllSetViewCalls()); hit {
+		t.Errorf("post popup-cycle: view %q SetView'd with Y0=0 (rect=%+v) — blue-line candidate", c.Name, c)
+	}
+}
+
+// TestRunLayoutRow0_NoArtifact_AfterResize (dbsavvy-tro.13): popup
+// show → resize → popup hide. The resize transition is the canonical
+// reproducer for stale back-buffer paint (different SetView rect on
+// the second frame leaves the old border in the cell grid). With
+// Screen.Clear() the back-buffer is wiped each frame, and no SetView
+// in normal-size layout creates a Y0=0 rectangle, so row 0 stays clean
+// across the transition.
+func TestRunLayoutRow0_NoArtifact_AfterResize(t *testing.T) {
+	g, rec := buildTestGui(t)
+	menu := g.Registry().Menu
+	if menu == nil {
+		t.Fatal("registry.Menu is nil")
+	}
+	if err := g.ContextTree().Push(menu); err != nil {
+		t.Fatalf("Push(menu): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout pre-resize: %v", err)
+	}
+	if err := g.RunLayout(100, 30); err != nil {
+		t.Fatalf("RunLayout post-resize: %v", err)
+	}
+	if err := g.ContextTree().Pop(); err != nil {
+		t.Fatalf("Pop: %v", err)
+	}
+	if err := g.RunLayout(100, 30); err != nil {
+		t.Fatalf("RunLayout post-pop: %v", err)
+	}
+	if c, hit := row0Artifact(rec.AllSetViewCalls()); hit {
+		t.Errorf("post resize+pop: view %q SetView'd with Y0=0 (rect=%+v) — blue-line candidate", c.Name, c)
 	}
 }
 
