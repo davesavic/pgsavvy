@@ -22,6 +22,7 @@ func TestOrderedViewNamesCoversLiveContexts(t *testing.T) {
 		string(types.CONFIRMATION): {},
 		string(types.PROMPT):       {},
 		string(types.SUGGESTIONS):  {},
+		string(types.COMMAND_LINE): {},
 		string(types.LIMIT):        {},
 	}
 	got := map[string]struct{}{}

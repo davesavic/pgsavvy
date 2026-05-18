@@ -50,6 +50,7 @@ var allKnownContexts = []types.ContextKey{
 	types.CONFIRMATION,
 	types.PROMPT,
 	types.SUGGESTIONS,
+	types.COMMAND_LINE,
 	types.HISTORY,
 	types.WHICH_KEY,
 	types.LIMIT,

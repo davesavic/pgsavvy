@@ -55,9 +55,12 @@ const (
 
 	// CommandOpen — owned globally; opens the COMMAND_LINE context. `:`
 	// CommandCancel — owned by COMMAND_LINE context; closes it. `<esc>`
-	// (CommandCancel is consumed by dlp.7's COMMAND_LINE bindings.)
+	// CommandSubmit — owned by COMMAND_LINE context; submits the typed
+	// buffer to the ExRegistry. `<cr>`
+	// (All three are consumed by dlp.7's COMMAND_LINE bindings.)
 	CommandOpen   = "command.open"
 	CommandCancel = "command.cancel"
+	CommandSubmit = "command.submit"
 
 	// HelpCheatsheet — opens the auto-generated cheatsheet popup. `?`
 	HelpCheatsheet = "help.cheatsheet"
@@ -87,6 +90,7 @@ func AllActionIDs() []string {
 		MenuCancel,
 		CommandOpen,
 		CommandCancel,
+		CommandSubmit,
 		HelpCheatsheet,
 	}
 }

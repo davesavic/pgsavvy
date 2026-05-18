@@ -54,6 +54,7 @@ const (
 	CONFIRMATION      ContextKey = "confirmation"
 	PROMPT            ContextKey = "prompt"
 	SUGGESTIONS       ContextKey = "suggestions"
+	COMMAND_LINE      ContextKey = "command_line"
 	HISTORY           ContextKey = "history"
 	WHICH_KEY         ContextKey = "which_key"
 	GLOBAL            ContextKey = "global"

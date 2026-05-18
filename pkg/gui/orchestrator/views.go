@@ -24,6 +24,7 @@ func orderedViewNames() []string {
 		string(types.CONFIRMATION),
 		string(types.PROMPT),
 		string(types.SUGGESTIONS),
+		string(types.COMMAND_LINE),
 		string(types.LIMIT),
 	}
 }

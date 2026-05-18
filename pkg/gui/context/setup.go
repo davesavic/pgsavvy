@@ -12,7 +12,7 @@ import (
 // Concrete Context fields are exposed by name so the gui bootstrap (T10)
 // and the controller registration shim (T7) can target a specific
 // Context by reference without re-lookup. Flatten() and ByKey() walk all
-// 17 entries (11 live + 6 stub) for the cases where ordered iteration is
+// 19 entries (14 live + 5 stub) for the cases where ordered iteration is
 // preferable.
 type ContextTree struct {
 	// Live SIDE_CONTEXT instances.
@@ -27,6 +27,7 @@ type ContextTree struct {
 	Confirmation *ConfirmationContext
 	Prompt       *PromptContext
 	Suggestions  *SuggestionsContext
+	CommandLine  *CommandLineContext
 
 	// Live EXTRAS / GLOBAL / DISPLAY instances.
 	CommandLog *CommandLogContext
@@ -97,6 +98,11 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			ViewName: string(types.SUGGESTIONS),
 			Kind:     types.TEMPORARY_POPUP,
 		}), deps),
+		CommandLine: NewCommandLineContext(NewBaseContext(BaseContextOpts{
+			Key:      types.COMMAND_LINE,
+			ViewName: string(types.COMMAND_LINE),
+			Kind:     types.TEMPORARY_POPUP,
+		}), deps, deps.ModeStore),
 
 		// EXTRAS / GLOBAL / DISPLAY.
 		CommandLog: NewCommandLogContext(NewBaseContext(BaseContextOpts{
@@ -133,8 +139,8 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 }
 
 // Flatten returns every Context (live + stub) in a stable order. Order
-// is: side rail (5) -> popups (4) -> extras/global/display (4) -> stubs
-// (5). Total length is always 18.
+// is: side rail (5) -> popups (5) -> extras/global/display (4) -> stubs
+// (5). Total length is always 19.
 func (t *ContextTree) Flatten() []types.IBaseContext {
 	return []types.IBaseContext{
 		t.Connections,
@@ -146,6 +152,7 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 		t.Confirmation,
 		t.Prompt,
 		t.Suggestions,
+		t.CommandLine,
 		t.CommandLog,
 		t.Global,
 		t.Limit,
@@ -159,7 +166,7 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 }
 
 // ByKey returns the Context registered under the given key, or nil when
-// the key is unknown. Lookup is O(n) over Flatten() — 18 entries — which
+// the key is unknown. Lookup is O(n) over Flatten() — 19 entries — which
 // is cheaper than maintaining a separate map for this size.
 func (t *ContextTree) ByKey(key types.ContextKey) types.IBaseContext {
 	for _, c := range t.Flatten() {

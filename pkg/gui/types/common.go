@@ -68,4 +68,20 @@ type ContextTreeDeps struct {
 	// (dlp.8c) to a closure over the live TrieSet + ModeStore. Nil-safe:
 	// nil → no rows rendered.
 	WhichKeyRows func(scope ContextKey, prefix []ChordKey) []ChildRow
+
+	// ModeStore is the per-context modal-state store. The COMMAND_LINE
+	// context flips it to ModeCommand on focus so the Matcher routes
+	// printable runes via the Insert/Command passthrough fast path.
+	// Typed as the minimal ModeSetter interface so pkg/gui/context does
+	// not import pkg/gui/keys (the canonical *keys.ModeStore satisfies
+	// it structurally). Nil-safe: contexts must nil-check.
+	ModeStore ModeSetter
+}
+
+// ModeSetter is the minimal surface contexts use to flip / reset modal
+// state on focus transitions. *keys.ModeStore satisfies this; tests
+// substitute a fake.
+type ModeSetter interface {
+	Set(ctx ContextKey, mode Mode)
+	Reset(ctx ContextKey)
 }

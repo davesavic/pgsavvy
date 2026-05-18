@@ -186,6 +186,8 @@ func chooseRect(name string, dims map[string]ui.Dimensions, popup rect) (rect, b
 		string(types.PROMPT),
 		string(types.SUGGESTIONS):
 		return popup, true
+	case string(types.COMMAND_LINE):
+		return commandLineRect(dims), true
 	case string(types.LOG):
 		d, ok := dims["extras"]
 		if !ok {
@@ -198,6 +200,26 @@ func chooseRect(name string, dims map[string]ui.Dimensions, popup rect) (rect, b
 			return rect{}, false
 		}
 		return rect{X0: d.X0, Y0: d.Y0, X1: d.X1, Y1: d.Y1}, true
+	}
+}
+
+// commandLineRect returns a full-width, single-line strip anchored to
+// the bottom of the popup-overlay canvas. Used by the COMMAND_LINE
+// TEMPORARY_POPUP — colon ex-commands always render at the very bottom
+// of the screen, vim-style.
+func commandLineRect(dims map[string]ui.Dimensions) rect {
+	canvas, ok := dims["popup-overlay"]
+	if !ok {
+		return rect{}
+	}
+	if canvas.Y1-canvas.Y0 < 1 || canvas.X1-canvas.X0 < 1 {
+		return rect{X0: canvas.X0, Y0: canvas.Y0, X1: canvas.X1, Y1: canvas.Y1}
+	}
+	return rect{
+		X0: canvas.X0,
+		Y0: canvas.Y1 - 1,
+		X1: canvas.X1,
+		Y1: canvas.Y1,
 	}
 }
 
