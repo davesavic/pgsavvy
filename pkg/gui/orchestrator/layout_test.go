@@ -105,6 +105,41 @@ func TestRunLayoutOmitsOffStackPopups(t *testing.T) {
 	}
 }
 
+// TestRunLayoutCheatsheetFocusedAfterPush is the lc2 / Bug C regression
+// probe. Pushing the CHEATSHEET context onto the focus stack and
+// running a Layout pass must yield a SetCurrentView("cheatsheet") call
+// so the gocui runtime routes Esc to the binding registered for that
+// view at gui.go:339. Passing this assertion means the Layout's focus
+// handoff is correct; if a real-terminal Esc still fails to dismiss
+// the cheatsheet, the bug is downstream of the binding registration
+// (e.g., dispatch / modifier mismatch — see Bug A's modifier fix).
+func TestRunLayoutCheatsheetFocusedAfterPush(t *testing.T) {
+	g, rec := buildTestGui(t)
+	cs := g.Registry().Cheatsheet
+	if cs == nil {
+		t.Fatal("registry.Cheatsheet is nil")
+	}
+	if err := g.ContextTree().Push(cs); err != nil {
+		t.Fatalf("Push(cheatsheet): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if !rec.HasSetView(string(types.CHEATSHEET)) {
+		t.Fatal("CHEATSHEET SetView not invoked after Push")
+	}
+	found := false
+	for _, vn := range rec.SetCurrentViewLog {
+		if vn == string(types.CHEATSHEET) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("SetCurrentView(%q) never invoked; SetCurrentViewLog = %v", types.CHEATSHEET, rec.SetCurrentViewLog)
+	}
+}
+
 // TestRunLayoutCreatesPopupOnStack pushes MENU onto the focus stack
 // and asserts the Tier-3 popup pass creates the view. After Pop, the
 // next RunLayout pass must DeleteView the now-orphan popup.

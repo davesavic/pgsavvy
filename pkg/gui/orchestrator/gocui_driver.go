@@ -56,8 +56,13 @@ func (d *gocuiDriver) SetKeybinding(viewName string, key types.Key, mod types.Mo
 	wrapped := func(_ *gocui.Gui, _ *gocui.View) error {
 		return handler()
 	}
-	_ = mod // gocui.SetKeybinding takes (viewname, Key, handler); the modifier is folded into Key per gocui's tcell layer.
-	return d.g.SetKeybinding(viewName, key, wrapped)
+	// gocui.Key is a {keyName, str, mod} composite — Equals checks all
+	// three fields against the runtime-decoded event Key. Callers pass
+	// the modifier alongside (the GuiDriver surface mirrors gocui's
+	// older two-arg shape); rebuild the Key with the modifier baked in
+	// so bindings like Ctrl+C match the event the tcell layer emits.
+	keyWithMod := gocui.NewKey(key.KeyName(), key.Str(), mod)
+	return d.g.SetKeybinding(viewName, keyWithMod, wrapped)
 }
 
 // Gocui returns the underlying *gocui.Gui. Used by wireWithDriver to

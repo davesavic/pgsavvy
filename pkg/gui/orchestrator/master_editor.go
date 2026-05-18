@@ -26,15 +26,19 @@ type Dispatcher interface {
 // flushed to the view's TextArea via the Matcher's
 // OnInsertPendingFlush callback (D16).
 //
-// g may be nil — when nil the flush callback writes directly into the
-// captured *gocui.View without going through gocui.Update. Production
-// wiring passes the real *gocui.Gui so flushes are scheduled onto the
-// MainLoop.
+// g may be nil (testfake path) — when nil the timer-driven flush is a
+// no-op (the test path drives flushPendingSync directly with the
+// per-call *gocui.View). Production wiring passes the real *gocui.Gui
+// so flushes are scheduled onto the MainLoop, and the editor's
+// viewName is used to look up the live view at flush time (no cached
+// pointer; re-pushes create a fresh view and a cached pointer would
+// dangle).
 func NewMasterEditor(g *gocui.Gui, matcher *keys.Matcher, scope types.ContextKey) gocui.Editor {
 	e := &masterEditor{
-		gui:     g,
-		matcher: matcher,
-		scope:   scope,
+		gui:      g,
+		matcher:  matcher,
+		scope:    scope,
+		viewName: string(scope),
 	}
 	if matcher != nil {
 		matcher.OnInsertPendingFlush(func(s types.ContextKey, runes []rune) {
@@ -50,12 +54,12 @@ func NewMasterEditor(g *gocui.Gui, matcher *keys.Matcher, scope types.ContextKey
 // masterEditor is the concrete gocui.Editor that bridges gocui's
 // per-view editor mechanism and keys.Matcher chord dispatch.
 type masterEditor struct {
-	gui     *gocui.Gui
-	matcher *keys.Matcher
-	scope   types.ContextKey
+	gui      *gocui.Gui
+	matcher  *keys.Matcher
+	scope    types.ContextKey
+	viewName string
 
 	mu           sync.Mutex
-	view         *gocui.View
 	pendingRunes []rune
 }
 
@@ -63,7 +67,6 @@ type masterEditor struct {
 // convention: true = "handled, do not propagate"; false = "not handled,
 // let gocui fall through".
 func (e *masterEditor) Edit(v *gocui.View, key gocui.Key) bool {
-	e.captureView(v)
 	if e.matcher == nil {
 		return false
 	}
@@ -77,7 +80,6 @@ func (e *masterEditor) Edit(v *gocui.View, key gocui.Key) bool {
 // nil — applyResult tolerates that by skipping the DefaultEditor
 // delegation and the pending-buffer flush write.
 func (e *masterEditor) Dispatch(v *gocui.View, key gocui.Key) (keys.DispatchResult, error) {
-	e.captureView(v)
 	if e.matcher == nil {
 		return keys.FellThrough, nil
 	}
@@ -85,20 +87,6 @@ func (e *masterEditor) Dispatch(v *gocui.View, key gocui.Key) (keys.DispatchResu
 	result, err := e.matcher.Dispatch(e.scope, k)
 	e.applyResult(v, key, k, result)
 	return result, err
-}
-
-// captureView records the first non-nil *gocui.View it sees so the
-// flush callback (which runs on the Matcher's timer goroutine) can
-// write into the right view.
-func (e *masterEditor) captureView(v *gocui.View) {
-	if v == nil {
-		return
-	}
-	e.mu.Lock()
-	if e.view == nil {
-		e.view = v
-	}
-	e.mu.Unlock()
 }
 
 // applyResult performs the side effects implied by result and returns
@@ -172,34 +160,29 @@ func (e *masterEditor) flushPendingSync(v *gocui.View) {
 
 // flushRunes is invoked by the Matcher's timer goroutine when a
 // ModeInsert partial sequence times out. It schedules the write onto
-// the MainLoop via gocui.Update when a *gocui.Gui is available, or
-// performs the write inline when it is not (testfake path).
+// the MainLoop via gocui.Update; inside the closure the live view is
+// looked up via gui.View so the write hits the current view-instance
+// (re-pushes DeleteView + recreate, so any cached pointer would
+// dangle). When gui is nil (testfake path) the call is a no-op — the
+// test path drives flushPendingSync directly with the per-call view.
 func (e *masterEditor) flushRunes(runes []rune) {
 	if len(runes) == 0 {
 		return
 	}
 	e.clearPending()
-	e.mu.Lock()
-	v := e.view
-	e.mu.Unlock()
-	if e.gui != nil {
-		e.gui.Update(func(*gocui.Gui) error {
-			if v == nil || v.TextArea == nil {
-				return nil
-			}
-			for _, r := range runes {
-				v.TextArea.TypeCharacter(string(r))
-			}
-			v.RenderTextArea()
+	if e.gui == nil {
+		return
+	}
+	name := e.viewName
+	e.gui.Update(func(g *gocui.Gui) error {
+		v, err := g.View(name)
+		if err != nil || v == nil || v.TextArea == nil {
 			return nil
-		})
-		return
-	}
-	if v == nil || v.TextArea == nil {
-		return
-	}
-	for _, r := range runes {
-		v.TextArea.TypeCharacter(string(r))
-	}
-	v.RenderTextArea()
+		}
+		for _, r := range runes {
+			v.TextArea.TypeCharacter(string(r))
+		}
+		v.RenderTextArea()
+		return nil
+	})
 }

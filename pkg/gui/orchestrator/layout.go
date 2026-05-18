@@ -14,6 +14,15 @@ import (
 // LIMIT overlay only.
 const limitThreshold = 10
 
+// commandLineViewSetter is the duck-typed surface RunLayout uses to
+// plumb the live *gocui.View into CommandLineContext each frame the
+// COMMAND_LINE is on the focus stack. The orchestrator can't import
+// pkg/gui/context (it already does), but this type-assertion avoids
+// adding the SetView method to the wider IBaseContext surface.
+type commandLineViewSetter interface {
+	SetView(types.View)
+}
+
 // Layout satisfies gocui.Manager. The runtime invokes it on every
 // frame; we delegate to RunLayout so the same code path is testable
 // without a real *gocui.Gui.
@@ -99,15 +108,29 @@ func (g *Gui) RunLayout(w, h int) error {
 			if !ok {
 				continue
 			}
-			if _, err := g.driver.SetView(name, r.X0, r.Y0, r.X1, r.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
-				return err
+			view, setViewErr := g.driver.SetView(name, r.X0, r.Y0, r.X1, r.Y1, 0)
+			freshView := errors.Is(setViewErr, gocui.ErrUnknownView)
+			if setViewErr != nil && !freshView {
+				return setViewErr
 			}
 			// COMMAND_LINE is an editable view; the master Editor is bound
 			// to the view-instance. Each Push creates a fresh view (the
 			// prior was DeleteView'd here), so reattach on every frame the
-			// context is on the stack. SetMasterEditor is idempotent.
+			// context is on the stack. SetMasterEditor is idempotent. On
+			// fresh creation, prepopulate the TextArea with the leading
+			// ":" prompt and plumb the view handle through to the
+			// CommandLineContext so command.submit can read v.TextArea.
 			if ctx.GetKey() == types.COMMAND_LINE && g.commandLineEditor != nil {
 				_ = g.driver.SetMasterEditor(name, g.commandLineEditor)
+				if view != nil {
+					if freshView && view.TextArea != nil {
+						view.TextArea.TypeCharacter(":")
+						view.RenderTextArea()
+					}
+					if cl, ok := ctx.(commandLineViewSetter); ok {
+						cl.SetView(view)
+					}
+				}
 			}
 			_ = ctx.HandleRender()
 			_, _ = g.driver.SetViewOnTop(name)
@@ -151,10 +174,20 @@ func (g *Gui) RunLayout(w, h int) error {
 	// Focus the gocui current-view on the top of the focus stack. This
 	// replaces the swap-hook indirection that previously queued a
 	// SetCurrentView via driver.Update and fought the SetViewOnTop pass.
+	//
+	// dbsavvy-lc2 Bug C diagnostic: log the SetCurrentView target +
+	// error only when the focus changes between frames, so a real-
+	// terminal repro can confirm the focus handoff lands on the
+	// cheatsheet view when `?` opens it without spamming once-per-frame.
+	// Remove once verified.
 	if g.tree != nil {
 		if top := g.tree.Current(); top != nil {
 			if vn := top.GetViewName(); vn != "" {
-				_, _ = g.driver.SetCurrentView(vn)
+				_, err := g.driver.SetCurrentView(vn)
+				if vn != g.lastFocusedView && g.deps.Common != nil && g.deps.Common.Log != nil {
+					g.deps.Common.Log.Warnf("dbsavvy-lc2: SetCurrentView -> %q (err=%v)", vn, err)
+				}
+				g.lastFocusedView = vn
 			}
 		}
 	}

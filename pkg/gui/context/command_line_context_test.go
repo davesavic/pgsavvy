@@ -132,39 +132,28 @@ func TestCommandLineContext_NilModesIsSafe(t *testing.T) {
 	}
 }
 
+// HandleRender is a no-op for COMMAND_LINE post-lc2: the master
+// gocui.Editor's Passthrough path writes user-typed runes into
+// v.TextArea every keystroke and the orchestrator's Layout Tier-3
+// pass prepopulates the leading ":" prompt on fresh view creation.
+// HandleRender used to call SetContent here, but that was clearing
+// v.lines after RenderTextArea on every frame — overwriting the
+// typed text. The assertions below pin the no-op contract.
+func TestCommandLineContext_HandleRenderIsNoOp(t *testing.T) {
+	drv := &cmdLineCaptureDriver{}
+	c := newTestCommandLine(drv, nil)
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	if drv.writes != 0 {
+		t.Fatalf("SetContent writes = %d, want 0 (HandleRender must not call SetContent)", drv.writes)
+	}
+}
+
 func TestCommandLineContext_HandleRenderNilDriver(t *testing.T) {
 	c := newTestCommandLine(nil, nil)
 	if err := c.HandleRender(); err != nil {
 		t.Fatalf("HandleRender with nil driver: %v", err)
-	}
-}
-
-func TestCommandLineContext_HandleRenderWritesPrompt(t *testing.T) {
-	drv := &cmdLineCaptureDriver{}
-	c := newTestCommandLine(drv, nil)
-	c.SetBuffer("reload")
-	if err := c.HandleRender(); err != nil {
-		t.Fatalf("HandleRender: %v", err)
-	}
-	if drv.writes != 1 {
-		t.Fatalf("SetContent writes = %d, want 1", drv.writes)
-	}
-	if drv.lastView != string(types.COMMAND_LINE) {
-		t.Errorf("view = %q, want %q", drv.lastView, string(types.COMMAND_LINE))
-	}
-	if drv.lastContent != ":reload" {
-		t.Errorf("content = %q, want %q", drv.lastContent, ":reload")
-	}
-}
-
-func TestCommandLineContext_HandleRenderEmptyBufferShowsColon(t *testing.T) {
-	drv := &cmdLineCaptureDriver{}
-	c := newTestCommandLine(drv, nil)
-	if err := c.HandleRender(); err != nil {
-		t.Fatalf("HandleRender: %v", err)
-	}
-	if drv.lastContent != ":" {
-		t.Errorf("content = %q, want \":\"", drv.lastContent)
 	}
 }
 
