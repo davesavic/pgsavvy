@@ -2,6 +2,7 @@ package pg
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -384,10 +385,67 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 	return newPgRowStream(rows, qid, s.releaseInFlight), nil
 }
 
-// Explain returns a zero-value Plan and drivers.ErrNotImplemented in v1.
-func (s *Session) Explain(_ context.Context, _ models.Query, _ bool) (models.Plan, error) {
+// Explain runs EXPLAIN against q.SQL in both FORMAT JSON (parsed into
+// models.Plan.Node) and the default text format (joined into
+// models.Plan.RawText). When analyze is true, ANALYZE is included in both
+// statements — the caller is responsible for ensuring this is safe (no
+// side-effect-producing statements without a transaction; the auto-rollback
+// wrapping lives in the controller layer, task 66p.11). q.Args are forwarded
+// to pgx and substituted for $N placeholders in the EXPLAIN'd statement.
+//
+// Failure of EITHER the JSON or the text EXPLAIN returns an error and a
+// zero-value Plan; we deliberately do not silently degrade because both
+// formats are part of the contract surfaced to the UI tree renderer.
+//
+// q.Timeout, when positive, is applied as a context.WithTimeout to the
+// caller's ctx for the duration of the call. The inFlight guard is held for
+// the whole call.
+func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (models.Plan, error) {
 	defer s.guard()()
-	return models.Plan{}, drivers.ErrNotImplemented
+
+	if q.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, q.Timeout)
+		defer cancel()
+	}
+
+	jsonSQL := "EXPLAIN (FORMAT JSON) " + q.SQL
+	textSQL := "EXPLAIN " + q.SQL
+	if analyze {
+		jsonSQL = "EXPLAIN (ANALYZE, FORMAT JSON) " + q.SQL
+		textSQL = "EXPLAIN ANALYZE " + q.SQL
+	}
+
+	// JSON format: a single row, single column carrying the JSON document.
+	var rawJSON []byte
+	if err := s.conn.QueryRow(ctx, jsonSQL, q.Args...).Scan(&rawJSON); err != nil {
+		return models.Plan{}, wrapPgError(err)
+	}
+
+	plan, err := parsePlanJSON(rawJSON)
+	if err != nil {
+		return models.Plan{}, err
+	}
+
+	// Text format: one row per output line.
+	rows, err := s.conn.Query(ctx, textSQL, q.Args...)
+	if err != nil {
+		return models.Plan{}, wrapPgError(err)
+	}
+	defer rows.Close()
+	var lines []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			return models.Plan{}, wrapPgError(err)
+		}
+		lines = append(lines, line)
+	}
+	if err := rows.Err(); err != nil {
+		return models.Plan{}, wrapPgError(err)
+	}
+	plan.RawText = strings.Join(lines, "\n")
+	return plan, nil
 }
 
 // Begin returns an untyped-nil Transaction and drivers.ErrNotImplemented in

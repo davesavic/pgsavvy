@@ -78,13 +78,6 @@ func TestSessionReleaseInFlightIdempotent(t *testing.T) {
 	s.releaseInFlight()
 }
 
-func TestSessionExplainReturnsErrNotImplemented(t *testing.T) {
-	s := newStubSession()
-	plan, err := s.Explain(context.Background(), models.Query{SQL: "SELECT 1"}, false)
-	require.ErrorIs(t, err, drivers.ErrNotImplemented)
-	require.Equal(t, models.Plan{}, plan)
-}
-
 func TestSessionBeginReturnsUntypedNilOnErrNotImplemented(t *testing.T) {
 	s := newStubSession()
 	tx, err := s.Begin(context.Background(), models.TxOptions{})
