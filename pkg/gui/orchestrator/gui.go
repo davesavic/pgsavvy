@@ -123,6 +123,13 @@ type Gui struct {
 	// Warnings() accessor for the dlp.14 integration smoke test.
 	lastWarnings []keys.Warning
 
+	// commandLineEditor is the master gocui.Editor instance bound to the
+	// COMMAND_LINE view. Built by installKeyDispatch and (re-)attached by
+	// RunLayout's Tier-3 popup pass each time COMMAND_LINE appears on the
+	// focus stack: a fresh Push creates a new gocui view, so the editor
+	// must be reattached to that view-instance.
+	commandLineEditor gocui.Editor
+
 	// Test overrides for Matcher timing; nil means use cfg + defaults.
 	delayOverrides *keyDelayOverrides
 
@@ -306,8 +313,8 @@ func (g *Gui) wireWithDriver() error {
 
 	// Cheatsheet popup: capture the focused scope, hand it to the
 	// CheatsheetContext, then push the context onto the focus stack.
-	// renderCheatsheetOverlay (layout.go) renders the popup on the
-	// next layout pass; <esc> pops it back to the previous context.
+	// RunLayout's Tier-3 popup pass (layout.go) renders the popup on
+	// the next layout frame; <esc> pops it back to the previous context.
 	_ = g.cmdRegistry.Register(&commands.Command{
 		ID:          commands.HelpCheatsheet,
 		Description: "Show cheatsheet",
@@ -421,13 +428,11 @@ func (g *Gui) wireWithDriver() error {
 	}
 
 	// Cancel any pending matcher partial / which-key on focus change.
+	// SetCurrentView is plumbed inline by RunLayout (Tier 4 final step)
+	// rather than via a swap hook, so it can't race the Layout pass's
+	// SetViewOnTop loop.
 	g.tree.RegisterSwapHook(matcher.Cancel)
 	g.tree.RegisterSwapHook(g.whichkey.Hide)
-
-	// Plumb the focus stack into gocui.SetCurrentView so view-specific
-	// keybindings can match — gocui.execKeybindings rejects view-specific
-	// bindings when g.currentView is nil or its name doesn't match.
-	g.tree.RegisterSwapHook(g.syncCurrentViewFromFocus)
 
 	// Push the initial CONNECTIONS context.
 	return g.tree.Push(g.registry.Connections)
@@ -465,10 +470,11 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 			if view == "" {
 				continue
 			}
-			ed := NewMasterEditor(ngocui, g.matcher, key)
-			if err := g.driver.SetMasterEditor(view, ed); err != nil {
-				return fmt.Errorf("gui: SetMasterEditor(%s): %w", view, err)
-			}
+			// Stash the master Editor on the Gui. RunLayout's Tier-3 popup
+			// pass attaches it to the COMMAND_LINE view-instance every
+			// frame the context is on the focus stack — re-Push creates a
+			// fresh view, and gocui's SetMasterEditor is idempotent.
+			g.commandLineEditor = NewMasterEditor(ngocui, g.matcher, key)
 			continue
 		}
 
@@ -542,27 +548,6 @@ type shimKey struct {
 	view string
 	gk   types.Key
 	gmod types.Modifier
-}
-
-// syncCurrentViewFromFocus enqueues a SetCurrentView call for the
-// current top of the focus stack. Viewless contexts (GLOBAL_CONTEXT
-// with GetViewName == "") are skipped.
-func (g *Gui) syncCurrentViewFromFocus() {
-	if g.driver == nil || g.tree == nil {
-		return
-	}
-	top := g.tree.Current()
-	if top == nil {
-		return
-	}
-	viewName := top.GetViewName()
-	if viewName == "" {
-		return
-	}
-	g.driver.Update(func() error {
-		_, _ = g.driver.SetCurrentView(viewName)
-		return nil
-	})
 }
 
 // RunAndHandleError is the production entry. It builds the driver,

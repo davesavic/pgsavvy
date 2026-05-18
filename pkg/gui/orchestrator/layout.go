@@ -22,9 +22,16 @@ func (g *Gui) Layout(ng *gocui.Gui) error {
 	return g.RunLayout(w, h)
 }
 
-// RunLayout positions every live (non-STUB) Context's view inside a
-// terminal of the supplied dimensions. Below the limit threshold the
-// pass renders only the LIMIT overlay (D11 / terminal-too-small AC).
+// RunLayout positions every live Context's view inside a terminal of
+// the supplied dimensions, dispatching per-Kind. Side rails + extras
+// are always tiled. Temporary popups + display contexts are created
+// from the focus stack (bottom→top so the top of the stack ends up at
+// the top of gocui's z-order); contexts no longer on the stack are
+// DeleteView'd so empty popup rectangles don't punch holes through the
+// screen under gocui.SupportOverlaps=false.
+//
+// Below the limit threshold this pass renders only the LIMIT overlay
+// (D11 / terminal-too-small AC).
 //
 // Errors from SetView returning gocui.ErrUnknownView are tolerated:
 // gocui surfaces that sentinel as "newly created" on first SetView,
@@ -39,51 +46,148 @@ func (g *Gui) RunLayout(w, h int) error {
 
 	dims := ui.GetWindowDimensions(w, h)
 
-	// Compute a centred popup rectangle covering ~50% of the available
-	// canvas inside popup-overlay.
-	popup := centeredRect(dims["popup-overlay"], 0.5, 0.5)
-
-	for _, name := range orderedViewNames() {
-		ctx := g.registry.ByKey(types.ContextKey(name))
-		if ctx == nil || ctx.GetKind() == types.STUB {
-			continue
-		}
-		rect, ok := chooseRect(name, dims, popup)
-		if !ok {
-			continue
-		}
-		if _, err := g.driver.SetView(name, rect.X0, rect.Y0, rect.X1, rect.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
-			return err
-		}
-	}
-
 	// Limit overlay is not active at this size; best-effort delete it
 	// so it doesn't linger from a previous tiny-terminal frame.
 	_ = g.driver.DeleteView(string(types.LIMIT))
 
-	// Raise everything to its declared z-order. Failures here are not
-	// load-bearing — a missing view simply hasn't been created yet.
-	for _, name := range orderedViewNames() {
-		_, _ = g.driver.SetViewOnTop(name)
-	}
-
-	// Best-effort render pass on every live context. DISPLAY_CONTEXT
-	// instances (LimitContext, WhichKeyContext) are rendered from
-	// their dedicated overlay functions instead; invoking their
-	// HandleRender here would queue a Write to a view that may not have
-	// been created for this frame, surfacing gocui.ErrUnknownView out of
-	// the MainLoop.
+	// Tier 1: always-on tiled contexts (side rails + extras). These are
+	// created every frame regardless of focus-stack state.
 	for _, ctx := range g.registry.Flatten() {
-		if ctx == nil || ctx.GetKind() == types.STUB || ctx.GetKind() == types.DISPLAY_CONTEXT {
+		if ctx == nil {
 			continue
+		}
+		kind := ctx.GetKind()
+		if kind != types.SIDE_CONTEXT && kind != types.EXTRAS_CONTEXT {
+			continue
+		}
+		name := ctx.GetViewName()
+		if name == "" {
+			continue
+		}
+		d, ok := dims[name]
+		if !ok && kind == types.EXTRAS_CONTEXT {
+			d, ok = dims["extras"]
+		}
+		if !ok {
+			continue
+		}
+		if _, err := g.driver.SetView(name, d.X0, d.Y0, d.X1, d.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+			return err
 		}
 		_ = ctx.HandleRender()
 	}
 
+	// Tier 3: focus-stack-driven popups (TEMPORARY_POPUP +
+	// DISPLAY_CONTEXT). Walk bottom→top so SetViewOnTop ordering matches
+	// the stack ordering. Contexts that aren't on the stack get their
+	// view DeleteView'd so empty popup rects don't occlude side panels.
+	onStack := map[types.ContextKey]struct{}{}
+	if g.tree != nil {
+		for _, ctx := range g.tree.Stack() {
+			if ctx == nil {
+				continue
+			}
+			kind := ctx.GetKind()
+			if kind != types.TEMPORARY_POPUP && kind != types.DISPLAY_CONTEXT {
+				continue
+			}
+			name := ctx.GetViewName()
+			if name == "" {
+				continue
+			}
+			r, ok := popupRectFor(ctx.GetKey(), dims, w, h)
+			if !ok {
+				continue
+			}
+			if _, err := g.driver.SetView(name, r.X0, r.Y0, r.X1, r.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+				return err
+			}
+			// COMMAND_LINE is an editable view; the master Editor is bound
+			// to the view-instance. Each Push creates a fresh view (the
+			// prior was DeleteView'd here), so reattach on every frame the
+			// context is on the stack. SetMasterEditor is idempotent.
+			if ctx.GetKey() == types.COMMAND_LINE && g.commandLineEditor != nil {
+				_ = g.driver.SetMasterEditor(name, g.commandLineEditor)
+			}
+			_ = ctx.HandleRender()
+			_, _ = g.driver.SetViewOnTop(name)
+			onStack[ctx.GetKey()] = struct{}{}
+		}
+	}
+
+	// Tear down any TEMPORARY_POPUP / DISPLAY_CONTEXT views that aren't
+	// currently on the focus stack. WHICH_KEY and LIMIT are managed by
+	// their dedicated overlay paths (notifier-driven / tiny-terminal
+	// branch respectively) and excluded here.
+	for _, ctx := range g.registry.Flatten() {
+		if ctx == nil {
+			continue
+		}
+		kind := ctx.GetKind()
+		if kind != types.TEMPORARY_POPUP && kind != types.DISPLAY_CONTEXT {
+			continue
+		}
+		key := ctx.GetKey()
+		if key == types.WHICH_KEY || key == types.LIMIT {
+			continue
+		}
+		if _, ok := onStack[key]; ok {
+			continue
+		}
+		name := ctx.GetViewName()
+		if name == "" {
+			continue
+		}
+		_ = g.driver.DeleteView(name)
+	}
+
+	// Tier 4: shy overlays driven by notifier visibility (not by stack
+	// membership). LIMIT is handled in the early-return tiny-terminal
+	// branch and never needs touching here.
 	if err := g.renderWhichKeyOverlay(w, h, dims); err != nil {
 		return err
 	}
-	return g.renderCheatsheetOverlay(w, h, dims)
+
+	// Focus the gocui current-view on the top of the focus stack. This
+	// replaces the swap-hook indirection that previously queued a
+	// SetCurrentView via driver.Update and fought the SetViewOnTop pass.
+	if g.tree != nil {
+		if top := g.tree.Current(); top != nil {
+			if vn := top.GetViewName(); vn != "" {
+				_, _ = g.driver.SetCurrentView(vn)
+			}
+		}
+	}
+
+	return nil
+}
+
+// popupRectFor maps a popup ContextKey to its SetView rectangle. The
+// rectangle is computed against dims["popup-overlay"] (the centred
+// inner canvas inside the side rails / extras).
+func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int) (rect, bool) {
+	switch key {
+	case types.MENU, types.CONFIRMATION, types.PROMPT, types.SUGGESTIONS:
+		canvas, ok := dims["popup-overlay"]
+		if !ok {
+			return rect{}, false
+		}
+		return centeredRect(canvas, 0.5, 0.5), true
+	case types.COMMAND_LINE:
+		r := commandLineRect(dims)
+		if r == (rect{}) {
+			return rect{}, false
+		}
+		return r, true
+	case types.CHEATSHEET:
+		canvas, ok := dims["popup-overlay"]
+		if !ok {
+			canvas = ui.Dimensions{X0: 0, Y0: 0, X1: w - 1, Y1: h - 1}
+		}
+		return centeredRectMaxSize(canvas, cheatsheetMaxCols, cheatsheetMaxRows), true
+	default:
+		return rect{}, false
+	}
 }
 
 // renderLimitOverlay sizes a single LIMIT view to the full canvas and
@@ -154,51 +258,6 @@ func (g *Gui) renderWhichKeyOverlay(w, h int, dims map[string]ui.Dimensions) err
 	return nil
 }
 
-// renderCheatsheetOverlay positions the CHEATSHEET view centred inside
-// popup-overlay and invokes CheatsheetContext.HandleRender — but only
-// when CHEATSHEET is currently on the focus stack. When absent, the
-// view is best-effort deleted so it doesn't linger from a prior frame.
-//
-// Defensive nil-guards mirror renderWhichKeyOverlay: a missing
-// registry, missing Cheatsheet context, or missing focus stack
-// collapses to a no-op.
-func (g *Gui) renderCheatsheetOverlay(w, h int, dims map[string]ui.Dimensions) error {
-	if g.registry == nil || g.registry.Cheatsheet == nil {
-		return nil
-	}
-	if !g.cheatsheetOnStack() {
-		_ = g.driver.DeleteView(string(types.CHEATSHEET))
-		return nil
-	}
-	canvas, ok := dims["popup-overlay"]
-	if !ok {
-		canvas = ui.Dimensions{X0: 0, Y0: 0, X1: w - 1, Y1: h - 1}
-	}
-	r := centeredRectMaxSize(canvas, cheatsheetMaxCols, cheatsheetMaxRows)
-	if _, err := g.driver.SetView(string(types.CHEATSHEET), r.X0, r.Y0, r.X1, r.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
-		return err
-	}
-	_ = g.registry.Cheatsheet.HandleRender()
-	_, _ = g.driver.SetViewOnTop(string(types.CHEATSHEET))
-	return nil
-}
-
-// cheatsheetOnStack reports whether the CHEATSHEET context is currently
-// present on the focus stack (it is a DISPLAY_CONTEXT, so Push just
-// appends rather than wiping/replacing). Returns false when the focus
-// tree is nil.
-func (g *Gui) cheatsheetOnStack() bool {
-	if g.tree == nil {
-		return false
-	}
-	for _, c := range g.tree.Stack() {
-		if c != nil && c.GetKey() == types.CHEATSHEET {
-			return true
-		}
-	}
-	return false
-}
-
 // centeredRectMaxSize returns a rectangle no larger than maxCols ×
 // maxRows centred inside canvas. When the canvas is smaller than the
 // requested max, the rect fills the canvas. Ensures min dimensions of
@@ -261,39 +320,6 @@ func bottomRightRect(canvas ui.Dimensions, maxCols, maxRows int) rect {
 // rect is the (X0, Y0, X1, Y1) tuple Layout passes to SetView.
 type rect struct {
 	X0, Y0, X1, Y1 int
-}
-
-// chooseRect maps a view name onto the window-arrangement output. The
-// popup overlay rect is shared by every popup view; side rails resolve
-// to their named dims entry.
-func chooseRect(name string, dims map[string]ui.Dimensions, popup rect) (rect, bool) {
-	switch name {
-	case string(types.MENU),
-		string(types.CONFIRMATION),
-		string(types.PROMPT),
-		string(types.SUGGESTIONS):
-		return popup, true
-	case string(types.CHEATSHEET):
-		// CHEATSHEET is positioned by renderCheatsheetOverlay (it is a
-		// DISPLAY_CONTEXT, rendered only when on the focus stack). The
-		// main layout pass must NOT create the view eagerly — that would
-		// leave an empty popup on screen at startup.
-		return rect{}, false
-	case string(types.COMMAND_LINE):
-		return commandLineRect(dims), true
-	case string(types.LOG):
-		d, ok := dims["extras"]
-		if !ok {
-			return rect{}, false
-		}
-		return rect{X0: d.X0, Y0: d.Y0, X1: d.X1, Y1: d.Y1}, true
-	default:
-		d, ok := dims[name]
-		if !ok {
-			return rect{}, false
-		}
-		return rect{X0: d.X0, Y0: d.Y0, X1: d.X1, Y1: d.Y1}, true
-	}
 }
 
 // commandLineRect returns a full-width, single-line strip anchored to

@@ -80,3 +80,64 @@ func TestRunLayoutNoQueuedWriteErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestRunLayoutOmitsOffStackPopups asserts the per-Kind dispatch
+// contract: popup contexts (MENU/CONFIRMATION/PROMPT/SUGGESTIONS/
+// COMMAND_LINE/CHEATSHEET) must NOT have SetView called when they are
+// absent from the focus stack — otherwise empty popup rectangles
+// occlude the screen under gocui.SupportOverlaps=false.
+func TestRunLayoutOmitsOffStackPopups(t *testing.T) {
+	g, rec := buildTestGui(t)
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	for _, name := range []string{
+		string(types.MENU),
+		string(types.CONFIRMATION),
+		string(types.PROMPT),
+		string(types.SUGGESTIONS),
+		string(types.COMMAND_LINE),
+		string(types.CHEATSHEET),
+	} {
+		if rec.HasSetView(name) {
+			t.Errorf("popup %q must not be laid out when off the focus stack", name)
+		}
+	}
+}
+
+// TestRunLayoutCreatesPopupOnStack pushes MENU onto the focus stack
+// and asserts the Tier-3 popup pass creates the view. After Pop, the
+// next RunLayout pass must DeleteView the now-orphan popup.
+func TestRunLayoutCreatesPopupOnStack(t *testing.T) {
+	g, rec := buildTestGui(t)
+	menu := g.Registry().Menu
+	if menu == nil {
+		t.Fatal("registry.Menu is nil")
+	}
+	if err := g.ContextTree().Push(menu); err != nil {
+		t.Fatalf("Push(menu): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout post-push: %v", err)
+	}
+	if !rec.HasSetView(string(types.MENU)) {
+		t.Fatal("MENU SetView not invoked after Push")
+	}
+
+	if err := g.ContextTree().Pop(); err != nil {
+		t.Fatalf("Pop: %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout post-pop: %v", err)
+	}
+	found := false
+	for _, name := range rec.DeleteViews {
+		if name == string(types.MENU) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("MENU DeleteView not invoked after Pop")
+	}
+}
