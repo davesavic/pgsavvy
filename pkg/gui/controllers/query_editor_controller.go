@@ -44,7 +44,9 @@ const resultTabLabelMax = 40
 //   - reading the buffer + cursor via EditorBufferReader
 //   - splitting statements via pkg/gui/editor.SplitStatements
 //   - surfacing toasts (no statement / no session / disabled by driver)
-//   - wiring the <leader>x DisabledReasonStatic based on driver caps
+//   - wiring the <leader>x GetDisabled closure that consults the live
+//     QueryRunner.Capabilities at dispatch time (driver caps may not be
+//     known until Bind() runs post-Connect)
 //
 // dbsavvy-66p.11.
 type QueryEditorController struct {
@@ -96,10 +98,10 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 }
 
 // RegisterActions registers the six query-editor commands with reg.
-// The <leader>x cancel command has its DisabledReasonStatic set when
-// the active driver lacks live-cancel support; the field is read once
-// at registration time and never re-set (driver swap = reconnect =
-// fresh bootstrap = fresh Registry).
+// The <leader>x cancel command uses a GetDisabled closure that reads
+// q.helpers.QueryRunner.Capabilities() at dispatch time, so a runner
+// bootstrapped before Connect (caps={}) is upgraded transparently
+// once Bind() lands the real driver caps.
 func (q *QueryEditorController) RegisterActions(reg *commands.Registry) {
 	if reg == nil {
 		return
@@ -131,14 +133,23 @@ func (q *QueryEditorController) RegisterActions(reg *commands.Registry) {
 		Handler:     q.handleExplainAnalyze,
 	})
 
+	// Capture the runner pointer; QueryRunner.Capabilities() reads
+	// through an atomic.Pointer so post-Bind caps are observed here.
+	runner := q.helpers.QueryRunner
 	cancel := &commands.Command{
 		ID:          commands.QueryCancel,
 		Description: "Cancel the active query",
 		Tag:         "Query",
 		Handler:     q.handleCancel,
-	}
-	if q.helpers.QueryRunner != nil && !q.helpers.QueryRunner.Capabilities().HasLiveCancel {
-		cancel.DisabledReasonStatic = tr.DisabledNoLiveCancel
+		GetDisabled: func(commands.ExecCtx) (string, bool) {
+			if runner == nil {
+				return "", false
+			}
+			if !runner.Capabilities().HasLiveCancel {
+				return tr.DisabledNoLiveCancel, true
+			}
+			return "", false
+		},
 	}
 	_ = reg.Register(cancel)
 

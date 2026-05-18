@@ -170,6 +170,53 @@ func TestQueryEditorCancelEnabledWhenDriverSupportsLiveCancel(t *testing.T) {
 	}
 }
 
+// TestQueryEditorController_CancelDisabled_RecomputesAfterBind locks in
+// dbsavvy-3tt: the <leader>x disabled state must be evaluated against
+// the LIVE QueryRunner.Capabilities() at dispatch time, not captured at
+// RegisterActions time. Production bootstrap wires the runner with
+// caps={} (HasLiveCancel=false) before Connect; once Bind() lands the
+// real driver caps, the same registered Command must flip to enabled
+// without re-registration.
+func TestQueryEditorController_CancelDisabled_RecomputesAfterBind(t *testing.T) {
+	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: false})
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, ok := reg.Get(commands.QueryCancel)
+	if !ok || cmd == nil {
+		t.Fatal("QueryCancel not registered")
+	}
+
+	// Baseline: bootstrap runner reports HasLiveCancel=false; cancel
+	// should be disabled with the localised reason.
+	want := i18n.EnglishTranslationSet().DisabledNoLiveCancel
+	reason, disabled := cmd.Disabled(commands.ExecCtx{Scope: types.QUERY_EDITOR})
+	if !disabled {
+		t.Fatalf("pre-Bind: cancel should be disabled when caps.HasLiveCancel=false")
+	}
+	if reason != want {
+		t.Fatalf("pre-Bind: reason = %q, want %q", reason, want)
+	}
+
+	// Simulate the post-Connect Bind that publishes real driver caps.
+	b.Runner.Bind(nil, drivers.Capabilities{HasLiveCancel: true})
+
+	// Same Command pointer (no re-registration): must now report
+	// enabled and an empty reason.
+	cmd2, _ := reg.Get(commands.QueryCancel)
+	if cmd2 != cmd {
+		t.Fatalf("registry returned a different Command after Bind; pre=%p post=%p", cmd, cmd2)
+	}
+	reason, disabled = cmd2.Disabled(commands.ExecCtx{Scope: types.QUERY_EDITOR})
+	if disabled {
+		t.Fatalf("post-Bind: cancel should be enabled when caps.HasLiveCancel=true; got disabled with reason %q", reason)
+	}
+	if reason != "" {
+		t.Fatalf("post-Bind: reason = %q, want empty", reason)
+	}
+}
+
 func TestQueryEditorHandleCancelToastsWhenDisabled(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: false})
 	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag)

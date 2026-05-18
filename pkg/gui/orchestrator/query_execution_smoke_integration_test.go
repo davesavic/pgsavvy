@@ -292,14 +292,11 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 			t.Fatalf("RowCount = %d, want 3", got)
 		}
 		// Title format: "result %d: %s (%s, %d rows)" where %d = slot+1.
-		// AC text says "tab title contains 'result 0:'" — the live
-		// format is 1-indexed in the title (slot+1) so the first tab's
-		// title starts with "result 1:". Adapted assertion: substring
-		// "result" + the SQL prefix + the row count — the load-bearing
-		// observable from the AC.
+		// Tabs are 1-indexed in user-facing UI (dbsavvy-ipb resolved via
+		// option (a)) so the first tab's title starts with "result 1:".
 		title := active.Title()
-		if !strings.Contains(title, "result") {
-			t.Fatalf("Title = %q; expected to contain 'result'", title)
+		if !strings.Contains(title, "result 1:") {
+			t.Fatalf("Title = %q; expected to contain 'result 1:'", title)
 		}
 		if !strings.Contains(title, "3 rows") {
 			t.Fatalf("Title = %q; expected to contain '3 rows'", title)
@@ -564,35 +561,9 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 	})
 
 	t.Run("step05_leader_x_enabled_on_pg", func(t *testing.T) {
-		// AC: "<leader>x cancels the active tab's stream when
-		// Capabilities.HasLiveCancel:true; is hard-disabled with
-		// DisabledReason otherwise"
-		// On the pg driver Capabilities.HasLiveCancel == true after
-		// dbsavvy-66p.4 (verified directly on bag.QueryRunner).
-		//
-		// DESIGN GAP: QueryEditorController.RegisterActions captures
-		// the DisabledReasonStatic from the QueryRunner's caps at
-		// REGISTRATION time (wireWithDriver, before any Connect has
-		// happened), so the runner reports caps={} → HasLiveCancel
-		// false → DisabledReasonStatic gets set to
-		// Tr.DisabledNoLiveCancel and the field is never recomputed
-		// after Bind(). The shipped registry therefore reports
-		// query.cancel as DISABLED on a wired pg session that should
-		// support live-cancel. This is a real wiring bug — the
-		// DisabledReason needs to be evaluated dynamically (via
-		// GetDisabled) rather than captured statically. Filed as a
-		// follow-up.
-		//
-		// Adapted assertion: verify the LIVE capability on bag.
-		// QueryRunner (post-Connect) reports HasLiveCancel=true, and
-		// that the handler's runtime fall-back (the
-		// non-Capabilities().HasLiveCancel branch in handleCancel)
-		// would NOT toast a "no live cancel" message — which is the
-		// behaviour the user would actually observe if the static
-		// DisabledReason were lifted. Both surfaces are the
-		// load-bearing observable: the FIRST cell of the AC ("cancels
-		// the stream when HasLiveCancel:true") is satisfied by the
-		// runner reporting true.
+		// AC (dbsavvy-3tt): with a wired pg session reporting
+		// Capabilities.HasLiveCancel=true, query.cancel must resolve to
+		// enabled with an empty DisabledReason in ExecCtx{Scope: QUERY_EDITOR}.
 		caps := bag.QueryRunner.Capabilities()
 		if !caps.HasLiveCancel {
 			t.Fatalf("pg driver Capabilities.HasLiveCancel = false; expected true after 66p.4")
@@ -602,10 +573,11 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 			t.Fatal("query.cancel not registered")
 		}
 		reason, disabled := cmd.Disabled(commands.ExecCtx{Mode: types.ModeNormal, Scope: types.QUERY_EDITOR})
-		if disabled && reason == s.tr.DisabledNoLiveCancel {
-			t.Logf("KNOWN GAP: query.cancel DisabledReasonStatic frozen to %q at register-time pre-Connect — needs dynamic GetDisabled wiring. AC satisfied by caps.HasLiveCancel=true at bag layer.", reason)
-		} else if disabled {
-			t.Fatalf("query.cancel disabled with unexpected reason %q", reason)
+		if disabled {
+			t.Fatalf("query.cancel should be enabled when Capabilities.HasLiveCancel=true after Connect; got disabled with reason %q", reason)
+		}
+		if reason != "" {
+			t.Fatalf("query.cancel reported empty disabled=false but non-empty reason %q", reason)
 		}
 	})
 
