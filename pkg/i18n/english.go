@@ -137,7 +137,7 @@ func EnglishTranslationSet() *TranslationSet {
 		FirstRunTipTitle: "Welcome to dbsavvy",
 		FirstRunTipBody:  "Press ? at any time to see available keys. Press a to add your first connection.",
 
-		EmptyConnectionsHint: "No connections yet.\nPress a to add a connection, or ? for help.",
+		EmptyConnectionsHint: "No connections yet.\nPress a to add",
 
 		UnhideConfirmationTitle: "Unhide schema?",
 		UnhideConfirmationBody:  "⚠ This schema was previously hidden. Unhide and show it again?",

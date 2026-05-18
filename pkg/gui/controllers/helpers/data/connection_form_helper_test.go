@@ -349,6 +349,12 @@ func TestNewEmptyStateHook(t *testing.T) {
 		if hint != tr.EmptyConnectionsHint {
 			t.Errorf("hint = %q; want %q", hint, tr.EmptyConnectionsHint)
 		}
+		// Pin the exact copy so it can't accidentally regrow and re-truncate
+		// in the connections rail (dbsavvy-tro.8).
+		const want = "No connections yet.\nPress a to add"
+		if hint != want {
+			t.Errorf("hint = %q; want %q", hint, want)
+		}
 	})
 	t.Run("non-empty list", func(t *testing.T) {
 		hook := NewEmptyStateHook(tr, func() []models.Connection {
