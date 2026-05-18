@@ -20,17 +20,21 @@ const AppStatusViewName = "app_status"
 // Pulled into its own struct so the orchestrator can construct it once
 // at wireWithDriver time and reuse the value for every render pass.
 type StatusRenderDeps struct {
-	Driver       types.GuiDriver
-	Tree         *gui.ContextTree
-	KbRuntime    *keys.Runtime
-	ActiveConn   func() *models.Connection
-	Options      func() []string
-	Tr           *i18n.TranslationSet
+	Driver     types.GuiDriver
+	Tree       *gui.ContextTree
+	KbRuntime  *keys.Runtime
+	ActiveConn func() *models.Connection
+	Tr         *i18n.TranslationSet
 }
 
 // RenderStatusLine resolves the focused context's mode label, builds the
 // status line via status.BuildStatusLine, and writes it to the
 // AppStatus view through the driver.
+//
+// The options slot is populated by CollectOptionsForScope using the
+// focused (mode, scope) pair from the focus tree plus the live
+// TrieSet snapshot held by the Matcher; an empty result is rendered
+// as no options (BuildStatusLine still appends the "?: more" hint).
 //
 // Skips silently when (a) the driver is nil, (b) the KbRuntime or its
 // ModeStore is nil (defensive bootstrap-order guard per dlp.9 review
@@ -49,21 +53,25 @@ func RenderStatusLine(d StatusRenderDeps) {
 	}
 
 	focused := d.Tree.Current()
-	var label string
+	var (
+		label   string
+		options []string
+	)
 	if focused != nil {
 		key := focused.GetKey()
 		mode := d.KbRuntime.ModeStore.Get(key)
 		label = status.LabelForMode(mode, d.Tr, key.IsEditable())
+
+		var trieSet *keys.TrieSet
+		if d.KbRuntime.Matcher != nil {
+			trieSet = d.KbRuntime.Matcher.TrieSet()
+		}
+		options = CollectOptionsForScope(trieSet, mode, key, d.Tr)
 	}
 
 	var conn *models.Connection
 	if d.ActiveConn != nil {
 		conn = d.ActiveConn()
-	}
-
-	var options []string
-	if d.Options != nil {
-		options = d.Options()
 	}
 
 	line := status.BuildStatusLine(label, conn, options, d.Tr)

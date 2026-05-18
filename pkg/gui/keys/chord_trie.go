@@ -10,10 +10,12 @@ import (
 // completes the node graph is treated as immutable; Matcher / Walk /
 // Lookup read it without locking.
 type trieNode struct {
-	children map[Key]*trieNode
-	action   *commands.Command
-	source   Source
-	origin   string
+	children  map[Key]*trieNode
+	action    *commands.Command
+	source    Source
+	origin    string
+	showInBar bool
+	opensMenu bool
 }
 
 // LookupResult is what Lookup returns. It is a value type so callers
@@ -36,6 +38,13 @@ type LookupResult struct {
 	IsLeaf      bool
 	HasChildren bool
 	Found       bool
+
+	// ShowInBar / OpensMenu are leaf-only cosmetic flags lifted from the
+	// originating ChordBinding. Interior-node results carry the zero
+	// value. Consumed by the options-bar collector (dlp.12) and reserved
+	// for the menu-routing flow.
+	ShowInBar bool
+	OpensMenu bool
 }
 
 // ChordTrie holds the chord prefix tree for a single (Mode, Scope)
@@ -70,6 +79,8 @@ func (t *ChordTrie) Lookup(seq []Key) LookupResult {
 		IsLeaf:      node.action != nil,
 		HasChildren: len(node.children) > 0,
 		Found:       true,
+		ShowInBar:   node.showInBar,
+		OpensMenu:   node.opensMenu,
 	}
 	return res
 }
@@ -144,6 +155,8 @@ func walkNode(node *trieNode, prefix []Key, fn func([]Key, LookupResult)) {
 			IsLeaf:      true,
 			HasChildren: len(node.children) > 0,
 			Found:       true,
+			ShowInBar:   node.showInBar,
+			OpensMenu:   node.opensMenu,
 		})
 	}
 	// Deterministic ordering: sort children by stringified Key so test
@@ -272,6 +285,8 @@ func (b *TrieBuilder) insert(cb *ChordBinding, cmd *commands.Command) {
 	node.action = cmd
 	node.source = cb.Source
 	node.origin = cb.Origin
+	node.showInBar = cb.ShowInBar
+	node.opensMenu = cb.OpensMenu
 }
 
 // insertUser is the user-tier path. It runs the same collision-detection
@@ -314,6 +329,8 @@ func (b *TrieBuilder) insertUser(cb *ChordBinding, cmd *commands.Command) {
 	node.action = cmd
 	node.source = cb.Source
 	node.origin = cb.Origin
+	node.showInBar = cb.ShowInBar
+	node.opensMenu = cb.OpensMenu
 }
 
 func (b *TrieBuilder) detectAmbiguousPrefixes(node *trieNode, prefix []Key) {
