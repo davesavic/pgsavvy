@@ -15,6 +15,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/spf13/afero"
 
+	"github.com/davesavic/dbsavvy/pkg/cheatsheet"
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
@@ -231,6 +232,26 @@ func (g *Gui) wireWithDriver() error {
 	g.matcher = matcher
 	runtime := keys.NewRuntime(g.cmdRegistry, matcher, g.modeStore, g.whichkey, g.exRegistry)
 
+	// Cheatsheet render closure. Captures the live matcher + tr so the
+	// CheatsheetContext renders the current TrieSet snapshot every time
+	// `?` is pressed. Returns the empty string when the matcher hasn't
+	// published a TrieSet yet (early bootstrap).
+	cheatsheetRender := func(scope types.ContextKey) string {
+		if g.matcher == nil {
+			return ""
+		}
+		ts := g.matcher.TrieSet()
+		if ts == nil {
+			return ""
+		}
+		out := cheatsheet.Generate(cheatsheet.GenerateInput{
+			Trie:  ts,
+			Scope: scope,
+			Tr:    tr,
+		})
+		return cheatsheet.Render(out, tr, cheatsheet.ScopeLabel(scope, tr))
+	}
+
 	// Build the context registry with hooks closed over the driver.
 	ctxDeps := types.ContextTreeDeps{
 		GuiDriver:            g.driver,
@@ -240,6 +261,7 @@ func (g *Gui) wireWithDriver() error {
 		LimitText:            presentation.NewLimitText(tr),
 		ModeStore:            g.modeStore,
 		WhichKey:             g.whichkey,
+		CheatsheetRender:     cheatsheetRender,
 	}
 	g.registry = guicontext.NewContextTree(ctxDeps)
 
@@ -277,12 +299,33 @@ func (g *Gui) wireWithDriver() error {
 	// Register every controller's action handlers with the registry.
 	g.controllers.RegisterActions(g.cmdRegistry)
 
-	// Cheatsheet stub: dlp.10 replaces with the real popup-opening
-	// handler. Today it is a no-op so the `?` binding has a leaf.
+	// Cheatsheet popup: capture the focused scope, hand it to the
+	// CheatsheetContext, then push the context onto the focus stack.
+	// renderCheatsheetOverlay (layout.go) renders the popup on the
+	// next layout pass; <esc> pops it back to the previous context.
 	_ = g.cmdRegistry.Register(&commands.Command{
 		ID:          commands.HelpCheatsheet,
 		Description: "Show cheatsheet",
-		Handler:     func(commands.ExecCtx) error { return nil },
+		Tag:         "Help",
+		Handler: func(commands.ExecCtx) error {
+			if g.registry == nil || g.registry.Cheatsheet == nil {
+				return nil
+			}
+			scope := types.GLOBAL
+			if top := g.tree.Current(); top != nil {
+				scope = top.GetKey()
+			}
+			g.registry.Cheatsheet.SetScope(scope)
+			return g.tree.Push(g.registry.Cheatsheet)
+		},
+	})
+
+	// <esc> on the CHEATSHEET view pops it off the focus stack so the
+	// user returns to the prior context (e.g. MENU or TABLES) intact.
+	// Installed directly via the driver because CHEATSHEET is a
+	// DISPLAY_CONTEXT and does not flow through the Matcher.
+	_ = g.driver.SetKeybinding(string(types.CHEATSHEET), gocui.NewKeyName(gocui.KeyEsc), gocui.ModNone, func() error {
+		return g.tree.Pop()
 	})
 
 	// COMMAND_LINE action commands. The CommandLineContext doubles as

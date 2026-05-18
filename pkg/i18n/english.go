@@ -54,6 +54,28 @@ type TranslationSet struct {
 	// Status bar fragments.
 	OptionsBarMore string
 
+	// Mode banner labels shown in the status bar's first slot. Empty
+	// strings hide the slot (LabelForMode never emits these wrapped in
+	// the separator).
+	ModeNormal          string
+	ModeInsert          string
+	ModeVisual          string
+	ModeVisualLine      string
+	ModeVisualBlock     string
+	ModeOperatorPending string
+	ModeCommand         string
+	ModeReplace         string
+
+	// Cheatsheet rendering fragments. The popup paints the legend once
+	// at the top, then a section per (Mode, Tag). ScopeAllLabel renames
+	// the "all" scope to a human-friendly label in cheatsheet output.
+	CheatsheetTitle           string
+	CheatsheetCurrentScopeTab string
+	CheatsheetGlobalTab       string
+	CheatsheetLegend          string
+	CheatsheetEmpty           string
+	CheatsheetScopeAllLabel   string
+
 	Actions ActionTranslations
 }
 
@@ -134,6 +156,22 @@ func EnglishTranslationSet() *TranslationSet {
 		KeyringPassphraseRequired:      "A keyring passphrase is required; please unlock the keyring from your desktop session.",
 
 		OptionsBarMore: "?: more",
+
+		ModeNormal:          "-- NORMAL --",
+		ModeInsert:          "-- INSERT --",
+		ModeVisual:          "-- VISUAL --",
+		ModeVisualLine:      "-- V-LINE --",
+		ModeVisualBlock:     "-- V-BLOCK --",
+		ModeOperatorPending: "-- OPERATOR --",
+		ModeCommand:         "-- COMMAND --",
+		ModeReplace:         "-- REPLACE --",
+
+		CheatsheetTitle:           "Keybindings",
+		CheatsheetCurrentScopeTab: "Current context",
+		CheatsheetGlobalTab:       "Global",
+		CheatsheetLegend:          "·=default  ✱=override  ★=custom",
+		CheatsheetEmpty:           "(no bindings)",
+		CheatsheetScopeAllLabel:   "(non-popup)",
 
 		Actions: ActionTranslations{
 			OpenTable:   "Open Table",

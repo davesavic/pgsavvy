@@ -183,6 +183,14 @@ func (m *Matcher) SwapTrieSet(t *TrieSet) {
 	m.trieSet.Store(t)
 }
 
+// TrieSet returns the currently-published TrieSet snapshot. Cheatsheet
+// (dlp.10) and options-bar (dlp.12) callers read the live trie to
+// enumerate bindings. Returns nil when no TrieSet has been published
+// yet; callers MUST nil-check.
+func (m *Matcher) TrieSet() *TrieSet {
+	return m.trieSet.Load()
+}
+
 // OnInsertPendingFlush registers the master Editor's pending-buffer
 // flush callback. fn may be nil to clear a previous registration.
 // Concurrency-safe.

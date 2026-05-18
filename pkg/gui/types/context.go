@@ -59,6 +59,7 @@ const (
 	WHICH_KEY         ContextKey = "which_key"
 	GLOBAL            ContextKey = "global"
 	LIMIT             ContextKey = "limit"
+	CHEATSHEET        ContextKey = "cheatsheet"
 )
 
 // IsEditable reports whether the view associated with k receives text

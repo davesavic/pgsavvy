@@ -80,7 +80,10 @@ func (g *Gui) RunLayout(w, h int) error {
 		_ = ctx.HandleRender()
 	}
 
-	return g.renderWhichKeyOverlay(w, h, dims)
+	if err := g.renderWhichKeyOverlay(w, h, dims); err != nil {
+		return err
+	}
+	return g.renderCheatsheetOverlay(w, h, dims)
 }
 
 // renderLimitOverlay sizes a single LIMIT view to the full canvas and
@@ -111,6 +114,16 @@ const (
 	whichKeyMaxCols = 40
 )
 
+// cheatsheetMaxRows / cheatsheetMaxCols cap the cheatsheet popup
+// rectangle. Larger than which-key because the cheatsheet enumerates
+// every binding for the current (Mode, Scope) plus the Global tier.
+// Clamped to the canvas at render time so small terminals don't
+// overflow.
+const (
+	cheatsheetMaxRows = 30
+	cheatsheetMaxCols = 60
+)
+
 // renderWhichKeyOverlay positions the WHICH_KEY view in the bottom
 // right corner of popup-overlay and invokes WhichKeyContext.HandleRender
 // — but only when the notifier reports visible. On invisibility the
@@ -139,6 +152,80 @@ func (g *Gui) renderWhichKeyOverlay(w, h int, dims map[string]ui.Dimensions) err
 	_ = g.registry.WhichKey.HandleRender()
 	_, _ = g.driver.SetViewOnTop(string(types.WHICH_KEY))
 	return nil
+}
+
+// renderCheatsheetOverlay positions the CHEATSHEET view centred inside
+// popup-overlay and invokes CheatsheetContext.HandleRender — but only
+// when CHEATSHEET is currently on the focus stack. When absent, the
+// view is best-effort deleted so it doesn't linger from a prior frame.
+//
+// Defensive nil-guards mirror renderWhichKeyOverlay: a missing
+// registry, missing Cheatsheet context, or missing focus stack
+// collapses to a no-op.
+func (g *Gui) renderCheatsheetOverlay(w, h int, dims map[string]ui.Dimensions) error {
+	if g.registry == nil || g.registry.Cheatsheet == nil {
+		return nil
+	}
+	if !g.cheatsheetOnStack() {
+		_ = g.driver.DeleteView(string(types.CHEATSHEET))
+		return nil
+	}
+	canvas, ok := dims["popup-overlay"]
+	if !ok {
+		canvas = ui.Dimensions{X0: 0, Y0: 0, X1: w - 1, Y1: h - 1}
+	}
+	r := centeredRectMaxSize(canvas, cheatsheetMaxCols, cheatsheetMaxRows)
+	if _, err := g.driver.SetView(string(types.CHEATSHEET), r.X0, r.Y0, r.X1, r.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		return err
+	}
+	_ = g.registry.Cheatsheet.HandleRender()
+	_, _ = g.driver.SetViewOnTop(string(types.CHEATSHEET))
+	return nil
+}
+
+// cheatsheetOnStack reports whether the CHEATSHEET context is currently
+// present on the focus stack (it is a DISPLAY_CONTEXT, so Push just
+// appends rather than wiping/replacing). Returns false when the focus
+// tree is nil.
+func (g *Gui) cheatsheetOnStack() bool {
+	if g.tree == nil {
+		return false
+	}
+	for _, c := range g.tree.Stack() {
+		if c != nil && c.GetKey() == types.CHEATSHEET {
+			return true
+		}
+	}
+	return false
+}
+
+// centeredRectMaxSize returns a rectangle no larger than maxCols ×
+// maxRows centred inside canvas. When the canvas is smaller than the
+// requested max, the rect fills the canvas. Ensures min dimensions of
+// 1×1 so gocui SetView is happy on tiny terminals.
+func centeredRectMaxSize(canvas ui.Dimensions, maxCols, maxRows int) rect {
+	cw := canvas.X1 - canvas.X0
+	ch := canvas.Y1 - canvas.Y0
+	if cw < 2 || ch < 2 {
+		return rect{X0: canvas.X0, Y0: canvas.Y0, X1: canvas.X1, Y1: canvas.Y1}
+	}
+	w := maxCols
+	if w > cw {
+		w = cw
+	}
+	if w < 1 {
+		w = 1
+	}
+	h := maxRows
+	if h > ch {
+		h = ch
+	}
+	if h < 1 {
+		h = 1
+	}
+	x0 := canvas.X0 + (cw-w)/2
+	y0 := canvas.Y0 + (ch-h)/2
+	return rect{X0: x0, Y0: y0, X1: x0 + w, Y1: y0 + h}
 }
 
 // bottomRightRect returns a maxCols × maxRows rectangle anchored to the
@@ -186,6 +273,12 @@ func chooseRect(name string, dims map[string]ui.Dimensions, popup rect) (rect, b
 		string(types.PROMPT),
 		string(types.SUGGESTIONS):
 		return popup, true
+	case string(types.CHEATSHEET):
+		// CHEATSHEET is positioned by renderCheatsheetOverlay (it is a
+		// DISPLAY_CONTEXT, rendered only when on the focus stack). The
+		// main layout pass must NOT create the view eagerly — that would
+		// leave an empty popup on screen at startup.
+		return rect{}, false
 	case string(types.COMMAND_LINE):
 		return commandLineRect(dims), true
 	case string(types.LOG):

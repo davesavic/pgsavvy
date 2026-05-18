@@ -12,8 +12,8 @@ func TestNewContextTreeReturnsAllNineteenContexts(t *testing.T) {
 		t.Fatal("NewContextTree returned nil")
 	}
 	flat := tree.Flatten()
-	if len(flat) != 19 {
-		t.Fatalf("Flatten() len = %d, want 19 (14 live + 5 stub)", len(flat))
+	if len(flat) != 20 {
+		t.Fatalf("Flatten() len = %d, want 20 (15 live + 5 stub)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -27,16 +27,16 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 	tree := NewContextTree(types.ContextTreeDeps{})
 
 	allKeys := []types.ContextKey{
-		// Live (14 — 5 side + 5 popup + 1 extras + 1 global + 2 display).
+		// Live (15 — 5 side + 5 popup + 1 extras + 1 global + 3 display).
 		types.CONNECTIONS, types.SCHEMAS, types.TABLES, types.COLUMNS, types.INDEXES,
 		types.MENU, types.CONFIRMATION, types.PROMPT, types.SUGGESTIONS, types.COMMAND_LINE,
-		types.LOG, types.GLOBAL, types.LIMIT, types.WHICH_KEY,
+		types.LOG, types.GLOBAL, types.LIMIT, types.WHICH_KEY, types.CHEATSHEET,
 		// Stub (5).
 		types.QUERY_EDITOR, types.TABLE_DATA_EDITOR, types.RESULT_GRID,
 		types.PLAN, types.HISTORY,
 	}
-	if len(allKeys) != 19 {
-		t.Fatalf("test bug: allKeys len = %d, want 19", len(allKeys))
+	if len(allKeys) != 20 {
+		t.Fatalf("test bug: allKeys len = %d, want 20", len(allKeys))
 	}
 	for _, k := range allKeys {
 		c := tree.ByKey(k)
@@ -69,11 +69,12 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.PROMPT, types.TEMPORARY_POPUP},
 		{types.SUGGESTIONS, types.TEMPORARY_POPUP},
 		{types.COMMAND_LINE, types.TEMPORARY_POPUP},
-		// 1 EXTRAS, 1 GLOBAL, 2 DISPLAY.
+		// 1 EXTRAS, 1 GLOBAL, 3 DISPLAY.
 		{types.LOG, types.EXTRAS_CONTEXT},
 		{types.GLOBAL, types.GLOBAL_CONTEXT},
 		{types.LIMIT, types.DISPLAY_CONTEXT},
 		{types.WHICH_KEY, types.DISPLAY_CONTEXT},
+		{types.CHEATSHEET, types.DISPLAY_CONTEXT},
 		// 5 STUB.
 		{types.QUERY_EDITOR, types.STUB},
 		{types.TABLE_DATA_EDITOR, types.STUB},
@@ -81,8 +82,8 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.PLAN, types.STUB},
 		{types.HISTORY, types.STUB},
 	}
-	if len(cases) != 19 {
-		t.Fatalf("test bug: cases len = %d, want 19", len(cases))
+	if len(cases) != 20 {
+		t.Fatalf("test bug: cases len = %d, want 20", len(cases))
 	}
 	for _, c := range cases {
 		got := tree.ByKey(c.key)
@@ -106,7 +107,7 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		types.TEMPORARY_POPUP: 5,
 		types.EXTRAS_CONTEXT:  1,
 		types.GLOBAL_CONTEXT:  1,
-		types.DISPLAY_CONTEXT: 2,
+		types.DISPLAY_CONTEXT: 3,
 		types.STUB:            5,
 	}
 	for k, w := range want {

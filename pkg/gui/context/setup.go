@@ -34,6 +34,7 @@ type ContextTree struct {
 	Global     *GlobalContext
 	Limit      *LimitContext
 	WhichKey   *WhichKeyContext
+	Cheatsheet *CheatsheetContext
 
 	// Stub instances for deferred Contexts; Layout filters these by
 	// Kind == STUB so they never reach SetView.
@@ -125,6 +126,11 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			ViewName: string(types.WHICH_KEY),
 			Kind:     types.DISPLAY_CONTEXT,
 		}), deps, deps.WhichKey, deps.WhichKeyRows),
+		Cheatsheet: NewCheatsheetContext(NewBaseContext(BaseContextOpts{
+			Key:      types.CHEATSHEET,
+			ViewName: string(types.CHEATSHEET),
+			Kind:     types.DISPLAY_CONTEXT,
+		}), deps, deps.CheatsheetRender),
 
 		// Stubs for the five deferred Contexts. ViewName matches the
 		// eventual layout slot so naming stays consistent when the real
@@ -157,6 +163,7 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 		t.Global,
 		t.Limit,
 		t.WhichKey,
+		t.Cheatsheet,
 		t.QueryEditor,
 		t.TableDataEditor,
 		t.ResultGrid,
