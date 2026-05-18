@@ -510,11 +510,21 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 }
 
 // installShimsForScope walks every (mode, scope) trie and registers one
-// SetKeybinding per top-level Key. The handler routes the key through
-// matcher.Dispatch under the supplied scope. Duplicate (view, key, mod)
-// registrations are tolerated — gocui returns nil and the second
-// handler shadows the first; our Matcher dispatches by scope so the
-// shadowing handler still hits the right binding.
+// SetKeybinding per Key reachable in the trie — root keys AND every
+// chord-trailing key. The handler routes the key through matcher.Dispatch
+// under the supplied scope; the Matcher tracks pending state internally,
+// so a per-key shim suffices to resolve multi-step chords.
+//
+// Duplicate (view, key, mod) registrations are tolerated — gocui returns
+// nil and the second handler shadows the first; our Matcher dispatches
+// by scope so the shadowing handler still hits the right binding.
+//
+// Bug history (dbsavvy-tro.7): previously this loop only walked
+// trie.RootKeys(). For a chord `<leader>q` (Space + q), only Space got a
+// shim. After Space was consumed (Matcher returned Pending), gocui had
+// no shim for q and silently dropped it — the leaf never fired and
+// gocui.ErrQuit never propagated. Fix: enumerate ReachableKeys() so
+// every chord-reachable key has a shim.
 func (g *Gui) installShimsForScope(trieSet *keys.TrieSet, scope types.ContextKey, view string) error {
 	if trieSet == nil {
 		return nil
@@ -528,7 +538,7 @@ func (g *Gui) installShimsForScope(trieSet *keys.TrieSet, scope types.ContextKey
 		if tk.Scope != scope {
 			return
 		}
-		for _, k := range trie.RootKeys() {
+		for _, k := range trie.ReachableKeys() {
 			gk, gmod, err := keys.ChordKeyToGocui(k)
 			if err != nil {
 				continue
@@ -538,9 +548,9 @@ func (g *Gui) installShimsForScope(trieSet *keys.TrieSet, scope types.ContextKey
 				continue
 			}
 			seen[sk] = struct{}{}
-			rootKey := k
+			dispatchKey := k
 			handler := func() error {
-				_, err := g.matcher.Dispatch(scope, rootKey)
+				_, err := g.matcher.Dispatch(scope, dispatchKey)
 				return err
 			}
 			if err := g.driver.SetKeybinding(view, gk, gmod, handler); err != nil {

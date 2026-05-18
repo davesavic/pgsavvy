@@ -96,6 +96,39 @@ func (t *ChordTrie) RootKeys() []Key {
 	return sortedKeys(t.root.children)
 }
 
+// ReachableKeys returns every distinct Key that appears at ANY depth in
+// the trie, in deterministic order. The orchestrator (dbsavvy-tro.7)
+// uses this to install one SetKeybinding shim per key reachable in any
+// chord — not just root keys. Without this, chord-trailing keys (e.g.
+// the `q` in `<leader>q`) are never delivered to the Matcher because
+// gocui silently swallows keystrokes that have no registered binding.
+// Empty trie → empty slice.
+func (t *ChordTrie) ReachableKeys() []Key {
+	if t == nil || t.root == nil {
+		return nil
+	}
+	set := map[Key]struct{}{}
+	collectReachableKeys(t.root, set)
+	out := make([]Key, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	// Reuse the same total order as sortedKeys for stable test output.
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j].String() < out[j-1].String(); j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
+}
+
+func collectReachableKeys(node *trieNode, set map[Key]struct{}) {
+	for k, child := range node.children {
+		set[k] = struct{}{}
+		collectReachableKeys(child, set)
+	}
+}
+
 // ChildrenAt returns the immediate children of the node at prefix,
 // sorted by Key.String() for determinism. The popup renderer
 // (WhichKeyContext) consumes the result to draw one row per child.

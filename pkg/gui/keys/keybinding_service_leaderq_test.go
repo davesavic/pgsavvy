@@ -69,9 +69,11 @@ func (f *shimFake) FeedKey(view string, gk types.Key, gmod types.Modifier) error
 }
 
 // installShimsForScopeLikeProduction faithfully replicates the shim
-// installation loop at pkg/gui/orchestrator/gui.go:518-545. The
-// IMPORTANT detail (and the heart of bug 7) is that only top-level
-// `trie.RootKeys()` get a SetKeybinding — trailing chord keys do not.
+// installation loop at pkg/gui/orchestrator/gui.go:518-545. Post-fix
+// (dbsavvy-tro.7), the loop walks `trie.ReachableKeys()` so every key
+// at any depth in the trie gets a SetKeybinding — root keys AND
+// chord-trailing keys (the `q` in `<leader>q`). This replica must stay
+// in lockstep with the production loop.
 func installShimsForScopeLikeProduction(f *shimFake, m *Matcher, ts *TrieSet, scope types.ContextKey, view string) {
 	if ts == nil {
 		return
@@ -81,7 +83,7 @@ func installShimsForScopeLikeProduction(f *shimFake, m *Matcher, ts *TrieSet, sc
 		if tk.Scope != scope {
 			return
 		}
-		for _, k := range trie.RootKeys() {
+		for _, k := range trie.ReachableKeys() {
 			gk, gmod, err := ChordKeyToGocui(k)
 			if err != nil {
 				continue
@@ -91,9 +93,9 @@ func installShimsForScopeLikeProduction(f *shimFake, m *Matcher, ts *TrieSet, sc
 				continue
 			}
 			seen[sk] = struct{}{}
-			rootKey := k
+			dispatchKey := k
 			handler := func() error {
-				_, derr := m.Dispatch(scope, rootKey)
+				_, derr := m.Dispatch(scope, dispatchKey)
 				return derr
 			}
 			f.SetKeybinding(view, gk, gmod, handler)
