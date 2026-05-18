@@ -6,6 +6,7 @@ import (
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
 // The interfaces below capture only the methods T7a controllers actually
@@ -86,6 +87,43 @@ type TablePicker interface {
 // AppState.HiddenSchemas key.
 type ActiveConnection interface {
 	ActiveConnectionID() string
+}
+
+// ResultTabsHelper is the narrow surface the QueryEditorController calls
+// to hand each launched RunHandle (or Explain plan) to the multi-tab
+// result pane. The concrete implementation lands in dbsavvy-66p.12;
+// 66p.11 declares the interface so the controller compiles and is
+// testable today.
+//
+// OpenResultTab opens a new result tab for rh and starts streaming it.
+// label is the tab title (typically the first ~40 chars of the SQL).
+//
+// OpenPlanTab opens a tab rendering the raw plan text (and, later, the
+// parsed tree in epic E7). plan.RawText is the v1 source of truth.
+//
+// ShowError surfaces a non-streamable failure (e.g. driver error before
+// Stream returns) in the result tabs pane rather than as a toast.
+type ResultTabsHelper interface {
+	OpenResultTab(label string, rh *session.RunHandle) error
+	OpenPlanTab(label string, plan models.Plan) error
+	ShowError(label string, err error)
+}
+
+// EditorBufferReader is the narrow surface the QueryEditorController
+// queries to learn what statement to run. It returns the full buffer
+// text and the cursor's byte offset into that buffer. The concrete
+// implementation reads from the QUERY_EDITOR view's TextArea once the
+// real (non-stub) context lands; tests inject a fake.
+//
+// BufferText returns the full editor buffer. The empty string is a
+// valid return (empty buffer).
+//
+// CursorOffset returns the byte offset of the cursor into BufferText.
+// Out-of-range values are clamped by callers; the implementation may
+// return any int.
+type EditorBufferReader interface {
+	BufferText() string
+	CursorOffset() int
 }
 
 // Compile-time sanity check: data.ErrNeedsConfirmation must remain an

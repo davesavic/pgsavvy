@@ -18,6 +18,7 @@ type Controllers struct {
 	Indexes     *IndexesController
 	Menu        *MenuController
 	Quit        *QuitController
+	QueryEditor *QueryEditorController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -77,6 +78,14 @@ func AttachControllers(
 	quit := NewQuitController(c, helpers)
 	quit.AttachToContext(&tree.Global.BaseContext)
 
+	queryEditor := NewQueryEditorController(c, helpers)
+	// tree.QueryEditor is a StubContext today (dbsavvy-66p.11);
+	// AddKeybindingsFn is a no-op there. The bindings reach the trie
+	// via AllDefaultBindings until the live QUERY_EDITOR context
+	// ships in a later epic. AttachToContext is still called so the
+	// wiring lights up automatically once the stub is replaced.
+	queryEditor.AttachToContext(tree.QueryEditor)
+
 	return &Controllers{
 		Connections: connections,
 		Schemas:     schemas,
@@ -85,6 +94,7 @@ func AttachControllers(
 		Indexes:     indexes,
 		Menu:        menu,
 		Quit:        quit,
+		QueryEditor: queryEditor,
 	}
 }
 
@@ -125,6 +135,9 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.Menu != nil {
 		b.Menu.RegisterActions(reg)
+	}
+	if b.QueryEditor != nil {
+		b.QueryEditor.RegisterActions(reg)
 	}
 }
 

@@ -64,6 +64,16 @@ const (
 
 	// HelpCheatsheet — opens the auto-generated cheatsheet popup. `?`
 	HelpCheatsheet = "help.cheatsheet"
+
+	// Query family — owned by QueryEditorController (dbsavvy-66p.11).
+	// Default bindings: <leader>r, <leader>R, <leader>e, <leader>E,
+	// <leader>x, <leader>! respectively.
+	QueryRun            = "query.run"
+	QueryRunAll         = "query.run_all"
+	QueryExplain        = "query.explain"
+	QueryExplainAnalyze = "query.explain_analyze"
+	QueryCancel         = "query.cancel"
+	QueryRunInNewTx     = "query.run_in_new_tx"
 )
 
 // AllActionIDs returns every ID declared in this file in declaration
@@ -92,5 +102,11 @@ func AllActionIDs() []string {
 		CommandCancel,
 		CommandSubmit,
 		HelpCheatsheet,
+		QueryRun,
+		QueryRunAll,
+		QueryExplain,
+		QueryExplainAnalyze,
+		QueryCancel,
+		QueryRunInNewTx,
 	}
 }

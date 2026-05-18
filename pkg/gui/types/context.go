@@ -63,12 +63,17 @@ const (
 )
 
 // IsEditable reports whether the view associated with k receives text
-// input through a master gocui.Editor. Today only COMMAND_LINE is
-// editable; QUERY_EDITOR / TABLE_DATA_EDITOR flip when their concrete
-// contexts ship. Non-editable views receive per-key SetKeybinding
-// dispatch into the Matcher (no master Editor installed).
+// input through a master gocui.Editor. COMMAND_LINE and QUERY_EDITOR
+// are editable; TABLE_DATA_EDITOR flips when its concrete context
+// ships. Non-editable views receive per-key SetKeybinding dispatch into
+// the Matcher (no master Editor installed).
+//
+// QUERY_EDITOR's flip in dbsavvy-66p.11 is forward-compat: the
+// orchestrator only installs a master Editor on a live (non-STUB)
+// context, so flipping here has no runtime effect until the real
+// QUERY_EDITOR context lands.
 func (k ContextKey) IsEditable() bool {
-	return k == COMMAND_LINE
+	return k == COMMAND_LINE || k == QUERY_EDITOR
 }
 
 // KeybindingsOpts is the (currently empty) bag passed to GetKeybindings

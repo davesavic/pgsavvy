@@ -7,6 +7,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
@@ -41,6 +42,17 @@ type HelperBag struct {
 	Tip         TipHelper
 	TableDouble TablesDoubleClickHelper
 	Menu        MenuPushHelper
+
+	// Query-editor collaborators (dbsavvy-66p.11). QueryRunner is the
+	// data-helper that orchestrates SQLSession.Stream / Explain on
+	// behalf of the controller; ResultTabs is the narrow surface used
+	// to hand the launched RunHandle to the multi-tab pane (concrete
+	// impl in 66p.12); EditorBuffer reports the buffer + cursor offset
+	// the controller needs to extract a statement. All three are nil-
+	// safe; the controller no-ops when any is unwired.
+	QueryRunner  *data.QueryRunner
+	ResultTabs   ResultTabsHelper
+	EditorBuffer EditorBufferReader
 
 	// HiddenPatterns supplies the (builtin, profile) glob lists for
 	// SchemasInvoker.UnhideSchema. Resolved per-call so a hot-reloaded

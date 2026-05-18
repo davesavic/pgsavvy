@@ -93,6 +93,12 @@ type ActionTranslations struct {
 	RunQuery    string
 	CancelQuery string
 
+	// Query editor family (dbsavvy-66p.11).
+	QueryRunAll         string
+	QueryExplain        string
+	QueryExplainAnalyze string
+	QueryRunInNewTx     string
+
 	// Connection lifecycle.
 	AddConnection  string
 	OpenConnection string
@@ -187,6 +193,11 @@ func EnglishTranslationSet() *TranslationSet {
 			OpenTable:   "Open Table",
 			RunQuery:    "Run Query",
 			CancelQuery: "Cancel Query",
+
+			QueryRunAll:         "Run All Statements",
+			QueryExplain:        "Explain",
+			QueryExplainAnalyze: "Explain (analyze)",
+			QueryRunInNewTx:     "Run in new transaction",
 
 			AddConnection:  "Add Connection",
 			OpenConnection: "Open Connection",
