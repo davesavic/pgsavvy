@@ -111,7 +111,7 @@ var uniqueDriverNameCounter atomic.Int64
 func registerWireFake(t *testing.T, caps drivers.Capabilities) (name string, conn *wireFakeConn) {
 	t.Helper()
 	n := uniqueDriverNameCounter.Add(1)
-	name = "wire-fake-" + itoa(n)
+	name = "wire-fake-" + itoaInt64(n)
 	conn = &wireFakeConn{}
 	drv := &wireFakeDriver{conn: conn, caps: caps}
 	drivers.Register(name, func(_ context.Context) (drivers.Driver, error) {
@@ -120,8 +120,8 @@ func registerWireFake(t *testing.T, caps drivers.Capabilities) (name string, con
 	return name, conn
 }
 
-// itoa avoids dragging strconv into the rest of the file's import list.
-func itoa(n int64) string {
+// itoaInt64 avoids dragging strconv into the rest of the file's import list.
+func itoaInt64(n int64) string {
 	if n == 0 {
 		return "0"
 	}
