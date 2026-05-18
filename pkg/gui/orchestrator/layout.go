@@ -170,19 +170,22 @@ func (g *Gui) RunLayout(w, h int) error {
 						cl.SetView(view)
 					}
 				}
-				// Anchor the caret to the end of the typed buffer each
-				// frame. Production view exposes TextArea.GetContent (full
-				// content including ':'); tests use the RecorderGuiDriver
-				// which returns view=nil from SetView, so fall back to the
-				// context's Buffer() which strips the ':' prompt — add 1
-				// for the prompt column. Bug dbsavvy-tro.2.
-				cursorX := 1
+				// Anchor the visible caret to the TextArea's actual cursor
+				// each frame. gocui's DefaultEditor moves TextArea.cursor on
+				// Left/Right/Backspace/Delete/Home/End but does not call
+				// SetCursor on the view, so we mirror it here. Tests use the
+				// RecorderGuiDriver which returns view=nil from SetView, so
+				// fall back to the context's Buffer() length (assumes the
+				// caret is at end-of-buffer in tests — adequate for the
+				// recorder, which has no real TextArea cursor). Bug
+				// dbsavvy-tro.2 / dbsavvy-go1.
+				cursorX, cursorY := 1, 0
 				if view != nil && view.TextArea != nil {
-					cursorX = len(view.TextArea.GetContent())
+					cursorX, cursorY = view.TextArea.GetCursorXY()
 				} else if bufHolder, ok := ctx.(interface{ Buffer() string }); ok {
 					cursorX = 1 + len(bufHolder.Buffer())
 				}
-				_ = g.driver.SetViewCursor(name, cursorX, 0)
+				_ = g.driver.SetViewCursor(name, cursorX, cursorY)
 			}
 			_ = ctx.HandleRender()
 			_, _ = g.driver.SetViewOnTop(name)
