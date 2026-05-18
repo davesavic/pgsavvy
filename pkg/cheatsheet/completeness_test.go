@@ -117,14 +117,28 @@ func buildProductionTrieSet(t *testing.T) (*keys.TrieSet, *commands.Registry, []
 }
 
 // collectWalkLeaves enumerates every leaf in trieSet keyed by
-// (Mode, Scope, SequenceString). Every leaf — including `<nop>` — is
+// (Mode, Scope, key-label). Every leaf — including `<nop>` — is
 // included because rowFromLeaf in generator.go emits a Row for any
 // non-nil Action, and NopCommand has a non-nil Action pointer.
+//
+// The key string is built with the SAME leader-aware label helper
+// Generate uses (keyLabel), so the (Walk ⇔ Generate) set-equality
+// invariant holds across the dbsavvy-tro.9 reverse-mapping change —
+// post-expanded runes ` `/`,` become `<leader>`/`<localleader>` on
+// both sides.
 func collectWalkLeaves(trieSet *keys.TrieSet) map[rowKey]struct{} {
 	out := map[rowKey]struct{}{}
+	leader := trieSet.Leader
+	if leader == 0 {
+		leader = ' '
+	}
+	localLeader := trieSet.LocalLeader
+	if localLeader == 0 {
+		localLeader = ','
+	}
 	trieSet.Walk(func(k keys.TrieSetKey, trie *keys.ChordTrie) {
 		trie.Walk(func(seq []keys.Key, _ keys.LookupResult) {
-			out[rowKey{Mode: k.Mode, Scope: k.Scope, Key: keys.SequenceString(seq)}] = struct{}{}
+			out[rowKey{Mode: k.Mode, Scope: k.Scope, Key: keyLabel(seq, leader, localLeader)}] = struct{}{}
 		})
 	})
 	return out

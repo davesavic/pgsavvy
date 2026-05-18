@@ -100,6 +100,19 @@ func Generate(in GenerateInput) Output {
 	currentByMode := map[types.Mode][]Row{}
 	globalByMode := map[types.Mode][]Row{}
 
+	// Reverse-map the runtime leader/localleader runes back to their raw
+	// `<leader>` / `<localleader>` token form when rendering the Key
+	// column. Defaults match leaderRunes' fallback so a zero-value
+	// TrieSet (test fixtures via NewTrieSet) still gets sensible output.
+	leader := in.Trie.Leader
+	if leader == 0 {
+		leader = ' '
+	}
+	localLeader := in.Trie.LocalLeader
+	if localLeader == 0 {
+		localLeader = ','
+	}
+
 	in.Trie.Walk(func(key keys.TrieSetKey, trie *keys.ChordTrie) {
 		var bucket map[types.Mode][]Row
 		switch key.Scope {
@@ -111,7 +124,7 @@ func Generate(in GenerateInput) Output {
 			return
 		}
 		trie.Walk(func(seq []keys.Key, leaf keys.LookupResult) {
-			row := rowFromLeaf(seq, leaf)
+			row := rowFromLeaf(seq, leaf, leader, localLeader)
 			bucket[key.Mode] = append(bucket[key.Mode], row)
 		})
 	})
@@ -127,9 +140,14 @@ func Generate(in GenerateInput) Output {
 // holds the resolved *commands.Command so no Registry lookup is needed.
 // A nil Action would only occur if Walk is changed to visit interior
 // nodes, which it does not today; we still guard defensively.
-func rowFromLeaf(seq []keys.Key, leaf keys.LookupResult) Row {
+//
+// leader / localLeader are the configured runes for the live TrieSet;
+// keyLabel reverse-maps them back to the raw `<leader>` / `<localleader>`
+// token form so the cheatsheet shows the stable shorthand the user wrote
+// (e.g. `<leader>q`) rather than the post-expanded rune sequence (`Space q`).
+func rowFromLeaf(seq []keys.Key, leaf keys.LookupResult, leader, localLeader rune) Row {
 	row := Row{
-		Key:    keys.SequenceString(seq),
+		Key:    keyLabel(seq, leader, localLeader),
 		Source: leaf.Source,
 		Glyph:  glyphFor(leaf.Source),
 	}
@@ -141,6 +159,33 @@ func rowFromLeaf(seq []keys.Key, leaf keys.LookupResult) Row {
 		row.Description = leaf.Action.ID
 	}
 	return row
+}
+
+// keyLabel formats seq as the human-readable key column for the
+// cheatsheet, reverse-mapping each occurrence of the leader/localleader
+// rune to its `<leader>` / `<localleader>` token form. Runes are matched
+// only when they carry no modifiers and are not a SpecialKey — that
+// guards against false-positives like `<c-space>` being misread as
+// `<c-leader>` when leader=Space.
+//
+// Note: this is a lossy operation by design — if the user binds a raw
+// rune that happens to equal the leader (e.g. binding `qq` with
+// leader=q), both runes will render as `<leader>`. That matches vim
+// semantics where the two are indistinguishable post-expansion and is
+// the price of keeping the cheatsheet stable across leader reconfigs.
+func keyLabel(seq []keys.Key, leader, localLeader rune) string {
+	out := make([]keys.Key, len(seq))
+	for i, k := range seq {
+		switch {
+		case k.Special == keys.KeyNone && k.Mod == 0 && k.Code == leader:
+			out[i] = keys.Key{Special: keys.KeyLeader}
+		case k.Special == keys.KeyNone && k.Mod == 0 && k.Code == localLeader:
+			out[i] = keys.Key{Special: keys.KeyLocalLeader}
+		default:
+			out[i] = k
+		}
+	}
+	return keys.SequenceString(out)
 }
 
 func glyphFor(s types.Source) rune {

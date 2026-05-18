@@ -88,10 +88,20 @@ type TrieSetKey struct {
 // snapshot the Matcher (dlp.5) consumes — built once at startup and
 // atomically swapped on `:reload`.
 //
+// Leader / LocalLeader carry the configured leader runes that were used
+// to expand `<leader>` / `<localleader>` tokens during Build. They are
+// preserved on the snapshot so downstream readers (the cheatsheet
+// generator) can reverse-map an expanded rune back to its raw token
+// form for display — without leaking the runtime leader value into
+// static cheatsheet output. Zero values default to ' ' (leader) and
+// ',' (localleader), matching leaderRunes' fallback.
+//
 // All methods on TrieSet are read-only after Build returns; concurrent
 // callers need no synchronisation.
 type TrieSet struct {
-	tries map[TrieSetKey]*ChordTrie
+	tries       map[TrieSetKey]*ChordTrie
+	Leader      rune
+	LocalLeader rune
 }
 
 // NewTrieSet returns an empty TrieSet. Production code routes through
@@ -300,7 +310,7 @@ func (s *KeybindingService) Build(
 	}
 
 	// Finalise each per-(Mode, Scope) trie.
-	out := &TrieSet{tries: map[TrieSetKey]*ChordTrie{}}
+	out := &TrieSet{tries: map[TrieSetKey]*ChordTrie{}, Leader: leader, LocalLeader: localLeader}
 	for key, b := range builders {
 		t, ws := b.Build()
 		out.tries[key] = t

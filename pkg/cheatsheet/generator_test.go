@@ -232,6 +232,106 @@ func TestGenerate_SameKeyDifferentModes(t *testing.T) {
 	}
 }
 
+// TestGenerate_PreservesLeaderTokenInKey is the regression for
+// dbsavvy-tro.9: chord bindings written as `<leader>q` must render with
+// the raw `<leader>` token in the cheatsheet's Key column — NOT the
+// post-expansion rune (`Space q`) and NOT a bare `q` (the old bug
+// dropped the prefix entirely).
+//
+// Single-key bindings must be unaffected.
+func TestGenerate_PreservesLeaderTokenInKey(t *testing.T) {
+	qcmd := &commands.Command{ID: "app.quit", Description: "Quit", Tag: "App", Handler: commands.NopSentinel}
+	bare := &commands.Command{ID: "table.bare", Description: "bare q", Tag: "App", Handler: commands.NopSentinel}
+
+	// Build a trie with the POST-expanded sequences (matching production:
+	// keys.expandLeaderTokens runs before the trie insert).
+	b := keys.NewTrieBuilder()
+	b.InsertDefault(&keys.ChordBinding{
+		Sequence: []keys.Key{{Code: ' '}, {Code: 'q'}}, // <leader>q expanded
+		Source:   types.ShippedDefault,
+		Origin:   "test",
+	}, qcmd)
+	b.InsertDefault(&keys.ChordBinding{
+		Sequence: []keys.Key{{Code: 'p'}}, // single key, no leader
+		Source:   types.ShippedDefault,
+		Origin:   "test",
+	}, bare)
+	trie, _ := b.Build()
+
+	ts := keys.NewTrieSet()
+	ts.Leader = ' '
+	ts.LocalLeader = ','
+	ts.Set(types.ModeNormal, types.GLOBAL, trie)
+
+	out := Generate(GenerateInput{Trie: ts, Scope: types.TABLES})
+
+	if len(out.Global) != 1 {
+		t.Fatalf("Global ModeViews = %d, want 1", len(out.Global))
+	}
+	if len(out.Global[0].Sections) != 1 {
+		t.Fatalf("Global Sections = %d, want 1", len(out.Global[0].Sections))
+	}
+	rows := out.Global[0].Sections[0].Rows
+	// Two rows, sorted by Key string: "<leader>q" sorts before "p"
+	// because '<' (0x3C) < 'p' (0x70).
+	keysSeen := map[string]bool{}
+	for _, r := range rows {
+		keysSeen[r.Key] = true
+	}
+	if !keysSeen["<leader>q"] {
+		t.Errorf("expected a row with Key=%q; got rows=%+v", "<leader>q", rows)
+	}
+	if !keysSeen["p"] {
+		t.Errorf("expected a row with Key=%q (single-key unchanged); got rows=%+v", "p", rows)
+	}
+	// Negative assertion: the post-expanded form must NOT leak.
+	if keysSeen["<space>q"] || keysSeen[" q"] {
+		t.Errorf("expanded leader rune leaked into Key column: %+v", rows)
+	}
+	// Negative assertion for the original bug: the bare `q` form must
+	// not appear — that would mean the `<leader>` prefix was dropped.
+	if keysSeen["q"] {
+		t.Errorf("chord binding rendered as bare %q; <leader> prefix was dropped: %+v", "q", rows)
+	}
+}
+
+// TestGenerate_PreservesLocalLeaderTokenInKey verifies the same
+// reverse-mapping for `<localleader>` with a non-default rune (`;`),
+// proving the cheatsheet stays stable when the user reconfigures
+// localleader away from the default `,`.
+func TestGenerate_PreservesLocalLeaderTokenInKey(t *testing.T) {
+	cmd := &commands.Command{ID: "x", Description: "x", Tag: "T", Handler: commands.NopSentinel}
+
+	b := keys.NewTrieBuilder()
+	b.InsertDefault(&keys.ChordBinding{
+		Sequence: []keys.Key{{Code: ';'}, {Code: 'x'}}, // <localleader>x expanded with non-default rune
+		Source:   types.ShippedDefault,
+		Origin:   "test",
+	}, cmd)
+	trie, _ := b.Build()
+
+	ts := keys.NewTrieSet()
+	ts.Leader = ' '
+	ts.LocalLeader = ';' // user reconfigured localleader to ;
+	ts.Set(types.ModeNormal, types.TABLES, trie)
+
+	out := Generate(GenerateInput{Trie: ts, Scope: types.TABLES})
+
+	if len(out.CurrentScope) != 1 || len(out.CurrentScope[0].Sections) != 1 {
+		t.Fatalf("CurrentScope shape unexpected: %+v", out.CurrentScope)
+	}
+	rows := out.CurrentScope[0].Sections[0].Rows
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].Key != "<localleader>x" {
+		t.Errorf("Key = %q, want %q (no rune leak)", rows[0].Key, "<localleader>x")
+	}
+	if rows[0].Key == ";x" {
+		t.Errorf("runtime localleader rune leaked into cheatsheet: %q", rows[0].Key)
+	}
+}
+
 func TestGenerate_DeterministicForSameInput(t *testing.T) {
 	cmd := &commands.Command{ID: "x", Description: "x", Tag: "T", Handler: commands.NopSentinel}
 	trie := buildTrie(t, []entry{
