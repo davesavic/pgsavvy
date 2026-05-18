@@ -74,6 +74,41 @@ func (t *ChordTrie) Lookup(seq []Key) LookupResult {
 	return res
 }
 
+// ChildrenAt returns the immediate children of the node at prefix,
+// sorted by Key.String() for determinism. The popup renderer
+// (WhichKeyContext) consumes the result to draw one row per child.
+//
+// Returns (nil, false) when prefix does not exist in the trie. Returns
+// (empty, true) when prefix resolves to a leaf with no continuations.
+// For leaf children, Label is the resolved Command.Description (the
+// <nop> command carries "(unbound)"). For interior children, Label is
+// empty — the caller decides how to format an interior continuation.
+func (t *ChordTrie) ChildrenAt(prefix []Key) ([]ChildRow, bool) {
+	node := t.root
+	for _, k := range prefix {
+		next, ok := node.children[k]
+		if !ok {
+			return nil, false
+		}
+		node = next
+	}
+	keys := sortedKeys(node.children)
+	out := make([]ChildRow, 0, len(keys))
+	for _, k := range keys {
+		child := node.children[k]
+		row := ChildRow{
+			Key:    k,
+			IsLeaf: child.action != nil,
+			Source: child.source,
+		}
+		if child.action != nil {
+			row.Label = child.action.Description
+		}
+		out = append(out, row)
+	}
+	return out, true
+}
+
 // Walk visits every LEAF in t (interior nodes are skipped) in
 // deterministic DFS order. fn is called with the resolved Sequence (a
 // fresh slice for each leaf) plus a LookupResult describing the leaf.

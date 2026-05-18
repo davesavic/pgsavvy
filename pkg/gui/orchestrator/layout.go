@@ -68,17 +68,19 @@ func (g *Gui) RunLayout(w, h int) error {
 	}
 
 	// Best-effort render pass on every live context. DISPLAY_CONTEXT
-	// (LimitContext) is rendered exclusively from renderLimitOverlay in
-	// the too-small branch; invoking its HandleRender here would queue a
-	// Write to the "limit" view, which is not created in the normal-size
-	// layout, surfacing gocui.ErrUnknownView out of the MainLoop.
+	// instances (LimitContext, WhichKeyContext) are rendered from
+	// their dedicated overlay functions instead; invoking their
+	// HandleRender here would queue a Write to a view that may not have
+	// been created for this frame, surfacing gocui.ErrUnknownView out of
+	// the MainLoop.
 	for _, ctx := range g.registry.Flatten() {
 		if ctx == nil || ctx.GetKind() == types.STUB || ctx.GetKind() == types.DISPLAY_CONTEXT {
 			continue
 		}
 		_ = ctx.HandleRender()
 	}
-	return nil
+
+	return g.renderWhichKeyOverlay(w, h, dims)
 }
 
 // renderLimitOverlay sizes a single LIMIT view to the full canvas and
@@ -93,8 +95,80 @@ func (g *Gui) renderLimitOverlay(w, h int) error {
 	if g.registry != nil && g.registry.Limit != nil {
 		_ = g.registry.Limit.HandleRender()
 	}
+	// Best-effort cleanup of any overlay views that may have been created
+	// in a previous normal-size frame; only LIMIT participates in this
+	// branch's render pass.
+	_ = g.driver.DeleteView(string(types.WHICH_KEY))
 	_, _ = g.driver.SetViewOnTop(string(types.LIMIT))
 	return nil
+}
+
+// whichKeyMaxRows / whichKeyMaxCols cap the popup rectangle. The
+// renderer truncates per-row content separately; the dims here only
+// bound the SetView rect so the popup doesn't dominate the screen.
+const (
+	whichKeyMaxRows = 12
+	whichKeyMaxCols = 40
+)
+
+// renderWhichKeyOverlay positions the WHICH_KEY view in the bottom
+// right corner of popup-overlay and invokes WhichKeyContext.HandleRender
+// — but only when the notifier reports visible. On invisibility the
+// view is best-effort deleted so it doesn't linger from a prior frame.
+//
+// Wired conservatively: a missing registry, missing WhichKey context,
+// or unwired notifier collapses to a no-op (the concrete WhichKey
+// wiring lands in dlp.8c).
+func (g *Gui) renderWhichKeyOverlay(w, h int, dims map[string]ui.Dimensions) error {
+	if g.registry == nil || g.registry.WhichKey == nil {
+		return nil
+	}
+	notifier := g.registry.WhichKey.Notifier()
+	if notifier == nil || !notifier.Visible() {
+		_ = g.driver.DeleteView(string(types.WHICH_KEY))
+		return nil
+	}
+	canvas, ok := dims["popup-overlay"]
+	if !ok {
+		canvas = ui.Dimensions{X0: 0, Y0: 0, X1: w - 1, Y1: h - 1}
+	}
+	r := bottomRightRect(canvas, whichKeyMaxCols, whichKeyMaxRows)
+	if _, err := g.driver.SetView(string(types.WHICH_KEY), r.X0, r.Y0, r.X1, r.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		return err
+	}
+	_ = g.registry.WhichKey.HandleRender()
+	_, _ = g.driver.SetViewOnTop(string(types.WHICH_KEY))
+	return nil
+}
+
+// bottomRightRect returns a maxCols × maxRows rectangle anchored to the
+// bottom-right of canvas, clamped to the canvas extent.
+func bottomRightRect(canvas ui.Dimensions, maxCols, maxRows int) rect {
+	cw := canvas.X1 - canvas.X0
+	ch := canvas.Y1 - canvas.Y0
+	if cw < 2 || ch < 2 {
+		return rect{X0: canvas.X0, Y0: canvas.Y0, X1: canvas.X1, Y1: canvas.Y1}
+	}
+	w := maxCols
+	if w > cw {
+		w = cw
+	}
+	if w < 1 {
+		w = 1
+	}
+	h := maxRows
+	if h > ch {
+		h = ch
+	}
+	if h < 1 {
+		h = 1
+	}
+	return rect{
+		X0: canvas.X1 - w,
+		Y0: canvas.Y1 - h,
+		X1: canvas.X1,
+		Y1: canvas.Y1,
+	}
 }
 
 // rect is the (X0, Y0, X1, Y1) tuple Layout passes to SetView.

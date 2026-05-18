@@ -56,4 +56,16 @@ type ContextTreeDeps struct {
 	// LimitText returns the text rendered by LimitContext for the
 	// terminal-too-small overlay (typically Tr.TerminalTooSmall).
 	LimitText func() string
+
+	// WhichKey is the live which-key notifier consumed by WhichKeyContext
+	// to fetch visibility + snapshot. Nil at construction time before
+	// the orchestrator wires it (dlp.8c). Nil-safe: WhichKeyContext
+	// renders a no-op when nil.
+	WhichKey WhichKeyState
+
+	// WhichKeyRows resolves the children rendered for a given (scope,
+	// prefix) when the popup is visible. Bound by the orchestrator
+	// (dlp.8c) to a closure over the live TrieSet + ModeStore. Nil-safe:
+	// nil → no rows rendered.
+	WhichKeyRows func(scope ContextKey, prefix []ChordKey) []ChildRow
 }

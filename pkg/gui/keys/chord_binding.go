@@ -28,6 +28,11 @@ type SpecialKey = types.SpecialKey
 // types.Source.
 type Source = types.Source
 
+// ChildRow is one immediate child of a prefix node in a ChordTrie, used
+// by the which-key popup. Aliased from types.ChildRow so callers inside
+// the keys package can keep the bare name.
+type ChildRow = types.ChildRow
+
 // Chord modifier constants (aliased from types).
 const (
 	ModCtrl  = types.ChordModCtrl

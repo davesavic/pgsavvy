@@ -13,7 +13,7 @@ func TestNewContextTreeReturnsAllEighteenContexts(t *testing.T) {
 	}
 	flat := tree.Flatten()
 	if len(flat) != 18 {
-		t.Fatalf("Flatten() len = %d, want 18 (11 live + 6 stub + 1 limit)", len(flat))
+		t.Fatalf("Flatten() len = %d, want 18 (13 live + 5 stub)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -27,13 +27,13 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 	tree := NewContextTree(types.ContextTreeDeps{})
 
 	allKeys := []types.ContextKey{
-		// Live (12 — 5 side + 4 popup + 1 extras + 1 global + 1 display).
+		// Live (13 — 5 side + 4 popup + 1 extras + 1 global + 2 display).
 		types.CONNECTIONS, types.SCHEMAS, types.TABLES, types.COLUMNS, types.INDEXES,
 		types.MENU, types.CONFIRMATION, types.PROMPT, types.SUGGESTIONS,
-		types.LOG, types.GLOBAL, types.LIMIT,
-		// Stub (6).
+		types.LOG, types.GLOBAL, types.LIMIT, types.WHICH_KEY,
+		// Stub (5).
 		types.QUERY_EDITOR, types.TABLE_DATA_EDITOR, types.RESULT_GRID,
-		types.PLAN, types.WHICH_KEY, types.HISTORY,
+		types.PLAN, types.HISTORY,
 	}
 	if len(allKeys) != 18 {
 		t.Fatalf("test bug: allKeys len = %d, want 18", len(allKeys))
@@ -68,16 +68,16 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.CONFIRMATION, types.TEMPORARY_POPUP},
 		{types.PROMPT, types.TEMPORARY_POPUP},
 		{types.SUGGESTIONS, types.TEMPORARY_POPUP},
-		// 1 EXTRAS, 1 GLOBAL, 1 DISPLAY.
+		// 1 EXTRAS, 1 GLOBAL, 2 DISPLAY.
 		{types.LOG, types.EXTRAS_CONTEXT},
 		{types.GLOBAL, types.GLOBAL_CONTEXT},
 		{types.LIMIT, types.DISPLAY_CONTEXT},
-		// 6 STUB.
+		{types.WHICH_KEY, types.DISPLAY_CONTEXT},
+		// 5 STUB.
 		{types.QUERY_EDITOR, types.STUB},
 		{types.TABLE_DATA_EDITOR, types.STUB},
 		{types.RESULT_GRID, types.STUB},
 		{types.PLAN, types.STUB},
-		{types.WHICH_KEY, types.STUB},
 		{types.HISTORY, types.STUB},
 	}
 	if len(cases) != 18 {
@@ -105,8 +105,8 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		types.TEMPORARY_POPUP: 4,
 		types.EXTRAS_CONTEXT:  1,
 		types.GLOBAL_CONTEXT:  1,
-		types.DISPLAY_CONTEXT: 1,
-		types.STUB:            6,
+		types.DISPLAY_CONTEXT: 2,
+		types.STUB:            5,
 	}
 	for k, w := range want {
 		if counts[k] != w {

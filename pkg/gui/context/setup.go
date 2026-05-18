@@ -32,6 +32,7 @@ type ContextTree struct {
 	CommandLog *CommandLogContext
 	Global     *GlobalContext
 	Limit      *LimitContext
+	WhichKey   *WhichKeyContext
 
 	// Stub instances for deferred Contexts; Layout filters these by
 	// Kind == STUB so they never reach SetView.
@@ -39,7 +40,6 @@ type ContextTree struct {
 	TableDataEditor *StubContext
 	ResultGrid      *StubContext
 	Plan            *StubContext
-	WhichKey        *StubContext
 	History         *StubContext
 }
 
@@ -114,8 +114,13 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			ViewName: string(types.LIMIT),
 			Kind:     types.DISPLAY_CONTEXT,
 		}), deps),
+		WhichKey: NewWhichKeyContext(NewBaseContext(BaseContextOpts{
+			Key:      types.WHICH_KEY,
+			ViewName: string(types.WHICH_KEY),
+			Kind:     types.DISPLAY_CONTEXT,
+		}), deps, deps.WhichKey, deps.WhichKeyRows),
 
-		// Stubs for the six deferred Contexts. ViewName matches the
+		// Stubs for the five deferred Contexts. ViewName matches the
 		// eventual layout slot so naming stays consistent when the real
 		// Context lands; Kind == STUB keeps Layout from creating the
 		// view.
@@ -123,14 +128,13 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 		TableDataEditor: NewStubContext(types.TABLE_DATA_EDITOR, string(types.TABLE_DATA_EDITOR)),
 		ResultGrid:      NewStubContext(types.RESULT_GRID, string(types.RESULT_GRID)),
 		Plan:            NewStubContext(types.PLAN, string(types.PLAN)),
-		WhichKey:        NewStubContext(types.WHICH_KEY, string(types.WHICH_KEY)),
 		History:         NewStubContext(types.HISTORY, string(types.HISTORY)),
 	}
 }
 
 // Flatten returns every Context (live + stub) in a stable order. Order
-// is: side rail (5) -> popups (4) -> extras/global/display (3) -> stubs
-// (6). Total length is always 18.
+// is: side rail (5) -> popups (4) -> extras/global/display (4) -> stubs
+// (5). Total length is always 18.
 func (t *ContextTree) Flatten() []types.IBaseContext {
 	return []types.IBaseContext{
 		t.Connections,
@@ -145,11 +149,11 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 		t.CommandLog,
 		t.Global,
 		t.Limit,
+		t.WhichKey,
 		t.QueryEditor,
 		t.TableDataEditor,
 		t.ResultGrid,
 		t.Plan,
-		t.WhichKey,
 		t.History,
 	}
 }

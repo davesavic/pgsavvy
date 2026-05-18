@@ -264,3 +264,25 @@ type ChordBinding struct {
 	// a view name (Scope-driven resolution replaces it).
 	ViewName string
 }
+
+// ChildRow is one immediate child of a prefix node in a chord trie,
+// shaped for the which-key popup. Label is the human description for
+// leaves (Command.Description, or "(unbound)" for <nop>) and empty for
+// interior children — the popup renderer decides how to present them.
+//
+// Lives in pkg/gui/types so pkg/gui/context can consume it without
+// importing pkg/gui/keys (the keys package re-exports an alias).
+type ChildRow struct {
+	Key    ChordKey
+	Label  string
+	IsLeaf bool
+	Source Source
+}
+
+// WhichKeyState is the read-only surface a renderer queries to draw the
+// which-key popup. Implemented by *keys.WhichKey. The Matcher-facing
+// WhichKeyNotifier interface lives in pkg/gui/keys and stays distinct.
+type WhichKeyState interface {
+	Visible() bool
+	Snapshot() (scope ContextKey, prefix []ChordKey, visible bool)
+}

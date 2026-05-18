@@ -283,6 +283,115 @@ func TestChordTrie_UnexpandedLeaderTriggersWarning(t *testing.T) {
 	}
 }
 
+func TestChordTrie_ChildrenAt_EmptyPrefixReturnsRootChildrenSorted(t *testing.T) {
+	b := NewTrieBuilder()
+	b.InsertDefault(&ChordBinding{Sequence: []Key{{Code: 'q'}}, ActionID: "q", Origin: "q"}, fixtureCmd("q"))
+	b.InsertDefault(&ChordBinding{Sequence: []Key{{Code: 'a'}}, ActionID: "a", Origin: "a"}, fixtureCmd("a"))
+	b.InsertDefault(&ChordBinding{Sequence: keyGG(), ActionID: "gg", Origin: "gg"}, fixtureCmd("gg"))
+	trie, _ := b.Build()
+
+	rows, ok := trie.ChildrenAt(nil)
+	if !ok {
+		t.Fatalf("ChildrenAt(nil) ok=false, want true")
+	}
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3: %+v", len(rows), rows)
+	}
+	want := []string{"a", "g", "q"}
+	for i, r := range rows {
+		if r.Key.String() != want[i] {
+			t.Errorf("rows[%d].Key.String() = %q, want %q", i, r.Key.String(), want[i])
+		}
+	}
+}
+
+func TestChordTrie_ChildrenAt_LeafChildHasDescription(t *testing.T) {
+	cmd := &commands.Command{ID: "app.quit", Description: "Quit", Handler: func(commands.ExecCtx) error { return nil }}
+	b := NewTrieBuilder()
+	b.InsertDefault(&ChordBinding{Sequence: []Key{{Code: 'q'}}, ActionID: "app.quit", Origin: "q"}, cmd)
+	trie, _ := b.Build()
+
+	rows, ok := trie.ChildrenAt(nil)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("ChildrenAt(nil): ok=%v rows=%+v", ok, rows)
+	}
+	r := rows[0]
+	if !r.IsLeaf {
+		t.Errorf("IsLeaf = false, want true")
+	}
+	if r.Label != "Quit" {
+		t.Errorf("Label = %q, want %q", r.Label, "Quit")
+	}
+	if r.Source != ShippedDefault {
+		t.Errorf("Source = %v, want ShippedDefault", r.Source)
+	}
+}
+
+func TestChordTrie_ChildrenAt_InteriorChildHasEmptyLabel(t *testing.T) {
+	// gg leaf creates an interior 'g' node. ChildrenAt(nil) yields one
+	// row for 'g', which is interior → IsLeaf=false, Label="".
+	b := NewTrieBuilder()
+	b.InsertDefault(&ChordBinding{Sequence: keyGG(), ActionID: "gg", Origin: "gg"}, fixtureCmd("gg"))
+	trie, _ := b.Build()
+
+	rows, ok := trie.ChildrenAt(nil)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("ChildrenAt(nil): ok=%v rows=%+v", ok, rows)
+	}
+	r := rows[0]
+	if r.IsLeaf {
+		t.Errorf("IsLeaf = true, want false (interior)")
+	}
+	if r.Label != "" {
+		t.Errorf("Label = %q, want empty for interior", r.Label)
+	}
+}
+
+func TestChordTrie_ChildrenAt_NopLeafLabel(t *testing.T) {
+	b := NewTrieBuilder()
+	b.InsertDefault(&ChordBinding{Sequence: []Key{{Code: 'q'}}, ActionID: "<nop>", Origin: "nop"}, commands.NopCommand)
+	trie, _ := b.Build()
+
+	rows, ok := trie.ChildrenAt(nil)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("ChildrenAt(nil): ok=%v rows=%+v", ok, rows)
+	}
+	if rows[0].Label != "(unbound)" {
+		t.Errorf("Label = %q, want %q for <nop>", rows[0].Label, "(unbound)")
+	}
+}
+
+func TestChordTrie_ChildrenAt_UnknownPrefixReturnsNotFound(t *testing.T) {
+	b := NewTrieBuilder()
+	b.InsertDefault(&ChordBinding{Sequence: []Key{{Code: 'q'}}, ActionID: "q", Origin: "q"}, fixtureCmd("q"))
+	trie, _ := b.Build()
+
+	rows, ok := trie.ChildrenAt([]Key{{Code: 'x'}})
+	if ok {
+		t.Errorf("ok = true for unknown prefix, want false")
+	}
+	if rows != nil {
+		t.Errorf("rows = %+v, want nil for unknown prefix", rows)
+	}
+}
+
+func TestChordTrie_ChildrenAt_LeafNoChildrenReturnsEmpty(t *testing.T) {
+	b := NewTrieBuilder()
+	b.InsertDefault(&ChordBinding{Sequence: []Key{{Code: 'q'}}, ActionID: "q", Origin: "q"}, fixtureCmd("q"))
+	trie, _ := b.Build()
+
+	rows, ok := trie.ChildrenAt([]Key{{Code: 'q'}})
+	if !ok {
+		t.Errorf("ok = false, want true (leaf node exists)")
+	}
+	if len(rows) != 0 {
+		t.Errorf("rows = %+v, want empty for terminal leaf", rows)
+	}
+	if rows == nil {
+		t.Errorf("rows = nil, want non-nil empty slice")
+	}
+}
+
 // SequenceFromShorthandT is a test helper that fails the test on parse
 // error instead of returning it.
 func SequenceFromShorthandT(t *testing.T, s string) []Key {
