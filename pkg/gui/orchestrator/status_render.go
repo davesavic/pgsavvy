@@ -1,7 +1,9 @@
 package orchestrator
 
 import (
+	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/gui"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/status"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -10,11 +12,39 @@ import (
 )
 
 // AppStatusViewName is the gocui view-name string the status bar
-// renderer targets. The view itself is allocated by the layout manager
-// in a later epic; until then SetContent on a missing view is a no-op
-// at the renderer level (the driver surfaces the error, the renderer
-// swallows it — the status bar is non-critical UI).
-const AppStatusViewName = "app_status"
+// renderer targets. The value MUST match the boxlayout slot key
+// returned by ui.GetWindowDimensions ("status") — RunLayout's Tier-4
+// status pass uses dims[AppStatusViewName] to size the view and then
+// hands the same name to driver.SetView before calling RenderStatusLine.
+// Keeping the constant and the layout key in lock-step means the
+// renderer's SetContent target and the layout's SetView target can never
+// drift (dbsavvy-tro.3 wire-up).
+const AppStatusViewName = "status"
+
+// ANSI SGR sequences used to give success / error toasts a
+// distinguishable foreground style at the cell-content level. gocui's
+// escape interpreter (escape.go in the vendored lazygit fork) parses
+// these inline and lifts them to per-cell Attribute values, so the
+// recorder driver's stored buffer carries the style as plain bytes —
+// which is exactly the observable the dbsavvy-tro.3 AC asserts.
+//
+// SafeText is applied to the user-supplied toast message BEFORE the
+// ANSI wrapper is prepended; SafeText would otherwise strip the \x1b
+// byte itself and defeat the styling.
+const (
+	ansiResetSGR   = "\x1b[0m"
+	ansiGreenFgSGR = "\x1b[32m" // success / info toast foreground
+	ansiRedFgSGR   = "\x1b[31m" // error toast foreground
+)
+
+// ToastSource is the narrow accessor RenderStatusLine needs from the
+// toast helper. *ui.ToastHelper satisfies it structurally; tests may
+// inject a fake. nil disables the toast multiplex (status bar reverts
+// to its default-line behaviour).
+type ToastSource interface {
+	Current() string
+	CurrentLevel() ui.ToastLevel
+}
 
 // StatusRenderDeps bundles every collaborator RenderStatusLine needs.
 // Pulled into its own struct so the orchestrator can construct it once
@@ -25,11 +55,25 @@ type StatusRenderDeps struct {
 	KbRuntime  *keys.Runtime
 	ActiveConn func() *models.Connection
 	Tr         *i18n.TranslationSet
+	// Toast surfaces a transient message that, while non-empty,
+	// overrides the default status line for its TTL window. Nil falls
+	// back to default-line rendering on every pass.
+	Toast ToastSource
 }
 
 // RenderStatusLine resolves the focused context's mode label, builds the
 // status line via status.BuildStatusLine, and writes it to the
 // AppStatus view through the driver.
+//
+// Toast multiplex: when d.Toast is non-nil AND d.Toast.Current() is
+// non-empty (i.e. an unexpired toast exists), the toast message takes
+// over the AppStatusViewName cells for the TTL window. The raw message
+// is run through config.SafeText to strip control bytes (the toast may
+// surface a runtime error string that isn't config-sourced), then
+// wrapped with an ANSI SGR pair keyed to the toast level so success
+// (green) and error (red) toasts are visually distinct at the cell
+// level. When the toast expires (Current() returns ""), the next pass
+// reverts to default status with no artifact.
 //
 // The options slot is populated by CollectOptionsForScope using the
 // focused (mode, scope) pair from the focus tree plus the live
@@ -39,12 +83,27 @@ type StatusRenderDeps struct {
 // Skips silently when (a) the driver is nil, (b) the KbRuntime or its
 // ModeStore is nil (defensive bootstrap-order guard per dlp.9 review
 // notes), or (c) the focus tree is nil/empty. Any driver SetContent
-// error is swallowed — the status bar is non-critical UI and the view
-// may not be allocated yet during early bootstrap.
+// error is swallowed — the status bar is non-critical UI. The view is
+// materialised by RunLayout's Tier-4 status pass each frame before this
+// function is invoked, so SetContent normally finds its target buffer;
+// the error-swallow is purely defense-in-depth for bootstrap races.
 func RenderStatusLine(d StatusRenderDeps) {
 	if d.Driver == nil {
 		return
 	}
+
+	// Toast multiplex — checked first so a toast can paint even before
+	// the keybinding runtime / focus tree are fully wired (e.g. on
+	// reload failures very early in bootstrap).
+	if d.Toast != nil {
+		if msg := d.Toast.Current(); msg != "" {
+			sanitized := config.SafeText(msg)
+			content := styleToastForLevel(sanitized, d.Toast.CurrentLevel())
+			_ = d.Driver.SetContent(AppStatusViewName, content)
+			return
+		}
+	}
+
 	if d.KbRuntime == nil || d.KbRuntime.ModeStore == nil {
 		return
 	}
@@ -76,4 +135,16 @@ func RenderStatusLine(d StatusRenderDeps) {
 
 	line := status.BuildStatusLine(label, conn, options, d.Tr)
 	_ = d.Driver.SetContent(AppStatusViewName, line)
+}
+
+// styleToastForLevel wraps msg with the ANSI SGR pair appropriate to
+// level. msg is assumed to already be SafeText-sanitised so it carries
+// no control bytes other than the ones this wrapper adds.
+func styleToastForLevel(msg string, level ui.ToastLevel) string {
+	switch level {
+	case ui.ToastError:
+		return ansiRedFgSGR + msg + ansiResetSGR
+	default:
+		return ansiGreenFgSGR + msg + ansiResetSGR
+	}
 }

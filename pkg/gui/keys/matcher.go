@@ -374,10 +374,13 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 	}
 
 	// Step 3: no match. ModeInsert / ModeCommand with a printable rune
-	// → Passthrough. Otherwise FellThrough. (The fast-path above
-	// already covered the empty-pending case; here we may have had a
-	// partial that just got cancelled.)
-	if (mode == types.ModeInsert || mode == types.ModeCommand) && isPrintableRune(k) {
+	// OR an editor-safe Special key (Backspace, Delete, arrows, Home,
+	// End) → Passthrough. Otherwise FellThrough. (The fast-path above
+	// already covered the empty-pending printable case; here we may
+	// have had a partial that just got cancelled, or the key is a
+	// Special that the fast-path skipped.)
+	if (mode == types.ModeInsert || mode == types.ModeCommand) &&
+		(isPrintableRune(k) || isEditorSafeSpecial(k)) {
 		m.mu.Unlock()
 		return Passthrough, nil
 	}
@@ -605,4 +608,35 @@ func isPrintableRune(k Key) bool {
 		return false
 	}
 	return unicode.IsPrint(k.Code)
+}
+
+// isEditorSafeSpecial reports whether k is a Special key that
+// gocui.DefaultEditor handles natively when delegated to via
+// Passthrough (Backspace, Delete, arrows, Home, End). Modifier-laden
+// Special keys (e.g. <c-bs>) are excluded so they remain available
+// for user bindings; if a binding matches, the trie lookup wins
+// before this gate is reached, so the modifier guard here is purely
+// for the unmatched-key Passthrough path.
+//
+// Used alongside isPrintableRune by the Insert/Command Passthrough
+// gate so non-printable editor keys reach DefaultEditor (otherwise
+// they would silently FellThrough — the master Editor cannot fall
+// back to DefaultEditor itself because the view's Editor IS the
+// master editor).
+func isEditorSafeSpecial(k Key) bool {
+	if k.Mod != 0 {
+		return false
+	}
+	switch k.Special {
+	case KeyBs,
+		KeyDel,
+		KeyLeft,
+		KeyRight,
+		KeyUp,
+		KeyDown,
+		KeyHome,
+		KeyEnd:
+		return true
+	}
+	return false
 }

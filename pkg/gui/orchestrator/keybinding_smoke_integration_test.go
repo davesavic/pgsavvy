@@ -398,6 +398,20 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 		if !seen {
 			t.Fatalf("toast history missing 'config reloaded'; history=%v", history)
 		}
+
+		// dbsavvy-tro.3: the toast must paint into the AppStatusViewName
+		// cells, not only land in the helper's History ring. Drive the
+		// production RunLayout path — it materialises the AppStatus view
+		// (Tier-4 status pass) and calls RenderStatusLine internally,
+		// which multiplexes the toast over the default status line. The
+		// recorder's stored cell buffer must carry the toast text.
+		if err := s.g.RunLayout(80, 24); err != nil {
+			t.Fatalf("RunLayout: %v", err)
+		}
+		buf := s.rec.GetViewBuffer(orchestrator.AppStatusViewName)
+		if !strings.Contains(buf, "config reloaded") {
+			t.Fatalf("AppStatusViewName buffer after RunLayout = %q; want it to contain 'config reloaded'", buf)
+		}
 	})
 
 	t.Run("step11_nop_unbinds_default", func(t *testing.T) {

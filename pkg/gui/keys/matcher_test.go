@@ -754,3 +754,237 @@ func TestMatcher_AfterFuncStaleFireSuppressed(t *testing.T) {
 		t.Errorf("stale timer fired %d times; want 0", got)
 	}
 }
+
+// --- dbsavvy-tro.6: editor-safe Special-key Passthrough --------------
+//
+// These tests pin the contract that the Matcher's Passthrough gate
+// (matcher.go: Step 3) returns Passthrough — NOT FellThrough — for
+// non-printable editor keys (Backspace, Delete, arrows, Home, End) in
+// ModeInsert / ModeCommand. The master editor's applyResult routes
+// Passthrough to gocui.DefaultEditor, which handles BackSpaceChar /
+// DeleteChar / cursor moves natively. Without this gate the keys are
+// silently dropped because the view's Editor IS the master editor —
+// gocui never reaches DefaultEditor on its own.
+
+// TestMatcher_BackspaceInModeCommand_ReturnsPassthrough is the
+// canonical regression: the original walkthrough bug was Backspace
+// being dropped in the COMMAND_LINE. Empty trieset so the matcher
+// reaches Step 3 (no binding, no partial), where the widened gate
+// must fire.
+func TestMatcher_BackspaceInModeCommand_ReturnsPassthrough(t *testing.T) {
+	ts := buildTrieSet(t, nil)
+	m := shortMatcher(t, ts, types.COMMAND_LINE, types.ModeCommand)
+
+	res, err := m.Dispatch(types.COMMAND_LINE, specialKey(KeyBs))
+	if err != nil {
+		t.Fatalf("Dispatch <bs>: %v", err)
+	}
+	if res != Passthrough {
+		t.Errorf("res = %v, want Passthrough (Backspace must reach DefaultEditor)", res)
+	}
+}
+
+// TestMatcher_EditorSafeSpecials_ModeCommand asserts every key in the
+// editor-safe Special set returns Passthrough under ModeCommand.
+// Drives them through fresh matchers so leftover pending state from
+// one key cannot mask a regression on the next.
+func TestMatcher_EditorSafeSpecials_ModeCommand(t *testing.T) {
+	cases := []struct {
+		name string
+		sp   SpecialKey
+	}{
+		{"Backspace", KeyBs},
+		{"Delete", KeyDel},
+		{"ArrowLeft", KeyLeft},
+		{"ArrowRight", KeyRight},
+		{"ArrowUp", KeyUp},
+		{"ArrowDown", KeyDown},
+		{"Home", KeyHome},
+		{"End", KeyEnd},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := buildTrieSet(t, nil)
+			m := shortMatcher(t, ts, types.COMMAND_LINE, types.ModeCommand)
+			res, err := m.Dispatch(types.COMMAND_LINE, specialKey(tc.sp))
+			if err != nil {
+				t.Fatalf("Dispatch %s: %v", tc.name, err)
+			}
+			if res != Passthrough {
+				t.Errorf("%s in ModeCommand: res = %v, want Passthrough", tc.name, res)
+			}
+		})
+	}
+}
+
+// TestMatcher_EditorSafeSpecials_ModeInsert mirrors the ModeCommand
+// suite under ModeInsert; the gate widens both modes symmetrically.
+func TestMatcher_EditorSafeSpecials_ModeInsert(t *testing.T) {
+	cases := []struct {
+		name string
+		sp   SpecialKey
+	}{
+		{"Backspace", KeyBs},
+		{"Delete", KeyDel},
+		{"ArrowLeft", KeyLeft},
+		{"ArrowRight", KeyRight},
+		{"ArrowUp", KeyUp},
+		{"ArrowDown", KeyDown},
+		{"Home", KeyHome},
+		{"End", KeyEnd},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := buildTrieSet(t, nil)
+			m := shortMatcher(t, ts, types.QUERY_EDITOR, types.ModeInsert)
+			res, err := m.Dispatch(types.QUERY_EDITOR, specialKey(tc.sp))
+			if err != nil {
+				t.Fatalf("Dispatch %s: %v", tc.name, err)
+			}
+			if res != Passthrough {
+				t.Errorf("%s in ModeInsert: res = %v, want Passthrough", tc.name, res)
+			}
+		})
+	}
+}
+
+// TestMatcher_NonEditorSpecials_StillFellThrough is the negative case
+// guarding against an over-broad helper: F1 / PgUp / PgDn / Insert /
+// Tab / Enter / Esc are NOT editor-safe (DefaultEditor either has no
+// useful behaviour or those keys have higher-level meaning) and must
+// continue to FellThrough so they can be picked up by Editor-external
+// keybindings.
+func TestMatcher_NonEditorSpecials_StillFellThrough(t *testing.T) {
+	cases := []struct {
+		name string
+		sp   SpecialKey
+	}{
+		{"F1", KeyF1},
+		{"F12", KeyF12},
+		{"PgUp", KeyPgUp},
+		{"PgDn", KeyPgDn},
+		{"Insert", KeyIns},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := buildTrieSet(t, nil)
+			m := shortMatcher(t, ts, types.COMMAND_LINE, types.ModeCommand)
+			res, err := m.Dispatch(types.COMMAND_LINE, specialKey(tc.sp))
+			if err != nil {
+				t.Fatalf("Dispatch %s: %v", tc.name, err)
+			}
+			if res != FellThrough {
+				t.Errorf("%s in ModeCommand: res = %v, want FellThrough (not editor-safe)", tc.name, res)
+			}
+		})
+	}
+}
+
+// TestMatcher_BackspaceInModeNormal_FellThrough guards the mode side
+// of the gate: outside ModeInsert / ModeCommand, even editor-safe
+// Special keys must FellThrough so Normal-mode bindings (or
+// higher-level handlers) can claim them.
+func TestMatcher_BackspaceInModeNormal_FellThrough(t *testing.T) {
+	ts := buildTrieSet(t, nil)
+	m := shortMatcher(t, ts, types.QUERY_EDITOR, types.ModeNormal)
+
+	res, err := m.Dispatch(types.QUERY_EDITOR, specialKey(KeyBs))
+	if err != nil {
+		t.Fatalf("Dispatch <bs>: %v", err)
+	}
+	if res != FellThrough {
+		t.Errorf("res = %v, want FellThrough (Backspace must NOT passthrough in Normal mode)", res)
+	}
+}
+
+// TestMatcher_BackspaceWithModifier_FellThrough pins the modifier
+// exclusion: <c-bs> is NOT editor-safe (it has no DefaultEditor
+// handler in our setup and should remain available for user
+// bindings). The gate's Mod != 0 check enforces this.
+func TestMatcher_BackspaceWithModifier_FellThrough(t *testing.T) {
+	ts := buildTrieSet(t, nil)
+	m := shortMatcher(t, ts, types.COMMAND_LINE, types.ModeCommand)
+
+	res, err := m.Dispatch(types.COMMAND_LINE, Key{Special: KeyBs, Mod: ModCtrl})
+	if err != nil {
+		t.Fatalf("Dispatch <c-bs>: %v", err)
+	}
+	if res != FellThrough {
+		t.Errorf("<c-bs> in ModeCommand: res = %v, want FellThrough (modifier excluded)", res)
+	}
+}
+
+// TestMatcher_PrintableStillPassthrough_Regression guards the
+// existing printable-rune behaviour from breaking when the gate is
+// widened. Mirrors TestMatcher_PassthroughInsertMode but in
+// ModeCommand for parity with the new code.
+func TestMatcher_PrintableStillPassthrough_Regression(t *testing.T) {
+	ts := buildTrieSet(t, nil)
+	m := shortMatcher(t, ts, types.COMMAND_LINE, types.ModeCommand)
+
+	res, err := m.Dispatch(types.COMMAND_LINE, keyOf('a'))
+	if err != nil {
+		t.Fatalf("Dispatch a: %v", err)
+	}
+	if res != Passthrough {
+		t.Errorf("'a' in ModeCommand: res = %v, want Passthrough (printable regression)", res)
+	}
+}
+
+// TestMatcher_BackspaceWithBinding_Dispatched proves bindings still
+// win over the editor-safe Passthrough fallback: if the user binds
+// <bs> to a command, the trie lookup at Step 1/2 fires before Step 3.
+// The widened gate is strictly a no-binding fallback.
+func TestMatcher_BackspaceWithBinding_Dispatched(t *testing.T) {
+	var fired []string
+	var mu sync.Mutex
+	bsCmd := recordingCmd("test.bs", &fired, &mu, nil)
+	ts := buildTrieSet(t, []trieEntry{
+		{types.ModeCommand, types.COMMAND_LINE, []Key{specialKey(KeyBs)}, bsCmd},
+	})
+	m := shortMatcher(t, ts, types.COMMAND_LINE, types.ModeCommand)
+
+	res, err := m.Dispatch(types.COMMAND_LINE, specialKey(KeyBs))
+	if err != nil {
+		t.Fatalf("Dispatch <bs>: %v", err)
+	}
+	if res != Dispatched {
+		t.Errorf("res = %v, want Dispatched (binding must win over passthrough)", res)
+	}
+	mu.Lock()
+	got := append([]string(nil), fired...)
+	mu.Unlock()
+	if len(got) != 1 || got[0] != "test.bs" {
+		t.Errorf("fired = %v, want [test.bs]", got)
+	}
+}
+
+// TestIsEditorSafeSpecial directly exercises the helper so a refactor
+// renaming or inlining it still has a focused unit-level safety net.
+func TestIsEditorSafeSpecial(t *testing.T) {
+	wantTrue := []SpecialKey{KeyBs, KeyDel, KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd}
+	for _, sp := range wantTrue {
+		if !isEditorSafeSpecial(Key{Special: sp}) {
+			t.Errorf("isEditorSafeSpecial(%v) = false, want true", sp)
+		}
+	}
+	wantFalse := []Key{
+		{Special: KeyF1},
+		{Special: KeyPgUp},
+		{Special: KeyPgDn},
+		{Special: KeyIns},
+		{Special: KeyEsc},
+		{Special: KeyEnter},
+		{Special: KeyTab},
+		{Special: KeySpace},
+		{Special: KeyNone},                // bare rune carrier
+		{Code: 'a'},                       // plain rune
+		{Special: KeyBs, Mod: ModCtrl},    // editor-safe key + modifier
+		{Special: KeyLeft, Mod: ModShift}, // ditto
+	}
+	for _, k := range wantFalse {
+		if isEditorSafeSpecial(k) {
+			t.Errorf("isEditorSafeSpecial(%+v) = true, want false", k)
+		}
+	}
+}

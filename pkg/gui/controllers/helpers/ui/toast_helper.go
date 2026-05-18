@@ -1,12 +1,52 @@
 package ui
 
 import (
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
+
+// ToastLevel classifies a toast for styling purposes. The current
+// emission API (controllers.ToastHelper.Show) takes only (message, ttl)
+// — out-of-scope for dbsavvy-tro.3 to extend — so the level is derived
+// from the message content inside Show via classifyToastLevel. The
+// status-bar renderer (orchestrator.RenderStatusLine) reads it via
+// CurrentLevel() to apply a distinguishable foreground style.
+type ToastLevel int
+
+const (
+	// ToastInfo styles the toast as a success / informational message
+	// (green foreground). Default classification.
+	ToastInfo ToastLevel = iota
+	// ToastError styles the toast as an error (red foreground).
+	// Selected when the message contains an error-indicating substring
+	// (case-insensitive "fail", "error", "panic").
+	ToastError
+)
+
+// classifyToastLevel picks a level from the (already-redacted) message
+// text. Emission sites (pkg/gui/keys/reload.go, command_line.go) pass
+// only a plain string; the heuristic recognises the shipped error
+// phrasing ("reload failed: ...", "build panic: ...", "unknown
+// ex-command: ...", etc.) so the status bar can paint them red without
+// changing the ToastFunc surface. "unknown" is a known error-phrasing
+// substring used by pkg/gui/keys/command_line.go for the
+// "unknown ex-command: X" toast — confirmed via grep over the
+// production emission sites (pkg/gui/keys, pkg/gui/controllers,
+// pkg/gui/orchestrator) that no success toast contains "unknown".
+func classifyToastLevel(msg string) ToastLevel {
+	lower := strings.ToLower(msg)
+	if strings.Contains(lower, "fail") ||
+		strings.Contains(lower, "error") ||
+		strings.Contains(lower, "panic") ||
+		strings.Contains(lower, "unknown") {
+		return ToastError
+	}
+	return ToastInfo
+}
 
 // ToastHelper renders a transient message in the status-bar's toast
 // slot. The actual status-bar rendering loop reads Current() on every
@@ -31,6 +71,7 @@ type ToastHelper struct {
 
 	mu        sync.Mutex
 	current   string
+	level     ToastLevel
 	gen       uint64 // monotonic: timer fires whose gen doesn't match are stale
 	clearTime time.Time
 	history   []string // bounded ring of every redacted message passed to Show
@@ -58,10 +99,12 @@ func NewToastHelper(driver types.GuiDriver) *ToastHelper {
 // pop-ups.)
 func (h *ToastHelper) Show(message string, ttl time.Duration) {
 	redacted := session.RedactDSN(message)
+	level := classifyToastLevel(redacted)
 	h.mu.Lock()
 	h.gen++
 	gen := h.gen
 	h.current = redacted
+	h.level = level
 	if ttl > 0 {
 		h.clearTime = time.Now().Add(ttl)
 	} else {
@@ -84,12 +127,24 @@ func (h *ToastHelper) Show(message string, ttl time.Duration) {
 			h.mu.Lock()
 			if h.gen == gen {
 				h.current = ""
+				h.level = ToastInfo
 				h.clearTime = time.Time{}
 			}
 			h.mu.Unlock()
 			return nil
 		})
 	})
+}
+
+// CurrentLevel returns the level classification of the currently visible
+// toast (ToastInfo when the slot is empty). Read by RenderStatusLine to
+// pick the foreground style. Snapshotted under the same mutex Current()
+// uses so a concurrent Show() cannot deliver (msg, level) torn across
+// the two accessors.
+func (h *ToastHelper) CurrentLevel() ToastLevel {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.level
 }
 
 // Current returns the currently visible toast message (already
@@ -117,6 +172,7 @@ func (h *ToastHelper) Clear() {
 	h.mu.Lock()
 	h.gen++ // invalidate any pending timer-fire
 	h.current = ""
+	h.level = ToastInfo
 	h.clearTime = time.Time{}
 	h.mu.Unlock()
 }

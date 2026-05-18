@@ -117,6 +117,11 @@ type Gui struct {
 	modeStore   *keys.ModeStore
 	whichkey    *keys.WhichKey
 	exRegistry  *keys.ExRegistry
+	// kbRuntime is the keys.Runtime composite handed to controllers via
+	// HelperBag.KbRuntime. Retained on Gui so RunLayout's Tier-4 status
+	// pass (dbsavvy-tro.3) can hand it to RenderStatusLine without
+	// rebuilding the value every frame.
+	kbRuntime *keys.Runtime
 
 	// lastWarnings captures the Warning slice returned by the most recent
 	// KeybindingService.Build run during wireWithDriver. Surfaced via the
@@ -243,6 +248,7 @@ func (g *Gui) wireWithDriver() error {
 	}
 	g.matcher = matcher
 	runtime := keys.NewRuntime(g.cmdRegistry, matcher, g.modeStore, g.whichkey, g.exRegistry)
+	g.kbRuntime = runtime
 
 	// Cheatsheet render closure. Captures the live matcher + tr so the
 	// CheatsheetContext renders the current TrieSet snapshot every time

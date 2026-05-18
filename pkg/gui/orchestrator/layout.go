@@ -7,6 +7,9 @@ import (
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/i18n"
+	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
 // limitThreshold is the smallest terminal dimension (in either axis)
@@ -71,7 +74,12 @@ func (g *Gui) RunLayout(w, h int) error {
 	_ = g.driver.DeleteView(string(types.LIMIT))
 
 	// Tier 1: always-on tiled contexts (side rails + extras). These are
-	// created every frame regardless of focus-stack state.
+	// created every frame regardless of focus-stack state. View handles
+	// returned by SetView are collected into rails so the focus-frame
+	// pass below can swap FrameColor per frame (gocui resets FrameColor
+	// to ColorDefault on each SetView — view.go:498 — so the swap has to
+	// run after SetView, not on focus-change events).
+	rails := make(map[string]*gocui.View)
 	for _, ctx := range g.registry.Flatten() {
 		if ctx == nil {
 			continue
@@ -91,11 +99,28 @@ func (g *Gui) RunLayout(w, h int) error {
 		if !ok {
 			continue
 		}
-		if _, err := g.driver.SetView(name, d.X0, d.Y0, d.X1, d.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		v, err := g.driver.SetView(name, d.X0, d.Y0, d.X1, d.Y1, 0)
+		if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
 			return err
+		}
+		if v != nil {
+			rails[name] = v
 		}
 		_ = ctx.HandleRender()
 	}
+
+	// Focus-frame swap (dbsavvy-tro.1): every Tier-1 rail repaints its
+	// FrameColor each frame — focused rail gets theme.ActiveBorder, the
+	// rest get theme.InactiveBorder. Popups (Tier-3) are NOT touched and
+	// keep whatever FrameColor their own render paths assign. Sourced
+	// from the existing focus stack (g.tree.Current); no new state.
+	focusedName := ""
+	if g.tree != nil {
+		if top := g.tree.Current(); top != nil {
+			focusedName = top.GetViewName()
+		}
+	}
+	applyFocusFrameColors(rails, focusedName, frameAttr(theme.Current().ActiveBorder), frameAttr(theme.Current().InactiveBorder))
 
 	// Tier 3: focus-stack-driven popups (TEMPORARY_POPUP +
 	// DISPLAY_CONTEXT). Walk bottom→top so SetViewOnTop ordering matches
@@ -189,6 +214,55 @@ func (g *Gui) RunLayout(w, h int) error {
 			continue
 		}
 		_ = g.driver.DeleteView(name)
+	}
+
+	// Tier 4a: always-on status bar (dbsavvy-tro.3). The boxlayout
+	// reserves a 1-row "status" slot at the canvas bottom; we materialise
+	// a borderless view there each frame and hand it to RenderStatusLine,
+	// which multiplexes the toast helper's Current() over the default
+	// status line for the TTL window. SetView returning ErrUnknownView
+	// is the gocui "created on first call" sentinel — same idiom Tier 1
+	// uses above. A nil view (test recorder path) is tolerated; the
+	// renderer writes to the view via SetContent, which the recorder
+	// driver routes by name regardless of the *View handle.
+	if d, ok := dims[AppStatusViewName]; ok && d.X1 > d.X0 && d.Y1 >= d.Y0 {
+		view, err := g.driver.SetView(AppStatusViewName, d.X0, d.Y0, d.X1, d.Y1, 0)
+		if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+		// Borderless 1-row strip — same shape as COMMAND_LINE. Without
+		// Frame=false gocui would draw a border box around the cell.
+		if view != nil {
+			view.Frame = false
+		}
+		// Resolve the live *models.Connection by joining the activeConnID
+		// state with the Deps.ConnectionsProvider (the same source the
+		// Connections side rail walks). A missing provider or empty ID
+		// collapses to nil — BuildStatusLine renders the no-conn slot.
+		activeConn := func() *models.Connection {
+			if g.activeConnID == "" || g.deps.ConnectionsProvider == nil {
+				return nil
+			}
+			for _, c := range g.deps.ConnectionsProvider() {
+				if c.Name == g.activeConnID {
+					cp := c
+					return &cp
+				}
+			}
+			return nil
+		}
+		var tr *i18n.TranslationSet
+		if g.deps.Common != nil {
+			tr = g.deps.Common.Tr
+		}
+		RenderStatusLine(StatusRenderDeps{
+			Driver:     g.driver,
+			Tree:       g.tree,
+			KbRuntime:  g.kbRuntime,
+			ActiveConn: activeConn,
+			Tr:         tr,
+			Toast:      g.toastHelp,
+		})
 	}
 
 	// Tier 4: shy overlays driven by notifier visibility (not by stack
@@ -390,6 +464,36 @@ func commandLineRect(dims map[string]ui.Dimensions) rect {
 		X1: canvas.X1,
 		Y1: canvas.Y1 + 1,
 	}
+}
+
+// applyFocusFrameColors walks the supplied rail views and writes
+// FrameColor for each: the view whose name equals focusedName receives
+// active, all other Frame=true views receive inactive. Views with
+// Frame=false (e.g. COMMAND_LINE) and nil entries are skipped. Caller
+// is responsible for excluding popup-Kind views from the input map —
+// only top-level rails belong in here.
+func applyFocusFrameColors(rails map[string]*gocui.View, focusedName string, active, inactive gocui.Attribute) {
+	for name, v := range rails {
+		if v == nil || !v.Frame {
+			continue
+		}
+		if name == focusedName {
+			v.FrameColor = active
+		} else {
+			v.FrameColor = inactive
+		}
+	}
+}
+
+// frameAttr translates a theme.Style colour-name into the gocui.Attribute
+// the runtime stores in v.FrameColor. Nil styles and empty Fg fall back
+// to gocui.ColorDefault so the helper never injects an invalid colour
+// into a view. gocui.GetColor accepts W3C names and #RRGGBB hex.
+func frameAttr(s *theme.Style) gocui.Attribute {
+	if s == nil || s.Fg == "" {
+		return gocui.ColorDefault
+	}
+	return gocui.GetColor(s.Fg)
 }
 
 // centeredRect returns the subrect occupying (frac w x frac h) of the

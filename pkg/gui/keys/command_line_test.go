@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -442,5 +443,148 @@ func TestDefaultCommandLineBindings(t *testing.T) {
 	}
 	if len(bs[2].Sequence) == 0 {
 		t.Error("bs[2].Sequence empty")
+	}
+}
+
+// --- dbsavvy-tro.6 integration: Backspace through the default bindings -
+//
+// These tests pin the contract from the COMMAND_LINE feature's
+// perspective: with the real DefaultCommandLineBindings (colon/esc/cr)
+// installed in a Matcher, non-printable editor keys must NOT be
+// shadowed by those bindings and must reach the master editor's
+// Passthrough → DefaultEditor delegation.
+//
+// We assert at the Matcher boundary (Passthrough result) rather than
+// at the TextArea level because the keys package cannot import gocui
+// without inverting the dependency direction; the orchestrator package
+// owns the matching TextArea assertion (master_editor_test.go's
+// TestMasterEditor_PassthroughInsertModeDelegates already covers the
+// printable variant of that wire).
+
+// buildCommandLineMatcher constructs a Matcher pre-loaded with the
+// three default COMMAND_LINE bindings (colon/esc/cr) and the supplied
+// scope/mode. We assemble the trie inline rather than calling Build —
+// Build also resolves command IDs to handlers (out-of-scope for a
+// gate test) and registering action handlers would muddy the test.
+func buildCommandLineMatcher(t *testing.T, scope types.ContextKey, mode types.Mode) *Matcher {
+	t.Helper()
+	bindings := DefaultCommandLineBindings()
+	builders := map[TrieSetKey]*TrieBuilder{}
+	for _, b := range bindings {
+		k := TrieSetKey{Mode: b.Mode, Scope: b.Scope}
+		tb, ok := builders[k]
+		if !ok {
+			tb = NewTrieBuilder()
+			builders[k] = tb
+		}
+		// Stub Command — handler is irrelevant because the test only
+		// drives keys for which we expect Passthrough, not Dispatched.
+		tb.InsertDefault(b, &commands.Command{
+			ID:      b.ActionID,
+			Handler: func(commands.ExecCtx) error { return nil },
+		})
+	}
+	ts := NewTrieSet()
+	for k, tb := range builders {
+		trie, err := tb.Build()
+		if err != nil {
+			t.Fatalf("build trie for %+v: %v", k, err)
+		}
+		ts.Set(k.Mode, k.Scope, trie)
+	}
+
+	store := NewModeStore()
+	store.Set(scope, mode)
+	m, err := NewMatcher(ts, MatcherConfig{
+		Modes:       store,
+		TimeoutLen:  30 * time.Millisecond,
+		TtimeoutLen: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewMatcher: %v", err)
+	}
+	return m
+}
+
+// TestCommandLine_BackspaceReachesPassthrough is the load-bearing
+// end-to-end assertion for the COMMAND_LINE feature: with the real
+// default bindings wired, Backspace in ModeCommand reaches the
+// matcher's Passthrough gate (and from there, in production,
+// gocui.DefaultEditor.BackSpaceChar mutates v.TextArea). If a future
+// refactor moves the gate or accidentally registers a <bs> binding,
+// this test fails — Backspace would either return Dispatched (binding
+// added by mistake) or FellThrough (gate narrowed).
+func TestCommandLine_BackspaceReachesPassthrough(t *testing.T) {
+	m := buildCommandLineMatcher(t, types.COMMAND_LINE, types.ModeCommand)
+
+	res, err := m.Dispatch(types.COMMAND_LINE, Key{Special: KeyBs})
+	if err != nil {
+		t.Fatalf("Dispatch <bs>: %v", err)
+	}
+	if res != Passthrough {
+		t.Errorf("res = %v, want Passthrough (Backspace must reach DefaultEditor)", res)
+	}
+}
+
+// TestCommandLine_PrintableTypingReachesPassthrough confirms the
+// :abc typing path still resolves to Passthrough through the same
+// matcher (no regression on the existing happy-path).
+func TestCommandLine_PrintableTypingReachesPassthrough(t *testing.T) {
+	m := buildCommandLineMatcher(t, types.COMMAND_LINE, types.ModeCommand)
+
+	for _, r := range "abc" {
+		res, err := m.Dispatch(types.COMMAND_LINE, Key{Code: r})
+		if err != nil {
+			t.Fatalf("Dispatch %q: %v", string(r), err)
+		}
+		if res != Passthrough {
+			t.Errorf("%q in ModeCommand: res = %v, want Passthrough", string(r), res)
+		}
+	}
+}
+
+// TestCommandLine_EscStillCancels guards that the gate change has
+// NOT swallowed the <esc> binding — Esc must still resolve to
+// Dispatched (the CommandCancel handler) because esc is wired into
+// the default trie.
+func TestCommandLine_EscStillCancels(t *testing.T) {
+	m := buildCommandLineMatcher(t, types.COMMAND_LINE, types.ModeCommand)
+
+	res, err := m.Dispatch(types.COMMAND_LINE, Key{Special: KeyEsc})
+	if err != nil {
+		t.Fatalf("Dispatch <esc>: %v", err)
+	}
+	if res != Dispatched {
+		t.Errorf("<esc> res = %v, want Dispatched", res)
+	}
+}
+
+// TestCommandLine_DeleteAndArrowsReachPassthrough mirrors the
+// Backspace assertion across the rest of the editor-safe Special
+// set, anchored to the real default bindings. A future "we forgot
+// arrow X" regression on the gate is caught here without bloating
+// matcher_test.go.
+func TestCommandLine_DeleteAndArrowsReachPassthrough(t *testing.T) {
+	cases := []struct {
+		name string
+		sp   SpecialKey
+	}{
+		{"Delete", KeyDel},
+		{"Left", KeyLeft},
+		{"Right", KeyRight},
+		{"Home", KeyHome},
+		{"End", KeyEnd},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := buildCommandLineMatcher(t, types.COMMAND_LINE, types.ModeCommand)
+			res, err := m.Dispatch(types.COMMAND_LINE, Key{Special: tc.sp})
+			if err != nil {
+				t.Fatalf("Dispatch %s: %v", tc.name, err)
+			}
+			if res != Passthrough {
+				t.Errorf("%s: res = %v, want Passthrough", tc.name, res)
+			}
+		})
 	}
 }
