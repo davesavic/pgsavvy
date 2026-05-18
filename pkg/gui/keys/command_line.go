@@ -25,15 +25,22 @@ type StackOps interface {
 	Pop() error
 }
 
+// CaretToggler flips the global terminal caret on/off. Bootstrap wires
+// this to driver.SetCaretEnabled; tests pass a recording func. Nil is
+// treated as a no-op so existing call sites that don't care about the
+// caret keep compiling.
+type CaretToggler func(enabled bool)
+
 // CommandLineCommandDeps groups the dependencies for command.open,
 // command.cancel, and command.submit. Bootstrap (dlp.8c) supplies the
 // concrete focus stack, the live CommandLineContext, the ExRegistry,
-// and the toast surface.
+// the toast surface, and the caret toggler.
 type CommandLineCommandDeps struct {
-	Stack      StackOps
-	Context    CommandLineHolder
-	ExRegistry *ExRegistry
-	Toaster    ToastFunc
+	Stack        StackOps
+	Context      CommandLineHolder
+	ExRegistry   *ExRegistry
+	Toaster      ToastFunc
+	CaretToggler CaretToggler
 }
 
 // CommandOpenCommand builds the `command.open` Command. Handler pushes
@@ -47,14 +54,23 @@ func CommandOpenCommand(deps CommandLineCommandDeps) *commands.Command {
 			if deps.Stack == nil || deps.Context == nil {
 				return nil
 			}
-			return deps.Stack.Push(deps.Context)
+			if err := deps.Stack.Push(deps.Context); err != nil {
+				return err
+			}
+			if deps.CaretToggler != nil {
+				deps.CaretToggler(true)
+			}
+			return nil
 		},
 	}
 }
 
 // CommandCancelCommand builds the `command.cancel` Command. Handler pops
 // the COMMAND_LINE context. ModeStore is reset via HandleFocusLost on
-// the context's pop.
+// the context's pop. The caret is disabled AFTER Pop so the focus has
+// already moved off COMMAND_LINE — gocui draws the caret at the current
+// view's cursor, so leaving caret=true pointed at a just-deleted view
+// would briefly draw at (0,0) of whatever rail is now current.
 func CommandCancelCommand(deps CommandLineCommandDeps) *commands.Command {
 	return &commands.Command{
 		ID:          commands.CommandCancel,
@@ -63,7 +79,13 @@ func CommandCancelCommand(deps CommandLineCommandDeps) *commands.Command {
 			if deps.Stack == nil {
 				return nil
 			}
-			return deps.Stack.Pop()
+			if err := deps.Stack.Pop(); err != nil {
+				return err
+			}
+			if deps.CaretToggler != nil {
+				deps.CaretToggler(false)
+			}
+			return nil
 		},
 	}
 }
@@ -84,7 +106,14 @@ func CommandSubmitCommand(deps CommandLineCommandDeps) *commands.Command {
 			}
 			line := strings.TrimSpace(deps.Context.ReadAndClearBuffer())
 			// Pop always — empty, unknown, success: same exit path.
-			defer func() { _ = deps.Stack.Pop() }()
+			// CaretToggler runs after Pop for the same reason as Cancel:
+			// caret must follow focus off COMMAND_LINE before disabling.
+			defer func() {
+				_ = deps.Stack.Pop()
+				if deps.CaretToggler != nil {
+					deps.CaretToggler(false)
+				}
+			}()
 			if line == "" {
 				return nil
 			}

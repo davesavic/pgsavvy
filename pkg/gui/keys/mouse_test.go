@@ -43,6 +43,8 @@ func (m *mouseFakeDriver) SetViewOnTop(_ string) (types.View, error) { panic("no
 func (m *mouseFakeDriver) ViewByName(_ string) (types.View, error)   { panic("not used") }
 func (m *mouseFakeDriver) DeleteView(_ string) error                 { return nil }
 func (m *mouseFakeDriver) SetManager(_ ...types.Manager)             {}
+func (m *mouseFakeDriver) SetCaretEnabled(_ bool)                    {}
+func (m *mouseFakeDriver) SetViewCursor(_ string, _, _ int) error    { return nil }
 func (m *mouseFakeDriver) MainLoop() error                           { return nil }
 func (m *mouseFakeDriver) Close() error                              { return nil }
 

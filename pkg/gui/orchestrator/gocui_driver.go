@@ -119,6 +119,19 @@ func (d *gocuiDriver) SetManager(managers ...types.Manager) {
 	d.g.SetManager(managers...)
 }
 
+func (d *gocuiDriver) SetCaretEnabled(enabled bool) {
+	d.g.Cursor = enabled
+}
+
+func (d *gocuiDriver) SetViewCursor(viewName string, x, y int) error {
+	v, err := d.g.View(viewName)
+	if err != nil {
+		return err
+	}
+	v.SetCursor(x, y)
+	return nil
+}
+
 func (d *gocuiDriver) MainLoop() error {
 	return d.g.MainLoop()
 }

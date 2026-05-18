@@ -68,6 +68,8 @@ func (cmdLineStubDriver) SetViewOnTop(string) (types.View, error)           { re
 func (cmdLineStubDriver) ViewByName(string) (types.View, error)             { return nil, nil }
 func (cmdLineStubDriver) DeleteView(string) error                           { return nil }
 func (cmdLineStubDriver) SetManager(...types.Manager)                       {}
+func (cmdLineStubDriver) SetCaretEnabled(bool)                              {}
+func (cmdLineStubDriver) SetViewCursor(string, int, int) error              { return nil }
 func (cmdLineStubDriver) MainLoop() error                                   { return nil }
 func (cmdLineStubDriver) Close() error                                      { return nil }
 

@@ -3,6 +3,8 @@ package orchestrator_test
 import (
 	"testing"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
@@ -174,5 +176,152 @@ func TestRunLayoutCreatesPopupOnStack(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("MENU DeleteView not invoked after Pop")
+	}
+}
+
+// TestCommandActionsFlipDriverCaret (dbsavvy-tro.2): the live wiring in
+// gui.go assembles CommandLineCommandDeps.CaretToggler = driver.SetCaretEnabled.
+// Invoke the registered command.open / command.cancel handlers and
+// verify the recorder driver observed (true, false).
+func TestCommandActionsFlipDriverCaret(t *testing.T) {
+	g, rec := buildTestGui(t)
+	openCmd, ok := g.CommandRegistry().Get(commands.CommandOpen)
+	if !ok || openCmd == nil {
+		t.Fatal("command.open not registered")
+	}
+	cancelCmd, ok := g.CommandRegistry().Get(commands.CommandCancel)
+	if !ok || cancelCmd == nil {
+		t.Fatal("command.cancel not registered")
+	}
+	if err := openCmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("open Handler: %v", err)
+	}
+	if !rec.CaretEnabled {
+		t.Errorf("after command.open: CaretEnabled = false, want true")
+	}
+	if err := cancelCmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("cancel Handler: %v", err)
+	}
+	if rec.CaretEnabled {
+		t.Errorf("after command.cancel: CaretEnabled = true, want false")
+	}
+	if got := rec.AllCaretEnabledLog(); len(got) != 2 || got[0] != true || got[1] != false {
+		t.Errorf("CaretEnabledLog = %v, want [true false]", got)
+	}
+}
+
+// TestRunLayoutCommandLineCaretAtPromptColumn (dbsavvy-tro.2): each
+// Layout pass while COMMAND_LINE is on the focus stack must call
+// driver.SetViewCursor on the command-line view at column = 1 +
+// len(buffer) so the caret sits right after the ':' prompt.
+//
+// Under the RecorderGuiDriver SetView returns view=nil, so the layout
+// branch falls back to the context's Buffer() method (which strips the
+// leading ':') — assert the cursor X is `1 + len(buffer)` (i.e. 1 for
+// an empty buffer).
+func TestRunLayoutCommandLineCaretAtPromptColumn(t *testing.T) {
+	g, rec := buildTestGui(t)
+	cl := g.Registry().CommandLine
+	if cl == nil {
+		t.Fatal("registry.CommandLine is nil")
+	}
+	if err := g.ContextTree().Push(cl); err != nil {
+		t.Fatalf("Push(CommandLine): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	calls := rec.AllSetViewCursorCalls()
+	var found *testfake.SetViewCursorCall
+	for i := range calls {
+		c := calls[i]
+		if c.View == string(types.COMMAND_LINE) {
+			found = &c
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("SetViewCursor not called for COMMAND_LINE; calls = %+v", calls)
+	}
+	// Empty buffer → X = 1 (column after ':'). Y = 0 (single-row strip).
+	if found.X != 1 || found.Y != 0 {
+		t.Errorf("SetViewCursor(COMMAND_LINE) = (%d, %d), want (1, 0)", found.X, found.Y)
+	}
+}
+
+// TestRunLayoutCommandLineCaretTracksBufferLength: after the user has
+// typed "abc", the next Layout pass must put the caret at X = 4
+// (1 for ':' + 3 typed chars). Drives SetBuffer on the test seam since
+// the recorder driver returns view=nil.
+func TestRunLayoutCommandLineCaretTracksBufferLength(t *testing.T) {
+	g, rec := buildTestGui(t)
+	cl := g.Registry().CommandLine
+	if cl == nil {
+		t.Fatal("registry.CommandLine is nil")
+	}
+	if err := g.ContextTree().Push(cl); err != nil {
+		t.Fatalf("Push(CommandLine): %v", err)
+	}
+	cl.SetBuffer("abc")
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	calls := rec.AllSetViewCursorCalls()
+	var last *testfake.SetViewCursorCall
+	for i := range calls {
+		c := calls[i]
+		if c.View == string(types.COMMAND_LINE) {
+			last = &c
+		}
+	}
+	if last == nil {
+		t.Fatalf("no SetViewCursor(COMMAND_LINE); calls=%+v", calls)
+	}
+	if last.X != 4 || last.Y != 0 {
+		t.Errorf("SetViewCursor(COMMAND_LINE) = (%d, %d), want (4, 0)", last.X, last.Y)
+	}
+}
+
+// TestRunLayoutCommandLineCaretResetOnRePush: after Pop, HandleFocusLost
+// clears the buffer; re-Push must produce a fresh SetViewCursor at X=1
+// even if the previous buffer was longer.
+func TestRunLayoutCommandLineCaretResetOnRePush(t *testing.T) {
+	g, rec := buildTestGui(t)
+	cl := g.Registry().CommandLine
+	if cl == nil {
+		t.Fatal("registry.CommandLine is nil")
+	}
+	// First push with a long buffer.
+	if err := g.ContextTree().Push(cl); err != nil {
+		t.Fatalf("Push#1: %v", err)
+	}
+	cl.SetBuffer("hello world")
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout#1: %v", err)
+	}
+	if err := g.ContextTree().Pop(); err != nil {
+		t.Fatalf("Pop: %v", err)
+	}
+	// Re-push — HandleFocusLost cleared buf to "".
+	if err := g.ContextTree().Push(cl); err != nil {
+		t.Fatalf("Push#2: %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout#2: %v", err)
+	}
+	// The LAST SetViewCursor call for COMMAND_LINE must be at X=1.
+	calls := rec.AllSetViewCursorCalls()
+	var last *testfake.SetViewCursorCall
+	for i := range calls {
+		c := calls[i]
+		if c.View == string(types.COMMAND_LINE) {
+			last = &c
+		}
+	}
+	if last == nil {
+		t.Fatalf("no SetViewCursor(COMMAND_LINE) recorded; calls=%+v", calls)
+	}
+	if last.X != 1 || last.Y != 0 {
+		t.Errorf("re-push SetViewCursor = (%d, %d), want (1, 0) — stale buffer length leaked", last.X, last.Y)
 	}
 }

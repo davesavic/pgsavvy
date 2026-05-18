@@ -58,6 +58,8 @@ func (d *updateRecordingDriver) SetViewOnTop(_ string) (types.View, error) {
 func (d *updateRecordingDriver) ViewByName(_ string) (types.View, error) { panic("not used") }
 func (d *updateRecordingDriver) DeleteView(_ string) error               { return nil }
 func (d *updateRecordingDriver) SetManager(_ ...types.Manager)           {}
+func (d *updateRecordingDriver) SetCaretEnabled(_ bool)                  {}
+func (d *updateRecordingDriver) SetViewCursor(_ string, _, _ int) error  { return nil }
 func (d *updateRecordingDriver) MainLoop() error                         { return nil }
 func (d *updateRecordingDriver) Close() error                            { return nil }
 

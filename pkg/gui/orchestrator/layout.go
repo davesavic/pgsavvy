@@ -145,6 +145,19 @@ func (g *Gui) RunLayout(w, h int) error {
 						cl.SetView(view)
 					}
 				}
+				// Anchor the caret to the end of the typed buffer each
+				// frame. Production view exposes TextArea.GetContent (full
+				// content including ':'); tests use the RecorderGuiDriver
+				// which returns view=nil from SetView, so fall back to the
+				// context's Buffer() which strips the ':' prompt — add 1
+				// for the prompt column. Bug dbsavvy-tro.2.
+				cursorX := 1
+				if view != nil && view.TextArea != nil {
+					cursorX = len(view.TextArea.GetContent())
+				} else if bufHolder, ok := ctx.(interface{ Buffer() string }); ok {
+					cursorX = 1 + len(bufHolder.Buffer())
+				}
+				_ = g.driver.SetViewCursor(name, cursorX, 0)
 			}
 			_ = ctx.HandleRender()
 			_, _ = g.driver.SetViewOnTop(name)

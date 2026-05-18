@@ -272,6 +272,128 @@ func TestCommandSubmitCommand_NilRegistryUnknown(t *testing.T) {
 	}
 }
 
+// --- CaretToggler wiring (dbsavvy-tro.2) -------------------------------
+
+// caretRecorder accumulates every CaretToggler call. The order matters
+// in the Cancel/Submit assertions (caret must flip false AFTER Pop).
+type caretRecorder struct{ log []bool }
+
+func (c *caretRecorder) toggle(enabled bool) { c.log = append(c.log, enabled) }
+
+func TestCommandOpenCommand_EnablesCaret(t *testing.T) {
+	stack := &fakeStack{}
+	holder := &fakeHolder{}
+	caret := &caretRecorder{}
+	cmd := CommandOpenCommand(CommandLineCommandDeps{
+		Stack: stack, Context: holder, CaretToggler: caret.toggle,
+	})
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if !reflect.DeepEqual(caret.log, []bool{true}) {
+		t.Errorf("caret log = %v, want [true]", caret.log)
+	}
+}
+
+func TestCommandOpenCommand_PushErrorSkipsCaret(t *testing.T) {
+	// If Push fails, we must NOT enable the caret — otherwise a
+	// failed-to-open command line would still leave the global caret on,
+	// painting at whatever view is current.
+	stack := &fakeStack{pushErr: errors.New("push failed")}
+	holder := &fakeHolder{}
+	caret := &caretRecorder{}
+	cmd := CommandOpenCommand(CommandLineCommandDeps{
+		Stack: stack, Context: holder, CaretToggler: caret.toggle,
+	})
+	if err := cmd.Handler(commands.ExecCtx{}); err == nil {
+		t.Fatal("Handler: want push error, got nil")
+	}
+	if len(caret.log) != 0 {
+		t.Errorf("caret log = %v, want empty (push failed)", caret.log)
+	}
+}
+
+func TestCommandCancelCommand_DisablesCaretAfterPop(t *testing.T) {
+	stack := &fakeStack{}
+	caret := &caretRecorder{}
+	cmd := CommandCancelCommand(CommandLineCommandDeps{
+		Stack: stack, CaretToggler: caret.toggle,
+	})
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if stack.popped != 1 {
+		t.Errorf("popped = %d, want 1", stack.popped)
+	}
+	if !reflect.DeepEqual(caret.log, []bool{false}) {
+		t.Errorf("caret log = %v, want [false]", caret.log)
+	}
+}
+
+func TestCommandSubmitCommand_DisablesCaretAfterPop(t *testing.T) {
+	stack := &fakeStack{}
+	holder := &fakeHolder{buf: ""}
+	caret := &caretRecorder{}
+	cmd := CommandSubmitCommand(CommandLineCommandDeps{
+		Stack: stack, Context: holder, ExRegistry: NewExRegistry(), CaretToggler: caret.toggle,
+	})
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if stack.popped != 1 {
+		t.Errorf("popped = %d, want 1", stack.popped)
+	}
+	if !reflect.DeepEqual(caret.log, []bool{false}) {
+		t.Errorf("caret log = %v, want [false]", caret.log)
+	}
+}
+
+func TestCommandSubmitCommand_DisablesCaretEvenOnHandlerError(t *testing.T) {
+	// Submit's defer must run on the error path too: a failing ex-command
+	// handler must not leave the caret enabled.
+	stack := &fakeStack{}
+	holder := &fakeHolder{buf: "broken"}
+	reg := NewExRegistry()
+	_ = reg.Register(ExCommand{
+		Name: "broken",
+		Handler: func(_ []string, _ commands.ExecCtx) error {
+			return errors.New("boom")
+		},
+	})
+	caret := &caretRecorder{}
+	cmd := CommandSubmitCommand(CommandLineCommandDeps{
+		Stack: stack, Context: holder, ExRegistry: reg,
+		Toaster: func(string) {}, CaretToggler: caret.toggle,
+	})
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if !reflect.DeepEqual(caret.log, []bool{false}) {
+		t.Errorf("caret log = %v, want [false]", caret.log)
+	}
+}
+
+func TestCommandOpenCommand_NilCaretTogglerNoCrash(t *testing.T) {
+	// CaretToggler is optional. Tests/bootstrap that don't supply one
+	// must still operate normally — the handlers nil-check before call.
+	stack := &fakeStack{}
+	holder := &fakeHolder{}
+	cmd := CommandOpenCommand(CommandLineCommandDeps{Stack: stack, Context: holder})
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Open Handler: %v", err)
+	}
+	cancelCmd := CommandCancelCommand(CommandLineCommandDeps{Stack: stack})
+	if err := cancelCmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Cancel Handler: %v", err)
+	}
+	submitCmd := CommandSubmitCommand(CommandLineCommandDeps{
+		Stack: stack, Context: holder, ExRegistry: NewExRegistry(),
+	})
+	if err := submitCmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Submit Handler: %v", err)
+	}
+}
+
 // --- DefaultCommandLineBindings ----------------------------------------
 
 func TestDefaultCommandLineBindings(t *testing.T) {

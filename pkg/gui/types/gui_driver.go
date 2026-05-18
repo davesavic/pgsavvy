@@ -65,6 +65,20 @@ type GuiDriver interface {
 	// on every Layout pass.
 	SetManager(managers ...Manager)
 
+	// SetCaretEnabled toggles the global terminal caret (gocui.Gui.Cursor
+	// — gui.go:161-162 in the vendored lazygit/gocui fork). When true,
+	// gocui calls Screen.ShowCursor each frame at the current view's
+	// cursor position; when false, Screen.HideCursor. CommandOpen flips
+	// it on; CommandCancel/Submit flip it off.
+	SetCaretEnabled(enabled bool)
+
+	// SetViewCursor positions the per-view caret of the named view to
+	// (x, y) via *gocui.View.SetCursor (view.go:612-618). Used by the
+	// COMMAND_LINE Layout branch to anchor the caret to the end of the
+	// typed buffer. No-op (returns nil) under fakes where the view
+	// doesn't exist or where the driver records calls instead.
+	SetViewCursor(viewName string, x, y int) error
+
 	// MainLoop runs the gocui event loop and blocks until Close is
 	// called or an unrecoverable error occurs.
 	MainLoop() error

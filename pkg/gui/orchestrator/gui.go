@@ -347,11 +347,17 @@ func (g *Gui) wireWithDriver() error {
 			g.toastHelp.Show(msg, 3*time.Second)
 		}
 	}
+	caret := func(enabled bool) {
+		if g.driver != nil {
+			g.driver.SetCaretEnabled(enabled)
+		}
+	}
 	cmdDeps := keys.CommandLineCommandDeps{
-		Stack:      g.tree,
-		Context:    g.registry.CommandLine,
-		ExRegistry: g.exRegistry,
-		Toaster:    toaster,
+		Stack:        g.tree,
+		Context:      g.registry.CommandLine,
+		ExRegistry:   g.exRegistry,
+		Toaster:      toaster,
+		CaretToggler: caret,
 	}
 	_ = g.cmdRegistry.Register(keys.CommandOpenCommand(cmdDeps))
 	_ = g.cmdRegistry.Register(keys.CommandCancelCommand(cmdDeps))

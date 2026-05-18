@@ -39,6 +39,13 @@ type SetViewCall struct {
 	Overlaps       byte
 }
 
+// SetViewCursorCall records one SetViewCursor invocation. Used by the
+// COMMAND_LINE caret tests in dbsavvy-tro.2.
+type SetViewCursorCall struct {
+	View string
+	X, Y int
+}
+
 // KbRecord is the public shape returned by AllKeybindings.
 type KbRecord struct {
 	View    string
@@ -67,13 +74,16 @@ type RecorderGuiDriver struct {
 
 	width, height int
 
-	SetViewCalls      []SetViewCall
-	SetViewOnTopCalls []string
-	SetCurrentViewLog []string
-	DeleteViews       []string
-	UpdateCalls       int
-	ContentOnlyCalls  int
-	updateErrors      []error
+	SetViewCalls       []SetViewCall
+	SetViewOnTopCalls  []string
+	SetCurrentViewLog  []string
+	DeleteViews        []string
+	UpdateCalls        int
+	ContentOnlyCalls   int
+	updateErrors       []error
+	CaretEnabled       bool
+	CaretEnabledLog    []bool
+	SetViewCursorCalls []SetViewCursorCall
 
 	bindings []KbRecord
 	clicks   []ClickRecord
@@ -483,6 +493,39 @@ func (r *RecorderGuiDriver) Manager() types.Manager {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.manager
+}
+
+func (r *RecorderGuiDriver) SetCaretEnabled(enabled bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.CaretEnabled = enabled
+	r.CaretEnabledLog = append(r.CaretEnabledLog, enabled)
+}
+
+func (r *RecorderGuiDriver) SetViewCursor(viewName string, x, y int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.SetViewCursorCalls = append(r.SetViewCursorCalls, SetViewCursorCall{View: viewName, X: x, Y: y})
+	return nil
+}
+
+// AllSetViewCursorCalls returns a defensive copy of the SetViewCursor log.
+func (r *RecorderGuiDriver) AllSetViewCursorCalls() []SetViewCursorCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]SetViewCursorCall, len(r.SetViewCursorCalls))
+	copy(out, r.SetViewCursorCalls)
+	return out
+}
+
+// AllCaretEnabledLog returns a defensive copy of the caret-toggle log
+// (every SetCaretEnabled call in order).
+func (r *RecorderGuiDriver) AllCaretEnabledLog() []bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]bool, len(r.CaretEnabledLog))
+	copy(out, r.CaretEnabledLog)
+	return out
 }
 
 func (r *RecorderGuiDriver) MainLoop() error { return nil }

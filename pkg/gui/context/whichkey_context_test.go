@@ -63,6 +63,8 @@ func (stubDriver) SetViewOnTop(string) (types.View, error)           { return ni
 func (stubDriver) ViewByName(string) (types.View, error)             { return nil, nil }
 func (stubDriver) DeleteView(string) error                           { return nil }
 func (stubDriver) SetManager(...types.Manager)                       {}
+func (stubDriver) SetCaretEnabled(bool)                              {}
+func (stubDriver) SetViewCursor(string, int, int) error              { return nil }
 func (stubDriver) MainLoop() error                                   { return nil }
 func (stubDriver) Close() error                                      { return nil }
 
