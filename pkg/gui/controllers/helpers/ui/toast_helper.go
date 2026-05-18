@@ -33,7 +33,13 @@ type ToastHelper struct {
 	current   string
 	gen       uint64 // monotonic: timer fires whose gen doesn't match are stale
 	clearTime time.Time
+	history   []string // bounded ring of every redacted message passed to Show
 }
+
+// toastHistoryCap caps the in-memory message history. The history is a
+// test/diagnostic surface only; cap keeps long-running sessions from
+// growing unbounded.
+const toastHistoryCap = 64
 
 // NewToastHelper builds a helper bound to the supplied driver. driver
 // may be nil for tests; in that case auto-clear is a no-op.
@@ -60,6 +66,10 @@ func (h *ToastHelper) Show(message string, ttl time.Duration) {
 		h.clearTime = time.Now().Add(ttl)
 	} else {
 		h.clearTime = time.Time{}
+	}
+	h.history = append(h.history, redacted)
+	if len(h.history) > toastHistoryCap {
+		h.history = h.history[len(h.history)-toastHistoryCap:]
 	}
 	h.mu.Unlock()
 
@@ -88,6 +98,17 @@ func (h *ToastHelper) Current() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.current
+}
+
+// History returns a defensive copy of every redacted message the helper
+// has accepted via Show, bounded by toastHistoryCap. Newest-last order.
+// Test accessor; not consumed by production rendering.
+func (h *ToastHelper) History() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]string, len(h.history))
+	copy(out, h.history)
+	return out
 }
 
 // Clear immediately drops the visible toast on the calling goroutine.

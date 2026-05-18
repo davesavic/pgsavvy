@@ -94,9 +94,10 @@ type InsertPendingFlush = func(scope types.ContextKey, runes []rune)
 // new snapshot without taking m.mu for the store itself (Cancel runs
 // first, under the mutex, to drop any in-flight pending state).
 type Matcher struct {
-	trieSet atomic.Pointer[TrieSet]
-	modes   *ModeStore
-	leader  rune
+	trieSet   atomic.Pointer[TrieSet]
+	swapCount atomic.Uint64
+	modes     *ModeStore
+	leader    rune
 
 	tlen   time.Duration
 	ttlen  time.Duration
@@ -179,8 +180,16 @@ func (m *Matcher) IsPartial() bool {
 // state is cancelled (D9: cancel before atomic swap) so a partial chord
 // CANNOT cross a reload boundary.
 func (m *Matcher) SwapTrieSet(t *TrieSet) {
+	m.swapCount.Add(1)
 	m.Cancel()
 	m.trieSet.Store(t)
+}
+
+// SwapCount returns the monotonic count of SwapTrieSet invocations.
+// Test accessor used by the dlp.14 integration smoke test to confirm
+// exactly one swap on `:reload`.
+func (m *Matcher) SwapCount() uint64 {
+	return m.swapCount.Load()
 }
 
 // TrieSet returns the currently-published TrieSet snapshot. Cheatsheet

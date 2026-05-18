@@ -118,6 +118,11 @@ type Gui struct {
 	whichkey    *keys.WhichKey
 	exRegistry  *keys.ExRegistry
 
+	// lastWarnings captures the Warning slice returned by the most recent
+	// KeybindingService.Build run during wireWithDriver. Surfaced via the
+	// Warnings() accessor for the dlp.14 integration smoke test.
+	lastWarnings []keys.Warning
+
 	// Test overrides for Matcher timing; nil means use cfg + defaults.
 	delayOverrides *keyDelayOverrides
 
@@ -368,6 +373,7 @@ func (g *Gui) wireWithDriver() error {
 			g.deps.Common.Log.Warnf("keybindings: [%s] %s (%s)", w.Code, w.Message, w.Origin)
 		}
 	}
+	g.lastWarnings = warnings
 	matcher.SwapTrieSet(trieSet)
 
 	// :reload ex-command. The LoadUserConfig closure is a minimal-viable
@@ -623,6 +629,23 @@ func (g *Gui) ExRegistry() *keys.ExRegistry { return g.exRegistry }
 
 // Matcher returns the active Matcher. Test accessor.
 func (g *Gui) Matcher() *keys.Matcher { return g.matcher }
+
+// WhichKey returns the WhichKey notifier. Test accessor — dlp.14 reads
+// Visible() to assert the popup mechanic.
+func (g *Gui) WhichKey() *keys.WhichKey { return g.whichkey }
+
+// ModeStore returns the ModeStore. Test accessor — dlp.14 toggles modes
+// to exercise the mode-conditional dispatch paths.
+func (g *Gui) ModeStore() *keys.ModeStore { return g.modeStore }
+
+// Warnings returns the Warning slice captured during the most recent
+// wireWithDriver Build pass. Test accessor used by the dlp.14 smoke
+// walkthrough to assert ambient warnings.
+func (g *Gui) Warnings() []keys.Warning { return g.lastWarnings }
+
+// ToastHelper returns the toast helper. Test accessor — dlp.14 reads
+// History() to assert reload / toast emissions.
+func (g *Gui) ToastHelper() *ui.ToastHelper { return g.toastHelp }
 
 // leaderRunesFromCfg extracts the leader / localleader runes from cfg,
 // using the same fallbacks as keys.KeybindingService.Build.
