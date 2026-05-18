@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -85,22 +86,6 @@ func (f *fakeToast) Show(msg string, ttl time.Duration) {
 	f.msgs = append(f.msgs, toastMsg{msg, ttl})
 }
 
-type fakeOneShot struct {
-	calls  []oneShotCall
-	armErr error
-}
-
-type oneShotCall struct {
-	Prefix   string
-	Suffixes map[rune]func() error
-	Scope    string
-}
-
-func (f *fakeOneShot) Arm(prefix string, suffixes map[rune]func() error, scope string) error {
-	f.calls = append(f.calls, oneShotCall{prefix, suffixes, scope})
-	return f.armErr
-}
-
 type fakeTip struct{ dismissed int }
 
 func (f *fakeTip) DismissStartupTip() error {
@@ -162,7 +147,6 @@ type bag struct {
 	ConnForm     *fakeConnectionForm
 	Confirm      *fakeConfirm
 	Toast        *fakeToast
-	OneShot      *fakeOneShot
 	Tip          *fakeTip
 	TableDouble  *fakeTableDouble
 	Menu         *fakeMenuPush
@@ -180,7 +164,6 @@ func newBag() *bag {
 		ConnForm:     &fakeConnectionForm{},
 		Confirm:      &fakeConfirm{},
 		Toast:        &fakeToast{},
-		OneShot:      &fakeOneShot{},
 		Tip:          &fakeTip{},
 		TableDouble:  &fakeTableDouble{},
 		Menu:         &fakeMenuPush{},
@@ -197,7 +180,6 @@ func newBag() *bag {
 		ConnectionForm:   b.ConnForm,
 		Confirm:          b.Confirm,
 		Toast:            b.Toast,
-		OneShot:          b.OneShot,
 		Tip:              b.Tip,
 		TableDouble:      b.TableDouble,
 		Menu:             b.Menu,
@@ -221,9 +203,7 @@ func (f *fakeCursor) SetCursor(i int) { f.idx = i }
 func (f *fakeCursor) Items() []any    { return f.items }
 
 // isRune reports whether b is a single-keystroke ChordBinding whose
-// first key is the bare rune r (no modifiers, no SpecialKey). Used by
-// controller tests to find specific bindings post-dlp.8a (ChordBinding
-// replaces the old gocui.Key field).
+// first key is the bare rune r (no modifiers, no SpecialKey).
 func isRune(b *types.ChordBinding, r rune) bool {
 	if b == nil || len(b.Sequence) != 1 {
 		return false
@@ -240,4 +220,31 @@ func isSpecial(b *types.ChordBinding, sp types.SpecialKey) bool {
 	}
 	k := b.Sequence[0]
 	return k.Special == sp && k.Mod == 0 && k.Code == 0
+}
+
+// invokeAction resolves b.ActionID against reg and invokes the
+// registered handler with a zero ExecCtx. Returns an error if no
+// handler is registered for the binding's ActionID.
+func invokeAction(reg *commands.Registry, b *types.ChordBinding) error {
+	if reg == nil || b == nil {
+		return nil
+	}
+	cmd, ok := reg.Get(b.ActionID)
+	if !ok || cmd == nil || cmd.Handler == nil {
+		return nil
+	}
+	return cmd.Handler(commands.ExecCtx{})
+}
+
+// buildRegistryFor returns a fresh Registry with reg.RegisterActions
+// invoked on the supplied bundle. Used by tests that want to dispatch
+// a binding's ActionID through the live handler.
+func buildRegistryFor(actions ...func(*commands.Registry)) *commands.Registry {
+	reg := commands.NewRegistry()
+	for _, a := range actions {
+		if a != nil {
+			a(reg)
+		}
+	}
+	return reg
 }

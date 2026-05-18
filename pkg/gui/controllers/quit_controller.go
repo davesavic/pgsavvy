@@ -4,17 +4,23 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// QuitController owns the global quit / menu bindings:
-//   - `q`     : direct quit
-//   - `:`     : colon prefix; armed via OneshotArmer.Arm with
-//     suffixes={q: quit}, scope=GLOBAL. Any other suffix
-//     cancels silently (delegated to OneshotArmer contract).
-//   - `?`     : opens the MENU context via MenuPushHelper.
+// QuitController owns the global quit + cheatsheet bindings.
 //
-// The controller is attached to the GLOBAL_CONTEXT (no view); bindings
+// Bindings:
+//   - <c-c>  : direct quit (returns gocui.ErrQuit)
+//   - ?      : open the auto-generated cheatsheet (real impl ships in
+//     dlp.10 — today the registered handler is a no-op stub so the
+//     binding has a leaf to dispatch).
+//
+// The <leader>q chord is shipped as a default in
+// config.GetDefaultConfig() and routes through the user-config layering
+// path at Build time; this controller does not publish it.
+//
+// QuitController attaches to the GLOBAL_CONTEXT (no view); bindings
 // flow through the runtime's global keybinding pass.
 type QuitController struct {
 	baseController
@@ -28,63 +34,43 @@ func NewQuitController(c *common.Common, helpers HelperBag) *QuitController {
 // Quit terminates the gocui main loop synchronously by returning
 // gocui.ErrQuit. Per M11g this MUST be invoked from the MainLoop (D8);
 // gocui guarantees keystroke handlers run on the MainLoop.
-func (q *QuitController) Quit() error {
+func (q *QuitController) Quit(_ commands.ExecCtx) error {
 	return gocui.ErrQuit
 }
 
-// ArmColon arms the ":" prefix. The next `q` keystroke invokes Quit;
-// any other suffix cancels per OneshotArmer contract. When OneShot is
-// not wired (T7a unit tests) the call is a no-op.
-func (q *QuitController) ArmColon() error {
-	if q.helpers.OneShot == nil {
-		return nil
-	}
-	suffixes := map[rune]func() error{
-		'q': q.Quit,
-	}
-	err := q.helpers.OneShot.Arm(":", suffixes, string(types.GLOBAL))
-	return q.wrapErr("quit.arm_colon", err)
-}
-
-// ShowMenu opens the MENU popup via the MenuPushHelper.
-func (q *QuitController) ShowMenu() error {
-	if q.helpers.Menu == nil {
-		return nil
-	}
-	err := q.helpers.Menu.PushMenu()
-	return q.wrapErr("quit.show_menu", err)
-}
-
-// GetKeybindings returns the global quit/menu bindings.
-//
-// GLOBAL_CONTEXT has no view, so ViewName is empty (gocui binds
-// globally when viewname == "").
+// GetKeybindings returns the global quit / cheatsheet bindings.
 func (q *QuitController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	tr := q.tr()
-	const globalView = "" // gocui's "bind globally" sentinel.
 	return []*types.ChordBinding{
 		{
-			ViewName:    globalView,
-			Sequence:    []types.ChordKey{{Code: 'q'}},
+			Sequence:    []types.ChordKey{{Code: 'c', Mod: types.ChordModCtrl}},
+			Mode:        types.ModeNormal,
 			Scope:       types.GLOBAL,
-			Handler:     q.Quit,
+			ActionID:    commands.AppQuit,
 			Description: tr.Actions.QuitApp,
 		},
 		{
-			ViewName:    globalView,
-			Sequence:    []types.ChordKey{{Code: ':'}},
-			Scope:       types.GLOBAL,
-			Handler:     q.ArmColon,
-			Description: tr.Actions.QuitApp,
-		},
-		{
-			ViewName:    globalView,
 			Sequence:    []types.ChordKey{{Code: '?'}},
+			Mode:        types.ModeNormal,
 			Scope:       types.GLOBAL,
-			Handler:     q.ShowMenu,
+			ActionID:    commands.HelpCheatsheet,
 			Description: tr.Actions.ShowMenu,
 		},
 	}
+}
+
+// RegisterActions registers the rail-specific action handlers this
+// controller owns with reg. Trait actions and rail-switch actions are
+// registered once at the Controllers aggregate level.
+func (q *QuitController) RegisterActions(reg *commands.Registry) {
+	if reg == nil {
+		return
+	}
+	_ = reg.Register(&commands.Command{
+		ID:          commands.AppQuit,
+		Description: "Quit application",
+		Handler:     q.Quit,
+	})
 }
 
 // AttachToContext registers GetKeybindings on the supplied context

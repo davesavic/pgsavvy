@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"testing"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -14,7 +15,6 @@ func TestConnectionsControllerBindingsShape(t *testing.T) {
 	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 
-	// Expect at least: j, k, <CR>, a, plus 5 rail-switch bindings.
 	want := map[string]bool{
 		"j":       false,
 		"k":       false,
@@ -63,18 +63,14 @@ func TestConnectionsControllerConfirmCallsConnect(t *testing.T) {
 	b.ConnPicker.sel = profile
 
 	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
-	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
-	var confirm func() error
-	for _, kb := range bindings {
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
+	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isSpecial(kb, types.KeyEnter) {
-			confirm = kb.Handler
+			if err := invokeAction(reg, kb); err != nil {
+				t.Fatalf("confirm: %v", err)
+			}
 		}
-	}
-	if confirm == nil {
-		t.Fatal("no <enter> binding")
-	}
-	if err := confirm(); err != nil {
-		t.Fatalf("confirm: %v", err)
 	}
 	if len(b.Connect.calls) != 1 || b.Connect.calls[0] != profile {
 		t.Fatalf("Connect called=%v, want 1 with profile pointer", b.Connect.calls)
@@ -86,10 +82,11 @@ func TestConnectionsControllerConfirmEmptyRailNoop(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
 	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
-	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
-	for _, kb := range bindings {
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
+	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isSpecial(kb, types.KeyEnter) {
-			_ = kb.Handler()
+			_ = invokeAction(reg, kb)
 		}
 	}
 	if len(b.Connect.calls) != 0 {
@@ -102,34 +99,31 @@ func TestConnectionsControllerAddCallsConnectionForm(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
 	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
-	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
-	var add func() error
-	for _, kb := range bindings {
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isRune(kb, 'a') {
-			add = kb.Handler
+			if err := invokeAction(reg, kb); err != nil {
+				t.Fatalf("add: %v", err)
+			}
 		}
-	}
-	if add == nil {
-		t.Fatal("no `a` binding")
-	}
-	if err := add(); err != nil {
-		t.Fatalf("add: %v", err)
 	}
 	if !b.ConnForm.called {
 		t.Fatal("ConnectionForm.WalkAdd not invoked")
 	}
 }
 
-// Edge from AC list: press `a` on CONNECTIONS when rail is non-empty:
-// still allowed.
+// Edge: `a` on CONNECTIONS with non-empty rail still allowed.
 func TestConnectionsControllerAddAllowedWithSelection(t *testing.T) {
 	b := newBag()
 	b.ConnPicker.sel = &models.Connection{Name: "x"}
 	cur := &fakeCursor{idx: 0, items: []any{b.ConnPicker.sel}}
 	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isRune(kb, 'a') {
-			_ = kb.Handler()
+			_ = invokeAction(reg, kb)
 		}
 	}
 	if !b.ConnForm.called {

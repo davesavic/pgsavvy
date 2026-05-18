@@ -3,8 +3,7 @@ package controllers_test
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/common"
-	"github.com/davesavic/dbsavvy/pkg/config"
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -16,9 +15,11 @@ func TestSchemasControllerHideCallsSchemasHelper(t *testing.T) {
 	b.Active.id = "local"
 	cur := &fakeCursor{}
 	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isRune(kb, 'H') {
-			if err := kb.Handler(); err != nil {
+			if err := invokeAction(reg, kb); err != nil {
 				t.Fatalf("H: %v", err)
 			}
 		}
@@ -36,9 +37,11 @@ func TestSchemasControllerUnhideOnErrNeedsConfirmationOpensConfirm(t *testing.T)
 	b.Schemas.unhideErr = data.ErrNeedsConfirmation
 	cur := &fakeCursor{}
 	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isRune(kb, 'U') {
-			if err := kb.Handler(); err != nil {
+			if err := invokeAction(reg, kb); err != nil {
 				t.Fatalf("U: %v", err)
 			}
 		}
@@ -46,9 +49,6 @@ func TestSchemasControllerUnhideOnErrNeedsConfirmationOpensConfirm(t *testing.T)
 	if len(b.Confirm.calls) != 1 {
 		t.Fatalf("expected ConfirmHelper.Confirm to fire once on ErrNeedsConfirmation, got %d", len(b.Confirm.calls))
 	}
-	// First call: predicate-failing (real builtin/profile passed); on
-	// confirm-yes the controller MUST re-invoke with empty lists.
-	// We simulate the user clicking Yes:
 	b.Schemas.unhideErr = nil
 	if err := b.Confirm.calls[0].OnYes(); err != nil {
 		t.Fatalf("OnYes: %v", err)
@@ -62,57 +62,45 @@ func TestSchemasControllerUnhideOnErrNeedsConfirmationOpensConfirm(t *testing.T)
 	}
 }
 
-// AC: <leader>H arms OneshotArmer with prefix=Common.Cfg().Leader.
-func TestSchemasControllerLeaderArmReadsCommonCfgLeader(t *testing.T) {
-	cfg := &config.UserConfig{Leader: "<space>"}
-	c := &common.Common{}
-	c.UserConfig.Store(cfg)
-
-	b := newBag()
-	cur := &fakeCursor{}
-	ctrl := controllers.NewSchemasController(c, b.HelperBag, cur, b.SchemaPicker)
-	// Find the leader binding (space, rune ' ').
-	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if isRune(kb, ' ') {
-			if err := kb.Handler(); err != nil {
-				t.Fatalf("leader: %v", err)
-			}
-		}
-	}
-	if len(b.OneShot.calls) != 1 {
-		t.Fatalf("OneShot.Arm calls = %d, want 1", len(b.OneShot.calls))
-	}
-	got := b.OneShot.calls[0]
-	if got.Prefix != "<space>" {
-		t.Fatalf("Arm.prefix = %q, want %q (G1-C: from Common.Cfg().Leader)", got.Prefix, "<space>")
-	}
-	if got.Scope != "schemas" {
-		t.Fatalf("Arm.scope = %q, want %q", got.Scope, "schemas")
-	}
-	if _, ok := got.Suffixes['H']; !ok {
-		t.Fatalf("Arm.suffixes missing 'H'; got %v", got.Suffixes)
-	}
-	// Invoking the H suffix toggles show-hidden.
-	if err := got.Suffixes['H'](); err != nil {
-		t.Fatalf("H suffix: %v", err)
-	}
-	if b.SchemaPicker.toggleCount != 1 {
-		t.Fatalf("ToggleShowHidden count = %d, want 1", b.SchemaPicker.toggleCount)
-	}
-}
-
-func TestSchemasControllerLeaderFallbacksToSpaceWhenCfgEmpty(t *testing.T) {
+// AC: <leader>H is published as a 2-key chord (leader placeholder + H).
+// The leader placeholder is expanded by keys.KeybindingService.Build at
+// trie-insert time; the controller emits KeyLeader untouched.
+func TestSchemasControllerLeaderHIsPublishedAsTwoKeyChord(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
 	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+
+	found := false
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if isRune(kb, ' ') {
-			if err := kb.Handler(); err != nil {
-				t.Fatalf("leader: %v", err)
+		if len(kb.Sequence) == 2 &&
+			kb.Sequence[0].Special == types.KeyLeader &&
+			kb.Sequence[1].Code == 'H' {
+			found = true
+			if kb.ActionID != commands.SchemaToggleShowHidden {
+				t.Fatalf("<leader>H ActionID = %q, want %q", kb.ActionID, commands.SchemaToggleShowHidden)
 			}
 		}
 	}
-	if len(b.OneShot.calls) != 1 || b.OneShot.calls[0].Prefix != "<space>" {
-		t.Fatalf("fallback leader prefix = %v, want <space>", b.OneShot.calls)
+	if !found {
+		t.Fatal("SchemasController did not publish a <leader>H chord binding")
+	}
+}
+
+// AC: SchemaToggleShowHidden handler delegates to picker.ToggleShowHidden.
+func TestSchemasControllerToggleShowHiddenHandler(t *testing.T) {
+	b := newBag()
+	cur := &fakeCursor{}
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, ok := reg.Get(commands.SchemaToggleShowHidden)
+	if !ok || cmd == nil {
+		t.Fatal("SchemaToggleShowHidden not registered")
+	}
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if b.SchemaPicker.toggleCount != 1 {
+		t.Fatalf("ToggleShowHidden count = %d, want 1", b.SchemaPicker.toggleCount)
 	}
 }

@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
@@ -30,7 +31,7 @@ type ListControllerTrait[T any] struct {
 	cursor   SideListCursor
 
 	// onConfirm is invoked by <CR>. May be nil (no-op binding).
-	onConfirm func() error
+	onConfirm commands.Handler
 
 	// picker is exposed so concrete controllers can resolve the
 	// cursor index to a domain entity inside their own handlers.
@@ -44,7 +45,7 @@ func NewListControllerTrait[T any](
 	viewName string,
 	cursor SideListCursor,
 	picker T,
-	onConfirm func() error,
+	onConfirm commands.Handler,
 ) *ListControllerTrait[T] {
 	return &ListControllerTrait[T]{
 		baseController: base,
@@ -56,7 +57,7 @@ func NewListControllerTrait[T any](
 }
 
 // Down moves the cursor by +1. Safe on empty lists (no-op).
-func (l *ListControllerTrait[T]) Down() error {
+func (l *ListControllerTrait[T]) Down(_ commands.ExecCtx) error {
 	if l.cursor == nil {
 		return nil
 	}
@@ -65,7 +66,7 @@ func (l *ListControllerTrait[T]) Down() error {
 }
 
 // Up moves the cursor by -1. Safe on empty lists (no-op).
-func (l *ListControllerTrait[T]) Up() error {
+func (l *ListControllerTrait[T]) Up(_ commands.ExecCtx) error {
 	if l.cursor == nil {
 		return nil
 	}
@@ -74,11 +75,36 @@ func (l *ListControllerTrait[T]) Up() error {
 }
 
 // Confirm fires the controller-supplied callback. Nil callback → no-op.
-func (l *ListControllerTrait[T]) Confirm() error {
+func (l *ListControllerTrait[T]) Confirm(ctx commands.ExecCtx) error {
 	if l.onConfirm == nil {
 		return nil
 	}
-	return l.onConfirm()
+	return l.onConfirm(ctx)
+}
+
+// RegisterActions registers the trait's three actions (ListUp /
+// ListDown / ListConfirm) with reg. The Controllers aggregate calls
+// this on a single representative trait so the actions exist in the
+// Registry without colliding across the five rails.
+func (l *ListControllerTrait[T]) RegisterActions(reg *commands.Registry) {
+	if reg == nil {
+		return
+	}
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ListUp,
+		Description: "Move list cursor up",
+		Handler:     l.Up,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ListDown,
+		Description: "Move list cursor down",
+		Handler:     l.Down,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ListConfirm,
+		Description: "Activate list row",
+		Handler:     l.Confirm,
+	})
 }
 
 // baseBindings returns the j/k/<CR> bindings every side rail shares.
@@ -89,24 +115,24 @@ func (l *ListControllerTrait[T]) baseBindings() []*types.ChordBinding {
 	scope := types.ContextKey(l.viewName)
 	return []*types.ChordBinding{
 		{
-			ViewName:    l.viewName,
 			Sequence:    []types.ChordKey{{Code: 'j'}},
+			Mode:        types.ModeNormal,
 			Scope:       scope,
-			Handler:     l.Down,
+			ActionID:    commands.ListDown,
 			Description: tr.Actions.Down,
 		},
 		{
-			ViewName:    l.viewName,
 			Sequence:    []types.ChordKey{{Code: 'k'}},
+			Mode:        types.ModeNormal,
 			Scope:       scope,
-			Handler:     l.Up,
+			ActionID:    commands.ListUp,
 			Description: tr.Actions.Up,
 		},
 		{
-			ViewName:    l.viewName,
 			Sequence:    []types.ChordKey{{Special: types.KeyEnter}},
+			Mode:        types.ModeNormal,
 			Scope:       scope,
-			Handler:     l.Confirm,
+			ActionID:    commands.ListConfirm,
 			Description: tr.Actions.Confirm,
 		},
 	}

@@ -2,23 +2,27 @@
 // concrete controller (connections, schemas, tables, columns, indexes,
 // menu, quit) is a thin slice of behaviour that:
 //
-//  1. Declares a flat []*types.ChordBinding via GetKeybindings.
+//  1. Declares a flat []*types.ChordBinding via GetKeybindings. Bindings
+//     carry only the (Sequence, Mode, Scope, ActionID, Description)
+//     metadata — there is NO Handler closure on the binding. Action
+//     handlers are registered separately via RegisterActions against a
+//     commands.Registry.
 //  2. Attaches itself to its target context via AttachToContext, which
 //     forwards GetKeybindings to context.BaseContext.AddKeybindingsFn.
+//  3. Registers its action handlers via RegisterActions. The Controllers
+//     aggregate's RegisterActions handles trait + rail-switch actions
+//     once so individual controllers don't fight for the same IDs.
 //
-// Controllers never call driver.SetKeybinding directly — every binding
-// flows through pkg/gui/keys.RegisterChord (the dlp.8a shim that
-// wraps keys.Register for single-key sequences; multi-key dispatch
-// lands in dlp.8b/c). The runtime iterates each context's
-// GetKeybindings result and calls RegisterChord for every entry.
+// Dispatch: chord keystrokes flow through pkg/gui/keys.Matcher (driven
+// by a master gocui.Editor for editable views, and by per-root-key
+// SetKeybinding shims for non-editable views). The Matcher resolves
+// each leaf's ActionID against commands.Registry and invokes the
+// registered Handler.
 //
-// Helpers from sibling task dbsavvy-zro (T7b) — Confirm, Prompt, Toast,
-// OneshotArmer, RefreshHelper, TipHelper, TablesDoubleClickHelper —
-// are consumed via narrow interfaces declared in helper_interfaces.go.
-// T7b's concrete helper types satisfy those interfaces structurally;
-// no controller imports the helpers/ui/ package directly.
+// Helpers (Confirm, Prompt, Toast, RefreshHelper, TipHelper,
+// TablesDoubleClickHelper, MenuPushHelper) are consumed via narrow
+// interfaces declared in helper_interfaces.go.
 //
 // Concurrency: all controller handlers run on the gocui MainLoop (D8).
-// Background work (driver loads, save debounce) is funneled through
-// the helper layer.
+// Background work is funneled through the helper layer.
 package controllers

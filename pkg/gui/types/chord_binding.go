@@ -220,17 +220,6 @@ func SequenceString(seq []ChordKey) string {
 // commands.Registry at Build time. The trie node carries the resolved
 // *commands.Command directly.
 //
-// Handler is a transitional shim field (dlp.8a only). It carries the
-// `func() error` closure controllers produce so the legacy
-// keys.RegisterChord → keys.Register single-key wiring path keeps
-// working until dlp.8c removes Handler in favor of commands.Registry
-// dispatch.
-//
-// ViewName is also a transitional shim field (dlp.8a only). It carries
-// the gocui view name the orchestrator's wiring loop passes to
-// driver.SetKeybinding. dlp.8c will resolve view names from Scope via
-// the ContextTree and remove this field.
-//
 // Description / Tag / ShowInBar / OpensMenu are cosmetic metadata
 // consumed by the cheatsheet, options bar, and which-key popup.
 //
@@ -251,18 +240,6 @@ type ChordBinding struct {
 	OpensMenu   bool
 	Source      Source
 	Origin      string
-
-	// Handler is a transitional shim field — see type doc above.
-	//
-	// Deprecated: removed in dlp.8c when the master Editor dispatches
-	// via commands.Registry instead of the per-binding closure.
-	Handler func() error
-
-	// ViewName is a transitional shim field — see type doc above.
-	//
-	// Deprecated: removed in dlp.8c when keys.Register no longer takes
-	// a view name (Scope-driven resolution replaces it).
-	ViewName string
 }
 
 // ChildRow is one immediate child of a prefix node in a chord trie,

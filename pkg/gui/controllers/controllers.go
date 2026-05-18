@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -85,6 +86,45 @@ func AttachControllers(
 		Menu:        menu,
 		Quit:        quit,
 	}
+}
+
+// RegisterActions registers every controller's action handlers with reg.
+// The trait actions (ListUp / ListDown / ListConfirm) are registered once
+// via the Connections controller's embedded trait so they exist in the
+// Registry without each rail-controller fighting for the same IDs.
+// Rail-switch actions are registered via shared.registerRailSwitchActions.
+//
+// Subsequent re-registrations of the same ID are silently swallowed via
+// commands.Registry.Register returning ErrDuplicateAction.
+func (b *Controllers) RegisterActions(reg *commands.Registry) {
+	if b == nil || reg == nil {
+		return
+	}
+	if b.Connections != nil && b.Connections.ListControllerTrait != nil {
+		b.Connections.ListControllerTrait.RegisterActions(reg)
+	}
+	if b.Quit != nil {
+		b.Quit.RegisterActions(reg)
+	}
+	if b.Connections != nil {
+		b.Connections.RegisterActions(reg)
+	}
+	if b.Schemas != nil {
+		b.Schemas.RegisterActions(reg)
+	}
+	if b.Tables != nil {
+		b.Tables.RegisterActions(reg)
+	}
+	if b.Columns != nil {
+		b.Columns.RegisterActions(reg)
+	}
+	if b.Indexes != nil {
+		b.Indexes.RegisterActions(reg)
+	}
+	if b.Menu != nil {
+		b.Menu.RegisterActions(reg)
+	}
+	registerRailSwitchActions(reg)
 }
 
 // Null-picker fallbacks. Returning nil/empty from every accessor is the

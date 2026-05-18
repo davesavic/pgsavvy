@@ -9,15 +9,17 @@
 package orchestrator
 
 import (
-	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/spf13/afero"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
 	"github.com/davesavic/dbsavvy/pkg/gui"
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
@@ -53,18 +55,45 @@ type Deps struct {
 	DriverNamesFn func() []string
 }
 
+// Option mutates a *Gui at construction time. Functional-option pattern
+// used to keep NewGui's signature stable while letting tests inject key
+// delay overrides without polluting Deps.
+type Option func(*Gui)
+
+// keyDelayOverrides holds explicit overrides for the three Matcher
+// delays. A nil pointer (or a zero field) means "fall back to cfg / the
+// hard-coded default".
+type keyDelayOverrides struct {
+	timeoutLen    time.Duration
+	ttimeoutLen   time.Duration
+	whichKeyDelay time.Duration
+}
+
+// WithKeyDelays overrides the Matcher's three timing knobs at NewGui
+// construction time. Each duration argument is honored only when
+// positive; non-positive arguments fall back to cfg.UserConfig values,
+// then to the documented Matcher defaults.
+func WithKeyDelays(timeoutLen, ttimeoutLen, whichKeyDelay time.Duration) Option {
+	return func(g *Gui) {
+		g.delayOverrides = &keyDelayOverrides{
+			timeoutLen:    timeoutLen,
+			ttimeoutLen:   ttimeoutLen,
+			whichKeyDelay: whichKeyDelay,
+		}
+	}
+}
+
 // Gui is the dbsavvy TUI orchestrator. NewGui builds the driver-free
-// pieces (focus stack, OneshotArm, data helpers). The driver-dependent
-// pieces (context registry, ui helpers, controllers, bindings) are
-// built lazily by wireWithDriver, called from either initGocui (real
+// pieces (focus stack, data helpers). The driver-dependent pieces
+// (context registry, ui helpers, controllers, bindings) are built
+// lazily by wireWithDriver, called from either initGocui (real
 // production wiring) or UseDriverForTest (test-only seam).
 type Gui struct {
 	deps   Deps
 	driver types.GuiDriver
 
-	// Focus stack and one-shot arm; driver-free.
+	// Focus stack; driver-free.
 	tree *gui.ContextTree
-	arm  *keys.OneshotArm
 
 	// Data helpers (driver-free).
 	connectHelper *data.ConnectHelper
@@ -81,6 +110,16 @@ type Gui struct {
 	tablesHelp  *ui.TablesHelper
 	tipHelp     *ui.TipHelper
 
+	// Keybinding system (built by wireWithDriver).
+	cmdRegistry *commands.Registry
+	matcher     *keys.Matcher
+	modeStore   *keys.ModeStore
+	whichkey    *keys.WhichKey
+	exRegistry  *keys.ExRegistry
+
+	// Test overrides for Matcher timing; nil means use cfg + defaults.
+	delayOverrides *keyDelayOverrides
+
 	// Connection state surfaced by the activeConnAdapter.
 	activeConnID string
 
@@ -92,16 +131,20 @@ type Gui struct {
 // GuiDriver. The driver-dependent wiring (context registry, UI helpers,
 // controllers, key/mouse bindings) waits for either initGocui (prod)
 // or UseDriverForTest (test).
-func NewGui(deps Deps) *Gui {
+func NewGui(deps Deps, opts ...Option) *Gui {
 	g := &Gui{
 		deps: deps,
 		tree: gui.NewContextTree(),
-		arm:  keys.NewOneshotArm(0),
 	}
 	g.connectHelper = data.NewConnectHelper()
 	g.schemasHelper = data.NewSchemasHelper(deps.Common, deps.Store)
 	g.formHelper = data.NewConnectionFormHelper(deps.Common, fsFromCommon(deps.Common), deps.ConnectionsPath, deps.DriverNamesFn)
 	g.refreshHelper = data.NewRefreshHelper(g.connectHelper)
+	for _, opt := range opts {
+		if opt != nil {
+			opt(g)
+		}
+	}
 	return g
 }
 
@@ -136,38 +179,67 @@ func (g *Gui) UseDriverForTest(d types.GuiDriver) error {
 	return g.wireWithDriver()
 }
 
-// wireWithDriver builds the context registry, UI helpers that need the
-// driver, controllers, registers every keyboard binding, optionally
-// wires mouse bindings, registers the swap-hook arm-cancel and pushes
-// the initial CONNECTIONS context.
+// wireWithDriver builds the context registry, keybinding-system
+// runtime (commands.Registry / Matcher / ModeStore / WhichKey /
+// ExRegistry), UI helpers, controllers, registers every binding, and
+// pushes the initial CONNECTIONS context.
 //
 // SetManager is called FIRST (before any binding registration) because
 // gocui.Gui.SetManager wipes g.keybindings, g.views, and g.currentView
 // in its body — calling it after Register would silently delete every
-// binding we just installed and leave the TUI unresponsive to input
-// (the original symptom of dbsavvy bug "no keys fire, not even q").
+// binding we just installed and leave the TUI unresponsive to input.
 func (g *Gui) wireWithDriver() error {
 	if g.driver == nil {
 		return fmt.Errorf("gui: wireWithDriver: nil driver")
 	}
 
 	// Install the Manager (g.Layout) before anything that touches the
-	// runtime's binding/view tables; see godoc above.
+	// runtime's binding/view tables.
 	g.driver.SetManager(g)
 
+	cfg := g.deps.Common.Cfg()
+	if cfg == nil {
+		cfg = config.GetDefaultConfig()
+	}
 	tr := g.deps.Common.Tr
 	provider := g.deps.ConnectionsProvider
 	if provider == nil {
 		provider = func() []models.Connection { return nil }
 	}
 
-	// Build the registry with hooks closed over the driver.
+	// Build the keybinding-system collaborators.
+	g.cmdRegistry = commands.NewRegistry()
+	g.modeStore = keys.NewModeStore()
+	g.whichkey = keys.NewWhichKey()
+	g.exRegistry = keys.NewExRegistry()
+
+	leader, _ := leaderRunesFromCfg(cfg)
+	tlen, ttlen, wdelay := resolveKeyDelays(cfg, g.delayOverrides)
+	matcher, err := keys.NewMatcher(nil, keys.MatcherConfig{
+		Modes:         g.modeStore,
+		Leader:        leader,
+		TimeoutLen:    tlen,
+		TtimeoutLen:   ttlen,
+		WhichKeyDelay: wdelay,
+		Registers:     keys.NewRegisterStore(),
+		WhichKey:      g.whichkey,
+		Log:           g.deps.Common.Log,
+	})
+	if err != nil {
+		return fmt.Errorf("gui: NewMatcher: %w", err)
+	}
+	g.matcher = matcher
+	runtime := keys.NewRuntime(g.cmdRegistry, matcher, g.modeStore, g.whichkey, g.exRegistry)
+
+	// Build the context registry with hooks closed over the driver.
 	ctxDeps := types.ContextTreeDeps{
 		GuiDriver:            g.driver,
 		EmptyStateHook:       data.NewEmptyStateHook(tr, provider),
 		PresentationHook:     presentation.NewPresentationHook(),
 		PerRowDecorationHook: presentation.NewPerRowDecorationHook(),
 		LimitText:            presentation.NewLimitText(tr),
+		ModeStore:            g.modeStore,
+		WhichKey:             g.whichkey,
 	}
 	g.registry = guicontext.NewContextTree(ctxDeps)
 
@@ -193,44 +265,105 @@ func (g *Gui) wireWithDriver() error {
 		Confirm:          g.confirmHelp,
 		Prompt:           g.promptHelp,
 		Toast:            g.toastHelp,
-		OneShot:          g.arm,
 		Refresh:          g.refreshHelper,
 		Tip:              g.tipHelp,
 		TableDouble:      g.tablesHelp,
 		Menu:             &menuPushHelper{tree: g.tree, menu: g.registry.Menu},
 		HiddenPatterns:   defaultHiddenPatterns,
-		ProvideLeader:    g.provideLeader,
+		KbRuntime:        runtime,
 	}
 	g.controllers = controllers.AttachControllers(g.registry, g.deps.Common, helperBag)
 
-	// Register every controller-published binding via keys.RegisterChord
-	// (the dlp.8a shim wrapper around keys.Register). Multi-key
-	// sequences and nil-handler bindings are logged and skipped so a
-	// single misconfigured controller does not fail gui startup —
-	// dispatch for multi-key bindings lands in dlp.8b/c via the master
-	// Editor + Matcher.
-	for _, ctx := range g.registry.Flatten() {
-		for _, kb := range ctx.GetKeybindings(types.KeybindingsOpts{}) {
-			if err := keys.RegisterChord(g.driver, g.deps.Common.Log, kb); err != nil {
-				if errors.Is(err, keys.ErrSequenceTooLong) || errors.Is(err, keys.ErrNilHandler) {
-					if g.deps.Common.Log != nil {
-						g.deps.Common.Log.Warnf("gui: skipping binding %q on %q: %v", kb.Description, kb.ViewName, err)
-					}
-					continue
-				}
-				return fmt.Errorf("gui: register %q on %q: %w", kb.Description, kb.ViewName, err)
+	// Register every controller's action handlers with the registry.
+	g.controllers.RegisterActions(g.cmdRegistry)
+
+	// Cheatsheet stub: dlp.10 replaces with the real popup-opening
+	// handler. Today it is a no-op so the `?` binding has a leaf.
+	_ = g.cmdRegistry.Register(&commands.Command{
+		ID:          commands.HelpCheatsheet,
+		Description: "Show cheatsheet",
+		Handler:     func(commands.ExecCtx) error { return nil },
+	})
+
+	// COMMAND_LINE action commands. The CommandLineContext doubles as
+	// the holder (it implements types.IBaseContext + ReadAndClearBuffer).
+	toaster := func(msg string) {
+		if g.toastHelp != nil {
+			g.toastHelp.Show(msg, 3*time.Second)
+		}
+	}
+	cmdDeps := keys.CommandLineCommandDeps{
+		Stack:      g.tree,
+		Context:    g.registry.CommandLine,
+		ExRegistry: g.exRegistry,
+		Toaster:    toaster,
+	}
+	_ = g.cmdRegistry.Register(keys.CommandOpenCommand(cmdDeps))
+	_ = g.cmdRegistry.Register(keys.CommandCancelCommand(cmdDeps))
+	_ = g.cmdRegistry.Register(keys.CommandSubmitCommand(cmdDeps))
+
+	// kindOf classifies a ContextKey by walking the registry; used by
+	// Build to expand `scope: all` and by :reload.
+	kindOf := func(k types.ContextKey) types.ContextKind {
+		for _, ctx := range g.registry.Flatten() {
+			if ctx != nil && ctx.GetKey() == k {
+				return ctx.GetKind()
 			}
 		}
+		return types.GLOBAL_CONTEXT
+	}
+
+	// Build the trie.
+	svc := keys.NewKeybindingService()
+	defaults := controllers.AllDefaultBindings(g.controllers)
+	trieSet, warnings, buildErr := svc.Build(defaults, cfg, g.cmdRegistry, kindOf)
+	if buildErr != nil {
+		return fmt.Errorf("gui: Build: %w", buildErr)
+	}
+	if g.deps.Common.Log != nil {
+		for _, w := range warnings {
+			g.deps.Common.Log.Warnf("keybindings: [%s] %s (%s)", w.Code, w.Message, w.Origin)
+		}
+	}
+	matcher.SwapTrieSet(trieSet)
+
+	// :reload ex-command. The LoadUserConfig closure is a minimal-viable
+	// stub: it returns the currently-loaded config rather than re-reading
+	// from disk. A real on-disk reload requires plumbing the bootstrap
+	// path through Deps; that lands in a follow-up. The AC only asks
+	// that :reload triggers exactly one matcher.SwapTrieSet — the stub
+	// satisfies that contract.
+	reloadDeps := keys.ReloadDeps{
+		LoadUserConfig: func() (*config.UserConfig, error) {
+			if c := g.deps.Common.Cfg(); c != nil {
+				return c, nil
+			}
+			return config.GetDefaultConfig(), nil
+		},
+		Defaults: defaults,
+		Registry: g.cmdRegistry,
+		KindOf:   kindOf,
+		Service:  svc,
+		Matcher:  matcher,
+		Toaster:  toaster,
+		Log:      g.deps.Common.Log,
+	}
+	_ = g.exRegistry.Register(keys.ReloadCommand(reloadDeps))
+
+	// Master Editor on editable views (today only COMMAND_LINE) +
+	// per-key SetKeybinding shims on every non-editable view.
+	if err := g.installKeyDispatch(trieSet); err != nil {
+		return err
 	}
 
 	// Mouse wiring is gated on cfg.UI.Mouse.Enabled.
-	if cfg := g.deps.Common.Cfg(); cfg != nil && cfg.UI.Mouse.Enabled {
+	if cfg.UI.Mouse.Enabled {
 		if err := ui.WireMouse(ui.MouseWiringDeps{
 			Driver:      g.driver,
 			Log:         g.deps.Common.Log,
 			Tree:        g.tree,
 			Registry:    g.registry,
-			OneShot:     g.arm,
+			Matcher:     matcher,
 			TableDouble: g.tablesHelp,
 			TablePicker: tablePicker,
 		}); err != nil {
@@ -238,29 +371,133 @@ func (g *Gui) wireWithDriver() error {
 		}
 	}
 
-	// Cancel any pending one-shot arm whenever the focus stack changes.
-	g.tree.RegisterSwapHook(g.arm.Cancel)
+	// Cancel any pending matcher partial / which-key on focus change.
+	g.tree.RegisterSwapHook(matcher.Cancel)
+	g.tree.RegisterSwapHook(g.whichkey.Hide)
 
 	// Plumb the focus stack into gocui.SetCurrentView so view-specific
-	// keybindings (the ones whose BindingsOpts had ViewName != "") can
-	// match — gocui.execKeybindings rejects view-specific bindings when
-	// g.currentView is nil or its name doesn't match. The actual call is
-	// deferred via driver.Update so it runs on the next MainLoop tick,
-	// AFTER Layout has had a chance to create the new view; calling it
-	// here on first push would error with ErrUnknownView because the
-	// initial push happens before MainLoop's first flush() pass.
+	// keybindings can match — gocui.execKeybindings rejects view-specific
+	// bindings when g.currentView is nil or its name doesn't match.
 	g.tree.RegisterSwapHook(g.syncCurrentViewFromFocus)
 
 	// Push the initial CONNECTIONS context.
 	return g.tree.Push(g.registry.Connections)
 }
 
+// installKeyDispatch wires the dispatch path:
+//
+//   - For editable views (Context.GetKey().IsEditable() returns true,
+//     i.e. COMMAND_LINE), install a master gocui.Editor that routes
+//     every keystroke through the Matcher.
+//   - For non-editable views, install one SetKeybinding per top-level
+//     trie-root Key (per Mode bit and per Scope including GLOBAL) so
+//     gocui dispatches the single key into the Matcher.
+//   - GLOBAL bindings are also installed with empty viewname so they
+//     fire from any focused view.
+//
+// Note: NewMasterEditor needs the underlying *gocui.Gui to schedule
+// pending-buffer flushes onto the MainLoop. For the recorder-driver
+// path (testfake) we pass nil; the in-flight flush path is only
+// relevant for ModeInsert (out of scope for this epic).
+func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
+	var ngocui *gocui.Gui
+	if real, ok := g.driver.(*gocuiDriver); ok {
+		ngocui = real.Gocui()
+	}
+
+	for _, ctx := range g.registry.Flatten() {
+		if ctx == nil || ctx.GetKind() == types.STUB {
+			continue
+		}
+		key := ctx.GetKey()
+		view := ctx.GetViewName()
+
+		if key.IsEditable() {
+			if view == "" {
+				continue
+			}
+			ed := NewMasterEditor(ngocui, g.matcher, key)
+			if err := g.driver.SetMasterEditor(view, ed); err != nil {
+				return fmt.Errorf("gui: SetMasterEditor(%s): %w", view, err)
+			}
+			continue
+		}
+
+		// Non-editable: install per-key SetKeybinding shims for every
+		// trie root child at this scope (across all modes).
+		if view == "" {
+			continue
+		}
+		if err := g.installShimsForScope(trieSet, key, view); err != nil {
+			return err
+		}
+	}
+
+	// GLOBAL trie's root keys: install with empty viewname so they
+	// fire regardless of which view holds focus. gocui treats viewname
+	// == "" as a global binding.
+	if err := g.installShimsForScope(trieSet, types.GLOBAL, ""); err != nil {
+		return err
+	}
+	return nil
+}
+
+// installShimsForScope walks every (mode, scope) trie and registers one
+// SetKeybinding per top-level Key. The handler routes the key through
+// matcher.Dispatch under the supplied scope. Duplicate (view, key, mod)
+// registrations are tolerated — gocui returns nil and the second
+// handler shadows the first; our Matcher dispatches by scope so the
+// shadowing handler still hits the right binding.
+func (g *Gui) installShimsForScope(trieSet *keys.TrieSet, scope types.ContextKey, view string) error {
+	if trieSet == nil {
+		return nil
+	}
+	seen := map[shimKey]struct{}{}
+	var firstErr error
+	trieSet.Walk(func(tk keys.TrieSetKey, trie *keys.ChordTrie) {
+		if firstErr != nil {
+			return
+		}
+		if tk.Scope != scope {
+			return
+		}
+		for _, k := range trie.RootKeys() {
+			gk, gmod, err := keys.ChordKeyToGocui(k)
+			if err != nil {
+				continue
+			}
+			sk := shimKey{view: view, gk: gk, gmod: gmod}
+			if _, dup := seen[sk]; dup {
+				continue
+			}
+			seen[sk] = struct{}{}
+			rootKey := k
+			handler := func() error {
+				_, err := g.matcher.Dispatch(scope, rootKey)
+				return err
+			}
+			if err := g.driver.SetKeybinding(view, gk, gmod, handler); err != nil {
+				firstErr = fmt.Errorf("gui: SetKeybinding(view=%q, key=%v): %w", view, k, err)
+				return
+			}
+		}
+	})
+	return firstErr
+}
+
+// shimKey deduplicates (view, key, mod) tuples within a single
+// installShimsForScope invocation. The same root Key may appear under
+// multiple modes for the same scope; gocui has no mode dimension so we
+// only need one SetKeybinding per (view, key, mod).
+type shimKey struct {
+	view string
+	gk   types.Key
+	gmod types.Modifier
+}
+
 // syncCurrentViewFromFocus enqueues a SetCurrentView call for the
 // current top of the focus stack. Viewless contexts (GLOBAL_CONTEXT
-// with GetViewName == "") are skipped so they don't clobber the
-// previous focus. Errors from SetCurrentView (typically
-// gocui.ErrUnknownView when the view hasn't been created yet on the
-// initial push) are tolerated — the next swap will retry.
+// with GetViewName == "") are skipped.
 func (g *Gui) syncCurrentViewFromFocus() {
 	if g.driver == nil || g.tree == nil {
 		return
@@ -286,8 +523,6 @@ func (g *Gui) RunAndHandleError() error {
 	if err := g.initGocui(); err != nil {
 		return err
 	}
-	// SetManager is performed inside wireWithDriver before bindings are
-	// registered; do not call it again here (it would wipe them).
 	err := g.driver.MainLoop()
 	if err == nil || err == gocui.ErrQuit {
 		return nil
@@ -296,7 +531,7 @@ func (g *Gui) RunAndHandleError() error {
 }
 
 // Close runs the M15c shutdown sequence: Flush → Close store → Close
-// driver. Idempotent: subsequent calls are no-ops.
+// driver. Idempotent.
 func (g *Gui) Close() error {
 	if g.closed {
 		return nil
@@ -320,8 +555,7 @@ func (g *Gui) Close() error {
 }
 
 // QuitOnSignal asks the gocui MainLoop to exit cleanly by enqueueing a
-// gocui.ErrQuit-returning closure on the Update queue. Safe to call
-// from a non-MainLoop goroutine (e.g. signal handler).
+// gocui.ErrQuit-returning closure on the Update queue.
 func (g *Gui) QuitOnSignal() {
 	if g.driver == nil {
 		return
@@ -338,18 +572,73 @@ func (g *Gui) Registry() *guicontext.ContextTree { return g.registry }
 // Controllers returns the controller bundle. Test accessor.
 func (g *Gui) Controllers() *controllers.Controllers { return g.controllers }
 
-// provideLeader resolves the leader prefix from the live config.
-func (g *Gui) provideLeader() string {
-	if cfg := g.deps.Common.Cfg(); cfg != nil && cfg.Leader != "" {
-		return cfg.Leader
+// CommandRegistry returns the commands.Registry. Test accessor.
+func (g *Gui) CommandRegistry() *commands.Registry { return g.cmdRegistry }
+
+// ExRegistry returns the ex-command registry. Test accessor.
+func (g *Gui) ExRegistry() *keys.ExRegistry { return g.exRegistry }
+
+// Matcher returns the active Matcher. Test accessor.
+func (g *Gui) Matcher() *keys.Matcher { return g.matcher }
+
+// leaderRunesFromCfg extracts the leader / localleader runes from cfg,
+// using the same fallbacks as keys.KeybindingService.Build.
+func leaderRunesFromCfg(cfg *config.UserConfig) (rune, rune) {
+	leader := ' '
+	localLeader := ','
+	if cfg == nil {
+		return leader, localLeader
 	}
-	return "<space>"
+	if cfg.Leader != "" {
+		for _, r := range cfg.Leader {
+			leader = r
+			break
+		}
+	}
+	if cfg.LocalLeader != "" {
+		for _, r := range cfg.LocalLeader {
+			localLeader = r
+			break
+		}
+	}
+	return leader, localLeader
+}
+
+// resolveKeyDelays merges the (optional) test overrides with the config
+// values and finally hardcoded defaults. Positive override fields win;
+// zero / negative fields fall through to cfg, then to the documented
+// defaults (1s / 50ms / 300ms).
+func resolveKeyDelays(cfg *config.UserConfig, overrides *keyDelayOverrides) (time.Duration, time.Duration, time.Duration) {
+	tlen := 1 * time.Second
+	ttlen := 50 * time.Millisecond
+	wdelay := 300 * time.Millisecond
+	if cfg != nil {
+		if cfg.TimeoutLen > 0 {
+			tlen = cfg.TimeoutLen
+		}
+		if cfg.TtimeoutLen > 0 {
+			ttlen = cfg.TtimeoutLen
+		}
+		if cfg.WhichKeyDelay > 0 {
+			wdelay = cfg.WhichKeyDelay
+		}
+	}
+	if overrides != nil {
+		if overrides.timeoutLen > 0 {
+			tlen = overrides.timeoutLen
+		}
+		if overrides.ttimeoutLen > 0 {
+			ttlen = overrides.ttimeoutLen
+		}
+		if overrides.whichKeyDelay > 0 {
+			wdelay = overrides.whichKeyDelay
+		}
+	}
+	return tlen, ttlen, wdelay
 }
 
 // defaultHiddenPatterns is the SchemasInvoker.UnhideSchema input — the
 // pg-driver builtin schemas are the only patterns this epic recognises.
-// Profile-level patterns land with the connection-profile expansion in
-// a later epic.
 func defaultHiddenPatterns() ([]string, []string) {
 	return pg.BuiltinHiddenSchemas, nil
 }

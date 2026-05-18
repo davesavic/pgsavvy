@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"testing"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
@@ -13,18 +14,20 @@ func TestListControllerTraitDownAndUp(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{idx: 5, items: []any{1, 2, 3, 4, 5, 6, 7}}
 	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 
 	jFired, kFired := false, false
 	for _, kb := range bindings {
 		if isRune(kb, 'j') {
-			if err := kb.Handler(); err != nil {
+			if err := invokeAction(reg, kb); err != nil {
 				t.Fatalf("j: %v", err)
 			}
 			jFired = true
 		}
 		if isRune(kb, 'k') {
-			if err := kb.Handler(); err != nil {
+			if err := invokeAction(reg, kb); err != nil {
 				t.Fatalf("k: %v", err)
 			}
 			kFired = true
@@ -33,9 +36,6 @@ func TestListControllerTraitDownAndUp(t *testing.T) {
 	if !jFired || !kFired {
 		t.Fatalf("expected both j and k bindings, jFired=%v kFired=%v", jFired, kFired)
 	}
-	// Net: +1 then -1 -> idx unchanged at 5 (fakeCursor stores raw, no
-	// clamping; the trait itself doesn't clamp either in T7a, that lives
-	// in the real side-list contexts).
 	if cur.idx != 5 {
 		t.Fatalf("cursor idx after j,k = %d, want 5", cur.idx)
 	}
@@ -45,13 +45,13 @@ func TestListControllerTraitDownAndUp(t *testing.T) {
 func TestListControllerTraitConfirmDelegates(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
-	// Use the columns controller (no row activation -> onConfirm is a
-	// noop returning nil; we just need a binding to fire).
 	ctrl := controllers.NewColumnsController(nil, b.HelperBag, cur)
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 	for _, kb := range bindings {
 		if isSpecial(kb, types.KeyEnter) {
-			if err := kb.Handler(); err != nil {
+			if err := invokeAction(reg, kb); err != nil {
 				t.Fatalf("<CR> on columns: %v", err)
 			}
 		}

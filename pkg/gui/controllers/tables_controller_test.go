@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"testing"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -16,9 +17,11 @@ func TestTablesControllerConfirmCallsDoubleClickStub(t *testing.T) {
 	b.TablePicker.sel = tbl
 	cur := &fakeCursor{}
 	ctrl := controllers.NewTablesController(nil, b.HelperBag, cur, b.TablePicker)
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isSpecial(kb, types.KeyEnter) {
-			if err := kb.Handler(); err != nil {
+			if err := invokeAction(reg, kb); err != nil {
 				t.Fatalf("<CR>: %v", err)
 			}
 		}
@@ -32,9 +35,11 @@ func TestTablesControllerEnterEmptyRailIsNoop(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
 	ctrl := controllers.NewTablesController(nil, b.HelperBag, cur, b.TablePicker)
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isSpecial(kb, types.KeyEnter) {
-			_ = kb.Handler()
+			_ = invokeAction(reg, kb)
 		}
 	}
 	if len(b.TableDouble.calls) != 0 {

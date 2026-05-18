@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
@@ -20,7 +21,7 @@ func NewTablesController(
 ) *TablesController {
 	base := newBase(c, helpers)
 	ctrl := &TablesController{}
-	confirm := func() error {
+	confirm := func(_ commands.ExecCtx) error {
 		if picker == nil || base.helpers.TableDouble == nil {
 			return nil
 		}
@@ -43,6 +44,11 @@ func (c *TablesController) GetKeybindings(_ types.KeybindingsOpts) []*types.Chor
 	out = append(out, railSwitchBindings(view, tr)...)
 	return out
 }
+
+// RegisterActions has no rail-specific actions to register beyond the
+// shared trait + rail-switch set. Implemented for symmetry; future
+// epics may attach table-specific actions here.
+func (c *TablesController) RegisterActions(_ *commands.Registry) {}
 
 // AttachToContext registers GetKeybindings.
 func (c *TablesController) AttachToContext(ctx attachable) {

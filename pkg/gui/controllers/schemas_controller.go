@@ -4,13 +4,15 @@ import (
 	"errors"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
+	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// SchemasController owns the SCHEMAS rail bindings: j/k navigation
-// via the trait, H (hide), U (unhide), and <leader>H (toggle-show-
-// hidden) via the OneshotArmer interface.
+// SchemasController owns the SCHEMAS rail bindings: j/k navigation via
+// the trait, H (hide), U (unhide), and <leader>H (toggle-show-hidden)
+// via the multi-key chord trie (no oneshot dispatcher).
 type SchemasController struct {
 	*ListControllerTrait[SchemaPicker]
 }
@@ -28,12 +30,12 @@ func NewSchemasController(
 	// <CR> on SCHEMAS is a no-op in T7a — selecting a schema in the
 	// rail drives the TABLES rail load, which is owned by the
 	// downstream bootstrap (T10) via a context-switch closure.
-	ctrl.ListControllerTrait = NewListControllerTrait(base, viewName(types.SCHEMAS), cursor, picker, func() error { return nil })
+	ctrl.ListControllerTrait = NewListControllerTrait(base, viewName(types.SCHEMAS), cursor, picker, func(_ commands.ExecCtx) error { return nil })
 	return ctrl
 }
 
 // HideSchema is the `H` handler.
-func (s *SchemasController) HideSchema() error {
+func (s *SchemasController) HideSchema(_ commands.ExecCtx) error {
 	if s.helpers.SchemasHelper == nil || s.helpers.ActiveConnection == nil {
 		return nil
 	}
@@ -54,10 +56,8 @@ func (s *SchemasController) HideSchema() error {
 
 // UnhideSchema is the `U` handler. On ErrNeedsConfirmation it routes
 // through the ConfirmHelper popup; the user's "Yes" callback re-issues
-// the unhide via a direct AppState mutation (delegated to T7b's
-// helper plumbing — here we simply invoke the SchemasHelper.UnhideSchema
-// path; T7b's confirm-yes callback will be wired to it).
-func (s *SchemasController) UnhideSchema() error {
+// the unhide via a direct AppState mutation.
+func (s *SchemasController) UnhideSchema(_ commands.ExecCtx) error {
 	if s.helpers.SchemasHelper == nil || s.helpers.ActiveConnection == nil {
 		return nil
 	}
@@ -80,9 +80,6 @@ func (s *SchemasController) UnhideSchema() error {
 
 	err := s.helpers.SchemasHelper.UnhideSchema(connID, name, builtin, profile)
 	if errors.Is(err, data.ErrNeedsConfirmation) {
-		// Route through ConfirmHelper. The user-approved path re-invokes
-		// the helper with empty builtin/profile lists, which bypasses
-		// the predicate.
 		if s.helpers.Confirm == nil {
 			return nil
 		}
@@ -99,26 +96,13 @@ func (s *SchemasController) UnhideSchema() error {
 	return s.wrapErr("schemas.unhide", err)
 }
 
-// ToggleShowHidden is the `<leader>H` suffix handler armed by OneshotArmer.
-func (s *SchemasController) ToggleShowHidden() error {
+// ToggleShowHidden is the `<leader>H` handler.
+func (s *SchemasController) ToggleShowHidden(_ commands.ExecCtx) error {
 	if s.picker == nil {
 		return nil
 	}
 	s.picker.ToggleShowHidden()
 	return nil
-}
-
-// armLeader is the bare `<leader>` keystroke handler — it arms the
-// oneshot dispatcher waiting for the `H` suffix.
-func (s *SchemasController) armLeader() error {
-	if s.helpers.OneShot == nil {
-		return nil
-	}
-	suffixes := map[rune]func() error{
-		'H': s.ToggleShowHidden,
-	}
-	err := s.helpers.OneShot.Arm(s.leader(), suffixes, string(types.SCHEMAS))
-	return s.wrapErr("schemas.arm_leader", err)
 }
 
 // GetKeybindings returns the schemas rail bindings.
@@ -129,34 +113,59 @@ func (s *SchemasController) GetKeybindings(_ types.KeybindingsOpts) []*types.Cho
 
 	out = append(out,
 		&types.ChordBinding{
-			ViewName:    view,
 			Sequence:    []types.ChordKey{{Code: 'H'}},
+			Mode:        types.ModeNormal,
 			Scope:       types.SCHEMAS,
-			Handler:     s.HideSchema,
+			ActionID:    commands.SchemaHide,
 			Description: tr.Actions.HideSchema,
 		},
 		&types.ChordBinding{
-			ViewName:    view,
 			Sequence:    []types.ChordKey{{Code: 'U'}},
+			Mode:        types.ModeNormal,
 			Scope:       types.SCHEMAS,
-			Handler:     s.UnhideSchema,
+			ActionID:    commands.SchemaUnhide,
 			Description: tr.Actions.UnhideSchema,
 		},
 	)
 
-	// <leader> binding. The OneshotArmer interface is supplied by T7b;
-	// when absent (early boot / unit tests) the binding is still
-	// registered but the arm() returns no-op.
-	out = append(out, &types.ChordBinding{
-		ViewName:    view,
-		Sequence:    []types.ChordKey{s.leaderChordKey()},
-		Scope:       types.SCHEMAS,
-		Handler:     s.armLeader,
-		Description: tr.Actions.ToggleShowHidden,
-	})
+	// <leader>H multi-key chord. SequenceFromShorthand emits a
+	// KeyLeader placeholder which Build expands using cfg.Leader before
+	// the trie insert.
+	if seq, err := keys.SequenceFromShorthand("<leader>H"); err == nil {
+		out = append(out, &types.ChordBinding{
+			Sequence:    seq,
+			Mode:        types.ModeNormal,
+			Scope:       types.SCHEMAS,
+			ActionID:    commands.SchemaToggleShowHidden,
+			Description: tr.Actions.ToggleShowHidden,
+		})
+	}
 
 	out = append(out, railSwitchBindings(view, tr)...)
 	return out
+}
+
+// RegisterActions registers the rail-specific action handlers this
+// controller owns with reg.
+func (s *SchemasController) RegisterActions(reg *commands.Registry) {
+	if reg == nil {
+		return
+	}
+	_ = reg.Register(&commands.Command{
+		ID:          commands.SchemaHide,
+		Description: "Hide schema",
+		Handler:     s.HideSchema,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.SchemaUnhide,
+		Description: "Unhide schema",
+		Handler:     s.UnhideSchema,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.SchemaToggleShowHidden,
+		Description: "Toggle show-hidden schemas",
+		Handler:     s.ToggleShowHidden,
+	})
 }
 
 // AttachToContext registers GetKeybindings on the supplied context.
@@ -165,22 +174,4 @@ func (s *SchemasController) AttachToContext(ctx attachable) {
 		return
 	}
 	ctx.AddKeybindingsFn(s.GetKeybindings)
-}
-
-// leaderChordKey resolves the configured leader label to a ChordKey.
-// Only the labels permitted by G1-C are honored here ("<space>", " ",
-// ""); any other label falls back to space (because custom leader
-// strings are an E5 chord-system feature) and emits a single Warnf so
-// the silent collision surfaces at runtime before E5 ships real leader
-// expansion.
-func (s *SchemasController) leaderChordKey() types.ChordKey {
-	label := s.leader()
-	switch label {
-	case "<space>", " ", "":
-		return types.ChordKey{Code: ' '}
-	}
-	if s.c != nil && s.c.Log != nil {
-		s.c.Log.Warnf("schemas_controller: unrecognized leader label %q; falling back to <space>", label)
-	}
-	return types.ChordKey{Code: ' '}
 }

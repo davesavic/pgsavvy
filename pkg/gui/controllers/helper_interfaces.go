@@ -38,13 +38,6 @@ type ToastHelper interface {
 	Show(message string, ttl time.Duration)
 }
 
-// OneshotArmer arms a one-shot prefix dispatcher: after Arm is invoked,
-// the next key matching a suffix in suffixes triggers the matched
-// handler; any other key cancels silently.
-type OneshotArmer interface {
-	Arm(prefix string, suffixes map[rune]func() error, scope string) error
-}
-
 // RefreshHelper reloads side-rail data after a hide/unhide mutation.
 type RefreshHelper interface {
 	RefreshSchemas(ctx context.Context) error

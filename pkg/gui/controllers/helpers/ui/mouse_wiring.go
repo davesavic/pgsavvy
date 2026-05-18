@@ -21,7 +21,7 @@ type MouseWiringDeps struct {
 	Log         keys.WarnLogger
 	Tree        *gui.ContextTree
 	Registry    *guicontext.ContextTree
-	OneShot     *keys.OneshotArm
+	Matcher     *keys.Matcher
 	TableDouble *TablesHelper
 	TablePicker TablePicker
 }
@@ -41,7 +41,7 @@ type TablePicker interface {
 //   - stub-context views are skipped (Kind == STUB).
 //   - bindings are registered via keys.RegisterMouseBinding so the
 //     swallow-and-warn-once contract applies.
-//   - the OneshotArm is cancelled inside each mouse-event handler
+//   - the Matcher is cancelled inside each mouse-event handler
 //     (mouse-event-cancels-arm AC scenario).
 //
 // Mouse-enabled gating is the CALLER's responsibility — when
@@ -76,8 +76,8 @@ func WireMouse(deps MouseWiringDeps) error {
 // dispatcher that calls TablesHelper.DoubleClickStub.
 func wireOneView(deps MouseWiringDeps, ctx types.IBaseContext, view string) error {
 	cancelArm := func() {
-		if deps.OneShot != nil {
-			deps.OneShot.Cancel()
+		if deps.Matcher != nil {
+			deps.Matcher.Cancel()
 		}
 	}
 	pushFocus := func(opts types.ViewMouseBindingOpts) error {

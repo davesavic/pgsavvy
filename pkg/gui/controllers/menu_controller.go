@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
@@ -18,15 +19,12 @@ func NewMenuController(c *common.Common, helpers HelperBag) *MenuController {
 
 // Select activates the cursor-selected menu entry. The MenuPushHelper
 // owns the actual selection plumbing (popup state lives in T7b).
-func (m *MenuController) Select() error {
-	// The select action is delegated to the menu helper which knows
-	// which entry the cursor is on and how to invoke its handler.
-	// In T7a we publish the binding; T7b's helper completes the wiring.
+func (m *MenuController) Select(_ commands.ExecCtx) error {
 	return nil
 }
 
 // Close pops the MENU popup.
-func (m *MenuController) Close() error {
+func (m *MenuController) Close(_ commands.ExecCtx) error {
 	if m.helpers.Menu == nil {
 		return nil
 	}
@@ -37,23 +35,39 @@ func (m *MenuController) Close() error {
 // GetKeybindings returns the menu popup bindings.
 func (m *MenuController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	tr := m.tr()
-	view := viewName(types.MENU)
 	return []*types.ChordBinding{
 		{
-			ViewName:    view,
 			Sequence:    []types.ChordKey{{Special: types.KeyEnter}},
+			Mode:        types.ModeNormal,
 			Scope:       types.MENU,
-			Handler:     m.Select,
+			ActionID:    commands.MenuConfirm,
 			Description: tr.Actions.Confirm,
 		},
 		{
-			ViewName:    view,
 			Sequence:    []types.ChordKey{{Special: types.KeyEsc}},
+			Mode:        types.ModeNormal,
 			Scope:       types.MENU,
-			Handler:     m.Close,
+			ActionID:    commands.MenuCancel,
 			Description: tr.Actions.Cancel,
 		},
 	}
+}
+
+// RegisterActions registers menu-specific actions with reg.
+func (m *MenuController) RegisterActions(reg *commands.Registry) {
+	if reg == nil {
+		return
+	}
+	_ = reg.Register(&commands.Command{
+		ID:          commands.MenuConfirm,
+		Description: "Select menu entry",
+		Handler:     m.Select,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.MenuCancel,
+		Description: "Close menu",
+		Handler:     m.Close,
+	})
 }
 
 // AttachToContext registers GetKeybindings.

@@ -68,9 +68,9 @@ func TestBaseContextLifecycleHooksReturnNil(t *testing.T) {
 func TestAddKeybindingsFnAppendsAndGetReturnsConcatenation(t *testing.T) {
 	b := NewBaseContext(BaseContextOpts{Key: types.SCHEMAS, Kind: types.SIDE_CONTEXT})
 
-	bindA := &types.ChordBinding{ViewName: "schemas", Description: "A"}
-	bindB := &types.ChordBinding{ViewName: "schemas", Description: "B"}
-	bindC := &types.ChordBinding{ViewName: "schemas", Description: "C"}
+	bindA := &types.ChordBinding{Scope: types.SCHEMAS, Description: "A"}
+	bindB := &types.ChordBinding{Scope: types.SCHEMAS, Description: "B"}
+	bindC := &types.ChordBinding{Scope: types.SCHEMAS, Description: "C"}
 
 	b.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.ChordBinding {
 		return []*types.ChordBinding{bindA}
@@ -100,8 +100,8 @@ func TestAddKeybindingsFnAppendsAndGetReturnsConcatenation(t *testing.T) {
 func TestGetKeybindingsLastAttachedWinsOrdering(t *testing.T) {
 	b := NewBaseContext(BaseContextOpts{Key: types.SCHEMAS, Kind: types.SIDE_CONTEXT})
 
-	earlier := &types.ChordBinding{ViewName: "schemas", Description: "old-H-handler"}
-	later := &types.ChordBinding{ViewName: "schemas", Description: "new-H-handler"}
+	earlier := &types.ChordBinding{Scope: types.SCHEMAS, Description: "old-H-handler"}
+	later := &types.ChordBinding{Scope: types.SCHEMAS, Description: "new-H-handler"}
 
 	b.AddKeybindingsFn(func(_ types.KeybindingsOpts) []*types.ChordBinding {
 		return []*types.ChordBinding{earlier}

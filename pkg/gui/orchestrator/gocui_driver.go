@@ -60,6 +60,18 @@ func (d *gocuiDriver) SetKeybinding(viewName string, key types.Key, mod types.Mo
 	return d.g.SetKeybinding(viewName, key, wrapped)
 }
 
+// Gocui returns the underlying *gocui.Gui. Used by wireWithDriver to
+// construct the master Editor (NewMasterEditor needs *gocui.Gui to
+// schedule pending-buffer flushes onto the MainLoop). Returns nil when
+// the driver is not a real gocuiDriver — tests with a recorder driver
+// pass nil through to NewMasterEditor, which handles it.
+func (d *gocuiDriver) Gocui() *gocui.Gui {
+	if d == nil {
+		return nil
+	}
+	return d.g
+}
+
 func (d *gocuiDriver) SetMasterEditor(view string, ed gocui.Editor) error {
 	v, err := d.g.View(view)
 	if err != nil {

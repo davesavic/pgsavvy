@@ -8,8 +8,9 @@ import (
 
 // ExpectedBinding is one (view, key, mod) tuple the bootstrap is expected
 // to register. The list is the union of every controller-published
-// binding plus a handful of global ones; gui_test asserts that every
-// entry appears in the recorder's AllKeybindings() set.
+// binding's top-level (first-chord) key, since per-key SetKeybinding
+// shims are installed only for the trie's root children — the Matcher
+// then takes over for any subsequent keys in a multi-key chord.
 type ExpectedBinding struct {
 	View string
 	Key  types.Key
@@ -18,10 +19,10 @@ type ExpectedBinding struct {
 
 // ExpectedBindings is the canonical inventory the AC suite walks.
 //
-// Coverage targets called out by the T10 AC: j, k, <CR>, H, U, leader,
-// digit 1..4, <tab>, ?, q, :, a — across every relevant view.
+// Coverage targets: j, k, <CR>, H, U, leader, digit 1..4, <tab>,
+// ?, <c-c>, :, a — across every relevant view.
 var ExpectedBindings = []ExpectedBinding{
-	// Connections rail: j/k/<CR>, digits 1..4, <tab>, `a`.
+	// Connections rail.
 	{View: "connections", Key: gocui.NewKeyRune('j'), Mod: gocui.ModNone},
 	{View: "connections", Key: gocui.NewKeyRune('k'), Mod: gocui.ModNone},
 	{View: "connections", Key: gocui.NewKeyName(gocui.KeyEnter), Mod: gocui.ModNone},
@@ -32,7 +33,7 @@ var ExpectedBindings = []ExpectedBinding{
 	{View: "connections", Key: gocui.NewKeyRune('4'), Mod: gocui.ModNone},
 	{View: "connections", Key: gocui.NewKeyName(gocui.KeyTab), Mod: gocui.ModNone},
 
-	// Schemas rail: j/k/<CR>, H, U, leader (space), digits, <tab>.
+	// Schemas rail. <leader>H's first key is space (the configured leader).
 	{View: "schemas", Key: gocui.NewKeyRune('j'), Mod: gocui.ModNone},
 	{View: "schemas", Key: gocui.NewKeyRune('k'), Mod: gocui.ModNone},
 	{View: "schemas", Key: gocui.NewKeyName(gocui.KeyEnter), Mod: gocui.ModNone},
@@ -45,7 +46,7 @@ var ExpectedBindings = []ExpectedBinding{
 	{View: "schemas", Key: gocui.NewKeyRune('4'), Mod: gocui.ModNone},
 	{View: "schemas", Key: gocui.NewKeyName(gocui.KeyTab), Mod: gocui.ModNone},
 
-	// Tables rail: j/k/<CR>, digits, <tab>.
+	// Tables rail.
 	{View: "tables", Key: gocui.NewKeyRune('j'), Mod: gocui.ModNone},
 	{View: "tables", Key: gocui.NewKeyRune('k'), Mod: gocui.ModNone},
 	{View: "tables", Key: gocui.NewKeyName(gocui.KeyEnter), Mod: gocui.ModNone},
@@ -64,7 +65,7 @@ var ExpectedBindings = []ExpectedBinding{
 	{View: "menu", Key: gocui.NewKeyName(gocui.KeyEsc), Mod: gocui.ModNone},
 
 	// Global bindings (view == "" means global per gocui).
-	{View: "", Key: gocui.NewKeyRune('q'), Mod: gocui.ModNone},
+	{View: "", Key: gocui.NewKeyRune('c'), Mod: gocui.ModCtrl},
 	{View: "", Key: gocui.NewKeyRune(':'), Mod: gocui.ModNone},
 	{View: "", Key: gocui.NewKeyRune('?'), Mod: gocui.ModNone},
 }

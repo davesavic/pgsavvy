@@ -74,6 +74,17 @@ func (t *ChordTrie) Lookup(seq []Key) LookupResult {
 	return res
 }
 
+// RootKeys returns the set of top-level (root child) Keys in
+// deterministic order. The orchestrator (dlp.8c) uses this to install
+// one per-key SetKeybinding shim per top-level chord prefix on
+// non-editable views. Empty trie → empty slice.
+func (t *ChordTrie) RootKeys() []Key {
+	if t == nil || t.root == nil {
+		return nil
+	}
+	return sortedKeys(t.root.children)
+}
+
 // ChildrenAt returns the immediate children of the node at prefix,
 // sorted by Key.String() for determinism. The popup renderer
 // (WhichKeyContext) consumes the result to draw one row per child.

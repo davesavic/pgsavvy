@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -34,7 +35,6 @@ type HelperBag struct {
 	Confirm     ConfirmHelper
 	Prompt      PromptHelper
 	Toast       ToastHelper
-	OneShot     OneshotArmer
 	Refresh     RefreshHelper
 	Tip         TipHelper
 	TableDouble TablesDoubleClickHelper
@@ -45,11 +45,12 @@ type HelperBag struct {
 	// profile change takes effect on the next U keystroke.
 	HiddenPatterns func() (builtin []string, profile []string)
 
-	// ProvideLeader returns the configured leader literal (e.g.
-	// "<space>"). Resolved at registration time per G1-C: T7a does NOT
-	// hardcode "<space>". When nil or returns empty string, the
-	// controller falls back to common.Cfg().Leader then to "<space>".
-	ProvideLeader func() string
+	// KbRuntime is the aggregate that bundles every keybinding-system
+	// collaborator (commands.Registry, Matcher, ModeStore, WhichKey,
+	// ExRegistry). Controllers use it to register action handlers via
+	// RegisterActions and to reach the Matcher when needed. Nil during
+	// unit tests that do not exercise dispatch.
+	KbRuntime *keys.Runtime
 }
 
 // DebugLogger is the minimal logging surface controllers expect.
@@ -108,23 +109,6 @@ func (b *baseController) wrapErr(label string, err error) error {
 		b.helpers.Logger.Debugf("controller %q: %v", label, err)
 	}
 	return fmt.Errorf("controller %s: %w", label, err)
-}
-
-// leader returns the configured leader prefix label, falling back to
-// the Common config and then "<space>". Per G1-C, T7a MUST resolve
-// the leader at registration time via Common.Cfg().Leader.
-func (b *baseController) leader() string {
-	if b.helpers.ProvideLeader != nil {
-		if got := b.helpers.ProvideLeader(); got != "" {
-			return got
-		}
-	}
-	if b.c != nil {
-		if cfg := b.c.Cfg(); cfg != nil && cfg.Leader != "" {
-			return cfg.Leader
-		}
-	}
-	return "<space>"
 }
 
 // tr returns the active i18n TranslationSet, falling back to a fresh

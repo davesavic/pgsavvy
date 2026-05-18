@@ -61,6 +61,15 @@ const (
 	LIMIT             ContextKey = "limit"
 )
 
+// IsEditable reports whether the view associated with k receives text
+// input through a master gocui.Editor. Today only COMMAND_LINE is
+// editable; QUERY_EDITOR / TABLE_DATA_EDITOR flip when their concrete
+// contexts ship. Non-editable views receive per-key SetKeybinding
+// dispatch into the Matcher (no master Editor installed).
+func (k ContextKey) IsEditable() bool {
+	return k == COMMAND_LINE
+}
+
 // KeybindingsOpts is the (currently empty) bag passed to GetKeybindings
 // so Controllers can branch on mode/state without changing the interface
 // signature later. Populated incrementally by downstream epics.

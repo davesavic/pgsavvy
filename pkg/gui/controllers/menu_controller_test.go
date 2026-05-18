@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"testing"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
@@ -10,9 +11,11 @@ import (
 func TestMenuControllerEscPopsMenu(t *testing.T) {
 	b := newBag()
 	ctrl := controllers.NewMenuController(nil, b.HelperBag)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isSpecial(kb, types.KeyEsc) {
-			if err := kb.Handler(); err != nil {
+			if err := invokeAction(reg, kb); err != nil {
 				t.Fatalf("esc: %v", err)
 			}
 		}

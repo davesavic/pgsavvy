@@ -6,92 +6,62 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// AC: bare `q` quits cleanly (returns gocui.ErrQuit).
-func TestQuitControllerQReturnsErrQuit(t *testing.T) {
+// AC: <c-c> dispatches commands.AppQuit which returns gocui.ErrQuit.
+func TestQuitControllerCtrlCReturnsErrQuit(t *testing.T) {
 	b := newBag()
 	ctrl := controllers.NewQuitController(nil, b.HelperBag)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	found := false
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if isRune(kb, 'q') {
-			if err := kb.Handler(); !errors.Is(err, gocui.ErrQuit) {
-				t.Fatalf("q handler returned %v, want gocui.ErrQuit", err)
+		if len(kb.Sequence) == 1 && kb.Sequence[0].Code == 'c' && kb.Sequence[0].Mod == types.ChordModCtrl {
+			found = true
+			if kb.ActionID != commands.AppQuit {
+				t.Fatalf("<c-c> ActionID = %q, want %q", kb.ActionID, commands.AppQuit)
+			}
+			if err := invokeAction(reg, kb); !errors.Is(err, gocui.ErrQuit) {
+				t.Fatalf("AppQuit handler returned %v, want gocui.ErrQuit", err)
 			}
 		}
 	}
-}
-
-// AC: `:q` invokes Quit via the colon-armed OneshotArmer with suffixes
-// map containing q→Quit, scope=GLOBAL.
-func TestQuitControllerColonArmsOneShotWithQSuffix(t *testing.T) {
-	b := newBag()
-	ctrl := controllers.NewQuitController(nil, b.HelperBag)
-	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if isRune(kb, ':') {
-			if err := kb.Handler(); err != nil {
-				t.Fatalf("colon: %v", err)
-			}
-		}
-	}
-	if len(b.OneShot.calls) != 1 {
-		t.Fatalf("OneShot.Arm calls = %d, want 1", len(b.OneShot.calls))
-	}
-	got := b.OneShot.calls[0]
-	if got.Prefix != ":" {
-		t.Fatalf("Arm.prefix = %q, want \":\"", got.Prefix)
-	}
-	if got.Scope != string(types.GLOBAL) {
-		t.Fatalf("Arm.scope = %q, want %q", got.Scope, string(types.GLOBAL))
-	}
-	qSuffix, ok := got.Suffixes['q']
-	if !ok {
-		t.Fatalf("Arm.suffixes missing 'q'; got %v", got.Suffixes)
-	}
-	// Invoking the q suffix MUST return gocui.ErrQuit.
-	if err := qSuffix(); !errors.Is(err, gocui.ErrQuit) {
-		t.Fatalf("q suffix returned %v, want ErrQuit", err)
+	if !found {
+		t.Fatal("QuitController did not publish a <c-c> binding")
 	}
 }
 
-// AC: `?` opens MENU via MenuPushHelper.
-func TestQuitControllerQuestionMarkOpensMenu(t *testing.T) {
+// AC: ? binding dispatches commands.HelpCheatsheet (registered as a
+// stub by the orchestrator; controller only publishes the binding).
+func TestQuitControllerQuestionMarkPublishesHelpCheatsheet(t *testing.T) {
 	b := newBag()
 	ctrl := controllers.NewQuitController(nil, b.HelperBag)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isRune(kb, '?') {
-			if err := kb.Handler(); err != nil {
-				t.Fatalf("?: %v", err)
+			if kb.ActionID != commands.HelpCheatsheet {
+				t.Fatalf("? ActionID = %q, want %q", kb.ActionID, commands.HelpCheatsheet)
 			}
+			return
 		}
 	}
-	if b.Menu.pushed != 1 {
-		t.Fatalf("Menu.PushMenu called %d times, want 1", b.Menu.pushed)
-	}
+	t.Fatal("QuitController did not publish a ? binding")
 }
 
-// Edge from AC list: ":" then a non-"q" key closes the colon-prefix
-// without action. The OneshotArmer interface's contract (T7b) handles
-// this — here we verify that the controller arms with a suffix map
-// containing ONLY q, so any other key is implicitly an "unknown
-// suffix" handled by the dispatcher.
-func TestQuitControllerColonArmsOnlyQSuffix(t *testing.T) {
+// RegisterActions populates commands.AppQuit.
+func TestQuitControllerRegisterActionsPopulatesAppQuit(t *testing.T) {
 	b := newBag()
 	ctrl := controllers.NewQuitController(nil, b.HelperBag)
-	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if isRune(kb, ':') {
-			_ = kb.Handler()
-		}
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, ok := reg.Get(commands.AppQuit)
+	if !ok || cmd == nil {
+		t.Fatalf("commands.AppQuit not registered after RegisterActions")
 	}
-	if len(b.OneShot.calls) != 1 {
-		t.Fatalf("expected one Arm call")
-	}
-	suffixes := b.OneShot.calls[0].Suffixes
-	if len(suffixes) != 1 {
-		t.Fatalf("colon arm should declare exactly 1 suffix (q); got %d entries: %v", len(suffixes), suffixes)
-	}
-	if _, ok := suffixes['q']; !ok {
-		t.Fatalf("colon arm must declare q→Quit suffix")
+	if err := cmd.Handler(commands.ExecCtx{}); !errors.Is(err, gocui.ErrQuit) {
+		t.Fatalf("AppQuit handler returned %v, want gocui.ErrQuit", err)
 	}
 }

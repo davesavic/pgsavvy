@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
@@ -16,7 +17,7 @@ type ColumnsController struct {
 func NewColumnsController(c *common.Common, helpers HelperBag, cursor SideListCursor) *ColumnsController {
 	base := newBase(c, helpers)
 	ctrl := &ColumnsController{}
-	ctrl.ListControllerTrait = NewListControllerTrait[any](base, viewName(types.COLUMNS), cursor, nil, func() error { return nil })
+	ctrl.ListControllerTrait = NewListControllerTrait[any](base, viewName(types.COLUMNS), cursor, nil, func(_ commands.ExecCtx) error { return nil })
 	return ctrl
 }
 
@@ -28,6 +29,9 @@ func (c *ColumnsController) GetKeybindings(_ types.KeybindingsOpts) []*types.Cho
 	out = append(out, railSwitchBindings(view, tr)...)
 	return out
 }
+
+// RegisterActions is a no-op — columns has no rail-specific actions.
+func (c *ColumnsController) RegisterActions(_ *commands.Registry) {}
 
 // AttachToContext registers GetKeybindings.
 func (c *ColumnsController) AttachToContext(ctx attachable) {

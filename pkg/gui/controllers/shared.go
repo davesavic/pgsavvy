@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 )
@@ -19,52 +20,67 @@ func viewName(k types.ContextKey) string { return string(k) }
 
 // railSwitchBindings returns the digit-1..4 + <tab> bindings every side
 // rail registers so the user can hop between SCHEMAS/TABLES/COLUMNS/
-// INDEXES from any of them. The Handler closures are no-ops at the
-// controller layer: the bootstrap (T10) wires the real ContextTree.Push
-// in via the global controller; T7a only declares the inventory so the
-// menu and the test-recorder see them.
-//
-// Per the AC list ("Each side-rail controller registers j/k/digit/<tab>")
-// the controller MUST publish these bindings so the bindings menu (?)
-// can list them. The actual switch action is wired downstream.
+// INDEXES from any of them. The handlers are registered ONCE per
+// process via registerRailSwitchActions; the per-controller bindings
+// just publish ActionID strings the Matcher resolves through the
+// commands.Registry.
 func railSwitchBindings(view string, tr *i18n.TranslationSet) []*types.ChordBinding {
-	noop := func() error { return nil }
 	scope := types.ContextKey(view)
 	return []*types.ChordBinding{
 		{
-			ViewName:    view,
 			Sequence:    []types.ChordKey{{Code: '1'}},
 			Scope:       scope,
-			Handler:     noop,
+			ActionID:    commands.RailSwitchSchemas,
 			Description: tr.Actions.RailSchemas,
 		},
 		{
-			ViewName:    view,
 			Sequence:    []types.ChordKey{{Code: '2'}},
 			Scope:       scope,
-			Handler:     noop,
+			ActionID:    commands.RailSwitchTables,
 			Description: tr.Actions.RailTables,
 		},
 		{
-			ViewName:    view,
 			Sequence:    []types.ChordKey{{Code: '3'}},
 			Scope:       scope,
-			Handler:     noop,
+			ActionID:    commands.RailSwitchColumns,
 			Description: tr.Actions.RailColumns,
 		},
 		{
-			ViewName:    view,
 			Sequence:    []types.ChordKey{{Code: '4'}},
 			Scope:       scope,
-			Handler:     noop,
+			ActionID:    commands.RailSwitchIndexes,
 			Description: tr.Actions.RailIndexes,
 		},
 		{
-			ViewName:    view,
 			Sequence:    []types.ChordKey{{Special: types.KeyTab}},
 			Scope:       scope,
-			Handler:     noop,
+			ActionID:    commands.RailSwitchNext,
 			Description: tr.Actions.RailSchemas,
 		},
+	}
+}
+
+// registerRailSwitchActions registers the five rail-switch action IDs
+// with reg using no-op handlers. The real cross-rail focus push is
+// owned by the global controller and lands in a downstream epic; today
+// we only need every shipped binding's ActionID to resolve to a Command
+// during Build so the trie has a leaf to dispatch.
+//
+// Idempotent: ErrDuplicateAction from a re-registration is swallowed,
+// matching the orchestrator's "controllers may register on top of each
+// other" contract.
+func registerRailSwitchActions(reg *commands.Registry) {
+	if reg == nil {
+		return
+	}
+	noop := func(commands.ExecCtx) error { return nil }
+	for _, id := range []string{
+		commands.RailSwitchSchemas,
+		commands.RailSwitchTables,
+		commands.RailSwitchColumns,
+		commands.RailSwitchIndexes,
+		commands.RailSwitchNext,
+	} {
+		_ = reg.Register(&commands.Command{ID: id, Description: id, Handler: noop})
 	}
 }

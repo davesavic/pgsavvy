@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
@@ -15,7 +16,7 @@ type IndexesController struct {
 func NewIndexesController(c *common.Common, helpers HelperBag, cursor SideListCursor) *IndexesController {
 	base := newBase(c, helpers)
 	ctrl := &IndexesController{}
-	ctrl.ListControllerTrait = NewListControllerTrait[any](base, viewName(types.INDEXES), cursor, nil, func() error { return nil })
+	ctrl.ListControllerTrait = NewListControllerTrait[any](base, viewName(types.INDEXES), cursor, nil, func(_ commands.ExecCtx) error { return nil })
 	return ctrl
 }
 
@@ -27,6 +28,9 @@ func (c *IndexesController) GetKeybindings(_ types.KeybindingsOpts) []*types.Cho
 	out = append(out, railSwitchBindings(view, tr)...)
 	return out
 }
+
+// RegisterActions is a no-op — indexes has no rail-specific actions.
+func (c *IndexesController) RegisterActions(_ *commands.Registry) {}
 
 // AttachToContext registers GetKeybindings.
 func (c *IndexesController) AttachToContext(ctx attachable) {
