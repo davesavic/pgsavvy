@@ -60,8 +60,8 @@ func TestBuildPgxConfig_PoolDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if cfg.MinConns != 1 {
-		t.Errorf("MinConns = %d, want 1", cfg.MinConns)
+	if cfg.MinConns != 2 {
+		t.Errorf("MinConns = %d, want 2 (raised in epic dbsavvy-66p.4 so Cancel cannot deadlock on conn checkout)", cfg.MinConns)
 	}
 	if cfg.MaxConns != 8 {
 		t.Errorf("MaxConns = %d, want 8", cfg.MaxConns)

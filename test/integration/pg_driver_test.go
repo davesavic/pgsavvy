@@ -443,7 +443,10 @@ func TestCapabilitiesShape(t *testing.T) {
 		HasMaterializedViews: true,
 		HasArrayTypes:        true,
 		HasJSONTypes:         true,
-		HasLiveCancel:        false,
+		// HasLiveCancel flipped from false to true in epic dbsavvy-66p.4
+		// (Connection.Cancel now dials a CancelRequest packet using the
+		// per-session secret key captured at AcquireSession time).
+		HasLiveCancel:        true,
 		HasExplainAnalyze:    true,
 		HasNotice:            true,
 		HasListenNotify:      true,
@@ -664,12 +667,18 @@ func TestEveryTrueCapabilityHasImpl(t *testing.T) {
 	}
 	ctx := context.Background()
 	checks := map[string]capCheck{
-		// D17: HasLiveCancel=false in v1; Connection.Cancel returns
-		// ErrNotImplemented. This is the canonical invariant.
+		// D17 (fulfilled in dbsavvy-66p.4): HasLiveCancel is now true;
+		// Connection.Cancel dials a CancelRequest packet. A QueryID with
+		// BackendPID==0 is a precondition violation (ErrInvalidQueryID),
+		// not ErrNotImplemented. To exercise the "implementation is wired"
+		// arm of this matrix without depending on a live in-flight query,
+		// we supply a non-zero PID and accept either nil (best-effort cancel
+		// against an unknown backend) or a wrapped network error — never
+		// ErrNotImplemented, which would mean the stub was never removed.
 		"HasLiveCancel": {
 			flag:     capabilities.HasLiveCancel,
-			invoke:   func() error { return conn.Cancel(ctx, models.QueryID{}) },
-			wantImpl: false,
+			invoke:   func() error { return conn.Cancel(ctx, models.QueryID{BackendPID: 1}) },
+			wantImpl: true,
 		},
 		// HasSchemas → ListSchemas is wired in v1 (task 921.9).
 		"HasSchemas": {

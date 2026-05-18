@@ -16,6 +16,13 @@ var ErrNotImplemented = errors.New("driver: operation not yet implemented")
 // been registered.
 var ErrUnknownDriver = errors.New("drivers: unknown driver")
 
+// ErrInvalidQueryID is returned by Connection.Cancel when the caller passes a
+// QueryID that cannot identify a live backend (e.g. BackendPID == 0). It is a
+// precondition-violation sentinel, distinct from network failures on the cancel
+// dial — those propagate as wrapped *QueryError values from the driver layer.
+// See epic dbsavvy-66p.4.
+var ErrInvalidQueryID = errors.New("driver: invalid query id")
+
 // QueryError is the engine-neutral wrapper drivers map their native error
 // type into. The query editor underlines the bad token at Position and
 // surfaces Hint as a tooltip. See DESIGN.md §11.5.

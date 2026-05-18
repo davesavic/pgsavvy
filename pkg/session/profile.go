@@ -62,8 +62,13 @@ var ErrStatementTimeoutInvalid = errors.New("session: invalid statement_timeout 
 //     = on" iff profile.ReadOnly is true (epic dbsavvy-921 §D7, §D8). Both SETs
 //     are re-applied on every pool-conn recycle by virtue of running in
 //     AfterConnect (§D12).
-//   - Pool defaults: MinConns=1, MaxConns=8, MaxConnLifetime=30m,
-//     MaxConnIdleTime=5m, HealthCheckPeriod=1m (§11.3).
+//   - Pool defaults: MinConns=2, MaxConns=8, MaxConnLifetime=30m,
+//     MaxConnIdleTime=5m, HealthCheckPeriod=1m (§11.3). MinConns was raised
+//     from 1 to 2 in epic dbsavvy-66p.4 so that Connection.Cancel and any
+//     concurrent session never compete for the only available pool slot —
+//     the cancel path opens a fresh raw TCP cancel-request rather than
+//     acquiring a pool conn, so MinConns=2 is conservative belt-and-braces
+//     for callers that DO acquire a second session for sentinel queries.
 //
 // statement_timeout is validated at config-build time, never at SET time, so a
 // misconfigured profile fails fast on the first call to BuildPgxConfig instead
@@ -107,7 +112,7 @@ func BuildPgxConfig(_ context.Context, profile models.Connection, password strin
 		return runAfterConnect(ctx, conn, readOnly, canonicalTimeout)
 	}
 
-	cfg.MinConns = 1
+	cfg.MinConns = 2
 	cfg.MaxConns = 8
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.MaxConnIdleTime = 5 * time.Minute

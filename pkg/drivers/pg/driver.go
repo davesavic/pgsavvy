@@ -14,14 +14,16 @@ import (
 // pgCapabilities is the single-source-of-truth Capabilities value for the
 // Postgres driver. Tests assert deep-equality against this var rather than a
 // literal so a future field addition can't silently drift the public surface.
-// See epic dbsavvy-921 D17 (HasLiveCancel=false in v1; flips true in E6 when
-// pg_cancel_backend lands) and Adv-B ADV-16.
+// HasLiveCancel was flipped from false to true in epic dbsavvy-66p.4, which
+// fulfils the D17 deferral from dbsavvy-921: Connection.Cancel now dials a
+// fresh CancelRequest packet against the same server using the per-session
+// secret key captured at AcquireSession time. See connection.go:Cancel.
 var pgCapabilities = drivers.Capabilities{
 	HasSchemas:           true,
 	HasMaterializedViews: true,
 	HasArrayTypes:        true,
 	HasJSONTypes:         true,
-	HasLiveCancel:        false,
+	HasLiveCancel:        true,
 	HasExplainAnalyze:    true,
 	HasNotice:            true,
 	HasListenNotify:      true,

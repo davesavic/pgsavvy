@@ -1,0 +1,444 @@
+package tasks
+
+import (
+	"context"
+	"sync"
+
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
+	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/models"
+)
+
+// ResultBufferManager is the SQL-row analogue of lazygit's
+// ViewBufferManager (pkg/tasks/tasks.go:31-149 in the vendored fork).
+// It owns the lifecycle of a single in-flight streaming query: starts
+// the stream on the worker pool, does an initial-fill drain that
+// pre-paints the first page of rows synchronously, then switches to a
+// chan-driven pull loop that delivers more rows on demand
+// (ReadRows / ReadToEnd). All deliveries to the row-sink callback
+// (appendRows) are routed back through onUIThread so the grid view
+// only mutates on the gocui main loop.
+//
+// Preemption: a second NewQueryTask call with a *different* taskKey
+// stops the running task (closes its RowStream and waits for its
+// onDone) before starting the new one. A second call with the *same*
+// taskKey is treated as a duplicate request and is a no-op — this
+// matches the user-visible behavior of lazygit's "switch back to the
+// same selection" path.
+//
+// All exported methods are safe for concurrent use from any goroutine.
+//
+// DESIGN.md §12.1; epic dbsavvy-66p §Shared Artifacts Registry.
+type ResultBufferManager struct {
+	// onWorker spawns a background goroutine via the orchestrator
+	// (pkg/gui/orchestrator/threading.go:OnWorker). It increments the
+	// busy counter and tracks the goroutine on shutdownWG so Close()
+	// + goleak see a clean exit.
+	onWorker func(func(gocui.Task) error)
+
+	// onUIThread schedules fn for execution on the gocui MainLoop.
+	// Signature matches orchestrator.Gui.OnUIThread (returns nothing;
+	// the driver enqueues onto userEvents and returns immediately).
+	// All appendRows invocations go through this seam.
+	onUIThread func(func() error)
+
+	// mu protects taskKey, stopCurrentTask, rowsToRead. Held briefly
+	// during NewQueryTask hand-off and during Stop. The worker
+	// goroutine reads rowsToRead via the channel value captured at
+	// startup, so it never contends with mu after launch.
+	mu sync.Mutex
+
+	// taskKey identifies the currently running task. Empty string
+	// means "idle, no task running". Tests and the future
+	// GridView consult this to suppress duplicate launches.
+	taskKey string
+
+	// stopCurrentTask is set by NewQueryTask while a task is in
+	// flight. Calling it closes the task's stop chan and blocks
+	// until the worker has finished its cleanup (RowStream.Close +
+	// onDone). Nil when no task is running. Wrapped in sync.Once so
+	// a double-Stop is safe.
+	stopCurrentTask func()
+
+	// rowsToRead is the per-task pull-request channel. It is
+	// re-created on every NewQueryTask so a stale request from a
+	// preempted task cannot leak into the new task. Nil when no
+	// task is running.
+	rowsToRead chan RowsToRead
+}
+
+// New constructs a ResultBufferManager wired to the given orchestrator
+// threading helpers. Pass orchestrator.Gui.OnWorker and
+// orchestrator.Gui.OnUIThreadContentOnly directly (the content-only
+// variant is the documented choice for high-frequency row deliveries
+// per DESIGN.md §6, but plain OnUIThread also satisfies the contract).
+//
+// New does not start any goroutines. The first goroutine is spawned by
+// NewQueryTask.
+func New(
+	onWorker func(func(gocui.Task) error),
+	onUIThread func(func() error),
+) *ResultBufferManager {
+	return &ResultBufferManager{
+		onWorker:   onWorker,
+		onUIThread: onUIThread,
+	}
+}
+
+// TaskKey returns the key of the currently running task, or "" when
+// the manager is idle. Safe to call from any goroutine.
+func (m *ResultBufferManager) TaskKey() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.taskKey
+}
+
+// ReadRows requests the worker pull up to n more rows from the
+// current RowStream and dispatch them via appendRows. No-op when the
+// manager is idle. Non-blocking: the request is enqueued on the
+// rowsToRead chan (which has buffer 1024 like lazygit's; see
+// NewQueryTask), and the worker picks it up on its next iteration.
+//
+// Order is preserved: requests are pulled FIFO by the single worker
+// goroutine, and each request's rows are delivered in arrival order
+// from the underlying RowStream.
+func (m *ResultBufferManager) ReadRows(n int) {
+	m.mu.Lock()
+	ch := m.rowsToRead
+	m.mu.Unlock()
+	if ch == nil {
+		return
+	}
+	// Non-blocking send into a 1024-buffer chan: in practice this
+	// never blocks; if a misbehaving caller fires thousands of
+	// requests faster than the worker drains, the send blocks and
+	// applies natural back-pressure rather than dropping requests.
+	ch <- RowsToRead{Total: n, InitialRefreshAfter: -1}
+}
+
+// ReadToEnd requests the worker drain the rest of the RowStream and
+// then invoke `then` (if non-nil) exactly once. When the manager is
+// idle, `then` is invoked synchronously so callers can rely on it
+// firing in both cases.
+func (m *ResultBufferManager) ReadToEnd(then func()) {
+	m.mu.Lock()
+	ch := m.rowsToRead
+	m.mu.Unlock()
+	if ch == nil {
+		if then != nil {
+			then()
+		}
+		return
+	}
+	ch <- RowsToRead{Total: -1, InitialRefreshAfter: -1, Then: then}
+}
+
+// Stop preempts the currently running task. Closes the RowStream,
+// drains the worker goroutine, and invokes the task's onDone callback
+// exactly once. No-op when the manager is idle. Safe to call twice
+// (second call observes a nil stopCurrentTask and returns).
+func (m *ResultBufferManager) Stop() {
+	m.mu.Lock()
+	stop := m.stopCurrentTask
+	m.mu.Unlock()
+	if stop == nil {
+		return
+	}
+	stop()
+}
+
+// NewQueryTask starts (or replaces) the streaming task identified by
+// taskKey. Returns nil immediately on the duplicate-key fast path; in
+// all other cases blocks only long enough to (a) preempt any prior
+// task and (b) schedule the new worker via onWorker. The actual
+// initial-fill drain runs asynchronously inside the worker.
+//
+//   - taskKey   identifies the task for preemption / dedup. Two
+//     consecutive calls with the same key are a no-op.
+//   - streamFn  is invoked once inside the worker to open the
+//     RowStream. ctx is the per-task context (cancelled on Stop /
+//     preempt). If streamFn returns an error, onDone is invoked and
+//     the manager returns to idle without ever touching the chan loop.
+//   - appendRows is the row sink. It receives a fresh slice on every
+//     call. The manager guarantees this is invoked on the UI thread
+//     (via onUIThread) and never from the worker goroutine.
+//   - initialRows is the size of the synchronous initial-fill drain.
+//     A value of 0 skips the initial fill entirely (the worker starts
+//     the chan loop immediately).
+//   - onDone is invoked exactly once when the task completes (clean
+//     EOF, stream error, or Stop / preempt).
+func (m *ResultBufferManager) NewQueryTask(
+	taskKey string,
+	streamFn func(ctx context.Context) (drivers.RowStream, error),
+	appendRows func([]models.Row),
+	initialRows int,
+	onDone func(),
+) error {
+	m.mu.Lock()
+
+	// Duplicate-key fast path: the AC scenario "second NewQueryTask
+	// with same taskKey is no-op" — return without disturbing the
+	// running task. onDone for the *new* call is intentionally
+	// dropped (no task ran for it); this matches the user-visible
+	// semantics of re-selecting the same row in lazygit.
+	if taskKey != "" && taskKey == m.taskKey && m.stopCurrentTask != nil {
+		m.mu.Unlock()
+		return nil
+	}
+
+	priorStop := m.stopCurrentTask
+	m.mu.Unlock()
+
+	// Preempt the prior task synchronously. priorStop blocks until
+	// the prior worker has closed its RowStream and fired its
+	// onDone, so by the time we proceed the manager is guaranteed
+	// idle from the prior task's perspective.
+	if priorStop != nil {
+		priorStop()
+	}
+
+	// Per-task state. rowsToRead is buffered to 1024 to match
+	// lazygit's ViewBufferManager (line 187). The buffer absorbs
+	// bursts of ReadRows calls from rapid scroll without forcing
+	// the UI thread to block.
+	rowsToRead := make(chan RowsToRead, 1024)
+	stopCh := make(chan struct{})
+	doneCh := make(chan struct{})
+
+	var stopOnce sync.Once
+	stopFn := func() {
+		stopOnce.Do(func() {
+			close(stopCh)
+		})
+		// Block until the worker has finished cleanup. Safe to
+		// call concurrently — the receive on a closed chan returns
+		// immediately for every caller after the worker closes
+		// doneCh.
+		<-doneCh
+	}
+
+	m.mu.Lock()
+	m.taskKey = taskKey
+	m.stopCurrentTask = stopFn
+	m.rowsToRead = rowsToRead
+	m.mu.Unlock()
+
+	// Capture so the worker's clearState closure runs against the
+	// exact rowsToRead chan it owns (defensive against a follow-up
+	// NewQueryTask racing with our cleanup — that NewQueryTask
+	// would already have replaced m.rowsToRead with its own chan).
+	myRowsToRead := rowsToRead
+	myStopFn := stopFn
+
+	m.onWorker(func(_ gocui.Task) error {
+		m.runTask(
+			taskKey,
+			streamFn,
+			appendRows,
+			initialRows,
+			onDone,
+			rowsToRead,
+			stopCh,
+			doneCh,
+			myRowsToRead,
+			myStopFn,
+		)
+		return nil
+	})
+
+	return nil
+}
+
+// runTask is the worker-goroutine body. It owns the RowStream for
+// the task's entire lifetime: opens via streamFn, drains the initial
+// fill synchronously, services the chan loop, and on exit closes the
+// stream + clears manager state + fires onDone (once).
+//
+// All paths through this function MUST go through the final
+// `defer cleanup()` so onDone fires exactly once on every exit.
+func (m *ResultBufferManager) runTask(
+	taskKey string,
+	streamFn func(ctx context.Context) (drivers.RowStream, error),
+	appendRows func([]models.Row),
+	initialRows int,
+	onDone func(),
+	rowsToRead chan RowsToRead,
+	stopCh chan struct{},
+	doneCh chan struct{},
+	myRowsToRead chan RowsToRead,
+	myStopFn func(),
+) {
+	var (
+		stream     drivers.RowStream
+		onDoneOnce sync.Once
+		fireOnDone = func() {
+			if onDone != nil {
+				onDoneOnce.Do(onDone)
+			}
+		}
+	)
+
+	// cleanup is the single exit point. It clears manager state
+	// (only if we are still the registered task — a preempting
+	// NewQueryTask may have already overwritten it), closes the
+	// stream if it was ever opened, and fires onDone. close(doneCh)
+	// unblocks any in-flight Stop callers waiting on stopFn.
+	cleanup := func() {
+		m.mu.Lock()
+		// Only clear if we are still the active task. A preempt
+		// from NewQueryTask has already replaced these fields.
+		if m.rowsToRead == myRowsToRead {
+			m.taskKey = ""
+			m.stopCurrentTask = nil
+			m.rowsToRead = nil
+		}
+		m.mu.Unlock()
+
+		if stream != nil {
+			_ = stream.Close()
+		}
+		fireOnDone()
+		close(doneCh)
+		_ = myStopFn // keep referenced; prevents Go vet noise about unused capture
+	}
+	defer cleanup()
+
+	// Per-task context cancelled when stopCh fires. Passed to
+	// streamFn and to every RowStream.Next call so a long-running
+	// driver call returns promptly on Stop.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-doneCh:
+			// task finished on its own; cancel is run by the
+			// outer defer.
+		}
+	}()
+
+	// Early-stop check before opening the stream: if Stop fired
+	// before the worker was scheduled, skip streamFn entirely.
+	select {
+	case <-stopCh:
+		return
+	default:
+	}
+
+	s, err := streamFn(ctx)
+	if err != nil {
+		// streamFn failure: onDone fires (via cleanup), no rows
+		// delivered, manager returns to idle.
+		return
+	}
+	stream = s
+
+	// --- Initial fill ---
+	//
+	// Pull up to initialRows rows synchronously and dispatch them
+	// in a single appendRows batch on the UI thread. Lazygit
+	// pre-paints lines from the scanner the same way (tasks.go:262;
+	// the InitialRefreshAfter knob) — the "first page is on screen
+	// before the chan loop starts" property is what AC scenario
+	// "Initial fill pre-paints rows" requires.
+	if initialRows > 0 {
+		initial := m.drainRows(ctx, stream, initialRows, stopCh)
+		if len(initial) > 0 {
+			m.dispatchRows(initial, appendRows)
+		}
+		// If the initial drain hit EOF or error, there is nothing
+		// more to read — fall through to chan loop, which will exit
+		// on the next ReadRows call (stream.Next returns 0, ok=false
+		// and the loop bails). Lazygit has the same property.
+	}
+
+	// --- Chan-driven pull loop ---
+	for {
+		select {
+		case <-stopCh:
+			return
+		case req, ok := <-rowsToRead:
+			if !ok {
+				// chan closed: only happens if someone external
+				// closed it (we never do). Treat as stop.
+				return
+			}
+			m.servicePullRequest(ctx, stream, req, appendRows, stopCh)
+			if req.Then != nil {
+				req.Then()
+			}
+			// If the underlying stream is now closed (EOF or
+			// error encountered while servicing the request),
+			// continue looping — further ReadRows calls will
+			// produce empty batches and a future Stop / preempt
+			// will end the task. This matches lazygit's
+			// post-EOF behavior of staying on the chan loop
+			// rather than auto-exiting.
+		}
+	}
+}
+
+// drainRows pulls up to want rows from the stream, respecting stop.
+// Returns the slice of rows pulled (possibly empty, possibly < want
+// on EOF / error / stop). Errors from Next are swallowed here —
+// drainRows treats any error as "end of stream" and lets the caller
+// observe the short read; the per-stream Close() at task end is what
+// surfaces resource cleanup.
+//
+// want=-1 means "drain to end".
+func (m *ResultBufferManager) drainRows(
+	ctx context.Context,
+	stream drivers.RowStream,
+	want int,
+	stopCh <-chan struct{},
+) []models.Row {
+	out := make([]models.Row, 0, max(want, 0))
+	for i := 0; want == -1 || i < want; i++ {
+		select {
+		case <-stopCh:
+			return out
+		default:
+		}
+		row, ok, err := stream.Next(ctx)
+		if err != nil || !ok {
+			return out
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// servicePullRequest handles a single RowsToRead from the chan loop.
+// Pulls up to req.Total rows (req.Total=-1 means drain), dispatches
+// them in a single batch on the UI thread, and returns. The batch is
+// dispatched only if non-empty so the UI side never sees a spurious
+// zero-row append.
+func (m *ResultBufferManager) servicePullRequest(
+	ctx context.Context,
+	stream drivers.RowStream,
+	req RowsToRead,
+	appendRows func([]models.Row),
+	stopCh <-chan struct{},
+) {
+	batch := m.drainRows(ctx, stream, req.Total, stopCh)
+	if len(batch) > 0 {
+		m.dispatchRows(batch, appendRows)
+	}
+}
+
+// dispatchRows schedules a single appendRows call on the UI thread.
+// This is the only call site that invokes appendRows; centralising it
+// makes the "appendRows is always on the UI thread" invariant
+// trivially auditable. When onUIThread is nil (defensive — should
+// never happen in production) the batch is dropped.
+func (m *ResultBufferManager) dispatchRows(batch []models.Row, appendRows func([]models.Row)) {
+	if m.onUIThread == nil || appendRows == nil {
+		return
+	}
+	m.onUIThread(func() error {
+		appendRows(batch)
+		return nil
+	})
+}

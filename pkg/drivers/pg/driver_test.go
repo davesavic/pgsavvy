@@ -63,15 +63,17 @@ func TestDriverCapabilitiesEqualsSingleSourceVar(t *testing.T) {
 }
 
 func TestPgCapabilitiesShape(t *testing.T) {
-	// Locks the documented §11.1 v1 capability set. HasLiveCancel MUST be
-	// false in v1 (epic dbsavvy-921 D17); flipping it true requires also
-	// removing the ErrNotImplemented stub in Connection.Cancel.
+	// Locks the documented §11.1 capability set. HasLiveCancel was flipped
+	// from false to true in epic dbsavvy-66p.4 (Connection.Cancel now dials
+	// a fresh CancelRequest packet); the corresponding invariant test
+	// TestCapabilitiesLiveCancelMatchesCancelImpl enforces that the flag and
+	// the impl stay in lock-step.
 	expected := drivers.Capabilities{
 		HasSchemas:           true,
 		HasMaterializedViews: true,
 		HasArrayTypes:        true,
 		HasJSONTypes:         true,
-		HasLiveCancel:        false,
+		HasLiveCancel:        true,
 		HasExplainAnalyze:    true,
 		HasNotice:            true,
 		HasListenNotify:      true,
@@ -82,10 +84,12 @@ func TestPgCapabilitiesShape(t *testing.T) {
 }
 
 func TestCapabilitiesLiveCancelMatchesCancelImpl(t *testing.T) {
-	// Invariant from D17 + 921.10 plan: any Capabilities flag set true must
-	// have a non-sentinel implementation. The inverse holds here: while
-	// Cancel returns ErrNotImplemented, HasLiveCancel MUST be false. This
-	// test fails loudly the day someone flips one without the other.
+	// Invariant: any Capabilities flag set true must have a non-sentinel
+	// implementation, and any flag set false must surface ErrNotImplemented.
+	// Since epic dbsavvy-66p.4 flipped HasLiveCancel to true, we exercise a
+	// nil-PID Cancel (which short-circuits BEFORE the pool is touched) and
+	// require it does NOT return ErrNotImplemented; the precondition error
+	// drivers.ErrInvalidQueryID is the expected response.
 	c := &Connection{}
 	err := c.Cancel(context.Background(), models.QueryID{})
 	if pgCapabilities.HasLiveCancel {
@@ -97,10 +101,25 @@ func TestCapabilitiesLiveCancelMatchesCancelImpl(t *testing.T) {
 	}
 }
 
-func TestConnectionCancelReturnsErrNotImplemented(t *testing.T) {
+// TestConnectionCancelZeroPIDReturnsErrInvalidQueryID exercises the
+// precondition-guard branch in Connection.Cancel: a QueryID with BackendPID=0
+// is rejected before any pool / network I/O. This complements the integration
+// tests in cancel_test.go which cover the live-cancel happy path.
+func TestConnectionCancelZeroPIDReturnsErrInvalidQueryID(t *testing.T) {
 	c := &Connection{}
 	err := c.Cancel(context.Background(), models.QueryID{})
-	require.ErrorIs(t, err, drivers.ErrNotImplemented)
+	require.ErrorIs(t, err, drivers.ErrInvalidQueryID)
+}
+
+func TestConnectionCancelHonorsCanceledCtx(t *testing.T) {
+	// Pre-cancelled ctx must short-circuit BEFORE pool / dial work — the
+	// receiver here has a nil pool, so any code path that reaches pool.Config
+	// would nil-panic. The test passes iff the ctx.Err() branch wins.
+	c := &Connection{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := c.Cancel(ctx, models.QueryID{BackendPID: 42})
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestConnectionAcquireSessionErrorsWithoutLivePool(t *testing.T) {

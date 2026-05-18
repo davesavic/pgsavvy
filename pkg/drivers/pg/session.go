@@ -33,22 +33,41 @@ type Session struct {
 	conn       *pgxpool.Conn
 	id         models.SessionID
 	backendPID uint32 // D19 — sized to match pgconn.PgConn.PID()
+	secretKey  uint32 // 66p.4 cancel-request authentication; captured from pgconn at construction
 	parent     *Connection
 	closed     atomic.Bool
 	inFlight   atomic.Int32
 }
 
 // newSession constructs a *Session bound to pgxConn and parent. Session.ID is
-// assigned from sessionIDCounter atomically; backendPID is captured from the
-// underlying pgconn for QueryID stamping in later epics.
+// assigned from sessionIDCounter atomically; backendPID and secretKey are
+// captured from the underlying pgconn — both are required by the cancel-request
+// wire protocol (epic dbsavvy-66p.4) and remain stable for the life of the
+// pgconn. The session is registered with parent.registerCancel so that
+// Connection.Cancel can look it up by BackendPID.
 func newSession(pgxConn *pgxpool.Conn, parent *Connection) *Session {
-	return &Session{
+	pid := pgxConn.Conn().PgConn().PID()
+	secret := pgxConn.Conn().PgConn().SecretKey()
+	s := &Session{
 		conn:       pgxConn,
 		id:         models.SessionID(sessionIDCounter.Add(1)),
-		backendPID: pgxConn.Conn().PgConn().PID(),
+		backendPID: pid,
+		secretKey:  secret,
 		parent:     parent,
 	}
+	parent.registerCancel(pid, secret)
+	return s
 }
+
+// SecretKey returns the PostgreSQL cancel-request secret key captured from the
+// underlying pgconn at session-open time. The value is required to authenticate
+// a cancel-request packet for this backend (see epic dbsavvy-66p.4). It is
+// non-zero for any session opened against a real Postgres server.
+func (s *Session) SecretKey() uint32 { return s.secretKey }
+
+// BackendPID returns the PostgreSQL backend PID captured at session-open. It
+// matches the BackendPID stamped into every QueryID produced by Stream/Execute.
+func (s *Session) BackendPID() uint32 { return s.backendPID }
 
 // Conn exposes the underlying pgxpool.Conn to same-package loaders that have
 // ALREADY acquired the inFlight guard via their calling Session method. It is
@@ -96,6 +115,7 @@ func (s *Session) Close() error {
 	if !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	s.parent.unregisterCancel(s.backendPID)
 	s.conn.Release()
 	s.parent.sessions.Add(-1)
 	return nil
