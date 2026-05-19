@@ -131,6 +131,21 @@ const visualEntryModeMask = types.ModeNormal
 // visual.exit action — every Visual variant.
 const visualExitModeMask = types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 
+// insertEntryModeMask is the Mode mask under which the insert-entry
+// bindings (i / a / o / O / I / A) fire — Normal only. Re-pressing
+// `i` while already in Insert mode would be the literal rune; the
+// Normal-only mask keeps that path clean.
+const insertEntryModeMask = types.ModeNormal
+
+// insertExitModeMask is the Mode mask under which `<esc>` fires the
+// mode.normal action — Insert only. Visual `<esc>` is bound separately
+// to visual.exit and does not overlap (the modes are disjoint bits).
+const insertExitModeMask = types.ModeInsert
+
+// editorHistoryModeMask is the Mode mask under which u / <c-r> fire —
+// Normal only. Vim's undo/redo are Normal-mode commands.
+const editorHistoryModeMask = types.ModeNormal
+
 // GetKeybindings publishes the motion + text-object + visual bindings
 // under QUERY_EDITOR scope.
 //
@@ -148,7 +163,9 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 	specs := c.motionSpecs()
 	textObjects := c.textObjectSpecs()
 	visuals := c.visualSpecs()
-	out := make([]*types.ChordBinding, 0, len(specs)+len(textObjects)+len(visuals))
+	inserts := c.insertEntrySpecs()
+	histories := c.editorHistorySpecs()
+	out := make([]*types.ChordBinding, 0, len(specs)+len(textObjects)+len(visuals)+len(inserts)+len(histories))
 	for _, s := range specs {
 		seq, err := keys.SequenceFromShorthand(s.shorthand)
 		if err != nil {
@@ -191,6 +208,34 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			Tag:         "Visual",
 		})
 	}
+	for _, s := range inserts {
+		seq, err := keys.SequenceFromShorthand(s.shorthand)
+		if err != nil {
+			continue
+		}
+		out = append(out, &types.ChordBinding{
+			Sequence:    seq,
+			Mode:        s.mode,
+			Scope:       types.QUERY_EDITOR,
+			ActionID:    s.actionID,
+			Description: s.description,
+			Tag:         s.tag,
+		})
+	}
+	for _, s := range histories {
+		seq, err := keys.SequenceFromShorthand(s.shorthand)
+		if err != nil {
+			continue
+		}
+		out = append(out, &types.ChordBinding{
+			Sequence:    seq,
+			Mode:        s.mode,
+			Scope:       types.QUERY_EDITOR,
+			ActionID:    s.actionID,
+			Description: s.description,
+			Tag:         s.tag,
+		})
+	}
 	return out
 }
 
@@ -211,6 +256,41 @@ func (c *VimEditorController) visualSpecs() []visualSpec {
 		{"V", commands.VisualEnterLine, "enter visual-line", visualEntryModeMask},
 		{"<c-v>", commands.VisualEnterBlock, "enter visual-block", visualEntryModeMask},
 		{"<esc>", commands.VisualExit, "exit visual", visualExitModeMask},
+	}
+}
+
+// editorActionSpec ties a shorthand to an action ID and its mode mask.
+// Used for the insert-entry, mode.normal, and undo/redo bindings added
+// by wwd.10. Each entry resolves to a dedicated handler in
+// RegisterActions; no shared closure family like motionHandler.
+type editorActionSpec struct {
+	shorthand   string
+	actionID    string
+	description string
+	tag         string
+	mode        types.Mode
+}
+
+// insertEntrySpecs returns the wwd.10 insert-entry + mode.normal table.
+// Insert entries fire only from Normal; the `<esc>` mode.normal exit
+// fires only from Insert. Tag drives the cheatsheet section heading.
+func (c *VimEditorController) insertEntrySpecs() []editorActionSpec {
+	return []editorActionSpec{
+		{"i", commands.InsertEnter, "enter insert", "Insert", insertEntryModeMask},
+		{"a", commands.InsertAppend, "append after cursor", "Insert", insertEntryModeMask},
+		{"o", commands.InsertOpenBelow, "open line below", "Insert", insertEntryModeMask},
+		{"O", commands.InsertOpenAbove, "open line above", "Insert", insertEntryModeMask},
+		{"I", commands.InsertFirstNonblank, "insert at first non-blank", "Insert", insertEntryModeMask},
+		{"A", commands.InsertAppendEnd, "append at line end", "Insert", insertEntryModeMask},
+		{"<esc>", commands.ModeNormal, "exit insert", "Insert", insertExitModeMask},
+	}
+}
+
+// editorHistorySpecs returns the wwd.10 undo / redo bindings.
+func (c *VimEditorController) editorHistorySpecs() []editorActionSpec {
+	return []editorActionSpec{
+		{"u", commands.EditorUndo, "undo", "Edit history", editorHistoryModeMask},
+		{"<c-r>", commands.EditorRedo, "redo", "Edit history", editorHistoryModeMask},
 	}
 }
 
@@ -294,6 +374,61 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 		Description: "Extend visual selection (motion-driven)",
 		Tag:         "Visual",
 		Handler:     commands.NopSentinel,
+	})
+	// wwd.10 — insert-entry + mode.normal + undo/redo handlers.
+	_ = reg.Register(&commands.Command{
+		ID:          commands.InsertEnter,
+		Description: "Enter insert mode at cursor",
+		Tag:         "Insert",
+		Handler:     c.insertEnterHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.InsertAppend,
+		Description: "Enter insert mode after cursor",
+		Tag:         "Insert",
+		Handler:     c.insertAppendHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.InsertOpenBelow,
+		Description: "Open new line below and enter insert",
+		Tag:         "Insert",
+		Handler:     c.insertOpenBelowHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.InsertOpenAbove,
+		Description: "Open new line above and enter insert",
+		Tag:         "Insert",
+		Handler:     c.insertOpenAboveHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.InsertFirstNonblank,
+		Description: "Enter insert at first non-blank column",
+		Tag:         "Insert",
+		Handler:     c.insertFirstNonblankHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.InsertAppendEnd,
+		Description: "Enter insert at line end",
+		Tag:         "Insert",
+		Handler:     c.insertAppendEndHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ModeNormal,
+		Description: "Exit insert mode",
+		Tag:         "Insert",
+		Handler:     c.modeNormalHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.EditorUndo,
+		Description: "Undo last edit",
+		Tag:         "Edit history",
+		Handler:     c.undoHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.EditorRedo,
+		Description: "Redo last undone edit",
+		Tag:         "Edit history",
+		Handler:     c.redoHandler(),
 	})
 }
 
@@ -456,4 +591,175 @@ func (c *VimEditorController) buffer() *editor.Buffer {
 		return nil
 	}
 	return c.qec.Buffer()
+}
+
+// setMode flips QUERY_EDITOR mode to m via the wired QueryEditorContext.
+// No-op when qec is nil (test wiring without modes setter).
+func (c *VimEditorController) setMode(m types.Mode) {
+	if c.qec == nil {
+		return
+	}
+	c.qec.SetMode(m)
+}
+
+// insertEnterHandler returns the `i` handler: leave Cursor in place,
+// flip to ModeInsert.
+func (c *VimEditorController) insertEnterHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		if c.buffer() == nil {
+			return nil
+		}
+		c.setMode(types.ModeInsert)
+		return nil
+	}
+}
+
+// insertAppendHandler returns the `a` handler: move Cursor one column
+// right (clamped to line-end+1), then flip to ModeInsert.
+func (c *VimEditorController) insertAppendHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		cur := buf.CursorPos()
+		next := editor.Position{Line: cur.Line, Col: cur.Col + 1}
+		maxCol := buf.LineRuneLen(cur.Line)
+		if next.Col > maxCol {
+			next.Col = maxCol
+		}
+		buf.SetCursor(next)
+		c.setMode(types.ModeInsert)
+		return nil
+	}
+}
+
+// insertOpenBelowHandler returns the `o` handler: insert "\n" at the
+// end of the current line, move Cursor to start of the new line, flip
+// to ModeInsert. On an empty buffer this lazily seeds Lines[0] before
+// the edit so Buffer.Apply has a valid Position{0,0}.
+func (c *VimEditorController) insertOpenBelowHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		cur := buf.CursorPos()
+		// Insert at the end of the current line so the new line lands
+		// directly below.
+		end := editor.Position{Line: cur.Line, Col: buf.LineRuneLen(cur.Line)}
+		if err := buf.Apply(editor.Edit{
+			Kind:  editor.EditKindInsert,
+			Range: editor.Range{Start: end, End: end},
+			Text:  "\n",
+		}); err != nil {
+			return nil
+		}
+		buf.SetCursor(editor.Position{Line: cur.Line + 1, Col: 0})
+		c.setMode(types.ModeInsert)
+		return nil
+	}
+}
+
+// insertOpenAboveHandler returns the `O` handler: insert "\n" at the
+// start of the current line, leave Cursor on the original line index
+// (which is now the new blank line), flip to ModeInsert.
+func (c *VimEditorController) insertOpenAboveHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		cur := buf.CursorPos()
+		start := editor.Position{Line: cur.Line, Col: 0}
+		if err := buf.Apply(editor.Edit{
+			Kind:  editor.EditKindInsert,
+			Range: editor.Range{Start: start, End: start},
+			Text:  "\n",
+		}); err != nil {
+			return nil
+		}
+		// The inserted "\n" splits the current line at column 0, leaving
+		// an empty new line at cur.Line and pushing the original content
+		// down. Cursor lands on the new empty line.
+		buf.SetCursor(editor.Position{Line: cur.Line, Col: 0})
+		c.setMode(types.ModeInsert)
+		return nil
+	}
+}
+
+// insertFirstNonblankHandler returns the `I` handler: jump Cursor to
+// the first non-blank column of the current line (or column 0 on an
+// all-blank line / when LineFirstNonBlank reports ok=false because
+// Cursor is already there), then flip to ModeInsert.
+func (c *VimEditorController) insertFirstNonblankHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		from := buf.CursorPos()
+		if next, ok := editor.LineFirstNonBlank(buf, from, 1); ok {
+			buf.SetCursor(next)
+		}
+		c.setMode(types.ModeInsert)
+		return nil
+	}
+}
+
+// insertAppendEndHandler returns the `A` handler: jump Cursor to
+// line-end+1 (the append slot), then flip to ModeInsert.
+func (c *VimEditorController) insertAppendEndHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		from := buf.CursorPos()
+		end := editor.Position{Line: from.Line, Col: buf.LineRuneLen(from.Line)}
+		buf.SetCursor(end)
+		c.setMode(types.ModeInsert)
+		return nil
+	}
+}
+
+// modeNormalHandler returns the `<esc>` Insert-mode handler. Flips
+// QUERY_EDITOR mode back to ModeNormal. A no-op when already in
+// Normal — handler binding is Insert-mode-only via insertExitModeMask
+// so this is defensive.
+func (c *VimEditorController) modeNormalHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		if c.buffer() == nil {
+			return nil
+		}
+		c.setMode(types.ModeNormal)
+		return nil
+	}
+}
+
+// undoHandler returns the `u` handler. Delegates to Buffer.Undo, which
+// rewinds the History cursor and replays the inverse Edit. Empty
+// history is a silent no-op. cancelSelectionIfOverlap is invoked
+// internally by Buffer.Undo so a stale visual range is dropped.
+func (c *VimEditorController) undoHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		return buf.Undo()
+	}
+}
+
+// redoHandler returns the `<c-r>` handler. Walks History forward along
+// children[0] and re-applies the recorded forward Edit. Empty
+// children list is a silent no-op.
+func (c *VimEditorController) redoHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		return buf.Redo()
+	}
 }

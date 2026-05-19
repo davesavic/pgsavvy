@@ -39,8 +39,61 @@ type VimEditor struct {
 // NewVimEditor builds a VimEditor bound to qec / matcher / scope. Any
 // of qec / matcher may be nil — Edit nil-checks before dereferencing
 // so partially-wired test rigs do not panic.
+//
+// When matcher is non-nil, the constructor registers an
+// OnInsertPendingFlush callback (scope-filtered) so that a ModeInsert
+// chord prefix timing out without resolving to a leaf flushes its
+// buffered printable runes into the canonical *Buffer (rather than
+// silently dropping them). This mirrors the master_editor.go pattern
+// for COMMAND_LINE; here the flush target is Buffer.Apply instead of
+// TextArea.TypeCharacter because Buffer is the source of truth for
+// QUERY_EDITOR. The view re-syncs on the next user keystroke via the
+// existing syncViewToBuffer path.
+//
+// Caveat: keys.Matcher holds a single InsertPendingFlush callback
+// globally — every scope's editor constructor races to register one,
+// and the last writer wins. In MVP this is benign: VimEditor has no
+// multi-key Insert-mode bindings today (`<esc>` is a single-key leaf),
+// so Pending never fires for QUERY_EDITOR. The registration here is
+// preemptive; a multi-callback registry can wait for an actual
+// consumer.
 func NewVimEditor(qec BufferProvider, matcher *keys.Matcher, scope types.ContextKey) *VimEditor {
-	return &VimEditor{qec: qec, matcher: matcher, scope: scope}
+	e := &VimEditor{qec: qec, matcher: matcher, scope: scope}
+	if matcher != nil {
+		matcher.OnInsertPendingFlush(func(s types.ContextKey, runes []rune) {
+			if s != scope {
+				return
+			}
+			e.flushPendingRunes(runes)
+		})
+	}
+	return e
+}
+
+// flushPendingRunes applies buffered Pending-state runes to the
+// *Buffer as a single Insert at the live Cursor, then advances the
+// Cursor past the inserted text. Called from the Matcher's timer
+// goroutine; Buffer.Apply is goroutine-safe via the Buffer mutex. The
+// view re-syncs on the next user keystroke (syncViewToBuffer runs at
+// the end of every insertKey / motion handler).
+func (e *VimEditor) flushPendingRunes(runes []rune) {
+	if len(runes) == 0 || e.qec == nil {
+		return
+	}
+	buf := e.qec.Buffer()
+	if buf == nil {
+		return
+	}
+	text := string(runes)
+	cur := buf.CursorPos()
+	if err := buf.Apply(Edit{
+		Kind:  EditKindInsert,
+		Range: Range{Start: cur, End: cur},
+		Text:  text,
+	}); err != nil {
+		return
+	}
+	buf.SetCursor(advancePos(cur, text))
 }
 
 // Edit implements gocui.Editor.
@@ -77,12 +130,10 @@ func (e *VimEditor) Dispatch(v *gocui.View, key gocui.Key) (keys.DispatchResult,
 func (e *VimEditor) applyResult(v *gocui.View, decoded keys.Key, result keys.DispatchResult) bool {
 	switch result {
 	case keys.Dispatched, keys.Pending, keys.Swallowed, keys.Cancelled:
-		// wwd.10 TODO: register OnInsertPendingFlush for QUERY_EDITOR so
-		// the leading rune of an Insert-mode chord prefix isn't dropped
-		// when the chord times out. Mirror master_editor.go:45-52 (scope
-		// filter + flushRunes). Latent until wwd.10 wires Insert-mode
-		// chord bindings (i/a/o) — no QUERY_EDITOR Insert chords exist
-		// today, so Pending never fires for this scope.
+		// OnInsertPendingFlush is registered in NewVimEditor — if a
+		// ModeInsert chord prefix times out without resolving, the
+		// callback flushes the buffered printable runes into the
+		// canonical *Buffer. No flush logic lives here in applyResult.
 		return true
 	case keys.Passthrough, keys.FellThrough:
 		if e.matcher.CurrentMode(e.scope) != types.ModeInsert {

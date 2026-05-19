@@ -170,6 +170,32 @@ const (
 	TextObjectInnerStatement    = "textobject.inner_statement"
 	TextObjectAroundStatement   = "textobject.around_statement"
 
+	// Insert-entry family — owned by VimEditorController (dbsavvy-wwd.10).
+	// Defaults: `i` enters Insert with cursor in place; `a` enters with
+	// cursor moved one column right (append); `o`/`O` open a new line
+	// below/above; `I`/`A` jump to first-non-blank / line-end+1 and
+	// enter Insert. Each handler flips ModeStore[QUERY_EDITOR] to
+	// ModeInsert after positioning the cursor (and applying the Insert
+	// edit for o/O).
+	InsertEnter         = "insert.enter"
+	InsertAppend        = "insert.append"
+	InsertOpenBelow     = "insert.open_below"
+	InsertOpenAbove     = "insert.open_above"
+	InsertFirstNonblank = "insert.first_nonblank"
+	InsertAppendEnd     = "insert.append_end"
+
+	// ModeNormal — owned by VimEditorController (dbsavvy-wwd.10).
+	// Bound to `<esc>` in Insert mode; flips ModeStore[QUERY_EDITOR]
+	// back to ModeNormal. Visual modes use VisualExit instead.
+	ModeNormal = "mode.normal"
+
+	// Editor history family — owned by VimEditorController (dbsavvy-wwd.10).
+	// `u` invokes Buffer.Undo (replays the inverse of the most recent
+	// Edit); `<c-r>` invokes Buffer.Redo (re-applies along children[0]
+	// of the UndoTree). Both are no-ops at the tree boundaries.
+	EditorUndo = "editor.undo"
+	EditorRedo = "editor.redo"
+
 	// Visual / Selection family — owned by VimEditorController (dbsavvy-wwd.7).
 	// Bindings: `v` / `V` / `<c-v>` enter char/line/block visual from Normal;
 	// `<esc>` exits to Normal. SelectionExtend is the action ID covering
@@ -279,5 +305,14 @@ func AllActionIDs() []string {
 		VisualEnterBlock,
 		VisualExit,
 		SelectionExtend,
+		InsertEnter,
+		InsertAppend,
+		InsertOpenBelow,
+		InsertOpenAbove,
+		InsertFirstNonblank,
+		InsertAppendEnd,
+		ModeNormal,
+		EditorUndo,
+		EditorRedo,
 	}
 }
