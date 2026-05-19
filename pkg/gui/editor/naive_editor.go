@@ -33,14 +33,6 @@ func (e *NaiveEditor) Edit(v *gocui.View, key gocui.Key) bool {
 	return gocui.DefaultEditor.Edit(v, key)
 }
 
-// Position is the (line, column) coordinate of a point inside the
-// editor buffer. Both fields are zero-indexed. Column is in runes, not
-// bytes, to match TextArea's cursor reporting.
-type Position struct {
-	Line int
-	Col  int
-}
-
 // ViewBuffer returns the full text content of v's TextArea, or "" when
 // v or its TextArea is nil. Renamed from Buffer in dbsavvy-wwd.1 so the
 // `editor.Buffer` identifier can be the canonical vim-buffer type (the
