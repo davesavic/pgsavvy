@@ -278,8 +278,20 @@ func (g *Gui) RunLayout(w, h int) error {
 	// uses above. A nil view (test recorder path) is tolerated; the
 	// renderer writes to the view via SetContent, which the recorder
 	// driver routes by name regardless of the *View handle.
+	//
+	// Rect expansion (dbsavvy-8tj): the lazygit gocui fork computes a
+	// view's writable InnerHeight as Height-2 regardless of Frame
+	// (pkg/gocui/view.go:527-547) and writes cells at screen position
+	// (x0+x+1, y0+y+1). A naked Size:1 slot from boxlayout yields
+	// Y0==Y1 → InnerHeight=0, and the off-by-one cell offset places
+	// content at row H (off-screen) for a bottom strip. We follow the
+	// same trick commandLineRect uses for COMMAND_LINE: extend the
+	// rectangle by -1/+1 in Y so gocui sees Height=3, InnerHeight=1,
+	// with the single visible row landing exactly on the boxlayout
+	// slot's reserved screen row (d.Y0). The "virtual" extra rows are
+	// never written to — gocui clamps cell writes to inner bounds.
 	if d, ok := dims[AppStatusViewName]; ok && d.X1 > d.X0 && d.Y1 >= d.Y0 {
-		view, err := g.driver.SetView(AppStatusViewName, d.X0, d.Y0, d.X1, d.Y1, 0)
+		view, err := g.driver.SetView(AppStatusViewName, d.X0, d.Y0-1, d.X1, d.Y1+1, 0)
 		if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
