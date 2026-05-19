@@ -37,6 +37,7 @@ type HelperBag struct {
 	// UI helpers (interfaces; T7b's concrete types satisfy these).
 	Confirm     ConfirmHelper
 	Prompt      PromptHelper
+	Choice      ChoiceHelper
 	Toast       ToastHelper
 	Refresh     RefreshHelper
 	Tip         TipHelper

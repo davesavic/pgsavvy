@@ -63,6 +63,14 @@ const (
 	PromptCancel    = "prompt.cancel"
 	PromptBackspace = "prompt.backspace"
 
+	// SelectionUp / SelectionDown / SelectionConfirm / SelectionCancel —
+	// owned by SelectionController. `<up>`/`k`, `<down>`/`j`, `<cr>`,
+	// `<esc>` inside the SELECTION popup context (dbsavvy-m47.2).
+	SelectionUp      = "selection.up"
+	SelectionDown    = "selection.down"
+	SelectionConfirm = "selection.confirm"
+	SelectionCancel  = "selection.cancel"
+
 	// CommandOpen — owned globally; opens the COMMAND_LINE context. `:`
 	// CommandCancel — owned by COMMAND_LINE context; closes it. `<esc>`
 	// CommandSubmit — owned by COMMAND_LINE context; submits the typed
@@ -130,6 +138,10 @@ func AllActionIDs() []string {
 		PromptSubmit,
 		PromptCancel,
 		PromptBackspace,
+		SelectionUp,
+		SelectionDown,
+		SelectionConfirm,
+		SelectionCancel,
 		CommandOpen,
 		CommandCancel,
 		CommandSubmit,

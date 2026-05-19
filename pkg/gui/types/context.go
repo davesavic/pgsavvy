@@ -53,6 +53,7 @@ const (
 	MENU              ContextKey = "menu"
 	CONFIRMATION      ContextKey = "confirmation"
 	PROMPT            ContextKey = "prompt"
+	SELECTION         ContextKey = "selection"
 	SUGGESTIONS       ContextKey = "suggestions"
 	COMMAND_LINE      ContextKey = "command_line"
 	HISTORY           ContextKey = "history"

@@ -44,6 +44,22 @@ type PromptHelper interface {
 	SetResetHandler(fn func(initial string))
 }
 
+// ChoiceHelper pushes a list-style selection popup (driver picker and
+// similar pickers in the connection-add flow). The helper owns the
+// label / choices / cursor; SelectionController reads them live via the
+// concrete *ui.ChoiceHelper accessors.
+//
+// Submit(idx) invokes the stored onSubmit(idx) callback if idx is in
+// [0, len(choices)) and pops the popup; out-of-range returns an error
+// WITHOUT invoking the callback or popping. Cancel invokes onCancel and
+// pops. (Both Submit and Cancel clear helper state so the next Choose
+// call starts fresh.)
+type ChoiceHelper interface {
+	Choose(label string, choices []string, onSubmit func(idx int) error, onCancel func() error) error
+	Submit(idx int) error
+	Cancel() error
+}
+
 // ToastHelper writes a transient message to the status bar slot.
 type ToastHelper interface {
 	Show(message string, ttl time.Duration)

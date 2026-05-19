@@ -12,7 +12,7 @@ import (
 // Concrete Context fields are exposed by name so the gui bootstrap (T10)
 // and the controller registration shim (T7) can target a specific
 // Context by reference without re-lookup. Flatten() and ByKey() walk all
-// 19 entries (14 live + 5 stub) for the cases where ordered iteration is
+// 21 entries (16 live + 5 stub) for the cases where ordered iteration is
 // preferable.
 type ContextTree struct {
 	// Live SIDE_CONTEXT instances.
@@ -26,6 +26,7 @@ type ContextTree struct {
 	Menu         *MenuContext
 	Confirmation *ConfirmationContext
 	Prompt       *PromptContext
+	Selection    *SelectionContext
 	Suggestions  *SuggestionsContext
 	CommandLine  *CommandLineContext
 
@@ -94,6 +95,11 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			ViewName: string(types.PROMPT),
 			Kind:     types.TEMPORARY_POPUP,
 		}), deps),
+		Selection: NewSelectionContext(NewBaseContext(BaseContextOpts{
+			Key:      types.SELECTION,
+			ViewName: string(types.SELECTION),
+			Kind:     types.TEMPORARY_POPUP,
+		}), deps),
 		Suggestions: NewSuggestionsContext(NewBaseContext(BaseContextOpts{
 			Key:      types.SUGGESTIONS,
 			ViewName: string(types.SUGGESTIONS),
@@ -145,8 +151,8 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 }
 
 // Flatten returns every Context (live + stub) in a stable order. Order
-// is: side rail (5) -> popups (5) -> extras/global/display (4) -> stubs
-// (5). Total length is always 19.
+// is: side rail (5) -> popups (6) -> extras/global/display (5) -> stubs
+// (5). Total length is always 21.
 func (t *ContextTree) Flatten() []types.IBaseContext {
 	return []types.IBaseContext{
 		t.Connections,
@@ -157,6 +163,7 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 		t.Menu,
 		t.Confirmation,
 		t.Prompt,
+		t.Selection,
 		t.Suggestions,
 		t.CommandLine,
 		t.CommandLog,

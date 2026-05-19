@@ -21,13 +21,13 @@ func TestAttachControllersWiresEveryContext(t *testing.T) {
 	}
 	if got.Connections == nil || got.Schemas == nil || got.Tables == nil ||
 		got.Columns == nil || got.Indexes == nil || got.Menu == nil ||
-		got.Prompt == nil || got.Quit == nil {
+		got.Prompt == nil || got.Selection == nil || got.Quit == nil {
 		t.Fatalf("Controllers bundle has nil entries: %+v", got)
 	}
 
 	for _, ctx := range []types.IBaseContext{
 		tree.Connections, tree.Schemas, tree.Tables, tree.Columns, tree.Indexes,
-		tree.Menu, tree.Prompt, tree.Global,
+		tree.Menu, tree.Prompt, tree.Selection, tree.Global,
 	} {
 		kbs := ctx.GetKeybindings(types.KeybindingsOpts{})
 		if len(kbs) == 0 {
