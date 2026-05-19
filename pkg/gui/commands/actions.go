@@ -62,14 +62,19 @@ const (
 	MenuConfirm = "menu.confirm"
 	MenuCancel  = "menu.cancel"
 
-	// PromptSubmit / PromptCancel / PromptBackspace — owned by
-	// PromptController. `<cr>` / `<esc>` / `<bs>` inside the PROMPT
-	// popup context. Printable-rune bindings register per-rune
-	// closures under IDs of the form "prompt.rune.<hex>" — those IDs
-	// are intentionally NOT listed in AllActionIDs (registry hygiene
-	// only covers stable, user-visible IDs).
+	// PromptSubmit / PromptCancel — owned by PromptController.
+	// `<cr>` / `<esc>` inside the PROMPT popup context. Printable
+	// runes, Backspace, Delete, Left/Right/Home/End and bracketed
+	// paste all flow through the master gocui.Editor's Passthrough
+	// branch into gocui.DefaultEditor (dbsavvy-fq9 / dbsavvy-7k9 /
+	// dbsavvy-f5t) — the PROMPT view is editable and gocui rejects
+	// char-key SetKeybinding shims on editable views (matchView), so
+	// per-rune action IDs no longer exist here.
 	PromptSubmit    = "prompt.submit"
 	PromptCancel    = "prompt.cancel"
+	// PromptBackspace is retained as a dangling alias for source
+	// compatibility with downstream pkgs that still reference the
+	// constant; no controller registers a handler under this ID.
 	PromptBackspace = "prompt.backspace"
 
 	// SelectionUp / SelectionDown / SelectionConfirm / SelectionCancel —

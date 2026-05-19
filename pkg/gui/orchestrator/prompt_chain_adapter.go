@@ -115,7 +115,11 @@ func (a *chainedPrompterAdapter) PromptString(ctx context.Context, title, label 
 							// Re-push with the error embedded in
 							// the label. Schedule via onUIThread so
 							// we don't race the helper.Submit pop.
-							schedule(fmt.Sprintf("%s: %s — %s", title, label, err.Error()))
+							// The error lands on its own line so the
+							// popup body wraps cleanly instead of
+							// truncating long validator messages at
+							// the popup right edge (dbsavvy-8p5).
+							schedule(fmt.Sprintf("%s: %s\n%s", title, label, err.Error()))
 							return nil
 						}
 					}

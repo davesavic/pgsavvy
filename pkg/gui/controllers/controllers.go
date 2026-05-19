@@ -160,9 +160,13 @@ func AttachControllers(
 }
 
 // RegisterActions registers every controller's action handlers with reg.
-// The trait actions (ListUp / ListDown / ListConfirm) are registered once
-// via the Connections controller's embedded trait so they exist in the
-// Registry without each rail-controller fighting for the same IDs.
+// The trait actions (ListUp / ListDown / ListConfirm) are registered
+// per-rail — each rail's trait emits its own scope-suffixed ID
+// (`list.down:CONNECTIONS`, `list.down:SCHEMAS`, …) so j/k/<CR> on
+// rail X dispatch to rail X's cursor (dbsavvy-6m9). Pre-fix only the
+// Connections trait registered handlers and every rail's j/k mutated
+// the Connections cursor.
+//
 // Rail-switch actions are registered by the orchestrator via
 // controllers.RegisterRailSwitchActions (it needs the focus tree +
 // context registry which this aggregate does not hold).
@@ -175,6 +179,18 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.Connections != nil && b.Connections.ListControllerTrait != nil {
 		b.Connections.ListControllerTrait.RegisterActions(reg)
+	}
+	if b.Schemas != nil && b.Schemas.ListControllerTrait != nil {
+		b.Schemas.ListControllerTrait.RegisterActions(reg)
+	}
+	if b.Tables != nil && b.Tables.ListControllerTrait != nil {
+		b.Tables.ListControllerTrait.RegisterActions(reg)
+	}
+	if b.Columns != nil && b.Columns.ListControllerTrait != nil {
+		b.Columns.ListControllerTrait.RegisterActions(reg)
+	}
+	if b.Indexes != nil && b.Indexes.ListControllerTrait != nil {
+		b.Indexes.ListControllerTrait.RegisterActions(reg)
 	}
 	if b.Quit != nil {
 		b.Quit.RegisterActions(reg)

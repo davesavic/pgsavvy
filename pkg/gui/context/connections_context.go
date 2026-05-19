@@ -54,21 +54,29 @@ func (c *ConnectionsContext) HandleRender() error {
 	return nil
 }
 
-// renderRows produces the row text for the current Items slice. Concrete
-// row decoration (icon, label, colour swatch) comes from
-// deps.PerRowDecorationHook when supplied; absent the hook each row is
-// plain "<name>".
+// renderRows produces the row text for the current Items slice. The
+// cursor row is prefixed with "> "; non-cursor rows are padded with "  "
+// so columns align and j/k visibly moves the marker (mirrors
+// SelectionContext's driver-picker convention). Bug dbsavvy-sig.
+//
+// Concrete row decoration (icon, label) comes from
+// deps.PerRowDecorationHook when supplied; absent the hook each row
+// falls back to a plain "<name>" so the rail still renders pre-wire.
 func (c *ConnectionsContext) renderRows() string {
 	if len(c.items) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	for _, item := range c.items {
+	for i, item := range c.items {
+		marker := "  "
+		if i == c.cursor {
+			marker = "> "
+		}
 		conn, ok := item.(*models.Connection)
 		if !ok {
 			// Unknown row type: render best-effort via fmt so we never
 			// silently drop a row.
-			fmt.Fprintf(&b, "%v\n", item)
+			fmt.Fprintf(&b, "%s%v\n", marker, item)
 			continue
 		}
 		if c.deps.PerRowDecorationHook != nil {
@@ -77,13 +85,13 @@ func (c *ConnectionsContext) renderRows() string {
 				label = conn.Name
 			}
 			if icon != "" {
-				fmt.Fprintf(&b, "%s %s\n", icon, label)
+				fmt.Fprintf(&b, "%s%s %s\n", marker, icon, label)
 			} else {
-				fmt.Fprintf(&b, "%s\n", label)
+				fmt.Fprintf(&b, "%s%s\n", marker, label)
 			}
 			continue
 		}
-		fmt.Fprintf(&b, "%s\n", conn.Name)
+		fmt.Fprintf(&b, "%s%s\n", marker, conn.Name)
 	}
 	return b.String()
 }

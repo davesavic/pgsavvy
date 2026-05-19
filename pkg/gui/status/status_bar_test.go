@@ -131,6 +131,39 @@ func TestBuildStatusLine_EmptyModeLabelOmitsSlot(t *testing.T) {
 	}
 }
 
+// AC dbsavvy-sgc: a connection with a named colour must produce an
+// ANSI SGR foreground wrapper around its icon+label header so the
+// status bar surface visibly tints the active-connection slot. The
+// reset escape MUST follow the header so subsequent sections (options /
+// "?: more") render in the default foreground.
+func TestBuildStatusLine_ConnColorTintsHeader(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	conn := &models.Connection{Icon: "*", Label: "local-pg", Color: "red"}
+
+	got := BuildStatusLine("", conn, nil, tr)
+
+	if !strings.Contains(got, "\x1b[31m* local-pg\x1b[0m") {
+		t.Fatalf("got %q; want substring %q", got, "\x1b[31m* local-pg\x1b[0m")
+	}
+}
+
+// Edge: an unrecognised colour token (hex) must NOT emit an ANSI
+// escape — the header falls through to plain text so we never write a
+// malformed sequence to the cell buffer.
+func TestBuildStatusLine_ConnHexColorIsNotTinted(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	conn := &models.Connection{Icon: "*", Label: "stg", Color: "#abcdef"}
+
+	got := BuildStatusLine("", conn, nil, tr)
+
+	if strings.ContainsRune(got, 0x1b) {
+		t.Fatalf("got %q must not contain an ANSI escape for an unrecognised colour token", got)
+	}
+	if !strings.Contains(got, "* stg") {
+		t.Fatalf("got %q; want plain '* stg' header", got)
+	}
+}
+
 // TestBuildStatusLine_NilConnWithModeLabel covers the (nil conn,
 // non-empty modeLabel) edge listed in dlp.9 AC. New in dlp.9.
 func TestBuildStatusLine_NilConnWithModeLabel(t *testing.T) {

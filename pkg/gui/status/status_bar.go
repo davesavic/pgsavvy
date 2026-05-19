@@ -14,6 +14,16 @@ const (
 	optionSep  = " "
 )
 
+// ANSI SGR pair used to tint the connection header (icon + label) with
+// the profile's `color:` field. dbsavvy-sgc: the header MUST be visibly
+// distinct after connect so the user can tell at a glance which
+// connection is active. Recognised colour names map to the standard
+// 8-colour ANSI palette; hex / unknown tokens fall through to an
+// untinted header (we never emit a malformed escape).
+const (
+	ansiResetSGR = "\x1b[0m"
+)
+
 // BuildStatusLine renders the plain text shown in the status slot.
 //
 // Layout: "<modeLabel> | <icon> <label> | [RO] <option1> <option2> … | <Tr.OptionsBarMore>".
@@ -43,7 +53,7 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 	}
 
 	if header := presentation.HeaderTextFor(activeConn); header != "" {
-		sections = append(sections, header)
+		sections = append(sections, tintHeaderForConn(header, activeConn))
 	}
 
 	var mid []string
@@ -58,6 +68,48 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 	sections = append(sections, tr.OptionsBarMore)
 
 	return strings.Join(sections, sectionSep)
+}
+
+// tintHeaderForConn wraps the header text with an ANSI SGR foreground
+// pair keyed off conn.Color when conn carries a recognised colour name.
+// Unrecognised values (hex codes, empty, nil conn) collapse to the bare
+// header — the rendering layer never emits a malformed escape. Mirrors
+// the cell-content approach used by status_render's toast styler.
+func tintHeaderForConn(header string, conn *models.Connection) string {
+	if conn == nil || conn.Color == "" {
+		return header
+	}
+	sgr := ansiSGRForColor(conn.Color)
+	if sgr == "" {
+		return header
+	}
+	return sgr + header + ansiResetSGR
+}
+
+// ansiSGRForColor maps an 8-colour name onto its ANSI foreground SGR.
+// Unknown tokens (hex codes, names not in the standard palette, empty)
+// return "" so callers can fall back to no tinting.
+func ansiSGRForColor(s string) string {
+	switch strings.ToLower(s) {
+	case "black":
+		return "\x1b[30m"
+	case "red":
+		return "\x1b[31m"
+	case "green":
+		return "\x1b[32m"
+	case "yellow":
+		return "\x1b[33m"
+	case "blue":
+		return "\x1b[34m"
+	case "magenta":
+		return "\x1b[35m"
+	case "cyan":
+		return "\x1b[36m"
+	case "white":
+		return "\x1b[37m"
+	default:
+		return ""
+	}
 }
 
 // LabelForMode maps a Mode to its i18n banner string. ModeNormal returns

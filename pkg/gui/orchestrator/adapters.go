@@ -139,7 +139,51 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 		return err
 	}
 	c.hydrateQueryEditorBuffer(profile)
+	c.populateSchemasRail(ctx)
 	return nil
+}
+
+// populateSchemasRail loads the schema list via ConnectHelper.LoadSchemas
+// and pushes the visible subset (built-in / profile-hidden patterns
+// filtered out) onto the SchemasContext so the SCHEMAS rail draws rows
+// on the next layout frame. Without this hook the rail stays empty
+// after a successful connect even though the driver is ready
+// (dbsavvy-855).
+//
+// Best-effort: a LoadSchemas error is logged and swallowed — the user
+// still has the open connection and can retry by re-pressing <cr>.
+// Empty registry / context (test wiring) collapses to a silent no-op.
+func (c *connectInvoker) populateSchemasRail(ctx context.Context) {
+	if c == nil || c.g == nil || c.helper == nil {
+		return
+	}
+	if c.g.registry == nil || c.g.registry.Schemas == nil {
+		return
+	}
+	schemas, err := c.helper.LoadSchemas(ctx, "")
+	if err != nil {
+		if c.g.deps.Common != nil && c.g.deps.Common.Log != nil {
+			c.g.deps.Common.Log.Warnf("gui: load schemas after connect: %v", err)
+		}
+		return
+	}
+	visible := schemas
+	if c.g.schemasHelper != nil {
+		// Apply builtin + profile hide-pattern filter. Runtime hides
+		// (AppState.HiddenSchemas) are deliberately NOT consulted here
+		// — the SHOW-HIDDEN toggle (H/U) reveals them on demand, and
+		// pulling them in at populate time would require a second pass
+		// through the picker on every toggle.
+		builtin, profile := defaultHiddenPatterns()
+		v, _ := c.g.schemasHelper.FilterHidden(schemas, builtin, profile, nil)
+		visible = v
+	}
+	items := make([]any, len(visible))
+	for i := range visible {
+		s := visible[i]
+		items[i] = s
+	}
+	c.g.registry.Schemas.SetItems(items)
 }
 
 // hydrateQueryEditorBuffer is the dbsavvy-wwd.9 post-Connect hook. It
@@ -274,14 +318,14 @@ func (c *connectionFormInvoker) WalkAdd(ctx context.Context) error {
 	return nil
 }
 
-// promptStateAdapter implements guicontext.PromptState by combining the
-// PromptHelper (which owns label + active) with the PromptController
-// (which owns the typed buffer). The two surfaces live in separate
-// packages and can't easily merge, so a small adapter is the cheapest
-// way to give PromptContext.HandleRender a single state reader.
+// promptStateAdapter implements guicontext.PromptState by surfacing
+// the PromptHelper's label + active flag to PromptContext.HandleRender.
+// The typed buffer is no longer combined here: post-dbsavvy-fq9 the
+// PROMPT view is editable and the runtime source of truth for the
+// input is the view's TextArea (PromptContext.Buffer reads through),
+// mirroring the COMMAND_LINE path.
 type promptStateAdapter struct {
 	helper *ui.PromptHelper
-	ctrl   *controllers.PromptController
 }
 
 func (a *promptStateAdapter) Active() bool {
@@ -296,13 +340,6 @@ func (a *promptStateAdapter) Label() string {
 		return ""
 	}
 	return a.helper.Label()
-}
-
-func (a *promptStateAdapter) Buffer() string {
-	if a == nil || a.ctrl == nil {
-		return ""
-	}
-	return a.ctrl.Buffer()
 }
 
 // menuPushHelper bridges controllers.MenuPushHelper to the focus-stack

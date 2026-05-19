@@ -13,6 +13,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
+	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
@@ -199,10 +200,21 @@ func feedSpecial(t *testing.T, drv *serializedDriver, view string, name gocui.Ke
 	}
 }
 
-func typeString(t *testing.T, drv *serializedDriver, view, s string) {
+// feedSpecialEditable dispatches a special key through the recorder's
+// master Editor instead of the SetKeybinding shim list. Editable views
+// (post-dbsavvy-fq9 that now includes PROMPT) install a master Editor
+// and SKIP per-key SetKeybinding shims, so FeedKey for Enter/Esc would
+// return errNotFound — FeedChord drives the same Dispatcher path the
+// production gocui Editor uses, so the matcher resolves Enter →
+// PromptSubmit (or Esc → PromptCancel) and the controller's handler
+// fires.
+func feedSpecialEditable(t *testing.T, drv *serializedDriver, view string, name gocui.KeyName) {
 	t.Helper()
-	for _, r := range s {
-		feedRune(t, drv, view, r)
+	drv.mu.Lock()
+	defer drv.mu.Unlock()
+	chordKey := keys.KeyFromGocui(gocui.NewKeyName(name))
+	if _, err := drv.RecorderGuiDriver.FeedChord(view, []keys.Key{chordKey}); err != nil {
+		t.Fatalf("FeedChord(view=%q, special=%v): %v", view, name, err)
 	}
 }
 
@@ -241,14 +253,19 @@ func TestConnectionAdd_HappyPath_AppendsOneRow(t *testing.T) {
 	assertPopupRendered(t, g, rec, string(types.PROMPT))
 	assertPopupBodyContains(t, g, rec, string(types.PROMPT), "Connection name")
 	assertCaretEnabled(t, rec, true)
-	typeString(t, rec, string(types.PROMPT), "alice")
-	// Caret anchor: after typing "alice" the layout pass should call
+	// Post-dbsavvy-fq9 PROMPT is editable: in production gocui.DefaultEditor
+	// writes keystrokes into v.TextArea, but the recorder driver returns
+	// nil from SetView so the TextArea path is unreachable. Inject the
+	// typed value via the test seam so PromptController.Submit reads
+	// "alice" from the context's test-mode buffer when <cr> fires.
+	g.SeedPromptBufferForTest("alice")
+	// Caret anchor: with buffer="alice" the layout pass should call
 	// SetViewCursor("prompt", 2+len("alice"), 2). The "> " prefix is two
 	// cells on body line 2 (label=0, blank=1, "> <buf>"=2). Without this
 	// the user sees the typed text but no caret showing where their next
 	// character will land (dbsavvy-m47.x / PROMPT caret bug).
 	assertPromptCursorAt(t, g, rec, 2+len("alice"), 2)
-	feedSpecial(t, rec, string(types.PROMPT), gocui.KeyEnter)
+	feedSpecialEditable(t, rec, string(types.PROMPT), gocui.KeyEnter)
 
 	// Step 3: PROMPT popup (DSN). The label is re-pushed by the adapter
 	// so we must poll until it transitions from "Name" to "DSN".
@@ -256,8 +273,8 @@ func TestConnectionAdd_HappyPath_AppendsOneRow(t *testing.T) {
 		ph := g.PromptHelperForTest()
 		return ph != nil && ph.Active() && strings.Contains(ph.Label(), "DSN")
 	}, "prompt popup (DSN) did not activate")
-	typeString(t, rec, string(types.PROMPT), "postgres://localhost:5432/db")
-	feedSpecial(t, rec, string(types.PROMPT), gocui.KeyEnter)
+	g.SeedPromptBufferForTest("postgres://localhost:5432/db")
+	feedSpecialEditable(t, rec, string(types.PROMPT), gocui.KeyEnter)
 
 	// Worker quiesces when WalkAddConnection returns. Poll on the
 	// filesystem rather than g.BusyCount so we test the user-visible

@@ -82,34 +82,36 @@ func (l *ListControllerTrait[T]) Confirm(ctx commands.ExecCtx) error {
 	return l.onConfirm(ctx)
 }
 
-// RegisterActions registers the trait's three actions (ListUp /
-// ListDown / ListConfirm) with reg. The Controllers aggregate calls
-// this on a single representative trait so the actions exist in the
-// Registry without colliding across the five rails.
+// RegisterActions registers this trait's three actions (ListUp /
+// ListDown / ListConfirm) with reg under per-rail IDs derived from
+// viewName. Each rail owns its own handler so j/k/<CR> dispatched on
+// rail X mutate rail X's cursor (dbsavvy-6m9). The aggregate
+// Controllers.RegisterActions must invoke this on every rail's trait.
 func (l *ListControllerTrait[T]) RegisterActions(reg *commands.Registry) {
 	if reg == nil {
 		return
 	}
 	_ = reg.Register(&commands.Command{
-		ID:          commands.ListUp,
-		Description: "Move list cursor up",
+		ID:          listActionID(commands.ListUp, l.viewName),
+		Description: "Move list cursor up (" + l.viewName + ")",
 		Handler:     l.Up,
 	})
 	_ = reg.Register(&commands.Command{
-		ID:          commands.ListDown,
-		Description: "Move list cursor down",
+		ID:          listActionID(commands.ListDown, l.viewName),
+		Description: "Move list cursor down (" + l.viewName + ")",
 		Handler:     l.Down,
 	})
 	_ = reg.Register(&commands.Command{
-		ID:          commands.ListConfirm,
-		Description: "Activate list row",
+		ID:          listActionID(commands.ListConfirm, l.viewName),
+		Description: "Activate list row (" + l.viewName + ")",
 		Handler:     l.Confirm,
 	})
 }
 
 // baseBindings returns the j/k/<CR> bindings every side rail shares.
-// Concrete controllers append rail-specific bindings (digit switch,
-// H/U, a, etc.).
+// Each binding's ActionID is per-rail (see RegisterActions) so dispatch
+// to the matching trait handler is unambiguous when multiple rails
+// register the same chord sequence.
 func (l *ListControllerTrait[T]) baseBindings() []*types.ChordBinding {
 	tr := l.tr()
 	scope := types.ContextKey(l.viewName)
@@ -118,22 +120,29 @@ func (l *ListControllerTrait[T]) baseBindings() []*types.ChordBinding {
 			Sequence:    []types.ChordKey{{Code: 'j'}},
 			Mode:        types.ModeNormal,
 			Scope:       scope,
-			ActionID:    commands.ListDown,
+			ActionID:    listActionID(commands.ListDown, l.viewName),
 			Description: tr.Actions.Down,
 		},
 		{
 			Sequence:    []types.ChordKey{{Code: 'k'}},
 			Mode:        types.ModeNormal,
 			Scope:       scope,
-			ActionID:    commands.ListUp,
+			ActionID:    listActionID(commands.ListUp, l.viewName),
 			Description: tr.Actions.Up,
 		},
 		{
 			Sequence:    []types.ChordKey{{Special: types.KeyEnter}},
 			Mode:        types.ModeNormal,
 			Scope:       scope,
-			ActionID:    commands.ListConfirm,
+			ActionID:    listActionID(commands.ListConfirm, l.viewName),
 			Description: tr.Actions.Confirm,
 		},
 	}
+}
+
+// listActionID composes the per-rail ActionID. The bare commands.ListUp
+// / ListDown / ListConfirm constants act as namespace prefixes; the
+// viewName suffix disambiguates per-rail dispatch.
+func listActionID(prefix, viewName string) string {
+	return prefix + ":" + viewName
 }

@@ -2,11 +2,20 @@ package controllers
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
+
+// connectErrToastTTL is the lifetime of the toast surfaced when
+// Connect returns a non-fatal error (e.g. missing credentials, already
+// connected). Long enough for the user to read the message, short
+// enough that it disappears before they retry.
+const connectErrToastTTL = 4 * time.Second
 
 // ConnectionsController owns keyboard bindings for the CONNECTIONS
 // side rail. It composes ListControllerTrait for j/k navigation and
@@ -36,7 +45,19 @@ func NewConnectionsController(
 			return nil
 		}
 		err := base.helpers.Connect.Connect(context.Background(), profile)
-		return base.wrapErr("connections.confirm", err)
+		if err == nil {
+			return nil
+		}
+		// Log via wrapErr for debug-log breadcrumb, then surface to the
+		// user as a sanitized toast and SWALLOW the error. Returning it
+		// up to gocui crashes the MainLoop — for non-credential and
+		// "already connected" errors the app must stay alive (bugs
+		// dbsavvy-a07, dbsavvy-e9i).
+		_ = base.wrapErr("connections.confirm", err)
+		if base.helpers.Toast != nil {
+			base.helpers.Toast.Show(config.SafeText(connectErrMessage(err)), connectErrToastTTL)
+		}
+		return nil
 	}
 	ctrl.ListControllerTrait = NewListControllerTrait(base, viewName(types.CONNECTIONS), cursor, picker, confirm)
 	return ctrl
@@ -94,4 +115,23 @@ func (c *ConnectionsController) AttachToContext(ctx attachable) {
 		return
 	}
 	ctx.AddKeybindingsFn(c.GetKeybindings)
+}
+
+// connectErrMessage returns the user-facing string for a Connect error.
+// Strips known multi-line / "controller …:" wrapping that wrapErr adds,
+// and rewrites the "already connected" sentinel into a friendlier
+// short phrase. The returned string is passed through config.SafeText
+// by the caller before reaching the toast surface.
+func connectErrMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	// data.ConnectHelper raises "data: already connected (call Disconnect first)"
+	// when <cr> hits a profile that's already open. From the user's
+	// perspective this is a no-op, not an error.
+	if strings.Contains(msg, "already connected") {
+		return "already connected"
+	}
+	return msg
 }

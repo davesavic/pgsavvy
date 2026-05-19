@@ -94,12 +94,19 @@ func NewPresentationHook() func(conn *models.Connection) (types.TextStyle, strin
 // uses the returned tuple to draw icon, label, and colour swatch per row.
 // A nil connection produces three empty strings so the caller's nil
 // branch keeps working.
+//
+// The label returned is Profile.Name (the stable, user-supplied key in
+// connections.yml), NOT Profile.Label. The CONNECTIONS rail's purpose is
+// to disambiguate profiles by handle; Profile.Label is reserved for the
+// status-bar / title-bar header decoration (see HeaderTextFor). Returning
+// Name here keeps two profiles with the same Label (e.g. both labelled
+// "localhost") visually distinct in the rail. Bug dbsavvy-2ox.
 func NewPerRowDecorationHook() func(conn *models.Connection) (icon, label, color string) {
 	return func(conn *models.Connection) (string, string, string) {
 		if conn == nil {
 			return "", "", ""
 		}
-		return conn.Icon, conn.Label, ResolveColor(conn.Color)
+		return conn.Icon, conn.Name, ResolveColor(conn.Color)
 	}
 }
 

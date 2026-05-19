@@ -472,8 +472,22 @@ func (g *Gui) wireWithDriver() error {
 	if g.registry.Prompt != nil {
 		g.registry.Prompt.SetState(&promptStateAdapter{
 			helper: g.promptHelp,
-			ctrl:   g.controllers.Prompt,
 		})
+		// Wire the per-scope ModeSetter so PromptContext.HandleFocus can
+		// flip the PROMPT scope into ModeCommand on push. Without this
+		// the master Editor's Passthrough branch would not delegate to
+		// gocui.DefaultEditor and paste / arrow-key edits would silently
+		// drop (dbsavvy-7k9, dbsavvy-f5t).
+		g.registry.Prompt.SetModes(g.modeStore)
+		// Plumb the read-and-clear surface so PromptController.Submit
+		// reads the typed value from the view's TextArea (production
+		// path) instead of an internal buffer the controller no longer
+		// maintains. The Reset hook also routes through here so
+		// helper.Prompt(initial=...) re-seeds the TextArea via the
+		// context.
+		if g.controllers.Prompt != nil {
+			g.controllers.Prompt.SetBufferReader(g.registry.Prompt)
+		}
 	}
 	if g.registry.Selection != nil {
 		g.registry.Selection.SetState(g.choiceHelp)
@@ -935,6 +949,19 @@ func (g *Gui) ChoiceHelperForTest() *ui.ChoiceHelper { return g.choiceHelp }
 // or nil before that pass ran. Test accessor used by m47.6 end-to-end
 // integration tests to quiesce on Active() between popup steps.
 func (g *Gui) PromptHelperForTest() *ui.PromptHelper { return g.promptHelp }
+
+// SeedPromptBufferForTest writes s into the PROMPT context's test-mode
+// buffer. Post-dbsavvy-fq9 the PROMPT view is editable: in production
+// gocui.DefaultEditor writes user keystrokes directly into v.TextArea
+// and PromptContext.Buffer() reads from there. Under the recorder
+// driver (integration tests) SetView returns nil, so the TextArea
+// branch is unreachable — tests use this helper to inject the typed
+// value before dispatching <cr> via FeedKey.
+func (g *Gui) SeedPromptBufferForTest(s string) {
+	if g.registry.Prompt != nil {
+		g.registry.Prompt.SetBuffer(s)
+	}
+}
 
 // QuitOnSignal asks the gocui MainLoop to exit cleanly by enqueueing a
 // gocui.ErrQuit-returning closure on the Update queue.

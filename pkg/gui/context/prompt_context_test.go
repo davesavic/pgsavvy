@@ -61,6 +61,11 @@ func TestPromptContext_RendersLabelAndBuffer(t *testing.T) {
 	drv := &captureDriver{}
 	state := &fakePromptState{active: true, label: "Connection name", buffer: "alice"}
 	c := newTestPrompt(state, drv)
+	// Post-dbsavvy-fq9 the typed buffer lives on the view's TextArea
+	// (or, when no view is plumbed in, the test-mode buf). The state's
+	// Buffer() field is no longer read by HandleRender — seed the test
+	// buffer explicitly here.
+	c.SetBuffer(state.buffer)
 	if err := c.HandleRender(); err != nil {
 		t.Fatalf("HandleRender: %v", err)
 	}
@@ -104,11 +109,15 @@ func TestPromptContext_NilGuiDriverNoPanic(t *testing.T) {
 
 // TestPromptContext_CursorXY_ActiveBuffer asserts the caret coordinates
 // match the position the layout pass should SetViewCursor to: the "> "
-// prefix is 2 chars on body line 2 (label=0, blank=1, "> <buf>"=2), so
-// x = 2 + len(buffer), y = 2. ok=true only when state is active.
+// prefix is 2 chars on body line N+1 (N label lines + 1 blank), so
+// x = 2 + len(buffer), y = labelLines + 1. The layout pass calls
+// SetLabelLineCount each frame; the test seeds it directly. ok=true
+// only when state is active.
 func TestPromptContext_CursorXY_ActiveBuffer(t *testing.T) {
 	state := &fakePromptState{active: true, label: "Connection name", buffer: "alice"}
 	c := newTestPrompt(state, &captureDriver{})
+	c.SetBuffer(state.buffer)
+	c.SetLabelLineCount(1)
 	x, y, ok := c.CursorXY()
 	if !ok {
 		t.Fatal("CursorXY ok=false for active state; want true")
@@ -124,6 +133,7 @@ func TestPromptContext_CursorXY_ActiveBuffer(t *testing.T) {
 func TestPromptContext_CursorXY_EmptyBuffer(t *testing.T) {
 	state := &fakePromptState{active: true, label: "Name", buffer: ""}
 	c := newTestPrompt(state, &captureDriver{})
+	c.SetLabelLineCount(1)
 	x, y, ok := c.CursorXY()
 	if !ok {
 		t.Fatal("CursorXY ok=false for active state with empty buffer; want true")

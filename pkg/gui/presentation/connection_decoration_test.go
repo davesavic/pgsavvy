@@ -155,10 +155,33 @@ func TestNewPerRowDecorationHook(t *testing.T) {
 		t.Fatalf("nil conn -> (%q,%q,%q), want all empty", icon, label, color)
 	}
 
-	conn := &models.Connection{Icon: "★", Label: "lbl", Color: "#abc"}
+	// The rail label is Profile.Name (not Profile.Label): the picker's
+	// purpose is to disambiguate profiles by their stable handle. A
+	// non-empty Profile.Label is ignored here; status-bar / title-bar
+	// rendering owns the Label-via-HeaderTextFor path. Bug dbsavvy-2ox.
+	conn := &models.Connection{Icon: "★", Name: "local-pg", Label: "lbl", Color: "#abc"}
 	icon, label, color = h(conn)
-	if icon != "★" || label != "lbl" || color != "#abc" {
-		t.Fatalf("got (%q,%q,%q), want (★,lbl,#abc)", icon, label, color)
+	if icon != "★" || label != "local-pg" || color != "#abc" {
+		t.Fatalf("got (%q,%q,%q), want (★,local-pg,#abc)", icon, label, color)
+	}
+}
+
+// TestNewPerRowDecorationHook_NameUsedWhenLabelMatchesHost guards the
+// dbsavvy-2ox regression: a profile saved with name='local-pg' and a
+// DSN-derived label='localhost' (the host portion of the DSN — typical
+// of an auto-populated or user-set label) must render as 'local-pg' in
+// the CONNECTIONS rail. Two profiles sharing a host but differing in
+// name remain visually distinguishable.
+func TestNewPerRowDecorationHook_NameUsedWhenLabelMatchesHost(t *testing.T) {
+	h := NewPerRowDecorationHook()
+	conn := &models.Connection{
+		Name:  "local-pg",
+		DSN:   "postgres://dbsavvy:dbsavvy@localhost:5432/dbsavvy_test",
+		Label: "localhost",
+	}
+	_, label, _ := h(conn)
+	if label != "local-pg" {
+		t.Fatalf("rail label = %q, want %q (must use Profile.Name, not Profile.Label)", label, "local-pg")
 	}
 }
 

@@ -1,6 +1,8 @@
 package controllers_test
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
@@ -128,6 +130,60 @@ func TestConnectionsControllerAddAllowedWithSelection(t *testing.T) {
 	}
 	if !b.ConnForm.called {
 		t.Fatal("WalkAdd MUST run even when the rail has a selected connection (AC)")
+	}
+}
+
+// AC dbsavvy-a07: a Connect error MUST NOT propagate up (which would
+// crash gocui's MainLoop). Instead the controller surfaces a toast and
+// returns nil.
+func TestConnectionsControllerConfirmConvertsConnectErrToToast(t *testing.T) {
+	b := newBag()
+	cur := &fakeCursor{}
+	b.ConnPicker.sel = &models.Connection{Name: "p", Driver: "pg"}
+	b.Connect.err = errors.New("session: interactive password prompt not supported in TUI mode; configure password_command, keyring, or pgpass (hint: password for localhost)")
+
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
+	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
+		if isSpecial(kb, types.KeyEnter) {
+			if err := invokeAction(reg, kb); err != nil {
+				t.Fatalf("confirm propagated Connect error (would crash MainLoop): %v", err)
+			}
+		}
+	}
+	if len(b.Toast.msgs) != 1 {
+		t.Fatalf("Toast.Show calls = %d; want 1", len(b.Toast.msgs))
+	}
+	if !strings.Contains(b.Toast.msgs[0].Msg, "interactive password prompt not supported") {
+		t.Fatalf("toast text = %q; want it to surface the prompt-not-supported error", b.Toast.msgs[0].Msg)
+	}
+}
+
+// AC dbsavvy-e9i: "already connected" MUST be a toast (or no-op),
+// never a crash. We assert the toast text is the friendlier short
+// rewrite (not the raw "data: …" string).
+func TestConnectionsControllerConfirmAlreadyConnectedIsToastNotCrash(t *testing.T) {
+	b := newBag()
+	cur := &fakeCursor{}
+	b.ConnPicker.sel = &models.Connection{Name: "p", Driver: "pg"}
+	b.Connect.err = errors.New("data: already connected (call Disconnect first)")
+
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
+	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
+		if isSpecial(kb, types.KeyEnter) {
+			if err := invokeAction(reg, kb); err != nil {
+				t.Fatalf("confirm propagated 'already connected' (would crash): %v", err)
+			}
+		}
+	}
+	if len(b.Toast.msgs) != 1 {
+		t.Fatalf("Toast.Show calls = %d; want 1", len(b.Toast.msgs))
+	}
+	if b.Toast.msgs[0].Msg != "already connected" {
+		t.Fatalf("toast text = %q; want the friendly 'already connected'", b.Toast.msgs[0].Msg)
 	}
 }
 

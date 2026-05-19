@@ -161,12 +161,16 @@ func (g *Gui) RunLayout(w, h int) error {
 			if setViewErr != nil && !freshView {
 				return setViewErr
 			}
-			// Editable views (COMMAND_LINE, QUERY_EDITOR) get their master
-			// Editor reattached to the live view-instance every frame the
-			// context is on the focus stack — each Push creates a fresh
-			// view (the prior was DeleteView'd here) and SetMasterEditor
-			// is idempotent.
-			if ed, ok := g.masterEditors[ctx.GetKey()]; ok && view != nil {
+			// Editable views (COMMAND_LINE, QUERY_EDITOR, PROMPT) get
+			// their master Editor reattached to the live view-instance
+			// every frame the context is on the focus stack — each Push
+			// creates a fresh view (the prior was DeleteView'd here) and
+			// SetMasterEditor is idempotent. The call is unconditional
+			// because the testfake recorder returns a nil view from
+			// SetView while still wanting the editor registered by name
+			// (FeedChord dispatches through it); production gocui's
+			// SetMasterEditor looks the view up by name internally.
+			if ed, ok := g.masterEditors[ctx.GetKey()]; ok {
 				_ = g.driver.SetMasterEditor(name, ed)
 			}
 			// COMMAND_LINE-specific frame / prompt / view-plumb. On fresh
@@ -221,16 +225,37 @@ func (g *Gui) RunLayout(w, h int) error {
 				}
 				_ = g.driver.SetViewCursor(name, cursorX, cursorY)
 			}
-			// PROMPT caret anchor (mirrors the COMMAND_LINE branch above):
-			// PromptContext has no editable TextArea, so the caret always
-			// sits at end-of-buffer on body line 2 (label=0, blank=1,
-			// "> <buf>"=2). CursorXY() returns (x, y, ok=false) when the
-			// helper is inactive or no state is wired — we skip
-			// SetViewCursor in that case so the caret doesn't land on a
-			// transitional empty popup. Duck-typed off the same shape the
-			// COMMAND_LINE branch uses for Buffer() so layout.go does not
-			// need to import pkg/gui/context concretely.
+			// PROMPT view-plumb + caret anchor. The PROMPT view is
+			// editable post-dbsavvy-fq9 — keystrokes flow through the
+			// master Editor's Passthrough branch into
+			// gocui.DefaultEditor which writes into v.TextArea. On fresh
+			// view creation we seed the TextArea with the helper's
+			// initial value (the user-visible re-prompt path uses the
+			// last typed input as the new initial). We also publish the
+			// view's inner width to PromptContext so its label wrapper
+			// fits any validator error onto multiple lines instead of
+			// truncating at the popup right edge (dbsavvy-8p5).
 			if ctx.GetKey() == types.PROMPT {
+				if cl, ok := ctx.(interface{ SetView(types.View) }); ok {
+					cl.SetView(view)
+				}
+				if freshView && view != nil && view.TextArea != nil {
+					if g.promptHelp != nil {
+						initial := g.promptHelp.Initial()
+						if initial != "" {
+							for _, r := range initial {
+								view.TextArea.TypeCharacter(string(r))
+							}
+							view.RenderTextArea()
+						}
+					}
+				}
+				if wsetter, ok := ctx.(interface{ SetLabelWrapWidth(int) }); ok && view != nil {
+					// view.InnerWidth() returns the writable column
+					// count (Width-2). Fall back to a sensible default
+					// when the view is nil (recorder driver path).
+					wsetter.SetLabelWrapWidth(view.InnerWidth())
+				}
 				if cur, ok := ctx.(interface{ CursorXY() (int, int, bool) }); ok {
 					if x, y, active := cur.CursorXY(); active {
 						_ = g.driver.SetViewCursor(name, x, y)
@@ -356,7 +381,20 @@ func (g *Gui) RunLayout(w, h int) error {
 // inner canvas inside the side rails / extras).
 func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int) (rect, bool) {
 	switch key {
-	case types.MENU, types.CONFIRMATION, types.PROMPT, types.SELECTION, types.SUGGESTIONS:
+	case types.PROMPT:
+		// PROMPT carries validator error messages on its second body
+		// line (e.g. "DSN: Connection string\nDSN contains an inline
+		// password; please remove it"). The 50% × 50% generic popup
+		// rect truncates these at the right edge (dbsavvy-8p5). Widen
+		// to 80% so the wrapped body fits in typical terminal widths;
+		// PromptContext word-wraps the label to popup width as a
+		// belt-and-braces guard for shorter terminals.
+		canvas, ok := dims["popup-overlay"]
+		if !ok {
+			return rect{}, false
+		}
+		return centeredRect(canvas, 0.8, 0.5), true
+	case types.MENU, types.CONFIRMATION, types.SELECTION, types.SUGGESTIONS:
 		canvas, ok := dims["popup-overlay"]
 		if !ok {
 			return rect{}, false

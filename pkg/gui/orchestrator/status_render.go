@@ -119,7 +119,13 @@ func RenderStatusLine(d StatusRenderDeps) {
 	if focused != nil {
 		key := focused.GetKey()
 		mode := d.KbRuntime.ModeStore.Get(key)
-		label = status.LabelForMode(mode, d.Tr, key.IsEditable())
+		// dbsavvy-ppr: always show the mode label, regardless of whether
+		// the focused context is editable. The status bar's mode banner
+		// is part of the always-on baseline (QA 1.1 / 3.1 / 5.1) so the
+		// user can see at a glance which mode keystrokes will dispatch
+		// against. Passing forceShowNormal=true keeps the "-- NORMAL --"
+		// label visible on side rails too.
+		label = status.LabelForMode(mode, d.Tr, true)
 
 		var trieSet *keys.TrieSet
 		if d.KbRuntime.Matcher != nil {

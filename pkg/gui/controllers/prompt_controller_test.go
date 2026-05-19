@@ -60,15 +60,15 @@ func dispatch(t *testing.T, reg *commands.Registry, id string) error {
 }
 
 func TestPromptControllerHasRequiredBindings(t *testing.T) {
+	// Post-dbsavvy-fq9 the PROMPT view is editable: printable runes,
+	// Backspace, arrow keys, and bracketed-paste are handled natively by
+	// gocui.DefaultEditor via the master Editor's Passthrough branch.
+	// The controller only owns <cr> (submit) and <esc> (cancel).
 	_, bag := newPromptBag()
 	ctrl := controllers.NewPromptController(nil, bag)
 	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
 
-	if len(kbs) < 4 {
-		t.Fatalf("expected ≥4 bindings, got %d", len(kbs))
-	}
-
-	hasEnter, hasEsc, hasBs, hasRune := false, false, false, false
+	hasEnter, hasEsc := false, false
 	for _, kb := range kbs {
 		if kb.Scope != types.PROMPT {
 			t.Errorf("binding scope = %q, want PROMPT", kb.Scope)
@@ -79,16 +79,9 @@ func TestPromptControllerHasRequiredBindings(t *testing.T) {
 		if isSpecial(kb, types.KeyEsc) {
 			hasEsc = true
 		}
-		if isSpecial(kb, types.KeyBs) {
-			hasBs = true
-		}
-		if isRune(kb, 'a') {
-			hasRune = true
-		}
 	}
-	if !hasEnter || !hasEsc || !hasBs || !hasRune {
-		t.Fatalf("missing bindings: enter=%v esc=%v bs=%v rune-a=%v",
-			hasEnter, hasEsc, hasBs, hasRune)
+	if !hasEnter || !hasEsc {
+		t.Fatalf("missing bindings: enter=%v esc=%v", hasEnter, hasEsc)
 	}
 }
 
@@ -98,14 +91,11 @@ func TestPromptControllerSubmitDeliversTypedValue(t *testing.T) {
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
-	// Simulate helper.Prompt with initial "" then type "hi".
-	_ = h.Prompt("name?", "", nil, nil)
-	if err := ctrl.InsertRune('h'); err != nil {
-		t.Fatalf("InsertRune h: %v", err)
-	}
-	if err := ctrl.InsertRune('i'); err != nil {
-		t.Fatalf("InsertRune i: %v", err)
-	}
+	// Simulate helper.Prompt with initial "hi"; in production the
+	// editable view's TextArea would absorb the user's typed runes, but
+	// in this unit test (no view) the test-mode buffer is seeded via
+	// Reset, which Prompt invokes through SetResetHandler.
+	_ = h.Prompt("name?", "hi", nil, nil)
 
 	if err := dispatch(t, reg, commands.PromptSubmit); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -123,8 +113,7 @@ func TestPromptControllerCancelInvokesHelperOnce(t *testing.T) {
 	ctrl := controllers.NewPromptController(nil, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
-	_ = h.Prompt("?", "x", nil, nil)
-	_ = ctrl.InsertRune('y')
+	_ = h.Prompt("?", "xy", nil, nil)
 
 	if err := dispatch(t, reg, commands.PromptCancel); err != nil {
 		t.Fatalf("cancel: %v", err)
@@ -134,40 +123,6 @@ func TestPromptControllerCancelInvokesHelperOnce(t *testing.T) {
 	}
 	if ctrl.Buffer() != "" {
 		t.Fatalf("buffer = %q after cancel, want empty", ctrl.Buffer())
-	}
-}
-
-func TestPromptControllerBackspaceOnEmptyIsNoOp(t *testing.T) {
-	h, bag := newPromptBag()
-	ctrl := controllers.NewPromptController(nil, bag)
-	reg := commands.NewRegistry()
-	ctrl.RegisterActions(reg)
-
-	if err := dispatch(t, reg, commands.PromptBackspace); err != nil {
-		t.Fatalf("backspace: %v", err)
-	}
-	if len(h.submitted) != 0 || h.cancelled != 0 {
-		t.Fatalf("backspace fired callbacks: submitted=%v cancelled=%d", h.submitted, h.cancelled)
-	}
-	if ctrl.Buffer() != "" {
-		t.Fatalf("buffer = %q after empty backspace, want empty", ctrl.Buffer())
-	}
-}
-
-func TestPromptControllerBackspaceRemovesLastRune(t *testing.T) {
-	_, bag := newPromptBag()
-	ctrl := controllers.NewPromptController(nil, bag)
-	reg := commands.NewRegistry()
-	ctrl.RegisterActions(reg)
-
-	_ = ctrl.InsertRune('a')
-	_ = ctrl.InsertRune('b')
-	_ = ctrl.InsertRune('c')
-	if err := dispatch(t, reg, commands.PromptBackspace); err != nil {
-		t.Fatalf("backspace: %v", err)
-	}
-	if got := ctrl.Buffer(); got != "ab" {
-		t.Fatalf("buffer = %q, want ab", got)
 	}
 }
 
@@ -186,30 +141,17 @@ func TestPromptControllerEmptyBufferSubmitsEmptyString(t *testing.T) {
 	}
 }
 
-func TestPromptControllerInsertNonASCIIRune(t *testing.T) {
-	_, bag := newPromptBag()
-	ctrl := controllers.NewPromptController(nil, bag)
-
-	if err := ctrl.InsertRune('ñ'); err != nil {
-		t.Fatalf("InsertRune: %v", err)
-	}
-	if got := ctrl.Buffer(); got != "ñ" {
-		t.Fatalf("buffer = %q, want ñ", got)
-	}
-}
-
 func TestPromptControllerSequentialPromptsReseedFromInitial(t *testing.T) {
 	h, bag := newPromptBag()
 	ctrl := controllers.NewPromptController(nil, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
-	// First prompt: initial "alpha", user types "X", submits.
-	_ = h.Prompt("first?", "alpha", nil, nil)
-	if got := ctrl.Buffer(); got != "alpha" {
-		t.Fatalf("after first Prompt buffer = %q, want alpha", got)
+	// First prompt: initial "alphaX", submits.
+	_ = h.Prompt("first?", "alphaX", nil, nil)
+	if got := ctrl.Buffer(); got != "alphaX" {
+		t.Fatalf("after first Prompt buffer = %q, want alphaX", got)
 	}
-	_ = ctrl.InsertRune('X')
 	if err := dispatch(t, reg, commands.PromptSubmit); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -247,8 +189,5 @@ func TestPromptControllerNilHelperHandlersAreNoOp(t *testing.T) {
 	}
 	if err := dispatch(t, reg, commands.PromptCancel); err != nil {
 		t.Fatalf("cancel nil helper: %v", err)
-	}
-	if err := dispatch(t, reg, commands.PromptBackspace); err != nil {
-		t.Fatalf("backspace nil helper: %v", err)
 	}
 }

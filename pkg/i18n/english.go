@@ -189,7 +189,7 @@ func EnglishTranslationSet() *TranslationSet {
 		DSNInlinePassword:              "DSN contains an inline password; please remove it and supply the password separately.",
 		KeyringPassphraseRequired:      "A keyring passphrase is required; please unlock the keyring from your desktop session.",
 
-		OptionsBarMore: "?: more",
+		OptionsBarMore: "? -> More",
 
 		ModeNormal:          "-- NORMAL --",
 		ModeInsert:          "-- INSERT --",

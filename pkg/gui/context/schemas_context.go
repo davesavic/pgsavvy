@@ -1,6 +1,12 @@
 package context
 
-import "sync/atomic"
+import (
+	"fmt"
+	"strings"
+	"sync/atomic"
+
+	"github.com/davesavic/dbsavvy/pkg/models"
+)
 
 // SchemasContext renders the schema list in the left-rail SCHEMAS slot.
 // The ShowHiddenMode flag is a transient view-state bit toggled by the
@@ -32,3 +38,51 @@ func (s *SchemasContext) GetShowHiddenMode() bool { return s.showHiddenMode.Load
 // SetShowHiddenMode flips the show-hidden toggle. Called by the schemas
 // helper after H/U/leader-H.
 func (s *SchemasContext) SetShowHiddenMode(v bool) { s.showHiddenMode.Store(v) }
+
+// HandleRender writes the schema-row text into the SCHEMAS view each
+// frame. Mirrors ConnectionsContext.HandleRender: cursor row gets a
+// "> " marker, other rows get "  " so columns line up. populateSchemasRail
+// (dbsavvy-855) feeds Items; without this method the rail stayed blank
+// after a successful connect (dbsavvy-5iv).
+func (s *SchemasContext) HandleRender() error {
+	deps := s.deps
+	viewName := s.GetViewName()
+	body := s.renderRows()
+	writeView(deps, func() error {
+		return deps.GuiDriver.SetContent(viewName, body)
+	})
+	return nil
+}
+
+func (s *SchemasContext) renderRows() string {
+	if len(s.items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, item := range s.items {
+		marker := "  "
+		if i == s.cursor {
+			marker = "> "
+		}
+		name := schemaName(item)
+		if name == "" {
+			fmt.Fprintf(&b, "%s%v\n", marker, item)
+			continue
+		}
+		fmt.Fprintf(&b, "%s%s\n", marker, name)
+	}
+	return b.String()
+}
+
+func schemaName(item any) string {
+	switch v := item.(type) {
+	case models.Schema:
+		return v.Name
+	case *models.Schema:
+		if v == nil {
+			return ""
+		}
+		return v.Name
+	}
+	return ""
+}
