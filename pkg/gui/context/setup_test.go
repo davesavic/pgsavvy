@@ -76,8 +76,9 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.LIMIT, types.DISPLAY_CONTEXT},
 		{types.WHICH_KEY, types.DISPLAY_CONTEXT},
 		{types.CHEATSHEET, types.DISPLAY_CONTEXT},
-		// 5 STUB.
-		{types.QUERY_EDITOR, types.STUB},
+		// 1 MAIN_CONTEXT (QUERY_EDITOR promoted by dbsavvy-wwd.1).
+		{types.QUERY_EDITOR, types.MAIN_CONTEXT},
+		// 4 STUB (TABLE_DATA_EDITOR + RESULT_GRID + PLAN + HISTORY).
 		{types.TABLE_DATA_EDITOR, types.STUB},
 		{types.RESULT_GRID, types.STUB},
 		{types.PLAN, types.STUB},
@@ -109,17 +110,17 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		types.EXTRAS_CONTEXT:  1,
 		types.GLOBAL_CONTEXT:  1,
 		types.DISPLAY_CONTEXT: 3,
-		types.STUB:            5,
+		// dbsavvy-wwd.1 promotes QUERY_EDITOR from STUB to a real
+		// MAIN_CONTEXT, so STUB drops 5→4 and MAIN_CONTEXT rises 0→1.
+		types.MAIN_CONTEXT: 1,
+		types.STUB:         4,
 	}
 	for k, w := range want {
 		if counts[k] != w {
 			t.Fatalf("kind %d count = %d, want %d (full = %+v)", k, counts[k], w, counts)
 		}
 	}
-	// Make sure nothing leaked into kinds we don't ship in T2.
-	if counts[types.MAIN_CONTEXT] != 0 {
-		t.Fatalf("MAIN_CONTEXT count = %d, want 0", counts[types.MAIN_CONTEXT])
-	}
+	// Make sure nothing leaked into a kind we still don't ship.
 	if counts[types.PERSISTENT_POPUP] != 0 {
 		t.Fatalf("PERSISTENT_POPUP count = %d, want 0", counts[types.PERSISTENT_POPUP])
 	}

@@ -55,6 +55,87 @@ func (s *serializedDriver) FeedKeySerialized(view string, key types.Key, mod typ
 	return s.RecorderGuiDriver.FeedKey(view, key, mod)
 }
 
+// assertPopupRendered drives RunLayout (mirroring the production
+// MainLoop) and asserts the named popup view was SetView'd this pass.
+//
+// Regression guard for the SELECTION popup vanishing because
+// layout.popupRectFor lacked a case branch for it: ChoiceHelper.Active()
+// returned true (the helper bookkeeping is correct), but the Tier-3
+// layout pass skipped SetView for "selection" and the user saw a focus
+// loss with no visible popup. Any future popup-context that ships a
+// helper-Active flag without a popupRectFor entry should fail this
+// check.
+//
+// RunLayout is called WITHOUT the serializedDriver mutex: HandleRender
+// fan-outs invoke driver.Update reentrantly, which would deadlock under
+// the non-reentrant mutex. Callers must invoke this only when the worker
+// goroutine is parked on its result channel (i.e. immediately after
+// eventually(Active) returns), so no concurrent driver.Update can race
+// the layout pass's stack walk.
+func assertPopupRendered(t *testing.T, g *orchestrator.Gui, rec *serializedDriver, viewName string) {
+	t.Helper()
+	if err := g.RunLayout(80, 24); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if !rec.HasSetView(viewName) {
+		t.Fatalf("popup %q helper reports Active() but RunLayout did not SetView the popup; "+
+			"likely missing popupRectFor case branch in pkg/gui/orchestrator/layout.go", viewName)
+	}
+}
+
+// assertPopupBodyContains drives RunLayout and asserts the named popup
+// view's buffer contains every substring in wants. Guards against the
+// SELECTION/PROMPT bodies being empty boxes — both contexts only paint
+// content when SetState has been wired to the live helper state.
+func assertPopupBodyContains(t *testing.T, g *orchestrator.Gui, rec *serializedDriver, viewName string, wants ...string) {
+	t.Helper()
+	if err := g.RunLayout(80, 24); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	body := rec.GetViewBuffer(viewName)
+	for _, w := range wants {
+		if !strings.Contains(body, w) {
+			t.Fatalf("popup %q body missing %q; body=%q", viewName, w, body)
+		}
+	}
+}
+
+// assertPromptCursorAt drives a layout pass and asserts the most-recent
+// SetViewCursor call for the PROMPT view lands at (wantX, wantY). The
+// PROMPT body is "<label>\n\n> <buffer>", so the caret belongs at the
+// end of the buffer on line 2: y=2, x=2+len(buffer). Mirrors the
+// COMMAND_LINE caret-anchoring guard.
+func assertPromptCursorAt(t *testing.T, g *orchestrator.Gui, rec *serializedDriver, wantX, wantY int) {
+	t.Helper()
+	if err := g.RunLayout(80, 24); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	calls := rec.AllSetViewCursorCalls()
+	for i := len(calls) - 1; i >= 0; i-- {
+		c := calls[i]
+		if c.View != string(types.PROMPT) {
+			continue
+		}
+		if c.X != wantX || c.Y != wantY {
+			t.Fatalf("SetViewCursor(%q) = (%d, %d), want (%d, %d)", c.View, c.X, c.Y, wantX, wantY)
+		}
+		return
+	}
+	t.Fatalf("no SetViewCursor call recorded for view %q; all calls=%+v", string(types.PROMPT), calls)
+}
+
+// assertCaretEnabled asserts the global gocui caret is on. SetViewCursor
+// positions the caret, but gocui's flush only renders the cursor when
+// g.Cursor (toggled via SetCaretEnabled) is true. Without this guard the
+// PROMPT popup writes its cursor position but no caret appears in the
+// real TUI.
+func assertCaretEnabled(t *testing.T, rec *serializedDriver, want bool) {
+	t.Helper()
+	if got := rec.CaretEnabled; got != want {
+		t.Fatalf("CaretEnabled = %v, want %v (log=%v)", got, want, rec.AllCaretEnabledLog())
+	}
+}
+
 // bootstrapAddConnGui wires a real *orchestrator.Gui against the recorder
 // driver with an in-memory connections.yml. No real Postgres / sqlite is
 // touched — HistoryProvider returns (nil, nil) so g.history stays nil and
@@ -147,6 +228,8 @@ func TestConnectionAdd_HappyPath_AppendsOneRow(t *testing.T) {
 		ch := g.ChoiceHelperForTest()
 		return ch != nil && ch.Active()
 	}, "selection popup did not become active")
+	assertPopupRendered(t, g, rec, string(types.SELECTION))
+	assertPopupBodyContains(t, g, rec, string(types.SELECTION), "Pick a driver", "postgres")
 	// Cursor defaults to 0; with one driver ("postgres") <cr> picks it.
 	feedSpecial(t, rec, string(types.SELECTION), gocui.KeyEnter)
 
@@ -155,7 +238,16 @@ func TestConnectionAdd_HappyPath_AppendsOneRow(t *testing.T) {
 		ph := g.PromptHelperForTest()
 		return ph != nil && ph.Active() && strings.Contains(ph.Label(), "Name")
 	}, "prompt popup (Name) did not activate")
+	assertPopupRendered(t, g, rec, string(types.PROMPT))
+	assertPopupBodyContains(t, g, rec, string(types.PROMPT), "Connection name")
+	assertCaretEnabled(t, rec, true)
 	typeString(t, rec, string(types.PROMPT), "alice")
+	// Caret anchor: after typing "alice" the layout pass should call
+	// SetViewCursor("prompt", 2+len("alice"), 2). The "> " prefix is two
+	// cells on body line 2 (label=0, blank=1, "> <buf>"=2). Without this
+	// the user sees the typed text but no caret showing where their next
+	// character will land (dbsavvy-m47.x / PROMPT caret bug).
+	assertPromptCursorAt(t, g, rec, 2+len("alice"), 2)
 	feedSpecial(t, rec, string(types.PROMPT), gocui.KeyEnter)
 
 	// Step 3: PROMPT popup (DSN). The label is re-pushed by the adapter

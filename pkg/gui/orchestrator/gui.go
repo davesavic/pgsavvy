@@ -354,6 +354,10 @@ func (g *Gui) wireWithDriver() error {
 		WhichKey:             g.whichkey,
 		WhichKeyRows:         whichKeyRows,
 		CheatsheetRender:     cheatsheetRender,
+		// dbsavvy-wwd.1: QueryEditorContext.HandleFocusLost calls
+		// matcher.Cancel via this minimal interface to keep
+		// pkg/gui/context decoupled from pkg/gui/keys.
+		Matcher: g.matcher,
 	}
 	g.registry = guicontext.NewContextTree(ctxDeps)
 
@@ -449,6 +453,33 @@ func (g *Gui) wireWithDriver() error {
 		OnWorker:              g.OnWorker,
 	}
 	g.controllers = controllers.AttachControllers(g.registry, g.deps.Common, helperBag)
+
+	// Wire the popup-body state readers now that both the helpers (which
+	// own label / active / choices / cursor) and the PromptController
+	// (which owns the typed line buffer) exist. Without this, RunLayout
+	// SetView's the popup rectangle but ctx.HandleRender's no-op leaves
+	// the popup body empty — the user sees an empty box.
+	if g.registry.Prompt != nil {
+		g.registry.Prompt.SetState(&promptStateAdapter{
+			helper: g.promptHelp,
+			ctrl:   g.controllers.Prompt,
+		})
+	}
+	if g.registry.Selection != nil {
+		g.registry.Selection.SetState(g.choiceHelp)
+	}
+	// Wire the gocui caret toggle through PromptHelper's lifecycle.
+	// SetViewCursor positions the caret each frame, but gocui's flush
+	// only calls Screen.ShowCursor when g.Cursor is true. Without this
+	// the PROMPT popup renders its body but no caret appears. Mirrors
+	// CommandLineCommandDeps.CaretToggler.
+	if g.promptHelp != nil {
+		g.promptHelp.SetCaretToggler(func(enabled bool) {
+			if g.driver != nil {
+				g.driver.SetCaretEnabled(enabled)
+			}
+		})
+	}
 
 	// Register every controller's action handlers with the registry.
 	g.controllers.RegisterActions(g.cmdRegistry)
@@ -601,8 +632,36 @@ func (g *Gui) wireWithDriver() error {
 	// Running. dbsavvy-66p.17.
 	installResultTabsSwapHook(g.tree, g.resultTabsH)
 
+	// Seed the CONNECTIONS rail from the on-disk profiles before the
+	// first render frame, so the rail is non-empty when its empty-state
+	// hook reports renderEmpty=false.
+	g.refreshConnectionsRail()
+
 	// Push the initial CONNECTIONS context.
 	return g.tree.Push(g.registry.Connections)
+}
+
+// refreshConnectionsRail re-loads the connection profiles from
+// Deps.ConnectionsProvider and pushes them into ConnectionsContext.items
+// so the next render frame draws the rows. Safe to call from any
+// goroutine — SideListContext.SetItems mutates an in-memory slice;
+// view writes happen in the next Layout pass.
+func (g *Gui) refreshConnectionsRail() {
+	if g.registry == nil || g.registry.Connections == nil {
+		return
+	}
+	provider := g.deps.ConnectionsProvider
+	if provider == nil {
+		g.registry.Connections.SetItems(nil)
+		return
+	}
+	profiles := provider()
+	items := make([]any, len(profiles))
+	for i := range profiles {
+		p := profiles[i]
+		items[i] = &p
+	}
+	g.registry.Connections.SetItems(items)
 }
 
 // installKeyDispatch wires the dispatch path:

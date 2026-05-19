@@ -29,9 +29,9 @@ func TestNaiveEditorMultiLineInsert(t *testing.T) {
 	for _, r := range []rune{'c', 'd'} {
 		ed.Edit(v, gocui.NewKeyRune(r))
 	}
-	got := Buffer(v)
+	got := ViewBuffer(v)
 	if got != "ab\ncd" {
-		t.Fatalf("Buffer after multi-line insert = %q, want %q", got, "ab\ncd")
+		t.Fatalf("ViewBuffer after multi-line insert = %q, want %q", got, "ab\ncd")
 	}
 }
 
@@ -43,8 +43,8 @@ func TestNaiveEditorNilViewIsNoOp(t *testing.T) {
 }
 
 func TestBufferAndLinesOnNilView(t *testing.T) {
-	if got := Buffer(nil); got != "" {
-		t.Fatalf("Buffer(nil) = %q, want \"\"", got)
+	if got := ViewBuffer(nil); got != "" {
+		t.Fatalf("ViewBuffer(nil) = %q, want \"\"", got)
 	}
 	if got := Lines(nil); got != nil {
 		t.Fatalf("Lines(nil) = %#v, want nil", got)

@@ -11,6 +11,7 @@ import (
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
@@ -213,10 +214,52 @@ func (c *connectionFormInvoker) WalkAdd(ctx context.Context) error {
 	}
 	worker(func(_ gocui.Task) error {
 		return c.helper.WalkAddConnection(ctx, c.prompter, func(_ models.Connection) {
-			// No-op: connection-list refresh after add is deferred.
+			if c.g == nil {
+				return
+			}
+			// Re-seed the CONNECTIONS rail on the UI thread so the new
+			// profile shows up in the list. The onComplete callback fires
+			// on the worker goroutine that owns WalkAddConnection; routing
+			// the slice swap through OnUIThread keeps it ordered with the
+			// next render frame.
+			c.g.OnUIThread(func() error {
+				c.g.refreshConnectionsRail()
+				return nil
+			})
 		})
 	})
 	return nil
+}
+
+// promptStateAdapter implements guicontext.PromptState by combining the
+// PromptHelper (which owns label + active) with the PromptController
+// (which owns the typed buffer). The two surfaces live in separate
+// packages and can't easily merge, so a small adapter is the cheapest
+// way to give PromptContext.HandleRender a single state reader.
+type promptStateAdapter struct {
+	helper *ui.PromptHelper
+	ctrl   *controllers.PromptController
+}
+
+func (a *promptStateAdapter) Active() bool {
+	if a == nil || a.helper == nil {
+		return false
+	}
+	return a.helper.Active()
+}
+
+func (a *promptStateAdapter) Label() string {
+	if a == nil || a.helper == nil {
+		return ""
+	}
+	return a.helper.Label()
+}
+
+func (a *promptStateAdapter) Buffer() string {
+	if a == nil || a.ctrl == nil {
+		return ""
+	}
+	return a.ctrl.Buffer()
 }
 
 // menuPushHelper bridges controllers.MenuPushHelper to the focus-stack

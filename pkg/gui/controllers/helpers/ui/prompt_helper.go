@@ -28,6 +28,12 @@ type PromptHelper struct {
 	onCancel func() error
 	active   bool
 	onReset  func(initial string)
+	// caretToggler flips the global gocui caret on Prompt and off on
+	// Submit / Cancel. Without this the layout pass's SetViewCursor sets
+	// the caret position but gocui's flush() skips Screen.ShowCursor
+	// when g.Cursor is false — the user sees a popup with no caret.
+	// Mirrors CommandLineCommandDeps.CaretToggler. Nil → no-op.
+	caretToggler func(enabled bool)
 }
 
 // NewPromptHelper builds a helper bound to the focus stack and the
@@ -47,6 +53,7 @@ func (h *PromptHelper) Prompt(label, initial string, onSubmit func(value string)
 	h.onCancel = onCancel
 	h.active = true
 	reset := h.onReset
+	caret := h.caretToggler
 	h.mu.Unlock()
 	// Notify the PromptController so it re-seeds its line buffer with
 	// the new initial value BEFORE the popup is pushed. Per
@@ -58,7 +65,16 @@ func (h *PromptHelper) Prompt(label, initial string, onSubmit func(value string)
 	if h.tree == nil || h.prompt == nil {
 		return nil
 	}
-	return h.tree.Push(h.prompt)
+	if err := h.tree.Push(h.prompt); err != nil {
+		return err
+	}
+	// Caret on AFTER Push so the focus is already on PROMPT — gocui
+	// draws the caret at the current view's cursor, so flipping caret
+	// while the previous rail is current would briefly draw there.
+	if caret != nil {
+		caret(true)
+	}
+	return nil
 }
 
 // SetResetHandler registers fn as the buffer-reset callback. Invoked
@@ -71,18 +87,37 @@ func (h *PromptHelper) SetResetHandler(fn func(initial string)) {
 	h.mu.Unlock()
 }
 
+// SetCaretToggler registers fn as the caret-on/off callback. Invoked
+// with true after Prompt activates the popup and with false after
+// Submit / Cancel pop it. Bootstrap wires this to
+// driver.SetCaretEnabled; nil is treated as a no-op so unit tests
+// without a driver keep compiling.
+func (h *PromptHelper) SetCaretToggler(fn func(enabled bool)) {
+	h.mu.Lock()
+	h.caretToggler = fn
+	h.mu.Unlock()
+}
+
 // Submit invokes onSubmit(value), pops the popup, and clears the helper
 // state. Driven by the PROMPT context's "<cr>" handler in a future
 // epic.
 func (h *PromptHelper) Submit(value string) error {
 	h.mu.Lock()
 	cb := h.onSubmit
+	caret := h.caretToggler
 	h.active = false
 	h.onSubmit = nil
 	h.onCancel = nil
 	h.mu.Unlock()
 	if h.tree != nil {
 		_ = h.tree.Pop()
+	}
+	// Caret off AFTER Pop — same ordering rationale as command.cancel:
+	// gocui draws the caret at the current view's cursor, so leaving
+	// caret=true pointed at a just-deleted PROMPT view would briefly
+	// draw at (0,0) of whatever rail is now current.
+	if caret != nil {
+		caret(false)
 	}
 	if cb == nil {
 		return nil
@@ -94,12 +129,16 @@ func (h *PromptHelper) Submit(value string) error {
 func (h *PromptHelper) Cancel() error {
 	h.mu.Lock()
 	cb := h.onCancel
+	caret := h.caretToggler
 	h.active = false
 	h.onSubmit = nil
 	h.onCancel = nil
 	h.mu.Unlock()
 	if h.tree != nil {
 		_ = h.tree.Pop()
+	}
+	if caret != nil {
+		caret(false)
 	}
 	if cb == nil {
 		return nil

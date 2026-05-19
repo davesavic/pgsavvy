@@ -217,6 +217,22 @@ func (g *Gui) RunLayout(w, h int) error {
 				}
 				_ = g.driver.SetViewCursor(name, cursorX, cursorY)
 			}
+			// PROMPT caret anchor (mirrors the COMMAND_LINE branch above):
+			// PromptContext has no editable TextArea, so the caret always
+			// sits at end-of-buffer on body line 2 (label=0, blank=1,
+			// "> <buf>"=2). CursorXY() returns (x, y, ok=false) when the
+			// helper is inactive or no state is wired — we skip
+			// SetViewCursor in that case so the caret doesn't land on a
+			// transitional empty popup. Duck-typed off the same shape the
+			// COMMAND_LINE branch uses for Buffer() so layout.go does not
+			// need to import pkg/gui/context concretely.
+			if ctx.GetKey() == types.PROMPT {
+				if cur, ok := ctx.(interface{ CursorXY() (int, int, bool) }); ok {
+					if x, y, active := cur.CursorXY(); active {
+						_ = g.driver.SetViewCursor(name, x, y)
+					}
+				}
+			}
 			_ = ctx.HandleRender()
 			_, _ = g.driver.SetViewOnTop(name)
 			onStack[ctx.GetKey()] = struct{}{}
@@ -324,7 +340,7 @@ func (g *Gui) RunLayout(w, h int) error {
 // inner canvas inside the side rails / extras).
 func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int) (rect, bool) {
 	switch key {
-	case types.MENU, types.CONFIRMATION, types.PROMPT, types.SUGGESTIONS:
+	case types.MENU, types.CONFIRMATION, types.PROMPT, types.SELECTION, types.SUGGESTIONS:
 		canvas, ok := dims["popup-overlay"]
 		if !ok {
 			return rect{}, false

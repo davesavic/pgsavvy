@@ -41,19 +41,22 @@ type Position struct {
 	Col  int
 }
 
-// Buffer returns the full text content of v's TextArea, or "" when v
-// or its TextArea is nil.
-func Buffer(v *gocui.View) string {
+// ViewBuffer returns the full text content of v's TextArea, or "" when
+// v or its TextArea is nil. Renamed from Buffer in dbsavvy-wwd.1 so the
+// `editor.Buffer` identifier can be the canonical vim-buffer type (the
+// shell shipped in wwd.1, filled by wwd.2). wwd.4 deletes this helper
+// entirely along with NaiveEditor.
+func ViewBuffer(v *gocui.View) string {
 	if v == nil || v.TextArea == nil {
 		return ""
 	}
 	return v.TextArea.GetContent()
 }
 
-// Lines returns Buffer(v) split on '\n'. A nil view returns nil so
+// Lines returns ViewBuffer(v) split on '\n'. A nil view returns nil so
 // callers can range over the empty result safely.
 func Lines(v *gocui.View) []string {
-	buf := Buffer(v)
+	buf := ViewBuffer(v)
 	if buf == "" {
 		return nil
 	}

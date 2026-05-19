@@ -37,9 +37,14 @@ type ContextTree struct {
 	WhichKey   *WhichKeyContext
 	Cheatsheet *CheatsheetContext
 
-	// Stub instances for deferred Contexts; Layout filters these by
-	// Kind == STUB so they never reach SetView.
-	QueryEditor     *StubContext
+	// QueryEditor is the live top-right MAIN_CONTEXT pane that hosts
+	// the vim-style SQL editor (epic dbsavvy-wwd). Promoted from
+	// StubContext in dbsavvy-wwd.1; subsequent child tasks fill in
+	// the *editor.Buffer / *editor.RepeatStore behind it.
+	QueryEditor *QueryEditorContext
+
+	// Stub instances for the remaining deferred Contexts; Layout
+	// filters these by Kind == STUB so they never reach SetView.
 	TableDataEditor *StubContext
 	ResultGrid      *StubContext
 	Plan            *StubContext
@@ -138,11 +143,22 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			Kind:     types.DISPLAY_CONTEXT,
 		}), deps, deps.CheatsheetRender),
 
-		// Stubs for the five deferred Contexts. ViewName matches the
-		// eventual layout slot so naming stays consistent when the real
-		// Context lands; Kind == STUB keeps Layout from creating the
-		// view.
-		QueryEditor:     NewStubContext(types.QUERY_EDITOR, string(types.QUERY_EDITOR)),
+		// QUERY_EDITOR is the live top-right MAIN_CONTEXT pane (epic
+		// dbsavvy-wwd). wwd.1 promotes it from stub to a real
+		// BaseContext-embedding type; modes + matcher come straight
+		// from the dependency bag so focus/blur can drive the
+		// ModeStore + Matcher.Cancel contract documented on the
+		// type. ViewName matches the layout slot.
+		QueryEditor: NewQueryEditorContext(NewBaseContext(BaseContextOpts{
+			Key:      types.QUERY_EDITOR,
+			ViewName: string(types.QUERY_EDITOR),
+			Kind:     types.MAIN_CONTEXT,
+		}), deps, deps.ModeStore, deps.Matcher),
+
+		// Stubs for the four remaining deferred Contexts. ViewName
+		// matches the eventual layout slot so naming stays
+		// consistent when the real Context lands; Kind == STUB
+		// keeps Layout from creating the view.
 		TableDataEditor: NewStubContext(types.TABLE_DATA_EDITOR, string(types.TABLE_DATA_EDITOR)),
 		ResultGrid:      NewStubContext(types.RESULT_GRID, string(types.RESULT_GRID)),
 		Plan:            NewStubContext(types.PLAN, string(types.PLAN)),

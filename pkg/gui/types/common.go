@@ -111,6 +111,13 @@ type ContextTreeDeps struct {
 	// not import pkg/gui/keys (the canonical *keys.ModeStore satisfies
 	// it structurally). Nil-safe: contexts must nil-check.
 	ModeStore ModeSetter
+
+	// Matcher is the runtime keys-matcher surface contexts need on
+	// focus transitions to drop any half-built chord pending. Only the
+	// Cancel hook is exposed here so pkg/gui/context stays decoupled
+	// from pkg/gui/keys. *keys.Matcher satisfies it structurally via
+	// its existing Cancel() method. Nil-safe: contexts must nil-check.
+	Matcher MatcherCanceller
 }
 
 // ModeSetter is the minimal surface contexts use to flip / reset modal
@@ -119,4 +126,12 @@ type ContextTreeDeps struct {
 type ModeSetter interface {
 	Set(ctx ContextKey, mode Mode)
 	Reset(ctx ContextKey)
+}
+
+// MatcherCanceller is the minimal surface contexts use to drop the
+// matcher's pending chord / which-key state on focus transitions.
+// *keys.Matcher satisfies this via its existing Cancel() method; tests
+// substitute a fake.
+type MatcherCanceller interface {
+	Cancel()
 }
