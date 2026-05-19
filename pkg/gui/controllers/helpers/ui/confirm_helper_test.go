@@ -108,6 +108,7 @@ func (m *minimalCtx) GetKey() types.ContextKey                      { return m.k
 func (m *minimalCtx) GetViewName() string                           { return string(m.key) }
 func (m *minimalCtx) GetWindowName() string                         { return string(m.key) }
 func (m *minimalCtx) GetKind() types.ContextKind                    { return m.kind }
+func (m *minimalCtx) GetTitle() string                              { return "" }
 func (m *minimalCtx) HandleFocus(_ types.OnFocusOpts) error         { return nil }
 func (m *minimalCtx) HandleFocusLost(_ types.OnFocusLostOpts) error { return nil }
 func (m *minimalCtx) HandleRender() error                           { return nil }

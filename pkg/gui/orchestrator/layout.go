@@ -106,6 +106,7 @@ func (g *Gui) RunLayout(w, h int) error {
 		}
 		if v != nil {
 			rails[name] = v
+			v.Title = ctx.GetTitle()
 		}
 		_ = ctx.HandleRender()
 	}

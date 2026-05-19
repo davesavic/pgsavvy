@@ -45,6 +45,7 @@ func (f *fakeHolder) GetKey() types.ContextKey                                  
 func (f *fakeHolder) GetViewName() string                                       { return string(types.COMMAND_LINE) }
 func (f *fakeHolder) GetWindowName() string                                     { return string(types.COMMAND_LINE) }
 func (f *fakeHolder) GetKind() types.ContextKind                                { return types.TEMPORARY_POPUP }
+func (f *fakeHolder) GetTitle() string                                          { return "" }
 func (f *fakeHolder) HandleFocus(types.OnFocusOpts) error                       { return nil }
 func (f *fakeHolder) HandleFocusLost(types.OnFocusLostOpts) error               { return nil }
 func (f *fakeHolder) HandleRender() error                                       { return nil }

@@ -105,6 +105,10 @@ type IBaseContext interface {
 	GetViewName() string
 	GetWindowName() string
 	GetKind() ContextKind
+	// GetTitle returns the heading rendered in the view's frame top edge.
+	// Empty string suppresses the title — used by frameless / popup
+	// contexts that do not want a heading.
+	GetTitle() string
 
 	HandleFocus(opts OnFocusOpts) error
 	HandleFocusLost(opts OnFocusLostOpts) error

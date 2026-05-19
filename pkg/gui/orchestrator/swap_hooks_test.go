@@ -21,6 +21,7 @@ func (f *fakeSwapHookContext) GetKey() types.ContextKey              { return f.
 func (f *fakeSwapHookContext) GetViewName() string                   { return string(f.key) }
 func (f *fakeSwapHookContext) GetWindowName() string                 { return string(f.key) }
 func (f *fakeSwapHookContext) GetKind() types.ContextKind            { return f.kind }
+func (f *fakeSwapHookContext) GetTitle() string                      { return "" }
 func (f *fakeSwapHookContext) HandleFocus(_ types.OnFocusOpts) error { return nil }
 func (f *fakeSwapHookContext) HandleFocusLost(_ types.OnFocusLostOpts) error {
 	return nil

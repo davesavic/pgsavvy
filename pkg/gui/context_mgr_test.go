@@ -22,6 +22,7 @@ func (f *fakeContext) GetKey() types.ContextKey   { return f.key }
 func (f *fakeContext) GetViewName() string        { return string(f.key) }
 func (f *fakeContext) GetWindowName() string      { return string(f.key) }
 func (f *fakeContext) GetKind() types.ContextKind { return f.kind }
+func (f *fakeContext) GetTitle() string           { return "" }
 func (f *fakeContext) HandleFocus(_ types.OnFocusOpts) error {
 	if f.focusLog != nil {
 		*f.focusLog = append(*f.focusLog, f.key)

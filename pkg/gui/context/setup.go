@@ -62,26 +62,31 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			Key:      types.CONNECTIONS,
 			ViewName: string(types.CONNECTIONS),
 			Kind:     types.SIDE_CONTEXT,
+			Title:    "Connections",
 		}), deps),
 		Schemas: NewSchemasContext(NewBaseContext(BaseContextOpts{
 			Key:      types.SCHEMAS,
 			ViewName: string(types.SCHEMAS),
 			Kind:     types.SIDE_CONTEXT,
+			Title:    "Schemas",
 		}), deps),
 		Tables: NewTablesContext(NewBaseContext(BaseContextOpts{
 			Key:      types.TABLES,
 			ViewName: string(types.TABLES),
 			Kind:     types.SIDE_CONTEXT,
+			Title:    "Tables",
 		}), deps),
 		Columns: NewColumnsContext(NewBaseContext(BaseContextOpts{
 			Key:      types.COLUMNS,
 			ViewName: string(types.COLUMNS),
 			Kind:     types.SIDE_CONTEXT,
+			Title:    "Columns",
 		}), deps),
 		Indexes: NewIndexesContext(NewBaseContext(BaseContextOpts{
 			Key:      types.INDEXES,
 			ViewName: string(types.INDEXES),
 			Kind:     types.SIDE_CONTEXT,
+			Title:    "Indexes",
 		}), deps),
 
 		// Popups (Kind = TEMPORARY_POPUP).
@@ -121,6 +126,7 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			Key:      types.LOG,
 			ViewName: string(types.LOG),
 			Kind:     types.EXTRAS_CONTEXT,
+			Title:    "Command log",
 		}), deps),
 		Global: NewGlobalContext(NewBaseContext(BaseContextOpts{
 			Key:      types.GLOBAL,

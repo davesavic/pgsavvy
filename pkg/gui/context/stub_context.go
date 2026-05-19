@@ -41,6 +41,10 @@ func (s *StubContext) GetWindowName() string { return s.viewName }
 // GetKind always returns types.STUB.
 func (s *StubContext) GetKind() types.ContextKind { return types.STUB }
 
+// GetTitle returns the empty string for stubs — Layout filters them out
+// of the SetView pass, so the value is never read.
+func (s *StubContext) GetTitle() string { return "" }
+
 // HandleFocus is a no-op for stubs.
 func (s *StubContext) HandleFocus(_ types.OnFocusOpts) error { return nil }
 

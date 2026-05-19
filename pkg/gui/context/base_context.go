@@ -22,6 +22,7 @@ type BaseContext struct {
 	viewName   string
 	windowName string
 	kind       types.ContextKind
+	title      string
 
 	// keybindingsFns are appended in attachment order. GetKeybindings
 	// iterates the slice in order and concatenates; later entries
@@ -37,6 +38,9 @@ type BaseContextOpts struct {
 	ViewName   string
 	WindowName string
 	Kind       types.ContextKind
+	// Title is the heading rendered in the view's frame. Defaults to
+	// the empty string, which suppresses the title.
+	Title string
 }
 
 // NewBaseContext constructs a BaseContext from the supplied options.
@@ -51,6 +55,7 @@ func NewBaseContext(opts BaseContextOpts) BaseContext {
 		viewName:   opts.ViewName,
 		windowName: opts.WindowName,
 		kind:       opts.Kind,
+		title:      opts.Title,
 	}
 }
 
@@ -66,6 +71,11 @@ func (b *BaseContext) GetWindowName() string { return b.windowName }
 
 // GetKind returns the Context's kind classification.
 func (b *BaseContext) GetKind() types.ContextKind { return b.kind }
+
+// GetTitle returns the heading rendered in the view's frame top edge.
+// Empty string suppresses the title (matches gocui's default behavior
+// when Title is unset).
+func (b *BaseContext) GetTitle() string { return b.title }
 
 // HandleFocus is the default no-op focus hook. Concrete contexts override.
 func (b *BaseContext) HandleFocus(_ types.OnFocusOpts) error { return nil }

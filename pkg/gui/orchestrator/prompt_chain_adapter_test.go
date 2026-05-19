@@ -28,6 +28,7 @@ func (m *minimalRootCtx) GetKey() types.ContextKey                      { return
 func (m *minimalRootCtx) GetViewName() string                           { return string(m.key) }
 func (m *minimalRootCtx) GetWindowName() string                         { return string(m.key) }
 func (m *minimalRootCtx) GetKind() types.ContextKind                    { return m.kind }
+func (m *minimalRootCtx) GetTitle() string                              { return "" }
 func (m *minimalRootCtx) HandleFocus(_ types.OnFocusOpts) error         { return nil }
 func (m *minimalRootCtx) HandleFocusLost(_ types.OnFocusLostOpts) error { return nil }
 func (m *minimalRootCtx) HandleRender() error                           { return nil }
