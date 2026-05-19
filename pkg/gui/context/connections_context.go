@@ -51,6 +51,7 @@ func (c *ConnectionsContext) HandleRender() error {
 	writeView(deps, func() error {
 		return deps.GuiDriver.SetContent(viewName, rows)
 	})
+	scrollSideRailIntoView(deps, viewName, c.cursor)
 	return nil
 }
 

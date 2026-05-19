@@ -20,3 +20,25 @@ func writeView(deps depsAlias, fn func() error) {
 	}
 	deps.GuiDriver.Update(fn)
 }
+
+// scrollSideRailIntoView pins the gocui view origin (oy) so the row at
+// `cursor` stays inside the visible viewport. Side rails render their
+// full item slice into the buffer via SetContent and use a "> " text
+// marker for selection; gocui's own scroll origin is independent of
+// that marker, so without this call the cursor scrolls off-screen as
+// soon as the list overflows while the scrollbar still reads as
+// top-pinned (dbsavvy-f50). Nil-safe when GuiDriver is unset or the
+// view isn't yet realized (unit tests, pre-layout).
+func scrollSideRailIntoView(deps depsAlias, viewName string, cursor int) {
+	if deps.GuiDriver == nil {
+		return
+	}
+	deps.GuiDriver.Update(func() error {
+		v, err := deps.GuiDriver.ViewByName(viewName)
+		if err != nil || v == nil {
+			return nil
+		}
+		v.FocusPoint(0, cursor, true)
+		return nil
+	})
+}

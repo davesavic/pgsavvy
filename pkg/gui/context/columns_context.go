@@ -28,6 +28,7 @@ func (c *ColumnsContext) HandleRender() error {
 	writeView(deps, func() error {
 		return deps.GuiDriver.SetContent(viewName, body)
 	})
+	scrollSideRailIntoView(deps, viewName, c.cursor)
 	return nil
 }
 

@@ -33,6 +33,7 @@ func (t *TablesContext) HandleRender() error {
 	writeView(deps, func() error {
 		return deps.GuiDriver.SetContent(viewName, body)
 	})
+	scrollSideRailIntoView(deps, viewName, t.cursor)
 	return nil
 }
 
