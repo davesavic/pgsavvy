@@ -80,6 +80,24 @@ func TestRegisteredBindingsCoverEveryACKey(t *testing.T) {
 	}
 }
 
+func TestNewGuiHasChoiceHelperWired(t *testing.T) {
+	g, _ := buildTestGui(t)
+	if g.ChoiceHelperForTest() == nil {
+		t.Fatal("choiceHelp is nil after wireWithDriver — ChainedPrompter adapter would be missing a picker")
+	}
+}
+
+func TestNewGuiContextRegistryHasSelection(t *testing.T) {
+	g, _ := buildTestGui(t)
+	reg := g.Registry()
+	if reg == nil {
+		t.Fatal("Registry() is nil after wireWithDriver")
+	}
+	if reg.Selection == nil {
+		t.Fatal("Registry().Selection is nil — m47.2 SelectionContext not wired")
+	}
+}
+
 func TestCloseIdempotent(t *testing.T) {
 	g, _ := buildTestGui(t)
 	if err := g.Close(); err != nil {

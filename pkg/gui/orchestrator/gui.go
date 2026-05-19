@@ -125,6 +125,7 @@ type Gui struct {
 	controllers *controllers.Controllers
 	confirmHelp *ui.ConfirmHelper
 	promptHelp  *ui.PromptHelper
+	choiceHelp  *ui.ChoiceHelper
 	toastHelp   *ui.ToastHelper
 	tablesHelp  *ui.TablesHelper
 	tipHelp     *ui.TipHelper
@@ -359,6 +360,7 @@ func (g *Gui) wireWithDriver() error {
 	// UI helpers that need the driver / registry.
 	g.confirmHelp = ui.NewConfirmHelper(g.tree, g.registry.Confirmation)
 	g.promptHelp = ui.NewPromptHelper(g.tree, g.registry.Prompt)
+	g.choiceHelp = ui.NewChoiceHelper(g.tree, g.registry.Selection)
 	g.toastHelp = ui.NewToastHelper(g.driver)
 	g.tablesHelp = ui.NewTablesHelper(g.toastHelp, tr)
 	g.tipHelp = ui.NewTipHelper(g.tree, g.deps.Store)
@@ -424,7 +426,7 @@ func (g *Gui) wireWithDriver() error {
 		ActiveConnection: &activeConnAdapter{g: g},
 		Connect:          &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history},
 		SchemasHelper:    g.schemasHelper,
-		ConnectionForm:   &connectionFormInvoker{g: g, helper: g.formHelper, prompter: stubPrompter{}},
+		ConnectionForm:   &connectionFormInvoker{g: g, helper: g.formHelper, prompter: newChainedPrompterAdapter(g.promptHelp, g.choiceHelp, g.OnUIThread)},
 		Confirm:          g.confirmHelp,
 		Prompt:           g.promptHelp,
 		Toast:            g.toastHelp,
@@ -813,6 +815,11 @@ func (g *Gui) HelperBagForTest() controllers.HelperBag {
 // ActiveSQLSessionForTest returns the SQLSession the most recent Connect
 // installed, or nil. Test-only.
 func (g *Gui) ActiveSQLSessionForTest() *session.SQLSession { return g.activeSQLSession }
+
+// ChoiceHelperForTest returns the ChoiceHelper wired by wireWithDriver,
+// or nil before that pass ran. Test accessor used by m47.4 wiring tests
+// to confirm the ChainedPrompter adapter has a real picker behind it.
+func (g *Gui) ChoiceHelperForTest() *ui.ChoiceHelper { return g.choiceHelp }
 
 // QuitOnSignal asks the gocui MainLoop to exit cleanly by enqueueing a
 // gocui.ErrQuit-returning closure on the Update queue.

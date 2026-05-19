@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/gui"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -181,23 +183,40 @@ func capsForDriver(ctx context.Context, name string) (drivers.Capabilities, erro
 }
 
 // connectionFormInvoker is the controllers.ConnectionFormInvoker facade.
-// The real WalkAddConnection takes a ChainedPrompter; the bootstrap
-// supplies a no-op prompter for this epic so the binding registers but
-// the production walk surfaces a fail-fast error if invoked. A later
-// epic wires the PromptHelper to drive ChainedPrompter properly.
+// It dispatches the (synchronous, blocking) WalkAddConnection call onto a
+// worker goroutine via g.OnWorker so the action handler running on the
+// gocui MainLoop returns immediately; the ChainedPrompter adapter then
+// re-enters the UI lane via OnUIThread to push popups while the worker
+// stays parked on a result channel (see prompt_chain_adapter.go).
 type connectionFormInvoker struct {
 	g        *Gui
 	helper   *data.ConnectionFormHelper
 	prompter data.ChainedPrompter
+
+	// onWorker can be overridden in tests to assert that WalkAdd
+	// schedules its body via the worker lane rather than running it
+	// inline on the caller goroutine. Production wiring leaves this nil
+	// and the receiver falls back to c.g.OnWorker.
+	onWorker func(fn func(gocui.Task) error)
 }
 
 func (c *connectionFormInvoker) WalkAdd(ctx context.Context) error {
 	if c == nil || c.helper == nil {
 		return nil
 	}
-	return c.helper.WalkAddConnection(ctx, c.prompter, func(_ models.Connection) {
-		// No-op: connection-list refresh after add is deferred to E5.
+	worker := c.onWorker
+	if worker == nil {
+		if c.g == nil {
+			return nil
+		}
+		worker = c.g.OnWorker
+	}
+	worker(func(_ gocui.Task) error {
+		return c.helper.WalkAddConnection(ctx, c.prompter, func(_ models.Connection) {
+			// No-op: connection-list refresh after add is deferred.
+		})
 	})
+	return nil
 }
 
 // menuPushHelper bridges controllers.MenuPushHelper to the focus-stack
@@ -224,20 +243,6 @@ func (m *menuPushHelper) PopMenu() error {
 	return nil
 }
 
-// stubPrompter is a ChainedPrompter implementation that fails fast. The
-// real prompter (PromptHelper-driven) lands in a later epic; until then
-// invoking the `a` binding in production surfaces this error so the
-// wiring failure is visible rather than silent.
-type stubPrompter struct{}
-
-func (stubPrompter) PromptString(_ context.Context, _, _ string, _ func(string) error) (string, error) {
-	return "", data.PromptCanceledErr()
-}
-
-func (stubPrompter) PromptChoice(_ context.Context, _, _ string, _ []string) (string, error) {
-	return "", data.PromptCanceledErr()
-}
-
 // Compile-time assertions: all adapters satisfy their target interfaces.
 var (
 	_ controllers.ConnectionPicker      = connectionsPickerAdapter{}
@@ -247,5 +252,4 @@ var (
 	_ controllers.ConnectInvoker        = (*connectInvoker)(nil)
 	_ controllers.ConnectionFormInvoker = (*connectionFormInvoker)(nil)
 	_ controllers.MenuPushHelper        = (*menuPushHelper)(nil)
-	_ data.ChainedPrompter              = stubPrompter{}
 )
