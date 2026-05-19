@@ -66,6 +66,48 @@ func TestRunLayoutCreatesQueryEditorMainPane(t *testing.T) {
 	}
 }
 
+// TestRunLayoutEnablesCaretOnQueryEditorFocus regresses the "cursor
+// invisible in query panel" bug. gocui's flush only calls
+// Screen.ShowCursor when g.Cursor (toggled via SetCaretEnabled) is true,
+// so even though syncViewToBuffer / Tier 1.4 position the view cursor,
+// no caret is drawn unless the layout enables it when QUERY_EDITOR is
+// focused. PROMPT and COMMAND_LINE manage their own caret via helpers
+// (they're TEMPORARY_POPUPs on top of the tiled stack); only the tiled
+// QUERY_EDITOR needs the layout-level toggle.
+func TestRunLayoutEnablesCaretOnQueryEditorFocus(t *testing.T) {
+	g, rec := buildTestGui(t)
+	qec := g.Registry().QueryEditor
+	if qec == nil {
+		t.Fatal("registry.QueryEditor is nil")
+	}
+	if err := g.ContextTree().Push(qec); err != nil {
+		t.Fatalf("Push(queryEditor): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if !rec.CaretEnabled {
+		t.Fatalf("CaretEnabled = false after focusing QUERY_EDITOR; caret would not render. log=%v", rec.AllCaretEnabledLog())
+	}
+}
+
+// TestRunLayoutDisablesCaretOnSideRailFocus locks the inverse: when a
+// SIDE_CONTEXT (here CONNECTIONS, the bootstrap top) is focused, the
+// layout must keep the gocui caret off so a stale enabled state from a
+// prior QUERY_EDITOR frame doesn't bleed a cursor onto the rail list.
+func TestRunLayoutDisablesCaretOnSideRailFocus(t *testing.T) {
+	g, rec := buildTestGui(t)
+	// Pre-stain the caret state so the assertion catches "layout never
+	// touched it" as a failure too.
+	rec.SetCaretEnabled(true)
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if rec.CaretEnabled {
+		t.Fatalf("CaretEnabled = true with CONNECTIONS focused; layout must clear caret on side-rail focus. log=%v", rec.AllCaretEnabledLog())
+	}
+}
+
 func TestRunLayoutCreatesSideRails(t *testing.T) {
 	g, rec := buildTestGui(t)
 	if err := g.RunLayout(120, 40); err != nil {

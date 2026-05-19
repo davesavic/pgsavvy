@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/gdamore/tcell/v3"
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
@@ -133,12 +134,20 @@ func (g *Gui) RunLayout(w, h int) error {
 			if v != nil {
 				rails[name] = v
 				v.Title = qec.GetTitle()
-				if freshView {
-					if buf := qec.Buffer(); buf != nil {
-						v.SetContent(buf.String())
-						cur := buf.CursorPos()
-						v.SetCursor(cur.Col, cur.Line)
-					}
+				// Sync the view from the canonical *editor.Buffer every
+				// frame, not just on fresh creation. Normal-mode motions
+				// (h/j/k/l, w/e/b, gg/G, …) in VimEditorController mutate
+				// buf.Cursor without ever touching v, so without this the
+				// rendered caret stays pinned to its last Insert-mode
+				// position. FocusPoint also pins v.oy so the cursor row
+				// stays inside the viewport — typing or motion past the
+				// view's bottom would otherwise scroll the cursor off
+				// screen with the origin stuck at 0 (mirrors the side-rail
+				// scrollSideRailIntoView fix from dbsavvy-f50).
+				if buf := qec.Buffer(); buf != nil {
+					v.SetContent(buf.String())
+					cur := buf.CursorPos()
+					v.FocusPoint(cur.Col, cur.Line, true)
 				}
 			}
 			// Attach the VimEditor master editor every frame.
@@ -412,6 +421,32 @@ func (g *Gui) RunLayout(w, h int) error {
 		if top := g.tree.Current(); top != nil {
 			if vn := top.GetViewName(); vn != "" {
 				_, _ = g.driver.SetCurrentView(vn)
+			}
+			// Caret toggle for tiled contexts (SIDE/MAIN/EXTRAS): gocui's
+			// flush only renders the terminal caret when g.Cursor is true,
+			// so even though Tier 1.4 / syncViewToBuffer position the view
+			// cursor every frame, the user sees no caret unless we enable
+			// it here. QUERY_EDITOR is the only tiled editable context;
+			// every other tile (side rails / messages) must keep the caret
+			// off so the cursor doesn't bleed onto rail rows. PROMPT and
+			// COMMAND_LINE are TEMPORARY_POPUPs and own their own caret
+			// state via PromptHelper / CommandLineCommandDeps — we leave
+			// their kinds untouched so those togglers stay authoritative.
+			switch top.GetKind() {
+			case types.SIDE_CONTEXT, types.MAIN_CONTEXT, types.EXTRAS_CONTEXT:
+				enabled := top.GetKey() == types.QUERY_EDITOR
+				g.driver.SetCaretEnabled(enabled)
+				// Force a steady (non-blinking) block cursor while the
+				// QUERY_EDITOR has focus. The terminal default is a
+				// blinking bar/block on most emulators, which is
+				// distracting in the editor. tcell deduplicates the
+				// escape sequence internally — safe to call every frame.
+				// Per-mode shapes (normal/visual/insert distinction) is
+				// future work; for now any focused editor frame stays
+				// steady-block.
+				if enabled && gocui.Screen != nil {
+					gocui.Screen.SetCursorStyle(tcell.CursorStyleSteadyBlock)
+				}
 			}
 		}
 	}
