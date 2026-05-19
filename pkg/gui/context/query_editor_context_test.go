@@ -182,3 +182,114 @@ func TestQueryEditorContext_RegisteredInTreeAsMainContext(t *testing.T) {
 		t.Fatalf("ByKey(QUERY_EDITOR) = %v, want a Context with that key", got)
 	}
 }
+
+func TestQueryEditorContext_SetBuffer(t *testing.T) {
+	ctx, _, _ := newTestQueryEditorContext()
+	original := ctx.Buffer()
+	replacement := original // any non-nil pointer; can't easily import editor here without cycle
+	ctx.SetBuffer(replacement)
+	if ctx.Buffer() != replacement {
+		t.Error("SetBuffer did not install the replacement buffer")
+	}
+	// nil replacement is rejected silently — Buffer() stays non-nil.
+	ctx.SetBuffer(nil)
+	if ctx.Buffer() == nil {
+		t.Error("SetBuffer(nil) overwrote the live buffer; want unchanged")
+	}
+}
+
+func TestQueryEditorContext_HandleFocusLost_DirtyDispatchesSave(t *testing.T) {
+	var sawConnID, sawUUID, sawContent string
+	var calls int
+	deps := depsAlias{
+		SaveBuffer: func(connID, uuid, content string) {
+			calls++
+			sawConnID = connID
+			sawUUID = uuid
+			sawContent = content
+		},
+	}
+	modes := newFakeModeStore()
+	matcher := &fakeMatcherCanceller{}
+	ctx := NewQueryEditorContext(
+		NewBaseContext(BaseContextOpts{
+			Key:      types.QUERY_EDITOR,
+			ViewName: string(types.QUERY_EDITOR),
+			Kind:     types.MAIN_CONTEXT,
+		}),
+		deps,
+		modes,
+		matcher,
+	)
+	buf := ctx.Buffer()
+	buf.ConnectionID = "conn-1"
+	buf.UUID = "deadbeef-1234-4567-89ab-cdef01234567"
+	buf.Dirty = true
+	if err := ctx.HandleFocusLost(types.OnFocusLostOpts{}); err != nil {
+		t.Fatalf("HandleFocusLost: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("SaveBuffer hook invoked %d times; want 1", calls)
+	}
+	if sawConnID != "conn-1" || sawUUID != "deadbeef-1234-4567-89ab-cdef01234567" {
+		t.Errorf("hook args = (%q, %q, %q); want (\"conn-1\", uuid, content)", sawConnID, sawUUID, sawContent)
+	}
+	if buf.Dirty {
+		t.Error("Dirty stayed true after focus-loss save dispatch")
+	}
+}
+
+func TestQueryEditorContext_HandleFocusLost_NotDirtyIsNoOp(t *testing.T) {
+	var calls int
+	deps := depsAlias{
+		SaveBuffer: func(_, _, _ string) { calls++ },
+	}
+	modes := newFakeModeStore()
+	matcher := &fakeMatcherCanceller{}
+	ctx := NewQueryEditorContext(
+		NewBaseContext(BaseContextOpts{
+			Key:      types.QUERY_EDITOR,
+			ViewName: string(types.QUERY_EDITOR),
+			Kind:     types.MAIN_CONTEXT,
+		}),
+		deps,
+		modes,
+		matcher,
+	)
+	buf := ctx.Buffer()
+	buf.ConnectionID = "conn-1"
+	buf.UUID = "deadbeef-1234-4567-89ab-cdef01234567"
+	buf.Dirty = false
+	if err := ctx.HandleFocusLost(types.OnFocusLostOpts{}); err != nil {
+		t.Fatalf("HandleFocusLost: %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("SaveBuffer hook invoked %d times on clean buffer; want 0", calls)
+	}
+}
+
+func TestQueryEditorContext_HandleFocusLost_EmptyConnIDSkipsSave(t *testing.T) {
+	var calls int
+	deps := depsAlias{
+		SaveBuffer: func(_, _, _ string) { calls++ },
+	}
+	ctx := NewQueryEditorContext(
+		NewBaseContext(BaseContextOpts{
+			Key:      types.QUERY_EDITOR,
+			ViewName: string(types.QUERY_EDITOR),
+			Kind:     types.MAIN_CONTEXT,
+		}),
+		deps,
+		newFakeModeStore(),
+		&fakeMatcherCanceller{},
+	)
+	buf := ctx.Buffer()
+	buf.Dirty = true
+	// Leave ConnectionID + UUID empty.
+	if err := ctx.HandleFocusLost(types.OnFocusLostOpts{}); err != nil {
+		t.Fatalf("HandleFocusLost: %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("SaveBuffer hook invoked %d times with empty connID; want 0", calls)
+	}
+}

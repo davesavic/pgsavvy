@@ -3,11 +3,54 @@ package common
 import (
 	"errors"
 	"os"
+	"regexp"
 	"testing"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
+
+var uuidV4Pat = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
+
+func TestAppState_GetOrCreateBufferUUID_EmptyConnID(t *testing.T) {
+	a := &AppState{}
+	got := a.GetOrCreateBufferUUID("")
+	require.Equal(t, "", got)
+	require.Nil(t, a.LastBufferUUIDs)
+}
+
+func TestAppState_GetOrCreateBufferUUID_GeneratesUUIDv4(t *testing.T) {
+	a := &AppState{}
+	got := a.GetOrCreateBufferUUID("postgres-prod")
+	require.NotEmpty(t, got)
+	require.True(t, uuidV4Pat.MatchString(got), "%q is not a canonical UUIDv4", got)
+}
+
+func TestAppState_GetOrCreateBufferUUID_Idempotent(t *testing.T) {
+	a := &AppState{}
+	first := a.GetOrCreateBufferUUID("postgres-prod")
+	second := a.GetOrCreateBufferUUID("postgres-prod")
+	require.Equal(t, first, second)
+	require.Len(t, a.LastBufferUUIDs, 1)
+}
+
+func TestAppState_GetOrCreateBufferUUID_DistinctConnIDs(t *testing.T) {
+	a := &AppState{}
+	one := a.GetOrCreateBufferUUID("conn-a")
+	two := a.GetOrCreateBufferUUID("conn-b")
+	require.NotEqual(t, one, two)
+	require.Len(t, a.LastBufferUUIDs, 2)
+}
+
+func TestAppState_GetOrCreateBufferUUID_KeyIsSHA256Prefix(t *testing.T) {
+	a := &AppState{}
+	connID := "postgres-prod"
+	a.GetOrCreateBufferUUID(connID)
+	expectedKey := connIDHashKey(connID)
+	require.Len(t, expectedKey, 16, "sha256 prefix key must be 16 hex chars")
+	_, ok := a.LastBufferUUIDs[expectedKey]
+	require.True(t, ok, "map key %q missing from LastBufferUUIDs %v", expectedKey, a.LastBufferUUIDs)
+}
 
 // failRenameFs wraps an afero.Fs and forces Rename to fail. All other
 // operations (MkdirAll, OpenFile, Stat, Remove, WriteFile, etc.) delegate to

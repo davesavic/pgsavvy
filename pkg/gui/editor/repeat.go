@@ -22,3 +22,29 @@ type RepeatStore struct {
 	LastRegister     rune
 	PendingOpID      string
 }
+
+// Capture records a completed operator dispatch so wwd.9's `.` action
+// can replay it. The (motionID, textObjectID) pair is mutually exclusive
+// — at most one is non-empty depending on which handler completed the
+// op-pending state machine. Empty opID is rejected (defensive: callers
+// should never Capture without a real operator to repeat).
+func (r *RepeatStore) Capture(opID, motionID, textObjectID string, count int, reg rune) {
+	if r == nil || opID == "" {
+		return
+	}
+	r.LastOpID = opID
+	r.LastMotionID = motionID
+	r.LastTextObjectID = textObjectID
+	r.LastCount = count
+	r.LastRegister = reg
+}
+
+// Replay returns the most-recently-captured operator + count + register
+// triple. ok=false when no operator has been captured yet (LastOpID
+// empty), so the `.` handler can no-op silently.
+func (r *RepeatStore) Replay() (opID string, count int, reg rune, ok bool) {
+	if r == nil || r.LastOpID == "" {
+		return "", 0, 0, false
+	}
+	return r.LastOpID, r.LastCount, r.LastRegister, true
+}

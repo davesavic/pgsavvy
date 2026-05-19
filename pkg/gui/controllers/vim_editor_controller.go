@@ -190,6 +190,12 @@ const editorHistoryModeMask = types.ModeNormal
 // contents) is deferred.
 const pasteModeMask = types.ModeNormal
 
+// editorRepeatModeMask is the Mode mask under which `.` fires — Normal
+// only. Replaying a captured operator from Visual or OperatorPending
+// would conflict with the live state machine, so wwd.9 restricts replay
+// to the Normal-mode entry point.
+const editorRepeatModeMask = types.ModeNormal
+
 // operatorSpec ties a shorthand to an operator action ID + its apply
 // function. apply receives a Range and returns the captured register
 // text (empty for non-yanking operators like gU/gu/>/<). isChange flips
@@ -386,6 +392,17 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			ActionID:    commands.EditorPaste,
 			Description: "paste after cursor",
 			Tag:         "Edit",
+		})
+	}
+	// Repeat binding: `.` Normal-only (wwd.9).
+	if seq, err := keys.SequenceFromShorthand("."); err == nil {
+		out = append(out, &types.ChordBinding{
+			Sequence:    seq,
+			Mode:        editorRepeatModeMask,
+			Scope:       types.QUERY_EDITOR,
+			ActionID:    commands.EditorRepeat,
+			Description: "repeat last edit",
+			Tag:         "Edit history",
 		})
 	}
 	for _, s := range operators {
@@ -624,6 +641,137 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 		Tag:         "Edit",
 		Handler:     c.pasteHandler(),
 	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.EditorRepeat,
+		Description: "Repeat last edit (vim `.`)",
+		Tag:         "Edit history",
+		Handler:     c.repeatHandler(),
+	})
+}
+
+// findMotionSpec returns the motionSpec whose actionID matches id, or
+// (motionSpec{}, false) when no motion owns the ID. Used by the `.`
+// handler to look up the original motion function and re-resolve its
+// range from the CURRENT cursor (vim semantics).
+func (c *VimEditorController) findMotionSpec(id string) (motionSpec, bool) {
+	if id == "" {
+		return motionSpec{}, false
+	}
+	for _, s := range c.motionSpecs() {
+		if s.actionID == id {
+			return s, true
+		}
+	}
+	return motionSpec{}, false
+}
+
+// findTextObjectSpec returns the textObjectSpec whose actionID matches
+// id, or (textObjectSpec{}, false). iB / aB and i{ / a{ alias to the
+// same actionID; the first match is sufficient for replay.
+func (c *VimEditorController) findTextObjectSpec(id string) (textObjectSpec, bool) {
+	if id == "" {
+		return textObjectSpec{}, false
+	}
+	for _, s := range c.textObjectSpecs() {
+		if s.actionID == id {
+			return s, true
+		}
+	}
+	return textObjectSpec{}, false
+}
+
+// repeatHandler returns the `.` action handler. Re-resolves the captured
+// motion or text-object range from the CURRENT cursor and re-invokes the
+// stashed operator via the same applyPending pathway used during the
+// original dispatch. Empty RepeatStore is a silent no-op.
+//
+// Re-resolution semantics: `.` is NOT a snapshotted replay — vim re-runs
+// the motion/text-object against the current cursor so a sequence like
+// `dap` (delete a paragraph), j (next line), `.` (delete a paragraph)
+// deletes the paragraph the cursor is in NOW, not the one originally
+// targeted.
+//
+// Operator dispatch reuses applyPending so the `c` (change) mode flip
+// to Insert and register/clipboard wiring stay consistent between the
+// first dispatch and the replay.
+func (c *VimEditorController) repeatHandler() commands.Handler {
+	return func(ec commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil || c.qec == nil {
+			return nil
+		}
+		rep := c.qec.Repeat()
+		if rep == nil {
+			return nil
+		}
+		opID, count, reg, ok := rep.Replay()
+		if !ok {
+			return nil
+		}
+		// Re-resolve the range from the CURRENT cursor.
+		from := buf.CursorPos()
+		var (
+			r            editor.Range
+			ranged       bool
+			rebuiltMotID string
+			rebuiltTxtID string
+		)
+		switch {
+		case rep.LastMotionID != "":
+			ms, ok := c.findMotionSpec(rep.LastMotionID)
+			if !ok {
+				return nil
+			}
+			rebuiltMotID = ms.actionID
+			replayCount := count
+			if replayCount == 0 {
+				replayCount = 1
+			}
+			newPos, motionOK := ms.fn(buf, from, replayCount)
+			if !motionOK {
+				// At boundary — operate over zero-length range so the
+				// applyPending state machine still resets cleanly.
+				r = editor.Range{Start: from, End: from}
+			} else {
+				r = editor.Range{Start: from, End: newPos}
+			}
+			ranged = true
+		case rep.LastTextObjectID != "":
+			tos, ok := c.findTextObjectSpec(rep.LastTextObjectID)
+			if !ok {
+				return nil
+			}
+			rebuiltTxtID = tos.actionID
+			rng, resolved := tos.fn(buf, from)
+			if !resolved {
+				return nil
+			}
+			r = rng
+			ranged = true
+		}
+		// Stash PendingOpID so applyPending dispatches via the normal
+		// operator pathway. Synthesize an ExecCtx with the replayed
+		// count + register so register-aware operators (y/d/c) write
+		// to the same effective register the original dispatch used.
+		rep.PendingOpID = opID
+		replayCtx := commands.ExecCtx{
+			Count:    count,
+			Register: reg,
+			Mode:     types.ModeOperatorPending,
+			Scope:    ec.Scope,
+		}
+		if !ranged {
+			// Doubled-shortcut replay (dd/yy/cc/>>/<<). Run the same
+			// linewise dispatch path the original handler used.
+			spec, specOK := c.findOperatorSpec(opID)
+			if !specOK {
+				rep.PendingOpID = ""
+				return nil
+			}
+			return c.operatorDoubledApply(buf, spec, replayCtx)
+		}
+		return c.applyPending(buf, r, rebuiltMotID, rebuiltTxtID, replayCtx)
+	}
 }
 
 // visualEnterHandler returns the Handler closure for v / V / <c-v>.

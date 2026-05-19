@@ -75,6 +75,7 @@ func Start(build *BuildInfo, args []string) error {
 	log.SetLevel(logrus.WarnLevel)
 
 	c := common.NewCommon(log, tr, cfg, &common.AppState{}, fs)
+	c.StateDir = stateDir
 
 	connectionsProvider := func() []models.Connection {
 		conns, _ := config.LoadConnections(fs, connectionsPath)

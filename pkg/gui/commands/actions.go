@@ -221,6 +221,14 @@ const (
 	EditorUndo = "editor.undo"
 	EditorRedo = "editor.redo"
 
+	// EditorRepeat — owned by VimEditorController (dbsavvy-wwd.9). Bound
+	// to `.` in Normal mode. The handler reads the most-recently-captured
+	// operator from QueryEditorContext.RepeatStore, re-resolves the
+	// motion or text-object range from the CURRENT cursor position
+	// (vim semantics — `.` is not a pure replay of the original range),
+	// and re-invokes the operator via the same applyPending pathway.
+	EditorRepeat = "editor.repeat"
+
 	// Visual / Selection family — owned by VimEditorController (dbsavvy-wwd.7).
 	// Bindings: `v` / `V` / `<c-v>` enter char/line/block visual from Normal;
 	// `<esc>` exits to Normal. SelectionExtend is the action ID covering
@@ -347,5 +355,6 @@ func AllActionIDs() []string {
 		ModeNormal,
 		EditorUndo,
 		EditorRedo,
+		EditorRepeat,
 	}
 }

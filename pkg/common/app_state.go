@@ -1,6 +1,9 @@
 package common
 
 import (
+	cryptorand "crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	iofs "io/fs"
@@ -67,4 +70,50 @@ func (a *AppState) Load(fs afero.Fs, path string) error {
 		return err
 	}
 	return yaml.Unmarshal(data, a)
+}
+
+// connIDHashKey returns the 16-hex-char key used to index LastBufferUUIDs:
+// hex(sha256(connID)[:8]). Empty connID returns "".
+func connIDHashKey(connID string) string {
+	if connID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(connID))
+	return hex.EncodeToString(sum[:8])
+}
+
+// GetOrCreateBufferUUID returns the persistent buffer UUID associated with
+// connID, generating a fresh v4 UUID and storing it on first call. Empty
+// connID returns "" without mutating state. Caller is responsible for
+// serialising mutation (AppState is not safe for concurrent writes).
+func (a *AppState) GetOrCreateBufferUUID(connID string) string {
+	key := connIDHashKey(connID)
+	if key == "" {
+		return ""
+	}
+	if a.LastBufferUUIDs == nil {
+		a.LastBufferUUIDs = make(map[string]string)
+	}
+	if u, ok := a.LastBufferUUIDs[key]; ok && u != "" {
+		return u
+	}
+	u, err := newUUIDv4()
+	if err != nil {
+		return ""
+	}
+	a.LastBufferUUIDs[key] = u
+	return u
+}
+
+// newUUIDv4 generates a canonical RFC 4122 v4 UUID using crypto/rand. The
+// version (0x40) and variant (0x80) bits are set on bytes 6 and 8.
+func newUUIDv4() (string, error) {
+	var b [16]byte
+	if _, err := cryptorand.Read(b[:]); err != nil {
+		return "", err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }

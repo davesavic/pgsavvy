@@ -65,6 +65,20 @@ func NewQueryEditorContext(
 // editor pane. Always non-nil. wwd.2 fills the body of *editor.Buffer.
 func (c *QueryEditorContext) Buffer() *editor.Buffer { return c.buf }
 
+// SetBuffer replaces the live *editor.Buffer with the supplied one.
+// connectInvoker calls this post-Connect after LoadBuffer hydrates a
+// persisted buffer from disk; SetBuffer keeps the per-context
+// RepeatStore intact so a `.`-repeat survives a buffer reload (vim
+// semantics — the last-edit replay is buffer-local but not file-local).
+// A nil buf is rejected silently so callers can pass LoadBuffer's
+// fallback unconditionally.
+func (c *QueryEditorContext) SetBuffer(buf *editor.Buffer) {
+	if buf == nil {
+		return
+	}
+	c.buf = buf
+}
+
 // Repeat returns the per-context `.`-repeat state. Always non-nil.
 // wwd.9 fills the body of *editor.RepeatStore.
 func (c *QueryEditorContext) Repeat() *editor.RepeatStore { return c.repeat }
@@ -133,14 +147,35 @@ func (c *QueryEditorContext) SetMode(m types.Mode) {
 	c.modes.Set(types.QUERY_EDITOR, m)
 }
 
-// saveBufferIfDirty is the wwd.9 call-site stub. wwd.9 fills it with
-// the OnWorker(SaveBuffer) dispatch keyed off c.buf.Dirty; until then
-// it is a no-op returning nil so HandleFocusLost's contract holds.
+// saveBufferIfDirty dispatches a buffer save via deps.SaveBuffer when
+// the live *editor.Buffer is Dirty. The buffer's String() snapshot is
+// taken on the MainLoop (cheap — Buffer.String holds RLock for the
+// duration) so the worker the orchestrator-bound SaveBuffer dispatches
+// receives an immutable string and never touches Buffer state. After
+// dispatch the Dirty flag is cleared so a focus-blur cycle without an
+// intervening edit doesn't re-fire the save.
+//
+// Missing inputs (nil buf, nil hook, empty ConnectionID/UUID) make the
+// call a silent no-op so test wiring without a Common.Fs / StateDir
+// stays correct.
 func (c *QueryEditorContext) saveBufferIfDirty() error {
 	if c.buf == nil {
 		return nil
 	}
-	// wwd.9: if c.buf.Dirty { deps.OnWorker(SaveBuffer(c.buf.LinesCopy())) }
+	if !c.buf.Dirty {
+		return nil
+	}
+	if c.deps.SaveBuffer == nil {
+		return nil
+	}
+	connID := c.buf.ConnectionID
+	uuid := c.buf.UUID
+	if connID == "" || uuid == "" {
+		return nil
+	}
+	content := c.buf.String()
+	c.deps.SaveBuffer(connID, uuid, content)
+	c.buf.Dirty = false
 	return nil
 }
 

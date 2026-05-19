@@ -361,6 +361,13 @@ func (g *Gui) wireWithDriver() error {
 		// matcher.Cancel via this minimal interface to keep
 		// pkg/gui/context decoupled from pkg/gui/keys.
 		Matcher: g.matcher,
+		// dbsavvy-wwd.9: buffer-save dispatch closure. The MainLoop
+		// caller already supplies a string snapshot (Buffer.String
+		// takes RLock); the worker just writes raw `.sql` text to disk.
+		// Common.Fs / Common.StateDir may be nil/empty in test wiring —
+		// the closure short-circuits via SaveBufferLines' empty-path
+		// guard so this stays safe for fixtures.
+		SaveBuffer: g.saveQueryEditorBuffer,
 	}
 	g.registry = guicontext.NewContextTree(ctxDeps)
 
@@ -868,6 +875,33 @@ func (g *Gui) Close() error {
 // state dir. Used when Deps.HistoryProvider is nil (production wiring).
 func defaultHistoryProvider() (*query.History, error) {
 	return query.New(filepath.Join(env.GetStateDir(), "history.sqlite"))
+}
+
+// saveQueryEditorBuffer is the SaveBuffer closure bound into ContextTreeDeps
+// for dbsavvy-wwd.9. The MainLoop caller (QueryEditorContext.HandleFocusLost)
+// has already taken Buffer.String() under the buffer's RLock, so content is
+// an immutable string. The closure dispatches the actual fs write to a
+// worker so HandleFocusLost returns immediately and the gocui MainLoop is
+// never blocked on disk I/O. Empty Common / Fs / StateDir is a silent
+// no-op via SaveBufferLines' empty-path guard, which keeps test wiring
+// (no Common at construction) safe.
+func (g *Gui) saveQueryEditorBuffer(connID, uuid, content string) {
+	if g == nil || g.deps.Common == nil {
+		return
+	}
+	fs := g.deps.Common.Fs
+	stateDir := g.deps.Common.StateDir
+	if fs == nil || stateDir == "" || connID == "" || uuid == "" {
+		return
+	}
+	g.OnWorker(func(_ gocui.Task) error {
+		if err := editor.SaveBufferContent(fs, stateDir, connID, uuid, content); err != nil {
+			if g.deps.Common.Log != nil {
+				g.deps.Common.Log.Warnf("gui: save query-editor buffer: %v", err)
+			}
+		}
+		return nil
+	})
 }
 
 // HelperBagForTest returns the HelperBag the most recent wireWithDriver

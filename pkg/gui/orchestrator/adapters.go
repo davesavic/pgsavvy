@@ -12,6 +12,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
@@ -137,7 +138,49 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 		}
 		return err
 	}
+	c.hydrateQueryEditorBuffer(profile)
 	return nil
+}
+
+// hydrateQueryEditorBuffer is the dbsavvy-wwd.9 post-Connect hook. It
+// resolves (or generates) the persistent buffer UUID for the active
+// connection via AppState.LastBufferUUIDs, loads the on-disk buffer (or
+// a fresh empty Buffer when missing), and injects it into the live
+// QueryEditorContext. Missing Common / registry / profile are silent
+// no-ops so test wiring without persistence still passes through.
+//
+// The hydration runs on the Connect goroutine (worker, via
+// onWorkerConnect) so the disk read does not block the MainLoop.
+// SetBuffer itself is mutex-free on QueryEditorContext but the swapped
+// *editor.Buffer's own sync.RWMutex serialises subsequent edits.
+func (c *connectInvoker) hydrateQueryEditorBuffer(profile *models.Connection) {
+	if c == nil || c.g == nil || profile == nil {
+		return
+	}
+	if c.g.deps.Common == nil {
+		return
+	}
+	common := c.g.deps.Common
+	if c.g.registry == nil || c.g.registry.QueryEditor == nil {
+		return
+	}
+	appState := common.AppState
+	if appState == nil {
+		return
+	}
+	connID := profile.Name
+	uuid := appState.GetOrCreateBufferUUID(connID)
+	if uuid == "" {
+		return
+	}
+	buf, err := editor.LoadBuffer(common.Fs, common.StateDir, connID, uuid)
+	if err != nil {
+		if common.Log != nil {
+			common.Log.Warnf("gui: load query-editor buffer for %q: %v", connID, err)
+		}
+		return
+	}
+	c.g.registry.QueryEditor.SetBuffer(buf)
 }
 
 // wireQueryRuntime acquires the second drivers.Session, derives the

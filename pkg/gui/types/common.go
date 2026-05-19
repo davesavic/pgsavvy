@@ -118,6 +118,15 @@ type ContextTreeDeps struct {
 	// from pkg/gui/keys. *keys.Matcher satisfies it structurally via
 	// its existing Cancel() method. Nil-safe: contexts must nil-check.
 	Matcher MatcherCanceller
+
+	// SaveBuffer is invoked by QueryEditorContext.HandleFocusLost when
+	// the live *editor.Buffer is Dirty. The orchestrator binds this to
+	// a closure that captures Common.Fs + Common.StateDir + g.OnWorker;
+	// the closure copies the content string on the MainLoop (cheap —
+	// the caller already grabs buf.String() under RLock) and writes
+	// the raw `.sql` file from a worker goroutine. Nil-safe: a nil
+	// hook is a no-op so HandleFocusLost stays correct in tests.
+	SaveBuffer func(connID, uuid, content string)
 }
 
 // ModeSetter is the minimal surface contexts use to flip / reset modal

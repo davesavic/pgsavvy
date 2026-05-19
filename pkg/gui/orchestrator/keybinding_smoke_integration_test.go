@@ -51,6 +51,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
@@ -246,7 +247,84 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 	})
 
 	t.Run("step04_chord_gg_in_query_editor_scope", func(t *testing.T) {
-		t.Skip("QUERY_EDITOR is STUB; controller for query-editor chords not yet shipped (E6 — dbsavvy-66p)")
+		// dbsavvy-wwd.9: QUERY_EDITOR is now the live MAIN_CONTEXT
+		// (promoted from STUB by wwd.1) and the VimEditorController
+		// publishes its motion bindings under QUERY_EDITOR scope. The
+		// `gg` binding maps to motion.buffer_start and its registered
+		// handler must move Buffer.Cursor to (0,0) regardless of where
+		// the cursor started.
+		//
+		// We verify the binding exists in the controller's published
+		// bindings (mode-mask aware — motion bindings carry the
+		// Normal | OperatorPending | Visual* composite mask), then
+		// pull the handler from the command registry and invoke it
+		// directly. End-to-end Matcher.Dispatch routing of `g`+`g` is
+		// covered by pkg/gui/keys/matcher_test.go's interior /
+		// ambiguous-leaf tests; this step is the wiring assertion.
+		ctrl := s.g.Controllers().VimEditor
+		if ctrl == nil {
+			t.Fatal("controllers.VimEditor is nil; query-editor not wired")
+		}
+		bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
+		var ggFound bool
+		var ggMode types.Mode
+		for _, kb := range bindings {
+			if kb == nil || kb.ActionID != commands.MotionBufferStart {
+				continue
+			}
+			if kb.Scope != types.QUERY_EDITOR {
+				t.Errorf("motion.buffer_start scope = %s, want QUERY_EDITOR", kb.Scope)
+			}
+			if len(kb.Sequence) != 2 || kb.Sequence[0].Code != 'g' || kb.Sequence[1].Code != 'g' {
+				t.Errorf("motion.buffer_start sequence = %+v, want ['g','g']", kb.Sequence)
+			}
+			ggFound = true
+			ggMode = kb.Mode
+			break
+		}
+		if !ggFound {
+			t.Fatal("VimEditorController did not publish a binding for motion.buffer_start")
+		}
+		// The published mask must at least cover the in-flight modes the
+		// editor uses (Visual / OperatorPending) — Normal mode is implicit
+		// via the controller's Normal-mode dispatch path. The mask is the
+		// wwd contract; bit-level fan-out is the keys-package contract.
+		if ggMode&types.ModeOperatorPending == 0 {
+			t.Errorf("motion.buffer_start mode mask = %v; expected ModeOperatorPending bit", ggMode)
+		}
+		// Pull the handler from the command registry and exercise it.
+		cmd, ok := s.g.CommandRegistry().Get(commands.MotionBufferStart)
+		if !ok || cmd == nil || cmd.Handler == nil {
+			t.Fatalf("registry missing handler for %s", commands.MotionBufferStart)
+		}
+		qec := s.g.Registry().QueryEditor
+		if qec == nil {
+			t.Fatal("registry.QueryEditor is nil after wireWithDriver")
+		}
+		buf := qec.Buffer()
+		if buf == nil {
+			t.Fatal("qec.Buffer() is nil")
+		}
+		// Seed multi-line content + cursor at (2, 3) so the handler has
+		// somewhere to move FROM.
+		buf.Lines = []editor.Line{
+			{Runes: []rune("first")},
+			{Runes: []rune("second")},
+			{Runes: []rune("third")},
+		}
+		buf.SetCursor(editor.Position{Line: 2, Col: 3})
+		if cur := buf.CursorPos(); cur.Line != 2 || cur.Col != 3 {
+			t.Fatalf("seeded cursor = %+v; want (2,3)", cur)
+		}
+		if err := cmd.Handler(commands.ExecCtx{
+			Mode:  types.ModeNormal,
+			Scope: types.QUERY_EDITOR,
+		}); err != nil {
+			t.Fatalf("motion.buffer_start handler: %v", err)
+		}
+		if cur := buf.CursorPos(); cur.Line != 0 || cur.Col != 0 {
+			t.Fatalf("after gg cursor = %+v; want (0,0)", cur)
+		}
 	})
 
 	t.Run("step05_chord_gd_in_result_grid_scope", func(t *testing.T) {

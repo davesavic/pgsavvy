@@ -437,3 +437,67 @@ func TestVimEditorNoCollisionWithQueryEditorBindings(t *testing.T) {
 	add(qe.GetKeybindings(types.KeybindingsOpts{}), "QueryEditor")
 	add(vim.GetKeybindings(types.KeybindingsOpts{}), "VimEditor")
 }
+
+func TestVimEditorRepeatHandlerNoOpWithoutCapture(t *testing.T) {
+	qec := newVimQEC(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("alpha beta")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	matcher, _ := keys.NewMatcher(nil, keys.MatcherConfig{Modes: keys.NewModeStore()})
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, ok := reg.Get(commands.EditorRepeat)
+	if !ok {
+		t.Fatalf("registry missing %s", commands.EditorRepeat)
+	}
+	before := buf.String()
+	if err := cmd.Handler(commands.ExecCtx{Mode: types.ModeNormal, Scope: types.QUERY_EDITOR}); err != nil {
+		t.Fatalf("repeat handler err = %v", err)
+	}
+	if buf.String() != before {
+		t.Errorf("repeat with no capture mutated buffer: %q -> %q", before, buf.String())
+	}
+}
+
+func TestVimEditorRepeatHandlerReRunsOperatorAtCurrentCursor(t *testing.T) {
+	qec := newVimQEC(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("alpha beta gamma")},
+	}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	matcher, _ := keys.NewMatcher(nil, keys.MatcherConfig{Modes: keys.NewModeStore()})
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	// Run `dw` once via direct handler calls to populate RepeatStore.
+	dCmd, _ := reg.Get(commands.OperatorDelete)
+	wCmd, _ := reg.Get(commands.MotionWordNext)
+	if err := dCmd.Handler(commands.ExecCtx{Mode: types.ModeNormal, Scope: types.QUERY_EDITOR}); err != nil {
+		t.Fatalf("d handler: %v", err)
+	}
+	// After `d`, mode is OperatorPending. The motion completes the pending op.
+	if err := wCmd.Handler(commands.ExecCtx{Mode: types.ModeOperatorPending, Scope: types.QUERY_EDITOR}); err != nil {
+		t.Fatalf("w handler in op-pending: %v", err)
+	}
+	if got := buf.String(); got != "beta gamma" {
+		t.Fatalf("after dw: buf = %q; want %q", got, "beta gamma")
+	}
+	rep := qec.Repeat()
+	if rep.LastOpID != commands.OperatorDelete || rep.LastMotionID != commands.MotionWordNext {
+		t.Fatalf("RepeatStore = %+v; want op=delete motion=word_next", rep)
+	}
+	// `.` repeats at the CURRENT cursor — should delete the next word too.
+	repeatCmd, _ := reg.Get(commands.EditorRepeat)
+	if err := repeatCmd.Handler(commands.ExecCtx{Mode: types.ModeNormal, Scope: types.QUERY_EDITOR}); err != nil {
+		t.Fatalf("repeat handler: %v", err)
+	}
+	if got := buf.String(); got != "gamma" {
+		t.Errorf("after `.` buf = %q; want %q", got, "gamma")
+	}
+}

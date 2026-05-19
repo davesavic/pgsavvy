@@ -30,6 +30,10 @@ type Common struct {
 	UserConfig atomic.Pointer[config.UserConfig]
 	AppState   *AppState
 	Fs         afero.Fs
+	// StateDir is the per-user state directory rooted at env.GetStateDir().
+	// Populated by entry_point.Start after NewCommon. Empty in tests that
+	// don't exercise persistence (dbsavvy-wwd.9).
+	StateDir string
 }
 
 // NewCommon constructs a *Common wired to the supplied dependencies. It panics
