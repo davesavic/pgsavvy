@@ -27,6 +27,7 @@ type PromptHelper struct {
 	onSubmit func(value string) error
 	onCancel func() error
 	active   bool
+	onReset  func(initial string)
 }
 
 // NewPromptHelper builds a helper bound to the focus stack and the
@@ -45,11 +46,29 @@ func (h *PromptHelper) Prompt(label, initial string, onSubmit func(value string)
 	h.onSubmit = onSubmit
 	h.onCancel = onCancel
 	h.active = true
+	reset := h.onReset
 	h.mu.Unlock()
+	// Notify the PromptController so it re-seeds its line buffer with
+	// the new initial value BEFORE the popup is pushed. Per
+	// dbsavvy-m47.1 the controller subscribes via SetResetHandler;
+	// nil-safe when no subscriber is wired (tests, early bootstrap).
+	if reset != nil {
+		reset(initial)
+	}
 	if h.tree == nil || h.prompt == nil {
 		return nil
 	}
 	return h.tree.Push(h.prompt)
+}
+
+// SetResetHandler registers fn as the buffer-reset callback. Invoked
+// from Prompt(label, initial, ...) with the new initial value so the
+// PromptController can re-seed its line buffer. Pass nil to clear the
+// subscription.
+func (h *PromptHelper) SetResetHandler(fn func(initial string)) {
+	h.mu.Lock()
+	h.onReset = fn
+	h.mu.Unlock()
 }
 
 // Submit invokes onSubmit(value), pops the popup, and clears the helper

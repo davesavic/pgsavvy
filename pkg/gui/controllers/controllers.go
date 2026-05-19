@@ -17,6 +17,7 @@ type Controllers struct {
 	Columns     *ColumnsController
 	Indexes     *IndexesController
 	Menu        *MenuController
+	Prompt      *PromptController
 	Quit        *QuitController
 	QueryEditor *QueryEditorController
 	ResultTabs  *ResultTabsController
@@ -76,6 +77,9 @@ func AttachControllers(
 	menu := NewMenuController(c, helpers)
 	menu.AttachToContext(&tree.Menu.BaseContext)
 
+	prompt := NewPromptController(c, helpers)
+	prompt.AttachToContext(&tree.Prompt.BaseContext)
+
 	quit := NewQuitController(c, helpers)
 	quit.AttachToContext(&tree.Global.BaseContext)
 
@@ -108,6 +112,7 @@ func AttachControllers(
 		Columns:     columns,
 		Indexes:     indexes,
 		Menu:        menu,
+		Prompt:      prompt,
 		Quit:        quit,
 		QueryEditor: queryEditor,
 		ResultTabs:  resultTabs,
@@ -151,6 +156,9 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.Menu != nil {
 		b.Menu.RegisterActions(reg)
+	}
+	if b.Prompt != nil {
+		b.Prompt.RegisterActions(reg)
 	}
 	if b.QueryEditor != nil {
 		b.QueryEditor.RegisterActions(reg)

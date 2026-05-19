@@ -53,6 +53,16 @@ const (
 	MenuConfirm = "menu.confirm"
 	MenuCancel  = "menu.cancel"
 
+	// PromptSubmit / PromptCancel / PromptBackspace — owned by
+	// PromptController. `<cr>` / `<esc>` / `<bs>` inside the PROMPT
+	// popup context. Printable-rune bindings register per-rune
+	// closures under IDs of the form "prompt.rune.<hex>" — those IDs
+	// are intentionally NOT listed in AllActionIDs (registry hygiene
+	// only covers stable, user-visible IDs).
+	PromptSubmit    = "prompt.submit"
+	PromptCancel    = "prompt.cancel"
+	PromptBackspace = "prompt.backspace"
+
 	// CommandOpen — owned globally; opens the COMMAND_LINE context. `:`
 	// CommandCancel — owned by COMMAND_LINE context; closes it. `<esc>`
 	// CommandSubmit — owned by COMMAND_LINE context; submits the typed
@@ -117,6 +127,9 @@ func AllActionIDs() []string {
 		RailSwitchNext,
 		MenuConfirm,
 		MenuCancel,
+		PromptSubmit,
+		PromptCancel,
+		PromptBackspace,
 		CommandOpen,
 		CommandCancel,
 		CommandSubmit,

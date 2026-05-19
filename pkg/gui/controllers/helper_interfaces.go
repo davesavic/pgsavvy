@@ -32,8 +32,16 @@ type ConfirmHelper interface {
 // for the chained add-connection flow (a thin facade — the real walk is
 // owned by data.ConnectionFormHelper.WalkAddConnection, which T7b's
 // prompt helper drives).
+//
+// Submit / Cancel are the seams the PromptController calls from its
+// <cr> / <esc> handlers. SetResetHandler lets the controller subscribe
+// to fresh Prompt invocations so it can re-seed its line buffer with
+// the new `initial` value (dbsavvy-m47.1).
 type PromptHelper interface {
 	Prompt(label string, initial string, onSubmit func(value string) error, onCancel func() error) error
+	Submit(value string) error
+	Cancel() error
+	SetResetHandler(fn func(initial string))
 }
 
 // ToastHelper writes a transient message to the status bar slot.
