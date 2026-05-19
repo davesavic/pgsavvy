@@ -429,6 +429,7 @@ func (g *Gui) wireWithDriver() error {
 		ConnectionForm:   &connectionFormInvoker{g: g, helper: g.formHelper, prompter: newChainedPrompterAdapter(g.promptHelp, g.choiceHelp, g.OnUIThread)},
 		Confirm:          g.confirmHelp,
 		Prompt:           g.promptHelp,
+		Choice:           g.choiceHelp,
 		Toast:            g.toastHelp,
 		Refresh:          g.refreshHelper,
 		Tip:              g.tipHelp,
@@ -820,6 +821,11 @@ func (g *Gui) ActiveSQLSessionForTest() *session.SQLSession { return g.activeSQL
 // or nil before that pass ran. Test accessor used by m47.4 wiring tests
 // to confirm the ChainedPrompter adapter has a real picker behind it.
 func (g *Gui) ChoiceHelperForTest() *ui.ChoiceHelper { return g.choiceHelp }
+
+// PromptHelperForTest returns the PromptHelper wired by wireWithDriver,
+// or nil before that pass ran. Test accessor used by m47.6 end-to-end
+// integration tests to quiesce on Active() between popup steps.
+func (g *Gui) PromptHelperForTest() *ui.PromptHelper { return g.promptHelp }
 
 // QuitOnSignal asks the gocui MainLoop to exit cleanly by enqueueing a
 // gocui.ErrQuit-returning closure on the Update queue.
