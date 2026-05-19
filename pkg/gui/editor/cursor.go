@@ -1,8 +1,140 @@
 package editor
 
+import "errors"
+
+// jumpListCap matches the epic Architecture Decision 9 — 100-entry
+// ring, push-only in MVP. Bidirectional walk (`<C-o>`/`<C-i>`)
+// deferred to a successor epic.
+const jumpListCap = 100
+
+// ErrInvalidMark is returned by SetMark when the mark name is not in
+// `[a-z]`. Marks `[A-Z]` and `'0`..`'9` are deferred to a successor
+// epic per epic Architecture Decision 9.
+var ErrInvalidMark = errors.New("editor: mark name out of range (a-z required)")
+
+// ErrEmptyBuffer is returned by SetCursor when the buffer has no
+// lines — there is no valid cursor target until at least one line
+// (possibly empty) exists.
+var ErrEmptyBuffer = errors.New("editor: cursor set on empty buffer")
+
+// ErrCursorOutOfRange is returned by SetCursor when Line falls
+// outside `[0, len(Lines))`. Col is clamped rather than rejected so
+// motions can drive past line-end without a special case.
+var ErrCursorOutOfRange = errors.New("editor: cursor line out of range")
+
 // JumpList is the bounded ring buffer of recent cursor positions
-// (vim's `<C-o>` / `<C-i>` stack). wwd.2 ships this empty shell so
-// Buffer.Jumps can hold a *JumpList pointer; wwd.3 fills the
-// push-only semantics with a 100-entry cap. Bidirectional walk
-// (`<C-o>` / `<C-i>`) is deferred per epic Architecture Decision 9.
-type JumpList struct{}
+// (vim's `<C-o>` / `<C-i>` stack). MVP exposes only Push; Len and
+// At are test-only accessors. Eviction drops the oldest entry once
+// jumpListCap is exceeded.
+//
+// Concurrency: JumpList is NOT safe for concurrent use. Buffer
+// serialises every access through Buffer.mu.
+type JumpList struct {
+	entries []Position
+	head    int
+	full    bool
+}
+
+func newJumpList() *JumpList {
+	return &JumpList{entries: make([]Position, jumpListCap)}
+}
+
+// Push appends p, evicting the oldest entry once the ring fills.
+func (j *JumpList) Push(p Position) {
+	j.entries[j.head] = p
+	j.head++
+	if j.head == jumpListCap {
+		j.head = 0
+		j.full = true
+	}
+}
+
+// Len returns the live entry count, 0..jumpListCap.
+func (j *JumpList) Len() int {
+	if j.full {
+		return jumpListCap
+	}
+	return j.head
+}
+
+// At returns the i-th entry in chronological order (oldest first).
+// Out-of-range i returns the zero Position.
+func (j *JumpList) At(i int) Position {
+	n := j.Len()
+	if i < 0 || i >= n {
+		return Position{}
+	}
+	if !j.full {
+		return j.entries[i]
+	}
+	return j.entries[(j.head+i)%jumpListCap]
+}
+
+// NewBuffer returns a Buffer with Marks (cap 26) and Jumps (cap 100)
+// initialised. wwd.2 zero-valued Buffers (`&Buffer{}`) still work for
+// the legacy buffer_test.go path — Marks/Jumps are lazily allocated
+// by SetMark and Push respectively when nil.
+func NewBuffer() *Buffer {
+	return &Buffer{
+		Marks: make(map[rune]Position, 26),
+		Jumps: newJumpList(),
+	}
+}
+
+// SetMark records p under r on b. Only lowercase ASCII `[a-z]` is
+// accepted in MVP; uppercase (file-global) and digit (jumplist
+// recall) marks are deferred. ErrInvalidMark on any other rune.
+func SetMark(b *Buffer, r rune, p Position) error {
+	if r < 'a' || r > 'z' {
+		return ErrInvalidMark
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.Marks == nil {
+		b.Marks = make(map[rune]Position, 26)
+	}
+	b.Marks[r] = p
+	return nil
+}
+
+// GetMark looks up r. Returns (Position{}, false) when r is not in
+// `[a-z]` or has not been set on b.
+func GetMark(b *Buffer, r rune) (Position, bool) {
+	if r < 'a' || r > 'z' {
+		return Position{}, false
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	p, ok := b.Marks[r]
+	return p, ok
+}
+
+// SetCursor writes p to b.Cursor after validating Line and clamping
+// Col to `[0, len(Lines[Line].Runes)]`. Empty buffer returns
+// ErrEmptyBuffer; out-of-range Line returns ErrCursorOutOfRange.
+// Negative Col clamps to 0; Col past line-end clamps to line-end
+// (col == rune-len is valid — that's the append-past-end position).
+//
+// This is the validating package-level helper. The unvalidated
+// b.SetCursor method on Buffer remains for VimEditor's internal
+// post-Apply cursor sync (which always passes already-valid pos
+// from advancePos).
+func SetCursor(b *Buffer, p Position) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.Lines) == 0 {
+		return ErrEmptyBuffer
+	}
+	if p.Line < 0 || p.Line >= len(b.Lines) {
+		return ErrCursorOutOfRange
+	}
+	if p.Col < 0 {
+		p.Col = 0
+	}
+	runeLen := len(b.Lines[p.Line].Runes)
+	if p.Col > runeLen {
+		p.Col = runeLen
+	}
+	b.Cursor = p
+	return nil
+}
