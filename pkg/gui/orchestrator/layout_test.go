@@ -35,8 +35,11 @@ func TestRunLayoutSkipsStubContexts(t *testing.T) {
 	if err := g.RunLayout(120, 40); err != nil {
 		t.Fatalf("RunLayout large: %v", err)
 	}
+	// QUERY_EDITOR is no longer in this list — promoted to a live
+	// MAIN_CONTEXT (dbsavvy-wwd.1) and tiled into dims["main"] every
+	// frame by Tier 1.4 (dbsavvy-9p3). See
+	// TestRunLayoutCreatesQueryEditorMainPane.
 	for _, name := range []string{
-		string(types.QUERY_EDITOR),
 		string(types.TABLE_DATA_EDITOR),
 		string(types.RESULT_GRID),
 		string(types.PLAN),
@@ -46,6 +49,20 @@ func TestRunLayoutSkipsStubContexts(t *testing.T) {
 		if rec.HasSetView(name) {
 			t.Errorf("stub context %q must not be laid out", name)
 		}
+	}
+}
+
+// TestRunLayoutCreatesQueryEditorMainPane (dbsavvy-9p3): the QUERY_EDITOR
+// is a live MAIN_CONTEXT and must be SetView'd into dims["main"] every
+// frame, regardless of focus-stack membership — focus only governs
+// FrameColor and SetCurrentView, not whether the pane exists.
+func TestRunLayoutCreatesQueryEditorMainPane(t *testing.T) {
+	g, rec := buildTestGui(t)
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if !rec.HasSetView(string(types.QUERY_EDITOR)) {
+		t.Fatal("QUERY_EDITOR SetView not invoked; main pane would be invisible")
 	}
 }
 

@@ -111,6 +111,48 @@ func (g *Gui) RunLayout(w, h int) error {
 		_ = ctx.HandleRender()
 	}
 
+	// Tier 1.4 (dbsavvy-9p3): always-on main pane. The MAIN_CONTEXT slot
+	// (right-top, dims["main"]) hosts QUERY_EDITOR. Painted every frame
+	// regardless of focus-stack membership so the user always sees the
+	// editor — focus only governs FrameColor + which view gocui routes
+	// keystrokes to. On fresh view creation we seed the view content
+	// from the canonical *editor.Buffer (the hydrate-after-Connect
+	// adapter swaps the buffer pointer — the next keystroke's
+	// syncViewToBuffer will refresh the view if the swap happens after
+	// the first paint). The view is added to the `rails` map so it
+	// participates in the focus-frame swap below.
+	if g.registry != nil && g.registry.QueryEditor != nil {
+		qec := g.registry.QueryEditor
+		name := qec.GetViewName()
+		if d, ok := dims["main"]; ok && name != "" && d.X1 > d.X0 && d.Y1 > d.Y0 {
+			v, err := g.driver.SetView(name, d.X0, d.Y0, d.X1, d.Y1, 0)
+			freshView := errors.Is(err, gocui.ErrUnknownView)
+			if err != nil && !freshView {
+				return err
+			}
+			if v != nil {
+				rails[name] = v
+				v.Title = qec.GetTitle()
+				if freshView {
+					if buf := qec.Buffer(); buf != nil {
+						v.SetContent(buf.String())
+						cur := buf.CursorPos()
+						v.SetCursor(cur.Col, cur.Line)
+					}
+				}
+			}
+			// Attach the VimEditor master editor every frame.
+			// gocuiDriver.SetMasterEditor flips v.Editable=true and
+			// stashes v.Editor, so the gocui dispatch loop routes keys
+			// here (gui.go:1576). SetMasterEditor is idempotent;
+			// production and recorder-driver paths converge by name.
+			if ed, ok := g.masterEditors[qec.GetKey()]; ok {
+				_ = g.driver.SetMasterEditor(name, ed)
+			}
+			_ = qec.HandleRender()
+		}
+	}
+
 	// Tier 1.5: result-tab pane (dbsavvy-66p.12). The ResultTabsHelper
 	// owns dynamic views named `result_tab_<slot>`; for each open tab
 	// we SetView at the "secondary" slot rectangle, the active tab is

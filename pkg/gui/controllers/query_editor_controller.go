@@ -92,7 +92,7 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		{"<leader>x", commands.QueryCancel, tr.Actions.CancelQuery, 0},
 		{"<leader>!", commands.QueryRunInNewTx, tr.Actions.QueryRunInNewTx, 0},
 	}
-	out := make([]*types.ChordBinding, 0, len(specs))
+	out := make([]*types.ChordBinding, 0, len(specs)+6)
 	for _, s := range specs {
 		seq, err := keys.SequenceFromShorthand(s.shorthand)
 		if err != nil {
@@ -110,6 +110,10 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 			Description: s.description,
 		})
 	}
+	// Rail-switch bindings (digits 1-5 + <tab>) so the user can hop out
+	// of the editor back to a side rail. Scoped to QUERY_EDITOR; the
+	// same set lives under each rail's scope via the rail controllers.
+	out = append(out, railSwitchBindings(string(types.QUERY_EDITOR), tr)...)
 	return out
 }
 

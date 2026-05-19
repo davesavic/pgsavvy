@@ -131,10 +131,11 @@ type ActionTranslations struct {
 	ShowMenu string
 
 	// Side rail navigation.
-	RailSchemas string
-	RailTables  string
-	RailColumns string
-	RailIndexes string
+	RailSchemas     string
+	RailTables      string
+	RailColumns     string
+	RailIndexes     string
+	RailQueryEditor string
 
 	// Cursor movement and confirmation primitives used by every side
 	// rail controller. Added by T7a (enn.8) to satisfy the M11i rule
@@ -240,10 +241,11 @@ func EnglishTranslationSet() *TranslationSet {
 			QuitApp:  "Quit",
 			ShowMenu: "Show Menu",
 
-			RailSchemas: "Schemas",
-			RailTables:  "Tables",
-			RailColumns: "Columns",
-			RailIndexes: "Indexes",
+			RailSchemas:     "Schemas",
+			RailTables:      "Tables",
+			RailColumns:     "Columns",
+			RailIndexes:     "Indexes",
+			RailQueryEditor: "Query Editor",
 
 			Down:    "Down",
 			Up:      "Up",

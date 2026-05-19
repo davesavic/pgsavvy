@@ -51,11 +51,12 @@ const (
 	// Rail-switch family — published by every side-rail controller via
 	// railSwitchBindings (pkg/gui/controllers/shared.go). Digits 1..4
 	// jump to a specific rail; `<tab>` cycles to the next rail.
-	RailSwitchSchemas = "rail.switch.schemas"
-	RailSwitchTables  = "rail.switch.tables"
-	RailSwitchColumns = "rail.switch.columns"
-	RailSwitchIndexes = "rail.switch.indexes"
-	RailSwitchNext    = "rail.switch.next"
+	RailSwitchSchemas     = "rail.switch.schemas"
+	RailSwitchTables      = "rail.switch.tables"
+	RailSwitchColumns     = "rail.switch.columns"
+	RailSwitchIndexes     = "rail.switch.indexes"
+	RailSwitchQueryEditor = "rail.switch.query_editor"
+	RailSwitchNext        = "rail.switch.next"
 
 	// MenuConfirm / MenuCancel — owned by MenuController. `<cr>` / `<esc>`
 	// inside the MENU popup context.
@@ -267,6 +268,7 @@ func AllActionIDs() []string {
 		RailSwitchTables,
 		RailSwitchColumns,
 		RailSwitchIndexes,
+		RailSwitchQueryEditor,
 		RailSwitchNext,
 		MenuConfirm,
 		MenuCancel,

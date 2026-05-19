@@ -159,6 +159,7 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			Key:      types.QUERY_EDITOR,
 			ViewName: string(types.QUERY_EDITOR),
 			Kind:     types.MAIN_CONTEXT,
+			Title:    "Query Editor",
 		}), deps, deps.ModeStore, deps.Matcher),
 
 		// Stubs for the four remaining deferred Contexts. ViewName
