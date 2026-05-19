@@ -29,6 +29,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/presentation"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -149,12 +150,14 @@ type Gui struct {
 	// Warnings() accessor for the dlp.14 integration smoke test.
 	lastWarnings []keys.Warning
 
-	// commandLineEditor is the master gocui.Editor instance bound to the
-	// COMMAND_LINE view. Built by installKeyDispatch and (re-)attached by
-	// RunLayout's Tier-3 popup pass each time COMMAND_LINE appears on the
-	// focus stack: a fresh Push creates a new gocui view, so the editor
-	// must be reattached to that view-instance.
-	commandLineEditor gocui.Editor
+	// masterEditors maps each editable context's key to the gocui.Editor
+	// installKeyDispatch built for it. RunLayout's Tier-3 popup pass
+	// reattaches the editor to the live view-instance each time the
+	// context appears on the focus stack — a fresh Push creates a new
+	// gocui view, so the editor must be reattached, and
+	// SetMasterEditor is idempotent. Today the map holds two entries:
+	// COMMAND_LINE (masterEditor) and QUERY_EDITOR (editor.VimEditor).
+	masterEditors map[types.ContextKey]gocui.Editor
 
 	// Test overrides for Matcher timing; nil means use cfg + defaults.
 	delayOverrides *keyDelayOverrides
@@ -442,7 +445,7 @@ func (g *Gui) wireWithDriver() error {
 		ResultTabs:       g.resultTabsH,
 		Notice:           g.noticeHelp,
 		QueryRunner:      g.queryRunner,
-		EditorBuffer:     newEditorBufferAdapter(g.driver),
+		EditorBuffer:     newEditorBufferAdapter(g.registry.QueryEditor),
 		HiddenPatterns:   defaultHiddenPatterns,
 		KbRuntime:        runtime,
 		// Threading helpers (DESIGN.md §17 / dbsavvy-66p.1). Bound to the
@@ -685,6 +688,8 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 		ngocui = real.Gocui()
 	}
 
+	g.masterEditors = map[types.ContextKey]gocui.Editor{}
+
 	for _, ctx := range g.registry.Flatten() {
 		if ctx == nil || ctx.GetKind() == types.STUB {
 			continue
@@ -696,11 +701,18 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 			if view == "" {
 				continue
 			}
-			// Stash the master Editor on the Gui. RunLayout's Tier-3 popup
-			// pass attaches it to the COMMAND_LINE view-instance every
-			// frame the context is on the focus stack — re-Push creates a
-			// fresh view, and gocui's SetMasterEditor is idempotent.
-			g.commandLineEditor = NewMasterEditor(ngocui, g.matcher, key)
+			// Stash the editable view's master Editor. RunLayout's Tier-3
+			// popup pass attaches it to the live view-instance every frame
+			// the context is on the focus stack — re-Push creates a fresh
+			// view, and gocui's SetMasterEditor is idempotent.
+			switch key {
+			case types.QUERY_EDITOR:
+				if g.registry.QueryEditor != nil {
+					g.masterEditors[key] = editor.NewVimEditor(g.registry.QueryEditor, g.matcher, key)
+				}
+			default:
+				g.masterEditors[key] = NewMasterEditor(ngocui, g.matcher, key)
+			}
 			continue
 		}
 
@@ -865,10 +877,14 @@ func defaultHistoryProvider() (*query.History, error) {
 // flip to HasSession() == true. Returns the zero HelperBag before any
 // wireWithDriver pass has run.
 func (g *Gui) HelperBagForTest() controllers.HelperBag {
+	var qec *guicontext.QueryEditorContext
+	if g.registry != nil {
+		qec = g.registry.QueryEditor
+	}
 	return controllers.HelperBag{
 		Connect:      &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history},
 		QueryRunner:  g.queryRunner,
-		EditorBuffer: newEditorBufferAdapter(g.driver),
+		EditorBuffer: newEditorBufferAdapter(qec),
 	}
 }
 

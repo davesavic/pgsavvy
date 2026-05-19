@@ -12,6 +12,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
@@ -224,20 +225,27 @@ func TestConnectInvokerBindsQueryRunner(t *testing.T) {
 	}
 }
 
-func TestEditorBufferReaderReadsViewBuffer(t *testing.T) {
-	g, rec := buildTestGuiWithHistory(t)
+func TestEditorBufferReaderReadsBuffer(t *testing.T) {
+	g, _ := buildTestGuiWithHistory(t)
 
-	// Seed the QUERY_EDITOR view's buffer via the recorder driver. The
-	// recorder driver returns nil for ViewByName even on existing views,
-	// so CursorOffset's defensive nil-View branch is the path exercised
-	// here — we assert it returns 0 instead of panicking. SetView returns
-	// gocui.ErrUnknownView on first creation (per gocui contract); the
-	// recorder driver still installs the view, so we swallow that one
-	// expected error and surface anything else.
-	_, _ = rec.SetView("query_editor", 0, 0, 80, 24, 0)
-	if err := rec.SetContent("query_editor", "SELECT 1;\nSELECT 2;"); err != nil {
-		t.Fatalf("SetContent: %v", err)
+	// Seed the canonical *editor.Buffer hung off QueryEditorContext.
+	// wwd.4 rewired editorBufferAdapter to read from Buffer (not the
+	// view's TextArea) — Architecture Decision 2: Buffer is the source
+	// of truth, the view is a mirror written by VimEditor on every
+	// Passthrough.
+	qec := g.Registry().QueryEditor
+	if qec == nil {
+		t.Fatal("registry.QueryEditor is nil after wireWithDriver")
 	}
+	buf := qec.Buffer()
+	if err := buf.Apply(editor.Edit{
+		Kind:  editor.EditKindInsert,
+		Range: editor.Range{Start: editor.Position{}, End: editor.Position{}},
+		Text:  "SELECT 1;\nSELECT 2;",
+	}); err != nil {
+		t.Fatalf("Buffer.Apply: %v", err)
+	}
+	buf.SetCursor(editor.Position{Line: 1, Col: 9})
 
 	bag := g.HelperBagForTest()
 	if bag.EditorBuffer == nil {
@@ -246,8 +254,8 @@ func TestEditorBufferReaderReadsViewBuffer(t *testing.T) {
 	if got, want := bag.EditorBuffer.BufferText(), "SELECT 1;\nSELECT 2;"; got != want {
 		t.Fatalf("BufferText() = %q, want %q", got, want)
 	}
-	// Recorder driver returns nil View; CursorOffset must clamp to 0 not panic.
-	if got := bag.EditorBuffer.CursorOffset(); got != 0 {
-		t.Fatalf("CursorOffset() with nil-View recorder = %d, want 0", got)
+	// "SELECT 1;\n" = 10 bytes; cursor at col 9 of line 1 → 10 + 9 = 19.
+	if got, want := bag.EditorBuffer.CursorOffset(), 19; got != want {
+		t.Fatalf("CursorOffset() = %d, want %d", got, want)
 	}
 }

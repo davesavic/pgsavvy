@@ -30,9 +30,7 @@ type Line struct {
 
 // Position is the (line, column) coordinate of a point inside the
 // editor buffer. Zero-indexed; Col is in runes so callers compare
-// against Line.Runes directly. Position previously lived alongside
-// NaiveEditor; wwd.2 promotes it to buffer.go because the vim Buffer
-// is the canonical owner. wwd.4 deletes NaiveEditor entirely.
+// against Line.Runes directly.
 type Position struct {
 	Line int
 	Col  int
@@ -231,6 +229,33 @@ func (b *Buffer) CursorByteOffset() int {
 		off += utf8ByteLen(runes[:col])
 	}
 	return off
+}
+
+// LineRuneLen returns the rune count of the line at index line, or 0
+// when line is out of range. Snapshot reads under b.mu.RLock.
+func (b *Buffer) LineRuneLen(line int) int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if line < 0 || line >= len(b.Lines) {
+		return 0
+	}
+	return len(b.Lines[line].Runes)
+}
+
+// SetCursor writes p to Cursor under b.mu. Used by VimEditor after
+// Apply to keep Cursor following the insertion point; future motion
+// handlers (wwd.5) call this too.
+func (b *Buffer) SetCursor(p Position) {
+	b.mu.Lock()
+	b.Cursor = p
+	b.mu.Unlock()
+}
+
+// CursorPos returns a snapshot of Cursor under b.mu.RLock.
+func (b *Buffer) CursorPos() Position {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.Cursor
 }
 
 // LinesCopy returns a deep copy of Lines safe to hand off to a

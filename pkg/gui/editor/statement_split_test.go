@@ -90,13 +90,3 @@ func TestStatementAtCursorOutOfRangeIsClamped(t *testing.T) {
 	}
 }
 
-func TestSplitLinesHelper(t *testing.T) {
-	if got := splitLines(""); got != nil {
-		t.Fatalf("splitLines empty = %#v, want nil", got)
-	}
-	got := splitLines("a\nb\n")
-	want := []string{"a", "b", ""}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("splitLines a\\nb\\n = %#v, want %#v", got, want)
-	}
-}

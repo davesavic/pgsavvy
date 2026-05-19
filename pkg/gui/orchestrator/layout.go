@@ -161,18 +161,22 @@ func (g *Gui) RunLayout(w, h int) error {
 			if setViewErr != nil && !freshView {
 				return setViewErr
 			}
-			// COMMAND_LINE is an editable view; the master Editor is bound
-			// to the view-instance. Each Push creates a fresh view (the
-			// prior was DeleteView'd here), so reattach on every frame the
-			// context is on the stack. SetMasterEditor is idempotent. On
-			// fresh creation, prepopulate the TextArea with the leading
-			// ":" prompt and plumb the view handle through to the
+			// Editable views (COMMAND_LINE, QUERY_EDITOR) get their master
+			// Editor reattached to the live view-instance every frame the
+			// context is on the focus stack — each Push creates a fresh
+			// view (the prior was DeleteView'd here) and SetMasterEditor
+			// is idempotent.
+			if ed, ok := g.masterEditors[ctx.GetKey()]; ok && view != nil {
+				_ = g.driver.SetMasterEditor(name, ed)
+			}
+			// COMMAND_LINE-specific frame / prompt / view-plumb. On fresh
+			// creation, prepopulate the TextArea with the leading ":"
+			// prompt and plumb the view handle through to the
 			// CommandLineContext so command.submit can read v.TextArea.
-			if ctx.GetKey() == types.COMMAND_LINE && g.commandLineEditor != nil {
+			if ctx.GetKey() == types.COMMAND_LINE {
 				if view != nil {
 					view.Frame = false
 				}
-				_ = g.driver.SetMasterEditor(name, g.commandLineEditor)
 				if view != nil {
 					if freshView && view.TextArea != nil {
 						view.TextArea.TypeCharacter(":")
