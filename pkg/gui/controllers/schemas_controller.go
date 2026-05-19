@@ -27,10 +27,22 @@ func NewSchemasController(
 ) *SchemasController {
 	base := newBase(c, helpers)
 	ctrl := &SchemasController{}
-	// <CR> on SCHEMAS is a no-op in T7a — selecting a schema in the
-	// rail drives the TABLES rail load, which is owned by the
-	// downstream bootstrap (T10) via a context-switch closure.
-	ctrl.ListControllerTrait = NewListControllerTrait(base, viewName(types.SCHEMAS), cursor, picker, func(_ commands.ExecCtx) error { return nil })
+	// <CR> on SCHEMAS fires HelperBag.OnSchemaActivate with the
+	// cursor-selected schema name, which the orchestrator wires to a
+	// worker-goroutine LoadTables that populates the TABLES rail
+	// (dbsavvy-04n). Empty selection or nil callback → no-op.
+	onConfirm := func(_ commands.ExecCtx) error {
+		if picker == nil || helpers.OnSchemaActivate == nil {
+			return nil
+		}
+		name := picker.SelectedSchemaName()
+		if name == "" {
+			return nil
+		}
+		helpers.OnSchemaActivate(name)
+		return nil
+	}
+	ctrl.ListControllerTrait = NewListControllerTrait(base, viewName(types.SCHEMAS), cursor, picker, onConfirm)
 	return ctrl
 }
 

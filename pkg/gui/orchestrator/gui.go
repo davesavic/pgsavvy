@@ -9,6 +9,7 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -431,6 +432,8 @@ func (g *Gui) wireWithDriver() error {
 		g.queryRunner = data.NewQueryRunner(nil, drivers.Capabilities{})
 	}
 
+	connectInv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
+
 	helperBag := controllers.HelperBag{
 		Driver:           g.driver,
 		Logger:           g.deps.Common.Log,
@@ -438,7 +441,7 @@ func (g *Gui) wireWithDriver() error {
 		Schemas:          schemasPickerAdapter{registry: g.registry.Schemas},
 		Tables:           tablePicker,
 		ActiveConnection: &activeConnAdapter{g: g},
-		Connect:          &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history},
+		Connect:          connectInv,
 		SchemasHelper:    g.schemasHelper,
 		ConnectionForm:   &connectionFormInvoker{g: g, helper: g.formHelper, prompter: newChainedPrompterAdapter(g.promptHelp, g.choiceHelp, g.OnUIThread)},
 		Confirm:          g.confirmHelp,
@@ -455,6 +458,18 @@ func (g *Gui) wireWithDriver() error {
 		EditorBuffer:     newEditorBufferAdapter(g.registry.QueryEditor),
 		HiddenPatterns:   defaultHiddenPatterns,
 		KbRuntime:        runtime,
+		// <CR> on a schema row reloads the TABLES rail via a worker
+		// (dbsavvy-04n). The handler runs on the gocui MainLoop; the
+		// driver call must hop to the worker queue so MainLoop is not
+		// blocked by a slow ListTables. populateTablesRail itself is
+		// safe to call from any goroutine — SetItems just mutates the
+		// in-memory slice (see refreshConnectionsRail comment).
+		OnSchemaActivate: func(schema string) {
+			g.OnWorker(func(_ gocui.Task) error {
+				connectInv.populateTablesRail(context.Background(), schema)
+				return nil
+			})
+		},
 		// Threading helpers (DESIGN.md §17 / dbsavvy-66p.1). Bound to the
 		// Gui's methods so controllers can schedule UI-thread work and
 		// spawn background workers without importing the orchestrator.

@@ -65,6 +65,12 @@ type HelperBag struct {
 	// profile change takes effect on the next U keystroke.
 	HiddenPatterns func() (builtin []string, profile []string)
 
+	// OnSchemaActivate fires when <CR> is pressed in the SCHEMAS rail.
+	// The orchestrator wires this to a closure that reloads the TABLES
+	// rail for the supplied schema name on a worker goroutine
+	// (dbsavvy-04n). Nil-safe: SchemasController no-ops when unwired.
+	OnSchemaActivate func(schema string)
+
 	// KbRuntime is the aggregate that bundles every keybinding-system
 	// collaborator (commands.Registry, Matcher, ModeStore, WhichKey,
 	// ExRegistry). Controllers use it to register action handlers via

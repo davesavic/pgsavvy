@@ -186,6 +186,39 @@ func (c *connectInvoker) populateSchemasRail(ctx context.Context) {
 	c.g.registry.Schemas.SetItems(items)
 }
 
+// populateTablesRail loads the table list for schema via
+// ConnectHelper.LoadTables and pushes the result onto TablesContext so
+// the TABLES rail draws rows on the next layout frame. Wired to the
+// SCHEMAS-rail <CR> handler via HelperBag.OnSchemaActivate (dbsavvy-04n).
+//
+// Best-effort: a LoadTables error is logged and swallowed; the existing
+// TablesContext.items are left intact so a transient failure does not
+// blank a previously-loaded list. An empty schema name is a silent
+// no-op (matches the picker's empty-list contract).
+func (c *connectInvoker) populateTablesRail(ctx context.Context, schema string) {
+	if c == nil || c.g == nil || c.helper == nil {
+		return
+	}
+	if schema == "" {
+		return
+	}
+	if c.g.registry == nil || c.g.registry.Tables == nil {
+		return
+	}
+	tables, err := c.helper.LoadTables(ctx, schema)
+	if err != nil {
+		if c.g.deps.Common != nil && c.g.deps.Common.Log != nil {
+			c.g.deps.Common.Log.Warnf("gui: load tables for schema %q: %v", schema, err)
+		}
+		return
+	}
+	items := make([]any, len(tables))
+	for i := range tables {
+		items[i] = tables[i]
+	}
+	c.g.registry.Tables.SetItems(items)
+}
+
 // hydrateQueryEditorBuffer is the dbsavvy-wwd.9 post-Connect hook. It
 // resolves (or generates) the persistent buffer UUID for the active
 // connection via AppState.LastBufferUUIDs, loads the on-disk buffer (or

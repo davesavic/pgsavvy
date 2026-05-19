@@ -86,6 +86,73 @@ func TestSchemasControllerLeaderHIsPublishedAsTwoKeyChord(t *testing.T) {
 	}
 }
 
+// AC (dbsavvy-04n): <CR> on a schema row invokes OnSchemaActivate with
+// the picker's selected name. Verifies the per-rail trait Enter binding
+// routes through SchemasController's onConfirm closure.
+func TestSchemasControllerEnterFiresOnSchemaActivate(t *testing.T) {
+	b := newBag()
+	b.SchemaPicker.name = "public"
+	var got []string
+	b.HelperBag.OnSchemaActivate = func(s string) { got = append(got, s) }
+	cur := &fakeCursor{}
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
+	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
+		if isSpecial(kb, types.KeyEnter) {
+			if err := invokeAction(reg, kb); err != nil {
+				t.Fatalf("<CR>: %v", err)
+			}
+		}
+	}
+	if len(got) != 1 || got[0] != "public" {
+		t.Fatalf("OnSchemaActivate calls = %+v, want [public]", got)
+	}
+}
+
+// AC (dbsavvy-04n): <CR> with no selection does not invoke
+// OnSchemaActivate (no spurious LoadTables for empty schema name).
+func TestSchemasControllerEnterEmptySelectionNoFire(t *testing.T) {
+	b := newBag()
+	b.SchemaPicker.name = ""
+	fired := 0
+	b.HelperBag.OnSchemaActivate = func(string) { fired++ }
+	cur := &fakeCursor{}
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
+	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
+		if isSpecial(kb, types.KeyEnter) {
+			if err := invokeAction(reg, kb); err != nil {
+				t.Fatalf("<CR>: %v", err)
+			}
+		}
+	}
+	if fired != 0 {
+		t.Fatalf("OnSchemaActivate fired %d times on empty selection; want 0", fired)
+	}
+}
+
+// AC (dbsavvy-04n): <CR> with nil OnSchemaActivate is a clean no-op
+// (preserves backward compat with test wiring that leaves the closure
+// unset).
+func TestSchemasControllerEnterNilCallbackNoPanic(t *testing.T) {
+	b := newBag()
+	b.SchemaPicker.name = "public"
+	// b.HelperBag.OnSchemaActivate intentionally left nil.
+	cur := &fakeCursor{}
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
+	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
+		if isSpecial(kb, types.KeyEnter) {
+			if err := invokeAction(reg, kb); err != nil {
+				t.Fatalf("<CR>: %v", err)
+			}
+		}
+	}
+}
+
 // AC: SchemaToggleShowHidden handler delegates to picker.ToggleShowHidden.
 func TestSchemasControllerToggleShowHiddenHandler(t *testing.T) {
 	b := newBag()
