@@ -20,6 +20,15 @@ package commands
 // later epics dbsavvy-66p, dbsavvy-wwd, etc.). dlp.7 adds `:reload`
 // via the ExRegistry, not the CommandRegistry — so no `reload.config`
 // constant appears here.
+//
+// Namespace ownership:
+//
+//   - The `motion.*`, `operator.*`, and `textobject.*` namespaces are
+//     owned exclusively by VimEditorController (epic dbsavvy-wwd). No
+//     other controller may register an ID in these namespaces. Action
+//     IDs in those namespaces resolve through the same Registry but
+//     their handlers are constructed by VimEditorController with closures
+//     over the live *editor.Buffer of the focused QUERY_EDITOR pane.
 const (
 	// AppQuit — owned by QuitController. Maps to `<leader>q` by default.
 	AppQuit = "app.quit"
@@ -111,6 +120,34 @@ const (
 	ResultTabClose  = "result.tab.close"
 	ResultTabPin    = "result.tab.pin"
 	ResultTabCancel = "result.tab.cancel"
+
+	// Motion family — owned by VimEditorController (dbsavvy-wwd.5).
+	// Defaults follow vim: w/b/e (word_*), W/B/E (WORD_*), 0/^/$,
+	// gg/G, {/}/(/), h/j/k/l, H/M/L. mark_jump backs the `'a..z'
+	// recall handler (wwd.3 mark recall surfaced to a binding by wwd.7).
+	MotionWordNext          = "motion.word_next"
+	MotionWordPrev          = "motion.word_prev"
+	MotionWordNextBig       = "motion.word_next_big"
+	MotionWordPrevBig       = "motion.word_prev_big"
+	MotionWordEnd           = "motion.word_end"
+	MotionWordEndBig        = "motion.word_end_big"
+	MotionLineStart         = "motion.line_start"
+	MotionLineFirstNonblank = "motion.line_first_nonblank"
+	MotionLineEnd           = "motion.line_end"
+	MotionBufferStart       = "motion.buffer_start"
+	MotionBufferEnd         = "motion.buffer_end"
+	MotionParagraphPrev     = "motion.paragraph_prev"
+	MotionParagraphNext     = "motion.paragraph_next"
+	MotionSentencePrev      = "motion.sentence_prev"
+	MotionSentenceNext      = "motion.sentence_next"
+	MotionLineDown          = "motion.line_down"
+	MotionLineUp            = "motion.line_up"
+	MotionCharLeft          = "motion.char_left"
+	MotionCharRight         = "motion.char_right"
+	MotionScreenTop         = "motion.screen_top"
+	MotionScreenMiddle      = "motion.screen_middle"
+	MotionScreenBottom      = "motion.screen_bottom"
+	MotionMarkJump          = "motion.mark_jump"
 )
 
 // AllActionIDs returns every ID declared in this file in declaration
@@ -166,5 +203,28 @@ func AllActionIDs() []string {
 		ResultTabClose,
 		ResultTabPin,
 		ResultTabCancel,
+		MotionWordNext,
+		MotionWordPrev,
+		MotionWordNextBig,
+		MotionWordPrevBig,
+		MotionWordEnd,
+		MotionWordEndBig,
+		MotionLineStart,
+		MotionLineFirstNonblank,
+		MotionLineEnd,
+		MotionBufferStart,
+		MotionBufferEnd,
+		MotionParagraphPrev,
+		MotionParagraphNext,
+		MotionSentencePrev,
+		MotionSentenceNext,
+		MotionLineDown,
+		MotionLineUp,
+		MotionCharLeft,
+		MotionCharRight,
+		MotionScreenTop,
+		MotionScreenMiddle,
+		MotionScreenBottom,
+		MotionMarkJump,
 	}
 }

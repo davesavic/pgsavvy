@@ -41,8 +41,10 @@ var _ types.IBaseContext = (*QueryEditorContext)(nil)
 // nil in test wiring; every focus hook nil-checks before calling.
 //
 // The *editor.Buffer / *editor.RepeatStore returned by Buffer() /
-// Repeat() are always non-nil — empty zero-value shells in wwd.1,
-// filled in by wwd.2 / wwd.9.
+// Repeat() are always non-nil — Buffer uses editor.NewBuffer so
+// Marks and Jumps are initialised before any wwd.5 motion handler
+// can call buf.Jumps.Push or editor.SetMark; RepeatStore stays a
+// zero-value shell until wwd.9 fills it.
 func NewQueryEditorContext(
 	base BaseContext,
 	deps depsAlias,
@@ -54,7 +56,7 @@ func NewQueryEditorContext(
 		deps:        deps,
 		modes:       modes,
 		matcher:     matcher,
-		buf:         &editor.Buffer{},
+		buf:         editor.NewBuffer(),
 		repeat:      &editor.RepeatStore{},
 	}
 }

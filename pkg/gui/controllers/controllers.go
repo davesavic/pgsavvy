@@ -4,6 +4,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -22,6 +23,7 @@ type Controllers struct {
 	Quit        *QuitController
 	QueryEditor *QueryEditorController
 	ResultTabs  *ResultTabsController
+	VimEditor   *VimEditorController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -109,6 +111,27 @@ func AttachControllers(
 	resultTabs := NewResultTabsController(c, helpers, tabsMgr)
 	resultTabs.AttachToContext(tree.ResultGrid)
 
+	// VimEditorController owns motion / operator / textobject bindings
+	// under QUERY_EDITOR scope (epic dbsavvy-wwd). It takes the live
+	// *context.QueryEditorContext directly (tree.QueryEditor is the
+	// concrete pointer post-wwd.1) plus the keybinding Matcher
+	// (wwd.8 uses the Matcher to coordinate operator-pending state).
+	// Either dep may be missing in test wiring: skip construction so
+	// AttachControllers stays nil-safe.
+	var vimEditor *VimEditorController
+	if tree.QueryEditor != nil {
+		var matcher *keys.Matcher
+		if helpers.KbRuntime != nil {
+			matcher = helpers.KbRuntime.Matcher
+		}
+		vimEditor = NewVimEditorController(tree.QueryEditor, matcher)
+		// No AttachToContext: VimEditor bindings reach the trie via
+		// AllDefaultBindings, mirroring ResultTabsController's path
+		// (see controllers.go:98-100). The Matcher routes keystrokes
+		// to the QUERY_EDITOR scope based on the focused context, so
+		// no per-context AddKeybindingsFn call is required.
+	}
+
 	return &Controllers{
 		Connections: connections,
 		Schemas:     schemas,
@@ -121,6 +144,7 @@ func AttachControllers(
 		Quit:        quit,
 		QueryEditor: queryEditor,
 		ResultTabs:  resultTabs,
+		VimEditor:   vimEditor,
 	}
 }
 
@@ -173,6 +197,9 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.ResultTabs != nil {
 		b.ResultTabs.RegisterActions(reg)
+	}
+	if b.VimEditor != nil {
+		b.VimEditor.RegisterActions(reg)
 	}
 }
 

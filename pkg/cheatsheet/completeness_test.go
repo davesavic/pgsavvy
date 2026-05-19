@@ -18,11 +18,15 @@ import (
 // futureEmptyModes are the modes intentionally left unbound in this
 // epic; future epics may add bindings to them but TODAY any binding in
 // these modes is a bug (per AC D13 — "future modes empty" invariant).
+//
+// ModeOperatorPending was removed in dbsavvy-wwd.5 — VimEditorController
+// now publishes motion bindings under Normal | OperatorPending so the
+// pending-operator + motion combo (d w, y j, …) resolves through the
+// same trie. Visual modes are dropped in wwd.7.
 var futureEmptyModes = []types.Mode{
 	types.ModeVisual,
 	types.ModeVisualLine,
 	types.ModeVisualBlock,
-	types.ModeOperatorPending,
 	types.ModeReplace,
 }
 
