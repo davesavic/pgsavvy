@@ -65,9 +65,9 @@ type stubService struct {
 	err      error
 	panic    bool
 
-	mu       sync.Mutex
-	buildCh  chan struct{} // when non-nil, Build blocks on receive
-	builds   int
+	mu      sync.Mutex
+	buildCh chan struct{} // when non-nil, Build blocks on receive
+	builds  int
 }
 
 func (s *stubService) Build(
@@ -401,4 +401,3 @@ func TestReloadCommand_RegistersIntoExRegistry(t *testing.T) {
 		t.Fatalf("Handler: %v", err)
 	}
 }
-

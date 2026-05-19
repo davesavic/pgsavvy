@@ -10,9 +10,9 @@ import (
 
 // fakeModeStore records Set/Reset calls; satisfies types.ModeSetter.
 type fakeModeStore struct {
-	set     map[types.ContextKey]types.Mode
-	resets  []types.ContextKey
-	sets    []types.ContextKey
+	set    map[types.ContextKey]types.Mode
+	resets []types.ContextKey
+	sets   []types.ContextKey
 }
 
 func newFakeModeStore() *fakeModeStore {
@@ -57,6 +57,7 @@ func (cmdLineStubDriver) GetViewBuffer(string) string       { return "" }
 func (cmdLineStubDriver) SetView(string, int, int, int, int, byte) (types.View, error) {
 	return nil, nil
 }
+
 func (cmdLineStubDriver) SetKeybinding(string, types.Key, types.Modifier, func() error) error {
 	return nil
 }

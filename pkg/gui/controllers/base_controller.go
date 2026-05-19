@@ -56,7 +56,7 @@ type HelperBag struct {
 	EditorBuffer EditorBufferReader
 
 	// Notice routes server NOTICE/WARNING messages from streaming
-	// queries to the command_log and a first-of-run toast
+	// queries to the messages panel and a first-of-run toast
 	// (dbsavvy-66p.13). Nil-safe: the controller no-ops when unwired.
 	Notice NoticeReporter
 

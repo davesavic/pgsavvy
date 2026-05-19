@@ -37,6 +37,7 @@ func (d *writeRecordingDriver) GetViewBuffer(_ string) string       { panic("not
 func (d *writeRecordingDriver) SetView(_ string, _, _, _, _ int, _ byte) (types.View, error) {
 	panic("not used")
 }
+
 func (d *writeRecordingDriver) SetKeybinding(_ string, _ types.Key, _ types.Modifier, _ func() error) error {
 	panic("not used")
 }
@@ -58,7 +59,7 @@ func (d *writeRecordingDriver) SetViewCursor(_ string, _, _ int) error    { retu
 func (d *writeRecordingDriver) MainLoop() error                           { return nil }
 func (d *writeRecordingDriver) Close() error                              { return nil }
 
-func TestDefaultCommandLogSink_AppendRoutesThroughUIThread(t *testing.T) {
+func TestDefaultMessagesSink_AppendRoutesThroughUIThread(t *testing.T) {
 	d := &writeRecordingDriver{}
 	// Capture scheduling: the sink hands a closure to onUIThreadContentOnly;
 	// the test invokes it synchronously to assert the eventual driver.Write.
@@ -66,7 +67,7 @@ func TestDefaultCommandLogSink_AppendRoutesThroughUIThread(t *testing.T) {
 	onUIThreadContentOnly := func(fn func() error) {
 		scheduled = append(scheduled, fn)
 	}
-	sink := ui.NewDefaultCommandLogSink(d, onUIThreadContentOnly)
+	sink := ui.NewDefaultMessagesSink(d, onUIThreadContentOnly)
 
 	sink.Append("line one")
 
@@ -85,23 +86,23 @@ func TestDefaultCommandLogSink_AppendRoutesThroughUIThread(t *testing.T) {
 		t.Fatalf("writes after flush = %d; want 1", got)
 	}
 	w := d.Writes[0]
-	if w.View != string(types.LOG) {
-		t.Errorf("view = %q; want LOG (%q)", w.View, string(types.LOG))
+	if w.View != string(types.MESSAGES) {
+		t.Errorf("view = %q; want MESSAGES (%q)", w.View, string(types.MESSAGES))
 	}
 	if string(w.Data) != "line one\n" {
 		t.Errorf("payload = %q; want %q", string(w.Data), "line one\n")
 	}
 }
 
-func TestDefaultCommandLogSink_NilDriverNoOp(t *testing.T) {
-	sink := ui.NewDefaultCommandLogSink(nil, nil)
+func TestDefaultMessagesSink_NilDriverNoOp(t *testing.T) {
+	sink := ui.NewDefaultMessagesSink(nil, nil)
 	// Must not panic.
 	sink.Append("dropped")
 }
 
-func TestDefaultCommandLogSink_NilSchedulerWritesSynchronously(t *testing.T) {
+func TestDefaultMessagesSink_NilSchedulerWritesSynchronously(t *testing.T) {
 	d := &writeRecordingDriver{}
-	sink := ui.NewDefaultCommandLogSink(d, nil)
+	sink := ui.NewDefaultMessagesSink(d, nil)
 	sink.Append("sync")
 	if got := len(d.Writes); got != 1 {
 		t.Fatalf("writes = %d; want 1 (synchronous fallback)", got)

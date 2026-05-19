@@ -27,8 +27,8 @@ type fakeEditorBuffer struct {
 	HasSel bool
 }
 
-func (f *fakeEditorBuffer) BufferText() string             { return f.Text }
-func (f *fakeEditorBuffer) CursorOffset() int              { return f.Off }
+func (f *fakeEditorBuffer) BufferText() string            { return f.Text }
+func (f *fakeEditorBuffer) CursorOffset() int             { return f.Off }
 func (f *fakeEditorBuffer) SelectionText() (string, bool) { return f.Sel, f.HasSel }
 
 type fakeResultTabs struct {

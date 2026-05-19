@@ -34,7 +34,7 @@ type noticeToaster interface {
 // prefixes and toast format strings live there. IconLabel is optional
 // and may return "" when the active connection has no icon configured.
 type NoticeHelperDeps struct {
-	Sink      CommandLogSink
+	Sink      MessagesSink
 	Toaster   noticeToaster
 	OnWorker  func(func(gocui.Task) error)
 	Tr        *i18n.TranslationSet
@@ -57,7 +57,7 @@ type NoticeReporter interface {
 }
 
 // NoticeHelper routes server NOTICE/WARNING messages from a streaming
-// query into two sinks: the command_log panel (every notice) and a
+// query into two sinks: the messages panel (every notice) and a
 // first-of-run toast (NOTICE/WARNING only; counter-updates on
 // subsequent emissions in the same run via ToastHelper.ShowOrUpdate).
 // The helper is run-scoped — OnRunStart establishes a runID,
@@ -65,7 +65,7 @@ type NoticeReporter interface {
 // "no more streams"; once every attached stream's notice channel
 // closes the helper resets its run state.
 type NoticeHelper struct {
-	sink      CommandLogSink
+	sink      MessagesSink
 	toaster   noticeToaster
 	onWorker  func(func(gocui.Task) error)
 	tr        *i18n.TranslationSet
@@ -129,10 +129,10 @@ func (h *NoticeHelper) OnRunEnd(runID string) {
 }
 
 // OnNotice processes a single pgconn.Notice. The notice is logged to
-// the command_log sink (every severity) and, when severity is NOTICE
-// or WARNING, raises a first-of-run toast or counter-updates the
-// existing one. Notices delivered while no run is bound (e.g. a stale
-// drain-worker firing after OnRunEnd) are dropped entirely.
+// the messages sink (every severity) and, when severity is NOTICE or
+// WARNING, raises a first-of-run toast or counter-updates the existing
+// one. Notices delivered while no run is bound (e.g. a stale drain-
+// worker firing after OnRunEnd) are dropped entirely.
 func (h *NoticeHelper) OnNotice(n pgconn.Notice) {
 	h.mu.Lock()
 	if h.currentRun == "" {
@@ -239,7 +239,7 @@ func (h *NoticeHelper) streamFinished(runID string) {
 	h.mu.Unlock()
 }
 
-// formatLogLine builds the command_log entry: "[<SEVERITY>]·<icon>·<msg>"
+// formatLogLine builds the messages-panel entry: "[<SEVERITY>]·<icon>·<msg>"
 // (middle-dot separator). The icon segment is omitted when iconLabel
 // is nil or returns "".
 func (h *NoticeHelper) formatLogLine(n pgconn.Notice) string {
@@ -271,7 +271,7 @@ func (h *NoticeHelper) severityLabel(raw string) string {
 }
 
 // isToastableSeverity returns true for severities that surface as a
-// toast in addition to the command_log line. NOTICE and WARNING toast;
+// toast in addition to the messages line. NOTICE and WARNING toast;
 // INFO and everything else log-only.
 func isToastableSeverity(raw string) bool {
 	switch strings.ToUpper(strings.TrimSpace(raw)) {

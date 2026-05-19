@@ -89,4 +89,3 @@ func TestStatementAtCursorOutOfRangeIsClamped(t *testing.T) {
 		t.Fatalf("StatementAt negative = %q, want %q", got, "SELECT 1")
 	}
 }
-

@@ -14,8 +14,8 @@ import (
 // --- Fakes -------------------------------------------------------------
 
 type fakeStack struct {
-	pushed []types.IBaseContext
-	popped int
+	pushed  []types.IBaseContext
+	popped  int
 	pushErr error
 	popErr  error
 }
@@ -24,6 +24,7 @@ func (f *fakeStack) Push(c types.IBaseContext) error {
 	f.pushed = append(f.pushed, c)
 	return f.pushErr
 }
+
 func (f *fakeStack) Pop() error {
 	f.popped++
 	return f.popErr
@@ -41,22 +42,23 @@ func (f *fakeHolder) ReadAndClearBuffer() string {
 	f.buf = ""
 	return s
 }
-func (f *fakeHolder) GetKey() types.ContextKey                                  { return types.COMMAND_LINE }
-func (f *fakeHolder) GetViewName() string                                       { return string(types.COMMAND_LINE) }
-func (f *fakeHolder) GetWindowName() string                                     { return string(types.COMMAND_LINE) }
-func (f *fakeHolder) GetKind() types.ContextKind                                { return types.TEMPORARY_POPUP }
-func (f *fakeHolder) GetTitle() string                                          { return "" }
-func (f *fakeHolder) HandleFocus(types.OnFocusOpts) error                       { return nil }
-func (f *fakeHolder) HandleFocusLost(types.OnFocusLostOpts) error               { return nil }
-func (f *fakeHolder) HandleRender() error                                       { return nil }
-func (f *fakeHolder) HandleRenderToMain() error                                 { return nil }
-func (f *fakeHolder) HandleQuit() error                                         { return nil }
-func (f *fakeHolder) NeedsRerenderOnHeightChange() bool                         { return false }
-func (f *fakeHolder) NeedsRerenderOnWidthChange() bool                          { return false }
-func (f *fakeHolder) AddKeybindingsFn(types.KeybindingsFn)                      {}
+func (f *fakeHolder) GetKey() types.ContextKey                    { return types.COMMAND_LINE }
+func (f *fakeHolder) GetViewName() string                         { return string(types.COMMAND_LINE) }
+func (f *fakeHolder) GetWindowName() string                       { return string(types.COMMAND_LINE) }
+func (f *fakeHolder) GetKind() types.ContextKind                  { return types.TEMPORARY_POPUP }
+func (f *fakeHolder) GetTitle() string                            { return "" }
+func (f *fakeHolder) HandleFocus(types.OnFocusOpts) error         { return nil }
+func (f *fakeHolder) HandleFocusLost(types.OnFocusLostOpts) error { return nil }
+func (f *fakeHolder) HandleRender() error                         { return nil }
+func (f *fakeHolder) HandleRenderToMain() error                   { return nil }
+func (f *fakeHolder) HandleQuit() error                           { return nil }
+func (f *fakeHolder) NeedsRerenderOnHeightChange() bool           { return false }
+func (f *fakeHolder) NeedsRerenderOnWidthChange() bool            { return false }
+func (f *fakeHolder) AddKeybindingsFn(types.KeybindingsFn)        {}
 func (f *fakeHolder) GetKeybindings(types.KeybindingsOpts) []*types.ChordBinding {
 	return nil
 }
+
 func (f *fakeHolder) GetMouseKeybindings(types.KeybindingsOpts) []types.MouseBinding {
 	return nil
 }

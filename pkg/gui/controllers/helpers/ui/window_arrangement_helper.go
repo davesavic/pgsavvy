@@ -50,7 +50,7 @@ var requiredWindows = []string{
 //	│   │   └── right ROW (weight 1)
 //	│   │       ├── "main"      weight=1
 //	│   │       └── "secondary" weight=1
-//	│   └── "extras" size=3 (command_log overlay strip)
+//	│   └── "extras" size=3 (messages overlay strip)
 //	└── "status" size=1              (bottom options/progress bar)
 //
 // `popup-overlay` is added to the map AFTER the box arrangement runs:

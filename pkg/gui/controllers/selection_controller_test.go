@@ -40,7 +40,7 @@ func (f *fakeChoiceHelper) Cancel() error {
 	return f.cancelErr
 }
 
-func (f *fakeChoiceHelper) Cursor() int     { return f.cursor }
+func (f *fakeChoiceHelper) Cursor() int { return f.cursor }
 func (f *fakeChoiceHelper) SetCursor(i int) { // mirrors ui.ChoiceHelper.SetCursor clamp
 	n := len(f.choices)
 	if n == 0 {

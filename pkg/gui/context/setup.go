@@ -31,7 +31,7 @@ type ContextTree struct {
 	CommandLine  *CommandLineContext
 
 	// Live EXTRAS / GLOBAL / DISPLAY instances.
-	CommandLog *CommandLogContext
+	Messages   *MessagesContext
 	Global     *GlobalContext
 	Limit      *LimitContext
 	WhichKey   *WhichKeyContext
@@ -122,11 +122,11 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 		}), deps, deps.ModeStore),
 
 		// EXTRAS / GLOBAL / DISPLAY.
-		CommandLog: NewCommandLogContext(NewBaseContext(BaseContextOpts{
-			Key:      types.LOG,
-			ViewName: string(types.LOG),
+		Messages: NewMessagesContext(NewBaseContext(BaseContextOpts{
+			Key:      types.MESSAGES,
+			ViewName: string(types.MESSAGES),
 			Kind:     types.EXTRAS_CONTEXT,
-			Title:    "Command log",
+			Title:    "Messages",
 		}), deps),
 		Global: NewGlobalContext(NewBaseContext(BaseContextOpts{
 			Key:      types.GLOBAL,
@@ -188,7 +188,7 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 		t.Selection,
 		t.Suggestions,
 		t.CommandLine,
-		t.CommandLog,
+		t.Messages,
 		t.Global,
 		t.Limit,
 		t.WhichKey,

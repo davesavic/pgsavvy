@@ -24,7 +24,7 @@ func TestBufferPathForRejectsInvalidUUID(t *testing.T) {
 		"",
 		"not-a-uuid",
 		"../../etc/passwd",
-		"deadbeef-1234-4567-89ab-cdef0123456",  // 11 trailing hex
+		"deadbeef-1234-4567-89ab-cdef0123456",   // 11 trailing hex
 		"deadbeef-1234-4567-89ab-cdef012345678", // 13 trailing hex
 		"DEADBEEF12344567-89ab-cdef01234567",
 	}

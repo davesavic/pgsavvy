@@ -392,13 +392,13 @@ func (g *Gui) wireWithDriver() error {
 	})
 
 	// NoticeHelper routes server NOTICE / WARNING messages from streaming
-	// queries to the command_log panel and a first-of-run toast. The
-	// command_log sink hops driver.Write onto the UI thread via
+	// queries to the messages panel and a first-of-run toast. The
+	// messages sink hops driver.Write onto the UI thread via
 	// OnUIThreadContentOnly so the helper itself can run from a worker
 	// goroutine (DESIGN.md §17). dbsavvy-66p.13.
-	commandLogSink := ui.NewDefaultCommandLogSink(g.driver, g.OnUIThreadContentOnly)
+	messagesSink := ui.NewDefaultMessagesSink(g.driver, g.OnUIThreadContentOnly)
 	g.noticeHelp = ui.NewNoticeHelper(ui.NoticeHelperDeps{
-		Sink:     commandLogSink,
+		Sink:     messagesSink,
 		Toaster:  g.toastHelp,
 		OnWorker: g.OnWorker,
 		Tr:       tr,

@@ -157,7 +157,7 @@ func (s *Session) AttachNotice(ch chan<- pgconn.Notice) {
 
 // DroppedNotices reports the count of notices that arrived while the
 // subscriber channel was full and were therefore discarded. Useful as a
-// diagnostic in the command_log writer (epic dbsavvy-66p.13). Zero when no
+// diagnostic in the messages writer (epic dbsavvy-66p.13). Zero when no
 // notices have been dropped (including when AttachNotice was never called).
 func (s *Session) DroppedNotices() uint64 {
 	if s.parent.notices == nil {

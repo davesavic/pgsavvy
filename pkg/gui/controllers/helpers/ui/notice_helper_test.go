@@ -12,7 +12,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 )
 
-// recordingSink is a synchronous CommandLogSink fake; Append captures
+// recordingSink is a synchronous MessagesSink fake; Append captures
 // each line into Lines under the mutex.
 type recordingSink struct {
 	mu    sync.Mutex
@@ -61,7 +61,7 @@ func (r *recordingToaster) snapshot() []toastCall {
 	return out
 }
 
-func newHelper(t *testing.T, sink ui.CommandLogSink, toaster *recordingToaster) *ui.NoticeHelper {
+func newHelper(t *testing.T, sink ui.MessagesSink, toaster *recordingToaster) *ui.NoticeHelper {
 	t.Helper()
 	return ui.NewNoticeHelper(ui.NoticeHelperDeps{
 		Sink:    sink,
@@ -179,7 +179,7 @@ func TestNoticeHelper_NoOpWhenNoNotices(t *testing.T) {
 	}
 }
 
-func TestNoticeHelper_SeverityPrefixInCommandLog(t *testing.T) {
+func TestNoticeHelper_SeverityPrefixInMessages(t *testing.T) {
 	sink := &recordingSink{}
 	toaster := &recordingToaster{}
 	h := newHelper(t, sink, toaster)

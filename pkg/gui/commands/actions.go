@@ -70,8 +70,8 @@ const (
 	// dbsavvy-f5t) — the PROMPT view is editable and gocui rejects
 	// char-key SetKeybinding shims on editable views (matchView), so
 	// per-rune action IDs no longer exist here.
-	PromptSubmit    = "prompt.submit"
-	PromptCancel    = "prompt.cancel"
+	PromptSubmit = "prompt.submit"
+	PromptCancel = "prompt.cancel"
 	// PromptBackspace is retained as a dangling alias for source
 	// compatibility with downstream pkgs that still reference the
 	// constant; no controller registers a handler under this ID.
@@ -185,7 +185,7 @@ const (
 	// ip/ap (paragraph — blank-line delimited per vim), is/as (SQL
 	// statement — naive ';' split). Bindings live under OperatorPending
 	// in wwd.6; the Visual / VisualLine mode mask is added in wwd.7.
-	TextObjectInnerQuoteDouble = "textobject.inner_quote_double"
+	TextObjectInnerQuoteDouble  = "textobject.inner_quote_double"
 	TextObjectAroundQuoteDouble = "textobject.around_quote_double"
 	TextObjectInnerQuoteSingle  = "textobject.inner_quote_single"
 	TextObjectAroundQuoteSingle = "textobject.around_quote_single"

@@ -18,7 +18,7 @@ const (
 	// TEMPORARY_POPUP is a popup discarded automatically the next time
 	// another popup is pushed on top of it.
 	TEMPORARY_POPUP
-	// EXTRAS_CONTEXT hosts the command_log panel.
+	// EXTRAS_CONTEXT hosts the messages panel.
 	EXTRAS_CONTEXT
 	// GLOBAL_CONTEXT has no view; it exists only to host global
 	// keybindings (leader prefix, ":" command line, etc.).
@@ -49,7 +49,7 @@ const (
 	TABLE_DATA_EDITOR ContextKey = "table_data_editor"
 	RESULT_GRID       ContextKey = "result_grid"
 	PLAN              ContextKey = "plan"
-	LOG               ContextKey = "log"
+	MESSAGES          ContextKey = "messages"
 	MENU              ContextKey = "menu"
 	CONFIRMATION      ContextKey = "confirmation"
 	PROMPT            ContextKey = "prompt"

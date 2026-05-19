@@ -15,7 +15,7 @@ arbitrary chord sequences, per-context maps).
 > 2. Concurrent queries → **one in-flight per connection**, pane-switch preempts (§12.2)
 > 3. Visual-select run → `<leader>r` overloaded; selection split on `;` → N tabs (§13.4)
 > 4. Pagination → auto-pull near tail, `G` triggers `ReadToEnd` (§12.3)
-> 5. Server NOTICE/WARNING → `command_log` + toast on first per run (§12.9)
+> 5. Server NOTICE/WARNING → `messages` + toast on first per run (§12.9)
 > 6. Cancel when `HasLiveCancel: false` → `<leader>x` hard-disabled, `<esc>` detaches (§12.4)
 > 7. Query history UX → `HISTORY` popup, `<leader>h`, FTS search (§8, §13.6)
 > 8. Result export → `<leader>oe` menu, CSV/TSV/JSON/NDJSON/SQL INSERTs/Markdown (§12.7)
@@ -275,7 +275,7 @@ dbsavvy/
 │   │   ├── main_panels.go           # MainContextPair, RefreshMainView
 │   │   ├── keybindings.go           # legacy global bindings + reset loop
 │   │   ├── options_map.go           # bottom options bar
-│   │   ├── command_log_panel.go     # action log
+│   │   ├── messages_panel.go        # server-emitted messages (PG NOTICE/WARNING/INFO)
 │   │   ├── editors.go               # editor builders
 │   │   ├── modes/                   # cherry-pick equivalents (e.g. "tx in progress")
 │   │   ├── types/
@@ -514,7 +514,7 @@ The single `layout(g *gocui.Gui) error` callback in `pkg/gui/layout.go`:
 | `main` (right top) | `query_editor` | query_editor / table_data / view_definition |
 | `secondary` (right bottom) | `result_grid_1` | **N result tabs** + plan / log / errors — see §12.2 |
 | `status` (bottom line) | `options_bar` | options / progress / search |
-| `extras` (overlay) | `command_log` | always-on-top toggle (`<leader>l`) |
+| `extras` (overlay) | `messages` | always-on-top toggle (`<leader>l`) |
 
 **Multi-result-tab model (v1).** The `secondary` slot hosts an
 ordered list of result tabs, one per `<leader>r` / `<leader>R` /
@@ -543,7 +543,7 @@ Deferred to Phase 8 (multi-connection / schema-diff work):
 1. `limit` overlay (when screen too small — `width<10 || height<10`)
 2. Popups: confirmation, prompt, menu, suggestions, tooltip, which-key
 3. Status line: options, app-status, search
-4. Extras: command_log
+4. Extras: messages
 5. Main pair (query_editor / result / plan / log)
 6. Side rail tabs (schemas / tables / columns / indexes)
 
@@ -565,7 +565,7 @@ const (
     MAIN_CONTEXT                          // right-top + right-bottom pair
     PERSISTENT_POPUP                      // identity preserved across pushes
     TEMPORARY_POPUP                       // discarded on next push
-    EXTRAS_CONTEXT                        // command_log
+    EXTRAS_CONTEXT                        // messages
     GLOBAL_CONTEXT                        // no view; hosts global bindings only
     DISPLAY_CONTEXT                       // pure render target (which-key popup)
 )
@@ -1231,7 +1231,7 @@ To keep the surface honest:
 | Visual block (`<c-v>`) | ✅ v1 |
 | Buffers and windows (`:buffers`, `:split`) | ❌ v1 — multi-buffer is via the Tabs concept (§7) |
 | `.` repeat | ✅ v1 — store last operator+motion |
-| Quickfix list | ❌ — `command_log` is the analog |
+| Quickfix list | ❌ — `messages` is the analog |
 
 ---
 
@@ -2183,7 +2183,7 @@ parse, constraints, and conflict counts before applying for real.
        PendingEditSet.Clear()
        re-fetch affected rows by PK to refresh display
        options bar: "✓ 3 changes applied"
-       command_log: SQL + duration + rows-affected per statement
+       messages: SQL + duration + rows-affected per statement
 ```
 
 Everything happens on a dedicated session (`AcquireSession`) so the
@@ -2391,7 +2391,7 @@ Postgres can emit `NOTICE`, `WARNING`, and `INFO` messages
 The `HasNotice` capability is declared in §11.1; v1 surfaces them
 as follows:
 
-- Every notice is appended to the `command_log` (§4 `command_log_panel.go`,
+- Every notice is appended to the `messages` panel (§4 `messages_panel.go`,
   the `extras` context) with severity prefix and the active
   connection's `icon label`:
   `[NOTICE] · ⚠ PROD · function "f"(int) is replaced ...`.
@@ -2406,7 +2406,7 @@ as follows:
   transaction is committed (Postgres semantics) but the dialog
   closes into a "review notices before continuing" state.
 - DDL run via custom command (`output: log`, §14) routes notices
-  the same way: `command_log` is the canonical sink.
+  the same way: `messages` is the canonical sink.
 
 ---
 
@@ -3169,7 +3169,7 @@ this phase, since the surface only grows from here.
 - `Main + Secondary` pair: QueryEditor + Result tabs (multi-tab
   model from §7 / §12.2 / decisions 1+2 shipped from day one).
 - Run / cancel (with no-live-cancel fallback, decision 6).
-- Server NOTICE / WARNING streaming into `command_log` + toast
+- Server NOTICE / WARNING streaming into `messages` + toast
   (§12.9, decision 5).
 - **Transaction submenu** `<leader>tx` and `[TX]` status indicator
   (§15.10, decision 14). Quit-with-open-tx confirmation (decision 15).

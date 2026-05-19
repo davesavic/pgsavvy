@@ -30,7 +30,7 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 		// Live (16 — 5 side + 6 popup + 1 extras + 1 global + 3 display).
 		types.CONNECTIONS, types.SCHEMAS, types.TABLES, types.COLUMNS, types.INDEXES,
 		types.MENU, types.CONFIRMATION, types.PROMPT, types.SELECTION, types.SUGGESTIONS, types.COMMAND_LINE,
-		types.LOG, types.GLOBAL, types.LIMIT, types.WHICH_KEY, types.CHEATSHEET,
+		types.MESSAGES, types.GLOBAL, types.LIMIT, types.WHICH_KEY, types.CHEATSHEET,
 		// Stub (5).
 		types.QUERY_EDITOR, types.TABLE_DATA_EDITOR, types.RESULT_GRID,
 		types.PLAN, types.HISTORY,
@@ -71,7 +71,7 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.SUGGESTIONS, types.TEMPORARY_POPUP},
 		{types.COMMAND_LINE, types.TEMPORARY_POPUP},
 		// 1 EXTRAS, 1 GLOBAL, 3 DISPLAY.
-		{types.LOG, types.EXTRAS_CONTEXT},
+		{types.MESSAGES, types.EXTRAS_CONTEXT},
 		{types.GLOBAL, types.GLOBAL_CONTEXT},
 		{types.LIMIT, types.DISPLAY_CONTEXT},
 		{types.WHICH_KEY, types.DISPLAY_CONTEXT},

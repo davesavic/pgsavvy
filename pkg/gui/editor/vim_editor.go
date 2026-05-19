@@ -232,4 +232,3 @@ func syncViewToBuffer(v *gocui.View, buf *Buffer) {
 	cur := buf.CursorPos()
 	v.SetCursor(cur.Col, cur.Line)
 }
-
