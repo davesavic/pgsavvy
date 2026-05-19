@@ -148,6 +148,27 @@ const (
 	MotionScreenMiddle      = "motion.screen_middle"
 	MotionScreenBottom      = "motion.screen_bottom"
 	MotionMarkJump          = "motion.mark_jump"
+
+	// Text-object family — owned by VimEditorController (dbsavvy-wwd.6).
+	// Defaults follow vim: i"/a" (double quote), i'/a' (single quote),
+	// i(/a( (paren), i[/a[ (bracket), i{/a{ + iB/aB (brace),
+	// ip/ap (paragraph — blank-line delimited per vim), is/as (SQL
+	// statement — naive ';' split). Bindings live under OperatorPending
+	// in wwd.6; the Visual / VisualLine mode mask is added in wwd.7.
+	TextObjectInnerQuoteDouble = "textobject.inner_quote_double"
+	TextObjectAroundQuoteDouble = "textobject.around_quote_double"
+	TextObjectInnerQuoteSingle  = "textobject.inner_quote_single"
+	TextObjectAroundQuoteSingle = "textobject.around_quote_single"
+	TextObjectInnerParen        = "textobject.inner_paren"
+	TextObjectAroundParen       = "textobject.around_paren"
+	TextObjectInnerBracket      = "textobject.inner_bracket"
+	TextObjectAroundBracket     = "textobject.around_bracket"
+	TextObjectInnerBrace        = "textobject.inner_brace"
+	TextObjectAroundBrace       = "textobject.around_brace"
+	TextObjectInnerParagraph    = "textobject.inner_paragraph"
+	TextObjectAroundParagraph   = "textobject.around_paragraph"
+	TextObjectInnerStatement    = "textobject.inner_statement"
+	TextObjectAroundStatement   = "textobject.around_statement"
 )
 
 // AllActionIDs returns every ID declared in this file in declaration
@@ -226,5 +247,19 @@ func AllActionIDs() []string {
 		MotionScreenMiddle,
 		MotionScreenBottom,
 		MotionMarkJump,
+		TextObjectInnerQuoteDouble,
+		TextObjectAroundQuoteDouble,
+		TextObjectInnerQuoteSingle,
+		TextObjectAroundQuoteSingle,
+		TextObjectInnerParen,
+		TextObjectAroundParen,
+		TextObjectInnerBracket,
+		TextObjectAroundBracket,
+		TextObjectInnerBrace,
+		TextObjectAroundBrace,
+		TextObjectInnerParagraph,
+		TextObjectAroundParagraph,
+		TextObjectInnerStatement,
+		TextObjectAroundStatement,
 	}
 }

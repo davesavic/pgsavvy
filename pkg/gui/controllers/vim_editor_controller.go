@@ -40,6 +40,22 @@ func NewVimEditorController(qec *context.QueryEditorContext, matcher *keys.Match
 // implements: pure (no Buffer mutation), pre-validated by the caller.
 type motionFunc func(b *editor.Buffer, pos editor.Position, count int) (editor.Position, bool)
 
+// textObjectFunc resolves a Range from a cursor position. Bool=false
+// means "no surrounding object found" — the handler MUST NOT call
+// applyPending in that case.
+type textObjectFunc func(b *editor.Buffer, pos editor.Position) (editor.Range, bool)
+
+// textObjectSpec ties together a default key shorthand, an action ID,
+// a human description, and the resolver. wwd.6 registers bindings
+// under OperatorPending only; wwd.7 extends the mode mask to include
+// Visual / VisualLine once those mode primitives ship.
+type textObjectSpec struct {
+	shorthand   string
+	actionID    string
+	description string
+	fn          textObjectFunc
+}
+
 // motionSpec ties together a default key shorthand, an action ID, a
 // human description, and the pure motion function the handler invokes.
 // jump = true classifies the motion for JumpList recording (gg, G,
@@ -94,9 +110,14 @@ func (c *VimEditorController) motionSpecs() []motionSpec {
 // scope. Mode = Normal | OperatorPending — Visual variants are added
 // in wwd.7. The mark-jump binding is NOT published here; the `'a..z`
 // recall family is shipped by wwd.7 alongside the visual extensions.
+//
+// Text-object bindings (i"/a", i(/a(, ip/ap, is/as, …) are appended
+// under OperatorPending only — wwd.7 extends the mode mask to
+// Visual / VisualLine once those modes are wired.
 func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	specs := c.motionSpecs()
-	out := make([]*types.ChordBinding, 0, len(specs))
+	textObjects := c.textObjectSpecs()
+	out := make([]*types.ChordBinding, 0, len(specs)+len(textObjects))
 	for _, s := range specs {
 		seq, err := keys.SequenceFromShorthand(s.shorthand)
 		if err != nil {
@@ -109,6 +130,20 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			ActionID:    s.actionID,
 			Description: s.description,
 			Tag:         "Motion",
+		})
+	}
+	for _, s := range textObjects {
+		seq, err := keys.SequenceFromShorthand(s.shorthand)
+		if err != nil {
+			continue
+		}
+		out = append(out, &types.ChordBinding{
+			Sequence:    seq,
+			Mode:        types.ModeOperatorPending,
+			Scope:       types.QUERY_EDITOR,
+			ActionID:    s.actionID,
+			Description: s.description,
+			Tag:         "Text object",
 		})
 	}
 	return out
@@ -135,6 +170,78 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 			Tag:         "Motion",
 			Handler:     c.motionHandler(spec),
 		})
+	}
+	// iB/i{ and aB/a{ share action IDs (vim alias) — register handler once.
+	seen := make(map[string]struct{})
+	for _, s := range c.textObjectSpecs() {
+		spec := s
+		if _, ok := seen[spec.actionID]; ok {
+			continue
+		}
+		seen[spec.actionID] = struct{}{}
+		_ = reg.Register(&commands.Command{
+			ID:          spec.actionID,
+			Description: spec.description,
+			Tag:         "Text object",
+			Handler:     c.textObjectHandler(spec),
+		})
+	}
+}
+
+// textObjectSpecs returns the wwd.6 text-object table. Quote-text
+// objects use a small adapter to bind the quote rune into a
+// textObjectFunc closure.
+func (c *VimEditorController) textObjectSpecs() []textObjectSpec {
+	innerQuote := func(q rune) textObjectFunc {
+		return func(b *editor.Buffer, pos editor.Position) (editor.Range, bool) {
+			return editor.InnerQuote(b, pos, q)
+		}
+	}
+	aroundQuote := func(q rune) textObjectFunc {
+		return func(b *editor.Buffer, pos editor.Position) (editor.Range, bool) {
+			return editor.AroundQuote(b, pos, q)
+		}
+	}
+	return []textObjectSpec{
+		{"i\"", commands.TextObjectInnerQuoteDouble, "inside \"", innerQuote('"')},
+		{"a\"", commands.TextObjectAroundQuoteDouble, "around \"", aroundQuote('"')},
+		{"i'", commands.TextObjectInnerQuoteSingle, "inside '", innerQuote('\'')},
+		{"a'", commands.TextObjectAroundQuoteSingle, "around '", aroundQuote('\'')},
+		{"i(", commands.TextObjectInnerParen, "inside ()", editor.InnerParen},
+		{"a(", commands.TextObjectAroundParen, "around ()", editor.AroundParen},
+		{"i[", commands.TextObjectInnerBracket, "inside []", editor.InnerBracket},
+		{"a[", commands.TextObjectAroundBracket, "around []", editor.AroundBracket},
+		{"i{", commands.TextObjectInnerBrace, "inside {}", editor.InnerBraces},
+		{"a{", commands.TextObjectAroundBrace, "around {}", editor.AroundBraces},
+		{"iB", commands.TextObjectInnerBrace, "inside {} (iB)", editor.InnerBraces},
+		{"aB", commands.TextObjectAroundBrace, "around {} (aB)", editor.AroundBraces},
+		{"ip", commands.TextObjectInnerParagraph, "inside paragraph", editor.InnerParagraph},
+		{"ap", commands.TextObjectAroundParagraph, "around paragraph", editor.AroundParagraph},
+		{"is", commands.TextObjectInnerStatement, "inside statement", editor.InnerStatement},
+		{"as", commands.TextObjectAroundStatement, "around statement", editor.AroundStatement},
+	}
+}
+
+// textObjectHandler returns the Handler closure for one textObjectSpec.
+// When fired in OperatorPending mode, it resolves the range and hands
+// off to applyPending (stub in wwd.5; filled in wwd.8). Outside
+// OperatorPending the handler is a no-op (Visual handling lands in
+// wwd.7).
+func (c *VimEditorController) textObjectHandler(spec textObjectSpec) commands.Handler {
+	return func(ec commands.ExecCtx) error {
+		if !ec.Mode.Has(types.ModeOperatorPending) {
+			return nil
+		}
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		from := buf.CursorPos()
+		r, ok := spec.fn(buf, from)
+		if !ok {
+			return nil
+		}
+		return c.applyPending(buf, r)
 	}
 }
 

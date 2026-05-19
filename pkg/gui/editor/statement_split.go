@@ -2,6 +2,22 @@ package editor
 
 import "strings"
 
+// DebugLog is the package-level diagnostic hook. The orchestrator
+// wires it to common.Log.Debugf when constructing the editor surface;
+// tests may swap it for capture. Nil means no logging.
+//
+// Reason: editor functions are pure and shouldn't take a logger
+// argument, but the naive ;-splitter has a documented limitation
+// (';' inside a string literal mis-splits) that's worth surfacing
+// without UI noise.
+var DebugLog func(format string, args ...any)
+
+func debugf(format string, args ...any) {
+	if DebugLog != nil {
+		DebugLog(format, args...)
+	}
+}
+
 // SplitStatements splits buf on ';' and returns the non-empty segments
 // without trimming surrounding whitespace beyond the semicolon itself.
 // The split is intentionally naive — it has no awareness of string
@@ -24,6 +40,7 @@ func SplitStatements(buf string) []string {
 	if strings.TrimSpace(buf) == "" {
 		return nil
 	}
+	detectStringLiteralMisplit(buf)
 	parts := strings.Split(buf, ";")
 	// Drop a single trailing empty segment from a buffer that ended in
 	// ';' (the common case). The non-empty-only filter below would
@@ -44,6 +61,35 @@ func SplitStatements(buf string) []string {
 		return nil
 	}
 	return out
+}
+
+// detectStringLiteralMisplit walks buf line-by-line and emits a
+// debug log when a line contains an unbalanced single-quote run AND
+// a `;` — which is a strong indicator that SplitStatements is about
+// to mis-split a string literal. This is purely a diagnostic; the
+// split result is unchanged. The SQL-aware splitter
+// ([[dbsavvy-wwd-highlighter]]) replaces this heuristic.
+func detectStringLiteralMisplit(buf string) {
+	if DebugLog == nil {
+		return
+	}
+	for lineNum, line := range strings.Split(buf, "\n") {
+		if !strings.ContainsRune(line, ';') {
+			continue
+		}
+		inside := false
+		for _, r := range line {
+			switch r {
+			case '\'':
+				inside = !inside
+			case ';':
+				if inside {
+					debugf("editor.SplitStatements: line %d has ';' inside a single-quoted string; possible mis-split", lineNum+1)
+					return
+				}
+			}
+		}
+	}
 }
 
 // StatementAt returns the statement under the byte offset off inside
