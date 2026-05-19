@@ -40,6 +40,11 @@ type fakePrompter struct {
 	t       *testing.T
 	strings []*stringAttempt
 	choices []*choiceAttempt
+
+	// promptChoiceCalls counts PromptChoice invocations so tests can assert
+	// it was never called (e.g. when the helper short-circuits before
+	// reaching the prompt). Incremented before any cancel/dispatch logic.
+	promptChoiceCalls int
 }
 
 func (f *fakePrompter) PromptString(_ context.Context, _ string, _ string, validate func(string) error) (string, error) {
@@ -66,6 +71,7 @@ func (f *fakePrompter) PromptString(_ context.Context, _ string, _ string, valid
 }
 
 func (f *fakePrompter) PromptChoice(_ context.Context, _ string, _ string, choices []string) (string, error) {
+	f.promptChoiceCalls++
 	if len(f.choices) == 0 {
 		f.t.Fatalf("PromptChoice: no scripted attempts left")
 	}
@@ -198,6 +204,44 @@ func TestWalkAddConnection_UnregisteredDriverReprompts(t *testing.T) {
 	}
 	if len(prompter.choices) != 0 {
 		t.Errorf("choices not fully consumed: %d remaining", len(prompter.choices))
+	}
+}
+
+func TestWalkAddConnection_NoDrivers(t *testing.T) {
+	cases := []struct {
+		name      string
+		driversFn func() []string
+	}{
+		{name: "nil_slice", driversFn: func() []string { return nil }},
+		{name: "zero_length", driversFn: func() []string { return []string{} }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			tr := i18n.EnglishTranslationSet()
+			cc := &common.Common{Tr: tr}
+			h := NewConnectionFormHelper(cc, fs, "/connections.yml", c.driversFn)
+			fp := &fakePrompter{t: t}
+			called := atomic.Bool{}
+			err := h.WalkAddConnection(context.Background(), fp, func(models.Connection) {
+				called.Store(true)
+			})
+			if err == nil {
+				t.Fatal("WalkAddConnection: nil error; want non-nil")
+			}
+			if !strings.Contains(err.Error(), "no drivers") {
+				t.Errorf("err = %q; want it to contain %q", err.Error(), "no drivers")
+			}
+			if fp.promptChoiceCalls != 0 {
+				t.Errorf("PromptChoice was called %d time(s); want 0", fp.promptChoiceCalls)
+			}
+			if called.Load() {
+				t.Error("onComplete called after short-circuit; expected no-write")
+			}
+			if exists, _ := afero.Exists(fs, "/connections.yml"); exists {
+				t.Error("connections.yml written; expected no write on empty drivers")
+			}
+		})
 	}
 }
 

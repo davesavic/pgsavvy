@@ -139,6 +139,9 @@ func (h *ConnectionFormHelper) WalkAddConnection(ctx context.Context, prompter C
 // in drivers.Names() (a contract violation by a misbehaving prompter) we
 // re-prompt rather than persisting bad data.
 func (h *ConnectionFormHelper) promptDriver(ctx context.Context, prompter ChainedPrompter) (string, error) {
+	if len(h.driversFn()) == 0 {
+		return "", errors.New("connection_form: no drivers registered")
+	}
 	for {
 		choices := h.driversFn()
 		picked, err := prompter.PromptChoice(ctx, "Driver", "Pick a driver", choices)
