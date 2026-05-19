@@ -346,7 +346,7 @@ func TestVimEditorPublishesInsertAndHistoryBindings(t *testing.T) {
 		commands.InsertOpenAbove:     types.ModeNormal,
 		commands.InsertFirstNonblank: types.ModeNormal,
 		commands.InsertAppendEnd:     types.ModeNormal,
-		commands.ModeNormal:          types.ModeInsert,
+		commands.ModeNormal:          types.ModeInsert | types.ModeOperatorPending,
 		commands.EditorUndo:          types.ModeNormal,
 		commands.EditorRedo:          types.ModeNormal,
 	}

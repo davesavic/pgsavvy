@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"time"
+
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -125,6 +127,15 @@ func AttachControllers(
 			matcher = helpers.KbRuntime.Matcher
 		}
 		vimEditor = NewVimEditorController(tree.QueryEditor, matcher)
+		// wwd.8 — wire the toast sink for the +/* clipboard one-shot
+		// TODO toast. Falls back silently when no Toast helper is
+		// injected (unit tests).
+		if helpers.Toast != nil {
+			toast := helpers.Toast
+			vimEditor.SetToaster(func(msg string) {
+				toast.Show(msg, 3*time.Second)
+			})
+		}
 		// No AttachToContext: VimEditor bindings reach the trie via
 		// AllDefaultBindings, mirroring ResultTabsController's path
 		// (see controllers.go:98-100). The Matcher routes keystrokes

@@ -149,6 +149,31 @@ const (
 	MotionScreenBottom      = "motion.screen_bottom"
 	MotionMarkJump          = "motion.mark_jump"
 
+	// Operator family — owned by VimEditorController (dbsavvy-wwd.8).
+	// Defaults: d/y/c (delete/yank/change), gU/gu (upper/lower), >/< (indent
+	// right/left). Each operator binds in Normal | OperatorPending | every
+	// Visual variant. In Normal mode the operator stashes itself in
+	// RepeatStore.PendingOpID and flips ModeStore[QUERY_EDITOR] to
+	// ModeOperatorPending; the next motion/text-object completes via
+	// VimEditorController.applyPending. In Visual mode the operator
+	// consumes Buffer.Selection directly (bypasses op-pending per
+	// Architecture Decision 4). In OperatorPending mode the same key as
+	// the stashed operator triggers the linewise variant (dd/yy/cc/>>/<<).
+	OperatorDelete      = "operator.delete"
+	OperatorYank        = "operator.yank"
+	OperatorChange      = "operator.change"
+	OperatorUpper       = "operator.upper"
+	OperatorLower       = "operator.lower"
+	OperatorIndentRight = "operator.indent_right"
+	OperatorIndentLeft  = "operator.indent_left"
+
+	// EditorPaste — owned by VimEditorController (dbsavvy-wwd.8). Bound
+	// to `p` in Normal mode. The handler reads from the effective
+	// register (ec.Register, defaulting to '"') and inserts the text
+	// after the cursor. LineWise registers (set by dd/yy) paste on a new
+	// line below the cursor, matching vim semantics.
+	EditorPaste = "editor.paste"
+
 	// Text-object family — owned by VimEditorController (dbsavvy-wwd.6).
 	// Defaults follow vim: i"/a" (double quote), i'/a' (single quote),
 	// i(/a( (paren), i[/a[ (bracket), i{/a{ + iB/aB (brace),
@@ -286,6 +311,14 @@ func AllActionIDs() []string {
 		MotionScreenMiddle,
 		MotionScreenBottom,
 		MotionMarkJump,
+		OperatorDelete,
+		OperatorYank,
+		OperatorChange,
+		OperatorUpper,
+		OperatorLower,
+		OperatorIndentRight,
+		OperatorIndentLeft,
+		EditorPaste,
 		TextObjectInnerQuoteDouble,
 		TextObjectAroundQuoteDouble,
 		TextObjectInnerQuoteSingle,

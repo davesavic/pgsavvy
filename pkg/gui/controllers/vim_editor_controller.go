@@ -25,6 +25,17 @@ import (
 type VimEditorController struct {
 	qec     *context.QueryEditorContext
 	matcher *keys.Matcher
+
+	// toaster is the optional sink for one-shot user feedback (e.g. the
+	// `"+y` / `"*y` "system clipboard not wired" TODO toast). Wired
+	// post-construction via SetToaster so test wiring can keep the
+	// two-arg NewVimEditorController call shape.
+	toaster func(msg string)
+
+	// clipboardToasted records whether the +/* TODO toast already fired
+	// this session — vim's system-clipboard registers (+/*) fall back to
+	// the in-memory store and surface a one-shot notice only.
+	clipboardToasted bool
 }
 
 // NewVimEditorController constructs the controller. Either argument
@@ -34,6 +45,23 @@ type VimEditorController struct {
 // surface independently.
 func NewVimEditorController(qec *context.QueryEditorContext, matcher *keys.Matcher) *VimEditorController {
 	return &VimEditorController{qec: qec, matcher: matcher}
+}
+
+// SetToaster wires a toast sink for the controller. nil clears any
+// previously-installed sink. The orchestrator calls this in
+// AttachControllers (post-construction) with a closure over the live
+// ToastHelper. Unit tests typically leave the sink unset.
+func (c *VimEditorController) SetToaster(t func(msg string)) {
+	c.toaster = t
+}
+
+// emitToast forwards msg to the wired toaster, or drops it when no
+// sink is installed.
+func (c *VimEditorController) emitToast(msg string) {
+	if c.toaster == nil {
+		return
+	}
+	c.toaster(msg)
 }
 
 // motionFunc is the shared signature every motion in pkg/gui/editor
@@ -106,6 +134,14 @@ func (c *VimEditorController) motionSpecs() []motionSpec {
 	}
 }
 
+// operatorModeMask is the Mode mask under which operator bindings fire.
+// Operators are valid in Normal (initiates op-pending), every Visual
+// variant (consumes Selection directly per Architecture Decision 4),
+// AND OperatorPending (the second key triggers the linewise variant —
+// `dd`/`yy`/`cc`/`>>`/`<<` etc.).
+const operatorModeMask = types.ModeNormal | types.ModeOperatorPending |
+	types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
+
 // motionModeMask is the Mode mask under which motion bindings fire.
 // Visual / VisualLine / VisualBlock are added in wwd.7 so motion keys
 // (h/j/k/l/w/b/...) extend the live Selection instead of just moving
@@ -138,13 +174,117 @@ const visualExitModeMask = types.ModeVisual | types.ModeVisualLine | types.ModeV
 const insertEntryModeMask = types.ModeNormal
 
 // insertExitModeMask is the Mode mask under which `<esc>` fires the
-// mode.normal action — Insert only. Visual `<esc>` is bound separately
-// to visual.exit and does not overlap (the modes are disjoint bits).
-const insertExitModeMask = types.ModeInsert
+// mode.normal action. wwd.10 shipped this as Insert-only; wwd.8 extends
+// it to also cover OperatorPending so a half-typed operator can be
+// cancelled with `<esc>` (clears RepeatStore.PendingOpID + resets mode).
+// Visual `<esc>` is bound separately to visual.exit and does not
+// overlap (the modes are disjoint bits).
+const insertExitModeMask = types.ModeInsert | types.ModeOperatorPending
 
 // editorHistoryModeMask is the Mode mask under which u / <c-r> fire —
 // Normal only. Vim's undo/redo are Normal-mode commands.
 const editorHistoryModeMask = types.ModeNormal
+
+// pasteModeMask is the Mode mask under which `p` (paste) fires — Normal
+// only in wwd.8. Visual-mode paste (replacing selection with register
+// contents) is deferred.
+const pasteModeMask = types.ModeNormal
+
+// operatorSpec ties a shorthand to an operator action ID + its apply
+// function. apply receives a Range and returns the captured register
+// text (empty for non-yanking operators like gU/gu/>/<). isChange flips
+// the mode to ModeInsert post-application (the vim `c` family).
+type operatorSpec struct {
+	shorthand   string
+	chord       []keys.Key // overrides shorthand parsing when non-nil
+	actionID    string
+	description string
+	apply       func(b *editor.Buffer, r editor.Range) (capture string, err error)
+	isChange    bool
+}
+
+// operatorSpecs returns the wwd.8 operator binding table.
+//
+//   - d/y/c (delete/yank/change): char-wise apply.
+//   - gU/gu (upper/lower): char-wise replace, no register write.
+//   - >/<  (indent right/left): linewise indent by ShiftWidth (=2).
+//
+// `<` and `>` cannot be shorthand-parsed (the parser treats `<` as the
+// start of a `<...>` token); their chords are constructed manually as
+// single-rune Keys.
+func (c *VimEditorController) operatorSpecs() []operatorSpec {
+	return []operatorSpec{
+		{
+			shorthand:   "d",
+			actionID:    commands.OperatorDelete,
+			description: "delete",
+			apply: func(b *editor.Buffer, r editor.Range) (string, error) {
+				return editor.Delete(b, r)
+			},
+		},
+		{
+			shorthand:   "y",
+			actionID:    commands.OperatorYank,
+			description: "yank",
+			apply: func(b *editor.Buffer, r editor.Range) (string, error) {
+				return editor.Yank(b, r), nil
+			},
+		},
+		{
+			shorthand:   "c",
+			actionID:    commands.OperatorChange,
+			description: "change",
+			apply: func(b *editor.Buffer, r editor.Range) (string, error) {
+				return editor.Change(b, r)
+			},
+			isChange: true,
+		},
+		{
+			shorthand:   "gU",
+			actionID:    commands.OperatorUpper,
+			description: "uppercase",
+			apply: func(b *editor.Buffer, r editor.Range) (string, error) {
+				return "", editor.Upper(b, r)
+			},
+		},
+		{
+			shorthand:   "gu",
+			actionID:    commands.OperatorLower,
+			description: "lowercase",
+			apply: func(b *editor.Buffer, r editor.Range) (string, error) {
+				return "", editor.Lower(b, r)
+			},
+		},
+		{
+			chord:       []keys.Key{{Code: '>'}},
+			actionID:    commands.OperatorIndentRight,
+			description: "indent right",
+			apply: func(b *editor.Buffer, r editor.Range) (string, error) {
+				return "", editor.IndentRight(b, r.Start.Line, r.End.Line)
+			},
+		},
+		{
+			chord:       []keys.Key{{Code: '<'}},
+			actionID:    commands.OperatorIndentLeft,
+			description: "indent left",
+			apply: func(b *editor.Buffer, r editor.Range) (string, error) {
+				return "", editor.IndentLeft(b, r.Start.Line, r.End.Line)
+			},
+		},
+	}
+}
+
+// findOperatorSpec returns the operatorSpec whose actionID matches id,
+// or (operatorSpec{}, false) when no operator owns the ID. Used by
+// applyPending to dispatch the stashed PendingOpID.
+func (c *VimEditorController) findOperatorSpec(id string) (operatorSpec, bool) {
+	for _, s := range c.operatorSpecs() {
+		if s.actionID == id {
+			return s, true
+		}
+	}
+	return operatorSpec{}, false
+}
 
 // GetKeybindings publishes the motion + text-object + visual bindings
 // under QUERY_EDITOR scope.
@@ -165,7 +305,8 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 	visuals := c.visualSpecs()
 	inserts := c.insertEntrySpecs()
 	histories := c.editorHistorySpecs()
-	out := make([]*types.ChordBinding, 0, len(specs)+len(textObjects)+len(visuals)+len(inserts)+len(histories))
+	operators := c.operatorSpecs()
+	out := make([]*types.ChordBinding, 0, len(specs)+len(textObjects)+len(visuals)+len(inserts)+len(histories)+len(operators)+1)
 	for _, s := range specs {
 		seq, err := keys.SequenceFromShorthand(s.shorthand)
 		if err != nil {
@@ -236,6 +377,42 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			Tag:         s.tag,
 		})
 	}
+	// Paste binding: `p` Normal-only.
+	if seq, err := keys.SequenceFromShorthand("p"); err == nil {
+		out = append(out, &types.ChordBinding{
+			Sequence:    seq,
+			Mode:        pasteModeMask,
+			Scope:       types.QUERY_EDITOR,
+			ActionID:    commands.EditorPaste,
+			Description: "paste after cursor",
+			Tag:         "Edit",
+		})
+	}
+	for _, s := range operators {
+		var (
+			seq []keys.Key
+			err error
+		)
+		if s.chord != nil {
+			seq = append([]keys.Key(nil), s.chord...)
+		} else {
+			seq, err = keys.SequenceFromShorthand(s.shorthand)
+			if err != nil {
+				continue
+			}
+		}
+		out = append(out, &types.ChordBinding{
+			Sequence:    seq,
+			Mode:        operatorModeMask,
+			Scope:       types.QUERY_EDITOR,
+			ActionID:    s.actionID,
+			Description: s.description,
+			Tag:         "Operator",
+		})
+	}
+	// (op-pending cancel: the existing `<esc>` → mode.normal binding from
+	// the insert-entry specs covers OperatorPending too — its mode mask
+	// was widened in wwd.8 via insertExitModeMask.)
 	return out
 }
 
@@ -430,6 +607,23 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 		Tag:         "Edit history",
 		Handler:     c.redoHandler(),
 	})
+	// wwd.8 — operator handlers. Each spec gets its own Handler closure
+	// over the spec value (loop-var aliasing avoided).
+	for _, s := range c.operatorSpecs() {
+		spec := s
+		_ = reg.Register(&commands.Command{
+			ID:          spec.actionID,
+			Description: spec.description,
+			Tag:         "Operator",
+			Handler:     c.operatorHandler(spec),
+		})
+	}
+	_ = reg.Register(&commands.Command{
+		ID:          commands.EditorPaste,
+		Description: "Paste after cursor",
+		Tag:         "Edit",
+		Handler:     c.pasteHandler(),
+	})
 }
 
 // visualEnterHandler returns the Handler closure for v / V / <c-v>.
@@ -524,7 +718,7 @@ func (c *VimEditorController) textObjectHandler(spec textObjectSpec) commands.Ha
 			return nil
 		}
 		if ec.Mode.Has(types.ModeOperatorPending) {
-			return c.applyPending(buf, r)
+			return c.applyPending(buf, r, "", spec.actionID, ec)
 		}
 		return nil
 	}
@@ -554,10 +748,20 @@ func (c *VimEditorController) motionHandler(spec motionSpec) commands.Handler {
 		from := buf.CursorPos()
 		newPos, ok := spec.fn(buf, from, count)
 		if !ok {
+			// Op-pending boundary: a motion at its target (G from last
+			// line, gg from {0,0}, 0 at col 0) returns ok=false. Vim's
+			// `dG` from the last line still deletes that line — a
+			// zero-length range is meaningful for operators. Hand the
+			// zero-length Range{from,from} to applyPending so the
+			// operator can act (typically a no-op, but the state
+			// machine still resets cleanly).
+			if ec.Mode.Has(types.ModeOperatorPending) {
+				return c.applyPending(buf, editor.Range{Start: from, End: from}, spec.actionID, "", ec)
+			}
 			return nil
 		}
 		if ec.Mode.Has(types.ModeOperatorPending) {
-			return c.applyPending(buf, editor.Range{Start: from, End: newPos})
+			return c.applyPending(buf, editor.Range{Start: from, End: newPos}, spec.actionID, "", ec)
 		}
 		if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
 			editor.ExtendSelection(buf, newPos)
@@ -571,17 +775,309 @@ func (c *VimEditorController) motionHandler(spec motionSpec) commands.Handler {
 	}
 }
 
-// applyPending is the operator-dispatch stub. wwd.5 records the
-// pending intent only in its docstring; wwd.8 fills the body with
-// the operator registry lookup + Range application. Returning nil
-// here means the Buffer.Cursor is intentionally NOT moved — the
-// operator handler in wwd.8 is responsible for both the edit AND
-// the post-edit cursor position.
-func (c *VimEditorController) applyPending(_ *editor.Buffer, _ editor.Range) error {
-	// wwd.8 fills: resolve pending operator from Matcher state,
-	// look up operator handler in commands.Registry, call
-	// handler with the supplied Range, clear operator-pending mode.
+// applyPending completes an operator-pending dispatch. The motion or
+// text-object that fired in OperatorPending mode supplies r as the
+// resolved range; applyPending reads c.qec.Repeat().PendingOpID,
+// looks up the operator spec, invokes its apply function with the
+// register-aware ExecCtx routing, then resets mode + pending stash.
+//
+//	completedMotionID     — populated when motionHandler called us
+//	completedTextObjectID — populated when textObjectHandler called us
+//
+// The two are mutually exclusive (a motion XOR a text-object completes
+// the operator). Both empty is acceptable for the doubled-shortcut path
+// (dd/yy/cc/>>/<<) where the operator handler self-completes against
+// the current line.
+//
+// After applying, applyPending updates RepeatStore.{LastOpID, LastMotionID,
+// LastTextObjectID, LastCount, LastRegister} so wwd.9's `.` action can
+// replay. PendingOpID is cleared on every exit path.
+func (c *VimEditorController) applyPending(buf *editor.Buffer, r editor.Range, completedMotionID, completedTextObjectID string, ctx commands.ExecCtx) error {
+	if c.qec == nil || buf == nil {
+		return nil
+	}
+	rep := c.qec.Repeat()
+	if rep == nil {
+		return nil
+	}
+	pendingOpID := rep.PendingOpID
+	// Clear pending eagerly so any early-return path leaves the
+	// state machine clean.
+	defer func() {
+		rep.PendingOpID = ""
+	}()
+	if pendingOpID == "" {
+		// No operator pending — defensive guard. Reset to Normal in
+		// case caller left ModeOperatorPending set.
+		c.setMode(types.ModeNormal)
+		return nil
+	}
+	spec, ok := c.findOperatorSpec(pendingOpID)
+	if !ok {
+		c.setMode(types.ModeNormal)
+		return nil
+	}
+	r = editor.NormaliseRange(r)
+	capture, err := spec.apply(buf, r)
+	if err != nil {
+		c.setMode(types.ModeNormal)
+		return err
+	}
+	if capture != "" {
+		c.writeRegister(ctx.Register, capture)
+	}
+	// Repeat-store bookkeeping (wwd.9 will consume this for `.`).
+	rep.LastOpID = pendingOpID
+	rep.LastMotionID = completedMotionID
+	rep.LastTextObjectID = completedTextObjectID
+	rep.LastCount = ctx.Count
+	rep.LastRegister = ctx.Register
+	// Mode transition: `change` lands in Insert; everything else
+	// returns to Normal.
+	if spec.isChange {
+		c.setMode(types.ModeInsert)
+	} else {
+		c.setMode(types.ModeNormal)
+	}
 	return nil
+}
+
+// operatorHandler returns the Handler closure for one operatorSpec.
+//
+// Dispatch:
+//   - Visual / VisualLine / VisualBlock — consume Buffer.Selection
+//     directly, apply, write register, exit Visual, return. (Architecture
+//     Decision 4: Visual+operator bypasses op-pending.)
+//   - OperatorPending — same-key second press = doubled-shortcut variant
+//     (dd/yy/cc/>>/<<): operate linewise on the current line. Different
+//     operator key in op-pending overrides the stash and acts as a fresh
+//     doubled-shortcut on the current line.
+//   - Normal — stash PendingOpID, set ModeOperatorPending, wait for the
+//     completing motion / text-object.
+func (c *VimEditorController) operatorHandler(spec operatorSpec) commands.Handler {
+	return func(ec commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		// System-clipboard registers (+/*): emit one-shot TODO toast on
+		// first use this session, then fall through to the in-memory
+		// store. Subsequent uses are silent.
+		if ec.Register == '+' || ec.Register == '*' {
+			if !c.clipboardToasted {
+				c.emitToast("register + / * not yet wired to system clipboard")
+				c.clipboardToasted = true
+			}
+		}
+		// Visual-mode bypass — consume Selection.
+		if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
+			return c.operatorVisualApply(buf, spec, ec)
+		}
+		// OperatorPending — doubled-shortcut path (dd/yy/cc/>>/<<).
+		if ec.Mode.Has(types.ModeOperatorPending) {
+			return c.operatorDoubledApply(buf, spec, ec)
+		}
+		// Normal — stash and enter OperatorPending.
+		if c.qec == nil {
+			return nil
+		}
+		rep := c.qec.Repeat()
+		if rep == nil {
+			return nil
+		}
+		rep.PendingOpID = spec.actionID
+		c.setMode(types.ModeOperatorPending)
+		return nil
+	}
+}
+
+// operatorVisualApply runs spec.apply over the live Buffer.Selection,
+// writes the captured text to the effective register, exits Visual
+// (clears Selection and flips mode back to Normal — or Insert for
+// `change`), and records the operation in RepeatStore for `.` replay.
+func (c *VimEditorController) operatorVisualApply(buf *editor.Buffer, spec operatorSpec, ec commands.ExecCtx) error {
+	if buf.Selection == nil {
+		// Visual mode without an active Selection is defensive — exit
+		// cleanly so we don't strand state.
+		editor.ExitVisual(buf)
+		c.setMode(types.ModeNormal)
+		return nil
+	}
+	sel := *buf.Selection
+	if ec.Mode.Has(types.ModeVisualLine) {
+		sel = editor.LineWiseFromVisualLine(buf, sel)
+	} else {
+		sel = editor.NormaliseRange(sel)
+	}
+	capture, err := spec.apply(buf, sel)
+	if err != nil {
+		editor.ExitVisual(buf)
+		c.setMode(types.ModeNormal)
+		return err
+	}
+	if capture != "" {
+		c.writeRegister(ec.Register, capture)
+	}
+	editor.ExitVisual(buf)
+	if rep := c.repeat(); rep != nil {
+		rep.LastOpID = spec.actionID
+		rep.LastMotionID = ""
+		rep.LastTextObjectID = ""
+		rep.LastCount = ec.Count
+		rep.LastRegister = ec.Register
+		rep.PendingOpID = ""
+	}
+	if spec.isChange {
+		c.setMode(types.ModeInsert)
+	} else {
+		c.setMode(types.ModeNormal)
+	}
+	return nil
+}
+
+// operatorDoubledApply implements the dd/yy/cc/>>/<< linewise variant.
+// Operates over the current line (or count lines starting at cursor when
+// a count prefix was supplied), then records the op into RepeatStore.
+func (c *VimEditorController) operatorDoubledApply(buf *editor.Buffer, spec operatorSpec, ec commands.ExecCtx) error {
+	count := ec.Count
+	if count == 0 {
+		count = 1
+	}
+	cursor := buf.CursorPos()
+	r := editor.CurrentLineLineWise(buf, cursor, count)
+	capture, err := spec.apply(buf, r)
+	if err != nil {
+		c.setMode(types.ModeNormal)
+		return err
+	}
+	if capture != "" {
+		c.writeRegister(ec.Register, capture)
+	}
+	if rep := c.repeat(); rep != nil {
+		rep.LastOpID = spec.actionID
+		rep.LastMotionID = ""
+		rep.LastTextObjectID = ""
+		rep.LastCount = count
+		rep.LastRegister = ec.Register
+		rep.PendingOpID = ""
+	}
+	if spec.isChange {
+		c.setMode(types.ModeInsert)
+	} else {
+		c.setMode(types.ModeNormal)
+	}
+	return nil
+}
+
+// writeRegister stores text in the effective register. ec.Register == 0
+// → effective register is `"` (rune 0x22) per the vim default-register
+// contract documented on commands.ExecCtx. A nil matcher (test wiring)
+// makes the call a no-op.
+func (c *VimEditorController) writeRegister(reg rune, text string) {
+	if c.matcher == nil {
+		return
+	}
+	store := c.matcher.Registers()
+	if store == nil {
+		return
+	}
+	if reg == 0 {
+		reg = '"'
+	}
+	store.Set(reg, text)
+}
+
+// repeat is the nil-safe RepeatStore accessor. Returns nil when qec is
+// unwired (test fixtures) so callers fall through without panicking.
+func (c *VimEditorController) repeat() *editor.RepeatStore {
+	if c.qec == nil {
+		return nil
+	}
+	return c.qec.Repeat()
+}
+
+// readRegister returns the contents of the effective register (defaulting
+// to '"' when reg == 0). Empty string when no matcher / no register
+// store / register unset.
+func (c *VimEditorController) readRegister(reg rune) string {
+	if c.matcher == nil {
+		return ""
+	}
+	store := c.matcher.Registers()
+	if store == nil {
+		return ""
+	}
+	if reg == 0 {
+		reg = '"'
+	}
+	return store.Get(reg)
+}
+
+// pasteHandler returns the `p` paste handler. Inserts the contents of
+// the effective register at / after the cursor:
+//
+//   - Char-wise register: inserted after the cursor column (or at end
+//     of an empty buffer / column-0 of an empty line).
+//   - Line-wise register (text ends in '\n', set by dd/yy doubled-form):
+//     inserted on a new line below the cursor.
+//
+// Empty register is a no-op. System-clipboard registers (+/*) surface
+// the same one-shot TODO toast as the yank operator before falling
+// through to the in-memory store.
+func (c *VimEditorController) pasteHandler() commands.Handler {
+	return func(ec commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		if ec.Register == '+' || ec.Register == '*' {
+			if !c.clipboardToasted {
+				c.emitToast("register + / * not yet wired to system clipboard")
+				c.clipboardToasted = true
+			}
+		}
+		text := c.readRegister(ec.Register)
+		if text == "" {
+			return nil
+		}
+		cur := buf.CursorPos()
+		// Line-wise: trailing newline marker (vim's '\n'-terminated
+		// register contents from a dd/yy yank). Strip it and insert on
+		// the next line.
+		if len(text) > 0 && text[len(text)-1] == '\n' {
+			body := text[:len(text)-1]
+			// Insert at end of current line + "\n" + body, so the
+			// pasted lines land below the cursor.
+			endCol := buf.LineRuneLen(cur.Line)
+			pos := editor.Position{Line: cur.Line, Col: endCol}
+			if err := buf.Apply(editor.Edit{
+				Kind:  editor.EditKindInsert,
+				Range: editor.Range{Start: pos, End: pos},
+				Text:  "\n" + body,
+			}); err != nil {
+				return err
+			}
+			// Cursor moves to col 0 of the first pasted line.
+			buf.SetCursor(editor.Position{Line: cur.Line + 1, Col: 0})
+			return nil
+		}
+		// Char-wise: insert after cursor (vim's `p` semantics). At
+		// the end-of-line column, "after cursor" lands at the end.
+		pasteCol := cur.Col + 1
+		maxCol := buf.LineRuneLen(cur.Line)
+		if pasteCol > maxCol {
+			pasteCol = maxCol
+		}
+		pos := editor.Position{Line: cur.Line, Col: pasteCol}
+		if err := buf.Apply(editor.Edit{
+			Kind:  editor.EditKindInsert,
+			Range: editor.Range{Start: pos, End: pos},
+			Text:  text,
+		}); err != nil {
+			return err
+		}
+		return nil
+	}
 }
 
 // buffer returns the live *editor.Buffer of the wired
@@ -723,14 +1219,17 @@ func (c *VimEditorController) insertAppendEndHandler() commands.Handler {
 	}
 }
 
-// modeNormalHandler returns the `<esc>` Insert-mode handler. Flips
-// QUERY_EDITOR mode back to ModeNormal. A no-op when already in
-// Normal — handler binding is Insert-mode-only via insertExitModeMask
-// so this is defensive.
+// modeNormalHandler returns the `<esc>` handler used in both Insert
+// and OperatorPending modes. Flips QUERY_EDITOR mode back to ModeNormal
+// and (for OperatorPending) clears RepeatStore.PendingOpID so a
+// half-typed operator doesn't strand later dispatches.
 func (c *VimEditorController) modeNormalHandler() commands.Handler {
 	return func(_ commands.ExecCtx) error {
 		if c.buffer() == nil {
 			return nil
+		}
+		if rep := c.repeat(); rep != nil {
+			rep.PendingOpID = ""
 		}
 		c.setMode(types.ModeNormal)
 		return nil

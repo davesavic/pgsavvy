@@ -102,6 +102,13 @@ func (c *QueryEditorContext) HandleFocusLost(_ types.OnFocusLostOpts) error {
 	if c.matcher != nil {
 		c.matcher.Cancel()
 	}
+	// wwd.8 — drop any half-typed operator stash so a focus blur during
+	// op-pending can't strand the next refocus in OperatorPending.
+	// matcher.Cancel() above handles the Matcher's pending count/register
+	// state; RepeatStore.PendingOpID is the action-handler-owned slot.
+	if c.repeat != nil {
+		c.repeat.PendingOpID = ""
+	}
 	return c.saveBufferIfDirty()
 }
 
