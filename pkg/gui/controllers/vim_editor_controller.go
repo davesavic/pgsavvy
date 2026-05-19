@@ -106,18 +106,49 @@ func (c *VimEditorController) motionSpecs() []motionSpec {
 	}
 }
 
-// GetKeybindings publishes the motion bindings under QUERY_EDITOR
-// scope. Mode = Normal | OperatorPending — Visual variants are added
-// in wwd.7. The mark-jump binding is NOT published here; the `'a..z`
-// recall family is shipped by wwd.7 alongside the visual extensions.
+// motionModeMask is the Mode mask under which motion bindings fire.
+// Visual / VisualLine / VisualBlock are added in wwd.7 so motion keys
+// (h/j/k/l/w/b/...) extend the live Selection instead of just moving
+// the cursor.
+const motionModeMask = types.ModeNormal | types.ModeOperatorPending |
+	types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
+
+// textObjectModeMask is the Mode mask under which text-object bindings
+// fire. OperatorPending is the original (wwd.6); wwd.7 extends to
+// Visual / VisualLine so `vi"`-style flows snap the Selection to the
+// resolved object. ModeVisualBlock is excluded — a vim corner case
+// left out of MVP.
+const textObjectModeMask = types.ModeOperatorPending |
+	types.ModeVisual | types.ModeVisualLine
+
+// visualEntryModeMask is the Mode mask under which the visual-enter
+// bindings (v / V / <c-v>) fire — Normal only. Re-pressing `v` in
+// Visual mode is vim's "exit" gesture; wwd.7 ships `<esc>` for that
+// instead, leaving v/V/<c-v> as Normal-only entry chords.
+const visualEntryModeMask = types.ModeNormal
+
+// visualExitModeMask is the Mode mask under which `<esc>` fires the
+// visual.exit action — every Visual variant.
+const visualExitModeMask = types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
+
+// GetKeybindings publishes the motion + text-object + visual bindings
+// under QUERY_EDITOR scope.
 //
-// Text-object bindings (i"/a", i(/a(, ip/ap, is/as, …) are appended
-// under OperatorPending only — wwd.7 extends the mode mask to
-// Visual / VisualLine once those modes are wired.
+//   - Motion bindings: motionModeMask (Normal | OperatorPending | every
+//     Visual variant). In Visual mode the motion handler extends
+//     Selection instead of moving the cursor; jumps are NOT pushed.
+//   - Text-object bindings: textObjectModeMask (OperatorPending |
+//     Visual | VisualLine).
+//   - Visual-enter bindings (v / V / <c-v>): Normal only.
+//   - Visual-exit binding (<esc>): every Visual variant.
+//
+// The mark-jump binding (`'a..z`) is NOT published here; that recall
+// family ships in a later wwd task.
 func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	specs := c.motionSpecs()
 	textObjects := c.textObjectSpecs()
-	out := make([]*types.ChordBinding, 0, len(specs)+len(textObjects))
+	visuals := c.visualSpecs()
+	out := make([]*types.ChordBinding, 0, len(specs)+len(textObjects)+len(visuals))
 	for _, s := range specs {
 		seq, err := keys.SequenceFromShorthand(s.shorthand)
 		if err != nil {
@@ -125,7 +156,7 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 		}
 		out = append(out, &types.ChordBinding{
 			Sequence:    seq,
-			Mode:        types.ModeNormal | types.ModeOperatorPending,
+			Mode:        motionModeMask,
 			Scope:       types.QUERY_EDITOR,
 			ActionID:    s.actionID,
 			Description: s.description,
@@ -139,14 +170,48 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 		}
 		out = append(out, &types.ChordBinding{
 			Sequence:    seq,
-			Mode:        types.ModeOperatorPending,
+			Mode:        textObjectModeMask,
 			Scope:       types.QUERY_EDITOR,
 			ActionID:    s.actionID,
 			Description: s.description,
 			Tag:         "Text object",
 		})
 	}
+	for _, s := range visuals {
+		seq, err := keys.SequenceFromShorthand(s.shorthand)
+		if err != nil {
+			continue
+		}
+		out = append(out, &types.ChordBinding{
+			Sequence:    seq,
+			Mode:        s.mode,
+			Scope:       types.QUERY_EDITOR,
+			ActionID:    s.actionID,
+			Description: s.description,
+			Tag:         "Visual",
+		})
+	}
 	return out
+}
+
+// visualSpec ties a shorthand to a visual action ID and its mode mask.
+// Entry chords (v / V / <c-v>) carry visualEntryModeMask; the exit
+// chord (<esc>) carries visualExitModeMask.
+type visualSpec struct {
+	shorthand   string
+	actionID    string
+	description string
+	mode        types.Mode
+}
+
+// visualSpecs returns the wwd.7 visual-entry + visual-exit table.
+func (c *VimEditorController) visualSpecs() []visualSpec {
+	return []visualSpec{
+		{"v", commands.VisualEnter, "enter visual", visualEntryModeMask},
+		{"V", commands.VisualEnterLine, "enter visual-line", visualEntryModeMask},
+		{"<c-v>", commands.VisualEnterBlock, "enter visual-block", visualEntryModeMask},
+		{"<esc>", commands.VisualExit, "exit visual", visualExitModeMask},
+	}
 }
 
 // RegisterActions wires each motion action ID to a handler that:
@@ -155,9 +220,18 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 //  2. resolves the new Position via the pure motion func,
 //  3. dispatches:
 //     - operator-pending → applyPending(buf, Range{cursor, newPos})
-//     - else → set Cursor; push jump (when motion is classed as jump)
+//     - visual           → ExtendSelection(buf, newPos) (jumps NOT pushed)
+//     - else             → set Cursor; push jump (when motion is jump)
 //
 // applyPending is a stub in wwd.5 (returns nil); wwd.8 fills the body.
+//
+// Text-object handlers in OperatorPending hand off to applyPending; in
+// Visual / VisualLine they snap Buffer.Selection to the resolved range.
+//
+// Visual entry / exit handlers (v / V / <c-v> / <esc>) drive
+// editor.EnterVisual / ExitVisual + flip QueryEditorContext mode.
+// SelectionExtend is registered so audits see it; the motion handlers
+// own the actual extension behaviour.
 func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 	if reg == nil {
 		return
@@ -185,6 +259,75 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 			Tag:         "Text object",
 			Handler:     c.textObjectHandler(spec),
 		})
+	}
+	// Visual entry / exit handlers (wwd.7). v / V / <c-v> share a
+	// parameterised entry handler; <esc> drives the exit.
+	_ = reg.Register(&commands.Command{
+		ID:          commands.VisualEnter,
+		Description: "Enter visual mode",
+		Tag:         "Visual",
+		Handler:     c.visualEnterHandler(types.ModeVisual),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.VisualEnterLine,
+		Description: "Enter visual-line mode",
+		Tag:         "Visual",
+		Handler:     c.visualEnterHandler(types.ModeVisualLine),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.VisualEnterBlock,
+		Description: "Enter visual-block mode",
+		Tag:         "Visual",
+		Handler:     c.visualEnterHandler(types.ModeVisualBlock),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.VisualExit,
+		Description: "Exit visual mode",
+		Tag:         "Visual",
+		Handler:     c.visualExitHandler(),
+	})
+	// SelectionExtend has no default chord — motion handlers own the
+	// extension behaviour — but the ID is still in the registry so
+	// /completeness audits and the cheatsheet can surface it.
+	_ = reg.Register(&commands.Command{
+		ID:          commands.SelectionExtend,
+		Description: "Extend visual selection (motion-driven)",
+		Tag:         "Visual",
+		Handler:     commands.NopSentinel,
+	})
+}
+
+// visualEnterHandler returns the Handler closure for v / V / <c-v>.
+// Seeds Selection at the live Cursor via editor.EnterVisual and flips
+// QUERY_EDITOR mode to the requested Visual variant.
+func (c *VimEditorController) visualEnterHandler(mode types.Mode) commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		editor.EnterVisual(buf, mode)
+		if c.qec != nil {
+			c.qec.SetMode(mode)
+		}
+		return nil
+	}
+}
+
+// visualExitHandler returns the Handler closure for <esc> in Visual
+// modes. Clears Selection via editor.ExitVisual and flips QUERY_EDITOR
+// mode back to ModeNormal.
+func (c *VimEditorController) visualExitHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		editor.ExitVisual(buf)
+		if c.qec != nil {
+			c.qec.SetMode(types.ModeNormal)
+		}
+		return nil
 	}
 }
 
@@ -223,15 +366,15 @@ func (c *VimEditorController) textObjectSpecs() []textObjectSpec {
 }
 
 // textObjectHandler returns the Handler closure for one textObjectSpec.
-// When fired in OperatorPending mode, it resolves the range and hands
-// off to applyPending (stub in wwd.5; filled in wwd.8). Outside
-// OperatorPending the handler is a no-op (Visual handling lands in
-// wwd.7).
+// Dispatch:
+//   - OperatorPending → resolve range, hand off to applyPending (stub
+//     in wwd.5; wwd.8 fills the body).
+//   - Visual / VisualLine → resolve range, snap Buffer.Selection to it
+//     via editor.SetSelection. Per Architecture Decision 4 of the wwd
+//     epic, Visual + textobject bypasses op-pending entirely.
+//   - else → no-op.
 func (c *VimEditorController) textObjectHandler(spec textObjectSpec) commands.Handler {
 	return func(ec commands.ExecCtx) error {
-		if !ec.Mode.Has(types.ModeOperatorPending) {
-			return nil
-		}
 		buf := c.buffer()
 		if buf == nil {
 			return nil
@@ -241,11 +384,25 @@ func (c *VimEditorController) textObjectHandler(spec textObjectSpec) commands.Ha
 		if !ok {
 			return nil
 		}
-		return c.applyPending(buf, r)
+		if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine) {
+			editor.SetSelection(buf, &r)
+			return nil
+		}
+		if ec.Mode.Has(types.ModeOperatorPending) {
+			return c.applyPending(buf, r)
+		}
+		return nil
 	}
 }
 
 // motionHandler returns the Handler closure for one motionSpec.
+//
+// Dispatch order (mode-driven; operator-pending wins over visual since
+// the two cannot coexist in practice):
+//   - OperatorPending → applyPending(Range{from, newPos})
+//   - Visual / VisualLine / VisualBlock → ExtendSelection(newPos); jumps
+//     are NOT pushed (vim doesn't push during visual extension).
+//   - else → SetCursor(newPos) + push jump when motion is classed jump.
 func (c *VimEditorController) motionHandler(spec motionSpec) commands.Handler {
 	return func(ec commands.ExecCtx) error {
 		buf := c.buffer()
@@ -266,6 +423,10 @@ func (c *VimEditorController) motionHandler(spec motionSpec) commands.Handler {
 		}
 		if ec.Mode.Has(types.ModeOperatorPending) {
 			return c.applyPending(buf, editor.Range{Start: from, End: newPos})
+		}
+		if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
+			editor.ExtendSelection(buf, newPos)
+			return nil
 		}
 		buf.SetCursor(newPos)
 		if spec.jump && buf.Jumps != nil {

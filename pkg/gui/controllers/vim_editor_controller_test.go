@@ -53,16 +53,22 @@ func TestVimEditorControllerPublishesMotionBindings(t *testing.T) {
 		commands.MotionScreenMiddle:      false,
 		commands.MotionScreenBottom:      false,
 	}
-	wantMode := types.ModeNormal | types.ModeOperatorPending
+	// Post-wwd.7 motion bindings carry Normal | OperatorPending plus
+	// every Visual variant so motion keys in Visual mode extend
+	// Selection instead of moving the cursor.
+	wantMode := types.ModeNormal | types.ModeOperatorPending |
+		types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 	for _, kb := range kbs {
-		if _, ok := wantActions[kb.ActionID]; ok {
-			wantActions[kb.ActionID] = true
+		if _, ok := wantActions[kb.ActionID]; !ok {
+			// Not a motion binding (visual / text-object) — skip mode check.
+			continue
 		}
+		wantActions[kb.ActionID] = true
 		if kb.Scope != types.QUERY_EDITOR {
 			t.Errorf("kb %s scope = %s, want QUERY_EDITOR", kb.ActionID, kb.Scope)
 		}
 		if kb.Mode != wantMode {
-			t.Errorf("kb %s mode = %v, want Normal|OperatorPending", kb.ActionID, kb.Mode)
+			t.Errorf("kb %s mode = %v, want Normal|OperatorPending|Visual*", kb.ActionID, kb.Mode)
 		}
 	}
 	for id, seen := range wantActions {
@@ -234,6 +240,174 @@ func TestVimEditorOperatorPendingSkipsCursorMove(t *testing.T) {
 	// applyPending stub is a no-op; cursor must NOT move.
 	if got := buf.CursorPos(); got != start {
 		t.Fatalf("cursor moved during operator-pending: %+v, want %+v", got, start)
+	}
+}
+
+func TestVimEditorVisualEnterRegistersAndSeedsSelection(t *testing.T) {
+	qec := newVimQEC(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 2})
+
+	ctrl := controllers.NewVimEditorController(qec, nil)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, ok := reg.Get(commands.VisualEnter)
+	if !ok {
+		t.Fatalf("registry missing VisualEnter")
+	}
+	if err := cmd.Handler(commands.ExecCtx{Mode: types.ModeNormal}); err != nil {
+		t.Fatalf("VisualEnter handler err = %v", err)
+	}
+	if buf.Selection == nil {
+		t.Fatalf("Selection not seeded by VisualEnter")
+	}
+	if buf.Selection.Start != (editor.Position{Line: 0, Col: 2}) {
+		t.Fatalf("Selection.Start = %+v, want {0,2}", buf.Selection.Start)
+	}
+	if buf.Selection.LineWise || buf.Selection.BlockWise {
+		t.Fatalf("char-wise visual should not set LineWise/BlockWise; got %+v", *buf.Selection)
+	}
+}
+
+func TestVimEditorVisualEnterLineFlagsLineWise(t *testing.T) {
+	qec := newVimQEC(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("a")}}
+
+	ctrl := controllers.NewVimEditorController(qec, nil)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, _ := reg.Get(commands.VisualEnterLine)
+	if err := cmd.Handler(commands.ExecCtx{Mode: types.ModeNormal}); err != nil {
+		t.Fatalf("VisualEnterLine handler err = %v", err)
+	}
+	if buf.Selection == nil || !buf.Selection.LineWise || buf.Selection.BlockWise {
+		t.Fatalf("Selection = %+v, want LineWise true", buf.Selection)
+	}
+}
+
+func TestVimEditorVisualExitClearsSelection(t *testing.T) {
+	qec := newVimQEC(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("abc")}}
+	buf.Selection = &editor.Range{Start: editor.Position{Line: 0, Col: 0}, End: editor.Position{Line: 0, Col: 3}}
+
+	ctrl := controllers.NewVimEditorController(qec, nil)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, _ := reg.Get(commands.VisualExit)
+	if err := cmd.Handler(commands.ExecCtx{Mode: types.ModeVisual}); err != nil {
+		t.Fatalf("VisualExit handler err = %v", err)
+	}
+	if buf.Selection != nil {
+		t.Fatalf("Selection should be nil after VisualExit, got %+v", *buf.Selection)
+	}
+}
+
+func TestVimEditorMotionInVisualExtendsSelection(t *testing.T) {
+	qec := newVimQEC(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	ctrl := controllers.NewVimEditorController(qec, nil)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	// Enter visual first via the handler so Selection is seeded.
+	enter, _ := reg.Get(commands.VisualEnter)
+	_ = enter.Handler(commands.ExecCtx{Mode: types.ModeNormal})
+
+	cmd, _ := reg.Get(commands.MotionWordNext)
+	if err := cmd.Handler(commands.ExecCtx{Mode: types.ModeVisual}); err != nil {
+		t.Fatalf("WordNext handler err = %v", err)
+	}
+	if buf.Selection == nil {
+		t.Fatalf("Selection cleared during Visual-mode motion")
+	}
+	if buf.Selection.End != (editor.Position{Line: 0, Col: 6}) {
+		t.Fatalf("Selection.End = %+v, want {0,6}", buf.Selection.End)
+	}
+	if buf.Selection.Start != (editor.Position{Line: 0, Col: 0}) {
+		t.Fatalf("Selection.Start moved during extend: %+v", buf.Selection.Start)
+	}
+}
+
+func TestVimEditorMotionInVisualDoesNotPushJump(t *testing.T) {
+	qec := newVimQEC(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("a")},
+		{Runes: []rune("b")},
+	}
+	buf.SetCursor(editor.Position{Line: 1, Col: 0})
+
+	ctrl := controllers.NewVimEditorController(qec, nil)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	enter, _ := reg.Get(commands.VisualEnter)
+	_ = enter.Handler(commands.ExecCtx{Mode: types.ModeNormal})
+
+	cmd, _ := reg.Get(commands.MotionBufferStart)
+	_ = cmd.Handler(commands.ExecCtx{Mode: types.ModeVisual})
+	if buf.Jumps != nil && buf.Jumps.Len() != 0 {
+		t.Fatalf("Visual-mode jump-motion pushed entry; Len = %d", buf.Jumps.Len())
+	}
+}
+
+func TestVimEditorTextObjectInVisualSnapsSelection(t *testing.T) {
+	qec := newVimQEC(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune(`SELECT "foo" FROM t`)}}
+	// Place cursor inside the quoted string.
+	buf.SetCursor(editor.Position{Line: 0, Col: 9})
+
+	ctrl := controllers.NewVimEditorController(qec, nil)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	enter, _ := reg.Get(commands.VisualEnter)
+	_ = enter.Handler(commands.ExecCtx{Mode: types.ModeNormal})
+
+	cmd, ok := reg.Get(commands.TextObjectInnerQuoteDouble)
+	if !ok {
+		t.Fatalf("registry missing TextObjectInnerQuoteDouble")
+	}
+	if err := cmd.Handler(commands.ExecCtx{Mode: types.ModeVisual}); err != nil {
+		t.Fatalf("text-object handler err = %v", err)
+	}
+	if buf.Selection == nil {
+		t.Fatalf("Selection cleared by text-object in Visual")
+	}
+	// InnerQuote("foo") spans cols 8..11 (after the opening quote, before the closing).
+	if buf.Selection.Start.Col != 8 || buf.Selection.End.Col != 11 {
+		t.Fatalf("Selection cols = (%d,%d), want (8,11): %+v", buf.Selection.Start.Col, buf.Selection.End.Col, *buf.Selection)
+	}
+}
+
+func TestVimEditorPublishesVisualBindings(t *testing.T) {
+	ctrl := controllers.NewVimEditorController(newVimQEC(t), nil)
+	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
+	wantVisual := map[string]bool{
+		commands.VisualEnter:      false,
+		commands.VisualEnterLine:  false,
+		commands.VisualEnterBlock: false,
+		commands.VisualExit:       false,
+	}
+	for _, kb := range kbs {
+		if _, ok := wantVisual[kb.ActionID]; ok {
+			wantVisual[kb.ActionID] = true
+		}
+	}
+	for id, seen := range wantVisual {
+		if !seen {
+			t.Errorf("visual action %q not published", id)
+		}
 	}
 }
 

@@ -17,13 +17,19 @@ import (
 
 // fakeEditorBuffer is the EditorBufferReader test double; tests set
 // Text + Off in the case body and feed the bag into the controller.
+// Sel + HasSel mirror Visual-mode selection state for the wwd.7
+// <leader>r-in-Visual fan-out tests; default empty values report "no
+// selection" so legacy non-visual tests need no changes.
 type fakeEditorBuffer struct {
-	Text string
-	Off  int
+	Text   string
+	Off    int
+	Sel    string
+	HasSel bool
 }
 
-func (f *fakeEditorBuffer) BufferText() string { return f.Text }
-func (f *fakeEditorBuffer) CursorOffset() int  { return f.Off }
+func (f *fakeEditorBuffer) BufferText() string             { return f.Text }
+func (f *fakeEditorBuffer) CursorOffset() int              { return f.Off }
+func (f *fakeEditorBuffer) SelectionText() (string, bool) { return f.Sel, f.HasSel }
 
 type fakeResultTabs struct {
 	resultCalls []resultCall
@@ -454,6 +460,112 @@ func TestQueryEditorExplainAnalyzeWrapsInBeginRollback(t *testing.T) {
 	}
 	if len(rec.explainCalls) != 1 || !rec.explainCalls[0].Analyze {
 		t.Fatalf("explainCalls = %#v, want one analyze", rec.explainCalls)
+	}
+}
+
+// TestQueryEditorVisualRunFansOutEachStatement asserts the dbsavvy-wwd.7
+// contract: when <leader>r fires in Visual mode, the controller reads
+// SelectionText, splits on ';' via SplitStatements, and calls runner.Run
+// once per non-empty statement (under the cap).
+func TestQueryEditorVisualRunFansOutEachStatement(t *testing.T) {
+	rec := &recordingRunnerSession{}
+	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+
+	base := newBag()
+	base.HelperBag.QueryRunner = runner
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{
+		Text:   "SELECT 1; SELECT 2; SELECT 3;",
+		Sel:    "SELECT 1; SELECT 2;",
+		HasSel: true,
+	}
+	base.HelperBag.ResultTabs = &fakeResultTabs{}
+
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{Mode: types.ModeVisual}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+	if got := len(rec.streamCalls); got != 2 {
+		t.Fatalf("streamCalls len = %d, want 2 (visual fan-out)", got)
+	}
+	wantSQL := []string{"SELECT 1", "SELECT 2"}
+	for i, want := range wantSQL {
+		if rec.streamCalls[i].SQL != want {
+			t.Fatalf("streamCalls[%d].SQL = %q, want %q", i, rec.streamCalls[i].SQL, want)
+		}
+	}
+}
+
+// TestQueryEditorVisualRunOverCapAbortsBeforeAnyRun asserts the wwd.7
+// hard cap: a Visual selection that splits into >maxVisualRunBatch
+// non-empty statements toasts and does NOT invoke runner.Run at all
+// (no partial run).
+func TestQueryEditorVisualRunOverCapAbortsBeforeAnyRun(t *testing.T) {
+	rec := &recordingRunnerSession{}
+	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+
+	// 33 statements (one over the 32 cap).
+	var sb strings.Builder
+	for i := 0; i < 33; i++ {
+		sb.WriteString("SELECT 1;")
+	}
+	base := newBag()
+	base.HelperBag.QueryRunner = runner
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{
+		Text:   sb.String(),
+		Sel:    sb.String(),
+		HasSel: true,
+	}
+	base.HelperBag.ResultTabs = &fakeResultTabs{}
+
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{Mode: types.ModeVisual}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+	if got := len(rec.streamCalls); got != 0 {
+		t.Fatalf("streamCalls len = %d, want 0 (over-cap should abort)", got)
+	}
+	if len(base.Toast.msgs) != 1 || !strings.Contains(base.Toast.msgs[0].Msg, "exceeds cap") {
+		t.Fatalf("Toast = %#v, want one 'exceeds cap' message", base.Toast.msgs)
+	}
+}
+
+// TestQueryEditorVisualRunEmptySelectionToasts covers the empty-selection
+// path: a Visual mode dispatch with no live selection or whitespace-only
+// selection emits the "no selection" toast and does NOT invoke runner.
+func TestQueryEditorVisualRunEmptySelectionToasts(t *testing.T) {
+	rec := &recordingRunnerSession{}
+	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+
+	base := newBag()
+	base.HelperBag.QueryRunner = runner
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{
+		Text:   "SELECT 1;",
+		Sel:    "   ",
+		HasSel: true,
+	}
+	base.HelperBag.ResultTabs = &fakeResultTabs{}
+
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{Mode: types.ModeVisual}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+	if got := len(rec.streamCalls); got != 0 {
+		t.Fatalf("streamCalls len = %d, want 0", got)
+	}
+	if len(base.Toast.msgs) != 1 || !strings.Contains(base.Toast.msgs[0].Msg, "no selection") {
+		t.Fatalf("Toast = %#v, want one 'no selection' message", base.Toast.msgs)
 	}
 }
 

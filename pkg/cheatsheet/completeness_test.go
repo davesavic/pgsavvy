@@ -20,13 +20,11 @@ import (
 // these modes is a bug (per AC D13 — "future modes empty" invariant).
 //
 // ModeOperatorPending was removed in dbsavvy-wwd.5 — VimEditorController
-// now publishes motion bindings under Normal | OperatorPending so the
-// pending-operator + motion combo (d w, y j, …) resolves through the
-// same trie. Visual modes are dropped in wwd.7.
+// now publishes motion bindings under Normal | OperatorPending. Visual
+// modes (ModeVisual / ModeVisualLine / ModeVisualBlock) were removed in
+// dbsavvy-wwd.7 — VimEditorController now publishes v / V / <c-v> /
+// <esc> + Visual-mode motion + Visual-mode text-object bindings.
 var futureEmptyModes = []types.Mode{
-	types.ModeVisual,
-	types.ModeVisualLine,
-	types.ModeVisualBlock,
 	types.ModeReplace,
 }
 
@@ -430,22 +428,23 @@ func TestCheatsheetCompleteness(t *testing.T) {
 	})
 
 	t.Run("FutureModeAccidentallyBound", func(t *testing.T) {
-		// Synthesise a single ChordBinding in ModeVisual; the
-		// future-modes-empty helper MUST flag it.
+		// Synthesise a single ChordBinding in ModeReplace (still a
+		// future-empty mode after dbsavvy-wwd.7); the future-modes-empty
+		// helper MUST flag it.
 		reg := commands.NewRegistry()
 		_ = reg.Register(&commands.Command{
-			ID:      "test.vis",
+			ID:      "test.rep",
 			Handler: commands.NopSentinel,
 		})
-		seq, err := keys.SequenceFromShorthand("v")
+		seq, err := keys.SequenceFromShorthand("r")
 		if err != nil {
 			t.Fatalf("SequenceFromShorthand: %v", err)
 		}
 		bindings := []*keys.ChordBinding{{
 			Sequence: seq,
-			Mode:     types.ModeVisual,
+			Mode:     types.ModeReplace,
 			Scope:    types.TABLES,
-			ActionID: "test.vis",
+			ActionID: "test.rep",
 			Origin:   "completeness_test.go",
 		}}
 		svc := keys.NewKeybindingService()
@@ -457,16 +456,16 @@ func TestCheatsheetCompleteness(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected an error from futureModesEmptyInTrie")
 		}
-		if !strings.Contains(err.Error(), "Visual") {
-			t.Fatalf("expected error to mention Visual, got: %v", err)
+		if !strings.Contains(err.Error(), "Replace") {
+			t.Fatalf("expected error to mention Replace, got: %v", err)
 		}
 		// And the Generate-side helper must also catch it.
 		err = futureModesEmptyInGenerate(trieSet, []types.ContextKey{types.TABLES, types.GLOBAL})
 		if err == nil {
 			t.Fatalf("expected an error from futureModesEmptyInGenerate")
 		}
-		if !strings.Contains(err.Error(), "Visual") {
-			t.Fatalf("expected Generate-side error to mention Visual, got: %v", err)
+		if !strings.Contains(err.Error(), "Replace") {
+			t.Fatalf("expected Generate-side error to mention Replace, got: %v", err)
 		}
 	})
 }

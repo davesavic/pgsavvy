@@ -57,3 +57,18 @@ func (a *editorBufferAdapter) CursorOffset() int {
 	}
 	return buf.CursorByteOffset()
 }
+
+// SelectionText returns the text covered by the canonical Buffer.Selection
+// when Visual mode is live, or ("", false) when no selection exists or
+// the wiring is nil. dbsavvy-wwd.7's <leader>r-in-Visual fan-out routes
+// through this method.
+func (a *editorBufferAdapter) SelectionText() (string, bool) {
+	if a == nil || a.qec == nil {
+		return "", false
+	}
+	buf := a.qec.Buffer()
+	if buf == nil {
+		return "", false
+	}
+	return buf.SelectionText()
+}

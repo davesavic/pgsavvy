@@ -35,6 +35,12 @@ const queryToastTTL = 4 * time.Second
 // exceeds the cap.
 const resultTabLabelMax = 40
 
+// maxVisualRunBatch caps the number of statements <leader>r will fan
+// out in Visual mode (dbsavvy-wwd.7). Selections wider than this toast
+// + abort BEFORE any runner.Run fires so the user can narrow the range
+// rather than discovering 200 result tabs after the fact.
+const maxVisualRunBatch = 32
+
 // QueryEditorController owns the QUERY_EDITOR scope keybindings:
 // <leader>r, <leader>R, <leader>e, <leader>E, <leader>x, <leader>!.
 // Handlers delegate dispatch to QueryRunner and route the launched
@@ -71,14 +77,20 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		shorthand   string
 		actionID    string
 		description string
+		// mode is the Mode mask this binding fires under. Zero means
+		// fall back to defaultMode (Normal | Insert). <leader>r extends
+		// to Visual modes so the fan-out path lands (wwd.7).
+		mode types.Mode
 	}
+	defaultMode := types.ModeNormal | types.ModeInsert
+	runMode := defaultMode | types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 	specs := []bspec{
-		{"<leader>r", commands.QueryRun, tr.Actions.RunQuery},
-		{"<leader>R", commands.QueryRunAll, tr.Actions.QueryRunAll},
-		{"<leader>e", commands.QueryExplain, tr.Actions.QueryExplain},
-		{"<leader>E", commands.QueryExplainAnalyze, tr.Actions.QueryExplainAnalyze},
-		{"<leader>x", commands.QueryCancel, tr.Actions.CancelQuery},
-		{"<leader>!", commands.QueryRunInNewTx, tr.Actions.QueryRunInNewTx},
+		{"<leader>r", commands.QueryRun, tr.Actions.RunQuery, runMode},
+		{"<leader>R", commands.QueryRunAll, tr.Actions.QueryRunAll, 0},
+		{"<leader>e", commands.QueryExplain, tr.Actions.QueryExplain, 0},
+		{"<leader>E", commands.QueryExplainAnalyze, tr.Actions.QueryExplainAnalyze, 0},
+		{"<leader>x", commands.QueryCancel, tr.Actions.CancelQuery, 0},
+		{"<leader>!", commands.QueryRunInNewTx, tr.Actions.QueryRunInNewTx, 0},
 	}
 	out := make([]*types.ChordBinding, 0, len(specs))
 	for _, s := range specs {
@@ -86,9 +98,13 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		if err != nil {
 			continue
 		}
+		mode := s.mode
+		if mode == 0 {
+			mode = defaultMode
+		}
 		out = append(out, &types.ChordBinding{
 			Sequence:    seq,
-			Mode:        types.ModeNormal | types.ModeInsert,
+			Mode:        mode,
 			Scope:       types.QUERY_EDITOR,
 			ActionID:    s.actionID,
 			Description: s.description,
@@ -183,7 +199,13 @@ func (q *QueryEditorController) handleRunInNewTx(ec commands.ExecCtx) error {
 	return q.runOne(ec, true)
 }
 
-func (q *QueryEditorController) runOne(_ commands.ExecCtx, newTx bool) error {
+// runOne dispatches <leader>r / <leader>!. In Visual mode it fans the
+// selection out through SplitStatements (capped at maxVisualRunBatch);
+// otherwise it falls through to the statement-under-cursor path.
+func (q *QueryEditorController) runOne(ec commands.ExecCtx, newTx bool) error {
+	if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
+		return q.runVisualSelection(newTx)
+	}
 	stmt := q.statementUnderCursor()
 	if stmt == "" {
 		q.toast("no statement under cursor")
@@ -198,19 +220,75 @@ func (q *QueryEditorController) runOne(_ commands.ExecCtx, newTx bool) error {
 	if q.helpers.Notice != nil {
 		q.helpers.Notice.OnRunStart(runID)
 	}
-	rh, err := runner.Run(context.Background(), stmt, data.RunOptions{NewTx: newTx})
-	if err != nil {
-		if q.helpers.Notice != nil {
+	attached := q.runStatement(stmt, data.RunOptions{NewTx: newTx})
+	if q.helpers.Notice != nil {
+		if attached {
+			q.helpers.Notice.Finish(runID)
+		} else {
 			q.helpers.Notice.OnRunEnd(runID)
 		}
-		q.surfaceErr(stmt, err)
+	}
+	return nil
+}
+
+// runVisualSelection handles <leader>r when one of the Visual modes is
+// active. SelectionText -> SplitStatements -> per-statement runStatement
+// fan-out. The cap check fires BEFORE any runner.Run so over-cap
+// selections are rejected wholesale; partial runs are intentionally
+// avoided (dbsavvy-wwd.7).
+func (q *QueryEditorController) runVisualSelection(newTx bool) error {
+	if q.helpers.EditorBuffer == nil {
+		q.toast("no selection")
 		return nil
 	}
-	if q.helpers.Notice != nil {
-		q.helpers.Notice.AttachStream(rh)
-		q.helpers.Notice.Finish(runID)
+	text, ok := q.helpers.EditorBuffer.SelectionText()
+	if !ok || strings.TrimSpace(text) == "" {
+		q.toast("no selection")
+		return nil
 	}
-	q.openResultTab(stmt, rh)
+	stmts := editor.SplitStatements(text)
+	// Count non-empty statements for the cap check so a leading ';'
+	// doesn't artificially inflate the count.
+	nonEmpty := 0
+	for _, s := range stmts {
+		if strings.TrimSpace(s) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty == 0 {
+		q.toast("no statements found")
+		return nil
+	}
+	if nonEmpty > maxVisualRunBatch {
+		q.toast(fmt.Sprintf("visual run: %d statements exceeds cap %d; narrow selection", nonEmpty, maxVisualRunBatch))
+		return nil
+	}
+	runner := q.helpers.QueryRunner
+	if runner == nil || !runner.HasSession() {
+		q.toast("no active connection")
+		return nil
+	}
+	runID := newRunID()
+	if q.helpers.Notice != nil {
+		q.helpers.Notice.OnRunStart(runID)
+	}
+	attached := 0
+	for _, raw := range stmts {
+		stmt := strings.TrimSpace(raw)
+		if stmt == "" {
+			continue
+		}
+		if q.runStatement(stmt, data.RunOptions{NewTx: newTx}) {
+			attached++
+		}
+	}
+	if q.helpers.Notice != nil {
+		if attached == 0 {
+			q.helpers.Notice.OnRunEnd(runID)
+		} else {
+			q.helpers.Notice.Finish(runID)
+		}
+	}
 	return nil
 }
 
@@ -236,16 +314,9 @@ func (q *QueryEditorController) handleRunAll(_ commands.ExecCtx) error {
 		if stmt == "" {
 			continue
 		}
-		rh, err := runner.Run(context.Background(), stmt, data.RunOptions{})
-		if err != nil {
-			q.surfaceErr(stmt, err)
-			continue
-		}
-		if q.helpers.Notice != nil {
-			q.helpers.Notice.AttachStream(rh)
+		if q.runStatement(stmt, data.RunOptions{}) {
 			attached++
 		}
-		q.openResultTab(stmt, rh)
 	}
 	if q.helpers.Notice != nil {
 		if attached == 0 {
@@ -257,6 +328,30 @@ func (q *QueryEditorController) handleRunAll(_ commands.ExecCtx) error {
 		}
 	}
 	return nil
+}
+
+// runStatement dispatches a single SQL statement through QueryRunner.
+// Returns true when a NoticeReporter stream was attached (i.e. the run
+// is in-flight); false when the runner errored before launch or when
+// no NoticeReporter is wired. Used by runOne / runVisualSelection /
+// handleRunAll to tally the attached count their run-scope teardown
+// depends on. Pre-conditions (no session, no statement) are the
+// caller's responsibility — runStatement assumes runner is non-nil and
+// stmt is non-empty.
+func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) bool {
+	runner := q.helpers.QueryRunner
+	rh, err := runner.Run(context.Background(), stmt, opts)
+	if err != nil {
+		q.surfaceErr(stmt, err)
+		return false
+	}
+	attached := false
+	if q.helpers.Notice != nil {
+		q.helpers.Notice.AttachStream(rh)
+		attached = true
+	}
+	q.openResultTab(stmt, rh)
+	return attached
 }
 
 func (q *QueryEditorController) handleExplain(ec commands.ExecCtx) error {

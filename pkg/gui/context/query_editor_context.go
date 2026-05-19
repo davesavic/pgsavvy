@@ -105,14 +105,25 @@ func (c *QueryEditorContext) HandleFocusLost(_ types.OnFocusLostOpts) error {
 	return c.saveBufferIfDirty()
 }
 
-// exitVisualIfActive is the wwd.7 call-site stub. It safely tolerates
-// a nil Buffer (the constructor never produces one, but tests may
-// substitute) and is a no-op until wwd.7 lands editor.ExitVisual.
+// exitVisualIfActive clears any live Selection on c.buf via
+// editor.ExitVisual, then resets the mode entry so HandleFocusLost
+// leaves QUERY_EDITOR in ModeNormal. Safe to call on a nil Buffer.
 func (c *QueryEditorContext) exitVisualIfActive() {
 	if c.buf == nil {
 		return
 	}
-	// wwd.7: editor.ExitVisual(c.buf)
+	editor.ExitVisual(c.buf)
+}
+
+// SetMode flips ModeStore[QUERY_EDITOR] to m. VimEditorController calls
+// this from the v / V / <c-v> / <esc> handlers (dbsavvy-wwd.7) so the
+// Matcher routes subsequent keys via the new mode mask. A nil modes
+// setter (test wiring) is a no-op so test fakes can omit it.
+func (c *QueryEditorContext) SetMode(m types.Mode) {
+	if c.modes == nil {
+		return
+	}
+	c.modes.Set(types.QUERY_EDITOR, m)
 }
 
 // saveBufferIfDirty is the wwd.9 call-site stub. wwd.9 fills it with

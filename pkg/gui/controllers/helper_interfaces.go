@@ -137,9 +137,10 @@ type ResultTabsHelper interface {
 
 // EditorBufferReader is the narrow surface the QueryEditorController
 // queries to learn what statement to run. It returns the full buffer
-// text and the cursor's byte offset into that buffer. The concrete
-// implementation reads from the QUERY_EDITOR view's TextArea once the
-// real (non-stub) context lands; tests inject a fake.
+// text, the cursor's byte offset into that buffer, and (post wwd.7)
+// the currently selected text when Visual mode is active. The concrete
+// implementation reads from the QUERY_EDITOR view's *editor.Buffer;
+// tests inject a fake.
 //
 // BufferText returns the full editor buffer. The empty string is a
 // valid return (empty buffer).
@@ -147,9 +148,15 @@ type ResultTabsHelper interface {
 // CursorOffset returns the byte offset of the cursor into BufferText.
 // Out-of-range values are clamped by callers; the implementation may
 // return any int.
+//
+// SelectionText returns the text covered by Buffer.Selection and true
+// when a Visual-mode selection is live; ("", false) when no selection
+// is active. dbsavvy-wwd.7's <leader>r-in-Visual fan-out reads through
+// this method.
 type EditorBufferReader interface {
 	BufferText() string
 	CursorOffset() int
+	SelectionText() (string, bool)
 }
 
 // NoticeReporter routes server NOTICE / WARNING messages from

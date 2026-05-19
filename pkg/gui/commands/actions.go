@@ -169,6 +169,19 @@ const (
 	TextObjectAroundParagraph   = "textobject.around_paragraph"
 	TextObjectInnerStatement    = "textobject.inner_statement"
 	TextObjectAroundStatement   = "textobject.around_statement"
+
+	// Visual / Selection family — owned by VimEditorController (dbsavvy-wwd.7).
+	// Bindings: `v` / `V` / `<c-v>` enter char/line/block visual from Normal;
+	// `<esc>` exits to Normal. SelectionExtend is the action ID covering
+	// in-Visual motion dispatch (motion keys re-target ExtendSelection
+	// instead of SetCursor); no default chord is published for it — it
+	// piggybacks on the existing motion bindings under the Visual-mode
+	// mask. The ID exists so the action registry can audit it.
+	VisualEnter      = "visual.enter"
+	VisualEnterLine  = "visual.enter_line"
+	VisualEnterBlock = "visual.enter_block"
+	VisualExit       = "visual.exit"
+	SelectionExtend  = "selection.extend"
 )
 
 // AllActionIDs returns every ID declared in this file in declaration
@@ -261,5 +274,10 @@ func AllActionIDs() []string {
 		TextObjectAroundParagraph,
 		TextObjectInnerStatement,
 		TextObjectAroundStatement,
+		VisualEnter,
+		VisualEnterLine,
+		VisualEnterBlock,
+		VisualExit,
+		SelectionExtend,
 	}
 }

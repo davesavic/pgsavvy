@@ -276,28 +276,55 @@ func (b *Buffer) LinesCopy() []Line {
 	return out
 }
 
-// cancelSelectionIfOverlap is the wwd.7 call-site stub. The wwd.2
-// body returns immediately when Selection is nil; wwd.7 fills the
-// overlap-cancel logic so an edit inside a visual range clears the
-// stale Selection rather than leaving it pointing at moved runes.
-func (b *Buffer) cancelSelectionIfOverlap(_ Range) {
+// SelectionText returns the text covered by the live Selection under
+// b.mu.RLock, or ("", false) when no Selection is set. A single read
+// path that holds the lock across both the nil-check and the
+// TextInRange read keeps adapters race-free even if a concurrent
+// ExitVisual / cancelSelectionIfOverlap clears Selection.
+func (b *Buffer) SelectionText() (string, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.Selection == nil {
+		return "", false
+	}
+	return b.textInRangeLocked(*b.Selection), true
+}
+
+// cancelSelectionIfOverlap drops b.Selection when the supplied edit
+// Range overlaps it in (Line, Col) lex order, so an edit inside a
+// visual range cannot leave a stale Selection pointing at moved runes.
+// Overlap test (half-open [a,b) vs [c,d)): a < d && c < b.
+//
+// The caller (applyRecordLocked / Undo / Redo) already holds b.mu.
+// Non-overlapping edits leave Selection intact so a write outside the
+// active visual range — e.g. background fill, sibling cursor edit —
+// is invisible to the user's selection.
+func (b *Buffer) cancelSelectionIfOverlap(r Range) {
 	if b.Selection == nil {
 		return
 	}
-	// wwd.7: cancel when r overlaps b.Selection per vim semantics.
-}
-
-// ExitVisual clears any live Selection on b under b.mu. The wwd.2
-// shipped form matches the bare-minimum semantics QueryEditorContext.
-// HandleFocusLost needs — wwd.7 extends it with anchor-restore and
-// the mode-change dispatch the visual epic ships.
-func ExitVisual(b *Buffer) {
-	if b == nil {
+	sel := *b.Selection
+	selStart, selEnd := sel.Start, sel.End
+	if posLess(selEnd, selStart) {
+		selStart, selEnd = selEnd, selStart
+	}
+	editStart, editEnd := r.Start, r.End
+	if posLess(editEnd, editStart) {
+		editStart, editEnd = editEnd, editStart
+	}
+	// Overlap: editStart < selEnd && selStart < editEnd. Equal endpoints
+	// don't overlap (half-open), but a zero-length edit at the selection
+	// boundary still counts as touching and is cleared defensively.
+	if posLess(editStart, selEnd) && posLess(selStart, editEnd) {
+		b.Selection = nil
 		return
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.Selection = nil
+	// Boundary touch: a zero-length insert (editStart == editEnd) anchored
+	// inside [selStart, selEnd] is split across the selection by insertAtLocked;
+	// cancel to avoid stale offsets.
+	if editStart == editEnd && !posLess(editStart, selStart) && posLess(editStart, selEnd) {
+		b.Selection = nil
+	}
 }
 
 // editInRangeLocked validates both endpoints of e.Range. Insert
