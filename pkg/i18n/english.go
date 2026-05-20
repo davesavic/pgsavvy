@@ -122,6 +122,13 @@ type ActionTranslations struct {
 	ResultPagePrev  string
 	ResultReadToEnd string
 
+	// /regex in-grid filter (dbsavvy-uv0.4).
+	ResultFilterPrompt    string
+	ResultFilterToggleAll string
+	ResultFilterNext      string
+	ResultFilterPrev      string
+	ResultFilterClear     string
+
 	// Connection lifecycle.
 	AddConnection  string
 	OpenConnection string
@@ -239,6 +246,12 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultPageNext:  "Next result page",
 			ResultPagePrev:  "Previous result page",
 			ResultReadToEnd: "Drain result to end",
+
+			ResultFilterPrompt:    "Filter rows by regex",
+			ResultFilterToggleAll: "Toggle filter across all columns",
+			ResultFilterNext:      "Jump to next filter match",
+			ResultFilterPrev:      "Jump to previous filter match",
+			ResultFilterClear:     "Clear result filter",
 
 			AddConnection:  "Add Connection",
 			OpenConnection: "Open Connection",

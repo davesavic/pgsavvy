@@ -1,6 +1,7 @@
 package grid
 
 import (
+	"regexp"
 	"sync"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
@@ -106,6 +107,16 @@ type View struct {
 	lastNearTailFireAt int
 
 	clipboard ClipboardWriter
+
+	// filterState carries the active /regex filter, if any. See
+	// filter.go for the type definition and the SetFilter / ClearFilter /
+	// JumpNextMatch / JumpPrevMatch verbs.
+	filterState filterState
+
+	// filterMaxRegexBytes caps the byte length of regex sources accepted
+	// by SetFilter. Wired from config at chord-registration time; 0
+	// means "use defaultFilterMaxRegexBytes".
+	filterMaxRegexBytes int
 }
 
 // NewView returns an empty grid in its initial state: no rows, no
@@ -114,8 +125,9 @@ type View struct {
 // + AppendRows + Render bring it to life.
 func NewView() *View {
 	return &View{
-		clipboard:          noopClipboard{},
-		lastNearTailFireAt: -1,
+		clipboard:           noopClipboard{},
+		lastNearTailFireAt:  -1,
+		filterMaxRegexBytes: defaultFilterMaxRegexBytes,
 	}
 }
 
@@ -158,6 +170,9 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 	v.anchorRow = 0
 	v.anchorCol = 0
 	v.lastNearTailFireAt = -1
+	// Clear any active /regex filter — a new schema attach is the reset
+	// signal per dbsavvy-uv0 §Architecture Decisions item 5.
+	v.filterState = filterState{}
 }
 
 // AppendRows extends the row buffer. Concurrency-safe (held under the
@@ -248,6 +263,9 @@ func (v *View) snapshot() viewSnapshot {
 		anchorRow:      v.anchorRow,
 		anchorCol:      v.anchorCol,
 		frozenFirstCol: v.frozenFirstCol,
+		filterRe:       v.filterState.re,
+		filterAllCols:  v.filterState.allCols,
+		filterActive:   v.filterState.re != nil,
 	}
 }
 
@@ -270,6 +288,13 @@ type viewSnapshot struct {
 	anchorCol int
 
 	frozenFirstCol bool
+
+	// Filter projection inputs. Render reads these (never v.filterState
+	// directly) so a concurrent SetFilter cannot tear the draw between
+	// snapshot capture and renderBody. dbsavvy-uv0.4.
+	filterRe      *regexp.Regexp
+	filterAllCols bool
+	filterActive  bool
 }
 
 // Render draws the current grid into the target gocui view. target may
@@ -343,12 +368,28 @@ func (v *View) clampOffsetsLocked(snap viewSnapshot, innerW, innerH int) (rowOff
 		dataRows = 1
 	}
 
+	// Cursor row-offset clamp is computed against the projected row
+	// count so the viewport doesn't try to scroll past the visible tail
+	// when a filter is active. NOTE: cursorRow is a raw-buffer index;
+	// when a filter is active and j/k has walked the cursor past the
+	// projected set, the viewport may not visibly contain the cursor
+	// until JumpNextMatch lands it on a matching row. This is the
+	// deliberate T4 simplest-first design — T5/T6 may revisit by
+	// projecting the cursor through the same pipeline.
+	projectedCount := len(project(snap))
 	rowOffset = snap.rowOffset
 	if snap.cursorRow < rowOffset {
 		rowOffset = snap.cursorRow
 	}
 	if snap.cursorRow >= rowOffset+dataRows {
 		rowOffset = snap.cursorRow - dataRows + 1
+	}
+	if rowOffset < 0 {
+		rowOffset = 0
+	}
+	// Don't allow rowOffset to point past the projected tail.
+	if projectedCount > 0 && rowOffset > projectedCount-1 {
+		rowOffset = projectedCount - 1
 	}
 	if rowOffset < 0 {
 		rowOffset = 0

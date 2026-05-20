@@ -1124,3 +1124,176 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
+
+// --- dbsavvy-uv0.4 /regex filter tests -----------------------------------
+
+// fakePrompter captures Prompt invocations and auto-submits the
+// configured response when autoSubmit is non-nil. Otherwise it stores
+// the callbacks for the test to drive directly.
+type fakePrompter struct {
+	mu         sync.Mutex
+	lastLabel  string
+	autoSubmit *string
+	onSubmit   func(value string) error
+	onCancel   func() error
+}
+
+func (f *fakePrompter) Prompt(label, _ string, onSubmit func(value string) error, onCancel func() error) error {
+	f.mu.Lock()
+	f.lastLabel = label
+	f.onSubmit = onSubmit
+	f.onCancel = onCancel
+	auto := f.autoSubmit
+	f.mu.Unlock()
+	if auto != nil {
+		return onSubmit(*auto)
+	}
+	return nil
+}
+
+func (f *fakePrompter) submitDirect(value string) error {
+	f.mu.Lock()
+	cb := f.onSubmit
+	f.mu.Unlock()
+	if cb == nil {
+		return nil
+	}
+	return cb(value)
+}
+
+func newFilterTestHelper(t *testing.T, prompter *fakePrompter) (*ResultTabsHelper, *fakeToaster) {
+	t.Helper()
+	toaster := &fakeToaster{}
+	deps := ResultTabsHelperDeps{
+		Toast:               toaster,
+		Prompt:              prompter,
+		MaxTabs:             0,
+		Now:                 time.Now,
+		FilterMaxRegexBytes: 4096,
+	}
+	return NewResultTabsHelper(deps), toaster
+}
+
+// TestTabCaveatShown_ResetOnStartStreaming verifies that flipping
+// caveatShown true and then re-attaching via startStreaming resets it
+// back to false. This is the rerun-in-same-tab path: re-running a SELECT
+// should re-fire the caveat.
+func TestTabCaveatShown_ResetOnStartStreaming(t *testing.T) {
+	h, _ := newFilterTestHelper(t, &fakePrompter{})
+	if err := h.openTab("Q", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	if tab == nil {
+		t.Fatal("no active tab after openTab")
+	}
+	tab.SetCaveatShown(true)
+	if !tab.CaveatShown() {
+		t.Fatal("SetCaveatShown(true) did not stick")
+	}
+	// startStreaming is the helper's fresh-schema-attach hook.
+	h.startStreaming(tab)
+	if tab.CaveatShown() {
+		t.Error("startStreaming must reset caveatShown")
+	}
+}
+
+// TestFilterPrompt_AppliesAndFiresCaveatOnce verifies the chord-handler
+// behavior: applying a filter on an incomplete tab fires the caveat once
+// and flips caveatShown.
+func TestFilterPrompt_AppliesAndFiresCaveatOnce(t *testing.T) {
+	prompter := &fakePrompter{}
+	h, toaster := newFilterTestHelper(t, prompter)
+	if err := h.openTab("Q", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	// Install columns so the grid has a schema; tab is incomplete by default.
+	tab.Grid().SetColumns([]models.ColumnMeta{{Name: "c", TypeName: "text"}})
+	tab.Grid().AppendRows([]models.Row{{Values: []any{"alice"}}})
+
+	h.FilterPrompt()
+	if err := prompter.submitDirect("alice"); err != nil {
+		t.Fatalf("submitDirect: %v", err)
+	}
+
+	if !tab.Grid().FilterActive() {
+		t.Error("FilterPrompt → submit must install filter")
+	}
+	if !tab.CaveatShown() {
+		t.Error("incomplete tab + filter applied → caveatShown should flip true")
+	}
+	msgs := toaster.Messages()
+	if !containsCaveat(msgs) {
+		t.Errorf("expected caveat toast in %v", msgs)
+	}
+
+	// Second filter on the same tab: caveat must NOT re-fire.
+	toasterBefore := len(toaster.Messages())
+	h.FilterPrompt()
+	if err := prompter.submitDirect("bob"); err != nil {
+		t.Fatalf("submitDirect: %v", err)
+	}
+	caveatsAfter := 0
+	for _, m := range toaster.Messages() {
+		if contains(m, "filtering loaded rows only") {
+			caveatsAfter++
+		}
+	}
+	if caveatsAfter != 1 {
+		t.Errorf("caveat must fire once per tab; got %d caveat toasts (msgs=%v, prev_len=%d)", caveatsAfter, toaster.Messages(), toasterBefore)
+	}
+}
+
+// TestFilterPrompt_InvalidRegexSurfacesToast verifies invalid regex
+// produces an error toast and leaves the filter inactive.
+func TestFilterPrompt_InvalidRegexSurfacesToast(t *testing.T) {
+	prompter := &fakePrompter{}
+	h, toaster := newFilterTestHelper(t, prompter)
+	if err := h.openTab("Q", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	tab.Grid().SetColumns([]models.ColumnMeta{{Name: "c", TypeName: "text"}})
+
+	h.FilterPrompt()
+	if err := prompter.submitDirect("["); err != nil {
+		t.Fatalf("submitDirect: %v", err)
+	}
+
+	if tab.Grid().FilterActive() {
+		t.Error("invalid regex must leave filter inactive")
+	}
+	msgs := toaster.Messages()
+	found := false
+	for _, m := range msgs {
+		if contains(m, "filter error") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'filter error' toast in %v", msgs)
+	}
+}
+
+// TestFilterClear_NoOpWhenInactive verifies <esc>-gating behavior:
+// FilterActive returns false when no filter is installed.
+func TestFilterActive_FalseWithoutFilter(t *testing.T) {
+	h, _ := newFilterTestHelper(t, &fakePrompter{})
+	if err := h.openTab("Q", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	if h.FilterActive() {
+		t.Error("FilterActive should be false on a fresh tab")
+	}
+}
+
+func containsCaveat(msgs []string) bool {
+	for _, m := range msgs {
+		if contains(m, "filtering loaded rows only") {
+			return true
+		}
+	}
+	return false
+}

@@ -140,13 +140,19 @@ func renderBody(snap viewSnapshot, innerW, innerH int) string {
 	sb.WriteString(renderHeaderLine(snap, innerW))
 	sb.WriteByte('\n')
 
+	// Iterate over the projected row-index list (filter → sort → hide
+	// composition) rather than the raw buffer so non-matching rows are
+	// skipped during render. The cursor is a row-index into snap.rows
+	// (not into the projection) so j/k still walks raw rows; only the
+	// visible rendering honors the filter. dbsavvy-uv0.4.
+	indices := project(snap)
 	end := snap.rowOffset + dataRows
-	if end > len(snap.rows) {
-		end = len(snap.rows)
+	if end > len(indices) {
+		end = len(indices)
 	}
-	for r := snap.rowOffset; r < end; r++ {
-		sb.WriteString(renderDataLine(snap, r, innerW))
-		if r != end-1 {
+	for i := snap.rowOffset; i < end; i++ {
+		sb.WriteString(renderDataLine(snap, indices[i], innerW))
+		if i != end-1 {
 			sb.WriteByte('\n')
 		}
 	}

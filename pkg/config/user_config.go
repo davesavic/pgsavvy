@@ -41,6 +41,11 @@ type UIConfig struct {
 	// G (ReadToEnd) shows a confirmation prompt before draining. Default
 	// 1_000_000. Must be > 0.
 	ReadToEndWarnThreshold int64 `yaml:"read_to_end_warn_threshold"`
+
+	// FilterMaxRegexBytes caps the byte length of the /regex source
+	// accepted by grid.View.SetFilter. Defense-in-depth against
+	// pathological inputs. Default 4096. Must be > 0. dbsavvy-uv0.4.
+	FilterMaxRegexBytes int `yaml:"filter_max_regex_bytes"`
 }
 
 // MouseConfig controls the optional mouse wiring registered by the
@@ -159,6 +164,7 @@ func GetDefaultConfig() *UserConfig {
 			ResultPrefetchRows:     50,
 			PrefetchThreshold:      25,
 			ReadToEndWarnThreshold: 1_000_000,
+			FilterMaxRegexBytes:    4096,
 		},
 	}
 }

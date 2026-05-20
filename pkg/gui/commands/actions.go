@@ -133,6 +133,18 @@ const (
 	ResultPagePrev  = "result.page.prev"
 	ResultReadToEnd = "result.read_to_end"
 
+	// /regex filter family (dbsavvy-uv0.4). RESULT_GRID-scoped.
+	//   ResultFilterPrompt    - /     opens the prompt; submit applies
+	//   ResultFilterToggleAll - <C-a> toggles allCols on the active filter
+	//   ResultFilterNext      - n     jump cursor to next match
+	//   ResultFilterPrev      - N     jump cursor to previous match
+	//   ResultFilterClear     - <esc> clear active filter
+	ResultFilterPrompt    = "result.filter.prompt"
+	ResultFilterToggleAll = "result.filter.toggle_all_cols"
+	ResultFilterNext      = "result.filter.next"
+	ResultFilterPrev      = "result.filter.prev"
+	ResultFilterClear     = "result.filter.clear"
+
 	// Plan family — owned by PlanController (dbsavvy-uv0.8). All PLAN-
 	// scoped; published only when a plan tab is the focused context.
 	//   PlanToggle        - <CR> toggles collapse on the cursor node
@@ -329,6 +341,11 @@ func AllActionIDs() []string {
 		ResultPageNext,
 		ResultPagePrev,
 		ResultReadToEnd,
+		ResultFilterPrompt,
+		ResultFilterToggleAll,
+		ResultFilterNext,
+		ResultFilterPrev,
+		ResultFilterClear,
 		PlanToggle,
 		PlanExpandAll,
 		PlanCollapseAll,

@@ -133,6 +133,23 @@ type confirmer interface {
 // orchestrator.Gui.OnUIThread.
 type onUIThreader func(func() error)
 
+// prompter is the narrow surface ResultTabsHelper uses to open the
+// /regex prompt. The concrete satisfier is *ui.PromptHelper; tests may
+// inject a fake. nil disables the filter-prompt path (chord becomes
+// a no-op). dbsavvy-uv0.4.
+type prompter interface {
+	Prompt(label, initial string, onSubmit func(value string) error, onCancel func() error) error
+}
+
+// toastUpdater extends toastShower with the once-per-tab caveat key
+// surface. *ui.ToastHelper satisfies it; tests inject a recorder. The
+// FilterPrompt handler reaches for ShowOrUpdate when present (so a
+// repeated caveat replaces in place); otherwise it falls back to Show.
+// dbsavvy-uv0.4.
+type toastUpdater interface {
+	ShowOrUpdate(key, message string, ttl time.Duration)
+}
+
 // ResultTabsHelperDeps bundles the helper's collaborators. All fields
 // are optional during unit testing; production wires the orchestrator's
 // driver / threading helpers / toast helper.
@@ -182,6 +199,14 @@ type ResultTabsHelperDeps struct {
 	// G first shows a confirmation prompt. 0 means "use the shipped
 	// default (1_000_000)". dbsavvy-uv0.3.
 	ReadToEndWarnThreshold int64
+
+	// Prompt pushes the single-line prompt for the /regex chord. nil
+	// disables the filter-prompt path. dbsavvy-uv0.4.
+	Prompt prompter
+
+	// FilterMaxRegexBytes caps the byte length of /regex sources accepted
+	// by SetFilter. 0 means "use grid's default cap (4096)". dbsavvy-uv0.4.
+	FilterMaxRegexBytes int
 }
 
 // defaultReadToEndWarnThreshold is the shipped ceiling above which G
@@ -195,12 +220,13 @@ const defaultReadToEndWarnThreshold int64 = 1_000_000
 //
 // dbsavvy-66p.12.
 type ResultTabsHelper struct {
-	deps          ResultTabsHelperDeps
-	maxTabs       int
-	nextID        atomic.Int64
-	now           func() time.Time
-	pageSize      int
-	warnThreshold int64
+	deps            ResultTabsHelperDeps
+	maxTabs         int
+	nextID          atomic.Int64
+	now             func() time.Time
+	pageSize        int
+	warnThreshold   int64
+	filterByteLimit int
 
 	mu       sync.Mutex
 	tabs     []*Tab // ordered by Slot (0..max-1)
@@ -226,12 +252,17 @@ func NewResultTabsHelper(deps ResultTabsHelperDeps) *ResultTabsHelper {
 	if warn <= 0 {
 		warn = defaultReadToEndWarnThreshold
 	}
+	filterCap := deps.FilterMaxRegexBytes
+	if filterCap <= 0 {
+		filterCap = 4096
+	}
 	return &ResultTabsHelper{
-		deps:          deps,
-		maxTabs:       max,
-		now:           now,
-		pageSize:      pageSize,
-		warnThreshold: warn,
+		deps:            deps,
+		maxTabs:         max,
+		now:             now,
+		pageSize:        pageSize,
+		warnThreshold:   warn,
+		filterByteLimit: filterCap,
 	}
 }
 
@@ -265,6 +296,13 @@ type Tab struct {
 	// ResultBufferManager's onUIThread callback so off-thread writers
 	// don't race with rendering. dbsavvy-uv0.3.
 	complete bool
+
+	// caveatShown gates the once-per-tab "/regex filter loaded rows only"
+	// toast. Flipped true by the filter chord handler the first time a
+	// filter is applied to an incomplete tab; reset to false whenever
+	// the helper attaches a fresh schema to the tab's grid (re-run in
+	// the same tab fires a fresh caveat). dbsavvy-uv0.4.
+	caveatShown bool
 
 	rh           runHandle
 	grid         *grid.View
@@ -365,6 +403,23 @@ func (t *Tab) Complete() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.complete
+}
+
+// CaveatShown reports whether the once-per-tab /regex caveat toast has
+// already fired for this tab. dbsavvy-uv0.4.
+func (t *Tab) CaveatShown() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.caveatShown
+}
+
+// SetCaveatShown flips the caveat-shown gate. The /regex chord handler
+// sets it true after firing the once-per-tab toast; startStreaming
+// resets it to false on a fresh schema attach. dbsavvy-uv0.4.
+func (t *Tab) SetCaveatShown(v bool) {
+	t.mu.Lock()
+	t.caveatShown = v
+	t.mu.Unlock()
 }
 
 // --- Public surface (controllers.ResultTabsHelper) -----------------------
@@ -877,6 +932,10 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 		doneCh:    make(chan struct{}),
 		grid:      grid.NewView(),
 	}
+	// Propagate the configured /regex byte cap into the grid view so a
+	// hot-reloaded config value takes effect on the next tab's filter.
+	// dbsavvy-uv0.4.
+	t.grid.SetFilterMaxRegexBytes(h.filterByteLimit)
 	if h.deps.StreamFactory != nil {
 		t.runner = h.deps.StreamFactory()
 	}
@@ -938,6 +997,9 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 	tab.state = StateRunning
 	rh := tab.rh
 	runner := tab.runner
+	// Fresh schema attach: reset the once-per-tab /regex caveat gate so
+	// a re-run in the same tab re-fires the caveat. dbsavvy-uv0.4.
+	tab.caveatShown = false
 	tab.mu.Unlock()
 	if rh == nil || runner == nil {
 		return
@@ -1208,6 +1270,132 @@ func (t *Tab) dispose() {
 		t.mu.Unlock()
 		close(t.doneCh)
 	})
+}
+
+// --- /regex filter surface (dbsavvy-uv0.4) -------------------------------
+
+// filterCaveatKey tags the once-per-tab "filtering loaded rows only"
+// toast so ShowOrUpdate replaces in place instead of stacking.
+const filterCaveatKey = "result.filter.caveat"
+
+// filterCaveatTTL is the visibility window for the caveat toast.
+const filterCaveatTTL = 5 * time.Second
+
+// filterCaveatMessage is the once-per-tab caveat surfaced when /regex
+// is applied to an incomplete tab.
+const filterCaveatMessage = "filtering loaded rows only — press G to load all then re-filter"
+
+// FilterPrompt opens the /regex prompt against the active tab. On
+// submit the regex is applied to the tab's grid; on incomplete tabs
+// the once-per-tab caveat toast fires. No-op when no tab is active or
+// the prompt helper is unwired. dbsavvy-uv0.4.
+func (h *ResultTabsHelper) FilterPrompt() {
+	t := h.Active()
+	if t == nil {
+		h.toast("no result tabs")
+		return
+	}
+	g := t.Grid()
+	if g == nil {
+		return
+	}
+	if h.deps.Prompt == nil {
+		return
+	}
+	_ = h.deps.Prompt.Prompt("/", "", func(value string) error {
+		if value == "" {
+			// Empty regex is treated as cancel per AC.
+			return nil
+		}
+		if err := g.SetFilter(value, false); err != nil {
+			h.toast(fmt.Sprintf("filter error: %v", err))
+			return nil
+		}
+		// Filter successfully applied: fire the once-per-tab caveat when
+		// the underlying buffer is still streaming.
+		if !t.Complete() && !t.CaveatShown() {
+			h.showFilterCaveat()
+			t.SetCaveatShown(true)
+		}
+		return nil
+	}, func() error { return nil })
+}
+
+// showFilterCaveat surfaces the filter caveat toast, preferring
+// ShowOrUpdate when the toast surface supports it so re-fires replace
+// in place instead of stacking. dbsavvy-uv0.4.
+func (h *ResultTabsHelper) showFilterCaveat() {
+	if h.deps.Toast == nil {
+		return
+	}
+	if upd, ok := h.deps.Toast.(toastUpdater); ok {
+		upd.ShowOrUpdate(filterCaveatKey, filterCaveatMessage, filterCaveatTTL)
+		return
+	}
+	h.deps.Toast.Show(filterCaveatMessage, filterCaveatTTL)
+}
+
+// FilterToggleAllCols flips the allCols flag of the active filter on
+// the active tab's grid. No-op when no tab is active or no filter is
+// installed. dbsavvy-uv0.4.
+func (h *ResultTabsHelper) FilterToggleAllCols() {
+	g := h.activeGrid()
+	if g == nil {
+		return
+	}
+	g.ToggleFilterAllCols()
+}
+
+// FilterJumpNext advances the cursor on the active tab's grid to the
+// next filter match. dbsavvy-uv0.4.
+func (h *ResultTabsHelper) FilterJumpNext() {
+	g := h.activeGrid()
+	if g == nil {
+		return
+	}
+	g.JumpNextMatch()
+}
+
+// FilterJumpPrev rewinds the cursor on the active tab's grid to the
+// previous filter match. dbsavvy-uv0.4.
+func (h *ResultTabsHelper) FilterJumpPrev() {
+	g := h.activeGrid()
+	if g == nil {
+		return
+	}
+	g.JumpPrevMatch()
+}
+
+// FilterClear drops the active filter on the active tab's grid.
+// dbsavvy-uv0.4.
+func (h *ResultTabsHelper) FilterClear() {
+	g := h.activeGrid()
+	if g == nil {
+		return
+	}
+	g.ClearFilter()
+}
+
+// FilterActive reports whether the active tab's grid has an active
+// filter. Used by the shared <esc> chord to avoid shadowing other esc
+// handlers when no filter is installed. dbsavvy-uv0.4.
+func (h *ResultTabsHelper) FilterActive() bool {
+	g := h.activeGrid()
+	if g == nil {
+		return false
+	}
+	return g.FilterActive()
+}
+
+// activeGrid returns the *grid.View attached to the currently-active
+// tab, or nil when no tab is active / the active tab is a plan/error
+// tab. dbsavvy-uv0.4.
+func (h *ResultTabsHelper) activeGrid() *grid.View {
+	t := h.Active()
+	if t == nil {
+		return nil
+	}
+	return t.Grid()
 }
 
 // truncateLabel cleans whitespace and truncates to cap with an

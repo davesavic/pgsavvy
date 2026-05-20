@@ -387,6 +387,7 @@ func (g *Gui) wireWithDriver() error {
 		Driver:     g.driver,
 		Toast:      g.toastHelp,
 		Confirm:    g.confirmHelp,
+		Prompt:     g.promptHelp,
 		OnUIThread: g.OnUIThread,
 		StreamFactory: func() ui.StreamRunner {
 			return tasks.New(g.OnWorker, g.OnUIThreadContentOnly)
@@ -395,6 +396,7 @@ func (g *Gui) wireWithDriver() error {
 	if cfg := g.deps.Common.Cfg(); cfg != nil {
 		resultTabsDeps.ResultPageSize = cfg.UI.ResultPageSize
 		resultTabsDeps.ReadToEndWarnThreshold = cfg.UI.ReadToEndWarnThreshold
+		resultTabsDeps.FilterMaxRegexBytes = cfg.UI.FilterMaxRegexBytes
 	}
 	g.resultTabsH = ui.NewResultTabsHelper(resultTabsDeps)
 
