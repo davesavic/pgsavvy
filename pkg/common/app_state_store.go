@@ -276,6 +276,24 @@ func (s *AppStateStore) HiddenColumnsSnapshot(connID, baseTable string) []string
 	return out
 }
 
+// LastResultViewModeSnapshot returns the persisted result-grid view mode
+// ("grid" / "expanded"). Empty string means the user has never toggled.
+// Callers should normalise empty / unknown values to "grid" on read.
+// dbsavvy-uv0.7.
+func (s *AppStateStore) LastResultViewModeSnapshot() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.LastResultViewMode
+}
+
+// SetLastResultViewMode persists the result-grid view mode through the
+// debounced save path. Idempotent. dbsavvy-uv0.7.
+func (s *AppStateStore) SetLastResultViewMode(m string) {
+	s.MutateAndSave(func(a *AppState) {
+		a.LastResultViewMode = m
+	})
+}
+
 // HiddenSchemasSnapshot returns a defensive copy of the hidden-schemas slice
 // for the given connection ID. Callers may mutate the returned slice without
 // affecting store state. Returns nil if no entry exists.

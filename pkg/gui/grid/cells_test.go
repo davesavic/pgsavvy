@@ -71,20 +71,36 @@ func TestRenderCell_BlobPreview(t *testing.T) {
 		"bytea preview should declare the original byte length")
 }
 
-// TestSanitizeCellEscapes_IdentityStub pins the dbsavvy-uv0.8 stub
-// behaviour: the function exists and returns its input unchanged.
-// T9 finalises the implementation; until then the call site must
-// remain wired so PlanContext's raw-text path is sanitization-aware.
-func TestSanitizeCellEscapes_IdentityStub(t *testing.T) {
-	for _, in := range []string{
-		"",
-		"plain text",
-		"with \x1b[31mred\x1b[0m escape",
-		"line1\nline2",
-	} {
-		if got := SanitizeCellEscapes(in); got != in {
-			t.Errorf("SanitizeCellEscapes(%q) = %q, want identity %q", in, got, in)
-		}
+// TestSanitizeCellEscapes asserts the AD-16 stripping contract: CSI/OSC
+// escapes and C0 controls (except \t / \n) are removed; plain text and
+// tab/newline pass through unchanged. dbsavvy-uv0.7 implements the body
+// previously stubbed by dbsavvy-uv0.8.
+func TestSanitizeCellEscapes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{"plain", "plain text", "plain text"},
+		{"keeps tab", "a\tb", "a\tb"},
+		{"keeps newline", "line1\nline2", "line1\nline2"},
+		{"strips CSI red", "with \x1b[31mred\x1b[0m escape", "with red escape"},
+		{"strips OSC bell", "before\x1b]0;title\x07after", "beforeafter"},
+		{"strips OSC st", "before\x1b]0;title\x1b\\after", "beforeafter"},
+		{"strips bare ESC", "a\x1b(Bb", "ab"},
+		{"strips bell", "a\x07b", "ab"},
+		{"strips CR", "a\rb", "ab"},
+		{"strips DEL", "a\x7fb", "ab"},
+		{"truncated CSI", "abc\x1b[31m", "abc"},
+		{"only escapes", "\x1b[2J\x1b[H", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SanitizeCellEscapes(tc.in); got != tc.want {
+				t.Errorf("SanitizeCellEscapes(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -14,20 +14,26 @@ import "strings"
 
 // MoveCursorDown advances the cursor by one row, clamped to the last
 // loaded row. Triggers an auto-prefetch check at the end (handled
-// inside the next Render).
+// inside the next Render). In expanded mode this means "next record"
+// (records == rows in the projected list). The wrapped-line offset is
+// reset so the new record starts at the top.
 func (v *View) MoveCursorDown() {
 	v.mu.Lock()
 	if len(v.rows) > 0 && v.cursorRow < len(v.rows)-1 {
 		v.cursorRow++
+		v.expandedLineOffset = 0
 	}
 	v.mu.Unlock()
 }
 
-// MoveCursorUp moves the cursor up by one row, clamped to row 0.
+// MoveCursorUp moves the cursor up by one row, clamped to row 0. In
+// expanded mode this means "previous record"; wrapped-line offset is
+// reset so the prior record starts at the top.
 func (v *View) MoveCursorUp() {
 	v.mu.Lock()
 	if v.cursorRow > 0 {
 		v.cursorRow--
+		v.expandedLineOffset = 0
 	}
 	v.mu.Unlock()
 }
@@ -54,9 +60,19 @@ func (v *View) MoveCursorRight() {
 
 // HalfPageDown jumps the cursor down by half the typical page (treated
 // as half of ResultPageSize rows for the no-viewport case). The Render
-// pass clamps scroll afterwards so the cursor stays on screen.
+// pass clamps scroll afterwards so the cursor stays on screen. In
+// expanded mode this scrolls inside the active record by a half-page
+// of wrapped lines; when the line offset overruns the record's content
+// the cursor advances to the next record.
 func (v *View) HalfPageDown() {
 	v.mu.Lock()
+	defer v.mu.Unlock()
+	if normaliseViewMode(v.viewMode) == ViewModeExpanded {
+		// Step inside the current record by half a viewport's worth.
+		step := expandedHalfPageStep
+		v.expandedLineOffset += step
+		return
+	}
 	step := ResultPageSize / 2
 	if step < 1 {
 		step = 1
@@ -69,12 +85,20 @@ func (v *View) HalfPageDown() {
 		target = 0
 	}
 	v.cursorRow = target
-	v.mu.Unlock()
 }
 
 // HalfPageUp is the symmetric counterpart of HalfPageDown.
 func (v *View) HalfPageUp() {
 	v.mu.Lock()
+	defer v.mu.Unlock()
+	if normaliseViewMode(v.viewMode) == ViewModeExpanded {
+		step := expandedHalfPageStep
+		v.expandedLineOffset -= step
+		if v.expandedLineOffset < 0 {
+			v.expandedLineOffset = 0
+		}
+		return
+	}
 	step := ResultPageSize / 2
 	if step < 1 {
 		step = 1
@@ -84,24 +108,87 @@ func (v *View) HalfPageUp() {
 		target = 0
 	}
 	v.cursorRow = target
+}
+
+// expandedHalfPageStep is the half-page distance in wrapped lines used
+// by HalfPageDown / HalfPageUp when the view is in expanded mode.
+// Chosen to roughly match a typical 24-line viewport / 2.
+const expandedHalfPageStep = 12
+
+// WrappedLineDown advances the wrapped-line cursor inside the active
+// record by one line (J chord in expanded mode). In grid mode this is
+// a no-op so callers can wire the chord unconditionally without checking
+// viewMode at the dispatch site. dbsavvy-uv0.7.
+func (v *View) WrappedLineDown() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if normaliseViewMode(v.viewMode) != ViewModeExpanded {
+		return
+	}
+	v.expandedLineOffset++
+}
+
+// WrappedLineUp is the symmetric counterpart of WrappedLineDown. K
+// chord in expanded mode. dbsavvy-uv0.7.
+func (v *View) WrappedLineUp() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if normaliseViewMode(v.viewMode) != ViewModeExpanded {
+		return
+	}
+	if v.expandedLineOffset > 0 {
+		v.expandedLineOffset--
+	}
+}
+
+// HorizScrollLeft scrolls the viewport one column-step to the left.
+// In expanded mode this shifts the value-column horizontal offset; in
+// grid mode it walks the cursor left (mirrors MoveCursorLeft). The
+// expanded-mode line offset is reused as a 1-D scroll because expanded
+// view only ever has one logical column of content. dbsavvy-uv0.7.
+func (v *View) HorizScrollLeft() {
+	if v.ViewMode() == ViewModeGrid {
+		v.MoveCursorLeft()
+		return
+	}
+	v.mu.Lock()
+	if v.colOffset > 0 {
+		v.colOffset--
+	}
 	v.mu.Unlock()
 }
 
-// JumpFirst moves the cursor to row 0 (gg).
+// HorizScrollRight scrolls the viewport one column-step to the right.
+// dbsavvy-uv0.7.
+func (v *View) HorizScrollRight() {
+	if v.ViewMode() == ViewModeGrid {
+		v.MoveCursorRight()
+		return
+	}
+	v.mu.Lock()
+	v.colOffset++
+	v.mu.Unlock()
+}
+
+// JumpFirst moves the cursor to row 0 (gg). In expanded mode this also
+// resets the wrapped-line offset so the first record starts at the top.
 func (v *View) JumpFirst() {
 	v.mu.Lock()
 	v.cursorRow = 0
+	v.expandedLineOffset = 0
 	v.mu.Unlock()
 }
 
-// JumpLast moves the cursor to the last loaded row (G). Auto-prefetch
-// will be considered on the next Render — the cursor lands at the
-// tail, well inside PrefetchThreshold.
+// JumpLast moves the cursor to the last loaded row (G in grid mode; in
+// expanded mode the result-tab controller rebinds G to this method
+// instead of ReadToEnd per AD-14). Auto-prefetch is considered on the
+// next Render.
 func (v *View) JumpLast() {
 	v.mu.Lock()
 	if len(v.rows) > 0 {
 		v.cursorRow = len(v.rows) - 1
 	}
+	v.expandedLineOffset = 0
 	v.mu.Unlock()
 }
 

@@ -8,6 +8,7 @@ package integration_test
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
@@ -53,6 +54,13 @@ func TestFoundationSmoke(t *testing.T) {
 	c.AppState.HiddenColumns = map[string]map[string][]string{"conn-1": {"users": {"password"}}}
 	c.AppState.StatementTimeoutOverride = map[string]string{"conn-1": "30s"}
 	c.AppState.LastSessionSettings = map[string]map[string]string{"conn-1": {"search_path": "public"}}
+	// dbsavvy-uv0.7: populate the remaining scalar fields so the round-
+	// trip exercises every AppState entry instead of only the maps.
+	c.AppState.LastTheme = "default-dark"
+	c.AppState.LastResultViewMode = "expanded"
+	// Drop monotonic clock so reflect.DeepEqual round-trips through YAML.
+	c.AppState.StartupTipsSeenAt = time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	c.AppState.Version = "v0.0.1"
 
 	if err := c.AppState.Save(c.Fs, statePath); err != nil {
 		t.Fatalf("AppState.Save returned error: %v", err)

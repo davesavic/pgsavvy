@@ -141,6 +141,24 @@ type View struct {
 	// callers re-seed from persisted column NAMES via SetHiddenCols.
 	// dbsavvy-uv0.6.
 	hiddenColSet map[int]bool
+
+	// viewMode picks the render path: ViewModeGrid (default) renders the
+	// row/col table; ViewModeExpanded renders one record at a time in
+	// psql `\x` style. Persisted globally via AppState.LastResultViewMode
+	// — see helpers/ui/result_tabs_helper.go. dbsavvy-uv0.7.
+	viewMode string
+
+	// estimatedRowsLoader returns the optimiser's row-count estimate for
+	// the active stream, or 0 when unknown. snapshot() invokes it under
+	// RLock so the expanded-mode separator can display "~total" without
+	// the grid package importing the task runner. nil means "unknown".
+	// dbsavvy-uv0.7.
+	estimatedRowsLoader func() int64
+
+	// expandedLineOffset is the wrapped-line offset inside the active
+	// record in expanded mode. Bumped by WrappedLineDown / WrappedLineUp;
+	// reset to 0 when the cursor moves to a new record. dbsavvy-uv0.7.
+	expandedLineOffset int
 }
 
 // headerClickState is the per-View state used by HandleHeaderClick to
@@ -400,24 +418,71 @@ func (v *View) snapshot() viewSnapshot {
 		// " (sort: name ↑)") computed under the same RLock so Render
 		// sees a tearing-free combination of base title + sort flip.
 		// dbsavvy-uv0.5.
-		widths:         v.widths,
-		title:          v.title + sortIndicatorLocked(v.sortState, v.cols),
-		cursorRow:      v.cursorRow,
-		cursorCol:      v.cursorCol,
-		rowOffset:      v.rowOffset,
-		colOffset:      v.colOffset,
-		selMode:        v.selMode,
-		anchorRow:      v.anchorRow,
-		anchorCol:      v.anchorCol,
-		frozenFirstCol: v.frozenFirstCol,
-		filterRe:       v.filterState.re,
-		filterAllCols:  v.filterState.allCols,
-		filterActive:   v.filterState.re != nil,
-		sortActive:     v.sortState.active(),
-		sortCol:        v.sortState.col,
-		sortDir:        v.sortState.dir,
-		hidden:         v.hiddenColSet,
+		widths:             v.widths,
+		title:              v.title + sortIndicatorLocked(v.sortState, v.cols),
+		cursorRow:          v.cursorRow,
+		cursorCol:          v.cursorCol,
+		rowOffset:          v.rowOffset,
+		colOffset:          v.colOffset,
+		selMode:            v.selMode,
+		anchorRow:          v.anchorRow,
+		anchorCol:          v.anchorCol,
+		frozenFirstCol:     v.frozenFirstCol,
+		filterRe:           v.filterState.re,
+		filterAllCols:      v.filterState.allCols,
+		filterActive:       v.filterState.re != nil,
+		sortActive:         v.sortState.active(),
+		sortCol:            v.sortState.col,
+		sortDir:            v.sortState.dir,
+		hidden:             v.hiddenColSet,
+		viewMode:           normaliseViewMode(v.viewMode),
+		estimatedRows:      v.loadEstimatedRowsLocked(),
+		expandedLineOffset: v.expandedLineOffset,
 	}
+}
+
+// loadEstimatedRowsLocked invokes the configured loader (under v.mu).
+// Returns 0 when no loader is wired or the loader reports unknown.
+// Used by snapshot() to surface "~total" in the expanded mode banner
+// without grid importing the task runner. dbsavvy-uv0.7.
+func (v *View) loadEstimatedRowsLocked() int64 {
+	if v.estimatedRowsLoader == nil {
+		return 0
+	}
+	n := v.estimatedRowsLoader()
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// SetViewMode flips the render path. Accepts ViewModeGrid /
+// ViewModeExpanded; any other value falls back to ViewModeGrid. Moving
+// to a new mode resets the expanded line-offset so the next render
+// starts at the top of the active record. dbsavvy-uv0.7.
+func (v *View) SetViewMode(m string) {
+	v.mu.Lock()
+	v.viewMode = normaliseViewMode(m)
+	v.expandedLineOffset = 0
+	v.mu.Unlock()
+}
+
+// ViewMode returns the current render mode (ViewModeGrid or
+// ViewModeExpanded). Safe from any goroutine. dbsavvy-uv0.7.
+func (v *View) ViewMode() string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return normaliseViewMode(v.viewMode)
+}
+
+// SetEstimatedRowsLoader wires the row-count-estimate provider for
+// expanded-mode rendering. The loader is invoked on every snapshot so
+// the banner stays current as the optimiser estimate is refined. Pass
+// nil to clear. dbsavvy-uv0.7.
+func (v *View) SetEstimatedRowsLoader(fn func() int64) {
+	v.mu.Lock()
+	v.estimatedRowsLoader = fn
+	v.mu.Unlock()
 }
 
 // viewSnapshot is the immutable bundle Render works against. Decoupled
@@ -458,6 +523,14 @@ type viewSnapshot struct {
 	// Captured under the same RLock as the rest of the snapshot so a
 	// concurrent SetHiddenCols cannot tear the frame. dbsavvy-uv0.6.
 	hidden map[int]bool
+
+	// viewMode + estimatedRows are the expanded-mode projection inputs.
+	// viewMode is normalised at snapshot time so renderExpanded never
+	// has to guess; estimatedRows is the loader's last-known value.
+	// dbsavvy-uv0.7.
+	viewMode           string
+	estimatedRows      int64
+	expandedLineOffset int
 }
 
 // Render draws the current grid into the target gocui view. target may
@@ -508,7 +581,12 @@ func (v *View) Render(target *gocui.View) {
 	// starts in the right place.
 	snap.rowOffset, snap.colOffset = v.clampOffsetsLocked(snap, innerW, innerH)
 
-	body := renderBody(snap, innerW, innerH)
+	var body string
+	if snap.viewMode == ViewModeExpanded {
+		body = renderExpanded(snap, innerW, innerH)
+	} else {
+		body = renderBody(snap, innerW, innerH)
+	}
 	if target != nil {
 		target.WriteString(body)
 	}

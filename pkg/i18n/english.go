@@ -118,9 +118,10 @@ type ActionTranslations struct {
 	ResultTabCancel string
 
 	// Result-grid pagination (dbsavvy-uv0.3).
-	ResultPageNext  string
-	ResultPagePrev  string
-	ResultReadToEnd string
+	ResultPageNext       string
+	ResultPagePrev       string
+	ResultReadToEnd      string
+	ResultReadToEndForce string
 
 	// /regex in-grid filter (dbsavvy-uv0.4).
 	ResultFilterPrompt    string
@@ -135,6 +136,21 @@ type ActionTranslations struct {
 
 	// In-grid hide-columns overlay (dbsavvy-uv0.6).
 	ResultHideOverlay string
+
+	// Expanded view mode + result-grid motion (dbsavvy-uv0.7).
+	ResultViewToggle      string
+	ResultCursorDown      string
+	ResultCursorUp        string
+	ResultCursorLeft      string
+	ResultCursorRight     string
+	ResultJumpFirst       string
+	ResultJumpLast        string
+	ResultHalfPageDown    string
+	ResultHalfPageUp      string
+	ResultWrappedLineDown string
+	ResultWrappedLineUp   string
+	ResultSelectRow       string
+	ResultSelectBlock     string
 
 	// Connection lifecycle.
 	AddConnection  string
@@ -251,9 +267,10 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultTabPin:    "Pin / unpin result tab",
 			ResultTabCancel: "Cancel result tab stream",
 
-			ResultPageNext:  "Next result page",
-			ResultPagePrev:  "Previous result page",
-			ResultReadToEnd: "Drain result to end",
+			ResultPageNext:       "Next result page",
+			ResultPagePrev:       "Previous result page",
+			ResultReadToEnd:      "Drain result to end",
+			ResultReadToEndForce: "Drain result to end (force)",
 
 			ResultFilterPrompt:    "Filter rows by regex",
 			ResultFilterToggleAll: "Toggle filter across all columns",
@@ -265,6 +282,20 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultSortPickLabel: "sort by column",
 
 			ResultHideOverlay: "Toggle column visibility",
+
+			ResultViewToggle:      "Toggle expanded view",
+			ResultCursorDown:      "Cursor down",
+			ResultCursorUp:        "Cursor up",
+			ResultCursorLeft:      "Cursor left",
+			ResultCursorRight:     "Cursor right",
+			ResultJumpFirst:       "Jump to first row",
+			ResultJumpLast:        "Jump to last row",
+			ResultHalfPageDown:    "Half page down",
+			ResultHalfPageUp:      "Half page up",
+			ResultWrappedLineDown: "Next wrapped line",
+			ResultWrappedLineUp:   "Previous wrapped line",
+			ResultSelectRow:       "Visual row selection",
+			ResultSelectBlock:     "Visual block selection",
 
 			AddConnection:  "Add Connection",
 			OpenConnection: "Open Connection",

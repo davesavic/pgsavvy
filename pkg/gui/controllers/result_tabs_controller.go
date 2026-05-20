@@ -52,6 +52,30 @@ type ResultTabsManager interface {
 	// tab. Persistence is gated on the tab's recorded ResultIdentity
 	// (HasRowIdentity). dbsavvy-uv0.6.
 	HideOverlay()
+
+	// ToggleViewMode flips the active tab's grid between ViewModeGrid
+	// and ViewModeExpanded and persists the new value globally via
+	// AppState.LastResultViewMode. dbsavvy-uv0.7.
+	ToggleViewMode()
+
+	// JumpLastOrReadToEnd dispatches `G`: in expanded mode jumps the
+	// cursor to the last loaded record; in grid mode triggers the
+	// ReadToEnd drain (with the existing >1M-row warn). dbsavvy-uv0.7.
+	JumpLastOrReadToEnd()
+
+	// Result-grid motion delegators. Dispatch is viewMode-aware inside
+	// the helper / grid.View. dbsavvy-uv0.7.
+	CursorDown()
+	CursorUp()
+	CursorLeft()
+	CursorRight()
+	JumpFirst()
+	HalfPageDown()
+	HalfPageUp()
+	WrappedLineDown()
+	WrappedLineUp()
+	SelectRow()
+	SelectBlock()
 }
 
 // ResultTabsController publishes the multi-tab keybindings:
@@ -117,6 +141,21 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"<leader>s", commands.ResultSortPick, tr.Actions.ResultSortPick, types.RESULT_GRID},
 		// dbsavvy-uv0.6: <leader>gH hide-cols overlay.
 		{"<leader>gH", commands.ResultHideOverlay, tr.Actions.ResultHideOverlay, types.RESULT_GRID},
+		// dbsavvy-uv0.7: expanded view toggle + ]G force-ReadToEnd +
+		// result-grid motion bindings (viewMode-aware via the helper).
+		{"<leader>gx", commands.ResultViewToggle, tr.Actions.ResultViewToggle, types.RESULT_GRID},
+		{"]G", commands.ResultReadToEndForce, tr.Actions.ResultReadToEndForce, types.RESULT_GRID},
+		{"j", commands.ResultCursorDown, tr.Actions.ResultCursorDown, types.RESULT_GRID},
+		{"k", commands.ResultCursorUp, tr.Actions.ResultCursorUp, types.RESULT_GRID},
+		{"h", commands.ResultCursorLeft, tr.Actions.ResultCursorLeft, types.RESULT_GRID},
+		{"l", commands.ResultCursorRight, tr.Actions.ResultCursorRight, types.RESULT_GRID},
+		{"gg", commands.ResultJumpFirst, tr.Actions.ResultJumpFirst, types.RESULT_GRID},
+		{"<c-d>", commands.ResultHalfPageDown, tr.Actions.ResultHalfPageDown, types.RESULT_GRID},
+		{"<c-u>", commands.ResultHalfPageUp, tr.Actions.ResultHalfPageUp, types.RESULT_GRID},
+		{"J", commands.ResultWrappedLineDown, tr.Actions.ResultWrappedLineDown, types.RESULT_GRID},
+		{"K", commands.ResultWrappedLineUp, tr.Actions.ResultWrappedLineUp, types.RESULT_GRID},
+		{"V", commands.ResultSelectRow, tr.Actions.ResultSelectRow, types.RESULT_GRID},
+		{"<c-v>", commands.ResultSelectBlock, tr.Actions.ResultSelectBlock, types.RESULT_GRID},
 	}
 	out := make([]*types.ChordBinding, 0, len(specs))
 	for _, s := range specs {
@@ -251,6 +290,20 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 		Description: tr.Actions.ResultReadToEnd,
 		Tag:         "Result",
 		Handler: func(_ commands.ExecCtx) error {
+			// dbsavvy-uv0.7 AD-14: in expanded mode G means "last record";
+			// the helper dispatches based on the active grid's viewMode.
+			if r.mgr != nil {
+				r.mgr.JumpLastOrReadToEnd()
+			}
+			return nil
+		},
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ResultReadToEndForce,
+		Description: tr.Actions.ResultReadToEndForce,
+		Tag:         "Result",
+		Handler: func(_ commands.ExecCtx) error {
+			// ]G — always ReadToEnd, regardless of viewMode.
 			if r.mgr != nil {
 				r.mgr.ReadToEnd()
 			}
@@ -334,6 +387,38 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 			if r.mgr != nil {
 				r.mgr.HideOverlay()
 			}
+			return nil
+		},
+	})
+	// dbsavvy-uv0.7: expanded view toggle + motion handlers.
+	r.registerMotionHandler(reg, commands.ResultViewToggle, tr.Actions.ResultViewToggle, func() { r.mgr.ToggleViewMode() })
+	r.registerMotionHandler(reg, commands.ResultCursorDown, tr.Actions.ResultCursorDown, func() { r.mgr.CursorDown() })
+	r.registerMotionHandler(reg, commands.ResultCursorUp, tr.Actions.ResultCursorUp, func() { r.mgr.CursorUp() })
+	r.registerMotionHandler(reg, commands.ResultCursorLeft, tr.Actions.ResultCursorLeft, func() { r.mgr.CursorLeft() })
+	r.registerMotionHandler(reg, commands.ResultCursorRight, tr.Actions.ResultCursorRight, func() { r.mgr.CursorRight() })
+	r.registerMotionHandler(reg, commands.ResultJumpFirst, tr.Actions.ResultJumpFirst, func() { r.mgr.JumpFirst() })
+	r.registerMotionHandler(reg, commands.ResultHalfPageDown, tr.Actions.ResultHalfPageDown, func() { r.mgr.HalfPageDown() })
+	r.registerMotionHandler(reg, commands.ResultHalfPageUp, tr.Actions.ResultHalfPageUp, func() { r.mgr.HalfPageUp() })
+	r.registerMotionHandler(reg, commands.ResultWrappedLineDown, tr.Actions.ResultWrappedLineDown, func() { r.mgr.WrappedLineDown() })
+	r.registerMotionHandler(reg, commands.ResultWrappedLineUp, tr.Actions.ResultWrappedLineUp, func() { r.mgr.WrappedLineUp() })
+	r.registerMotionHandler(reg, commands.ResultSelectRow, tr.Actions.ResultSelectRow, func() { r.mgr.SelectRow() })
+	r.registerMotionHandler(reg, commands.ResultSelectBlock, tr.Actions.ResultSelectBlock, func() { r.mgr.SelectBlock() })
+}
+
+// registerMotionHandler wires a no-arg manager call into the command
+// registry, nil-checking the manager so unit tests that build the
+// controller without a real helper don't crash on dispatch.
+// dbsavvy-uv0.7.
+func (r *ResultTabsController) registerMotionHandler(reg *commands.Registry, id, desc string, fn func()) {
+	_ = reg.Register(&commands.Command{
+		ID:          id,
+		Description: desc,
+		Tag:         "Result",
+		Handler: func(_ commands.ExecCtx) error {
+			if r.mgr == nil {
+				return nil
+			}
+			fn()
 			return nil
 		},
 	})

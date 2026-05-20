@@ -24,7 +24,12 @@ import "strings"
 // active selection, the cell under the cursor is yanked.
 func (v *View) Yank() string {
 	snap := v.snapshot()
-	out := buildTSV(snap)
+	var out string
+	if snap.viewMode == ViewModeExpanded {
+		out = buildExpandedYank(snap)
+	} else {
+		out = buildTSV(snap)
+	}
 	v.mu.RLock()
 	cw := v.clipboard
 	v.mu.RUnlock()
@@ -36,6 +41,46 @@ func (v *View) Yank() string {
 		_ = cw.Write(out)
 	}
 	return out
+}
+
+// buildExpandedYank serialises the selected records as `col\tvalue\n`
+// lines per record, with a blank line between records. Hidden columns
+// are skipped (same projection as renderExpanded). Cell values pass
+// through renderCellPlain so the sanitizer + truncation rules apply.
+// dbsavvy-uv0.7.
+func buildExpandedYank(snap viewSnapshot) string {
+	if len(snap.cols) == 0 || len(snap.rows) == 0 {
+		return ""
+	}
+	r0, _, r1, _, _ := selectionRange(snap)
+	if r0 < 0 {
+		r0 = 0
+	}
+	if r1 >= len(snap.rows) {
+		r1 = len(snap.rows) - 1
+	}
+	if r0 > r1 {
+		return ""
+	}
+	visibleCols := expandedColumnOrder(snap)
+	var sb strings.Builder
+	for r := r0; r <= r1; r++ {
+		if r > r0 {
+			sb.WriteByte('\n')
+		}
+		row := snap.rows[r]
+		for _, c := range visibleCols {
+			var value any
+			if c < len(row.Values) {
+				value = row.Values[c]
+			}
+			sb.WriteString(snap.cols[c].Name)
+			sb.WriteByte('\t')
+			sb.WriteString(renderCellPlain(value, snap.cols[c]))
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
 }
 
 // buildTSV is the pure, side-effect-free TSV serialiser. Split out so

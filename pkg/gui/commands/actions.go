@@ -129,10 +129,12 @@ const (
 	ResultTabCancel = "result.tab.cancel"
 
 	// Pagination + read-to-end (dbsavvy-uv0.3). RESULT_GRID-scoped:
-	// ]p / [p / G fire only when a result tab is focused.
-	ResultPageNext  = "result.page.next"
-	ResultPagePrev  = "result.page.prev"
-	ResultReadToEnd = "result.read_to_end"
+	// ]p / [p / G fire only when a result tab is focused. ]G forces
+	// ReadToEnd regardless of viewMode (dbsavvy-uv0.7 AD-14).
+	ResultPageNext       = "result.page.next"
+	ResultPagePrev       = "result.page.prev"
+	ResultReadToEnd      = "result.read_to_end"
+	ResultReadToEndForce = "result.read_to_end_force"
 
 	// /regex filter family (dbsavvy-uv0.4). RESULT_GRID-scoped.
 	//   ResultFilterPrompt    - /     opens the prompt; submit applies
@@ -156,6 +158,25 @@ const (
 	//                       Persistence is gated on the active tab's
 	//                       ResultIdentity.HasRowIdentity flag.
 	ResultHideOverlay = "result.hide.overlay"
+
+	// Expanded view mode (dbsavvy-uv0.7). RESULT_GRID-scoped.
+	//   ResultViewToggle - <leader>gx flips the active grid between
+	//                      grid and expanded view; persisted globally
+	//                      via AppState.LastResultViewMode.
+	//   Result grid motion chords (dispatched on viewMode by the helper).
+	ResultViewToggle      = "result.view.toggle"
+	ResultCursorDown      = "result.cursor.down"
+	ResultCursorUp        = "result.cursor.up"
+	ResultCursorLeft      = "result.cursor.left"
+	ResultCursorRight     = "result.cursor.right"
+	ResultJumpFirst       = "result.jump.first"
+	ResultJumpLast        = "result.jump.last"
+	ResultHalfPageDown    = "result.half_page.down"
+	ResultHalfPageUp      = "result.half_page.up"
+	ResultWrappedLineDown = "result.wrapped_line.down"
+	ResultWrappedLineUp   = "result.wrapped_line.up"
+	ResultSelectRow       = "result.select.row"
+	ResultSelectBlock     = "result.select.block"
 
 	// HideOverlay-scope handlers (dbsavvy-uv0.6) — owned by
 	// HideOverlayController. j/k cursor moves, <space> toggle, <esc> /
@@ -362,6 +383,7 @@ func AllActionIDs() []string {
 		ResultPageNext,
 		ResultPagePrev,
 		ResultReadToEnd,
+		ResultReadToEndForce,
 		ResultFilterPrompt,
 		ResultFilterToggleAll,
 		ResultFilterNext,
@@ -369,6 +391,19 @@ func AllActionIDs() []string {
 		ResultFilterClear,
 		ResultSortPick,
 		ResultHideOverlay,
+		ResultViewToggle,
+		ResultCursorDown,
+		ResultCursorUp,
+		ResultCursorLeft,
+		ResultCursorRight,
+		ResultJumpFirst,
+		ResultJumpLast,
+		ResultHalfPageDown,
+		ResultHalfPageUp,
+		ResultWrappedLineDown,
+		ResultWrappedLineUp,
+		ResultSelectRow,
+		ResultSelectBlock,
 		HideOverlayUp,
 		HideOverlayDown,
 		HideOverlayToggle,

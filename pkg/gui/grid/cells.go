@@ -73,7 +73,10 @@ func renderCell(value any, col models.ColumnMeta) (visible, decorated string) {
 
 // renderCellPlain is the unstyled cell stringifier. Used for column
 // auto-sizing (where SGR escapes would skew the width) and for TSV
-// yank output (which must not carry colour codes).
+// yank output (which must not carry colour codes). All non-NULL
+// strings are routed through SanitizeCellEscapes (dbsavvy-uv0 AD-16)
+// so untrusted server output cannot bleed terminal escapes into the
+// grid or exports.
 func renderCellPlain(value any, col models.ColumnMeta) string {
 	if value == nil {
 		return "NULL"
@@ -86,13 +89,13 @@ func renderCellPlain(value any, col models.ColumnMeta) string {
 		if len(s) > MaxCellRenderBytes {
 			s = s[:MaxCellRenderBytes-1] + "…"
 		}
-		return s
+		return SanitizeCellEscapes(s)
 	default:
 		s := fmt.Sprintf("%v", value)
 		if len(s) > MaxCellRenderBytes {
 			s = s[:MaxCellRenderBytes-1] + "…"
 		}
-		return s
+		return SanitizeCellEscapes(s)
 	}
 }
 
@@ -212,22 +215,114 @@ func ansiFgCode(fg string) string {
 	}
 }
 
-// SanitizeCellEscapes is the call-site for stripping / neutralising ANSI
-// escape sequences embedded in cell content (or other free-form strings
-// like EXPLAIN plan raw text) before rendering. It returns s unchanged
-// today — a stub that pins the call site so EXPLAIN raw-text rendering
-// can already route through it.
+// SanitizeCellEscapes strips ANSI escape introducers and C0 control
+// characters from s so untrusted server output cannot hijack the
+// terminal. Used by renderExpanded, grid cell passthrough, yank, EXPLAIN
+// raw text, and exporters (dbsavvy-uv0 AD-16).
 //
-// TODO(dbsavvy-uv0.8/T9): finalise the escape-stripping implementation.
-// The shipped impl should strip / replace CSI (\x1b[ … m / J / K …) and
-// OSC (\x1b] … \x07 / \x1b\\) sequences so untrusted server output cannot
-// hijack the terminal's cursor or colour state. T7 owns the cell-side
-// integration; T9 owns this function's body.
-//
-// dbsavvy-uv0.8 (AD-16).
+// Rules:
+//   - CSI sequences (\x1b[ ... final-byte) are dropped wholesale.
+//   - OSC sequences (\x1b] ... BEL or ESC \) are dropped wholesale.
+//   - Other \x1b-prefixed escapes are dropped along with their single
+//     following byte (covers \x1b(B, \x1b)A, ESC-only, etc.).
+//   - C0 control characters (0x00-0x1F and 0x7F) are removed, EXCEPT
+//     \t (0x09) and \n (0x0A) which carry legitimate meaning in cell
+//     content (TSV yank, multi-line JSON).
 func SanitizeCellEscapes(s string) string {
-	// Identity stub. See TODO above.
-	return s
+	if s == "" {
+		return s
+	}
+	if !needsSanitize(s) {
+		return s
+	}
+	var sb strings.Builder
+	sb.Grow(len(s))
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c == 0x1b {
+			// ESC; skip the sequence.
+			i = skipEscapeSequence(s, i)
+			continue
+		}
+		if c == '\t' || c == '\n' {
+			sb.WriteByte(c)
+			i++
+			continue
+		}
+		if c < 0x20 || c == 0x7f {
+			// Drop other C0 controls (incl. \r, BEL, etc).
+			i++
+			continue
+		}
+		sb.WriteByte(c)
+		i++
+	}
+	return sb.String()
+}
+
+// needsSanitize is a fast path: scan for any byte that would trigger
+// the stripper. Identity-preserving inputs return false and skip the
+// allocation in SanitizeCellEscapes.
+func needsSanitize(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == 0x1b || c == 0x7f {
+			return true
+		}
+		if c < 0x20 && c != '\t' && c != '\n' {
+			return true
+		}
+	}
+	return false
+}
+
+// skipEscapeSequence consumes the escape sequence starting at s[i]
+// (where s[i] == 0x1b) and returns the index past the last consumed
+// byte. Handles CSI, OSC, and lone ESC + one byte.
+func skipEscapeSequence(s string, i int) int {
+	// Already at ESC.
+	j := i + 1
+	if j >= len(s) {
+		return j
+	}
+	switch s[j] {
+	case '[':
+		// CSI: consume params and intermediates until the final byte
+		// in 0x40..0x7E.
+		j++
+		for j < len(s) {
+			c := s[j]
+			j++
+			if c >= 0x40 && c <= 0x7e {
+				return j
+			}
+		}
+		return j
+	case ']':
+		// OSC: terminated by BEL (0x07) or ESC \ (0x1b 0x5c).
+		j++
+		for j < len(s) {
+			c := s[j]
+			if c == 0x07 {
+				return j + 1
+			}
+			if c == 0x1b && j+1 < len(s) && s[j+1] == '\\' {
+				return j + 2
+			}
+			j++
+		}
+		return j
+	case '(', ')', '*', '+':
+		// SCS — Select Character Set: ESC <designator> <final>. Drop all
+		// three bytes (the final byte carries the charset identifier).
+		if j+1 < len(s) {
+			return j + 2
+		}
+		return j + 1
+	default:
+		// Two-byte escape (lone ESC + one byte) — drop both.
+		return j + 1
+	}
 }
 
 // applySelectionHighlight wraps cell in the SelectedRowBg style. The

@@ -1063,8 +1063,20 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 	// Propagate the configured double-click window onto the grid so the
 	// header mouse-debounce uses the user's tuned value. dbsavvy-uv0.5.
 	t.grid.SetMouseDoubleClickMs(h.doubleClickMs)
+	// Seed the grid's viewMode from AppState.LastResultViewMode so a
+	// new tab opens in the user's last-chosen mode (dbsavvy-uv0.7). An
+	// empty string normalises to "grid" inside SetViewMode.
+	if h.deps.Store != nil {
+		t.grid.SetViewMode(h.deps.Store.LastResultViewModeSnapshot())
+	}
 	if h.deps.StreamFactory != nil {
 		t.runner = h.deps.StreamFactory()
+	}
+	// Wire the EstimatedRows loader so expanded-mode renders the
+	// "~total" separator with the optimiser estimate (dbsavvy-uv0.7).
+	if t.runner != nil {
+		runner := t.runner
+		t.grid.SetEstimatedRowsLoader(runner.EstimatedRows)
 	}
 	h.tabs = append(h.tabs, t)
 	h.mu.Unlock()
@@ -1819,6 +1831,86 @@ func (h *ResultTabsHelper) SeedHiddenColsFromAppState(t *Tab) {
 		}
 	}
 	g.SetHiddenCols(idx)
+}
+
+// --- Expanded view mode + result-grid motion (dbsavvy-uv0.7) -------------
+
+// ToggleViewMode flips the active tab's grid between ViewModeGrid and
+// ViewModeExpanded and persists the new value globally via
+// AppState.LastResultViewMode. No-op when no tab is active or the
+// active tab has no grid (plan / error tabs). dbsavvy-uv0.7.
+func (h *ResultTabsHelper) ToggleViewMode() {
+	t := h.Active()
+	if t == nil {
+		h.toast("no result tabs")
+		return
+	}
+	g := t.Grid()
+	if g == nil {
+		return
+	}
+	next := grid.ViewModeExpanded
+	if g.ViewMode() == grid.ViewModeExpanded {
+		next = grid.ViewModeGrid
+	}
+	g.SetViewMode(next)
+	if h.deps.Store != nil {
+		h.deps.Store.SetLastResultViewMode(next)
+	}
+}
+
+// JumpLastOrReadToEnd dispatches the G chord: expanded mode -> jump to
+// the last loaded record (no drain); grid mode -> ReadToEnd with the
+// existing >1M warn. dbsavvy-uv0.7 (AD-14).
+func (h *ResultTabsHelper) JumpLastOrReadToEnd() {
+	t := h.Active()
+	if t == nil {
+		h.toast("no result tabs")
+		return
+	}
+	g := t.Grid()
+	if g != nil && g.ViewMode() == grid.ViewModeExpanded {
+		g.JumpLast()
+		return
+	}
+	h.ReadToEnd()
+}
+
+// CursorDown / CursorUp / CursorLeft / CursorRight / JumpFirst /
+// HalfPageDown / HalfPageUp / WrappedLineDown / WrappedLineUp /
+// SelectRow / SelectBlock delegate to the active grid. No-op when no
+// tab is active or the active tab has no grid. dbsavvy-uv0.7.
+func (h *ResultTabsHelper) CursorDown() { h.withActiveGrid(func(g *grid.View) { g.MoveCursorDown() }) }
+func (h *ResultTabsHelper) CursorUp()   { h.withActiveGrid(func(g *grid.View) { g.MoveCursorUp() }) }
+func (h *ResultTabsHelper) CursorLeft() { h.withActiveGrid(func(g *grid.View) { g.HorizScrollLeft() }) }
+func (h *ResultTabsHelper) CursorRight() {
+	h.withActiveGrid(func(g *grid.View) { g.HorizScrollRight() })
+}
+func (h *ResultTabsHelper) JumpFirst()    { h.withActiveGrid(func(g *grid.View) { g.JumpFirst() }) }
+func (h *ResultTabsHelper) HalfPageDown() { h.withActiveGrid(func(g *grid.View) { g.HalfPageDown() }) }
+func (h *ResultTabsHelper) HalfPageUp()   { h.withActiveGrid(func(g *grid.View) { g.HalfPageUp() }) }
+func (h *ResultTabsHelper) WrappedLineDown() {
+	h.withActiveGrid(func(g *grid.View) { g.WrappedLineDown() })
+}
+
+func (h *ResultTabsHelper) WrappedLineUp() {
+	h.withActiveGrid(func(g *grid.View) { g.WrappedLineUp() })
+}
+func (h *ResultTabsHelper) SelectRow()   { h.withActiveGrid(func(g *grid.View) { g.EnterRowMode() }) }
+func (h *ResultTabsHelper) SelectBlock() { h.withActiveGrid(func(g *grid.View) { g.EnterBlockMode() }) }
+
+// withActiveGrid resolves the active tab's grid and invokes fn. No-op
+// when no tab is active or the active tab has no grid. dbsavvy-uv0.7.
+func (h *ResultTabsHelper) withActiveGrid(fn func(*grid.View)) {
+	t := h.Active()
+	if t == nil {
+		return
+	}
+	g := t.Grid()
+	if g == nil {
+		return
+	}
+	fn(g)
 }
 
 // gridColumnNames snapshots the column-name list off the active grid.
