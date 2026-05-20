@@ -1458,3 +1458,52 @@ func TestSortPick_NoColumnsIsNoOp(t *testing.T) {
 		t.Errorf("chooser invoked despite empty columns; calls=%d", chooser.calls)
 	}
 }
+
+// stubColumnStream is a minimal drivers.RowStream whose Columns() returns
+// the configured slice. Used to verify the helper installs the streamed
+// schema onto the tab's grid.View at attach time (dbsavvy-dqp).
+type stubColumnStream struct {
+	cols []models.ColumnMeta
+}
+
+func (s *stubColumnStream) Columns() []models.ColumnMeta { return s.cols }
+func (s *stubColumnStream) Next(_ context.Context) (models.Row, bool, error) {
+	return models.Row{}, false, nil
+}
+func (s *stubColumnStream) Close() error            { return nil }
+func (s *stubColumnStream) QueryID() models.QueryID { return models.QueryID{} }
+
+// TestOpenTab_InstallsStreamColumnsOnGrid is the regression test for
+// dbsavvy-dqp. Prior to the fix, the result grid stayed at zero columns
+// for every streaming query because no path called grid.View.SetColumns
+// with the stream's schema — so the grid rendered the "(0 rows)"
+// EmptyResultIndicator regardless of how many rows were actually
+// streamed in. After the fix, openTab installs the schema from
+// RowStream.Columns() onto the tab's grid before the worker drains.
+func TestOpenTab_InstallsStreamColumnsOnGrid(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	cols := []models.ColumnMeta{
+		{Name: "id", TypeName: "int8"},
+		{Name: "email", TypeName: "text"},
+		{Name: "name", TypeName: "text"},
+	}
+	rh := newFakeRunHandle()
+	rh.rows = &stubColumnStream{cols: cols}
+
+	if err := h.openTab("SELECT", rh); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	if tab == nil {
+		t.Fatal("no active tab")
+	}
+	got := tab.Grid().ColumnCount()
+	if got != len(cols) {
+		t.Fatalf("grid.ColumnCount() = %d, want %d (columns from RowStream.Columns() must be installed by openTab/startStreaming)", got, len(cols))
+	}
+	for i, want := range cols {
+		if name := tab.Grid().ColumnName(i); name != want.Name {
+			t.Errorf("grid.ColumnName(%d) = %q, want %q", i, name, want.Name)
+		}
+	}
+}

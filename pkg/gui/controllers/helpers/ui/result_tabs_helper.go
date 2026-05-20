@@ -1091,10 +1091,24 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 	// a re-run in the same tab re-fires the caveat. dbsavvy-uv0.4.
 	tab.caveatShown = false
 	tab.mu.Unlock()
+
+	gridView := tab.grid
+
+	// Install the result-set schema on the grid BEFORE any rows are
+	// appended. RowStream.Columns() is safe to call before the first
+	// Next — drivers capture FieldDescriptions at Stream() time. Without
+	// this, the grid stays at zero columns and renders the
+	// EmptyResultIndicator "(0 rows)" regardless of how many rows the
+	// stream actually produces (dbsavvy-dqp).
+	if gridView != nil && rh != nil {
+		if rs := rh.Rows(); rs != nil {
+			gridView.SetColumns(rs.Columns())
+		}
+	}
+
 	if rh == nil || runner == nil {
 		return
 	}
-	gridView := tab.grid
 	if gridView != nil && runner != nil {
 		gridView.SetOnNearTail(func(n int) {
 			runner.ReadRows(n)
