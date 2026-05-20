@@ -17,11 +17,30 @@ type UserConfig struct {
 }
 
 // UIConfig groups settings that govern UI behaviour (vs. data /
-// connection settings). Today it only carries the mouse-enabled toggle
-// (dbsavvy-zro T7b mouse wiring); future epics may add scrollback,
-// double-click TTL, etc.
+// connection settings). Today it carries the mouse-enabled toggle
+// (dbsavvy-zro T7b mouse wiring) and the result-grid pagination knobs
+// (dbsavvy-uv0.3). Future epics may add scrollback, double-click TTL, etc.
 type UIConfig struct {
 	Mouse MouseConfig `yaml:"mouse"`
+
+	// ResultPageSize is the page size used by the ]p / [p result-grid
+	// pagination chord. Default 200. Must be > 0.
+	ResultPageSize int `yaml:"result_page_size"`
+
+	// ResultPrefetchRows is the row count requested when the grid
+	// cursor crosses PrefetchThreshold of the loaded tail. Default 50.
+	// Must be > 0.
+	ResultPrefetchRows int `yaml:"result_prefetch_rows"`
+
+	// PrefetchThreshold is the distance from the loaded tail (in rows)
+	// at which the View fires its near-tail prefetch callback. Default
+	// 25. Must be >= 0.
+	PrefetchThreshold int `yaml:"prefetch_threshold"`
+
+	// ReadToEndWarnThreshold is the estimated-rows ceiling above which
+	// G (ReadToEnd) shows a confirmation prompt before draining. Default
+	// 1_000_000. Must be > 0.
+	ReadToEndWarnThreshold int64 `yaml:"read_to_end_warn_threshold"`
 }
 
 // MouseConfig controls the optional mouse wiring registered by the
@@ -135,7 +154,11 @@ func GetDefaultConfig() *UserConfig {
 			{Mode: "n", Scope: "global", Key: "<leader>q", Action: "app.quit", Description: "Quit via leader"},
 		},
 		UI: UIConfig{
-			Mouse: MouseConfig{Enabled: true},
+			Mouse:                  MouseConfig{Enabled: true},
+			ResultPageSize:         200,
+			ResultPrefetchRows:     50,
+			PrefetchThreshold:      25,
+			ReadToEndWarnThreshold: 1_000_000,
 		},
 	}
 }

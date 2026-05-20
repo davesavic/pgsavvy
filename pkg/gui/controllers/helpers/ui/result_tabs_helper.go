@@ -81,6 +81,10 @@ type runHandle interface {
 //
 // Exported so the orchestrator (which constructs the real
 // *tasks.ResultBufferManager) can pass a typed factory closure.
+//
+// dbsavvy-uv0.3 extends this interface with ReadRows / ReadToEnd / an
+// EstimatedRows accessor so the helper can drive pagination + the
+// G-with-warn flow without importing pkg/tasks (cycle).
 type StreamRunner interface {
 	NewQueryTask(
 		taskKey string,
@@ -90,6 +94,19 @@ type StreamRunner interface {
 		onDone func(),
 	) error
 	Stop()
+
+	// ReadRows enqueues a non-blocking request to drain up to n more
+	// rows from the active stream. No-op when idle.
+	ReadRows(n int)
+
+	// ReadToEnd enqueues a request to drain the stream to completion,
+	// invoking then exactly once on completion. When idle, then fires
+	// synchronously so callers can rely on the callback in either case.
+	ReadToEnd(then func())
+
+	// EstimatedRows returns the optimiser's row-count estimate for the
+	// active stream, or 0 when unknown.
+	EstimatedRows() int64
 }
 
 // StreamRunnerFactory builds a StreamRunner per tab. Real production
@@ -101,6 +118,19 @@ type StreamRunnerFactory func() StreamRunner
 type toastShower interface {
 	Show(message string, ttl time.Duration)
 }
+
+// confirmer is the narrow surface ResultTabsHelper uses to prompt the
+// user before kicking off a potentially-expensive ReadToEnd. The concrete
+// satisfier is *ui.ConfirmHelper; nil disables the warning path
+// (G fires unconditionally).
+type confirmer interface {
+	Confirm(title, body string, onYes, onNo func() error) error
+}
+
+// onUIThreader is the narrow surface used to marshal off-thread state
+// flips (e.g. the complete flag) onto the gocui MainLoop. Mirrors
+// orchestrator.Gui.OnUIThread.
+type onUIThreader func(func() error)
 
 // ResultTabsHelperDeps bundles the helper's collaborators. All fields
 // are optional during unit testing; production wires the orchestrator's
@@ -129,7 +159,34 @@ type ResultTabsHelperDeps struct {
 	// Now is the time source used to stamp createdAt for eviction
 	// ordering. Defaults to time.Now when nil.
 	Now func() time.Time
+
+	// Confirm pushes a confirmation popup. Used by ReadToEnd above
+	// ReadToEndWarnThreshold to make the user explicitly opt in to a
+	// large drain. nil disables the warning path. dbsavvy-uv0.3.
+	Confirm confirmer
+
+	// OnUIThread marshals a closure onto the gocui MainLoop. Used by
+	// the helper to flip Tab.complete from a worker goroutine (the
+	// onDone / then callbacks of ReadToEnd fire off-thread). nil means
+	// "run synchronously" — fine for the unit-test path; production
+	// wires Gui.OnUIThread. dbsavvy-uv0.3.
+	OnUIThread onUIThreader
+
+	// ResultPageSize is the page size for explicit ]p / [p chord
+	// requests. Falls back to grid.ResultPageSize (200) when 0.
+	// dbsavvy-uv0.3.
+	ResultPageSize int
+
+	// ReadToEndWarnThreshold is the estimated-rows ceiling above which
+	// G first shows a confirmation prompt. 0 means "use the shipped
+	// default (1_000_000)". dbsavvy-uv0.3.
+	ReadToEndWarnThreshold int64
 }
+
+// defaultReadToEndWarnThreshold is the shipped ceiling above which G
+// first prompts for confirmation. Mirrors the config default
+// (ui.read_to_end_warn_threshold = 1_000_000). dbsavvy-uv0.3.
+const defaultReadToEndWarnThreshold int64 = 1_000_000
 
 // ResultTabsHelper owns the multi-result-tab pane in the orchestrator's
 // "secondary" window slot. It is the concrete satisfier of
@@ -137,10 +194,12 @@ type ResultTabsHelperDeps struct {
 //
 // dbsavvy-66p.12.
 type ResultTabsHelper struct {
-	deps    ResultTabsHelperDeps
-	maxTabs int
-	nextID  atomic.Int64
-	now     func() time.Time
+	deps          ResultTabsHelperDeps
+	maxTabs       int
+	nextID        atomic.Int64
+	now           func() time.Time
+	pageSize      int
+	warnThreshold int64
 
 	mu       sync.Mutex
 	tabs     []*Tab // ordered by Slot (0..max-1)
@@ -158,10 +217,20 @@ func NewResultTabsHelper(deps ResultTabsHelperDeps) *ResultTabsHelper {
 	if now == nil {
 		now = time.Now
 	}
+	pageSize := deps.ResultPageSize
+	if pageSize <= 0 {
+		pageSize = grid.ResultPageSize
+	}
+	warn := deps.ReadToEndWarnThreshold
+	if warn <= 0 {
+		warn = defaultReadToEndWarnThreshold
+	}
 	return &ResultTabsHelper{
-		deps:    deps,
-		maxTabs: max,
-		now:     now,
+		deps:          deps,
+		maxTabs:       max,
+		now:           now,
+		pageSize:      pageSize,
+		warnThreshold: warn,
 	}
 }
 
@@ -185,6 +254,15 @@ type Tab struct {
 	plan      models.Plan
 	planRaw   string
 	cancelled bool
+
+	// complete flips true when the stream has been drained to EOF
+	// (either via clean stream end in onDone, or via the then-callback
+	// of an explicit ReadToEnd request). Surfaced in Title() as a
+	// "(complete)" suffix and used to drop the "~" approximate prefix
+	// from the row count. The flip is marshalled through the
+	// ResultBufferManager's onUIThread callback so off-thread writers
+	// don't race with rendering. dbsavvy-uv0.3.
+	complete bool
 
 	rh           runHandle
 	grid         *grid.View
@@ -255,15 +333,36 @@ func (t *Tab) ViewName() string {
 	return string(types.ResultTabKey(t.slot))
 }
 
-// Title builds the rendered title: "<label> (<state>, N rows)" with
-// label truncated to resultTabLabelMax characters.
+// Title builds the rendered title:
+//
+//	"result N: <label> (<state>, ~M rows)"          (in-flight)
+//	"result N: <label> (<state>, M rows) (complete)" (after EOF)
+//
+// The "~" prefix on the row count marks an approximate (still-streaming)
+// count; it is dropped once the tab has been marked complete. Label is
+// truncated to resultTabLabelMax characters. dbsavvy-uv0.3.
 func (t *Tab) Title() string {
 	t.mu.Lock()
 	state := t.state
 	rows := t.rowCount
+	complete := t.complete
 	t.mu.Unlock()
 	label := truncateLabel(t.label, resultTabLabelMax)
-	return fmt.Sprintf("result %d: %s (%s, %d rows)", t.slot+1, label, state, rows)
+	rowsSegment := fmt.Sprintf("~%d rows", rows)
+	suffix := ""
+	if complete {
+		rowsSegment = fmt.Sprintf("%d rows", rows)
+		suffix = " (complete)"
+	}
+	return fmt.Sprintf("result %d: %s (%s, %s)%s", t.slot+1, label, state, rowsSegment, suffix)
+}
+
+// Complete reports whether the tab's stream has been drained to EOF.
+// dbsavvy-uv0.3.
+func (t *Tab) Complete() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.complete
 }
 
 // --- Public surface (controllers.ResultTabsHelper) -----------------------
@@ -501,6 +600,127 @@ func (h *ResultTabsHelper) Cycle(dir int) {
 	h.mu.Unlock()
 }
 
+// Page advances (dir > 0) or rewinds (dir < 0) the active tab's grid
+// by one page (helper.pageSize rows). Forward paging requests more rows
+// from the active stream via runner.ReadRows; backward paging just
+// repositions the cursor at the top of the visible window. No-op when
+// no tab is active. dbsavvy-uv0.3.
+//
+// When the stream is already complete, forward paging is a no-op
+// (the rule "[]p when stream is already complete: no-op") to avoid
+// firing a needless ReadRows that would hit EOF.
+func (h *ResultTabsHelper) Page(dir int) {
+	if dir == 0 {
+		return
+	}
+	t := h.Active()
+	if t == nil {
+		h.toast("no result tabs")
+		return
+	}
+	g := t.Grid()
+	if g == nil {
+		return
+	}
+	pageSize := h.pageSize
+	if pageSize <= 0 {
+		pageSize = grid.ResultPageSize
+	}
+	if dir > 0 {
+		// Forward: only request more rows when the stream isn't
+		// already complete. After the request lands, jump cursor to
+		// the new tail so the user sees the freshly-fetched page.
+		if !t.Complete() {
+			t.mu.Lock()
+			runner := t.runner
+			t.mu.Unlock()
+			if runner != nil {
+				runner.ReadRows(pageSize)
+			}
+		}
+		g.JumpLast()
+		return
+	}
+	// Backward: rewind the cursor by one page; the next Render clamps
+	// the viewport so the cursor lands at the top of the visible
+	// window. Implementation: step HalfPageUp twice for now (mirrors
+	// the existing scroll verbs). Note: this is the minimum-viable
+	// surface; a dedicated PageUp verb is a follow-up.
+	for i := 0; i < 2; i++ {
+		g.HalfPageUp()
+	}
+}
+
+// ReadToEnd drains the active tab's stream to completion. Above
+// helper.warnThreshold (or when EstimatedRows is unknown == 0 AND the
+// stream isn't already complete with zero rows), it first shows a
+// confirmation prompt; the drain only fires after the user accepts.
+// dbsavvy-uv0.3.
+//
+// Semantics (see dbsavvy-uv0.3 AC "G with >1M warn"):
+//   - complete && rowsLoaded==0 → no-op
+//   - !complete && EstimatedRows()==0 → prompt (unknown = conservative)
+//   - !complete && EstimatedRows()>warnThreshold → prompt
+//   - !complete && 0 < EstimatedRows() ≤ warnThreshold → fire without prompt
+func (h *ResultTabsHelper) ReadToEnd() {
+	t := h.Active()
+	if t == nil {
+		h.toast("no result tabs")
+		return
+	}
+	t.mu.Lock()
+	complete := t.complete
+	rows := t.rowCount
+	runner := t.runner
+	t.mu.Unlock()
+	if complete && rows == 0 {
+		// Empty + already complete: nothing to drain. No-op.
+		return
+	}
+	if runner == nil {
+		// No stream attached (test / plan / error tab); no-op.
+		return
+	}
+	if complete {
+		// Already complete with rows loaded: nothing more to drain.
+		return
+	}
+	est := runner.EstimatedRows()
+	shouldPrompt := est == 0 || est > h.warnThreshold
+	if shouldPrompt && h.deps.Confirm != nil {
+		title := "Drain result to end?"
+		body := h.readToEndPromptBody(est)
+		_ = h.deps.Confirm.Confirm(title, body, func() error {
+			h.fireReadToEnd(t, runner)
+			return nil
+		}, func() error {
+			// User declined; nothing to do.
+			return nil
+		})
+		return
+	}
+	h.fireReadToEnd(t, runner)
+}
+
+// fireReadToEnd issues the drain request and registers the
+// completion-flip callback. dbsavvy-uv0.3.
+func (h *ResultTabsHelper) fireReadToEnd(tab *Tab, runner StreamRunner) {
+	if runner == nil {
+		return
+	}
+	runner.ReadToEnd(func() {
+		h.markCompleteOnUI(tab)
+	})
+}
+
+// readToEndPromptBody builds the confirmation popup body. dbsavvy-uv0.3.
+func (h *ResultTabsHelper) readToEndPromptBody(est int64) string {
+	if est <= 0 {
+		return fmt.Sprintf("Estimated row count is unknown. Draining could be slow or consume a lot of memory.\nPress <CR> to proceed, <esc> to cancel. (warn threshold: %d)", h.warnThreshold)
+	}
+	return fmt.Sprintf("Estimated %d rows (above warn threshold of %d). Draining may be slow.\nPress <CR> to proceed, <esc> to cancel.", est, h.warnThreshold)
+}
+
 // CancelActive cancels the active tab's stream. For a queued tab the
 // queue waiter is aborted without ever calling the driver Cancel
 // surface; for a running tab the underlying RunHandle.Cancel runs.
@@ -673,6 +893,12 @@ func (h *ResultTabsHelper) priorRunningTab(excludeID int64) *Tab {
 // startStreaming kicks off the per-tab StreamRunner immediately. tab.rh
 // MAY be nil (used by unit tests of the tab-management layer); in that
 // case state is set to Running but no NewQueryTask runs.
+//
+// dbsavvy-uv0.3: wires grid.View.SetOnNearTail to runner.ReadRows so the
+// auto-prefetch path fires when the cursor crosses PrefetchThreshold,
+// and flips Tab.complete in the onDone closure (marshalled through
+// deps.OnUIThread so the rendering thread is the one that observes the
+// state transition).
 func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 	tab.mu.Lock()
 	tab.state = StateRunning
@@ -683,6 +909,11 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		return
 	}
 	gridView := tab.grid
+	if gridView != nil && runner != nil {
+		gridView.SetOnNearTail(func(n int) {
+			runner.ReadRows(n)
+		})
+	}
 	id := tab.id
 	streamFn := func(ctx context.Context) (drivers.RowStream, error) {
 		_ = ctx
@@ -696,8 +927,20 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 	}
 	taskKey := fmt.Sprintf("result_tab_%d", id)
 	onDone := func() {
-		// Finalise tab state from the worker goroutine. Idempotent —
-		// dispose() may have already set Cancelled / etc.
+		// Finalise tab state from the worker goroutine. The state +
+		// complete flip is marshalled onto the UI thread so the next
+		// Render reads a consistent snapshot. Idempotent — dispose()
+		// may have already set Cancelled / etc.
+		h.markCompleteOnUI(tab)
+	}
+	_ = runner.NewQueryTask(taskKey, streamFn, appendRows, resultTabInitialRows, onDone)
+}
+
+// markCompleteOnUI schedules the Tab.complete + state finalisation flip
+// onto the UI thread. When deps.OnUIThread is nil the flip runs
+// synchronously (test path). dbsavvy-uv0.3.
+func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab) {
+	flip := func() error {
 		tab.mu.Lock()
 		if tab.state == StateRunning {
 			if tab.cancelled {
@@ -706,9 +949,15 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 				tab.state = StateComplete
 			}
 		}
+		tab.complete = true
 		tab.mu.Unlock()
+		return nil
 	}
-	_ = runner.NewQueryTask(taskKey, streamFn, appendRows, resultTabInitialRows, onDone)
+	if h.deps.OnUIThread != nil {
+		h.deps.OnUIThread(flip)
+		return
+	}
+	_ = flip()
 }
 
 // queueBehind marks tab Queued, opens a queuedCancel chan, and spawns

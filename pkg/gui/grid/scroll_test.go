@@ -180,6 +180,42 @@ func TestMaybeFireNearTail_FiresOncePerCrossing(t *testing.T) {
 		"onNearTail should re-fire after the buffer grows past the last fire point")
 }
 
+// TestJumpLast_LandsAtLastLoadedRow pins the grid-side cursor jump that
+// ]p (Page(+1)) relies on. dbsavvy-uv0.3 AC #2.
+func TestJumpLast_LandsAtLastLoadedRow(t *testing.T) {
+	v := NewView()
+	v.SetColumns(makeSingleCol("c1", "text"))
+	rows := make([]models.Row, 17)
+	for i := range rows {
+		rows[i] = models.Row{Values: []any{rowLabel(i)}}
+	}
+	v.AppendRows(rows)
+	v.JumpLast()
+	r, _ := v.CursorPosition()
+	require.Equal(t, 16, r, "JumpLast must land at len(rows)-1")
+}
+
+// TestHalfPageUp_MovesCursorUp pins the grid-side cursor rewind that
+// [p (Page(-1)) relies on. The helper invokes HalfPageUp twice; the
+// resulting net movement must be strictly upward when there's room.
+// dbsavvy-uv0.3 AC #2.
+func TestHalfPageUp_MovesCursorUp(t *testing.T) {
+	v := NewView()
+	v.SetColumns(makeSingleCol("c1", "text"))
+	rows := make([]models.Row, ResultPageSize*2)
+	for i := range rows {
+		rows[i] = models.Row{Values: []any{"r"}}
+	}
+	v.AppendRows(rows)
+	// Park cursor at tail.
+	v.JumpLast()
+	start, _ := v.CursorPosition()
+	v.HalfPageUp()
+	v.HalfPageUp()
+	end, _ := v.CursorPosition()
+	require.Less(t, end, start, "HalfPageUp x2 must move cursor up from %d, got %d", start, end)
+}
+
 // rowLabel returns a uniquely-identifiable string for a row index that's
 // long enough not to collide with any of the constants used elsewhere
 // in the tests. e.g. row 0 → "ROW-0000".

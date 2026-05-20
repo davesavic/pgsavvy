@@ -383,13 +383,20 @@ func (g *Gui) wireWithDriver() error {
 	// ResultTabsHelper owns the multi-tab pane in the secondary slot.
 	// Each tab gets its own ResultBufferManager built against the
 	// orchestrator's threading helpers. dbsavvy-66p.12.
-	g.resultTabsH = ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{
-		Driver: g.driver,
-		Toast:  g.toastHelp,
+	resultTabsDeps := ui.ResultTabsHelperDeps{
+		Driver:     g.driver,
+		Toast:      g.toastHelp,
+		Confirm:    g.confirmHelp,
+		OnUIThread: g.OnUIThread,
 		StreamFactory: func() ui.StreamRunner {
 			return tasks.New(g.OnWorker, g.OnUIThreadContentOnly)
 		},
-	})
+	}
+	if cfg := g.deps.Common.Cfg(); cfg != nil {
+		resultTabsDeps.ResultPageSize = cfg.UI.ResultPageSize
+		resultTabsDeps.ReadToEndWarnThreshold = cfg.UI.ReadToEndWarnThreshold
+	}
+	g.resultTabsH = ui.NewResultTabsHelper(resultTabsDeps)
 
 	// NoticeHelper routes server NOTICE / WARNING messages from streaming
 	// queries to the messages panel and a first-of-run toast. The

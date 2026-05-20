@@ -91,11 +91,15 @@ func (f *fakeToaster) Last() string {
 
 // fakeStreamRunner records NewQueryTask invocations.
 type fakeStreamRunner struct {
-	mu       sync.Mutex
-	starts   int
-	stops    int
-	lastKey  string
-	lastInit int
+	mu             sync.Mutex
+	starts         int
+	stops          int
+	lastKey        string
+	lastInit       int
+	readRowsCalls  []int
+	readToEndCalls int
+	lastOnDone     func()
+	estimatedRows  int64
 }
 
 func (f *fakeStreamRunner) NewQueryTask(
@@ -103,13 +107,14 @@ func (f *fakeStreamRunner) NewQueryTask(
 	_ func(ctx context.Context) (drivers.RowStream, error),
 	_ func([]models.Row),
 	initialRows int,
-	_ func(),
+	onDone func(),
 ) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.starts++
 	f.lastKey = taskKey
 	f.lastInit = initialRows
+	f.lastOnDone = onDone
 	return nil
 }
 
@@ -117,6 +122,33 @@ func (f *fakeStreamRunner) Stop() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stops++
+}
+
+func (f *fakeStreamRunner) ReadRows(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readRowsCalls = append(f.readRowsCalls, n)
+}
+
+func (f *fakeStreamRunner) ReadToEnd(then func()) {
+	f.mu.Lock()
+	f.readToEndCalls++
+	f.mu.Unlock()
+	if then != nil {
+		then()
+	}
+}
+
+func (f *fakeStreamRunner) EstimatedRows() int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.estimatedRows
+}
+
+func (f *fakeStreamRunner) setEstimatedRows(n int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.estimatedRows = n
 }
 
 func (f *fakeStreamRunner) StartCount() int {
@@ -129,6 +161,29 @@ func (f *fakeStreamRunner) StopCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.stops
+}
+
+func (f *fakeStreamRunner) ReadRowsCalls() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]int, len(f.readRowsCalls))
+	copy(out, f.readRowsCalls)
+	return out
+}
+
+func (f *fakeStreamRunner) ReadToEndCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.readToEndCalls
+}
+
+func (f *fakeStreamRunner) fireOnDone() {
+	f.mu.Lock()
+	cb := f.lastOnDone
+	f.mu.Unlock()
+	if cb != nil {
+		cb()
+	}
 }
 
 // newTestHelper builds a helper with the common test deps wired.
@@ -480,7 +535,9 @@ func TestTabTitleFormat(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
 	_ = h.openTab("SELECT * FROM users", nil)
 	active := h.Active()
-	want := "result 1: SELECT * FROM users (running, 0 rows)"
+	// dbsavvy-uv0.3: in-flight tabs prefix the row count with "~" to
+	// signal an approximate (still-streaming) value.
+	want := "result 1: SELECT * FROM users (running, ~0 rows)"
 	if got := active.Title(); got != want {
 		t.Errorf("Title = %q, want %q", got, want)
 	}
@@ -559,6 +616,481 @@ func TestCloseRunningTabDisposesStream(t *testing.T) {
 	if h.Count() != 0 {
 		t.Errorf("Count after Close = %d, want 0", h.Count())
 	}
+}
+
+// --- dbsavvy-uv0.3: prefetch wiring, paging, ReadToEnd, complete flag ----
+
+// fakeConfirmer records Confirm calls and lets the test drive the
+// onYes / onNo callbacks deterministically.
+type fakeConfirmer struct {
+	mu       sync.Mutex
+	calls    int
+	lastYes  func() error
+	lastNo   func() error
+	autoYes  bool
+	autoNo   bool
+	lastBody string
+}
+
+func (f *fakeConfirmer) Confirm(title, body string, onYes, onNo func() error) error {
+	f.mu.Lock()
+	f.calls++
+	f.lastYes = onYes
+	f.lastNo = onNo
+	f.lastBody = body
+	autoYes := f.autoYes
+	autoNo := f.autoNo
+	f.mu.Unlock()
+	_ = title
+	if autoYes && onYes != nil {
+		return onYes()
+	}
+	if autoNo && onNo != nil {
+		return onNo()
+	}
+	return nil
+}
+
+func (f *fakeConfirmer) Calls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+// TestSetOnNearTailWiringFiresReadRowsOnCursorCross verifies that when
+// the grid cursor enters the near-tail prefetch window, the helper-
+// installed callback invokes runner.ReadRows exactly once with the
+// configured prefetch row count (grid.ResultPrefetchRows = 50).
+//
+// dbsavvy-uv0.3 AC #1.
+func TestSetOnNearTailWiringFiresReadRowsOnCursorCross(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, _ := newTestHelper(t, factory)
+
+	rh := newFakeRunHandle()
+	if err := h.openTab("Q", rh); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	g := tab.Grid()
+
+	g.SetColumns([]models.ColumnMeta{{Name: "c0", TypeName: "text"}})
+	// Append 30 rows so PrefetchThreshold=25 is crossed near the tail.
+	rows := make([]models.Row, 30)
+	for i := range rows {
+		rows[i] = models.Row{Values: []any{i}}
+	}
+	g.AppendRows(rows)
+
+	// Drive cursor into the near-tail zone via Render-triggered checks.
+	for i := 0; i < 28; i++ {
+		g.MoveCursorDown()
+		g.Render(nil) // nil target is allowed
+	}
+
+	calls := runner.ReadRowsCalls()
+	if len(calls) != 1 {
+		t.Fatalf("ReadRows calls = %v, want exactly 1", calls)
+	}
+	// The wired prefetch payload is grid.ResultPrefetchRows (50).
+	if calls[0] != 50 {
+		t.Errorf("ReadRows arg = %d, want 50", calls[0])
+	}
+}
+
+// TestPrefetchDoesNotDoubleFireForSameRowsLen verifies the
+// lastNearTailFireAt gate: scrolling around inside the near-tail window
+// fires exactly once per rows-length crossing. dbsavvy-uv0.3 AC #5.
+func TestPrefetchDoesNotDoubleFireForSameRowsLen(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, _ := newTestHelper(t, factory)
+
+	rh := newFakeRunHandle()
+	_ = h.openTab("Q", rh)
+	tab := h.Active()
+	g := tab.Grid()
+
+	g.SetColumns([]models.ColumnMeta{{Name: "c0", TypeName: "text"}})
+	rows := make([]models.Row, 30)
+	for i := range rows {
+		rows[i] = models.Row{Values: []any{i}}
+	}
+	g.AppendRows(rows)
+
+	// Cross the threshold the first time.
+	for i := 0; i < 28; i++ {
+		g.MoveCursorDown()
+		g.Render(nil)
+	}
+	// Bounce out and back in WITHOUT growing rows.
+	for i := 0; i < 10; i++ {
+		g.MoveCursorUp()
+	}
+	g.Render(nil)
+	for i := 0; i < 10; i++ {
+		g.MoveCursorDown()
+		g.Render(nil)
+	}
+	calls := runner.ReadRowsCalls()
+	if len(calls) != 1 {
+		t.Errorf("ReadRows fired %d times for identical rowsLen; want exactly 1", len(calls))
+	}
+}
+
+// TestPagePlusOneRequestsReadRowsAndJumpsLast verifies that ]p (Page(+1))
+// fires runner.ReadRows(pageSize) AND jumps the grid cursor to the
+// loaded tail. dbsavvy-uv0.3 AC #2.
+func TestPagePlusOneRequestsReadRowsAndJumpsLast(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, _ := newTestHelper(t, factory)
+
+	rh := newFakeRunHandle()
+	_ = h.openTab("Q", rh)
+	tab := h.Active()
+	g := tab.Grid()
+	g.SetColumns([]models.ColumnMeta{{Name: "c0", TypeName: "text"}})
+	rows := make([]models.Row, 10)
+	for i := range rows {
+		rows[i] = models.Row{Values: []any{i}}
+	}
+	g.AppendRows(rows)
+
+	runner.readRowsCalls = nil // reset any prefetch fires (none expected here)
+
+	h.Page(1)
+
+	calls := runner.ReadRowsCalls()
+	if len(calls) != 1 {
+		t.Fatalf("Page(+1) ReadRows calls = %v, want exactly 1", calls)
+	}
+	// Default ResultPageSize wiring = 200 (grid.ResultPageSize).
+	if calls[0] != 200 {
+		t.Errorf("Page(+1) requested %d rows, want 200", calls[0])
+	}
+	row, _ := g.CursorPosition()
+	if row != 9 {
+		t.Errorf("cursor row after Page(+1) = %d, want 9 (last loaded)", row)
+	}
+}
+
+// TestPageMinusOneRewindsCursor verifies [p (Page(-1)) rewinds the
+// cursor (anchored at the top) and does NOT fire ReadRows.
+// dbsavvy-uv0.3 AC #2.
+func TestPageMinusOneRewindsCursor(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, _ := newTestHelper(t, factory)
+
+	rh := newFakeRunHandle()
+	_ = h.openTab("Q", rh)
+	tab := h.Active()
+	g := tab.Grid()
+	g.SetColumns([]models.ColumnMeta{{Name: "c0", TypeName: "text"}})
+	rows := make([]models.Row, 250)
+	for i := range rows {
+		rows[i] = models.Row{Values: []any{i}}
+	}
+	g.AppendRows(rows)
+	// Park cursor near the tail.
+	for i := 0; i < 240; i++ {
+		g.MoveCursorDown()
+	}
+	startRow, _ := g.CursorPosition()
+	runner.readRowsCalls = nil
+
+	h.Page(-1)
+
+	endRow, _ := g.CursorPosition()
+	if endRow >= startRow {
+		t.Errorf("Page(-1) did not move cursor up: %d -> %d", startRow, endRow)
+	}
+	if len(runner.ReadRowsCalls()) != 0 {
+		t.Errorf("Page(-1) fired ReadRows; want no fetch on rewind")
+	}
+}
+
+// TestPagePlusOneOnCompleteStreamIsNoop verifies the AC "]p when stream
+// is already complete: no-op (no ReadRows)". dbsavvy-uv0.3.
+func TestPagePlusOneOnCompleteStreamIsNoop(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, _ := newTestHelper(t, factory)
+
+	rh := newFakeRunHandle()
+	_ = h.openTab("Q", rh)
+	tab := h.Active()
+	// Simulate stream EOF: fire the registered onDone (which marshals
+	// through OnUIThread = nil = synchronous).
+	runner.fireOnDone()
+	if !tab.Complete() {
+		t.Fatalf("tab not marked complete after fireOnDone")
+	}
+	runner.readRowsCalls = nil
+
+	h.Page(1)
+	if calls := runner.ReadRowsCalls(); len(calls) != 0 {
+		t.Errorf("Page(+1) on complete stream fired ReadRows %v; want no-op", calls)
+	}
+}
+
+// TestReadToEndBelowThresholdFiresWithoutPrompt verifies the AC "G with
+// EstimatedRows ≤ threshold fires without prompt". dbsavvy-uv0.3 AC #3.
+func TestReadToEndBelowThresholdFiresWithoutPrompt(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	runner.setEstimatedRows(500)
+	confirm := &fakeConfirmer{}
+	factory := func() StreamRunner { return runner }
+	deps := ResultTabsHelperDeps{
+		Toast:                  &fakeToaster{},
+		StreamFactory:          factory,
+		Now:                    time.Now,
+		Confirm:                confirm,
+		ReadToEndWarnThreshold: 1_000_000,
+	}
+	h := NewResultTabsHelper(deps)
+
+	rh := newFakeRunHandle()
+	_ = h.openTab("Q", rh)
+
+	h.ReadToEnd()
+
+	if confirm.Calls() != 0 {
+		t.Errorf("Confirm calls = %d, want 0 (below threshold)", confirm.Calls())
+	}
+	if runner.ReadToEndCount() != 1 {
+		t.Errorf("runner.ReadToEnd called %d times, want 1", runner.ReadToEndCount())
+	}
+}
+
+// TestReadToEndAboveThresholdPromptsThenFiresOnYes verifies the AC
+// "G above threshold: prompt first; only <CR> proceeds".
+// dbsavvy-uv0.3 AC #3.
+func TestReadToEndAboveThresholdPromptsThenFiresOnYes(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	runner.setEstimatedRows(2_000_000)
+	confirm := &fakeConfirmer{autoYes: true}
+	factory := func() StreamRunner { return runner }
+	deps := ResultTabsHelperDeps{
+		Toast:                  &fakeToaster{},
+		StreamFactory:          factory,
+		Now:                    time.Now,
+		Confirm:                confirm,
+		ReadToEndWarnThreshold: 1_000_000,
+	}
+	h := NewResultTabsHelper(deps)
+	_ = h.openTab("Q", newFakeRunHandle())
+
+	h.ReadToEnd()
+
+	if confirm.Calls() != 1 {
+		t.Errorf("Confirm calls = %d, want 1", confirm.Calls())
+	}
+	if runner.ReadToEndCount() != 1 {
+		t.Errorf("runner.ReadToEnd called %d times after autoYes, want 1", runner.ReadToEndCount())
+	}
+}
+
+// TestReadToEndAboveThresholdNoFireOnDismiss verifies the AC "User
+// dismisses G prompt with <esc>: incomplete state, no ReadRows fired".
+// dbsavvy-uv0.3 edge case.
+func TestReadToEndAboveThresholdNoFireOnDismiss(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	runner.setEstimatedRows(2_000_000)
+	confirm := &fakeConfirmer{autoNo: true}
+	factory := func() StreamRunner { return runner }
+	deps := ResultTabsHelperDeps{
+		Toast:                  &fakeToaster{},
+		StreamFactory:          factory,
+		Now:                    time.Now,
+		Confirm:                confirm,
+		ReadToEndWarnThreshold: 1_000_000,
+	}
+	h := NewResultTabsHelper(deps)
+	tab, _ := openAndReturnRH(t, h, "Q")
+
+	h.ReadToEnd()
+
+	if runner.ReadToEndCount() != 0 {
+		t.Errorf("runner.ReadToEnd fired %d times after dismiss, want 0", runner.ReadToEndCount())
+	}
+	if tab.Complete() {
+		t.Error("tab marked complete despite dismissed prompt")
+	}
+}
+
+// TestReadToEndUnknownEstimatePrompts verifies the tiebreaker:
+// "!complete && EstimatedRows.Load() == 0: G shows prompt".
+// dbsavvy-uv0.3.
+func TestReadToEndUnknownEstimatePrompts(t *testing.T) {
+	runner := &fakeStreamRunner{} // EstimatedRows() == 0
+	confirm := &fakeConfirmer{}
+	factory := func() StreamRunner { return runner }
+	deps := ResultTabsHelperDeps{
+		Toast:                  &fakeToaster{},
+		StreamFactory:          factory,
+		Now:                    time.Now,
+		Confirm:                confirm,
+		ReadToEndWarnThreshold: 1_000_000,
+	}
+	h := NewResultTabsHelper(deps)
+	_ = h.openTab("Q", newFakeRunHandle())
+
+	h.ReadToEnd()
+
+	if confirm.Calls() != 1 {
+		t.Errorf("Confirm calls = %d, want 1 (unknown estimate = conservative)", confirm.Calls())
+	}
+	if runner.ReadToEndCount() != 0 {
+		t.Errorf("runner.ReadToEnd fired %d times before user accepts, want 0", runner.ReadToEndCount())
+	}
+}
+
+// TestReadToEndOnEmptyCompleteIsNoop verifies the AC "Empty result
+// (0 rows, complete=true): G is a no-op". dbsavvy-uv0.3.
+func TestReadToEndOnEmptyCompleteIsNoop(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	confirm := &fakeConfirmer{}
+	factory := func() StreamRunner { return runner }
+	deps := ResultTabsHelperDeps{
+		Toast:                  &fakeToaster{},
+		StreamFactory:          factory,
+		Now:                    time.Now,
+		Confirm:                confirm,
+		ReadToEndWarnThreshold: 1_000_000,
+	}
+	h := NewResultTabsHelper(deps)
+	_ = h.openTab("Q", newFakeRunHandle())
+
+	// Flip the tab into the complete-with-zero-rows state.
+	runner.fireOnDone()
+
+	h.ReadToEnd()
+
+	if confirm.Calls() != 0 {
+		t.Errorf("Confirm calls = %d, want 0 (empty complete tab)", confirm.Calls())
+	}
+	if runner.ReadToEndCount() != 0 {
+		t.Errorf("runner.ReadToEnd fired %d times on empty-complete tab, want 0", runner.ReadToEndCount())
+	}
+}
+
+// TestTabCompleteFlagDropsTildeAddsSuffix verifies the AC "Tab.complete
+// flag drops ~, adds (complete) in title". dbsavvy-uv0.3 AC #4.
+func TestTabCompleteFlagDropsTildeAddsSuffix(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, _ := newTestHelper(t, factory)
+	_ = h.openTab("SELECT 1", newFakeRunHandle())
+	tab := h.Active()
+
+	// Before complete: title carries "~N rows".
+	pre := tab.Title()
+	if !contains(pre, "~0 rows") {
+		t.Errorf("pre-complete title %q missing ~N rows prefix", pre)
+	}
+	if contains(pre, "(complete)") {
+		t.Errorf("pre-complete title %q already has (complete)", pre)
+	}
+
+	// Fire the registered onDone to mark complete. Since OnUIThread is
+	// nil, the flip runs synchronously.
+	runner.fireOnDone()
+	if !tab.Complete() {
+		t.Fatal("tab not marked complete after fireOnDone")
+	}
+	post := tab.Title()
+	if contains(post, "~") {
+		t.Errorf("post-complete title %q still has '~' prefix", post)
+	}
+	if !contains(post, "(complete)") {
+		t.Errorf("post-complete title %q missing (complete) suffix", post)
+	}
+}
+
+// TestCompleteFlipMarshalsThroughOnUIThread verifies the AC "complete
+// flip marshals through onUIThread (assert callback was invoked, no
+// direct write off-thread)". Race-test target. dbsavvy-uv0.3 AC #4.
+func TestCompleteFlipMarshalsThroughOnUIThread(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	var uiCalls atomic.Int32
+	uiCh := make(chan func() error, 16)
+	deps := ResultTabsHelperDeps{
+		Toast:         &fakeToaster{},
+		StreamFactory: factory,
+		Now:           time.Now,
+		OnUIThread: func(fn func() error) {
+			uiCalls.Add(1)
+			uiCh <- fn
+		},
+	}
+	h := NewResultTabsHelper(deps)
+	_ = h.openTab("Q", newFakeRunHandle())
+	tab := h.Active()
+
+	// onDone fires on a worker goroutine; the flip must NOT happen
+	// inline — it must be enqueued via OnUIThread.
+	done := make(chan struct{})
+	go func() {
+		runner.fireOnDone()
+		close(done)
+	}()
+	<-done
+
+	// At this point the worker has enqueued the flip but has NOT yet
+	// executed it. tab.complete should still be false.
+	if tab.Complete() {
+		t.Error("tab.complete flipped without OnUIThread draining")
+	}
+	if uiCalls.Load() == 0 {
+		t.Fatal("OnUIThread was never invoked; flip did not marshal")
+	}
+	// Drain the queue (simulates the gocui MainLoop running).
+	close(uiCh)
+	for fn := range uiCh {
+		_ = fn()
+	}
+	if !tab.Complete() {
+		t.Error("tab.complete still false after draining OnUIThread queue")
+	}
+}
+
+// TestPrefetchAtRow0WithBufferLargerThanThresholdNoFire verifies the AC
+// "Cursor at row 0 with 200 rows loaded: prefetch does NOT fire".
+// dbsavvy-uv0.3 edge case.
+func TestPrefetchAtRow0WithBufferLargerThanThresholdNoFire(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, _ := newTestHelper(t, factory)
+	_ = h.openTab("Q", newFakeRunHandle())
+	tab := h.Active()
+	g := tab.Grid()
+	g.SetColumns([]models.ColumnMeta{{Name: "c0", TypeName: "text"}})
+	rows := make([]models.Row, 200)
+	for i := range rows {
+		rows[i] = models.Row{Values: []any{i}}
+	}
+	g.AppendRows(rows)
+
+	// Cursor at row 0; far from tail (rowsLen-cursorRow = 200 > 25).
+	g.Render(nil)
+
+	if calls := runner.ReadRowsCalls(); len(calls) != 0 {
+		t.Errorf("prefetch fired at cursor=0 with 200 rows loaded: %v", calls)
+	}
+}
+
+// openAndReturnRH opens a tab with a real fakeRunHandle and returns the
+// active tab. Distinct from openAndReturn (which passes nil rh).
+func openAndReturnRH(t *testing.T, h *ResultTabsHelper, label string) (*Tab, error) {
+	t.Helper()
+	if err := h.openTab(label, newFakeRunHandle()); err != nil {
+		return nil, err
+	}
+	return h.Active(), nil
 }
 
 // --- Helpers -------------------------------------------------------------

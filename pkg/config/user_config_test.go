@@ -39,3 +39,21 @@ func TestGetDefaultConfigTimeoutDefaults(t *testing.T) {
 		t.Errorf("WhichKeyDelay = %v, want 300ms", cfg.WhichKeyDelay)
 	}
 }
+
+// TestGetDefaultConfigUIPaginationDefaults pins the dbsavvy-uv0.3
+// pagination knob defaults: 200/50/25/1_000_000.
+func TestGetDefaultConfigUIPaginationDefaults(t *testing.T) {
+	cfg := GetDefaultConfig()
+	if cfg.UI.ResultPageSize != 200 {
+		t.Errorf("UI.ResultPageSize = %d, want 200", cfg.UI.ResultPageSize)
+	}
+	if cfg.UI.ResultPrefetchRows != 50 {
+		t.Errorf("UI.ResultPrefetchRows = %d, want 50", cfg.UI.ResultPrefetchRows)
+	}
+	if cfg.UI.PrefetchThreshold != 25 {
+		t.Errorf("UI.PrefetchThreshold = %d, want 25", cfg.UI.PrefetchThreshold)
+	}
+	if cfg.UI.ReadToEndWarnThreshold != 1_000_000 {
+		t.Errorf("UI.ReadToEndWarnThreshold = %d, want 1_000_000", cfg.UI.ReadToEndWarnThreshold)
+	}
+}

@@ -19,6 +19,13 @@ type ResultTabsManager interface {
 	CloseActive() error
 	PinActive() bool
 	CancelActive() error
+	// Page advances (+1) / rewinds (-1) the active tab's grid by one
+	// page. dbsavvy-uv0.3.
+	Page(dir int)
+	// ReadToEnd drains the active tab's stream to completion (with a
+	// confirmation prompt above the configured warn threshold).
+	// dbsavvy-uv0.3.
+	ReadToEnd()
 }
 
 // ResultTabsController publishes the multi-tab keybindings:
@@ -70,6 +77,10 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"<leader>X", commands.ResultTabClose, tr.Actions.ResultTabClose, types.RESULT_GRID},
 		{"<leader>=", commands.ResultTabPin, tr.Actions.ResultTabPin, types.RESULT_GRID},
 		{"<leader>x", commands.ResultTabCancel, tr.Actions.ResultTabCancel, types.RESULT_GRID},
+		// dbsavvy-uv0.3: pagination + read-to-end chords.
+		{"]p", commands.ResultPageNext, tr.Actions.ResultPageNext, types.RESULT_GRID},
+		{"[p", commands.ResultPagePrev, tr.Actions.ResultPagePrev, types.RESULT_GRID},
+		{"G", commands.ResultReadToEnd, tr.Actions.ResultReadToEnd, types.RESULT_GRID},
 	}
 	out := make([]*types.ChordBinding, 0, len(specs))
 	for _, s := range specs {
@@ -162,6 +173,40 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 		Handler: func(_ commands.ExecCtx) error {
 			if r.mgr != nil {
 				return r.mgr.CancelActive()
+			}
+			return nil
+		},
+	})
+	// dbsavvy-uv0.3: ]p / [p / G handlers.
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ResultPageNext,
+		Description: tr.Actions.ResultPageNext,
+		Tag:         "Result",
+		Handler: func(_ commands.ExecCtx) error {
+			if r.mgr != nil {
+				r.mgr.Page(1)
+			}
+			return nil
+		},
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ResultPagePrev,
+		Description: tr.Actions.ResultPagePrev,
+		Tag:         "Result",
+		Handler: func(_ commands.ExecCtx) error {
+			if r.mgr != nil {
+				r.mgr.Page(-1)
+			}
+			return nil
+		},
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ResultReadToEnd,
+		Description: tr.Actions.ResultReadToEnd,
+		Tag:         "Result",
+		Handler: func(_ commands.ExecCtx) error {
+			if r.mgr != nil {
+				r.mgr.ReadToEnd()
 			}
 			return nil
 		},

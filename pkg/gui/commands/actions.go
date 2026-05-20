@@ -127,6 +127,12 @@ const (
 	ResultTabPin    = "result.tab.pin"
 	ResultTabCancel = "result.tab.cancel"
 
+	// Pagination + read-to-end (dbsavvy-uv0.3). RESULT_GRID-scoped:
+	// ]p / [p / G fire only when a result tab is focused.
+	ResultPageNext  = "result.page.next"
+	ResultPagePrev  = "result.page.prev"
+	ResultReadToEnd = "result.read_to_end"
+
 	// Motion family — owned by VimEditorController (dbsavvy-wwd.5).
 	// Defaults follow vim: w/b/e (word_*), W/B/E (WORD_*), 0/^/$,
 	// gg/G, {/}/(/), h/j/k/l, H/M/L. mark_jump backs the `'a..z'
@@ -303,6 +309,9 @@ func AllActionIDs() []string {
 		ResultTabClose,
 		ResultTabPin,
 		ResultTabCancel,
+		ResultPageNext,
+		ResultPagePrev,
+		ResultReadToEnd,
 		MotionWordNext,
 		MotionWordPrev,
 		MotionWordNextBig,

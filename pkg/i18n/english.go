@@ -117,6 +117,11 @@ type ActionTranslations struct {
 	ResultTabPin    string
 	ResultTabCancel string
 
+	// Result-grid pagination (dbsavvy-uv0.3).
+	ResultPageNext  string
+	ResultPagePrev  string
+	ResultReadToEnd string
+
 	// Connection lifecycle.
 	AddConnection  string
 	OpenConnection string
@@ -230,6 +235,10 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultTabClose:  "Close result tab",
 			ResultTabPin:    "Pin / unpin result tab",
 			ResultTabCancel: "Cancel result tab stream",
+
+			ResultPageNext:  "Next result page",
+			ResultPagePrev:  "Previous result page",
+			ResultReadToEnd: "Drain result to end",
 
 			AddConnection:  "Add Connection",
 			OpenConnection: "Open Connection",

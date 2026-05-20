@@ -142,6 +142,20 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 		}
 	}
 
+	// UI pagination knobs (dbsavvy-uv0.3).
+	if cfg.UI.ResultPageSize <= 0 {
+		errs = append(errs, fmt.Errorf("config: ui.result_page_size must be > 0, got %d", cfg.UI.ResultPageSize))
+	}
+	if cfg.UI.ResultPrefetchRows <= 0 {
+		errs = append(errs, fmt.Errorf("config: ui.result_prefetch_rows must be > 0, got %d", cfg.UI.ResultPrefetchRows))
+	}
+	if cfg.UI.PrefetchThreshold < 0 {
+		errs = append(errs, fmt.Errorf("config: ui.prefetch_threshold must be >= 0, got %d", cfg.UI.PrefetchThreshold))
+	}
+	if cfg.UI.ReadToEndWarnThreshold <= 0 {
+		errs = append(errs, fmt.Errorf("config: ui.read_to_end_warn_threshold must be > 0, got %d", cfg.UI.ReadToEndWarnThreshold))
+	}
+
 	return warns, errs
 }
 

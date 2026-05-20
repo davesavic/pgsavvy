@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
@@ -66,6 +67,19 @@ type ResultBufferManager struct {
 	// preempted task cannot leak into the new task. Nil when no
 	// task is running.
 	rowsToRead chan RowsToRead
+
+	// estimatedRows is the optimiser's row-count estimate for the
+	// in-flight query. Populated at stream open by callers that have
+	// a planner-side estimate handy (e.g. EXPLAIN FORMAT JSON's top-
+	// level "Plan Rows"). A value of 0 means "unknown"; callers that
+	// need to gate on a row-count threshold treat unknown as
+	// conservative (e.g. show a warning prompt).
+	//
+	// dbsavvy-uv0.3: seeded externally via Store / left at zero. The
+	// real EXPLAIN-side seed is deferred — for now this field is
+	// always 0 in production; consumers must handle the unknown case.
+	// TODO(dbsavvy-uv0.4+): wire a real EXPLAIN seed.
+	estimatedRows atomic.Int64
 }
 
 // New constructs a ResultBufferManager wired to the given orchestrator
@@ -92,6 +106,19 @@ func (m *ResultBufferManager) TaskKey() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.taskKey
+}
+
+// EstimatedRows returns the optimiser's row-count estimate seeded into
+// the manager, or 0 when unknown. dbsavvy-uv0.3.
+func (m *ResultBufferManager) EstimatedRows() int64 {
+	return m.estimatedRows.Load()
+}
+
+// SetEstimatedRows stores the planner-side row-count estimate. Intended
+// to be called once at stream open by code that has just parsed an
+// EXPLAIN result. dbsavvy-uv0.3.
+func (m *ResultBufferManager) SetEstimatedRows(n int64) {
+	m.estimatedRows.Store(n)
 }
 
 // ReadRows requests the worker pull up to n more rows from the

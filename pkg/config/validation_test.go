@@ -318,3 +318,63 @@ func containsErrSubstr(errs []error, sub string) bool {
 	}
 	return false
 }
+
+// TestValidateUserConfig_UIPaginationDefaults pins that the shipped
+// defaults (200/50/25/1_000_000) all pass validation. dbsavvy-uv0.3.
+func TestValidateUserConfig_UIPaginationDefaults(t *testing.T) {
+	cfg := GetDefaultConfig()
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	for _, e := range errs {
+		if strings.Contains(e.Error(), "result_page_size") ||
+			strings.Contains(e.Error(), "result_prefetch_rows") ||
+			strings.Contains(e.Error(), "prefetch_threshold") ||
+			strings.Contains(e.Error(), "read_to_end_warn_threshold") {
+			t.Errorf("default UI pagination knobs should validate; got %v", e)
+		}
+	}
+}
+
+func TestValidateUserConfig_UIPagination_ResultPageSizeZero(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.UI.ResultPageSize = 0
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if !containsErrSubstr(errs, "result_page_size") {
+		t.Errorf("expected result_page_size error, got %v", errs)
+	}
+}
+
+func TestValidateUserConfig_UIPagination_ResultPrefetchRowsNegative(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.UI.ResultPrefetchRows = -1
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if !containsErrSubstr(errs, "result_prefetch_rows") {
+		t.Errorf("expected result_prefetch_rows error, got %v", errs)
+	}
+}
+
+func TestValidateUserConfig_UIPagination_PrefetchThresholdNegative(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.UI.PrefetchThreshold = -1
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if !containsErrSubstr(errs, "prefetch_threshold") {
+		t.Errorf("expected prefetch_threshold error, got %v", errs)
+	}
+}
+
+func TestValidateUserConfig_UIPagination_PrefetchThresholdZeroOK(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.UI.PrefetchThreshold = 0
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if containsErrSubstr(errs, "prefetch_threshold") {
+		t.Errorf("prefetch_threshold=0 should be valid, got %v", errs)
+	}
+}
+
+func TestValidateUserConfig_UIPagination_ReadToEndWarnThresholdZero(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.UI.ReadToEndWarnThreshold = 0
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if !containsErrSubstr(errs, "read_to_end_warn_threshold") {
+		t.Errorf("expected read_to_end_warn_threshold error, got %v", errs)
+	}
+}
