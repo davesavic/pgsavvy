@@ -13,6 +13,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
+	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/grid"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -253,6 +254,7 @@ type Tab struct {
 	err       error
 	plan      models.Plan
 	planRaw   string
+	planCtx   *guicontext.PlanContext // non-nil for plan tabs (dbsavvy-uv0.8)
 	cancelled bool
 
 	// complete flips true when the stream has been drained to EOF
@@ -384,19 +386,51 @@ func (h *ResultTabsHelper) OpenResultTab(label string, rh *session.RunHandle) er
 
 // OpenPlanTab implements controllers.ResultTabsHelper. Creates a tab
 // holding the supplied plan; no stream is attached.
+//
+// dbsavvy-uv0.8: each plan tab gets its own *context.PlanContext bound
+// to the tab's view name. The context owns the per-tab tree state
+// (collapse map, cursor, raw toggle) — discarded when the tab is closed.
+// PlanController handlers look up the active plan context through the
+// orchestrator-supplied resolver (see controllers.PlanContextResolver).
 func (h *ResultTabsHelper) OpenPlanTab(label string, plan models.Plan) error {
 	tab, err := h.allocTab(label)
 	if err != nil {
 		return err
 	}
+	planCtx := guicontext.NewPlanContext(
+		guicontext.NewBaseContext(guicontext.BaseContextOpts{
+			Key:      types.PLAN,
+			ViewName: tab.ViewName(),
+			Kind:     types.MAIN_CONTEXT,
+			Title:    label,
+		}),
+		guicontext.Deps{}, // GuiDriver is nil-safe; LayoutPaint uses the driver directly via RenderBody
+		plan,
+	)
 	tab.mu.Lock()
 	tab.state = StatePlan
 	tab.plan = plan
 	tab.planRaw = plan.RawText
+	tab.planCtx = planCtx
 	tab.mu.Unlock()
 	h.setActive(tab.id)
 	h.materialiseView(tab)
 	return nil
+}
+
+// ActivePlanContext returns the *context.PlanContext attached to the
+// currently-active tab, or nil when no plan tab is active. Wired into
+// the controllers.PlanController via a closure during bootstrap so
+// PLAN-scoped keybindings can mutate the live plan state without
+// touching the helper's internals. dbsavvy-uv0.8.
+func (h *ResultTabsHelper) ActivePlanContext() *guicontext.PlanContext {
+	t := h.Active()
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.planCtx
 }
 
 // ShowError implements controllers.ResultTabsHelper. Creates a tab
@@ -1076,7 +1110,15 @@ func (h *ResultTabsHelper) LayoutPaint(driver types.GuiDriver, x0, y0, x1, y1 in
 			if g := t.Grid(); g != nil {
 				g.Render(view)
 			} else if t.State() == StatePlan {
-				_ = driver.SetContent(name, t.planRawSnapshot())
+				// dbsavvy-uv0.8: prefer the PlanContext-rendered tree
+				// body. Falls back to raw text when planCtx is missing
+				// (defensive: should not happen post-OpenPlanTab, but
+				// keeps the layout pass nil-safe).
+				if pc := t.planContextSnapshot(); pc != nil {
+					_ = driver.SetContent(name, pc.RenderBody())
+				} else {
+					_ = driver.SetContent(name, t.planRawSnapshot())
+				}
 			} else if errTab := t.Err(); errTab != nil {
 				_ = driver.SetContent(name, errTab.Error())
 			}
@@ -1103,6 +1145,23 @@ func (t *Tab) planRawSnapshot() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.planRaw
+}
+
+// planContextSnapshot exposes the tab's *context.PlanContext (or nil)
+// under the tab mutex. dbsavvy-uv0.8.
+func (t *Tab) planContextSnapshot() *guicontext.PlanContext {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.planCtx
+}
+
+// PlanContext returns the *context.PlanContext attached to this tab, or
+// nil for non-plan tabs. Exported so callers outside the helper (e.g.
+// the orchestrator's PlanController resolver) can reach it without
+// going through ActivePlanContext when they already hold a *Tab
+// reference. dbsavvy-uv0.8.
+func (t *Tab) PlanContext() *guicontext.PlanContext {
+	return t.planContextSnapshot()
 }
 
 // dispose cancels the tab's stream, waits for Done, and tears down the

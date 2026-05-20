@@ -176,6 +176,28 @@ func TestApply_PromptFgDefault(t *testing.T) {
 	}
 }
 
+// TestIsMonochrome_Cached confirms IsMonochrome reads NO_COLOR once
+// then returns the cached value on subsequent calls. Subsequent
+// environment mutations are NOT honoured — the cache is process-
+// lifetime.
+func TestIsMonochrome_Cached(t *testing.T) {
+	// First call resolves the value; we cannot guarantee what it is
+	// (depends on whether NO_COLOR is set in the test runner's env).
+	// What we CAN assert is that two consecutive calls return the
+	// same boolean — the sync.Once cache invariant.
+	first := IsMonochrome()
+	second := IsMonochrome()
+	if first != second {
+		t.Fatalf("IsMonochrome returned %v then %v; cache must be stable", first, second)
+	}
+	// Mutating NO_COLOR after the cache resolves should NOT change
+	// the return value.
+	t.Setenv("NO_COLOR", "1")
+	if IsMonochrome() != first {
+		t.Fatalf("IsMonochrome flipped after NO_COLOR mutation; cache invariant broken")
+	}
+}
+
 func TestParseStyle_AlwaysNonNil(t *testing.T) {
 	cases := []string{"", "red", "#123456", "notacolor"}
 	for _, c := range cases {

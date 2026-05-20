@@ -71,6 +71,23 @@ func TestRenderCell_BlobPreview(t *testing.T) {
 		"bytea preview should declare the original byte length")
 }
 
+// TestSanitizeCellEscapes_IdentityStub pins the dbsavvy-uv0.8 stub
+// behaviour: the function exists and returns its input unchanged.
+// T9 finalises the implementation; until then the call site must
+// remain wired so PlanContext's raw-text path is sanitization-aware.
+func TestSanitizeCellEscapes_IdentityStub(t *testing.T) {
+	for _, in := range []string{
+		"",
+		"plain text",
+		"with \x1b[31mred\x1b[0m escape",
+		"line1\nline2",
+	} {
+		if got := SanitizeCellEscapes(in); got != in {
+			t.Errorf("SanitizeCellEscapes(%q) = %q, want identity %q", in, got, in)
+		}
+	}
+}
+
 // TestRenderCell_HugeCellTruncates feeds a 20KB text cell and verifies
 // truncation kicks in and nothing panics.
 func TestRenderCell_HugeCellTruncates(t *testing.T) {

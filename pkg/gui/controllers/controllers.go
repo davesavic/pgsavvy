@@ -26,6 +26,7 @@ type Controllers struct {
 	QueryEditor *QueryEditorController
 	ResultTabs  *ResultTabsController
 	VimEditor   *VimEditorController
+	Plan        *PlanController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -143,6 +144,16 @@ func AttachControllers(
 		// no per-context AddKeybindingsFn call is required.
 	}
 
+	// PlanController publishes PLAN-scoped tree-navigation bindings
+	// (dbsavvy-uv0.8). The plan tab's per-tab *context.PlanContext is
+	// reached through helpers.ActivePlanContextFn (wired by the
+	// orchestrator to ResultTabsHelper.ActivePlanContext). The
+	// controller is attached to tree.Plan even though that's a
+	// StubContext today — AttachToContext on a stub is a no-op, and
+	// the bindings reach the trie via AllDefaultBindings.
+	plan := NewPlanController(c, helpers, helpers.ActivePlanContextFn)
+	plan.AttachToContext(tree.Plan)
+
 	return &Controllers{
 		Connections: connections,
 		Schemas:     schemas,
@@ -156,6 +167,7 @@ func AttachControllers(
 		QueryEditor: queryEditor,
 		ResultTabs:  resultTabs,
 		VimEditor:   vimEditor,
+		Plan:        plan,
 	}
 }
 
@@ -227,6 +239,9 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.VimEditor != nil {
 		b.VimEditor.RegisterActions(reg)
+	}
+	if b.Plan != nil {
+		b.Plan.RegisterActions(reg)
 	}
 }
 

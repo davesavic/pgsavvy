@@ -133,6 +133,23 @@ const (
 	ResultPagePrev  = "result.page.prev"
 	ResultReadToEnd = "result.read_to_end"
 
+	// Plan family — owned by PlanController (dbsavvy-uv0.8). All PLAN-
+	// scoped; published only when a plan tab is the focused context.
+	//   PlanToggle        - <CR> toggles collapse on the cursor node
+	//   PlanExpandAll     - <C-a> empties the collapsed map
+	//   PlanCollapseAll   - <C-x> collapses every node except the root
+	//   PlanJumpHeaviest  - H jumps cursor to heaviest descendant subtree
+	//   PlanToggleRaw     - o flips raw-text vs tree view
+	//   PlanCursorDown    - j cursor +1
+	//   PlanCursorUp      - k cursor -1
+	PlanToggle       = "plan.toggle"
+	PlanExpandAll    = "plan.expand_all"
+	PlanCollapseAll  = "plan.collapse_all"
+	PlanJumpHeaviest = "plan.jump_heaviest"
+	PlanToggleRaw    = "plan.toggle_raw"
+	PlanCursorDown   = "plan.cursor_down"
+	PlanCursorUp     = "plan.cursor_up"
+
 	// Motion family — owned by VimEditorController (dbsavvy-wwd.5).
 	// Defaults follow vim: w/b/e (word_*), W/B/E (WORD_*), 0/^/$,
 	// gg/G, {/}/(/), h/j/k/l, H/M/L. mark_jump backs the `'a..z'
@@ -312,6 +329,13 @@ func AllActionIDs() []string {
 		ResultPageNext,
 		ResultPagePrev,
 		ResultReadToEnd,
+		PlanToggle,
+		PlanExpandAll,
+		PlanCollapseAll,
+		PlanJumpHeaviest,
+		PlanToggleRaw,
+		PlanCursorDown,
+		PlanCursorUp,
 		MotionWordNext,
 		MotionWordPrev,
 		MotionWordNextBig,

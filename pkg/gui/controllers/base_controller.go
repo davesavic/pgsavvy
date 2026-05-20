@@ -78,6 +78,14 @@ type HelperBag struct {
 	// unit tests that do not exercise dispatch.
 	KbRuntime *keys.Runtime
 
+	// ActivePlanContextFn resolves the currently-active plan tab's
+	// *context.PlanContext (or nil when no plan tab is focused). Wired
+	// by the orchestrator to a closure over the result_tabs helper;
+	// PlanController handlers use it to find their target. Nil-safe:
+	// PlanController treats nil as "no active plan tab" and no-ops.
+	// dbsavvy-uv0.8.
+	ActivePlanContextFn PlanContextResolver
+
 	// Threading helpers (DESIGN.md §17). Controllers call these to
 	// schedule UI-thread work and to spawn background workers without
 	// importing the orchestrator (which would close the import cycle:

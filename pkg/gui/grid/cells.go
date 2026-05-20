@@ -212,6 +212,24 @@ func ansiFgCode(fg string) string {
 	}
 }
 
+// SanitizeCellEscapes is the call-site for stripping / neutralising ANSI
+// escape sequences embedded in cell content (or other free-form strings
+// like EXPLAIN plan raw text) before rendering. It returns s unchanged
+// today — a stub that pins the call site so EXPLAIN raw-text rendering
+// can already route through it.
+//
+// TODO(dbsavvy-uv0.8/T9): finalise the escape-stripping implementation.
+// The shipped impl should strip / replace CSI (\x1b[ … m / J / K …) and
+// OSC (\x1b] … \x07 / \x1b\\) sequences so untrusted server output cannot
+// hijack the terminal's cursor or colour state. T7 owns the cell-side
+// integration; T9 owns this function's body.
+//
+// dbsavvy-uv0.8 (AD-16).
+func SanitizeCellEscapes(s string) string {
+	// Identity stub. See TODO above.
+	return s
+}
+
 // applySelectionHighlight wraps cell in the SelectedRowBg style. The
 // background is rendered via ANSI reverse-video because gocui's escape
 // interpreter doesn't honor 48;5;N sequences for cell-background in

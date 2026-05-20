@@ -2,6 +2,7 @@ package theme
 
 import (
 	"errors"
+	"os"
 	"sync"
 	"sync/atomic"
 
@@ -154,4 +155,28 @@ func parseStyle(s string) *Style {
 
 func init() {
 	_ = Apply(builtin.DefaultDark())
+}
+
+// monochrome caches the result of reading the NO_COLOR env var. Resolved
+// lazily on first IsMonochrome() call (via monochromeOnce) so test code
+// that mutates the environment before reaching the call site is honored.
+// dbsavvy-uv0.8.
+var (
+	monochromeOnce sync.Once
+	monochrome     bool
+)
+
+// IsMonochrome reports whether the runtime should suppress color output
+// in renderers that otherwise paint accent colors (e.g. EXPLAIN plan
+// cost-percentile coloring). Returns true when the NO_COLOR environment
+// variable is set to any non-empty value (per https://no-color.org).
+//
+// The value is resolved once on first call and cached for the lifetime
+// of the process — subsequent calls are O(1). Production callers do not
+// need to invalidate; the variable is read at startup. dbsavvy-uv0.8.
+func IsMonochrome() bool {
+	monochromeOnce.Do(func() {
+		monochrome = os.Getenv("NO_COLOR") != ""
+	})
+	return monochrome
 }

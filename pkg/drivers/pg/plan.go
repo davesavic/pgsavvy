@@ -43,7 +43,26 @@ func parsePlanJSON(raw []byte) (models.Plan, error) {
 	if !ok {
 		return models.Plan{}, fmt.Errorf("EXPLAIN parse failed: %q is not an object", "Plan")
 	}
-	return models.Plan{Node: buildPlanNode(planMap)}, nil
+	node := buildPlanNode(planMap)
+	return models.Plan{Node: node, Analyzed: nodeHasActuals(node)}, nil
+}
+
+// nodeHasActuals reports whether n (or any descendant) carries one or more
+// Actual* fields populated by `EXPLAIN ANALYZE`. The walk is depth-first;
+// returns true on the first node with a non-zero actual. dbsavvy-uv0.8.
+func nodeHasActuals(n *models.PlanNode) bool {
+	if n == nil {
+		return false
+	}
+	if n.ActualCost != 0 || n.ActualRows != 0 || n.Loops != 0 {
+		return true
+	}
+	for _, c := range n.Children {
+		if nodeHasActuals(c) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildPlanNode recursively transforms a decoded EXPLAIN-JSON object into a
@@ -67,6 +86,12 @@ func buildPlanNode(m map[string]any) *models.PlanNode {
 			n.Cost = jsonNumberToFloat(v)
 		case "Plan Rows":
 			n.EstRows = jsonNumberToInt64(v)
+		case "Actual Total Cost":
+			n.ActualCost = jsonNumberToFloat(v)
+		case "Actual Rows":
+			n.ActualRows = jsonNumberToInt64(v)
+		case "Actual Loops":
+			n.Loops = jsonNumberToInt64(v)
 		case "Plans":
 			if arr, ok := v.([]any); ok {
 				for _, child := range arr {

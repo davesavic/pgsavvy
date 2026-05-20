@@ -687,6 +687,37 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		}
 	})
 
+	t.Run("step09b_leader_e_plan_tab_renders_tree_glyphs", func(t *testing.T) {
+		// dbsavvy-uv0.8 AC: "<leader>e end-to-end path renders the plan
+		// tab; body contains tree glyphs (▼/▶/─)". The plan tab from
+		// step09 stays active here; RunLayout paints the tab body via
+		// ResultTabsHelper.LayoutPaint which now routes through
+		// PlanContext.RenderBody.
+		if err := s.g.RunLayout(120, 40); err != nil {
+			t.Fatalf("RunLayout: %v", err)
+		}
+		active := helper.Active()
+		if active == nil {
+			t.Fatal("no active tab to assert against")
+		}
+		viewName := active.ViewName()
+		buf := s.rec.GetViewBuffer(viewName)
+		// At least one of the three tree glyphs must appear in the
+		// rendered body. The exact glyph depends on the plan shape (a
+		// single-node plan renders only ─; a multi-node plan adds ▼).
+		hasGlyph := false
+		for _, glyph := range []string{"▼", "▶", "─"} {
+			if strings.Contains(buf, glyph) {
+				hasGlyph = true
+				break
+			}
+		}
+		if !hasGlyph {
+			t.Fatalf("plan tab body missing tree glyphs (▼/▶/─); view=%q buf=%q",
+				viewName, buf)
+		}
+	})
+
 	t.Run("step10_in_flight_leader_r_queues_new_tab", func(t *testing.T) {
 		// AC: "One in-flight query per connection invariant: a <leader>r
 		// while a query is running queues or preempts per §12.2"

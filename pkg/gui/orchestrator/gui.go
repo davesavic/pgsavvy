@@ -460,11 +460,22 @@ func (g *Gui) wireWithDriver() error {
 		TableDouble:      g.tablesHelp,
 		Menu:             &menuPushHelper{tree: g.tree, menu: g.registry.Menu},
 		ResultTabs:       g.resultTabsH,
-		Notice:           g.noticeHelp,
-		QueryRunner:      g.queryRunner,
-		EditorBuffer:     newEditorBufferAdapter(g.registry.QueryEditor),
-		HiddenPatterns:   defaultHiddenPatterns,
-		KbRuntime:        runtime,
+		// PlanController dispatches against the active plan tab's
+		// PlanContext (dbsavvy-uv0.8). Closing over g.resultTabsH so
+		// ActivePlanContext stays in lockstep with whatever the user
+		// has currently focused. Nil-safe — returns nil when the
+		// helper is unwired or no plan tab is active.
+		ActivePlanContextFn: func() *guicontext.PlanContext {
+			if g.resultTabsH == nil {
+				return nil
+			}
+			return g.resultTabsH.ActivePlanContext()
+		},
+		Notice:         g.noticeHelp,
+		QueryRunner:    g.queryRunner,
+		EditorBuffer:   newEditorBufferAdapter(g.registry.QueryEditor),
+		HiddenPatterns: defaultHiddenPatterns,
+		KbRuntime:      runtime,
 		// <CR> on a schema row reloads the TABLES rail via a worker
 		// (dbsavvy-04n). The handler runs on the gocui MainLoop; the
 		// driver call must hop to the worker queue so MainLoop is not

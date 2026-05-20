@@ -131,3 +131,51 @@ func TestParsePlanJSON_OmitsEmptyDetailMap(t *testing.T) {
 	require.NotNil(t, plan.Node)
 	require.Empty(t, plan.Node.Detail, "Detail should be nil/empty when no unrecognized scalar keys exist")
 }
+
+// TestParsePlanJSON_ActualFieldsPopulated verifies that the post-uv0.8
+// switch arms (Actual Total Cost / Actual Rows / Actual Loops) lift
+// into typed fields and that Plan.Analyzed flips true.
+func TestParsePlanJSON_ActualFieldsPopulated(t *testing.T) {
+	raw := []byte(`[{"Plan": {
+	  "Node Type": "Seq Scan",
+	  "Total Cost": 12.5,
+	  "Plan Rows": 100,
+	  "Actual Total Cost": 9.75,
+	  "Actual Rows": 87,
+	  "Actual Loops": 3
+	}}]`)
+	plan, err := parsePlanJSON(raw)
+	require.NoError(t, err)
+	require.NotNil(t, plan.Node)
+	require.InDelta(t, 9.75, plan.Node.ActualCost, 0.0001)
+	require.Equal(t, int64(87), plan.Node.ActualRows)
+	require.Equal(t, int64(3), plan.Node.Loops)
+	require.True(t, plan.Analyzed, "Analyzed should flip true when any Actual* key is present")
+}
+
+// TestParsePlanJSON_AnalyzedFalseWithoutActuals confirms the Analyzed
+// flag stays false on plain EXPLAIN output (no ANALYZE actuals).
+func TestParsePlanJSON_AnalyzedFalseWithoutActuals(t *testing.T) {
+	raw := []byte(`[{"Plan": {"Node Type": "Seq Scan", "Total Cost": 1.0, "Plan Rows": 1}}]`)
+	plan, err := parsePlanJSON(raw)
+	require.NoError(t, err)
+	require.NotNil(t, plan.Node)
+	require.False(t, plan.Analyzed)
+}
+
+// TestParsePlanJSON_AnalyzedDescendantTriggersFlag exercises the
+// recursive nodeHasActuals check: an inner Hash Join under a top-level
+// Seq Scan with actuals should still flip plan.Analyzed.
+func TestParsePlanJSON_AnalyzedDescendantTriggersFlag(t *testing.T) {
+	raw := []byte(`[{"Plan": {
+	  "Node Type": "Result",
+	  "Total Cost": 1.0,
+	  "Plan Rows": 1,
+	  "Plans": [
+	    {"Node Type": "Seq Scan", "Total Cost": 1.0, "Plan Rows": 1, "Actual Rows": 5}
+	  ]
+	}}]`)
+	plan, err := parsePlanJSON(raw)
+	require.NoError(t, err)
+	require.True(t, plan.Analyzed)
+}

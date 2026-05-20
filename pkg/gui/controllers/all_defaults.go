@@ -54,6 +54,9 @@ func AllDefaultBindings(c *Controllers) []*types.ChordBinding {
 	if c.VimEditor != nil {
 		out = append(out, c.VimEditor.GetKeybindings(types.KeybindingsOpts{})...)
 	}
+	if c.Plan != nil {
+		out = append(out, c.Plan.GetKeybindings(types.KeybindingsOpts{})...)
+	}
 	out = append(out, keys.DefaultCommandLineBindings()...)
 	return out
 }
