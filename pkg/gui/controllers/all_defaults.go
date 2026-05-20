@@ -57,6 +57,9 @@ func AllDefaultBindings(c *Controllers) []*types.ChordBinding {
 	if c.Plan != nil {
 		out = append(out, c.Plan.GetKeybindings(types.KeybindingsOpts{})...)
 	}
+	if c.HideOverlay != nil {
+		out = append(out, c.HideOverlay.GetKeybindings(types.KeybindingsOpts{})...)
+	}
 	out = append(out, keys.DefaultCommandLineBindings()...)
 	return out
 }

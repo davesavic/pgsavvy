@@ -107,7 +107,7 @@ func (h *HideOverlayController) GetKeybindings(_ types.KeybindingsOpts) []*types
 			Description: tr.Actions.Up,
 		},
 		{
-			Sequence:    []types.ChordKey{{Special: types.KeySpace}},
+			Sequence:    []types.ChordKey{{Code: ' '}},
 			Mode:        types.ModeNormal,
 			Scope:       types.HIDE_OVERLAY,
 			ActionID:    commands.HideOverlayToggle,
