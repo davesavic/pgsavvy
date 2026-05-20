@@ -252,3 +252,50 @@ func firstNonEmptyLine(s string) string {
 	}
 	return ""
 }
+
+// TestRenderDataLine_DigitInSGRPrefixDoesNotCorruptEscape is a regression
+// test for a bug where a numeric cell value (e.g. "3" or "5") collided
+// with a digit inside the SGR prefix used to colourise it (e.g. \x1b[35m
+// for magenta). The previous implementation used
+// strings.Replace(decorated, visible, padded, 1) to splice the padded
+// value into the already-decorated string; that replace matched the
+// digit inside the SGR params rather than the cell value itself,
+// corrupting the escape and leaking "[35m3" remnants onto the screen.
+//
+// The fix pads the plain visible string first and wraps it with the
+// style afterwards. This test feeds an integer column whose values
+// happen to share digits with the magenta SGR (3 and 5) and asserts the
+// resulting line strips cleanly to plain text.
+func TestRenderDataLine_DigitInSGRPrefixDoesNotCorruptEscape(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{{Name: "id", TypeName: "int4"}})
+	v.AppendRows([]models.Row{
+		{Values: []any{1}},
+		{Values: []any{3}}, // collides with '3' in \x1b[35m
+		{Values: []any{5}}, // collides with '5' in \x1b[35m
+	})
+	snap := v.snapshot()
+	for i := range 3 {
+		line := renderDataLine(snap, i, 80)
+		// Bug signature: a malformed CSI like "\x1b[3       5m" where
+		// padding whitespace ended up *inside* the escape sequence
+		// because strings.Replace matched a digit in the SGR params
+		// instead of the cell value. Walk every \x1b[...] sequence
+		// and assert no whitespace appears before its final byte.
+		for j := 0; j < len(line); j++ {
+			if line[j] != 0x1b || j+1 >= len(line) || line[j+1] != '[' {
+				continue
+			}
+			for k := j + 2; k < len(line); k++ {
+				b := line[k]
+				if b == ' ' || b == '\t' {
+					t.Fatalf("row %d: malformed CSI containing whitespace starting at offset %d (raw %q)",
+						i, j, line)
+				}
+				if b >= 0x40 && b <= 0x7e {
+					break // final byte reached
+				}
+			}
+		}
+	}
+}

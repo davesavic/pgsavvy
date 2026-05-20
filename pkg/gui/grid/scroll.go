@@ -239,17 +239,15 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 		if c < len(row.Values) {
 			value = row.Values[c]
 		}
-		visible, decorated := renderCell(value, snap.cols[c])
-		// padRight operates on the visible string so width math is
-		// correct; we then re-apply the SGR escapes around the
-		// padded form.
+		// Pad the visible string to column width, then wrap with the
+		// style. We must NOT splice padded into the already-decorated
+		// string via strings.Replace: the visible value (e.g. "3" or
+		// "5") can collide with a digit inside the SGR prefix itself
+		// (e.g. \x1b[35m for magenta), corrupting the escape sequence
+		// and dumping its remnants onto the screen.
+		visible := renderCellPlain(value, snap.cols[c])
 		padded := padRight(visible, w)
-		styled := strings.Replace(decorated, visible, padded, 1)
-		// If the cell content was empty / the SGR wrapper produced
-		// no decoration, fall back to the padded plain string.
-		if styled == decorated && !strings.Contains(decorated, "\x1b[") {
-			styled = padded
-		}
+		styled := wrapWithStyle(padded, styleForCell(value, snap.cols[c]))
 		if inSelection(snap, r, c) {
 			styled = applySelectionHighlight(styled)
 		}
