@@ -140,6 +140,14 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	}
 	c.hydrateQueryEditorBuffer(profile)
 	c.populateSchemasRail(ctx)
+
+	if len(c.g.registry.Schemas.Items()) != 0 {
+		c.g.OnUIThread(func() error {
+			// Focus the SCHEMAS rail so the user sees the loaded schemas
+			// immediately and can j/k to navigate them.
+			return c.g.tree.Push(c.g.registry.Schemas)
+		})
+	}
 	return nil
 }
 
@@ -217,6 +225,38 @@ func (c *connectInvoker) populateTablesRail(ctx context.Context, schema string) 
 		items[i] = tables[i]
 	}
 	c.g.registry.Tables.SetItems(items)
+}
+
+// populateColumnsRail loads the column list for (schema, table) via
+// ConnectHelper.LoadColumns and pushes the result onto ColumnsContext so
+// the COLUMNS rail draws rows on the next layout frame. Wired to the
+// TABLES-rail <CR> handler via HelperBag.OnTableActivate.
+//
+// Best-effort: a LoadColumns error is logged and swallowed; the existing
+// ColumnsContext.items are left intact so a transient failure does not
+// blank a previously-loaded list. Empty schema/table is a silent no-op.
+func (c *connectInvoker) populateColumnsRail(ctx context.Context, schema, table string) {
+	if c == nil || c.g == nil || c.helper == nil {
+		return
+	}
+	if schema == "" || table == "" {
+		return
+	}
+	if c.g.registry == nil || c.g.registry.Columns == nil {
+		return
+	}
+	cols, err := c.helper.LoadColumns(ctx, schema, table)
+	if err != nil {
+		if c.g.deps.Common != nil && c.g.deps.Common.Log != nil {
+			c.g.deps.Common.Log.Warnf("gui: load columns for %s.%s: %v", schema, table, err)
+		}
+		return
+	}
+	items := make([]any, len(cols))
+	for i := range cols {
+		items[i] = cols[i]
+	}
+	c.g.registry.Columns.SetItems(items)
 }
 
 // hydrateQueryEditorBuffer is the dbsavvy-wwd.9 post-Connect hook. It

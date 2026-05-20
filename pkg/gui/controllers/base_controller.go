@@ -71,6 +71,12 @@ type HelperBag struct {
 	// (dbsavvy-04n). Nil-safe: SchemasController no-ops when unwired.
 	OnSchemaActivate func(schema string)
 
+	// OnTableActivate fires when <CR> is pressed in the TABLES rail. The
+	// orchestrator wires this to a closure that loads columns for the
+	// supplied table on a worker goroutine and pushes focus to the
+	// COLUMNS rail. Nil-safe: TablesController no-ops when unwired.
+	OnTableActivate func(table *models.Table) error
+
 	// KbRuntime is the aggregate that bundles every keybinding-system
 	// collaborator (commands.Registry, Matcher, ModeStore, WhichKey,
 	// ExRegistry). Controllers use it to register action handlers via

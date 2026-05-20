@@ -7,7 +7,9 @@ import (
 )
 
 // TablesController owns TABLES rail bindings: j/k via the trait, and
-// <CR> emits the deferred-action toast through the TablesDoubleClickHelper.
+// <CR> fires HelperBag.OnTableActivate, which the orchestrator wires to
+// a worker that loads columns for the selected table and pushes focus
+// to the COLUMNS rail.
 type TablesController struct {
 	*ListControllerTrait[TablePicker]
 }
@@ -22,14 +24,14 @@ func NewTablesController(
 	base := newBase(c, helpers)
 	ctrl := &TablesController{}
 	confirm := func(_ commands.ExecCtx) error {
-		if picker == nil || base.helpers.TableDouble == nil {
+		if picker == nil || base.helpers.OnTableActivate == nil {
 			return nil
 		}
 		t := picker.SelectedTable()
 		if t == nil {
 			return nil
 		}
-		err := base.helpers.TableDouble.DoubleClickStub(t)
+		err := base.helpers.OnTableActivate(t)
 		return base.wrapErr("tables.confirm", err)
 	}
 	ctrl.ListControllerTrait = NewListControllerTrait(base, viewName(types.TABLES), cursor, picker, confirm)

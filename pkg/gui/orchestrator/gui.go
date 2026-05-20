@@ -522,9 +522,33 @@ func (g *Gui) wireWithDriver() error {
 		OnSchemaActivate: func(schema string) {
 			g.OnWorker(func(_ gocui.Task) error {
 				connectInv.populateTablesRail(context.Background(), schema)
+
+				// Push the refreshed TABLES context onto the focus stack so the
+				// user lands there after picking a schema.
+				connectInv.g.tree.Push(g.registry.Tables)
 				return nil
 			})
 		},
+
+		// <CR> on a table row loads the COLUMNS rail for the selected
+		// table on a worker (mirrors OnSchemaActivate). The driver
+		// LoadColumns call must not block MainLoop; the focus push runs
+		// inside the worker after items are set, so the next layout frame
+		// sees the populated rail.
+		OnTableActivate: func(table *models.Table) error {
+			if table == nil {
+				return nil
+			}
+			g.OnWorker(func(_ gocui.Task) error {
+				connectInv.populateColumnsRail(context.Background(), table.Schema, table.Name)
+				if len(g.registry.Columns.Items()) != 0 {
+					_ = g.tree.Push(g.registry.Columns)
+				}
+				return nil
+			})
+			return nil
+		},
+
 		// Threading helpers (DESIGN.md §17 / dbsavvy-66p.1). Bound to the
 		// Gui's methods so controllers can schedule UI-thread work and
 		// spawn background workers without importing the orchestrator.
