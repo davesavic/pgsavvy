@@ -53,6 +53,10 @@ type ResultTabsManager interface {
 	// (HasRowIdentity). dbsavvy-uv0.6.
 	HideOverlay()
 
+	// PromptExport opens the <leader>oe export menu for the active tab.
+	// dbsavvy-uv0.9.
+	PromptExport()
+
 	// ToggleViewMode flips the active tab's grid between ViewModeGrid
 	// and ViewModeExpanded and persists the new value globally via
 	// AppState.LastResultViewMode. dbsavvy-uv0.7.
@@ -141,6 +145,8 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"<leader>s", commands.ResultSortPick, tr.Actions.ResultSortPick, types.RESULT_GRID},
 		// dbsavvy-uv0.6: <leader>gH hide-cols overlay.
 		{"<leader>gH", commands.ResultHideOverlay, tr.Actions.ResultHideOverlay, types.RESULT_GRID},
+		// dbsavvy-uv0.9: <leader>oe opens the export menu.
+		{"<leader>oe", commands.ResultExportPrompt, tr.Actions.ResultExportPrompt, types.RESULT_GRID},
 		// dbsavvy-uv0.7: expanded view toggle + ]G force-ReadToEnd +
 		// result-grid motion bindings (viewMode-aware via the helper).
 		{"<leader>gx", commands.ResultViewToggle, tr.Actions.ResultViewToggle, types.RESULT_GRID},
@@ -386,6 +392,18 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 		Handler: func(_ commands.ExecCtx) error {
 			if r.mgr != nil {
 				r.mgr.HideOverlay()
+			}
+			return nil
+		},
+	})
+	// dbsavvy-uv0.9: <leader>oe export menu handler.
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ResultExportPrompt,
+		Description: tr.Actions.ResultExportPrompt,
+		Tag:         "Result",
+		Handler: func(_ commands.ExecCtx) error {
+			if r.mgr != nil {
+				r.mgr.PromptExport()
 			}
 			return nil
 		},

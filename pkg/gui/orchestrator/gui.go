@@ -410,6 +410,18 @@ func (g *Gui) wireWithDriver() error {
 			return g.tree.Pop()
 		}
 	}
+	// dbsavvy-uv0.9: focus-stack push/pop closures for the EXPORT_MENU
+	// popup + OnWorker for the export pipeline.
+	if g.registry.ExportMenu != nil && g.tree != nil {
+		resultTabsDeps.PushExportMenu = func() error {
+			g.registry.ExportMenu.SetState(exportMenuStateAdapter{helper: g.resultTabsH})
+			return g.tree.Push(g.registry.ExportMenu)
+		}
+		resultTabsDeps.PopExportMenu = func() error {
+			return g.tree.Pop()
+		}
+	}
+	resultTabsDeps.OnWorker = g.OnWorker
 	if tr != nil {
 		resultTabsDeps.SortPickLabel = tr.Actions.ResultSortPickLabel
 	}
@@ -418,6 +430,8 @@ func (g *Gui) wireWithDriver() error {
 		resultTabsDeps.ReadToEndWarnThreshold = cfg.UI.ReadToEndWarnThreshold
 		resultTabsDeps.FilterMaxRegexBytes = cfg.UI.FilterMaxRegexBytes
 		resultTabsDeps.MouseDoubleClickMs = cfg.UI.Mouse.DoubleClickMs
+		resultTabsDeps.ExportBufferedRowWarnThreshold = cfg.UI.Export.BufferedRowWarnThreshold
+		resultTabsDeps.ExportClipboardMaxBytes = cfg.UI.Export.ClipboardMaxBytes
 	}
 	g.resultTabsH = ui.NewResultTabsHelper(resultTabsDeps)
 

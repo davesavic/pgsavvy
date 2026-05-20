@@ -26,6 +26,7 @@ type Controllers struct {
 	QueryEditor *QueryEditorController
 	ResultTabs  *ResultTabsController
 	HideOverlay *HideOverlayController
+	ExportMenu  *ExportMenuController
 	VimEditor   *VimEditorController
 	Plan        *PlanController
 }
@@ -129,6 +130,20 @@ func AttachControllers(
 	hideOverlay := NewHideOverlayController(c, helpers, hideMgr)
 	hideOverlay.AttachToContext(&tree.HideOverlay.BaseContext)
 
+	// ExportMenuController publishes EXPORT_MENU-scope bindings for the
+	// <leader>oe export menu (dbsavvy-uv0.9). The manager surface is the
+	// same concrete *ui.ResultTabsHelper that backs ResultTabsManager —
+	// typed through a narrower interface so the controller package stays
+	// free of helpers/ui.
+	var exportMgr ExportMenuManager
+	if helpers.ResultTabs != nil {
+		if m, ok := helpers.ResultTabs.(ExportMenuManager); ok {
+			exportMgr = m
+		}
+	}
+	exportMenu := NewExportMenuController(c, helpers, exportMgr)
+	exportMenu.AttachToContext(&tree.ExportMenu.BaseContext)
+
 	// VimEditorController owns motion / operator / textobject bindings
 	// under QUERY_EDITOR scope (epic dbsavvy-wwd). It takes the live
 	// *context.QueryEditorContext directly (tree.QueryEditor is the
@@ -182,6 +197,7 @@ func AttachControllers(
 		QueryEditor: queryEditor,
 		ResultTabs:  resultTabs,
 		HideOverlay: hideOverlay,
+		ExportMenu:  exportMenu,
 		VimEditor:   vimEditor,
 		Plan:        plan,
 	}
@@ -255,6 +271,9 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.HideOverlay != nil {
 		b.HideOverlay.RegisterActions(reg)
+	}
+	if b.ExportMenu != nil {
+		b.ExportMenu.RegisterActions(reg)
 	}
 	if b.VimEditor != nil {
 		b.VimEditor.RegisterActions(reg)

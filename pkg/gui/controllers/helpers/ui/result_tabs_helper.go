@@ -14,7 +14,9 @@ import (
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/env"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/dbsavvy/pkg/gui/exporter"
 	"github.com/davesavic/dbsavvy/pkg/gui/grid"
 	"github.com/davesavic/dbsavvy/pkg/gui/popup"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -249,6 +251,28 @@ type ResultTabsHelperDeps struct {
 	// final hidden set + persisted it. nil disables the pop — production
 	// wires a closure over tree.Pop(). dbsavvy-uv0.6.
 	PopHideOverlay func() error
+
+	// PushExportMenu pushes the EXPORT_MENU context onto the focus stack.
+	// Invoked by PromptExport(). dbsavvy-uv0.9.
+	PushExportMenu func() error
+	// PopExportMenu pops the EXPORT_MENU context off the focus stack.
+	PopExportMenu func() error
+
+	// OnWorker dispatches a closure onto a background worker goroutine
+	// (mirrors orchestrator.Gui.OnWorker). The <leader>oe export pipeline
+	// uses this to run exporter.Run off the UI thread. nil disables the
+	// worker path — ExportMenuConfirm will toast a failure. dbsavvy-uv0.9.
+	OnWorker func(func(gocui.Task) error)
+
+	// ExportBufferedRowWarnThreshold is the row-count ceiling above which
+	// the export menu's "buffered" formats (Markdown, JSON Array) gate
+	// behind a typed-YES confirmation. 0 means "use the shipped default
+	// (100_000)". dbsavvy-uv0.9.
+	ExportBufferedRowWarnThreshold int64
+
+	// ExportClipboardMaxBytes caps the payload size pushed to the system
+	// clipboard. 0 means "use the shipped default (16 MiB)". dbsavvy-uv0.9.
+	ExportClipboardMaxBytes int64
 }
 
 // defaultReadToEndWarnThreshold is the shipped ceiling above which G
@@ -279,6 +303,10 @@ type ResultTabsHelper struct {
 	// hideOverlay tracks the currently-open <leader>gH overlay, if any.
 	// nil when no overlay is active. dbsavvy-uv0.6.
 	hideOverlay *activeHideOverlay
+
+	// exportMenu tracks the currently-open <leader>oe export menu.
+	// nil when no menu is active. Accessed under h.mu. dbsavvy-uv0.9.
+	exportMenu *activeExportMenu
 }
 
 // NewResultTabsHelper constructs a helper with deps. The returned value
@@ -431,6 +459,15 @@ func (t *Tab) Grid() *grid.View {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.grid
+}
+
+// Runner returns the per-tab StreamRunner, or nil when the tab has no
+// stream attached (plan / error tabs, or test wiring). Read-only
+// accessor used by the <leader>oe export pipeline. dbsavvy-uv0.9.
+func (t *Tab) Runner() StreamRunner {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.runner
 }
 
 // Plan returns the parsed plan tree for plan tabs; zero value otherwise.
@@ -1831,6 +1868,394 @@ func (h *ResultTabsHelper) SeedHiddenColsFromAppState(t *Tab) {
 		}
 	}
 	g.SetHiddenCols(idx)
+}
+
+// --- <leader>oe export menu (dbsavvy-uv0.9) ------------------------------
+
+// activeExportMenu holds the currently-open export menu plus the
+// in-flight export's cancel func (when one is running). At most one menu
+// and one in-flight export per helper. Accessed under h.mu. dbsavvy-uv0.9.
+type activeExportMenu struct {
+	tab    *Tab
+	menu   *popup.ExportMenu
+	cancel context.CancelFunc // non-nil only while an export is running
+}
+
+// exportFormatLabels returns the menu's Format options in render order.
+// SQL-INSERTs is appended only when the source tab carries row identity.
+func exportFormatLabels(hasRowIdentity bool) []string {
+	base := []string{"CSV", "TSV", "NDJSON", "JSON Array", "Markdown"}
+	if hasRowIdentity {
+		return append(base, "SQL INSERTs")
+	}
+	return base
+}
+
+const (
+	exportScopeVisible = 0
+	exportScopeLoaded  = 1
+	exportScopeFull    = 2
+)
+
+const (
+	defaultExportBufferedRowWarnThreshold int64 = 100_000
+	defaultExportClipboardMaxBytes        int64 = 16 * 1024 * 1024
+)
+
+// PromptExport opens the <leader>oe export menu for the active tab.
+// Resolves SQL-INSERTs availability from the tab's ResultIdentity.
+// dbsavvy-uv0.9.
+func (h *ResultTabsHelper) PromptExport() {
+	t := h.Active()
+	if t == nil {
+		h.toast("no result tabs")
+		return
+	}
+	g := t.Grid()
+	if g == nil {
+		return
+	}
+	_, ri := t.Identity()
+	formats := exportFormatLabels(ri.HasRowIdentity)
+
+	filterActive := g.FilterActive()
+
+	var estimated int64
+	if r := t.Runner(); r != nil {
+		estimated = r.EstimatedRows()
+	}
+	threshold := h.deps.ExportBufferedRowWarnThreshold
+	if threshold <= 0 {
+		threshold = defaultExportBufferedRowWarnThreshold
+	}
+	bufferedThresholdExceeded := estimated > threshold
+
+	destinations := []string{"File", "Clipboard", "stdout"}
+	scopes := []string{"Visible", "Loaded", "Full"}
+
+	m := popup.NewExportMenu(formats, destinations, scopes, -1, bufferedThresholdExceeded, filterActive)
+	m.SetBufferedFormatIndexes(indexOf(formats, "Markdown"), indexOf(formats, "JSON Array"))
+	m.SetBufferedThresholdLabel(fmt.Sprintf("≥ %d rows", threshold))
+
+	h.mu.Lock()
+	h.exportMenu = &activeExportMenu{tab: t, menu: m}
+	h.mu.Unlock()
+
+	if h.deps.PushExportMenu != nil {
+		_ = h.deps.PushExportMenu()
+	}
+}
+
+// indexOf returns the position of s in ss, or -1 when absent.
+func indexOf(ss []string, s string) int {
+	for i, v := range ss {
+		if v == s {
+			return i
+		}
+	}
+	return -1
+}
+
+// ExportMenuBody returns the current menu body for rendering, "" when no
+// menu is active. dbsavvy-uv0.9.
+func (h *ResultTabsHelper) ExportMenuBody() string {
+	h.mu.Lock()
+	m := h.exportMenu
+	h.mu.Unlock()
+	if m == nil || m.menu == nil {
+		return ""
+	}
+	return m.menu.Body()
+}
+
+// ExportMenuActive reports whether the export menu is currently waiting
+// for input. dbsavvy-uv0.9.
+func (h *ResultTabsHelper) ExportMenuActive() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.exportMenu != nil && h.exportMenu.menu != nil
+}
+
+// ExportMenuMoveField dispatches into popup.ExportMenu.
+func (h *ResultTabsHelper) ExportMenuMoveField(d int) {
+	h.mu.Lock()
+	m := h.exportMenu
+	h.mu.Unlock()
+	if m == nil || m.menu == nil {
+		return
+	}
+	m.menu.MoveField(d)
+}
+
+// ExportMenuMoveValue dispatches into popup.ExportMenu.
+func (h *ResultTabsHelper) ExportMenuMoveValue(d int) {
+	h.mu.Lock()
+	m := h.exportMenu
+	h.mu.Unlock()
+	if m == nil || m.menu == nil {
+		return
+	}
+	m.menu.MoveValue(d)
+}
+
+// ExportMenuCancel pops the menu. If an export is in flight, also
+// cancels it. dbsavvy-uv0.9.
+func (h *ResultTabsHelper) ExportMenuCancel() {
+	h.mu.Lock()
+	m := h.exportMenu
+	h.exportMenu = nil
+	h.mu.Unlock()
+	if m != nil && m.cancel != nil {
+		m.cancel()
+	}
+	if popFn := h.deps.PopExportMenu; popFn != nil {
+		_ = popFn()
+	}
+}
+
+// ExportMenuConfirmFullScopeWithFilter sets the menu's typed-YES flag
+// when the warning is showing. Bound to `y`. dbsavvy-uv0.9.
+func (h *ResultTabsHelper) ExportMenuConfirmFullScopeWithFilter() {
+	h.mu.Lock()
+	m := h.exportMenu
+	h.mu.Unlock()
+	if m == nil || m.menu == nil {
+		return
+	}
+	if !m.menu.RequiresFullWithFilterConfirmation() {
+		return
+	}
+	m.menu.SetConfirmedFullWithFilter(true)
+}
+
+// ExportMenuConfirm kicks off the export based on the menu's current
+// selection. Pops the menu first (so the user sees the toast), then
+// runs the export on a worker goroutine. dbsavvy-uv0.9.
+func (h *ResultTabsHelper) ExportMenuConfirm() {
+	h.mu.Lock()
+	m := h.exportMenu
+	h.mu.Unlock()
+	if m == nil || m.menu == nil {
+		return
+	}
+	if reason := m.menu.ConfirmBlockedReason(); reason != "" {
+		h.toast(reason)
+		return
+	}
+	if m.menu.RequiresFullWithFilterConfirmation() {
+		h.toast("press y to confirm Full scope ignoring filter, or move Scope")
+		return
+	}
+
+	tab := m.tab
+	formatLabel := m.menu.FormatLabel()
+	destLabel := m.menu.DestinationLabel()
+	scopeIdx := m.menu.ScopeIdx()
+
+	format, ferr := h.buildFormat(tab, formatLabel)
+	if ferr != nil {
+		h.toast(ferr.Error())
+		return
+	}
+	dest, derr := h.buildDestination(tab, destLabel, formatLabel)
+	if derr != nil {
+		h.toast(derr.Error())
+		return
+	}
+
+	// Pop the menu off the focus stack now.
+	h.mu.Lock()
+	h.exportMenu = nil
+	h.mu.Unlock()
+	if popFn := h.deps.PopExportMenu; popFn != nil {
+		_ = popFn()
+	}
+
+	if h.deps.OnWorker == nil {
+		h.toast("export: no worker available")
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	h.mu.Lock()
+	// Keep cancel reachable so ExportMenuCancel-on-shutdown still aborts
+	// the in-flight export. menu is nil since the UI is closed.
+	h.exportMenu = &activeExportMenu{tab: tab, menu: nil, cancel: cancel}
+	h.mu.Unlock()
+
+	h.deps.OnWorker(func(_ gocui.Task) error {
+		src := h.buildRowSource(tab, scopeIdx)
+		descriptor, err := exporter.Run(ctx, format, dest, src, h.progressFn())
+		h.mu.Lock()
+		h.exportMenu = nil
+		h.mu.Unlock()
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				h.toast("export cancelled")
+			} else {
+				h.toast("export failed: " + err.Error())
+			}
+			return nil
+		}
+		h.toast("export complete: " + descriptor)
+		return nil
+	})
+}
+
+// progressFn returns a callback that updates a "export-progress" toast.
+// Returns nil when the helper has no toast-updater wired (toast still
+// fires once at completion via toast()).
+func (h *ResultTabsHelper) progressFn() exporter.ProgressFn {
+	if h.deps.Toast == nil {
+		return nil
+	}
+	upd, ok := h.deps.Toast.(toastUpdater)
+	if !ok {
+		return nil
+	}
+	return func(rows int64) {
+		upd.ShowOrUpdate("export.progress", fmt.Sprintf("exporting… %d rows", rows), 5*time.Second)
+	}
+}
+
+// buildFormat resolves the menu's selected format label to an
+// exporter.Format. Returns an error for unknown labels or when
+// SQL-INSERTs is selected but no encoder is reachable.
+func (h *ResultTabsHelper) buildFormat(t *Tab, label string) (exporter.Format, error) {
+	switch label {
+	case "CSV":
+		return exporter.NewCSV(), nil
+	case "TSV":
+		return exporter.NewTSV(), nil
+	case "NDJSON":
+		return exporter.NewNDJSON(), nil
+	case "JSON Array":
+		return exporter.NewJSONArray(), nil
+	case "Markdown":
+		return exporter.NewMarkdown(), nil
+	case "SQL INSERTs":
+		_, ri := t.Identity()
+		if !ri.HasRowIdentity {
+			return nil, fmt.Errorf("SQL INSERTs unavailable")
+		}
+		enc := h.tabEncoder(t)
+		if enc == nil {
+			return nil, fmt.Errorf("SQL INSERTs: no encoder")
+		}
+		return exporter.NewSQLInserts(ri.BaseTable, enc), nil
+	}
+	return nil, fmt.Errorf("unknown format: %s", label)
+}
+
+// buildDestination resolves the menu's selected destination label to an
+// exporter.Destination.
+func (h *ResultTabsHelper) buildDestination(t *Tab, destLabel, formatLabel string) (exporter.Destination, error) {
+	switch destLabel {
+	case "File":
+		downloadDir := env.GetDownloadDir()
+		connID, ri := t.Identity()
+		base := ri.BaseTable
+		if base == "" {
+			base = "result"
+		}
+		ext := extFor(formatLabel)
+		filename := exporter.DefaultFilename(connID, base, ext, h.now())
+		return exporter.NewFileDest(downloadDir, filename), nil
+	case "Clipboard":
+		maxBytes := h.deps.ExportClipboardMaxBytes
+		if maxBytes <= 0 {
+			maxBytes = defaultExportClipboardMaxBytes
+		}
+		// ClipboardWriter is intentionally nil for v1 — clipboard payloads
+		// are buffered and discarded on Close. A full wiring lands in a
+		// follow-up that surfaces the grid clipboard adapter through Deps.
+		return exporter.NewClipboardDest(nil, maxBytes), nil
+	case "stdout":
+		return exporter.NewStdoutDest(), nil
+	}
+	return nil, fmt.Errorf("unknown destination: %s", destLabel)
+}
+
+// extFor maps the menu's format label to a filesystem extension.
+func extFor(formatLabel string) string {
+	switch formatLabel {
+	case "CSV":
+		return "csv"
+	case "TSV":
+		return "tsv"
+	case "NDJSON":
+		return "ndjson"
+	case "JSON Array":
+		return "json"
+	case "Markdown":
+		return "md"
+	case "SQL INSERTs":
+		return "sql"
+	}
+	return "txt"
+}
+
+// buildRowSource builds a RowSource for the given scope. Visible scope
+// snapshots grid.VisibleRows; Loaded snapshots grid.AllRows; Full
+// triggers ReadToEnd and blocks the worker goroutine until it
+// completes, then snapshots grid.AllRows. dbsavvy-uv0.9.
+func (h *ResultTabsHelper) buildRowSource(t *Tab, scopeIdx int) exporter.RowSource {
+	g := t.Grid()
+	if g == nil {
+		return &staticRowSource{}
+	}
+	cols := g.Columns()
+	switch scopeIdx {
+	case exportScopeVisible:
+		return &staticRowSource{cols: cols, rows: g.VisibleRows()}
+	case exportScopeLoaded:
+		return &staticRowSource{cols: cols, rows: g.AllRows()}
+	case exportScopeFull:
+		done := make(chan struct{})
+		if r := t.Runner(); r != nil {
+			r.ReadToEnd(func() { close(done) })
+		} else {
+			close(done)
+		}
+		<-done
+		return &staticRowSource{cols: cols, rows: g.AllRows()}
+	}
+	return &staticRowSource{cols: cols}
+}
+
+// staticRowSource is a snapshot-backed RowSource for the export
+// pipeline. Iterate walks the captured slice in order.
+type staticRowSource struct {
+	cols []models.ColumnMeta
+	rows []models.Row
+}
+
+func (s *staticRowSource) Cols() []models.ColumnMeta { return s.cols }
+func (s *staticRowSource) Iterate(fn func(models.Row) error) error {
+	for _, r := range s.rows {
+		if err := fn(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// tabEncoder returns the driver Encoder for the tab's session, or nil
+// when none is reachable. SQL INSERTs surfaces a "no encoder" error in
+// that case. v1 returns nil unless the StreamRunner exposes Encoder()
+// via interface assertion; the full Encoder wiring lands as a follow-up.
+func (h *ResultTabsHelper) tabEncoder(t *Tab) drivers.Encoder {
+	if t == nil {
+		return nil
+	}
+	r := t.Runner()
+	if r == nil {
+		return nil
+	}
+	if er, ok := any(r).(interface{ Encoder() drivers.Encoder }); ok {
+		return er.Encoder()
+	}
+	return nil
 }
 
 // --- Expanded view mode + result-grid motion (dbsavvy-uv0.7) -------------

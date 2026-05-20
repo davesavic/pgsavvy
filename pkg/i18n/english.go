@@ -137,6 +137,15 @@ type ActionTranslations struct {
 	// In-grid hide-columns overlay (dbsavvy-uv0.6).
 	ResultHideOverlay string
 
+	// Result-export menu (dbsavvy-uv0.9).
+	ResultExportPrompt string
+	ExportMenuUp       string
+	ExportMenuDown     string
+	ExportMenuLeft     string
+	ExportMenuRight    string
+	ExportMenuConfirm  string
+	ExportMenuCancel   string
+
 	// Expanded view mode + result-grid motion (dbsavvy-uv0.7).
 	ResultViewToggle      string
 	ResultCursorDown      string
@@ -282,6 +291,14 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultSortPickLabel: "sort by column",
 
 			ResultHideOverlay: "Toggle column visibility",
+
+			ResultExportPrompt: "Export result...",
+			ExportMenuUp:       "Move field up",
+			ExportMenuDown:     "Move field down",
+			ExportMenuLeft:     "Previous value",
+			ExportMenuRight:    "Next value",
+			ExportMenuConfirm:  "Start export",
+			ExportMenuCancel:   "Cancel",
 
 			ResultViewToggle:      "Toggle expanded view",
 			ResultCursorDown:      "Cursor down",

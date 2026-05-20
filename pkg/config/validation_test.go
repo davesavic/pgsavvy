@@ -397,3 +397,48 @@ func TestValidateUserConfig_MouseDoubleClickMs_DefaultClean(t *testing.T) {
 		t.Errorf("default DoubleClickMs should validate clean; got %v", errs)
 	}
 }
+
+// TestValidateUserConfig_ExportDefaults pins that the shipped export
+// defaults validate clean. dbsavvy-uv0.9.
+func TestValidateUserConfig_ExportDefaults(t *testing.T) {
+	cfg := GetDefaultConfig()
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if containsErrSubstr(errs, "ui.export") {
+		t.Errorf("default ui.export knobs should validate; got %v", errs)
+	}
+}
+
+// TestValidateUserConfig_Export_BufferedRowWarnThresholdZero rejects
+// non-positive warn thresholds. dbsavvy-uv0.9.
+func TestValidateUserConfig_Export_BufferedRowWarnThresholdZero(t *testing.T) {
+	for _, v := range []int64{0, -1} {
+		cfg := GetDefaultConfig()
+		cfg.UI.Export.BufferedRowWarnThreshold = v
+		_, errs := ValidateUserConfig(cfg, fullDeps())
+		if !containsErrSubstr(errs, "buffered_row_warn_threshold") {
+			t.Errorf("BufferedRowWarnThreshold=%d: expected error, got %v", v, errs)
+		}
+	}
+}
+
+// TestValidateUserConfig_Export_ClipboardMaxBytesZero rejects
+// non-positive clipboard caps. dbsavvy-uv0.9.
+func TestValidateUserConfig_Export_ClipboardMaxBytesZero(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.UI.Export.ClipboardMaxBytes = 0
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if !containsErrSubstr(errs, "clipboard_max_bytes") {
+		t.Errorf("expected clipboard_max_bytes error, got %v", errs)
+	}
+}
+
+// TestValidateUserConfig_Export_ClipboardMaxBytesAboveGiB rejects caps
+// larger than 1 GiB. dbsavvy-uv0.9.
+func TestValidateUserConfig_Export_ClipboardMaxBytesAboveGiB(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.UI.Export.ClipboardMaxBytes = (1 << 30) + 1
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if !containsErrSubstr(errs, "clipboard_max_bytes") {
+		t.Errorf("expected clipboard_max_bytes error, got %v", errs)
+	}
+}

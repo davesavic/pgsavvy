@@ -373,6 +373,27 @@ func (a hideOverlayStateAdapter) Body() string {
 	return a.helper.HideOverlayBody()
 }
 
+// exportMenuStateAdapter implements guicontext.ExportMenuState by
+// proxying through the ResultTabsHelper. Mirrors hideOverlayStateAdapter.
+// dbsavvy-uv0.9.
+type exportMenuStateAdapter struct {
+	helper *ui.ResultTabsHelper
+}
+
+func (a exportMenuStateAdapter) Active() bool {
+	if a.helper == nil {
+		return false
+	}
+	return a.helper.ExportMenuActive()
+}
+
+func (a exportMenuStateAdapter) Body() string {
+	if a.helper == nil {
+		return ""
+	}
+	return a.helper.ExportMenuBody()
+}
+
 // promptStateAdapter implements guicontext.PromptState by surfacing
 // the PromptHelper's label + active flag to PromptContext.HandleRender.
 // The typed buffer is no longer combined here: post-dbsavvy-fq9 the

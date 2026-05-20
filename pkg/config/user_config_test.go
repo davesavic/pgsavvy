@@ -57,3 +57,16 @@ func TestGetDefaultConfigUIPaginationDefaults(t *testing.T) {
 		t.Errorf("UI.ReadToEndWarnThreshold = %d, want 1_000_000", cfg.UI.ReadToEndWarnThreshold)
 	}
 }
+
+// TestGetDefaultConfigUIExportDefaults pins the dbsavvy-uv0.9 export
+// knob defaults: 100_000 buffered-row warn threshold and 16 MiB
+// clipboard cap.
+func TestGetDefaultConfigUIExportDefaults(t *testing.T) {
+	cfg := GetDefaultConfig()
+	if cfg.UI.Export.BufferedRowWarnThreshold != 100_000 {
+		t.Errorf("UI.Export.BufferedRowWarnThreshold = %d, want 100_000", cfg.UI.Export.BufferedRowWarnThreshold)
+	}
+	if cfg.UI.Export.ClipboardMaxBytes != 16*1024*1024 {
+		t.Errorf("UI.Export.ClipboardMaxBytes = %d, want %d (16 MiB)", cfg.UI.Export.ClipboardMaxBytes, 16*1024*1024)
+	}
+}

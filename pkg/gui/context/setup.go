@@ -12,7 +12,7 @@ import (
 // Concrete Context fields are exposed by name so the gui bootstrap (T10)
 // and the controller registration shim (T7) can target a specific
 // Context by reference without re-lookup. Flatten() and ByKey() walk all
-// 21 entries (16 live + 5 stub) for the cases where ordered iteration is
+// 23 entries (18 live + 5 stub) for the cases where ordered iteration is
 // preferable.
 type ContextTree struct {
 	// Live SIDE_CONTEXT instances.
@@ -32,6 +32,9 @@ type ContextTree struct {
 	// HideOverlay is the <leader>gH column-visibility overlay
 	// (dbsavvy-uv0.6). TEMPORARY_POPUP kind.
 	HideOverlay *HideOverlayContext
+	// ExportMenu is the <leader>oe export-result menu
+	// (dbsavvy-uv0.9). TEMPORARY_POPUP kind.
+	ExportMenu *ExportMenuContext
 
 	// Live EXTRAS / GLOBAL / DISPLAY instances.
 	Messages   *MessagesContext
@@ -128,6 +131,11 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			ViewName: string(types.HIDE_OVERLAY),
 			Kind:     types.TEMPORARY_POPUP,
 		}), deps),
+		ExportMenu: NewExportMenuContext(NewBaseContext(BaseContextOpts{
+			Key:      types.EXPORT_MENU,
+			ViewName: string(types.EXPORT_MENU),
+			Kind:     types.TEMPORARY_POPUP,
+		}), deps),
 
 		// EXTRAS / GLOBAL / DISPLAY.
 		Messages: NewMessagesContext(NewBaseContext(BaseContextOpts{
@@ -182,8 +190,8 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 }
 
 // Flatten returns every Context (live + stub) in a stable order. Order
-// is: side rail (5) -> popups (6) -> extras/global/display (5) -> stubs
-// (5). Total length is always 21.
+// is: side rail (5) -> popups (8) -> extras/global/display (5) -> stubs
+// (5). Total length is always 23.
 func (t *ContextTree) Flatten() []types.IBaseContext {
 	return []types.IBaseContext{
 		t.Connections,
@@ -198,6 +206,7 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 		t.Suggestions,
 		t.CommandLine,
 		t.HideOverlay,
+		t.ExportMenu,
 		t.Messages,
 		t.Global,
 		t.Limit,

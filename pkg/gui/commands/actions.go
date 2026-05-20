@@ -186,6 +186,25 @@ const (
 	HideOverlayToggle = "hide_overlay.toggle"
 	HideOverlayClose  = "hide_overlay.close"
 
+	// Result-export menu (dbsavvy-uv0.9). RESULT_GRID-scoped.
+	//   ResultExportPrompt - <leader>oe opens the export-destination menu.
+	//                        Chord registration is deferred until the menu
+	//                        UI lands; this constant exists so the action
+	//                        registry + i18n table can reserve the ID.
+	ResultExportPrompt = "result.export.prompt"
+
+	// ExportMenuUp / Down move the field cursor; Left / Right adjust the
+	// value of the current field; Confirm executes; Cancel pops the popup;
+	// ConfirmFullScopeWithFilter is the typed-YES handler for the
+	// filter-conflict warning. dbsavvy-uv0.9.
+	ExportMenuUp                         = "export.menu.up"
+	ExportMenuDown                       = "export.menu.down"
+	ExportMenuLeft                       = "export.menu.left"
+	ExportMenuRight                      = "export.menu.right"
+	ExportMenuConfirm                    = "export.menu.confirm"
+	ExportMenuCancel                     = "export.menu.cancel"
+	ExportMenuConfirmFullScopeWithFilter = "export.menu.confirm.full.filter"
+
 	// Plan family — owned by PlanController (dbsavvy-uv0.8). All PLAN-
 	// scoped; published only when a plan tab is the focused context.
 	//   PlanToggle        - <CR> toggles collapse on the cursor node
@@ -408,6 +427,14 @@ func AllActionIDs() []string {
 		HideOverlayDown,
 		HideOverlayToggle,
 		HideOverlayClose,
+		ResultExportPrompt,
+		ExportMenuUp,
+		ExportMenuDown,
+		ExportMenuLeft,
+		ExportMenuRight,
+		ExportMenuConfirm,
+		ExportMenuCancel,
+		ExportMenuConfirmFullScopeWithFilter,
 		PlanToggle,
 		PlanExpandAll,
 		PlanCollapseAll,

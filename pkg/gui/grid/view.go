@@ -159,6 +159,13 @@ type View struct {
 	// record in expanded mode. Bumped by WrappedLineDown / WrappedLineUp;
 	// reset to 0 when the cursor moves to a new record. dbsavvy-uv0.7.
 	expandedLineOffset int
+
+	// viewHeight tracks the data-row capacity of the most recent Render
+	// (innerH - 1 for the header). 0 means "no Render yet"; VisibleRows
+	// falls back to a no-op in that case. Stamped under v.mu.Lock by
+	// clampOffsetsLocked so export-time readers see a consistent value.
+	// dbsavvy-uv0.9.
+	viewHeight int
 }
 
 // headerClickState is the per-View state used by HandleHeaderClick to
@@ -347,11 +354,66 @@ func (v *View) RowCount() int {
 	return len(v.rows)
 }
 
+// AllRows returns a snapshot of every buffered row (header excluded).
+// The returned slice is a fresh allocation, so the caller may iterate
+// or mutate it while concurrent AppendRows continues without observing
+// torn state. Used by the export pipeline's Scope=All path.
+// dbsavvy-uv0.9.
+func (v *View) AllRows() []models.Row {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	out := make([]models.Row, len(v.rows))
+	copy(out, v.rows)
+	return out
+}
+
+// VisibleRows returns a defensive copy of the rows currently inside the
+// rendered viewport — the same window the user sees on screen. The
+// window is [rowOffset, rowOffset+viewHeight), clamped to the buffer.
+// When no Render has happened yet (viewHeight == 0) or the buffer is
+// empty, an empty slice is returned. Used by the export pipeline's
+// Scope=Visible path. dbsavvy-uv0.9.
+func (v *View) VisibleRows() []models.Row {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if len(v.rows) == 0 || v.viewHeight <= 0 {
+		return []models.Row{}
+	}
+	start := v.rowOffset
+	if start < 0 {
+		start = 0
+	}
+	if start > len(v.rows) {
+		start = len(v.rows)
+	}
+	end := start + v.viewHeight
+	if end > len(v.rows) {
+		end = len(v.rows)
+	}
+	out := make([]models.Row, end-start)
+	copy(out, v.rows[start:end])
+	return out
+}
+
 // ColumnCount returns the number of configured columns.
 func (v *View) ColumnCount() int {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	return len(v.cols)
+}
+
+// Columns returns a defensive copy of the column-metadata slice. Used by
+// the <leader>oe export pipeline to feed exporter.RowSource. Returns nil
+// when no columns are configured. dbsavvy-uv0.9.
+func (v *View) Columns() []models.ColumnMeta {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if len(v.cols) == 0 {
+		return nil
+	}
+	out := make([]models.ColumnMeta, len(v.cols))
+	copy(out, v.cols)
+	return out
 }
 
 // ColumnName returns the configured column name at index i, or "" when
@@ -664,6 +726,10 @@ func (v *View) clampOffsetsLocked(snap viewSnapshot, innerW, innerH int) (rowOff
 	v.mu.Lock()
 	v.rowOffset = rowOffset
 	v.colOffset = colOffset
+	// Record the latest data-row capacity so VisibleRows (export Scope)
+	// can return the on-screen window without re-deriving the layout.
+	// dbsavvy-uv0.9.
+	v.viewHeight = dataRows
 	v.mu.Unlock()
 	return rowOffset, colOffset
 }

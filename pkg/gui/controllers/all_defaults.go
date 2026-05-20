@@ -60,6 +60,9 @@ func AllDefaultBindings(c *Controllers) []*types.ChordBinding {
 	if c.HideOverlay != nil {
 		out = append(out, c.HideOverlay.GetKeybindings(types.KeybindingsOpts{})...)
 	}
+	if c.ExportMenu != nil {
+		out = append(out, c.ExportMenu.GetKeybindings(types.KeybindingsOpts{})...)
+	}
 	out = append(out, keys.DefaultCommandLineBindings()...)
 	return out
 }

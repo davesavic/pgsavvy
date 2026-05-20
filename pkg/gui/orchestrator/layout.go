@@ -493,7 +493,7 @@ func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int)
 			return rect{}, false
 		}
 		return centeredRect(canvas, 0.8, 0.5), true
-	case types.MENU, types.CONFIRMATION, types.SELECTION, types.SUGGESTIONS, types.HIDE_OVERLAY:
+	case types.MENU, types.CONFIRMATION, types.SELECTION, types.SUGGESTIONS, types.HIDE_OVERLAY, types.EXPORT_MENU:
 		canvas, ok := dims["popup-overlay"]
 		if !ok {
 			return rect{}, false

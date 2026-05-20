@@ -160,6 +160,16 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 		errs = append(errs, fmt.Errorf("config: ui.mouse.double_click_ms must be in [100, 2000], got %d", cfg.UI.Mouse.DoubleClickMs))
 	}
 
+	// Export bounds (dbsavvy-uv0.9).
+	if cfg.UI.Export.BufferedRowWarnThreshold <= 0 {
+		errs = append(errs, fmt.Errorf("config: ui.export.buffered_row_warn_threshold must be > 0, got %d", cfg.UI.Export.BufferedRowWarnThreshold))
+	}
+	if cfg.UI.Export.ClipboardMaxBytes <= 0 {
+		errs = append(errs, fmt.Errorf("config: ui.export.clipboard_max_bytes must be > 0, got %d", cfg.UI.Export.ClipboardMaxBytes))
+	} else if cfg.UI.Export.ClipboardMaxBytes > 1<<30 {
+		errs = append(errs, fmt.Errorf("config: ui.export.clipboard_max_bytes must be <= 1 GiB (1073741824), got %d", cfg.UI.Export.ClipboardMaxBytes))
+	}
+
 	return warns, errs
 }
 

@@ -64,6 +64,9 @@ const (
 	// HIDE_OVERLAY is the in-grid column-visibility overlay opened by
 	// <leader>gH on the active result tab (dbsavvy-uv0.6).
 	HIDE_OVERLAY ContextKey = "hide_overlay"
+	// EXPORT_MENU is the <leader>oe export-result menu opened from the
+	// result-grid context. TEMPORARY_POPUP kind. dbsavvy-uv0.9.
+	EXPORT_MENU ContextKey = "export_menu"
 )
 
 // IsEditable reports whether the view associated with k receives text

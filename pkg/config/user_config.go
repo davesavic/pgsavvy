@@ -46,6 +46,25 @@ type UIConfig struct {
 	// accepted by grid.View.SetFilter. Defense-in-depth against
 	// pathological inputs. Default 4096. Must be > 0. dbsavvy-uv0.4.
 	FilterMaxRegexBytes int `yaml:"filter_max_regex_bytes"`
+
+	// Export carries the result-export knobs surfaced by the
+	// <leader>oe menu. dbsavvy-uv0.9.
+	Export ExportConfig `yaml:"export"`
+}
+
+// ExportConfig groups the user-tunable bounds for the result-export
+// pipeline. The defaults are set in GetDefaultConfig and validated by
+// ValidateUserConfig. dbsavvy-uv0.9.
+type ExportConfig struct {
+	// BufferedRowWarnThreshold is the buffered-row count above which
+	// the export menu surfaces a "this will copy/write a lot of rows"
+	// confirmation before proceeding. Default 100_000. Must be > 0.
+	BufferedRowWarnThreshold int64 `yaml:"buffered_row_warn_threshold"`
+
+	// ClipboardMaxBytes caps the payload size that may be pushed onto
+	// the clipboard in a single export. Larger payloads must fall back
+	// to a file destination. Default 16 MiB. Must be > 0 and <= 1 GiB.
+	ClipboardMaxBytes int64 `yaml:"clipboard_max_bytes"`
 }
 
 // MouseConfig controls the optional mouse wiring registered by the
@@ -171,6 +190,10 @@ func GetDefaultConfig() *UserConfig {
 			PrefetchThreshold:      25,
 			ReadToEndWarnThreshold: 1_000_000,
 			FilterMaxRegexBytes:    4096,
+			Export: ExportConfig{
+				BufferedRowWarnThreshold: 100_000,
+				ClipboardMaxBytes:        16 * 1024 * 1024,
+			},
 		},
 	}
 }

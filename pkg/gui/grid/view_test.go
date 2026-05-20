@@ -118,3 +118,100 @@ func TestRender_HonoursTitle(t *testing.T) {
 	require.True(t, strings.Contains(target.Title, "hello"),
 		"target gocui view Title should contain 'hello', got %q", target.Title)
 }
+
+// TestAllRows_ReturnsCopyOfBufferedRows verifies AllRows returns every
+// buffered row and that the result is a defensive copy — mutating the
+// returned slice must not affect later AllRows calls or RowCount.
+// dbsavvy-uv0.9.
+func TestAllRows_ReturnsCopyOfBufferedRows(t *testing.T) {
+	v := NewView()
+	v.SetColumns(makeSingleCol("c1", "text"))
+	batch := make([]models.Row, 10)
+	for i := range batch {
+		batch[i] = models.Row{Values: []any{i}}
+	}
+	v.AppendRows(batch)
+
+	got := v.AllRows()
+	require.Len(t, got, 10, "AllRows should return every buffered row")
+
+	// Mutate the returned slice header — clearing it must not affect
+	// the view's buffered rows.
+	for i := range got {
+		got[i] = models.Row{Values: []any{"clobbered"}}
+	}
+	require.Equal(t, 10, v.RowCount(), "RowCount must be unaffected by caller mutation")
+
+	again := v.AllRows()
+	require.Len(t, again, 10, "AllRows must return the original buffered rows")
+	require.Equal(t, 0, again[0].Values[0], "row 0 value must be the original 0, not 'clobbered'")
+}
+
+// TestVisibleRows_ReturnsViewportSlice seeds the View with 100 rows and
+// stamps viewport state (rowOffset=20, viewHeight=10) directly, then
+// expects VisibleRows to return rows[20:30]. dbsavvy-uv0.9.
+func TestVisibleRows_ReturnsViewportSlice(t *testing.T) {
+	v := NewView()
+	v.SetColumns(makeSingleCol("c1", "text"))
+	batch := make([]models.Row, 100)
+	for i := range batch {
+		batch[i] = models.Row{Values: []any{i}}
+	}
+	v.AppendRows(batch)
+
+	v.mu.Lock()
+	v.rowOffset = 20
+	v.viewHeight = 10
+	v.mu.Unlock()
+
+	got := v.VisibleRows()
+	require.Len(t, got, 10, "viewport top=20 height=10 should yield 10 rows")
+	require.Equal(t, 20, got[0].Values[0], "first visible row should be index 20")
+	require.Equal(t, 29, got[9].Values[0], "last visible row should be index 29")
+}
+
+// TestVisibleRows_EmptyBeforeRender verifies that with no Render having
+// run (viewHeight == 0) VisibleRows returns an empty slice rather than
+// panicking. dbsavvy-uv0.9.
+func TestVisibleRows_EmptyBeforeRender(t *testing.T) {
+	v := NewView()
+	v.SetColumns(makeSingleCol("c1", "text"))
+	v.AppendRows([]models.Row{{Values: []any{"a"}}})
+	require.Empty(t, v.VisibleRows(), "VisibleRows before any Render must be empty")
+}
+
+// TestAllRows_ConcurrentSafety runs a producer goroutine appending rows
+// alongside a reader goroutine repeatedly calling AllRows. Run with
+// -race to catch any data race. dbsavvy-uv0.9.
+func TestAllRows_ConcurrentSafety(t *testing.T) {
+	v := NewView()
+	v.SetColumns(makeSingleCol("c1", "text"))
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for i := range 500 {
+			v.AppendRows([]models.Row{{Values: []any{i}}})
+		}
+		close(done)
+	}()
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				_ = v.AllRows() // one final read after producer is done
+				return
+			default:
+				_ = v.AllRows()
+			}
+		}
+	}()
+
+	wg.Wait()
+	require.Equal(t, 500, v.RowCount(), "all producer appends must be present")
+}
