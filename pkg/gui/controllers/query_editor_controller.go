@@ -79,11 +79,15 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		actionID    string
 		description string
 		// mode is the Mode mask this binding fires under. Zero means
-		// fall back to defaultMode (Normal | Insert). <leader>r extends
-		// to Visual modes so the fan-out path lands (wwd.7).
+		// fall back to defaultMode (Normal). INSERT is deliberately
+		// EXCLUDED (dbsavvy-1yb): with leader=<space>, an INSERT-mode
+		// mask makes the space rune a chord prefix, so the matcher
+		// buffers it until tlen — producing the "select*" → "select *"
+		// reordering bug. <leader>r still extends to Visual modes so
+		// the fan-out path lands (wwd.7).
 		mode types.Mode
 	}
-	defaultMode := types.ModeNormal | types.ModeInsert
+	defaultMode := types.ModeNormal
 	runMode := defaultMode | types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 	specs := []bspec{
 		{"<leader>r", commands.QueryRun, tr.Actions.RunQuery, runMode},

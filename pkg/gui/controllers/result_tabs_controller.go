@@ -125,8 +125,13 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			continue
 		}
 		out = append(out, &types.ChordBinding{
-			Sequence:    seq,
-			Mode:        types.ModeNormal | types.ModeInsert,
+			Sequence: seq,
+			// INSERT deliberately excluded (dbsavvy-1yb): leader-
+			// prefixed bindings registered under (ModeInsert, GLOBAL)
+			// make the leader rune (<space>) a chord prefix when the
+			// editor is in INSERT mode, buffering it until tlen and
+			// producing the "select*" → "select *" reordering bug.
+			Mode:        types.ModeNormal,
 			Scope:       s.scope,
 			ActionID:    s.actionID,
 			Description: s.description,

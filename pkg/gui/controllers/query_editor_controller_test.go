@@ -120,6 +120,64 @@ func TestQueryEditorControllerPublishesSixBindings(t *testing.T) {
 	}
 }
 
+// dbsavvy-1yb: Leader chords MUST NOT be active in INSERT mode in the
+// ResultTabsController either; <leader>1..9 / <leader>X / <leader>= /
+// <leader>x / <leader>s / <leader>gH leak into the editor's INSERT
+// mode via the (mode, GLOBAL) trie lookup performed by the matcher's
+// fast-path passthrough gate, so any INSERT-mode mask on these
+// bindings re-triggers the "select*" reordering bug from a different
+// scope.
+func TestResultTabsControllerLeaderBindingsExcludeInsertMode(t *testing.T) {
+	ctrl := controllers.NewResultTabsController(nil, controllers.HelperBag{}, nil)
+	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
+	leaderCount := 0
+	for _, kb := range kbs {
+		if len(kb.Sequence) == 0 {
+			continue
+		}
+		first := kb.Sequence[0]
+		if first.Special != types.KeyLeader && first.Special != types.KeyLocalLeader {
+			continue
+		}
+		leaderCount++
+		if kb.Mode&types.ModeInsert != 0 {
+			t.Errorf("leader binding %q has ModeInsert set in Mode mask = %b; INSERT must be cleared to keep <space> literal in INSERT mode", kb.ActionID, kb.Mode)
+		}
+	}
+	if leaderCount == 0 {
+		t.Fatalf("expected at least one leader-prefixed binding from ResultTabsController, got 0")
+	}
+}
+
+// dbsavvy-1yb: Leader chords MUST NOT be active in INSERT mode. When
+// <leader> is <space>, an INSERT-mode mask makes the space rune a
+// chord-prefix and the matcher buffers it until tlen expires, producing
+// the user-visible "select*" reordering bug. Regression guard: every
+// binding whose first key is KeyLeader (or KeyLocalLeader) must have
+// ModeInsert cleared from its Mode mask.
+func TestQueryEditorControllerLeaderBindingsExcludeInsertMode(t *testing.T) {
+	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag)
+	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
+	leaderCount := 0
+	for _, kb := range kbs {
+		if len(kb.Sequence) == 0 {
+			continue
+		}
+		first := kb.Sequence[0]
+		if first.Special != types.KeyLeader && first.Special != types.KeyLocalLeader {
+			continue
+		}
+		leaderCount++
+		if kb.Mode&types.ModeInsert != 0 {
+			t.Errorf("leader binding %q has ModeInsert set in Mode mask = %b; INSERT must be cleared to keep <space> literal in INSERT mode", kb.ActionID, kb.Mode)
+		}
+	}
+	if leaderCount == 0 {
+		t.Fatalf("expected at least one leader-prefixed binding from QueryEditorController, got 0")
+	}
+}
+
 func TestQueryEditorControllerRegisterActionsRegistersAllSix(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
 	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag)
