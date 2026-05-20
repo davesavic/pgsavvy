@@ -378,3 +378,22 @@ func TestValidateUserConfig_UIPagination_ReadToEndWarnThresholdZero(t *testing.T
 		t.Errorf("expected read_to_end_warn_threshold error, got %v", errs)
 	}
 }
+
+func TestValidateUserConfig_MouseDoubleClickMs_OutOfRange(t *testing.T) {
+	for _, v := range []int{0, 99, 2001, -1} {
+		cfg := GetDefaultConfig()
+		cfg.UI.Mouse.DoubleClickMs = v
+		_, errs := ValidateUserConfig(cfg, fullDeps())
+		if !containsErrSubstr(errs, "double_click_ms") {
+			t.Errorf("DoubleClickMs=%d: expected double_click_ms error, got %v", v, errs)
+		}
+	}
+}
+
+func TestValidateUserConfig_MouseDoubleClickMs_DefaultClean(t *testing.T) {
+	cfg := GetDefaultConfig()
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if containsErrSubstr(errs, "double_click_ms") {
+		t.Errorf("default DoubleClickMs should validate clean; got %v", errs)
+	}
+}

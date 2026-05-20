@@ -145,6 +145,11 @@ const (
 	ResultFilterPrev      = "result.filter.prev"
 	ResultFilterClear     = "result.filter.clear"
 
+	// In-grid sort (dbsavvy-uv0.5). RESULT_GRID-scoped.
+	//   ResultSortPick - <leader>s opens column picker; first invocation
+	//                    on a column = asc, second = desc, third = clear.
+	ResultSortPick = "result.sort.pick"
+
 	// Plan family — owned by PlanController (dbsavvy-uv0.8). All PLAN-
 	// scoped; published only when a plan tab is the focused context.
 	//   PlanToggle        - <CR> toggles collapse on the cursor node
@@ -346,6 +351,7 @@ func AllActionIDs() []string {
 		ResultFilterNext,
 		ResultFilterPrev,
 		ResultFilterClear,
+		ResultSortPick,
 		PlanToggle,
 		PlanExpandAll,
 		PlanCollapseAll,

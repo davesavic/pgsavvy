@@ -141,6 +141,13 @@ type prompter interface {
 	Prompt(label, initial string, onSubmit func(value string) error, onCancel func() error) error
 }
 
+// chooser is the narrow surface ResultTabsHelper uses to open the
+// <leader>s sort picker. The concrete satisfier is *ui.ChoiceHelper;
+// tests inject a fake. nil disables the sort-picker path. dbsavvy-uv0.5.
+type chooser interface {
+	Choose(label string, choices []string, onSubmit func(idx int) error, onCancel func() error) error
+}
+
 // toastUpdater extends toastShower with the once-per-tab caveat key
 // surface. *ui.ToastHelper satisfies it; tests inject a recorder. The
 // FilterPrompt handler reaches for ShowOrUpdate when present (so a
@@ -207,6 +214,19 @@ type ResultTabsHelperDeps struct {
 	// FilterMaxRegexBytes caps the byte length of /regex sources accepted
 	// by SetFilter. 0 means "use grid's default cap (4096)". dbsavvy-uv0.4.
 	FilterMaxRegexBytes int
+
+	// Choice pushes the column-picker overlay used by <leader>s. nil
+	// disables the sort-picker path (chord becomes a no-op). dbsavvy-uv0.5.
+	Choice chooser
+
+	// SortPickLabel is the picker label rendered above the column list.
+	// "" falls back to "sort by column". dbsavvy-uv0.5.
+	SortPickLabel string
+
+	// MouseDoubleClickMs is the maximum gap (in milliseconds) that still
+	// counts as a double-click on a grid header. 0 falls back to grid's
+	// default (400ms). dbsavvy-uv0.5.
+	MouseDoubleClickMs int
 }
 
 // defaultReadToEndWarnThreshold is the shipped ceiling above which G
@@ -227,6 +247,8 @@ type ResultTabsHelper struct {
 	pageSize        int
 	warnThreshold   int64
 	filterByteLimit int
+	sortPickLabel   string
+	doubleClickMs   int
 
 	mu       sync.Mutex
 	tabs     []*Tab // ordered by Slot (0..max-1)
@@ -256,6 +278,14 @@ func NewResultTabsHelper(deps ResultTabsHelperDeps) *ResultTabsHelper {
 	if filterCap <= 0 {
 		filterCap = 4096
 	}
+	sortLabel := deps.SortPickLabel
+	if sortLabel == "" {
+		sortLabel = "sort by column"
+	}
+	dblClick := deps.MouseDoubleClickMs
+	if dblClick <= 0 {
+		dblClick = 400
+	}
 	return &ResultTabsHelper{
 		deps:            deps,
 		maxTabs:         max,
@@ -263,6 +293,8 @@ func NewResultTabsHelper(deps ResultTabsHelperDeps) *ResultTabsHelper {
 		pageSize:        pageSize,
 		warnThreshold:   warn,
 		filterByteLimit: filterCap,
+		sortPickLabel:   sortLabel,
+		doubleClickMs:   dblClick,
 	}
 }
 
@@ -936,6 +968,9 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 	// hot-reloaded config value takes effect on the next tab's filter.
 	// dbsavvy-uv0.4.
 	t.grid.SetFilterMaxRegexBytes(h.filterByteLimit)
+	// Propagate the configured double-click window onto the grid so the
+	// header mouse-debounce uses the user's tuned value. dbsavvy-uv0.5.
+	t.grid.SetMouseDoubleClickMs(h.doubleClickMs)
 	if h.deps.StreamFactory != nil {
 		t.runner = h.deps.StreamFactory()
 	}
@@ -1111,6 +1146,11 @@ func (h *ResultTabsHelper) setActive(id int64) {
 // rect (0,0,0,0). The layout pass repositions per frame; we just need
 // the view to exist so SetViewOnTop / DeleteView have a target. Driver
 // may be nil in unit tests.
+//
+// dbsavvy-uv0.5: also registers the per-view left-click mouse binding
+// used by the grid header double-click → SetSort flow. The binding is
+// best-effort (errors are swallowed by keys.RegisterMouseBinding) so a
+// terminal without mouse support degrades cleanly.
 func (h *ResultTabsHelper) materialiseView(tab *Tab) {
 	if h.deps.Driver == nil {
 		return
@@ -1122,6 +1162,34 @@ func (h *ResultTabsHelper) materialiseView(tab *Tab) {
 		// Best-effort: log via toast if available, otherwise swallow.
 		h.toast(fmt.Sprintf("result tab view error: %v", err))
 	}
+	h.wireGridMouseClick(tab)
+}
+
+// wireGridMouseClick registers the grid-header left-click binding on the
+// tab's view. The handler maps the click X/Y onto the grid's column
+// layout and forwards to grid.View.HandleHeaderClick, which owns the
+// debounce + SetSort cycle. Plan / error tabs have a nil grid so the
+// handler becomes a no-op for them. dbsavvy-uv0.5.
+func (h *ResultTabsHelper) wireGridMouseClick(tab *Tab) {
+	g := tab.Grid()
+	if g == nil {
+		return
+	}
+	view := tab.ViewName()
+	now := h.now
+	handler := func(opts types.ViewMouseBindingOpts) error {
+		g.HandleHeaderClick(opts.X, opts.Y, now())
+		return nil
+	}
+	binding := &types.ViewMouseBinding{
+		ViewName: view,
+		Key:      types.MouseLeft,
+		Modifier: types.ModNone,
+		Handler:  handler,
+	}
+	// SetViewClickBinding errors are swallowed: the TUI must remain
+	// usable when the terminal refuses mouse mode (dbsavvy-zro AC).
+	_ = h.deps.Driver.SetViewClickBinding(binding)
 }
 
 // findByIDLocked returns the tab with the supplied id under helper.mu.
@@ -1396,6 +1464,53 @@ func (h *ResultTabsHelper) activeGrid() *grid.View {
 		return nil
 	}
 	return t.Grid()
+}
+
+// --- <leader>s sort picker (dbsavvy-uv0.5) -------------------------------
+
+// SortPick opens the column picker against the active tab. On submit
+// SetSort(idx) fires on the tab's grid, cycling asc → desc → clear per
+// the AC. No-op when no tab is active, no grid is attached, the choice
+// dep is unwired, or the buffer has no columns yet. dbsavvy-uv0.5.
+func (h *ResultTabsHelper) SortPick() {
+	t := h.Active()
+	if t == nil {
+		h.toast("no result tabs")
+		return
+	}
+	g := t.Grid()
+	if g == nil {
+		return
+	}
+	if h.deps.Choice == nil {
+		return
+	}
+	cols := h.gridColumnNames(g)
+	if len(cols) == 0 {
+		return
+	}
+	_ = h.deps.Choice.Choose(h.sortPickLabel, cols, func(idx int) error {
+		g.SetSort(idx)
+		return nil
+	}, func() error { return nil })
+}
+
+// gridColumnNames snapshots the column-name list off the active grid.
+// Used to build the SortPick overlay. Returns an empty slice when the
+// grid has no columns installed yet.
+func (h *ResultTabsHelper) gridColumnNames(g *grid.View) []string {
+	if g == nil {
+		return nil
+	}
+	n := g.ColumnCount()
+	if n == 0 {
+		return nil
+	}
+	names := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		names = append(names, g.ColumnName(i))
+	}
+	return names
 }
 
 // truncateLabel cleans whitespace and truncates to cap with an

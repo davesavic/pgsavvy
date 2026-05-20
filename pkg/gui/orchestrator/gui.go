@@ -388,15 +388,20 @@ func (g *Gui) wireWithDriver() error {
 		Toast:      g.toastHelp,
 		Confirm:    g.confirmHelp,
 		Prompt:     g.promptHelp,
+		Choice:     g.choiceHelp,
 		OnUIThread: g.OnUIThread,
 		StreamFactory: func() ui.StreamRunner {
 			return tasks.New(g.OnWorker, g.OnUIThreadContentOnly)
 		},
 	}
+	if tr != nil {
+		resultTabsDeps.SortPickLabel = tr.Actions.ResultSortPickLabel
+	}
 	if cfg := g.deps.Common.Cfg(); cfg != nil {
 		resultTabsDeps.ResultPageSize = cfg.UI.ResultPageSize
 		resultTabsDeps.ReadToEndWarnThreshold = cfg.UI.ReadToEndWarnThreshold
 		resultTabsDeps.FilterMaxRegexBytes = cfg.UI.FilterMaxRegexBytes
+		resultTabsDeps.MouseDoubleClickMs = cfg.UI.Mouse.DoubleClickMs
 	}
 	g.resultTabsH = ui.NewResultTabsHelper(resultTabsDeps)
 

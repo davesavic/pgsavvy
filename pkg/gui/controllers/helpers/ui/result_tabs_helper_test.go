@@ -1297,3 +1297,164 @@ func containsCaveat(msgs []string) bool {
 	}
 	return false
 }
+
+// --- dbsavvy-uv0.5 sort picker tests -------------------------------------
+
+// fakeChooser captures Choose invocations and exposes hooks for the test
+// to submit / cancel a specific index. Mirrors fakePrompter's shape.
+type fakeChooser struct {
+	mu         sync.Mutex
+	lastLabel  string
+	lastChoice []string
+	onSubmit   func(idx int) error
+	onCancel   func() error
+	calls      int
+}
+
+func (f *fakeChooser) Choose(label string, choices []string, onSubmit func(idx int) error, onCancel func() error) error {
+	f.mu.Lock()
+	f.lastLabel = label
+	f.lastChoice = append([]string(nil), choices...)
+	f.onSubmit = onSubmit
+	f.onCancel = onCancel
+	f.calls++
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeChooser) submit(idx int) error {
+	f.mu.Lock()
+	cb := f.onSubmit
+	f.mu.Unlock()
+	if cb == nil {
+		return nil
+	}
+	return cb(idx)
+}
+
+func (f *fakeChooser) cancel() error {
+	f.mu.Lock()
+	cb := f.onCancel
+	f.mu.Unlock()
+	if cb == nil {
+		return nil
+	}
+	return cb()
+}
+
+func newSortTestHelper(t *testing.T, chooser *fakeChooser) (*ResultTabsHelper, *fakeToaster) {
+	t.Helper()
+	toaster := &fakeToaster{}
+	deps := ResultTabsHelperDeps{
+		Toast:         toaster,
+		Choice:        chooser,
+		Now:           time.Now,
+		SortPickLabel: "sort by column",
+	}
+	return NewResultTabsHelper(deps), toaster
+}
+
+// TestSortPick_OpensPickerWithGridColumns pins: SortPick passes the
+// grid's column names to the chooser, in column order.
+func TestSortPick_OpensPickerWithGridColumns(t *testing.T) {
+	chooser := &fakeChooser{}
+	h, _ := newSortTestHelper(t, chooser)
+	if err := h.openTab("Q", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	tab.Grid().SetColumns([]models.ColumnMeta{
+		{Name: "name", TypeName: "text"},
+		{Name: "age", TypeName: "int4"},
+	})
+
+	h.SortPick()
+
+	chooser.mu.Lock()
+	defer chooser.mu.Unlock()
+	if chooser.calls != 1 {
+		t.Errorf("Choose calls = %d; want 1", chooser.calls)
+	}
+	if chooser.lastLabel != "sort by column" {
+		t.Errorf("label = %q; want %q", chooser.lastLabel, "sort by column")
+	}
+	if len(chooser.lastChoice) != 2 || chooser.lastChoice[0] != "name" || chooser.lastChoice[1] != "age" {
+		t.Errorf("choices = %v; want [name age]", chooser.lastChoice)
+	}
+}
+
+// TestSortPick_SubmitFiresSetSort pins: submitting an index from the
+// picker fires SetSort on the active tab's grid.
+func TestSortPick_SubmitFiresSetSort(t *testing.T) {
+	chooser := &fakeChooser{}
+	h, _ := newSortTestHelper(t, chooser)
+	if err := h.openTab("Q", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	tab.Grid().SetColumns([]models.ColumnMeta{
+		{Name: "name", TypeName: "text"},
+		{Name: "age", TypeName: "int4"},
+	})
+
+	h.SortPick()
+	if err := chooser.submit(1); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if !tab.Grid().SortActive() {
+		t.Error("expected SortActive after submit")
+	}
+}
+
+// TestSortPick_CancelLeavesStateUnchanged pins AC: <esc> on the picker
+// closes without touching sort state.
+func TestSortPick_CancelLeavesStateUnchanged(t *testing.T) {
+	chooser := &fakeChooser{}
+	h, _ := newSortTestHelper(t, chooser)
+	if err := h.openTab("Q", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	tab.Grid().SetColumns([]models.ColumnMeta{{Name: "n", TypeName: "text"}})
+
+	h.SortPick()
+	if err := chooser.cancel(); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if tab.Grid().SortActive() {
+		t.Error("cancel must NOT activate sort")
+	}
+}
+
+// TestSortPick_NoTabsToasts pins: SortPick with no tabs surfaces the
+// "no result tabs" toast (matches FilterPrompt behavior).
+func TestSortPick_NoTabsToasts(t *testing.T) {
+	chooser := &fakeChooser{}
+	h, toaster := newSortTestHelper(t, chooser)
+	h.SortPick()
+	msgs := toaster.Messages()
+	if len(msgs) == 0 || !contains(msgs[0], "no result tabs") {
+		t.Errorf("expected 'no result tabs' toast; got %v", msgs)
+	}
+	chooser.mu.Lock()
+	defer chooser.mu.Unlock()
+	if chooser.calls != 0 {
+		t.Errorf("chooser must not be invoked when no tab is active; calls=%d", chooser.calls)
+	}
+}
+
+// TestSortPick_NoColumnsIsNoOp pins: SortPick on a tab without columns
+// (no schema attached yet) does not call the chooser.
+func TestSortPick_NoColumnsIsNoOp(t *testing.T) {
+	chooser := &fakeChooser{}
+	h, _ := newSortTestHelper(t, chooser)
+	if err := h.openTab("Q", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	h.SortPick()
+	chooser.mu.Lock()
+	defer chooser.mu.Unlock()
+	if chooser.calls != 0 {
+		t.Errorf("chooser invoked despite empty columns; calls=%d", chooser.calls)
+	}
+}

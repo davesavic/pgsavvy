@@ -155,6 +155,10 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 	if cfg.UI.ReadToEndWarnThreshold <= 0 {
 		errs = append(errs, fmt.Errorf("config: ui.read_to_end_warn_threshold must be > 0, got %d", cfg.UI.ReadToEndWarnThreshold))
 	}
+	// Mouse double-click window (dbsavvy-uv0.5).
+	if cfg.UI.Mouse.DoubleClickMs < 100 || cfg.UI.Mouse.DoubleClickMs > 2000 {
+		errs = append(errs, fmt.Errorf("config: ui.mouse.double_click_ms must be in [100, 2000], got %d", cfg.UI.Mouse.DoubleClickMs))
+	}
 
 	return warns, errs
 }

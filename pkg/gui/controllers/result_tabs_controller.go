@@ -41,6 +41,12 @@ type ResultTabsManager interface {
 	FilterJumpPrev()
 	FilterClear()
 	FilterActive() bool
+
+	// SortPick opens the column-picker overlay for the active tab. On
+	// submit, SetSort(col) fires; cycling through asc/desc/clear per the
+	// AC. No-op when no tab is active or the picker dep is unwired.
+	// dbsavvy-uv0.5.
+	SortPick()
 }
 
 // ResultTabsController publishes the multi-tab keybindings:
@@ -102,6 +108,8 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"n", commands.ResultFilterNext, tr.Actions.ResultFilterNext, types.RESULT_GRID},
 		{"N", commands.ResultFilterPrev, tr.Actions.ResultFilterPrev, types.RESULT_GRID},
 		{"<esc>", commands.ResultFilterClear, tr.Actions.ResultFilterClear, types.RESULT_GRID},
+		// dbsavvy-uv0.5: <leader>s sort picker.
+		{"<leader>s", commands.ResultSortPick, tr.Actions.ResultSortPick, types.RESULT_GRID},
 	}
 	out := make([]*types.ChordBinding, 0, len(specs))
 	for _, s := range specs {
@@ -284,6 +292,18 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 		Handler: func(_ commands.ExecCtx) error {
 			if r.mgr != nil && r.mgr.FilterActive() {
 				r.mgr.FilterClear()
+			}
+			return nil
+		},
+	})
+	// dbsavvy-uv0.5: <leader>s sort picker handler.
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ResultSortPick,
+		Description: tr.Actions.ResultSortPick,
+		Tag:         "Result",
+		Handler: func(_ commands.ExecCtx) error {
+			if r.mgr != nil {
+				r.mgr.SortPick()
 			}
 			return nil
 		},

@@ -53,6 +53,12 @@ type UIConfig struct {
 // registration block is skipped entirely (per dbsavvy-zro AC).
 type MouseConfig struct {
 	Enabled bool `yaml:"enabled"`
+
+	// DoubleClickMs is the maximum gap (in milliseconds) between two
+	// successive left-clicks on the same grid column header that still
+	// counts as a double-click → SetSort invocation. Default 400; range
+	// [100, 2000]. dbsavvy-uv0.5.
+	DoubleClickMs int `yaml:"double_click_ms"`
 }
 
 // KeybindingConfig describes a single user-defined keybinding entry.
@@ -159,7 +165,7 @@ func GetDefaultConfig() *UserConfig {
 			{Mode: "n", Scope: "global", Key: "<leader>q", Action: "app.quit", Description: "Quit via leader"},
 		},
 		UI: UIConfig{
-			Mouse:                  MouseConfig{Enabled: true},
+			Mouse:                  MouseConfig{Enabled: true, DoubleClickMs: 400},
 			ResultPageSize:         200,
 			ResultPrefetchRows:     50,
 			PrefetchThreshold:      25,

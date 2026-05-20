@@ -129,6 +129,10 @@ type ActionTranslations struct {
 	ResultFilterPrev      string
 	ResultFilterClear     string
 
+	// In-grid sort (dbsavvy-uv0.5).
+	ResultSortPick      string
+	ResultSortPickLabel string
+
 	// Connection lifecycle.
 	AddConnection  string
 	OpenConnection string
@@ -252,6 +256,9 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultFilterNext:      "Jump to next filter match",
 			ResultFilterPrev:      "Jump to previous filter match",
 			ResultFilterClear:     "Clear result filter",
+
+			ResultSortPick:      "Sort rows by column",
+			ResultSortPickLabel: "sort by column",
 
 			AddConnection:  "Add Connection",
 			OpenConnection: "Open Connection",

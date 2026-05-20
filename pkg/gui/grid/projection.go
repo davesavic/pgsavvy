@@ -3,13 +3,13 @@ package grid
 // project returns the ordered list of row indices into snap.rows that
 // should be rendered, after composing filter -> sort -> hide-cols.
 //
-// Filter is implemented here (dbsavvy-uv0.4). Sort (dbsavvy-uv0.5) and
-// hide-cols (dbsavvy-uv0.6) keep their no-op slots so the composition
-// pipeline is already in place when those tasks land; T5 and T6 fill in
-// their slot without touching the surrounding wiring.
+// Filter is implemented in filter.go (dbsavvy-uv0.4); sort is implemented
+// in sort.go (dbsavvy-uv0.5); hide-cols (dbsavvy-uv0.6) keeps its no-op
+// slot here for symmetry — the hide operation is on the column axis, not
+// the row axis, so it returns the row-index list unchanged.
 func project(snap viewSnapshot) []int {
 	indices := applyFilter(snap)
-	indices = applySort(snap, indices)     // T5 placeholder.
+	indices = applySort(snap, indices)
 	indices = applyHideCols(snap, indices) // T6 placeholder (row-axis no-op).
 	return indices
 }
@@ -32,10 +32,6 @@ func applyFilter(snap viewSnapshot) []int {
 	}
 	return out
 }
-
-// applySort is the dbsavvy-uv0.5 (sort) placeholder. T4 leaves the
-// row-index list unchanged.
-func applySort(_ viewSnapshot, in []int) []int { return in }
 
 // applyHideCols is the dbsavvy-uv0.6 (hide-cols) placeholder. Hide is a
 // column-axis operation, not a row-axis one; the slot is kept here for

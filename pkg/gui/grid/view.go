@@ -3,6 +3,7 @@ package grid
 import (
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
@@ -117,7 +118,35 @@ type View struct {
 	// by SetFilter. Wired from config at chord-registration time; 0
 	// means "use defaultFilterMaxRegexBytes".
 	filterMaxRegexBytes int
+
+	// sortState carries the active column sort, if any. See sort.go for
+	// the SetSort / SortActive / SortIndicator surface. dbsavvy-uv0.5.
+	sortState sortState
+
+	// lastHeaderClick records the column + timestamp of the most recent
+	// row-0 (header) left-click. Used by HandleHeaderClick to detect a
+	// double-click on the same column inside the configured debounce
+	// window. dbsavvy-uv0.5.
+	lastHeaderClick headerClickState
+
+	// mouseDoubleClickMs is the maximum gap (in milliseconds) that still
+	// counts as a double-click on the same header. 0 falls back to
+	// defaultMouseDoubleClickMs. Wired from config at chord-registration
+	// time. dbsavvy-uv0.5.
+	mouseDoubleClickMs int
 }
+
+// headerClickState is the per-View state used by HandleHeaderClick to
+// detect a double-click. col == -1 means "no prior click recorded".
+// dbsavvy-uv0.5.
+type headerClickState struct {
+	col int
+	t   time.Time
+}
+
+// defaultMouseDoubleClickMs mirrors the config default
+// (ui.mouse.double_click_ms = 400). dbsavvy-uv0.5.
+const defaultMouseDoubleClickMs = 400
 
 // NewView returns an empty grid in its initial state: no rows, no
 // columns, cursor at (0,0), selection cleared, clipboard set to the
@@ -128,7 +157,22 @@ func NewView() *View {
 		clipboard:           noopClipboard{},
 		lastNearTailFireAt:  -1,
 		filterMaxRegexBytes: defaultFilterMaxRegexBytes,
+		lastHeaderClick:     headerClickState{col: -1},
+		mouseDoubleClickMs:  defaultMouseDoubleClickMs,
 	}
+}
+
+// SetMouseDoubleClickMs installs the maximum gap (in milliseconds) that
+// counts as a double-click on the same column header. n <= 0 falls back
+// to defaultMouseDoubleClickMs. Wired from config at chord-registration
+// time. dbsavvy-uv0.5.
+func (v *View) SetMouseDoubleClickMs(n int) {
+	if n <= 0 {
+		n = defaultMouseDoubleClickMs
+	}
+	v.mu.Lock()
+	v.mouseDoubleClickMs = n
+	v.mu.Unlock()
 }
 
 // SetTitle installs the title shown in the host gocui view's frame.
@@ -140,11 +184,15 @@ func (v *View) SetTitle(t string) {
 	v.mu.Unlock()
 }
 
-// Title returns the currently configured title string.
+// Title returns the currently configured title string with the sort
+// indicator appended when a sort is active. The base title set via
+// SetTitle is left untouched; the indicator is applied here so callers
+// (and the result-tab layout pass) see the dynamic decoration without
+// having to re-call SetTitle on every sort flip. dbsavvy-uv0.5.
 func (v *View) Title() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	return v.title
+	return v.title + sortIndicatorLocked(v.sortState, v.cols)
 }
 
 // SetColumns installs the result-set schema and resets all derived
@@ -173,6 +221,11 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 	// Clear any active /regex filter — a new schema attach is the reset
 	// signal per dbsavvy-uv0 §Architecture Decisions item 5.
 	v.filterState = filterState{}
+	// Clear any active sort: a fresh schema attach resets sort/hide/filter
+	// (dbsavvy-uv0 AD-5). T6 will reseed hide-cols from AppState after this
+	// point in its own SetColumns extension.
+	v.sortState = sortState{}
+	v.lastHeaderClick = headerClickState{col: -1}
 }
 
 // AppendRows extends the row buffer. Concurrency-safe (held under the
@@ -203,6 +256,18 @@ func (v *View) ColumnCount() int {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	return len(v.cols)
+}
+
+// ColumnName returns the configured column name at index i, or "" when
+// i is out of range. Used by the sort picker to render the column-name
+// overlay. dbsavvy-uv0.5.
+func (v *View) ColumnName(i int) string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if i < 0 || i >= len(v.cols) {
+		return ""
+	}
+	return v.cols[i].Name
 }
 
 // SetOnNearTail wires the auto-prefetch callback. Pass nil to disable.
@@ -251,10 +316,14 @@ func (v *View) snapshot() viewSnapshot {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	return viewSnapshot{
-		rows:           v.rows,
-		cols:           v.cols,
+		rows: v.rows,
+		cols: v.cols,
+		// The rendered title carries the dynamic sort indicator (e.g.
+		// " (sort: name ↑)") computed under the same RLock so Render
+		// sees a tearing-free combination of base title + sort flip.
+		// dbsavvy-uv0.5.
 		widths:         v.widths,
-		title:          v.title,
+		title:          v.title + sortIndicatorLocked(v.sortState, v.cols),
 		cursorRow:      v.cursorRow,
 		cursorCol:      v.cursorCol,
 		rowOffset:      v.rowOffset,
@@ -266,6 +335,9 @@ func (v *View) snapshot() viewSnapshot {
 		filterRe:       v.filterState.re,
 		filterAllCols:  v.filterState.allCols,
 		filterActive:   v.filterState.re != nil,
+		sortActive:     v.sortState.active(),
+		sortCol:        v.sortState.col,
+		sortDir:        v.sortState.dir,
 	}
 }
 
@@ -295,6 +367,13 @@ type viewSnapshot struct {
 	filterRe      *regexp.Regexp
 	filterAllCols bool
 	filterActive  bool
+
+	// Sort projection inputs. Same rationale as the filter trio above:
+	// Render reads the snapshot's sort fields, never v.sortState, so a
+	// concurrent SetSort cannot tear the frame. dbsavvy-uv0.5.
+	sortActive bool
+	sortCol    int
+	sortDir    int
 }
 
 // Render draws the current grid into the target gocui view. target may
@@ -451,6 +530,76 @@ func (v *View) maybeFireNearTail() {
 	v.lastNearTailFireAt = rowsLen
 	v.mu.Unlock()
 	cb(ResultPrefetchRows)
+}
+
+// HandleHeaderClick processes a mouse left-click at view-relative (x, y).
+// y == 0 means the click landed on the header row; y > 0 is a data-cell
+// click and is currently a no-op (preserves the row-select invariant from
+// the AC).
+//
+// On a header click the (x) coordinate is translated to a column index
+// using the snapshot's column-width layout (frozen-first-col + colOffset
+// honored). If a prior header click on the SAME column happened within
+// the configured mouseDoubleClickMs window, this click counts as a
+// double-click and SetSort(col) fires. Otherwise the click is recorded
+// so the NEXT click against the same column within the window completes
+// the double-click. The recorded col is reset on any click against a
+// different column.
+//
+// The now argument is injected so tests can drive the debounce state
+// machine deterministically; production callers pass time.Now().
+//
+// dbsavvy-uv0.5.
+func (v *View) HandleHeaderClick(x, y int, now time.Time) {
+	if y != 0 {
+		// Non-header click. AC: data-row clicks must NOT alter sort state
+		// or the recorded prior-click; only row==0 participates.
+		return
+	}
+	col := v.headerColumnAt(x)
+	if col < 0 {
+		return
+	}
+	v.mu.Lock()
+	window := time.Duration(v.mouseDoubleClickMs) * time.Millisecond
+	prior := v.lastHeaderClick
+	if prior.col == col && !prior.t.IsZero() && now.Sub(prior.t) <= window {
+		// Inside window: this is the second click of the pair → sort cycle.
+		// Reset prior-click so the NEXT click starts a fresh first-click.
+		v.lastHeaderClick = headerClickState{col: -1}
+		v.mu.Unlock()
+		v.SetSort(col)
+		return
+	}
+	// Either no prior click, prior on a different column, or window
+	// expired — record this as the new first-click.
+	v.lastHeaderClick = headerClickState{col: col, t: now}
+	v.mu.Unlock()
+}
+
+// headerColumnAt translates a view-relative x coordinate to the column
+// index under the header at that position, or -1 when x lands beyond the
+// visible columns. Mirrors the layout walk in renderHeaderLine so the
+// hit-test stays in sync with what the user sees on screen.
+//
+// Caller must NOT hold v.mu; the function acquires its own RLock.
+func (v *View) headerColumnAt(x int) int {
+	snap := v.snapshot()
+	if len(snap.cols) == 0 || x < 0 {
+		return -1
+	}
+	used := 0
+	for _, c := range visibleColumnOrder(snap) {
+		w := effectiveWidth(snap.widths, c)
+		// Column c occupies [used, used+w); the trailing space separator
+		// is NOT part of the clickable region (clicking the gap between
+		// two columns falls into neither).
+		if x >= used && x < used+w {
+			return c
+		}
+		used += w + 1
+	}
+	return -1
 }
 
 // effectiveWidth returns the per-column width to use for layout,
