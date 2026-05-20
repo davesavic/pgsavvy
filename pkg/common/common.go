@@ -1,6 +1,7 @@
 package common
 
 import (
+	"io"
 	"runtime"
 	"sync/atomic"
 
@@ -21,6 +22,9 @@ var getGOOS = func() string { return runtime.GOOS }
 // every receiver downstream. The field layout is FROZEN for the foundation
 // epic; downstream extensions require epic-level review. See DESIGN.md §5 and
 // §15.3.
+//
+// Exception: LogCloser is a field-only addition authorized by epic
+// dbsavvy-8s2 (AD-18) for per-session log file teardown in M15c.
 type Common struct {
 	Log *logrus.Logger
 	Tr  *i18n.TranslationSet
@@ -34,6 +38,11 @@ type Common struct {
 	// Populated by entry_point.Start after NewCommon. Empty in tests that
 	// don't exercise persistence (dbsavvy-wwd.9).
 	StateDir string
+	// LogCloser closes the per-session log file during M15c shutdown.
+	// Field-only addition (AD-18); NewCommon does not accept it.
+	// entry_point.Start sets it after NewCommon, mirroring StateDir.
+	// nil-tolerant — tests that build a *Common directly leave it nil.
+	LogCloser io.Closer
 }
 
 // NewCommon constructs a *Common wired to the supplied dependencies. It panics

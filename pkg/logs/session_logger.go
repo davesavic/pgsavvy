@@ -11,10 +11,19 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 )
+
+// LogCloser is the published shutdown contract for the per-session logger.
+// Implementations close the underlying file. CloseWithDeadline runs Close in
+// a goroutine and force-closes the fd if Close exceeds d (AD-16).
+type LogCloser interface {
+	io.Closer
+	CloseWithDeadline(d time.Duration) error
+}
 
 const (
 	sessionFilePrefix = "dbsavvy-"
@@ -26,8 +35,9 @@ const (
 // logrus logger configured to route DEBUG+ to that file (gated by
 // opts.Categories, if non-empty) and WARN+ to opts.Stderr.
 //
-// The returned io.Closer closes only the underlying file; close is idempotent.
-func Open(opts Options) (*logrus.Logger, io.Closer, error) {
+// The returned LogCloser closes only the underlying file; close is idempotent.
+// CloseWithDeadline force-closes the fd on timeout (AD-16).
+func Open(opts Options) (*logrus.Logger, LogCloser, error) {
 	if opts.Dir == "" {
 		return nil, nil, errors.New("logs: Options.Dir is empty (HOME/XDG_STATE_HOME may be unset)")
 	}
@@ -140,6 +150,23 @@ func (c *sessionCloser) Close() error {
 		c.err = c.f.Close()
 	})
 	return c.err
+}
+
+// CloseWithDeadline runs Close in a goroutine. If it doesn't return within d,
+// the underlying fd (when the file is backed by *os.File) is force-closed via
+// syscall.Close and a single line is written to os.Stderr. Returns the Close
+// error on success, or a deadline-exceeded error on timeout.
+func (c *sessionCloser) CloseWithDeadline(d time.Duration) error {
+	done := make(chan error, 1)
+	go func() { done <- c.Close() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(d):
+		forceCloseFd(c.f)
+		fmt.Fprintln(os.Stderr, "dbsavvy: log file close timed out; fd force-closed")
+		return errors.New("logs: close deadline exceeded")
+	}
 }
 
 // --- hooks ------------------------------------------------------------------

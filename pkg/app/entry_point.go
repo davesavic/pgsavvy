@@ -18,8 +18,15 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/env"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
+
+// disableSessionLogEnv is the kill switch (SC#8). When set to "1", the app
+// reverts to the pre-feature stderr-only WarnLevel logger with no file and no
+// redaction hook — for emergency rollback when the session log itself causes
+// problems.
+const disableSessionLogEnv = "DBSAVVY_DISABLE_SESSION_LOG"
 
 // BuildInfo carries build-time metadata injected via -ldflags.
 type BuildInfo struct {
@@ -71,11 +78,11 @@ func Start(build *BuildInfo, args []string) error {
 	_ = store.Load() // missing state file → defaults; not an error.
 
 	tr := i18n.EnglishTranslationSet()
-	log := logrus.New()
-	log.SetLevel(logrus.WarnLevel)
+	log, logCloser := wireSessionLogger(stateDir, fs, build)
 
 	c := common.NewCommon(log, tr, cfg, &common.AppState{}, fs)
 	c.StateDir = stateDir
+	c.LogCloser = logCloser
 
 	connectionsProvider := func() []models.Connection {
 		conns, _ := config.LoadConnections(fs, connectionsPath)
@@ -103,4 +110,45 @@ func Start(build *BuildInfo, args []string) error {
 	defer func() { _ = g.Close() }()
 
 	return g.RunAndHandleError()
+}
+
+// wireSessionLogger builds the primary logger. Behavior:
+//   - DBSAVVY_DISABLE_SESSION_LOG=1 → pre-feature stderr-only WarnLevel logger
+//     with no file and no redaction hook (SC#8 kill switch).
+//   - logs.Open success → DEBUG-level file logger + stderr Warn+ + redaction hook.
+//   - logs.Open failure → fallback stderr logger WITH redaction hook installed
+//     (AD-13d) and a single Warn line documenting the failure. App still starts.
+func wireSessionLogger(stateDir string, fs afero.Fs, build *BuildInfo) (*logrus.Logger, io.Closer) {
+	if os.Getenv(disableSessionLogEnv) == "1" {
+		log := logrus.New()
+		log.SetLevel(logrus.WarnLevel)
+		return log, nil
+	}
+
+	logger, closer, err := logs.Open(logs.Options{
+		Dir:            stateDir,
+		FS:             fs,
+		RetentionCount: 20,
+		Redactor:       logs.DefaultRedactor(),
+		BuildInfo: logs.BuildInfo{
+			Version: build.Version,
+			Commit:  build.Commit,
+			Date:    build.Date,
+		},
+	})
+	if err != nil {
+		fb := newFallbackLogger()
+		fb.WithError(err).Warn("logs: session logger open failed; using stderr fallback")
+		return fb, nil
+	}
+	return logger, closer
+}
+
+// newFallbackLogger builds a stderr WarnLevel logrus with the default
+// redactor hook installed (AD-13d). Used when logs.Open fails.
+func newFallbackLogger() *logrus.Logger {
+	log := logrus.New()
+	log.SetLevel(logrus.WarnLevel)
+	log.AddHook(logs.DefaultRedactor())
+	return log
 }

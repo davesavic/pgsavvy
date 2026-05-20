@@ -1,7 +1,10 @@
 package orchestrator_test
 
 import (
+	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
@@ -19,6 +22,14 @@ import (
 // driver already installed (wireWithDriver run). Returns both for
 // assertions.
 func buildTestGui(t *testing.T) (*orchestrator.Gui, *testfake.RecorderGuiDriver) {
+	t.Helper()
+	g, rec, _ := buildTestGuiWithCommon(t)
+	return g, rec
+}
+
+// buildTestGuiWithCommon is buildTestGui plus the *common.Common it built,
+// for tests that need to assign field-only additions like LogCloser (AD-18).
+func buildTestGuiWithCommon(t *testing.T) (*orchestrator.Gui, *testfake.RecorderGuiDriver, *common.Common) {
 	t.Helper()
 	fs := afero.NewMemMapFs()
 	log := logrus.New()
@@ -38,7 +49,7 @@ func buildTestGui(t *testing.T) (*orchestrator.Gui, *testfake.RecorderGuiDriver)
 	if err := g.UseDriverForTest(rec); err != nil {
 		t.Fatalf("UseDriverForTest: %v", err)
 	}
-	return g, rec
+	return g, rec, c
 }
 
 func TestNewGuiAttachesControllers(t *testing.T) {
@@ -106,5 +117,85 @@ func TestCloseIdempotent(t *testing.T) {
 	// Second Close must be a no-op (no panic, no error).
 	if err := g.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
+	}
+}
+
+// countingCloser records Close calls; satisfies io.Closer.
+type countingCloser struct {
+	calls atomic.Int32
+	err   error
+}
+
+func (c *countingCloser) Close() error {
+	c.calls.Add(1)
+	return c.err
+}
+
+// slowCloser blocks Close until released or the test ends. Satisfies the
+// pkg/logs.LogCloser interface so Gui.Close exercises the deadline path.
+type slowCloser struct {
+	release chan struct{}
+	closed  atomic.Bool
+}
+
+func (s *slowCloser) Close() error {
+	<-s.release
+	s.closed.Store(true)
+	return nil
+}
+
+func (s *slowCloser) CloseWithDeadline(d time.Duration) error {
+	done := make(chan error, 1)
+	go func() { done <- s.Close() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(d):
+		return errors.New("deadline exceeded")
+	}
+}
+
+func TestClose_InvokesLogCloser_M15cStep7(t *testing.T) {
+	g, _, cmn := buildTestGuiWithCommon(t)
+	c := &countingCloser{}
+	cmn.LogCloser = c
+
+	if err := g.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if got := c.calls.Load(); got != 1 {
+		t.Fatalf("LogCloser.Close call count = %d, want 1", got)
+	}
+}
+
+func TestClose_LogCloserRespectsDeadline(t *testing.T) {
+	g, _, cmn := buildTestGuiWithCommon(t)
+	slow := &slowCloser{release: make(chan struct{})}
+	cmn.LogCloser = slow
+	t.Cleanup(func() { close(slow.release) })
+
+	start := time.Now()
+	_ = g.Close()
+	elapsed := time.Since(start)
+	// Deadline is 2 s; allow 1 s slack for scheduling noise.
+	if elapsed > 3*time.Second {
+		t.Fatalf("Close blocked for %v; expected ≤ 3 s under 2 s deadline", elapsed)
+	}
+	if elapsed < 1900*time.Millisecond {
+		t.Fatalf("Close returned in %v; expected near 2 s deadline", elapsed)
+	}
+}
+
+func TestQuitOnSignal_DoesNotCloseLoggerEarly(t *testing.T) {
+	g, _, cmn := buildTestGuiWithCommon(t)
+	c := &countingCloser{}
+	cmn.LogCloser = c
+
+	g.QuitOnSignal()
+	// QuitOnSignal only enqueues a quit closure; it must never touch the
+	// logger directly. Logger close is the responsibility of g.Close()
+	// after MainLoop unwinds.
+	if got := c.calls.Load(); got != 0 {
+		t.Fatalf("QuitOnSignal invoked LogCloser %d times; expected 0", got)
 	}
 }

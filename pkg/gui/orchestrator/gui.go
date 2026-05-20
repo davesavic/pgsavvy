@@ -34,6 +34,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/presentation"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
@@ -947,8 +948,16 @@ func (g *Gui) RunAndHandleError() error {
 	return err
 }
 
-// Close runs the M15c shutdown sequence: Flush → Close store → Close
-// driver. Idempotent.
+// Close runs the M15c shutdown sequence (epic dbsavvy-8s2 AD-8 revised):
+//  1. workersWG.Wait
+//  2. activeSQLSession.Close
+//  3. queryRunner.Unbind
+//  4. history.Close
+//  5. store.Flush + store.Close
+//  6. driver.Close (gocui TUI driver)
+//  7. LogCloser.Close (2 s deadline; AD-16)
+//
+// Idempotent.
 func (g *Gui) Close() error {
 	if g.closed {
 		return nil
@@ -994,6 +1003,21 @@ func (g *Gui) Close() error {
 	if g.driver != nil {
 		if err := g.driver.Close(); err != nil && firstErr == nil {
 			firstErr = err
+		}
+	}
+	// Step 7 — close the per-session log file LAST so any error emitted
+	// by the steps above lands in the log (AD-8 revised). Wrapped in a
+	// 2 s deadline (AD-16); on timeout the fd is force-closed.
+	if g.deps.Common != nil && g.deps.Common.LogCloser != nil {
+		closer := g.deps.Common.LogCloser
+		var cerr error
+		if lc, ok := closer.(logs.LogCloser); ok {
+			cerr = lc.CloseWithDeadline(2 * time.Second)
+		} else {
+			cerr = closer.Close()
+		}
+		if cerr != nil && firstErr == nil {
+			firstErr = cerr
 		}
 	}
 	return firstErr
