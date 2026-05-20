@@ -169,7 +169,28 @@ func (g *Gui) RunLayout(w, h int) error {
 	// list collapses to a no-op so the layout pass works pre-wire.
 	if g.resultTabsH != nil {
 		if d, ok := dims["secondary"]; ok && d.X1 > d.X0 && d.Y1 > d.Y0 {
-			g.resultTabsH.LayoutPaint(g.driver, d.X0, d.Y0, d.X1, d.Y1)
+			activeTabView := g.resultTabsH.LayoutPaint(g.driver, d.X0, d.Y0, d.X1, d.Y1)
+			// Attach the RESULT_GRID master editor to the active tab's
+			// view every frame so RESULT_GRID-scoped chords (gt/gT, /, n,
+			// G, ]p, [p, <leader>X, <leader>=, <leader>x, <leader>s,
+			// <leader>gH) dispatch when focus lands on a result tab.
+			// SetMasterEditor is idempotent; the editor was built once
+			// in installKeyDispatch (dbsavvy-usj).
+			if activeTabView != "" {
+				if ed, ok := g.masterEditors[types.RESULT_GRID]; ok {
+					_ = g.driver.SetMasterEditor(activeTabView, ed)
+				}
+				// Register the active tab view in the rails map so
+				// applyFocusFrameColors below can paint ActiveBorder
+				// when focus is on result_tab_<slot>; without this the
+				// highlight visibly leaves QUERY_EDITOR but never lands
+				// on the result pane. Inactive tabs are fully occluded
+				// by SetViewOnTop so their FrameColor never shows.
+				// dbsavvy-usj.
+				if v, err := g.driver.ViewByName(activeTabView); err == nil && v != nil {
+					rails[activeTabView] = v
+				}
+			}
 		}
 	}
 

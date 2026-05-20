@@ -369,6 +369,13 @@ type Tab struct {
 	disposeOnce  sync.Once
 	disposed     atomic.Bool
 
+	// baseCtx is the IBaseContext attached to this tab so the focus stack
+	// can route to result_tab_<slot> through rail-switch bindings
+	// (dbsavvy-usj). For plan tabs the active context surfaced through
+	// Context() is planCtx instead — plan tabs carry their own PLAN-keyed
+	// context for the plan controller's bindings.
+	baseCtx guicontext.BaseContext
+
 	doneCh chan struct{} // closed when the tab is fully torn down
 
 	// connID + resultIdentity carry the per-tab persistence key for the
@@ -558,6 +565,30 @@ func (h *ResultTabsHelper) OpenPlanTab(label string, plan models.Plan) error {
 	h.setActive(tab.id)
 	h.materialiseView(tab)
 	return nil
+}
+
+// Context returns the IBaseContext the focus stack should push to land
+// on this tab. Plan tabs surface their PlanContext (PLAN key, PLAN
+// bindings); every other tab surfaces a result_tab_<slot>-keyed
+// BaseContext built at allocTab. dbsavvy-usj.
+func (t *Tab) Context() types.IBaseContext {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.planCtx != nil {
+		return t.planCtx
+	}
+	return &t.baseCtx
+}
+
+// ActiveContext returns the IBaseContext of the currently-active tab,
+// or nil when no tab exists. The rail-switch-to-results handler calls
+// this when pushing focus onto the result pane. dbsavvy-usj.
+func (h *ResultTabsHelper) ActiveContext() types.IBaseContext {
+	t := h.Active()
+	if t == nil {
+		return nil
+	}
+	return t.Context()
 }
 
 // ActivePlanContext returns the *context.PlanContext attached to the
@@ -1018,6 +1049,12 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 		state:     StateRunning, // overwritten by caller as needed
 		doneCh:    make(chan struct{}),
 		grid:      grid.NewView(),
+		baseCtx: guicontext.NewBaseContext(guicontext.BaseContextOpts{
+			Key:      types.ResultTabKey(slot),
+			ViewName: string(types.ResultTabKey(slot)),
+			Kind:     types.MAIN_CONTEXT,
+			Title:    label,
+		}),
 	}
 	// Propagate the configured /regex byte cap into the grid view so a
 	// hot-reloaded config value takes effect on the next tab's filter.

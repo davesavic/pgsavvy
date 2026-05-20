@@ -155,6 +155,7 @@ type ActionTranslations struct {
 	RailColumns     string
 	RailIndexes     string
 	RailQueryEditor string
+	RailResults     string
 
 	// Cursor movement and confirmation primitives used by every side
 	// rail controller. Added by T7a (enn.8) to satisfy the M11i rule
@@ -280,6 +281,7 @@ func EnglishTranslationSet() *TranslationSet {
 			RailColumns:     "Columns",
 			RailIndexes:     "Indexes",
 			RailQueryEditor: "Query Editor",
+			RailResults:     "Results",
 
 			Down:    "Down",
 			Up:      "Up",

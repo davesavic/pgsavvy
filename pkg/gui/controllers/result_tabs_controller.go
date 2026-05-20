@@ -137,6 +137,11 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			Description: s.description,
 		})
 	}
+	// dbsavvy-usj: rail-switch chords (1..6 + <tab>) under RESULT_GRID so
+	// the user can navigate back out of the result pane. Without these
+	// the master editor (scope=RESULT_GRID) dispatches FellThrough for
+	// every digit and Tab, leaving the user stranded on the active tab.
+	out = append(out, railSwitchBindings(string(types.RESULT_GRID), tr)...)
 	return out
 }
 

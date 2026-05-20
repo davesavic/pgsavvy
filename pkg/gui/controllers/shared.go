@@ -60,6 +60,12 @@ func railSwitchBindings(view string, tr *i18n.TranslationSet) []*types.ChordBind
 			Description: tr.Actions.RailQueryEditor,
 		},
 		{
+			Sequence:    []types.ChordKey{{Code: '6'}},
+			Scope:       scope,
+			ActionID:    commands.RailSwitchResults,
+			Description: tr.Actions.RailResults,
+		},
+		{
 			Sequence:    []types.ChordKey{{Special: types.KeyTab}},
 			Scope:       scope,
 			ActionID:    commands.RailSwitchNext,
@@ -68,24 +74,34 @@ func railSwitchBindings(view string, tr *i18n.TranslationSet) []*types.ChordBind
 	}
 }
 
-// RegisterRailSwitchActions registers the six rail-switch action IDs
+// ResultsContextResolver returns the IBaseContext of the active result
+// tab, or nil when no tab is open. The orchestrator wires this through
+// to the live ResultTabsHelper at boot; tests pass a nil resolver and
+// the digit-6 / cycle-to-results path falls through to a no-op.
+type ResultsContextResolver func() types.IBaseContext
+
+// RegisterRailSwitchActions registers the seven rail-switch action IDs
 // with reg, each wired to Push() the named context onto the focus
-// stack. tree owns the focus stack; ctxTree holds the Context
-// instances. 1/2/3/4 jump to Schemas/Tables/Columns/Indexes; 5 jumps
-// to the QueryEditor main pane; Tab cycles
-// connections→schemas→tables→columns→indexes→query_editor→connections.
+// stack. tree owns the focus stack; ctxTree holds the static Context
+// instances; resolveResults resolves the dynamic result-tab context.
+// 1/2/3/4 jump to Schemas/Tables/Columns/Indexes; 5 jumps to the
+// QueryEditor main pane; 6 jumps to the active result tab; Tab cycles
+// connections→schemas→tables→columns→indexes→query_editor→results
+// →connections.
 //
-// Push (not Replace) is used because the QueryEditor is MAIN_CONTEXT
-// while the rails are SIDE_CONTEXT — ContextTree.Push has the right
-// per-kind semantics: SIDE_CONTEXT wipes the stack (clean rail state),
-// MAIN_CONTEXT removes any existing MAIN and appends (layers on top of
-// the rail at the bottom). Replace would leak QueryEditor onto a rail
-// slot or stack two SIDE_CONTEXTs.
+// Push (not Replace) is used because the QueryEditor / result tabs are
+// MAIN_CONTEXT while the rails are SIDE_CONTEXT — ContextTree.Push has
+// the right per-kind semantics: SIDE_CONTEXT wipes the stack (clean
+// rail state), MAIN_CONTEXT removes any existing MAIN and appends
+// (layers on top of the rail at the bottom). Replace would leak
+// QueryEditor onto a rail slot or stack two SIDE_CONTEXTs.
 //
 // Idempotent: ErrDuplicateAction from a re-registration is swallowed.
 // nil reg/tree/ctxTree falls back to a no-op registration so tests that
-// build a partial wiring continue to compile.
-func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ctxTree *context.ContextTree) {
+// build a partial wiring continue to compile. nil resolveResults is
+// equivalent to "no result tabs ever exist" — digit 6 and cycle-to-
+// results are silent no-ops, mirroring the pre-usj behaviour.
+func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ctxTree *context.ContextTree, resolveResults ResultsContextResolver) {
 	if reg == nil {
 		return
 	}
@@ -97,6 +113,7 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 			commands.RailSwitchColumns,
 			commands.RailSwitchIndexes,
 			commands.RailSwitchQueryEditor,
+			commands.RailSwitchResults,
 			commands.RailSwitchNext,
 		} {
 			_ = reg.Register(&commands.Command{ID: id, Description: id, Handler: noop})
@@ -119,18 +136,72 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 	_ = reg.Register(&commands.Command{ID: commands.RailSwitchIndexes, Description: commands.RailSwitchIndexes, Handler: jumpTo(ctxTree.Indexes)})
 	_ = reg.Register(&commands.Command{ID: commands.RailSwitchQueryEditor, Description: commands.RailSwitchQueryEditor, Handler: jumpTo(ctxTree.QueryEditor)})
 
+	// Digit 6 — push the active result tab onto the focus stack. The
+	// resolver is invoked at fire time so the dispatch always sees the
+	// current active tab. nil resolver / nil active tab silently no-ops
+	// (no toast — keystrokes that produce nothing are common in TUIs and
+	// the user gets immediate visual feedback via the focus border).
+	_ = reg.Register(&commands.Command{
+		ID:          commands.RailSwitchResults,
+		Description: commands.RailSwitchResults,
+		Handler: func(commands.ExecCtx) error {
+			if resolveResults == nil {
+				return nil
+			}
+			target := resolveResults()
+			if target == nil {
+				return nil
+			}
+			return tree.Push(target)
+		},
+	})
+
 	// Tab cycles linearly through every rail plus the QueryEditor main
-	// pane. Lookup the next entry from the current view name; if the
-	// current view is not in the cycle (e.g. focus is on a popup that
-	// somehow leaked Tab through), fall through to Schemas as a safe
-	// default.
-	cycle := []types.IBaseContext{
-		ctxTree.Connections,
-		ctxTree.Schemas,
-		ctxTree.Tables,
-		ctxTree.Columns,
-		ctxTree.Indexes,
-		ctxTree.QueryEditor,
+	// pane and the active result tab. The result entry is a closure that
+	// resolves dynamically — if no tab is open, cycle skips that slot.
+	// Lookup the next entry from the current view name; if the current
+	// view is not in the cycle (e.g. focus is on a popup that somehow
+	// leaked Tab through), fall through to Schemas as a safe default.
+	type cycleEntry struct {
+		// resolve returns the next IBaseContext to push, or nil when the
+		// entry is currently unavailable (e.g. results when no tab open).
+		resolve func() types.IBaseContext
+		// viewName returns the view-name identifying this entry on the
+		// focus stack. The result entry uses the live active tab's view
+		// name so the current-view lookup matches result_tab_<slot>.
+		viewName func() string
+	}
+	staticEntry := func(c types.IBaseContext) cycleEntry {
+		return cycleEntry{
+			resolve:  func() types.IBaseContext { return c },
+			viewName: func() string { return c.GetViewName() },
+		}
+	}
+	cycle := []cycleEntry{
+		staticEntry(ctxTree.Connections),
+		staticEntry(ctxTree.Schemas),
+		staticEntry(ctxTree.Tables),
+		staticEntry(ctxTree.Columns),
+		staticEntry(ctxTree.Indexes),
+		staticEntry(ctxTree.QueryEditor),
+		{
+			resolve: func() types.IBaseContext {
+				if resolveResults == nil {
+					return nil
+				}
+				return resolveResults()
+			},
+			viewName: func() string {
+				if resolveResults == nil {
+					return ""
+				}
+				c := resolveResults()
+				if c == nil {
+					return ""
+				}
+				return c.GetViewName()
+			},
+		},
 	}
 	_ = reg.Register(&commands.Command{
 		ID:          commands.RailSwitchNext,
@@ -141,17 +212,20 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 				return tree.Push(ctxTree.Schemas)
 			}
 			curName := cur.GetViewName()
-			for i, c := range cycle {
-				if c == nil {
+			for i := range cycle {
+				if cycle[i].viewName() != curName {
 					continue
 				}
-				if c.GetViewName() == curName {
-					next := cycle[(i+1)%len(cycle)]
-					if next == nil {
-						return nil
+				// Walk forward looking for the next entry whose resolve
+				// returns non-nil; skips an absent result slot rather
+				// than wrapping the cycle through nil.
+				for off := 1; off <= len(cycle); off++ {
+					next := cycle[(i+off)%len(cycle)].resolve()
+					if next != nil {
+						return tree.Push(next)
 					}
-					return tree.Push(next)
 				}
+				return nil
 			}
 			return tree.Push(ctxTree.Schemas)
 		},

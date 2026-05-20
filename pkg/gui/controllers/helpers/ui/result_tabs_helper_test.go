@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -1505,5 +1506,65 @@ func TestOpenTab_InstallsStreamColumnsOnGrid(t *testing.T) {
 		if name := tab.Grid().ColumnName(i); name != want.Name {
 			t.Errorf("grid.ColumnName(%d) = %q, want %q", i, name, want.Name)
 		}
+	}
+}
+
+// --- dbsavvy-usj: focus-stack IBaseContext for result tabs -----------------
+
+// TestActiveContext_NilWhenNoTabs verifies that ActiveContext() returns
+// nil before any tab is opened. The rail-switch handler relies on this
+// to silently no-op digit 6 when no result tabs exist (dbsavvy-usj).
+func TestActiveContext_NilWhenNoTabs(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	if got := h.ActiveContext(); got != nil {
+		t.Fatalf("ActiveContext() with no tabs = %v, want nil", got)
+	}
+}
+
+// TestActiveContext_ResultTabReturnsResultTabKey verifies that the
+// IBaseContext surfaced for a non-plan tab carries the slot-specific
+// result_tab_<slot> Key and matching ViewName, and is MAIN_CONTEXT
+// (so ContextTree.Push lands it correctly on the main slot).
+// dbsavvy-usj.
+func TestActiveContext_ResultTabReturnsResultTabKey(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	if err := h.openTab("SELECT 1", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	ctx := h.ActiveContext()
+	if ctx == nil {
+		t.Fatal("ActiveContext() with one open tab returned nil")
+	}
+	tab := h.Active()
+	if tab == nil {
+		t.Fatal("Active() with one open tab returned nil")
+	}
+	wantKey := types.ResultTabKey(tab.Slot())
+	if ctx.GetKey() != wantKey {
+		t.Errorf("ctx.GetKey() = %q, want %q", ctx.GetKey(), wantKey)
+	}
+	if ctx.GetViewName() != string(wantKey) {
+		t.Errorf("ctx.GetViewName() = %q, want %q", ctx.GetViewName(), string(wantKey))
+	}
+	if ctx.GetKind() != types.MAIN_CONTEXT {
+		t.Errorf("ctx.GetKind() = %v, want MAIN_CONTEXT", ctx.GetKind())
+	}
+}
+
+// TestActiveContext_PlanTabSurfacesPlanContext verifies that a plan tab
+// surfaces its PlanContext (PLAN key) rather than the slot-specific
+// BaseContext, so PLAN-scoped controller bindings dispatch correctly
+// when focus lands on a plan tab. dbsavvy-usj.
+func TestActiveContext_PlanTabSurfacesPlanContext(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	if err := h.OpenPlanTab("EXPLAIN", models.Plan{RawText: "Seq Scan"}); err != nil {
+		t.Fatalf("OpenPlanTab: %v", err)
+	}
+	ctx := h.ActiveContext()
+	if ctx == nil {
+		t.Fatal("ActiveContext() with one open plan tab returned nil")
+	}
+	if ctx.GetKey() != types.PLAN {
+		t.Errorf("plan tab ctx.GetKey() = %q, want PLAN", ctx.GetKey())
 	}
 }

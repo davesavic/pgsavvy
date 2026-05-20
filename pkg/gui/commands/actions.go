@@ -56,6 +56,7 @@ const (
 	RailSwitchColumns     = "rail.switch.columns"
 	RailSwitchIndexes     = "rail.switch.indexes"
 	RailSwitchQueryEditor = "rail.switch.query_editor"
+	RailSwitchResults     = "rail.switch.results"
 	RailSwitchNext        = "rail.switch.next"
 
 	// MenuConfirm / MenuCancel — owned by MenuController. `<cr>` / `<esc>`
@@ -323,6 +324,7 @@ func AllActionIDs() []string {
 		RailSwitchColumns,
 		RailSwitchIndexes,
 		RailSwitchQueryEditor,
+		RailSwitchResults,
 		RailSwitchNext,
 		MenuConfirm,
 		MenuCancel,

@@ -564,9 +564,19 @@ func (g *Gui) wireWithDriver() error {
 	// Register every controller's action handlers with the registry.
 	g.controllers.RegisterActions(g.cmdRegistry)
 
-	// Rail-switch (1-4, Tab) needs the focus tree + context registry,
-	// which the Controllers aggregate does not hold; register here.
-	controllers.RegisterRailSwitchActions(g.cmdRegistry, g.tree, g.registry)
+	// Rail-switch (1-6, Tab) needs the focus tree + context registry,
+	// which the Controllers aggregate does not hold; register here. The
+	// results-resolver closes over g.resultTabsH so digit 6 / cycle-to-
+	// results push the live active tab's IBaseContext onto the focus
+	// stack (dbsavvy-usj). nil helper → resolver returns nil → digit 6
+	// is a silent no-op (e.g. pre-Connect, helper not yet wired).
+	resolveResults := func() types.IBaseContext {
+		if g.resultTabsH == nil {
+			return nil
+		}
+		return g.resultTabsH.ActiveContext()
+	}
+	controllers.RegisterRailSwitchActions(g.cmdRegistry, g.tree, g.registry, resolveResults)
 
 	// Cheatsheet popup: capture the focused scope, hand it to the
 	// CheatsheetContext, then push the context onto the focus stack.
@@ -809,6 +819,16 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 	if err := g.installShimsForScope(trieSet, types.GLOBAL, ""); err != nil {
 		return err
 	}
+
+	// RESULT_GRID master editor (dbsavvy-usj). The context is a
+	// StubContext (no static view), so the Flatten loop above skipped
+	// it; build the editor here so RunLayout's Tier-1.5 pass can attach
+	// it to whichever dynamic result_tab_<slot> view is currently
+	// active. SetMasterEditor is idempotent — reattach per frame is
+	// cheap, and re-pushes between tabs do not strand a stale editor on
+	// the prior view (gocui's per-view Editor pointer is replaced on
+	// attach, and result_tab views never become editable text targets).
+	g.masterEditors[types.RESULT_GRID] = NewMasterEditor(ngocui, g.matcher, types.RESULT_GRID)
 	return nil
 }
 
