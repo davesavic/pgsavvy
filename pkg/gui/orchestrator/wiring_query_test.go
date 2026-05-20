@@ -81,6 +81,13 @@ func (s *wireFakeSession) Begin(_ context.Context, _ models.TxOptions) (drivers.
 }
 func (s *wireFakeSession) InTransaction() bool                     { return false }
 func (s *wireFakeSession) CurrentTransaction() drivers.Transaction { return nil }
+func (s *wireFakeSession) Encoder() drivers.Encoder                { return nopEncoder{} }
+
+// nopEncoder is a no-op drivers.Encoder used by the wireFake test session.
+// It returns "NULL" for any input — the wiring tests never inspect literals.
+type nopEncoder struct{}
+
+func (nopEncoder) EncodeLiteral(_ any, _ uint32) string { return "NULL" }
 
 type wireFakeConn struct {
 	acquired atomic.Int32

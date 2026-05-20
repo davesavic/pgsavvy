@@ -148,6 +148,14 @@ func (s *fakeSess) Begin(context.Context, models.TxOptions) (drivers.Transaction
 }
 func (s *fakeSess) InTransaction() bool                     { return s.inTx.Load() }
 func (s *fakeSess) CurrentTransaction() drivers.Transaction { return s.currentTx }
+func (s *fakeSess) Encoder() drivers.Encoder                { return nopEncoder{} }
+
+// nopEncoder is a no-op drivers.Encoder used by the SQLSession fake session.
+// It returns "NULL" for any input — these tests do not exercise literal
+// encoding.
+type nopEncoder struct{}
+
+func (nopEncoder) EncodeLiteral(_ any, _ uint32) string { return "NULL" }
 
 // fakeTx is a minimal drivers.Transaction whose Rollback flips inTx.
 type fakeTx struct {

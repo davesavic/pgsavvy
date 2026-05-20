@@ -109,6 +109,14 @@ func (s *fakeSession) Begin(_ context.Context, _ models.TxOptions) (drivers.Tran
 }
 func (s *fakeSession) InTransaction() bool                     { return false }
 func (s *fakeSession) CurrentTransaction() drivers.Transaction { return nil }
+func (s *fakeSession) Encoder() drivers.Encoder                { return nopEncoder{} }
+
+// nopEncoder is a no-op drivers.Encoder used by the connect-helper fake
+// session. It returns "NULL" for any input — these unit tests never
+// exercise literal encoding.
+type nopEncoder struct{}
+
+func (nopEncoder) EncodeLiteral(_ any, _ uint32) string { return "NULL" }
 
 // fakeConnection satisfies drivers.Connection.
 type fakeConnection struct {

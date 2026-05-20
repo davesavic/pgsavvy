@@ -61,6 +61,14 @@ type Session interface {
 	Begin(ctx context.Context, opts models.TxOptions) (Transaction, error)
 	InTransaction() bool
 	CurrentTransaction() Transaction
+
+	// Encoder returns the literal encoder for this session. It is a
+	// singleton owned by the session; the returned value is safe to retain
+	// for the session's lifetime. Encoder() lives here (per epic
+	// dbsavvy-uv0 AD-3) rather than on Driver because literal encoding
+	// can depend on session-scoped GUCs (standard_conforming_strings,
+	// server_encoding).
+	Encoder() Encoder
 }
 
 // Transaction is an in-progress transaction on a Session. See DESIGN.md §11.1.

@@ -510,4 +510,8 @@ func (s *Session) InTransaction() bool { return false }
 // returns nil unconditionally.
 func (s *Session) CurrentTransaction() drivers.Transaction { return nil }
 
+// Encoder returns the stateless literal encoder for this Postgres session.
+// The same singleton value is returned on every call. See pkg/drivers/pg/encoder.go.
+func (s *Session) Encoder() drivers.Encoder { return pgEncoder }
+
 var _ drivers.Session = (*Session)(nil)
