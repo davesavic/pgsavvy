@@ -150,6 +150,20 @@ const (
 	//                    on a column = asc, second = desc, third = clear.
 	ResultSortPick = "result.sort.pick"
 
+	// In-grid hide-columns overlay (dbsavvy-uv0.6). RESULT_GRID-scoped.
+	//   ResultHideOverlay - <leader>gH opens the column-visibility overlay.
+	//                       Persistence is gated on the active tab's
+	//                       ResultIdentity.HasRowIdentity flag.
+	ResultHideOverlay = "result.hide.overlay"
+
+	// HideOverlay-scope handlers (dbsavvy-uv0.6) — owned by
+	// HideOverlayController. j/k cursor moves, <space> toggle, <esc> /
+	// q apply-and-close.
+	HideOverlayUp     = "hide_overlay.up"
+	HideOverlayDown   = "hide_overlay.down"
+	HideOverlayToggle = "hide_overlay.toggle"
+	HideOverlayClose  = "hide_overlay.close"
+
 	// Plan family — owned by PlanController (dbsavvy-uv0.8). All PLAN-
 	// scoped; published only when a plan tab is the focused context.
 	//   PlanToggle        - <CR> toggles collapse on the cursor node
@@ -352,6 +366,11 @@ func AllActionIDs() []string {
 		ResultFilterPrev,
 		ResultFilterClear,
 		ResultSortPick,
+		ResultHideOverlay,
+		HideOverlayUp,
+		HideOverlayDown,
+		HideOverlayToggle,
+		HideOverlayClose,
 		PlanToggle,
 		PlanExpandAll,
 		PlanCollapseAll,

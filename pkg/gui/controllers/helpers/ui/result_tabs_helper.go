@@ -12,11 +12,14 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/grid"
+	"github.com/davesavic/dbsavvy/pkg/gui/popup"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
@@ -227,6 +230,25 @@ type ResultTabsHelperDeps struct {
 	// counts as a double-click on a grid header. 0 falls back to grid's
 	// default (400ms). dbsavvy-uv0.5.
 	MouseDoubleClickMs int
+
+	// Store is the *common.AppStateStore used to seed/persist the
+	// per-(connID, baseTable) hidden-column set. nil disables persistence
+	// (overlay still works session-only). dbsavvy-uv0.6.
+	Store *common.AppStateStore
+
+	// PushHideOverlay pushes the HIDE_OVERLAY context onto the focus
+	// stack. Invoked by HideOverlay() after the helper has stashed the
+	// overlay state object. nil disables the modal push (overlay state
+	// is built but the popup never appears) — production wires a closure
+	// over (registry.HideOverlay.SetState(adapter); tree.Push(registry.HideOverlay)).
+	// dbsavvy-uv0.6.
+	PushHideOverlay func() error
+
+	// PopHideOverlay pops the HIDE_OVERLAY context off the focus stack.
+	// Invoked by HideOverlayClose() after the helper has committed the
+	// final hidden set + persisted it. nil disables the pop — production
+	// wires a closure over tree.Pop(). dbsavvy-uv0.6.
+	PopHideOverlay func() error
 }
 
 // defaultReadToEndWarnThreshold is the shipped ceiling above which G
@@ -253,6 +275,10 @@ type ResultTabsHelper struct {
 	mu       sync.Mutex
 	tabs     []*Tab // ordered by Slot (0..max-1)
 	activeID int64  // 0 when no tab is active
+
+	// hideOverlay tracks the currently-open <leader>gH overlay, if any.
+	// nil when no overlay is active. dbsavvy-uv0.6.
+	hideOverlay *activeHideOverlay
 }
 
 // NewResultTabsHelper constructs a helper with deps. The returned value
@@ -344,6 +370,14 @@ type Tab struct {
 	disposed     atomic.Bool
 
 	doneCh chan struct{} // closed when the tab is fully torn down
+
+	// connID + resultIdentity carry the per-tab persistence key for the
+	// hide-cols set. connID is "" and resultIdentity is the zero value
+	// until the caller invokes SetIdentity (typically right after
+	// OpenResultTab when both the connection and SQL are in hand).
+	// dbsavvy-uv0.6.
+	connID         string
+	resultIdentity query.ResultIdentity
 }
 
 // ID returns the tab's monotonically-allocated identifier. Stable for
@@ -452,6 +486,27 @@ func (t *Tab) SetCaveatShown(v bool) {
 	t.mu.Lock()
 	t.caveatShown = v
 	t.mu.Unlock()
+}
+
+// SetIdentity records the (connID, ResultIdentity) pair used by
+// dbsavvy-uv0.6 to gate hide-col persistence. The caller (typically
+// QueryEditorController right after OpenResultTab) supplies the active
+// connection ID and the heuristic result from
+// query.DetectFromQuery(sql). A zero ResultIdentity is valid — the
+// hide-cols overlay falls back to session-only mode in that case.
+func (t *Tab) SetIdentity(connID string, ri query.ResultIdentity) {
+	t.mu.Lock()
+	t.connID = connID
+	t.resultIdentity = ri
+	t.mu.Unlock()
+}
+
+// Identity returns the (connID, ResultIdentity) pair previously recorded
+// via SetIdentity. dbsavvy-uv0.6.
+func (t *Tab) Identity() (string, query.ResultIdentity) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.connID, t.resultIdentity
 }
 
 // --- Public surface (controllers.ResultTabsHelper) -----------------------
@@ -1493,6 +1548,226 @@ func (h *ResultTabsHelper) SortPick() {
 		g.SetSort(idx)
 		return nil
 	}, func() error { return nil })
+}
+
+// --- <leader>gH hide-cols overlay (dbsavvy-uv0.6) ------------------------
+
+// activeHideOverlay holds the currently-open hide overlay (if any). nil
+// when no overlay is active. Accessed under h.mu. dbsavvy-uv0.6.
+type activeHideOverlay struct {
+	tab *Tab
+	ov  *popup.HideOverlay
+}
+
+// HideOverlay opens the <leader>gH hide-cols overlay against the active
+// tab. Seeds the overlay's hidden set from the tab's current
+// grid.HiddenCols() (which itself was seeded from AppState on identity
+// attach when HasRowIdentity). Persistence on close is gated by the
+// tab's recorded ResultIdentity.HasRowIdentity flag — when false, the
+// overlay runs session-only and the footer notes it. dbsavvy-uv0.6.
+func (h *ResultTabsHelper) HideOverlay() {
+	t := h.Active()
+	if t == nil {
+		h.toast("no result tabs")
+		return
+	}
+	g := t.Grid()
+	if g == nil {
+		return
+	}
+	names := h.gridColumnNames(g)
+	if len(names) == 0 {
+		return
+	}
+	hidden := g.HiddenCols()
+	connID, ri := t.Identity()
+	persistEnabled := ri.HasRowIdentity && connID != "" && ri.BaseTable != "" && h.deps.Store != nil
+	ov := popup.NewHideOverlay(names, hidden, persistEnabled)
+
+	h.mu.Lock()
+	h.hideOverlay = &activeHideOverlay{tab: t, ov: ov}
+	h.mu.Unlock()
+	if h.deps.PushHideOverlay != nil {
+		_ = h.deps.PushHideOverlay()
+	}
+}
+
+// HideOverlayBody returns the current overlay body for rendering, or
+// the empty string when no overlay is active. Mirrors the Active+Body
+// shape the context's HideOverlayState interface requires. dbsavvy-uv0.6.
+func (h *ResultTabsHelper) HideOverlayBody() string {
+	h.mu.Lock()
+	ov := h.hideOverlay
+	h.mu.Unlock()
+	if ov == nil || ov.ov == nil {
+		return ""
+	}
+	return ov.ov.Body()
+}
+
+// HideOverlayActive reports whether the <leader>gH hide overlay is
+// currently waiting for input.
+func (h *ResultTabsHelper) HideOverlayActive() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.hideOverlay != nil && h.hideOverlay.ov != nil
+}
+
+// HideOverlayState returns the overlay state for rendering. nil when no
+// overlay is active. Test + render accessor.
+func (h *ResultTabsHelper) HideOverlayState() *popup.HideOverlay {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.hideOverlay == nil {
+		return nil
+	}
+	return h.hideOverlay.ov
+}
+
+// HideOverlayMove advances the overlay's cursor by d (+1 / -1). No-op
+// when no overlay is active.
+func (h *ResultTabsHelper) HideOverlayMove(d int) {
+	h.mu.Lock()
+	ov := h.hideOverlay
+	h.mu.Unlock()
+	if ov == nil || ov.ov == nil {
+		return
+	}
+	ov.ov.MoveCursor(d)
+}
+
+// HideOverlayToggle flips the visibility of the column under the
+// overlay's cursor. Rejects the toggle (with a toast) when it would
+// leave zero visible columns. No-op when no overlay is active.
+func (h *ResultTabsHelper) HideOverlayToggle() {
+	h.mu.Lock()
+	ov := h.hideOverlay
+	h.mu.Unlock()
+	if ov == nil || ov.ov == nil {
+		return
+	}
+	if err := ov.ov.Toggle(); err != nil {
+		h.toast(err.Error())
+	}
+}
+
+// HideOverlayClose applies the overlay's hidden set to the tab's grid,
+// persists the column-name list when persistence is enabled, and clears
+// the overlay state. <esc> handler. dbsavvy-uv0.6.
+//
+// Pop ordering: state is committed FIRST (SetHiddenCols + optional
+// MutateAndSave) so the popped popup snaps back to a grid that already
+// reflects the new hidden set. Then the focus-stack pop fires so the
+// next render frame sees the new top context.
+func (h *ResultTabsHelper) HideOverlayClose() {
+	h.mu.Lock()
+	ov := h.hideOverlay
+	h.hideOverlay = nil
+	h.mu.Unlock()
+	// Pop the popup off the focus stack on every Close path (including
+	// early returns) — callers may invoke HideOverlayClose defensively.
+	if popFn := h.deps.PopHideOverlay; popFn != nil {
+		defer func() { _ = popFn() }()
+	}
+	if ov == nil || ov.ov == nil || ov.tab == nil {
+		return
+	}
+	g := ov.tab.Grid()
+	if g == nil {
+		return
+	}
+	hiddenSet := ov.ov.HiddenSet()
+	g.SetHiddenCols(hiddenSet)
+	if !ov.ov.PersistEnabled() {
+		return
+	}
+	if h.deps.Store == nil {
+		return
+	}
+	connID, ri := ov.tab.Identity()
+	if !ri.HasRowIdentity || connID == "" || ri.BaseTable == "" {
+		return
+	}
+	colNames := g.HiddenColumnNames()
+	h.deps.Store.MutateAndSave(func(s *common.AppState) {
+		if len(colNames) == 0 {
+			// Empty set: prune the entry to keep the YAML clean.
+			if s.HiddenColumns == nil {
+				return
+			}
+			inner, ok := s.HiddenColumns[connID]
+			if !ok {
+				return
+			}
+			delete(inner, ri.BaseTable)
+			if len(inner) == 0 {
+				delete(s.HiddenColumns, connID)
+			}
+			return
+		}
+		if s.HiddenColumns == nil {
+			s.HiddenColumns = make(map[string]map[string][]string)
+		}
+		if s.HiddenColumns[connID] == nil {
+			s.HiddenColumns[connID] = make(map[string][]string)
+		}
+		dup := make([]string, len(colNames))
+		copy(dup, colNames)
+		s.HiddenColumns[connID][ri.BaseTable] = dup
+	})
+}
+
+// AttachActiveTabIdentity records (connID, ri) on the currently-active
+// tab and seeds its grid's hidden-col set from AppState when
+// ri.HasRowIdentity. The caller (QueryEditorController) invokes this
+// right after OpenResultTab so the per-(connID, baseTable) persisted
+// hidden columns reapply on tab attach. No-op when no tab is active.
+// dbsavvy-uv0.6.
+func (h *ResultTabsHelper) AttachActiveTabIdentity(connID string, ri query.ResultIdentity) {
+	t := h.Active()
+	if t == nil {
+		return
+	}
+	t.SetIdentity(connID, ri)
+	h.SeedHiddenColsFromAppState(t)
+}
+
+// SeedHiddenColsFromAppState looks up the persisted hidden-col name set
+// for the active tab's (connID, baseTable) pair and re-installs it on
+// the tab's grid as an index set. Called by the controller right after
+// the grid's SetColumns is invoked (and after SetIdentity has been
+// called). No-op when persistence is disabled, the store is unwired, or
+// no entry exists. dbsavvy-uv0.6.
+func (h *ResultTabsHelper) SeedHiddenColsFromAppState(t *Tab) {
+	if t == nil || h.deps.Store == nil {
+		return
+	}
+	g := t.Grid()
+	if g == nil {
+		return
+	}
+	connID, ri := t.Identity()
+	if !ri.HasRowIdentity || connID == "" || ri.BaseTable == "" {
+		return
+	}
+	names := h.deps.Store.HiddenColumnsSnapshot(connID, ri.BaseTable)
+	if len(names) == 0 {
+		return
+	}
+	// Translate names → indices against the CURRENT cols slice. Names
+	// missing from the new query are silently dropped from runtime.
+	idx := make(map[int]bool, len(names))
+	nameSet := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		nameSet[n] = struct{}{}
+	}
+	n := g.ColumnCount()
+	for i := 0; i < n; i++ {
+		if _, ok := nameSet[g.ColumnName(i)]; ok {
+			idx[i] = true
+		}
+	}
+	g.SetHiddenCols(idx)
 }
 
 // gridColumnNames snapshots the column-name list off the active grid.

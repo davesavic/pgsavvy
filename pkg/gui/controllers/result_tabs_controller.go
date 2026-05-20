@@ -47,6 +47,11 @@ type ResultTabsManager interface {
 	// AC. No-op when no tab is active or the picker dep is unwired.
 	// dbsavvy-uv0.5.
 	SortPick()
+
+	// HideOverlay opens the <leader>gH hide-cols overlay for the active
+	// tab. Persistence is gated on the tab's recorded ResultIdentity
+	// (HasRowIdentity). dbsavvy-uv0.6.
+	HideOverlay()
 }
 
 // ResultTabsController publishes the multi-tab keybindings:
@@ -110,6 +115,8 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"<esc>", commands.ResultFilterClear, tr.Actions.ResultFilterClear, types.RESULT_GRID},
 		// dbsavvy-uv0.5: <leader>s sort picker.
 		{"<leader>s", commands.ResultSortPick, tr.Actions.ResultSortPick, types.RESULT_GRID},
+		// dbsavvy-uv0.6: <leader>gH hide-cols overlay.
+		{"<leader>gH", commands.ResultHideOverlay, tr.Actions.ResultHideOverlay, types.RESULT_GRID},
 	}
 	out := make([]*types.ChordBinding, 0, len(specs))
 	for _, s := range specs {
@@ -304,6 +311,18 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 		Handler: func(_ commands.ExecCtx) error {
 			if r.mgr != nil {
 				r.mgr.SortPick()
+			}
+			return nil
+		},
+	})
+	// dbsavvy-uv0.6: <leader>gH hide-cols overlay handler.
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ResultHideOverlay,
+		Description: tr.Actions.ResultHideOverlay,
+		Tag:         "Result",
+		Handler: func(_ commands.ExecCtx) error {
+			if r.mgr != nil {
+				r.mgr.HideOverlay()
 			}
 			return nil
 		},

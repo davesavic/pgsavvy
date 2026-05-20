@@ -13,6 +13,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
@@ -440,6 +441,20 @@ func (q *QueryEditorController) openResultTab(stmt string, rh *session.RunHandle
 		return
 	}
 	_ = q.helpers.ResultTabs.OpenResultTab(tabLabel(stmt), rh)
+	// dbsavvy-uv0.6: record (connID, ResultIdentity) on the now-active
+	// tab so the <leader>gH overlay can gate persistence and seed the
+	// grid's hidden-col set from AppState. Optional surface — fake test
+	// helpers don't implement it, so the type-assertion gates this off
+	// in unit tests while production *ui.ResultTabsHelper satisfies it.
+	// connID falls back to "" when no connection is open (overlay then
+	// runs session-only).
+	if attacher, ok := q.helpers.ResultTabs.(ResultTabIdentityAttacher); ok {
+		connID := ""
+		if q.helpers.ActiveConnection != nil {
+			connID = q.helpers.ActiveConnection.ActiveConnectionID()
+		}
+		attacher.AttachActiveTabIdentity(connID, query.DetectFromQuery(stmt))
+	}
 }
 
 func (q *QueryEditorController) openPlanTab(stmt string, plan models.Plan) {

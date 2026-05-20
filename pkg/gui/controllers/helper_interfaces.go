@@ -8,6 +8,7 @@ import (
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
@@ -133,6 +134,17 @@ type ResultTabsHelper interface {
 	OpenResultTab(label string, rh *session.RunHandle) error
 	OpenPlanTab(label string, plan models.Plan) error
 	ShowError(label string, err error)
+}
+
+// ResultTabIdentityAttacher is the optional surface QueryEditorController
+// uses to record the (connID, ResultIdentity) pair on the currently-active
+// tab right after OpenResultTab — gating the <leader>gH overlay's
+// persistence and seeding the grid's hidden-col set from AppState. The
+// concrete *ui.ResultTabsHelper satisfies it; tests that don't implement
+// it cause the controller to skip identity attach (overlay then runs
+// session-only against any data those tests synthesise). dbsavvy-uv0.6.
+type ResultTabIdentityAttacher interface {
+	AttachActiveTabIdentity(connID string, ri query.ResultIdentity)
 }
 
 // EditorBufferReader is the narrow surface the QueryEditorController

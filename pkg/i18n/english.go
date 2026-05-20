@@ -133,6 +133,9 @@ type ActionTranslations struct {
 	ResultSortPick      string
 	ResultSortPickLabel string
 
+	// In-grid hide-columns overlay (dbsavvy-uv0.6).
+	ResultHideOverlay string
+
 	// Connection lifecycle.
 	AddConnection  string
 	OpenConnection string
@@ -259,6 +262,8 @@ func EnglishTranslationSet() *TranslationSet {
 
 			ResultSortPick:      "Sort rows by column",
 			ResultSortPickLabel: "sort by column",
+
+			ResultHideOverlay: "Toggle column visibility",
 
 			AddConnection:  "Add Connection",
 			OpenConnection: "Open Connection",

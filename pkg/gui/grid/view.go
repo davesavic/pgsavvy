@@ -134,6 +134,13 @@ type View struct {
 	// defaultMouseDoubleClickMs. Wired from config at chord-registration
 	// time. dbsavvy-uv0.5.
 	mouseDoubleClickMs int
+
+	// hiddenColSet is the per-View hide-cols state used by the <leader>gH
+	// overlay. Keys are indices into the CURRENT cols slice. SetColumns
+	// clears this map (the indices are not stable across schema attaches);
+	// callers re-seed from persisted column NAMES via SetHiddenCols.
+	// dbsavvy-uv0.6.
+	hiddenColSet map[int]bool
 }
 
 // headerClickState is the per-View state used by HandleHeaderClick to
@@ -226,6 +233,77 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 	// point in its own SetColumns extension.
 	v.sortState = sortState{}
 	v.lastHeaderClick = headerClickState{col: -1}
+	// Clear hide-cols: int indices are not stable across schema attaches.
+	// Callers reseed via SetHiddenCols after re-translating persisted names
+	// against the new cols slice. dbsavvy-uv0.6 AD-5.
+	v.hiddenColSet = nil
+}
+
+// SetHiddenCols installs the set of column indices to hide from the
+// render. A nil / empty set clears any prior hide state. Indices outside
+// [0, len(cols)) are silently dropped — caller is responsible for
+// translating persisted column NAMES to indices against the current
+// columns slice before calling. dbsavvy-uv0.6.
+func (v *View) SetHiddenCols(set map[int]bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if len(set) == 0 {
+		v.hiddenColSet = nil
+		return
+	}
+	out := make(map[int]bool, len(set))
+	for k, val := range set {
+		if !val {
+			continue
+		}
+		if k < 0 || k >= len(v.cols) {
+			continue
+		}
+		out[k] = true
+	}
+	if len(out) == 0 {
+		v.hiddenColSet = nil
+		return
+	}
+	v.hiddenColSet = out
+}
+
+// HiddenCols returns a defensive copy of the current hidden-col index
+// set. Callers may mutate the returned map without affecting view state.
+// Returns nil when no columns are hidden. dbsavvy-uv0.6.
+func (v *View) HiddenCols() map[int]bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if len(v.hiddenColSet) == 0 {
+		return nil
+	}
+	out := make(map[int]bool, len(v.hiddenColSet))
+	for k, val := range v.hiddenColSet {
+		if val {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+// HiddenColumnNames returns the names of currently-hidden columns in
+// the View's column order. Names of indices that fall outside the
+// current cols slice are silently skipped. Used by the helper to
+// translate the runtime int-set into the persisted []string for
+// AppState.HiddenColumns. dbsavvy-uv0.6.
+func (v *View) HiddenColumnNames() []string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if len(v.hiddenColSet) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(v.hiddenColSet))
+	for i := 0; i < len(v.cols); i++ {
+		if v.hiddenColSet[i] {
+			out = append(out, v.cols[i].Name)
+		}
+	}
+	return out
 }
 
 // AppendRows extends the row buffer. Concurrency-safe (held under the
@@ -338,6 +416,7 @@ func (v *View) snapshot() viewSnapshot {
 		sortActive:     v.sortState.active(),
 		sortCol:        v.sortState.col,
 		sortDir:        v.sortState.dir,
+		hidden:         v.hiddenColSet,
 	}
 }
 
@@ -374,6 +453,11 @@ type viewSnapshot struct {
 	sortActive bool
 	sortCol    int
 	sortDir    int
+
+	// hidden is the index-set of columns to skip in visibleColumnOrder.
+	// Captured under the same RLock as the rest of the snapshot so a
+	// concurrent SetHiddenCols cannot tear the frame. dbsavvy-uv0.6.
+	hidden map[int]bool
 }
 
 // Render draws the current grid into the target gocui view. target may

@@ -351,6 +351,28 @@ func (c *connectionFormInvoker) WalkAdd(ctx context.Context) error {
 	return nil
 }
 
+// hideOverlayStateAdapter implements guicontext.HideOverlayState by
+// proxying through the ResultTabsHelper. The helper owns overlay
+// lifecycle (HideOverlayActive / HideOverlayBody) and the context only
+// renders the rendered body each frame. dbsavvy-uv0.6.
+type hideOverlayStateAdapter struct {
+	helper *ui.ResultTabsHelper
+}
+
+func (a hideOverlayStateAdapter) Active() bool {
+	if a.helper == nil {
+		return false
+	}
+	return a.helper.HideOverlayActive()
+}
+
+func (a hideOverlayStateAdapter) Body() string {
+	if a.helper == nil {
+		return ""
+	}
+	return a.helper.HideOverlayBody()
+}
+
 // promptStateAdapter implements guicontext.PromptState by surfacing
 // the PromptHelper's label + active flag to PromptContext.HandleRender.
 // The typed buffer is no longer combined here: post-dbsavvy-fq9 the

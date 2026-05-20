@@ -163,7 +163,34 @@ func renderBody(snap viewSnapshot, innerW, innerH int) string {
 	for filled := end - snap.rowOffset; filled < dataRows; filled++ {
 		sb.WriteByte('\n')
 	}
+	// Hide-cols footer (dbsavvy-uv0.6). When any column is hidden, append
+	// a `hidden: c1, c2` line so users have a visible cue. The line is
+	// wrapped in the dim SGR pair (\x1b[2m…\x1b[22m); themes without dim
+	// support degrade to plain text.
+	if footer := hideFooterLine(snap); footer != "" {
+		sb.WriteByte('\n')
+		sb.WriteString(footer)
+	}
 	return sb.String()
+}
+
+// hideFooterLine renders the "hidden: c1, c2" footer in dim style when
+// any columns are hidden. Returns "" when nothing is hidden.
+// dbsavvy-uv0.6.
+func hideFooterLine(snap viewSnapshot) string {
+	if len(snap.hidden) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(snap.hidden))
+	for i := 0; i < len(snap.cols); i++ {
+		if snap.hidden[i] {
+			names = append(names, snap.cols[i].Name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return "\x1b[2mhidden: " + strings.Join(names, ", ") + "\x1b[22m"
 }
 
 // renderHeaderLine assembles the column-name header. Headers use the
@@ -238,6 +265,12 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 // offset. When frozenFirstCol is on, column 0 is always first; the
 // remainder starts at max(colOffset, 1). When off, the order is the
 // natural [colOffset, len(cols)) range.
+//
+// dbsavvy-uv0.6: indices in snap.hidden are filtered out via
+// filterHidden (see hide.go). The filter runs AFTER the frozen-first /
+// colOffset composition so hiding column 0 still hides it even when
+// frozenFirstCol is on (consistent with user expectation: the overlay
+// shows ALL columns including the frozen one).
 func visibleColumnOrder(snap viewSnapshot) []int {
 	if len(snap.cols) == 0 {
 		return nil
@@ -255,7 +288,7 @@ func visibleColumnOrder(snap viewSnapshot) []int {
 			}
 			out = append(out, c)
 		}
-		return out
+		return filterHidden(out, snap.hidden)
 	}
 	start := snap.colOffset
 	if start < 0 {
@@ -264,5 +297,5 @@ func visibleColumnOrder(snap viewSnapshot) []int {
 	for c := start; c < len(snap.cols); c++ {
 		out = append(out, c)
 	}
-	return out
+	return filterHidden(out, snap.hidden)
 }

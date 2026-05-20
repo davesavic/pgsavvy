@@ -25,6 +25,7 @@ type Controllers struct {
 	Quit        *QuitController
 	QueryEditor *QueryEditorController
 	ResultTabs  *ResultTabsController
+	HideOverlay *HideOverlayController
 	VimEditor   *VimEditorController
 	Plan        *PlanController
 }
@@ -114,6 +115,20 @@ func AttachControllers(
 	resultTabs := NewResultTabsController(c, helpers, tabsMgr)
 	resultTabs.AttachToContext(tree.ResultGrid)
 
+	// HideOverlayController publishes HIDE_OVERLAY-scope bindings for the
+	// <leader>gH column-visibility overlay (dbsavvy-uv0.6). The manager
+	// surface is the same concrete *ui.ResultTabsHelper that backs
+	// ResultTabsManager — typed here through a narrower interface so the
+	// controller package stays free of helpers/ui.
+	var hideMgr HideOverlayManager
+	if helpers.ResultTabs != nil {
+		if m, ok := helpers.ResultTabs.(HideOverlayManager); ok {
+			hideMgr = m
+		}
+	}
+	hideOverlay := NewHideOverlayController(c, helpers, hideMgr)
+	hideOverlay.AttachToContext(&tree.HideOverlay.BaseContext)
+
 	// VimEditorController owns motion / operator / textobject bindings
 	// under QUERY_EDITOR scope (epic dbsavvy-wwd). It takes the live
 	// *context.QueryEditorContext directly (tree.QueryEditor is the
@@ -166,6 +181,7 @@ func AttachControllers(
 		Quit:        quit,
 		QueryEditor: queryEditor,
 		ResultTabs:  resultTabs,
+		HideOverlay: hideOverlay,
 		VimEditor:   vimEditor,
 		Plan:        plan,
 	}
@@ -236,6 +252,9 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.ResultTabs != nil {
 		b.ResultTabs.RegisterActions(reg)
+	}
+	if b.HideOverlay != nil {
+		b.HideOverlay.RegisterActions(reg)
 	}
 	if b.VimEditor != nil {
 		b.VimEditor.RegisterActions(reg)

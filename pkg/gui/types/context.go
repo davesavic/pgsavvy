@@ -61,6 +61,9 @@ const (
 	GLOBAL            ContextKey = "global"
 	LIMIT             ContextKey = "limit"
 	CHEATSHEET        ContextKey = "cheatsheet"
+	// HIDE_OVERLAY is the in-grid column-visibility overlay opened by
+	// <leader>gH on the active result tab (dbsavvy-uv0.6).
+	HIDE_OVERLAY ContextKey = "hide_overlay"
 )
 
 // IsEditable reports whether the view associated with k receives text

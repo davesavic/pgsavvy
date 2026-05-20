@@ -29,6 +29,9 @@ type ContextTree struct {
 	Selection    *SelectionContext
 	Suggestions  *SuggestionsContext
 	CommandLine  *CommandLineContext
+	// HideOverlay is the <leader>gH column-visibility overlay
+	// (dbsavvy-uv0.6). TEMPORARY_POPUP kind.
+	HideOverlay *HideOverlayContext
 
 	// Live EXTRAS / GLOBAL / DISPLAY instances.
 	Messages   *MessagesContext
@@ -120,6 +123,11 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			ViewName: string(types.COMMAND_LINE),
 			Kind:     types.TEMPORARY_POPUP,
 		}), deps, deps.ModeStore),
+		HideOverlay: NewHideOverlayContext(NewBaseContext(BaseContextOpts{
+			Key:      types.HIDE_OVERLAY,
+			ViewName: string(types.HIDE_OVERLAY),
+			Kind:     types.TEMPORARY_POPUP,
+		}), deps),
 
 		// EXTRAS / GLOBAL / DISPLAY.
 		Messages: NewMessagesContext(NewBaseContext(BaseContextOpts{
@@ -189,6 +197,7 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 		t.Selection,
 		t.Suggestions,
 		t.CommandLine,
+		t.HideOverlay,
 		t.Messages,
 		t.Global,
 		t.Limit,

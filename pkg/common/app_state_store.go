@@ -254,6 +254,28 @@ func (s *AppStateStore) StampStartupTips() {
 	})
 }
 
+// HiddenColumnsSnapshot returns a defensive copy of the persisted hidden-column
+// name list for the given (connID, baseTable) pair. Returns nil when no entry
+// exists. Caller may mutate the returned slice. dbsavvy-uv0.6.
+func (s *AppStateStore) HiddenColumnsSnapshot(connID, baseTable string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state.HiddenColumns == nil {
+		return nil
+	}
+	inner, ok := s.state.HiddenColumns[connID]
+	if !ok {
+		return nil
+	}
+	src, ok := inner[baseTable]
+	if !ok {
+		return nil
+	}
+	out := make([]string, len(src))
+	copy(out, src)
+	return out
+}
+
 // HiddenSchemasSnapshot returns a defensive copy of the hidden-schemas slice
 // for the given connection ID. Callers may mutate the returned slice without
 // affecting store state. Returns nil if no entry exists.

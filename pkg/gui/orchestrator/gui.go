@@ -393,6 +393,22 @@ func (g *Gui) wireWithDriver() error {
 		StreamFactory: func() ui.StreamRunner {
 			return tasks.New(g.OnWorker, g.OnUIThreadContentOnly)
 		},
+		// dbsavvy-uv0.6: AppStateStore drives the per-(connID, baseTable)
+		// hidden-column persistence used by the <leader>gH overlay.
+		Store: g.deps.Store,
+	}
+	// dbsavvy-uv0.6: focus-stack push/pop closures for the HIDE_OVERLAY
+	// popup. The helper holds the overlay state object; PushHideOverlay
+	// installs an adapter on the context (so HandleRender reads the
+	// helper's body) and pushes the popup; PopHideOverlay pops it.
+	if g.registry.HideOverlay != nil && g.tree != nil {
+		resultTabsDeps.PushHideOverlay = func() error {
+			g.registry.HideOverlay.SetState(hideOverlayStateAdapter{helper: g.resultTabsH})
+			return g.tree.Push(g.registry.HideOverlay)
+		}
+		resultTabsDeps.PopHideOverlay = func() error {
+			return g.tree.Pop()
+		}
 	}
 	if tr != nil {
 		resultTabsDeps.SortPickLabel = tr.Actions.ResultSortPickLabel
