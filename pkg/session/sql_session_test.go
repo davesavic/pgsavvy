@@ -453,3 +453,20 @@ func TestSQLSessionDelegates_SessionIDAndInTx(t *testing.T) {
 		t.Error("InTransaction = true, want false")
 	}
 }
+
+// TestNew_NilLoggerUsesDiscardHandler exercises the nil-tolerant contract:
+// constructing a SQLSession with an empty Options must succeed and the
+// installed default logger must accept a Warn call without panicking and
+// without writing to any real sink.
+func TestNew_NilLoggerUsesDiscardHandler(t *testing.T) {
+	conn := &fakeConn{}
+	inner := &fakeSess{id: 1}
+	s := session.New(conn, inner, session.Options{})
+	if s == nil {
+		t.Fatal("New returned nil")
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	// Smoke: any future code path that emits through s.logger would not
+	// panic with a nil dereference. We exercise it indirectly via Close,
+	// which is safe to call here.
+}

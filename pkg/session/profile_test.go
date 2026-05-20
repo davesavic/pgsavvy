@@ -368,6 +368,53 @@ func TestRedactDSN(t *testing.T) {
 	}
 }
 
+func TestRedactConnectionString_BothForms(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{
+			name: "url-form only",
+			in:   "postgres://app:hunter2@h/db",
+			want: "postgres://app:***@h/db",
+		},
+		{
+			name: "kv-form only",
+			in:   "host=h password=hunter2 user=app",
+			want: "host=h password=*** user=app",
+		},
+		{
+			name: "kv sslpassword",
+			in:   "host=h sslpassword=hunter2",
+			want: "host=h sslpassword=***",
+		},
+		{
+			name: "kv single-quoted",
+			in:   "host=h password='hunter 2' user=app",
+			want: "host=h password=*** user=app",
+		},
+		{
+			name: "kv uppercase",
+			in:   "host=h PASSWORD=hunter2",
+			want: "host=h PASSWORD=***",
+		},
+		{
+			name: "both forms in one string",
+			in:   "fallback postgres://app:hunter2@h/db then host=h password=hunter2",
+			want: "fallback postgres://app:***@h/db then host=h password=***",
+		},
+		{
+			name: "no creds",
+			in:   "host=h user=app",
+			want: "host=h user=app",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := RedactConnectionString(c.in); got != c.want {
+				t.Errorf("RedactConnectionString(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 func TestBuildPgxConfig_ParseErrorRedactsInlinePassword(t *testing.T) {
 	// Malformed port + inline password — the wrapped error must NOT contain
 	// the plaintext password.

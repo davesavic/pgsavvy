@@ -225,6 +225,21 @@ func RedactDSN(s string) string {
 	return dsnInlineCredRe.ReplaceAllString(s, "${1}${2}:***@")
 }
 
+// kvDSNCredRe matches `key=value` form Postgres DSNs and libpq connection
+// strings where the key is password/sslpassword. The value is captured both
+// for quoted (single-quoted, with potential whitespace) and unquoted forms.
+// The `(?i)` makes the key match case-insensitive.
+var kvDSNCredRe = regexp.MustCompile(`(?i)\b(password|sslpassword)=('[^']*'|"[^"]*"|\S+)`)
+
+// RedactConnectionString applies both the URL-form (dsnInlineCredRe) and the
+// kv-form (kvDSNCredRe) scrubs in sequence. Use this in any code path that
+// emits a DSN-shaped string to logs or to a user-visible toast.
+func RedactConnectionString(s string) string {
+	s = dsnInlineCredRe.ReplaceAllString(s, "${1}${2}:***@")
+	s = kvDSNCredRe.ReplaceAllString(s, "$1=***")
+	return s
+}
+
 // isLoopbackHost is true for empty host (Unix socket), "localhost", or any
 // IP whose net.IP.IsLoopback reports true.
 func isLoopbackHost(h string) bool {

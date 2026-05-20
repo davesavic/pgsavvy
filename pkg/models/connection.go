@@ -5,12 +5,12 @@ package models
 type Connection struct {
 	Name   string `yaml:"name"`
 	Driver string `yaml:"driver"`
-	DSN    string `yaml:"dsn"`
+	DSN    string `yaml:"dsn" log:"redact"`
 	// Password is a plaintext fallback for development only. Production deployments MUST prefer PasswordCommand, KeyringRef, or PgpassPath. Never log this value; never serialize back to config files written by the app. See DESIGN.md §11.2 / §15.6.
-	Password         string           `yaml:"password,omitempty"`
-	PasswordCommand  string           `yaml:"password_command,omitempty"`
-	KeyringRef       string           `yaml:"keyring,omitempty"`
-	PgpassPath       string           `yaml:"pgpass,omitempty"`
+	Password         string           `yaml:"password,omitempty" log:"redact"`
+	PasswordCommand  string           `yaml:"password_command,omitempty" log:"redact"`
+	KeyringRef       string           `yaml:"keyring,omitempty" log:"redact"`
+	PgpassPath       string           `yaml:"pgpass,omitempty" log:"redact"`
 	SSHTunnel        *SSHTunnelConfig `yaml:"ssh_tunnel,omitempty"`
 	Tags             []string         `yaml:"tags,omitempty"`
 	Color            string           `yaml:"color,omitempty"`
@@ -29,5 +29,5 @@ type SSHTunnelConfig struct {
 	Host         string `yaml:"host"`
 	User         string `yaml:"user"`
 	Port         int    `yaml:"port"`
-	IdentityFile string `yaml:"identity_file"`
+	IdentityFile string `yaml:"identity_file" log:"redact"`
 }

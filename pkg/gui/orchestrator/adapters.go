@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
@@ -317,6 +319,9 @@ func (c *connectInvoker) wireQueryRuntime(ctx context.Context, conn drivers.Conn
 		return fmt.Errorf("orchestrator: acquire query session: %w", err)
 	}
 	opts := session.Options{}
+	if c.g != nil && c.g.deps.Common != nil && c.g.deps.Common.Log != nil {
+		opts.Logger = slog.New(logs.NewSlogHandler(c.g.deps.Common.Log))
+	}
 	if c.history != nil {
 		opts.HistoryRecorder = c.history.AsSessionRecorder(profile.Name)
 	}

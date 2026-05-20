@@ -30,8 +30,8 @@ type noticeAttacher interface {
 const sqlSessionNoticeBuffer = 128
 
 // Options configures a SQLSession at New time. HistoryRecorder may be nil
-// (the package installs noopHistoryRecorder); Logger may be nil (a
-// discard-equivalent default is installed via slog.Default if so).
+// (the package installs noopHistoryRecorder); Logger may be nil (a no-op
+// discard handler is installed if so).
 type Options struct {
 	HistoryRecorder HistoryRecorder
 	Logger          *slog.Logger
@@ -87,7 +87,7 @@ func New(conn drivers.Connection, inner drivers.Session, opts Options) *SQLSessi
 		s.history = noopHistoryRecorder{}
 	}
 	if s.logger == nil {
-		s.logger = slog.Default()
+		s.logger = slog.New(slog.DiscardHandler)
 	}
 
 	if na, ok := inner.(noticeAttacher); ok {
