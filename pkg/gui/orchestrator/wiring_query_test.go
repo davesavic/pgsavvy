@@ -2,11 +2,11 @@ package orchestrator_test
 
 import (
 	"context"
+	"log/slog"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
@@ -159,8 +159,7 @@ func itoaInt64(n int64) string {
 func buildTestGuiWithHistory(t *testing.T) (*orchestrator.Gui, *testfake.RecorderGuiDriver) {
 	t.Helper()
 	fs := afero.NewMemMapFs()
-	log := logrus.New()
-	log.SetLevel(logrus.PanicLevel)
+	log := slog.New(slog.DiscardHandler)
 	cfg := config.GetDefaultConfig()
 	c := common.NewCommon(log, i18n.EnglishTranslationSet(), cfg, &common.AppState{}, fs)
 	store := common.NewAppStateStore(fs, "/tmp/state.yml", common.DefaultClock())

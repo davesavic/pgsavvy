@@ -3,13 +3,13 @@ package tasks_test
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
@@ -17,12 +17,9 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/tasks"
 )
 
-func newBufLogger() (*logrus.Logger, *bytes.Buffer) {
+func newBufLogger() (*slog.Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
-	l := logrus.New()
-	l.SetOutput(buf)
-	l.SetLevel(logrus.DebugLevel)
-	l.SetFormatter(&logrus.JSONFormatter{})
+	l := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	return l, buf
 }
 

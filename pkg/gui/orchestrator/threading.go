@@ -2,10 +2,10 @@ package orchestrator
 
 import (
 	"fmt"
+	"log/slog"
 	"sync/atomic"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
-	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/logs"
@@ -116,10 +116,10 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 	// shape the AD-20 burst-sampling test asserts.
 	sampleTick := g.onWorkerSampleCounter.Add(1)
 	if busyBefore == 0 || sampleTick%onWorkerSampleN == 0 {
-		g.emitWorkerEvent("worker_start", logrus.Fields{
-			"busy_before": busyBefore,
-			"busy_after":  busyAfter,
-		})
+		g.emitWorkerEvent("worker_start",
+			slog.Int64("busy_before", busyBefore),
+			slog.Int64("busy_after", busyAfter),
+		)
 	}
 
 	go func() {
@@ -133,36 +133,36 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 			// (sampling lives on the start side only) to keep the
 			// per-burst line budget at 2 + N/10.
 			if endBusyAfter == 0 {
-				g.emitWorkerEvent("worker_end", logrus.Fields{
-					"busy_before": endBusyBefore,
-					"busy_after":  endBusyAfter,
-				})
+				g.emitWorkerEvent("worker_end",
+					slog.Int64("busy_before", endBusyBefore),
+					slog.Int64("busy_after", endBusyAfter),
+				)
 			}
 		}()
 		defer func() {
 			if r := recover(); r != nil {
-				if g.deps.Common != nil && g.deps.Common.Log != nil {
-					g.deps.Common.Log.Errorf("gui: OnWorker panic recovered: %v", r)
+				if g.deps.Common != nil {
+					g.deps.Common.Logger().Error("gui: OnWorker panic recovered", slog.Any("err", r))
 				}
 				// AD-20 edge: panic-recover always emits a worker_end with
 				// panic_recovered=true (regardless of the sampling gate)
 				// so silent crashes always leave a trace. The deferred
 				// quiescence emit above ALSO fires — that one carries the
 				// busy counters; this one carries the panic payload.
-				g.emitWorkerEvent("worker_end", logrus.Fields{
-					"panic_recovered": true,
-					"err":             r,
-				})
+				g.emitWorkerEvent("worker_end",
+					slog.Bool("panic_recovered", true),
+					slog.Any("err", r),
+				)
 			}
 		}()
 		if err := fn(task); err != nil {
-			if g.deps.Common != nil && g.deps.Common.Log != nil {
-				g.deps.Common.Log.Errorf("gui: OnWorker returned error: %v", err)
+			if g.deps.Common != nil {
+				g.deps.Common.Logger().Error("gui: OnWorker returned error", slog.Any("err", err))
 			}
 			// AD-20 edge: a non-nil fn error always emits worker_end with
 			// err alongside the existing Errorf — sampling never decimates
 			// the failure trail.
-			g.emitWorkerEvent("worker_end", logrus.Fields{"err": err})
+			g.emitWorkerEvent("worker_end", slog.Any("err", err))
 		}
 	}()
 }
@@ -170,11 +170,11 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 // emitWorkerEvent funnels every cat=state worker_* emit through a single
 // nil-tolerant helper so the OnWorker hot path stays one-line per
 // call-site.
-func (g *Gui) emitWorkerEvent(evt string, fields logrus.Fields) {
+func (g *Gui) emitWorkerEvent(evt string, attrs ...slog.Attr) {
 	if g == nil || g.deps.Common == nil {
 		return
 	}
-	logs.Event(g.deps.Common.Log, "state", evt, fields)
+	logs.Event(g.deps.Common.Logger(), "state", evt, attrs...)
 }
 
 // WaitWorkers blocks until every in-flight OnWorker goroutine has

@@ -37,12 +37,12 @@
 package orchestrator_test
 
 import (
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"go.uber.org/goleak"
 
@@ -68,7 +68,7 @@ type kbSmoke struct {
 	rec *testfake.RecorderGuiDriver
 	cfg *config.UserConfig
 	tr  *i18n.TranslationSet
-	log *logrus.Logger
+	log *slog.Logger
 }
 
 // setupKbSmoke spins up a minimal *orchestrator.Gui backed by the
@@ -77,8 +77,7 @@ type kbSmoke struct {
 func setupKbSmoke(t *testing.T) *kbSmoke {
 	t.Helper()
 	fs := afero.NewMemMapFs()
-	log := logrus.New()
-	log.SetLevel(logrus.PanicLevel)
+	log := slog.New(slog.DiscardHandler)
 	cfg := config.GetDefaultConfig()
 	tr := i18n.EnglishTranslationSet()
 	c := common.NewCommon(log, tr, cfg, &common.AppState{}, fs)

@@ -10,11 +10,11 @@
 package orchestrator_test
 
 import (
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
@@ -32,8 +32,7 @@ import (
 func setupResultTabsSmoke(t *testing.T) *orchestrator.Gui {
 	t.Helper()
 	fs := afero.NewMemMapFs()
-	log := logrus.New()
-	log.SetLevel(logrus.PanicLevel)
+	log := slog.New(slog.DiscardHandler)
 	cfg := config.GetDefaultConfig()
 	tr := i18n.EnglishTranslationSet()
 	c := common.NewCommon(log, tr, cfg, &common.AppState{}, fs)

@@ -2,11 +2,11 @@ package orchestrator
 
 import (
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
-	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -32,7 +32,7 @@ type MasterEditorOption func(*masterEditor)
 
 // WithSessionLog injects the per-session logger the master editor uses
 // to emit cat=input key / dispatch_result events. nil disables emission.
-func WithSessionLog(l *logrus.Logger) MasterEditorOption {
+func WithSessionLog(l *slog.Logger) MasterEditorOption {
 	return func(e *masterEditor) {
 		e.sessionLog = l
 	}
@@ -92,7 +92,7 @@ type masterEditor struct {
 	matcher    *keys.Matcher
 	scope      types.ContextKey
 	viewName   string
-	sessionLog *logrus.Logger
+	sessionLog *slog.Logger
 
 	mu           sync.Mutex
 	pendingRunes []rune
@@ -154,17 +154,17 @@ func (e *masterEditor) emitInputEvents(decoded keys.Key, result keys.DispatchRes
 	if _, sensitive := sensitiveScopes[e.scope]; sensitive {
 		keyLabel = "<redacted>"
 	}
-	logs.Event(log, "input", "key", logrus.Fields{
-		"key":   keyLabel,
-		"scope": string(e.scope),
-		"mode":  mode.String(),
-	})
-	logs.Event(log, "input", "dispatch_result", logrus.Fields{
-		"result": dispatchResultLabel(result),
-		"scope":  string(e.scope),
-		"mode":   mode.String(),
-		"ms":     elapsed.Microseconds(),
-	})
+	logs.Event(log, "input", "key",
+		slog.String("key", keyLabel),
+		slog.String("scope", string(e.scope)),
+		slog.String("mode", mode.String()),
+	)
+	logs.Event(log, "input", "dispatch_result",
+		slog.String("result", dispatchResultLabel(result)),
+		slog.String("scope", string(e.scope)),
+		slog.String("mode", mode.String()),
+		slog.Int64("ms", elapsed.Microseconds()),
+	)
 }
 
 // dispatchResultLabel renders the canonical PascalCase label for r as

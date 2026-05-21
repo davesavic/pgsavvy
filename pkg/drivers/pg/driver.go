@@ -3,19 +3,19 @@ package pg
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
-// globalLogger is the package-level *logrus.Logger used by Driver / Connection
+// globalLogger is the package-level *slog.Logger used by Driver / Connection
 // / Session instrumentation emits. It is set ONCE by SetGlobalLogger from the
 // app entry-point AFTER logs.Open succeeds — preserving the init-time
 // drivers.Register invariant (the registration in main.go runs at init time,
@@ -24,19 +24,19 @@ import (
 //
 // The atomic.Pointer wrapper makes concurrent reads race-free; emits acquire
 // the current pointer via Load.
-var globalLogger atomic.Pointer[logrus.Logger]
+var globalLogger atomic.Pointer[slog.Logger]
 
 // SetGlobalLogger installs the package-level logger used by instrumentation
 // emits. Safe to call multiple times (last write wins). Pass nil to disable
 // emits (e.g. for tests that want to silence the driver). See AD-11.
-func SetGlobalLogger(l *logrus.Logger) {
+func SetGlobalLogger(l *slog.Logger) {
 	globalLogger.Store(l)
 }
 
 // pkgLogger returns the currently-installed package logger or nil. Helpers
 // in this package call logs.Event(pkgLogger(), …) so a nil logger silently
 // no-ops.
-func pkgLogger() *logrus.Logger { return globalLogger.Load() }
+func pkgLogger() *slog.Logger { return globalLogger.Load() }
 
 // pgCapabilities is the single-source-of-truth Capabilities value for the
 // Postgres driver. Tests assert deep-equality against this var rather than a
@@ -93,22 +93,22 @@ func (d *Driver) Capabilities() drivers.Capabilities { return pgCapabilities }
 func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (drivers.Connection, error) {
 	log := pkgLogger()
 	redactedDSN := session.RedactConnectionString(profile.DSN)
-	logs.Event(log, "db", "conn_open", logrus.Fields{
-		"profile":      profile.Name,
-		"redacted_dsn": redactedDSN,
-	})
+	logs.Event(log, "db", "conn_open",
+		slog.String("profile", profile.Name),
+		slog.String("redacted_dsn", redactedDSN),
+	)
 	start := time.Now()
 
 	emitDone := func(err error) {
-		fields := logrus.Fields{
-			"profile":      profile.Name,
-			"redacted_dsn": redactedDSN,
-			"ms":           time.Since(start).Milliseconds(),
+		attrs := []slog.Attr{
+			slog.String("profile", profile.Name),
+			slog.String("redacted_dsn", redactedDSN),
+			slog.Int64("ms", time.Since(start).Milliseconds()),
 		}
 		if err != nil {
-			fields["err"] = session.RedactConnectionString(err.Error())
+			attrs = append(attrs, slog.Any("err", session.RedactConnectionString(err.Error())))
 		}
-		logs.Event(log, "db", "conn_open_done", fields)
+		logs.Event(log, "db", "conn_open_done", attrs...)
 	}
 
 	password, err := session.ResolvePassword(ctx, profile, d.prompter)

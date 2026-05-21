@@ -3,25 +3,22 @@ package orchestrator_test
 import (
 	"bytes"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 )
 
-// bufLogger returns a JSON DebugLevel *logrus.Logger writing to a fresh
+// bufLogger returns a JSON DebugLevel *slog.Logger writing to a fresh
 // buffer. Used by the cat=state worker_* tests to inspect emitted lines
 // without depending on file-side instrumentation.
-func bufLogger() (*logrus.Logger, *bytes.Buffer) {
+func bufLogger() (*slog.Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
-	l := logrus.New()
-	l.SetOutput(buf)
-	l.SetLevel(logrus.DebugLevel)
-	l.SetFormatter(&logrus.JSONFormatter{})
-	return l, buf
+	h := slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	return slog.New(h), buf
 }
 
 // countLines counts lines in buf containing all of subs.
@@ -65,10 +62,9 @@ func grepLines(buf *bytes.Buffer, subs ...string) []string {
 // BOTH worker_start (busy_before=0, busy_after=1) AND, on completion,
 // worker_end (busy_after=0). Sampling does NOT decimate either.
 func TestOnWorker_AlwaysEmitsQuiescenceTransitions(t *testing.T) {
-	g, _, cmn := buildTestGuiWithCommon(t)
-	defer func() { _ = g.Close() }()
 	l, buf := bufLogger()
-	cmn.Log = l
+	g, _, _ := buildTestGuiWithLogger(t, l)
+	defer func() { _ = g.Close() }()
 
 	done := make(chan struct{})
 	g.OnWorker(func(_ gocui.Task) error {
@@ -104,10 +100,9 @@ func TestOnWorker_AlwaysEmitsQuiescenceTransitions(t *testing.T) {
 // = 101 starts + 1 end = 102. Workers block until released so all 1000
 // are simultaneously in flight when sampling fires.
 func TestOnWorker_SamplesBurstAt_2plus100(t *testing.T) {
-	g, _, cmn := buildTestGuiWithCommon(t)
-	defer func() { _ = g.Close() }()
 	l, buf := bufLogger()
-	cmn.Log = l
+	g, _, _ := buildTestGuiWithLogger(t, l)
+	defer func() { _ = g.Close() }()
 
 	const n = 1000
 	release := make(chan struct{})
@@ -140,10 +135,9 @@ func TestOnWorker_SamplesBurstAt_2plus100(t *testing.T) {
 // worker still leaves a worker_end{panic_recovered:true} trace alongside
 // the existing Errorf log line.
 func TestOnWorker_PanicEmitsWorkerEndWithRecovered(t *testing.T) {
-	g, _, cmn := buildTestGuiWithCommon(t)
-	defer func() { _ = g.Close() }()
 	l, buf := bufLogger()
-	cmn.Log = l
+	g, _, _ := buildTestGuiWithLogger(t, l)
+	defer func() { _ = g.Close() }()
 
 	done := make(chan struct{})
 	g.OnWorker(func(_ gocui.Task) error {
@@ -161,10 +155,9 @@ func TestOnWorker_PanicEmitsWorkerEndWithRecovered(t *testing.T) {
 // worker fn emits a worker_end{err:...} line on top of the existing
 // Errorf log line.
 func TestOnWorker_ErrEmitsWorkerEnd(t *testing.T) {
-	g, _, cmn := buildTestGuiWithCommon(t)
-	defer func() { _ = g.Close() }()
 	l, buf := bufLogger()
-	cmn.Log = l
+	g, _, _ := buildTestGuiWithLogger(t, l)
+	defer func() { _ = g.Close() }()
 
 	g.OnWorker(func(_ gocui.Task) error {
 		return errors.New("synthetic worker error")

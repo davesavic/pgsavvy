@@ -2,11 +2,11 @@ package data_test
 
 import (
 	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
@@ -16,12 +16,9 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 )
 
-func bufLogger() (*logrus.Logger, *bytes.Buffer) {
+func bufLogger() (*slog.Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
-	l := logrus.New()
-	l.SetOutput(buf)
-	l.SetLevel(logrus.DebugLevel)
-	l.SetFormatter(&logrus.JSONFormatter{})
+	l := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	return l, buf
 }
 
@@ -91,7 +88,7 @@ func TestUnhide_OnlyEmitsWhenRemoved(t *testing.T) {
 
 	// Wait until the MutateAndSave's goroutine boundary settles. The
 	// store mutation is synchronous so no sleep is required, but a tiny
-	// yield lets any pending logrus formatter flush.
+	// yield lets any pending slog handler flush.
 	time.Sleep(5 * time.Millisecond)
 
 	require.NoError(t, h.UnhideSchema("conn-1", "scratch", nil, nil))

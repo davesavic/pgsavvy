@@ -9,30 +9,26 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/davesavic/dbsavvy/pkg/drivers"
-	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
 // newLoggedSession builds a SQLSession whose slog logger writes JSON lines
-// into the returned buffer via the production logs.NewSlogHandler bridge.
-// Tests can scan the buffer for `evt=...` lines after exercising the
-// SQLSession.
+// into the returned buffer via a slog.JSONHandler. Tests can scan the
+// buffer for `evt=...` lines after exercising the SQLSession.
 func newLoggedSession(t *testing.T, opts ...func(*session.Options)) (*session.SQLSession, *fakeConn, *fakeSess, *syncBuf) {
 	t.Helper()
 	buf := &syncBuf{}
-	l := logrus.New()
-	l.SetOutput(buf)
-	l.SetLevel(logrus.DebugLevel)
-	l.SetFormatter(&logrus.JSONFormatter{})
-	bridged := slog.New(logs.NewSlogHandler(l))
+	// SQLSession emits via raw slog.LogAttrs without setting cat=db itself
+	// — in production that attr is injected by the slog handler stack
+	// (AD-22 cat=db bridge). The test fixture mimics that by pre-binding
+	// cat="db" on the logger so audit assertions on `cat` continue to hold.
+	lg := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})).With(slog.String("cat", "db"))
 
 	conn := &fakeConn{}
 	sess := &fakeSess{id: 42}
-	o := session.Options{Logger: bridged}
+	o := session.Options{Logger: lg}
 	for _, f := range opts {
 		f(&o)
 	}
@@ -41,7 +37,7 @@ func newLoggedSession(t *testing.T, opts ...func(*session.Options)) (*session.SQ
 	return s, conn, sess, buf
 }
 
-// syncBuf is a goroutine-safe bytes.Buffer. logrus may emit from multiple
+// syncBuf is a goroutine-safe bytes.Buffer. slog may emit from multiple
 // goroutines (stream notice fan-out etc.).
 type syncBuf struct {
 	mu  sync.Mutex

@@ -295,9 +295,9 @@ func (g *Gui) wireWithDriver() error {
 	// dbsavvy-8s2.5: wire the per-session logger into the input-side
 	// stores so mode_set / mode_reset / ctx_* events flow through
 	// logs.Event. nil-safe — logs.Event short-circuits on nil.
-	g.modeStore.SetSessionLog(g.deps.Common.Log)
+	g.modeStore.SetSessionLog(g.deps.Common.Logger())
 	if g.tree != nil {
-		g.tree.SetSessionLog(g.deps.Common.Log)
+		g.tree.SetSessionLog(g.deps.Common.Logger())
 	}
 
 	leader, _ := leaderRunesFromCfg(cfg)
@@ -310,7 +310,7 @@ func (g *Gui) wireWithDriver() error {
 		WhichKeyDelay: wdelay,
 		Registers:     keys.NewRegisterStore(),
 		WhichKey:      g.whichkey,
-		Log:           g.deps.Common.Log,
+		Log:           g.deps.Common.Logger(),
 	})
 	if err != nil {
 		return fmt.Errorf("gui: NewMatcher: %w", err)
@@ -318,7 +318,7 @@ func (g *Gui) wireWithDriver() error {
 	g.matcher = matcher
 	// dbsavvy-8s2.5: wire the per-session logger into the matcher so
 	// chord_resolved events flow through logs.Event. nil-safe.
-	g.matcher.SetSessionLog(g.deps.Common.Log)
+	g.matcher.SetSessionLog(g.deps.Common.Logger())
 	runtime := keys.NewRuntime(g.cmdRegistry, matcher, g.modeStore, g.whichkey, g.exRegistry)
 	g.kbRuntime = runtime
 
@@ -400,7 +400,7 @@ func (g *Gui) wireWithDriver() error {
 	g.choiceHelp = ui.NewChoiceHelper(g.tree, g.registry.Selection)
 	g.toastHelp = ui.NewToastHelper(g.driver)
 	if g.deps.Common != nil {
-		g.toastHelp.SetLogger(g.deps.Common.Log)
+		g.toastHelp.SetLogger(g.deps.Common.Logger())
 	}
 	g.tablesHelp = ui.NewTablesHelper(g.toastHelp, tr)
 	g.tipHelp = ui.NewTipHelper(g.tree, g.deps.Store)
@@ -418,7 +418,7 @@ func (g *Gui) wireWithDriver() error {
 		StreamFactory: func() ui.StreamRunner {
 			rbm := tasks.New(g.OnWorker, g.OnUIThreadContentOnly)
 			if g.deps.Common != nil {
-				rbm.SetLogger(g.deps.Common.Log)
+				rbm.SetLogger(g.deps.Common.Logger())
 			}
 			return rbm
 		},
@@ -491,9 +491,7 @@ func (g *Gui) wireWithDriver() error {
 		}
 		h, hErr := hp()
 		if hErr != nil {
-			if g.deps.Common.Log != nil {
-				g.deps.Common.Log.Warnf("gui: history open: %v", hErr)
-			}
+			g.deps.Common.Logger().Warn("gui: history open", "err", hErr)
 		} else {
 			g.history = h
 		}
@@ -509,7 +507,7 @@ func (g *Gui) wireWithDriver() error {
 
 	helperBag := controllers.HelperBag{
 		Driver:           g.driver,
-		Logger:           g.deps.Common.Log,
+		Logger:           g.deps.Common.Logger(),
 		Connections:      connectionsPickerAdapter{registry: g.registry.Connections},
 		Schemas:          schemasPickerAdapter{registry: g.registry.Schemas},
 		Tables:           tablePicker,
@@ -715,10 +713,8 @@ func (g *Gui) wireWithDriver() error {
 	if buildErr != nil {
 		return fmt.Errorf("gui: Build: %w", buildErr)
 	}
-	if g.deps.Common.Log != nil {
-		for _, w := range warnings {
-			g.deps.Common.Log.Warnf("keybindings: [%s] %s (%s)", w.Code, w.Message, w.Origin)
-		}
+	for _, w := range warnings {
+		g.deps.Common.Logger().Warn(fmt.Sprintf("keybindings: [%s] %s (%s)", w.Code, w.Message, w.Origin))
 	}
 	g.lastWarnings = warnings
 	matcher.SwapTrieSet(trieSet)
@@ -742,7 +738,7 @@ func (g *Gui) wireWithDriver() error {
 		Service:  svc,
 		Matcher:  matcher,
 		Toaster:  toaster,
-		Log:      g.deps.Common.Log,
+		Log:      g.deps.Common.Logger(),
 	}
 	_ = g.exRegistry.Register(keys.ReloadCommand(reloadDeps))
 
@@ -766,7 +762,7 @@ func (g *Gui) wireWithDriver() error {
 	if cfg.UI.Mouse.Enabled {
 		if err := ui.WireMouse(ui.MouseWiringDeps{
 			Driver:      g.driver,
-			Log:         g.deps.Common.Log,
+			Log:         g.deps.Common.Logger(),
 			Tree:        g.tree,
 			Registry:    g.registry,
 			Matcher:     matcher,
@@ -865,7 +861,7 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 					g.masterEditors[key] = editor.NewVimEditor(g.registry.QueryEditor, g.matcher, key)
 				}
 			default:
-				g.masterEditors[key] = NewMasterEditor(ngocui, g.matcher, key, WithSessionLog(g.deps.Common.Log))
+				g.masterEditors[key] = NewMasterEditor(ngocui, g.matcher, key, WithSessionLog(g.deps.Common.Logger()))
 			}
 			continue
 		}
@@ -895,7 +891,7 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 	// cheap, and re-pushes between tabs do not strand a stale editor on
 	// the prior view (gocui's per-view Editor pointer is replaced on
 	// attach, and result_tab views never become editable text targets).
-	g.masterEditors[types.RESULT_GRID] = NewMasterEditor(ngocui, g.matcher, types.RESULT_GRID, WithSessionLog(g.deps.Common.Log))
+	g.masterEditors[types.RESULT_GRID] = NewMasterEditor(ngocui, g.matcher, types.RESULT_GRID, WithSessionLog(g.deps.Common.Logger()))
 	return nil
 }
 
@@ -1076,9 +1072,7 @@ func (g *Gui) saveQueryEditorBuffer(connID, uuid, content string) {
 	}
 	g.OnWorker(func(_ gocui.Task) error {
 		if err := editor.SaveBufferContent(fs, stateDir, connID, uuid, content); err != nil {
-			if g.deps.Common.Log != nil {
-				g.deps.Common.Log.Warnf("gui: save query-editor buffer: %v", err)
-			}
+			g.deps.Common.Logger().Warn("gui: save query-editor buffer", "err", err)
 		}
 		return nil
 	})

@@ -39,7 +39,7 @@ func readTestdata(t *testing.T, name string) string {
 func TestLoadAndMerge_EmptyOverlayPreservesEnglish(t *testing.T) {
 	fsys := newOverlayFS(t, map[string]string{"empty": readTestdata(t, "empty.json")})
 
-	got, err := LoadAndMerge(fsys, "empty")
+	got, err := LoadAndMerge(fsys, "empty", nil)
 	if err != nil {
 		t.Fatalf("LoadAndMerge: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestLoadAndMerge_EmptyOverlayPreservesEnglish(t *testing.T) {
 func TestLoadAndMerge_PartialOverlay_OmittedFieldsKeepEnglish(t *testing.T) {
 	fsys := newOverlayFS(t, map[string]string{"fr": readTestdata(t, "fr.json")})
 
-	got, err := LoadAndMerge(fsys, "fr")
+	got, err := LoadAndMerge(fsys, "fr", nil)
 	if err != nil {
 		t.Fatalf("LoadAndMerge: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestLoadAndMerge_PartialOverlay_OmittedFieldsKeepEnglish(t *testing.T) {
 func TestLoadAndMerge_MalformedJSON_FallsBackToFreshEnglish(t *testing.T) {
 	fsys := newOverlayFS(t, map[string]string{"bad": readTestdata(t, "malformed.json")})
 
-	got, err := LoadAndMerge(fsys, "bad")
+	got, err := LoadAndMerge(fsys, "bad", nil)
 	if err != nil {
 		t.Fatalf("LoadAndMerge: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestLoadAndMerge_Oversize_FallsBackToEnglish_NoPanic(t *testing.T) {
 		}
 	}()
 
-	got, err := LoadAndMerge(fsys, "big")
+	got, err := LoadAndMerge(fsys, "big", nil)
 	if err != nil {
 		t.Fatalf("LoadAndMerge: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestLoadAndMerge_Oversize_FallsBackToEnglish_NoPanic(t *testing.T) {
 
 func TestLoadAndMerge_NonexistentLang_ReturnsEnglish_NilError(t *testing.T) {
 	fsys := afero.NewMemMapFs() // empty
-	got, err := LoadAndMerge(fsys, "zz")
+	got, err := LoadAndMerge(fsys, "zz", nil)
 	if err != nil {
 		t.Fatalf("LoadAndMerge: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestLoadAndMerge_NonexistentLang_ReturnsEnglish_NilError(t *testing.T) {
 
 func TestLoadAndMerge_NilAfero_FallsBackToEmbed(t *testing.T) {
 	// Embedded en.json is `{}` so the result must match English baseline.
-	got, err := LoadAndMerge(nil, "en")
+	got, err := LoadAndMerge(nil, "en", nil)
 	if err != nil {
 		t.Fatalf("LoadAndMerge: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestLoadAndMerge_NilAfero_FallsBackToEmbed(t *testing.T) {
 }
 
 func TestLoadAndMerge_EmptyLang_ReturnsEnglish(t *testing.T) {
-	got, err := LoadAndMerge(nil, "")
+	got, err := LoadAndMerge(nil, "", nil)
 	if err != nil {
 		t.Fatalf("LoadAndMerge: %v", err)
 	}

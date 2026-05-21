@@ -2,10 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
@@ -35,8 +35,7 @@ func (cancelingPrompter) PromptChoice(_ context.Context, _, _ string, _ []string
 func newTestFormHelper(t *testing.T) *data.ConnectionFormHelper {
 	t.Helper()
 	fs := afero.NewMemMapFs()
-	log := logrus.New()
-	log.SetLevel(logrus.PanicLevel)
+	log := slog.New(slog.DiscardHandler)
 	c := common.NewCommon(log, i18n.EnglishTranslationSet(), config.GetDefaultConfig(), &common.AppState{}, fs)
 	return data.NewConnectionFormHelper(c, fs, "/tmp/connections.yml", func() []string { return []string{"postgres"} })
 }

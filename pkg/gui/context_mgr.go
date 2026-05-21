@@ -2,8 +2,7 @@ package gui
 
 import (
 	"errors"
-
-	"github.com/sirupsen/logrus"
+	"log/slog"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/logs"
@@ -42,7 +41,7 @@ var ErrPopAtBottom = errors.New("gui: cannot pop the root context")
 type ContextTree struct {
 	stack      []types.IBaseContext
 	swapHooks  []func()
-	sessionLog *logrus.Logger
+	sessionLog *slog.Logger
 }
 
 // NewContextTree returns an empty ContextTree. Callers are expected to
@@ -55,7 +54,7 @@ func NewContextTree() *ContextTree {
 // Replace/wipeStack/removeMain to emit cat=input ctx_* events. nil
 // disables emission. Wired by the orchestrator at bootstrap; the
 // nil-default keeps test fixtures that never call this method silent.
-func (t *ContextTree) SetSessionLog(l *logrus.Logger) {
+func (t *ContextTree) SetSessionLog(l *slog.Logger) {
 	t.sessionLog = l
 }
 
@@ -109,12 +108,12 @@ func (t *ContextTree) Push(c types.IBaseContext) error {
 		t.stack = append(t.stack, c)
 	}
 
-	logs.Event(t.sessionLog, "input", "ctx_push", logrus.Fields{
-		"key":                string(c.GetKey()),
-		"kind":               kindLabel(c.GetKind()),
-		"stack_depth_before": depthBefore,
-		"stack_depth_after":  len(t.stack),
-	})
+	logs.Event(t.sessionLog, "input", "ctx_push",
+		slog.String("key", string(c.GetKey())),
+		slog.String("kind", kindLabel(c.GetKind())),
+		slog.Int("stack_depth_before", depthBefore),
+		slog.Int("stack_depth_after", len(t.stack)),
+	)
 
 	if err := c.HandleFocus(types.OnFocusOpts{NewContextKey: c.GetKey()}); err != nil {
 		return err
@@ -134,12 +133,12 @@ func (t *ContextTree) Pop() error {
 	popped := t.stack[len(t.stack)-1]
 	t.stack = t.stack[:len(t.stack)-1]
 	newTop := t.stack[len(t.stack)-1]
-	logs.Event(t.sessionLog, "input", "ctx_pop", logrus.Fields{
-		"key":                string(popped.GetKey()),
-		"kind":               kindLabel(popped.GetKind()),
-		"stack_depth_before": depthBefore,
-		"stack_depth_after":  len(t.stack),
-	})
+	logs.Event(t.sessionLog, "input", "ctx_pop",
+		slog.String("key", string(popped.GetKey())),
+		slog.String("kind", kindLabel(popped.GetKind())),
+		slog.Int("stack_depth_before", depthBefore),
+		slog.Int("stack_depth_after", len(t.stack)),
+	)
 	if err := popped.HandleFocusLost(types.OnFocusLostOpts{NewContextKey: newTop.GetKey()}); err != nil {
 		return err
 	}
@@ -156,23 +155,23 @@ func (t *ContextTree) Replace(c types.IBaseContext) error {
 	if len(t.stack) == 0 {
 		depthBefore := 0
 		t.stack = append(t.stack, c)
-		logs.Event(t.sessionLog, "input", "ctx_replace", logrus.Fields{
-			"key":                string(c.GetKey()),
-			"kind":               kindLabel(c.GetKind()),
-			"stack_depth_before": depthBefore,
-			"stack_depth_after":  len(t.stack),
-		})
+		logs.Event(t.sessionLog, "input", "ctx_replace",
+			slog.String("key", string(c.GetKey())),
+			slog.String("kind", kindLabel(c.GetKind())),
+			slog.Int("stack_depth_before", depthBefore),
+			slog.Int("stack_depth_after", len(t.stack)),
+		)
 		t.fireSwapHooks()
 		return nil
 	}
 	depthBefore := len(t.stack)
 	t.stack[len(t.stack)-1] = c
-	logs.Event(t.sessionLog, "input", "ctx_replace", logrus.Fields{
-		"key":                string(c.GetKey()),
-		"kind":               kindLabel(c.GetKind()),
-		"stack_depth_before": depthBefore,
-		"stack_depth_after":  len(t.stack),
-	})
+	logs.Event(t.sessionLog, "input", "ctx_replace",
+		slog.String("key", string(c.GetKey())),
+		slog.String("kind", kindLabel(c.GetKind())),
+		slog.Int("stack_depth_before", depthBefore),
+		slog.Int("stack_depth_after", len(t.stack)),
+	)
 	t.fireSwapHooks()
 	return nil
 }
@@ -238,12 +237,12 @@ func (t *ContextTree) wipeStack() {
 		_ = t.stack[i].HandleFocusLost(types.OnFocusLostOpts{})
 	}
 	t.stack = t.stack[:0]
-	logs.Event(t.sessionLog, "input", "ctx_wipe", logrus.Fields{
-		"key":                "",
-		"kind":               "",
-		"stack_depth_before": depthBefore,
-		"stack_depth_after":  len(t.stack),
-	})
+	logs.Event(t.sessionLog, "input", "ctx_wipe",
+		slog.String("key", ""),
+		slog.String("kind", ""),
+		slog.Int("stack_depth_before", depthBefore),
+		slog.Int("stack_depth_after", len(t.stack)),
+	)
 }
 
 // removeMain drops the first MAIN_CONTEXT found in the stack (there is
@@ -254,12 +253,12 @@ func (t *ContextTree) removeMain() {
 			depthBefore := len(t.stack)
 			_ = c.HandleFocusLost(types.OnFocusLostOpts{})
 			t.stack = append(t.stack[:i], t.stack[i+1:]...)
-			logs.Event(t.sessionLog, "input", "ctx_remove_main", logrus.Fields{
-				"key":                string(c.GetKey()),
-				"kind":               kindLabel(c.GetKind()),
-				"stack_depth_before": depthBefore,
-				"stack_depth_after":  len(t.stack),
-			})
+			logs.Event(t.sessionLog, "input", "ctx_remove_main",
+				slog.String("key", string(c.GetKey())),
+				slog.String("kind", kindLabel(c.GetKind())),
+				slog.Int("stack_depth_before", depthBefore),
+				slog.Int("stack_depth_after", len(t.stack)),
+			)
 			return
 		}
 	}

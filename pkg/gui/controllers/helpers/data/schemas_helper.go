@@ -2,9 +2,9 @@ package data
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
 	"path"
-
-	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -59,8 +59,8 @@ func NewSchemasHelper(c *common.Common, store *common.AppStateStore) *SchemasHel
 //   - Dedupes the merged hidden set across builtin/profile/runtime overlap:
 //     a schema that matches via multiple categories appears once in hidden.
 //   - A malformed pattern (path.Match returns a non-nil error, e.g. "[") is
-//     logged via c.Log.Warnf and SKIPPED — remaining patterns still apply
-//     (M09f). The helper never fails on a bad glob.
+//     logged via the per-session logger and SKIPPED — remaining patterns
+//     still apply (M09f). The helper never fails on a bad glob.
 //   - Empty raw → returns (nil-or-empty, nil-or-empty) without allocating
 //     beyond the zero-length slice headers.
 //
@@ -116,9 +116,7 @@ func (h *SchemasHelper) matchesAny(name string, patterns []string) bool {
 			// path.Match returns ErrBadPattern for syntactically invalid
 			// patterns ("[", "[^", etc). Skip — log once per encounter so
 			// operators can spot the config bug, but DO NOT fail the filter.
-			if h.c != nil && h.c.Log != nil {
-				h.c.Log.Warnf("schemas_helper: skipping malformed hide pattern %q: %v", pat, err)
-			}
+			h.c.Logger().Warn(fmt.Sprintf("schemas_helper: skipping malformed hide pattern %q: %v", pat, err))
 			continue
 		}
 		if ok {
@@ -153,18 +151,16 @@ func (h *SchemasHelper) HideSchema(connID, schemaName string) error {
 		}
 		s.HiddenSchemas[connID] = append(existing, schemaName)
 	})
-	logs.Event(h.logger(), "state", "schema_hide", logrus.Fields{"conn_id": connID, "schema": schemaName})
+	logs.Event(h.logger(), "state", "schema_hide", slog.String("conn_id", connID), slog.String("schema", schemaName))
 	return nil
 }
 
-// logger returns the per-session logger threaded through *common.Common,
-// or nil if Common is unwired (test fixtures). logs.Event is nil-tolerant
-// so this stays safe in both paths.
-func (h *SchemasHelper) logger() *logrus.Logger {
-	if h.c == nil {
-		return nil
-	}
-	return h.c.Log
+// logger returns the per-session logger threaded through *common.Common.
+// Common.Logger() is nil-safe (returns a discarding logger when c or its
+// internal log is nil), so this stays safe in test fixtures that build
+// SchemasHelper without a real Common.
+func (h *SchemasHelper) logger() *slog.Logger {
+	return h.c.Logger()
 }
 
 // UnhideSchema removes schemaName from AppState.HiddenSchemas[connID] via
@@ -223,7 +219,7 @@ func (h *SchemasHelper) UnhideSchema(connID, schemaName string, builtin, profile
 	// AC: emit ONLY on actual removal — skip the not-present no-op and the
 	// ErrNeedsConfirmation early return (handled above).
 	if removed {
-		logs.Event(h.logger(), "state", "schema_unhide", logrus.Fields{"conn_id": connID, "schema": schemaName})
+		logs.Event(h.logger(), "state", "schema_unhide", slog.String("conn_id", connID), slog.String("schema", schemaName))
 	}
 	return nil
 }

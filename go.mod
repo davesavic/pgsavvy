@@ -12,7 +12,6 @@ require (
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/jesseduffield/lazycore v0.0.0-20221012050358-03d2e40243c5
 	github.com/jesseduffield/lazygit v0.61.2-0.20260511142836-c49350362005
-	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/afero v1.15.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/goleak v1.3.0

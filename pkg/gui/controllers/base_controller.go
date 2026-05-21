@@ -3,9 +3,9 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
-	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
@@ -106,9 +106,9 @@ type HelperBag struct {
 }
 
 // DebugLogger is the minimal logging surface controllers expect.
-// *logrus.Logger satisfies it.
+// *slog.Logger satisfies it.
 type DebugLogger interface {
-	Debugf(format string, args ...any)
+	Debug(msg string, args ...any)
 }
 
 // ConnectInvoker is the narrow surface the connections controller calls
@@ -158,7 +158,7 @@ func (b *baseController) wrapErr(label string, err error) error {
 		return nil
 	}
 	if b.helpers.Logger != nil {
-		b.helpers.Logger.Debugf("controller %q: %v", label, err)
+		b.helpers.Logger.Debug(fmt.Sprintf("controller %q: %v", label, err))
 	}
 	return fmt.Errorf("controller %s: %w", label, err)
 }
@@ -172,15 +172,12 @@ func (b *baseController) tr() *i18n.TranslationSet {
 	return i18n.EnglishTranslationSet()
 }
 
-// Log returns the per-session *logrus.Logger this controller's
-// common.Common bag carries, or nil when c (or c.Log) is nil. Per
-// AD-19: instrumentation paths reach the session logger through this
-// accessor rather than widening the narrower DebugLogger interface.
-// logs.Event tolerates a nil logger, so callers may pass the return
-// value through without nil-checking.
-func (b *baseController) Log() *logrus.Logger {
-	if b.c == nil {
-		return nil
-	}
-	return b.c.Log
+// Log returns the per-session *slog.Logger this controller's
+// common.Common bag carries. Per AD-19: instrumentation paths reach the
+// session logger through this accessor rather than widening the narrower
+// DebugLogger interface. The underlying Common.Logger() accessor is
+// nil-safe and returns a discarding logger when the bag is unwired, so
+// callers may pass the return value through without nil-checking.
+func (b *baseController) Log() *slog.Logger {
+	return b.c.Logger()
 }

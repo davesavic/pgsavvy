@@ -142,10 +142,10 @@ func ReloadCommand(deps ReloadDeps) ExCommand {
 		// Step 3: log warnings, swap, toast success.
 		if deps.Log != nil {
 			for _, w := range warnings {
-				deps.Log.Debugf(
+				deps.Log.Debug(fmt.Sprintf(
 					"reload: %s warning [%s] %s (origin=%s)",
 					w.Level, w.Code, w.Message, w.Origin,
-				)
+				))
 			}
 		}
 		deps.Matcher.SwapTrieSet(newTrie)

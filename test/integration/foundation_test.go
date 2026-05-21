@@ -73,7 +73,7 @@ func TestFoundationSmoke(t *testing.T) {
 		t.Fatalf("AppState round-trip mismatch:\n  saved=%+v\n  loaded=%+v", c.AppState, loaded)
 	}
 
-	tr, err := i18n.LoadAndMerge(c.Fs, "en")
+	tr, err := i18n.LoadAndMerge(c.Fs, "en", nil)
 	if err != nil {
 		t.Fatalf("i18n.LoadAndMerge returned error: %v", err)
 	}

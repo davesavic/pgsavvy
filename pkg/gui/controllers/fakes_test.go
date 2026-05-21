@@ -132,11 +132,11 @@ type fakeActiveConnection struct{ id string }
 
 func (f *fakeActiveConnection) ActiveConnectionID() string { return f.id }
 
-// recordingLogger captures Debugf format strings.
+// recordingLogger captures Debug messages.
 type recordingLogger struct{ msgs []string }
 
-func (r *recordingLogger) Debugf(format string, _ ...any) {
-	r.msgs = append(r.msgs, format)
+func (r *recordingLogger) Debug(msg string, _ ...any) {
+	r.msgs = append(r.msgs, msg)
 }
 
 // newBag returns a HelperBag with every fake pre-wired and addressable.

@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -24,7 +25,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jesseduffield/lazygit/pkg/gocui"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"go.uber.org/goleak"
 
@@ -94,7 +94,7 @@ type smoke struct {
 	statePath   string
 	cfg         *config.UserConfig
 	tr          *i18n.TranslationSet
-	log         *logrus.Logger
+	log         *slog.Logger
 	dsn         string
 	connections []models.Connection
 }
@@ -105,8 +105,7 @@ func setupSmoke(t *testing.T) *smoke {
 	registerSmokeDriver()
 
 	fs := afero.NewMemMapFs()
-	log := logrus.New()
-	log.SetLevel(logrus.PanicLevel)
+	log := slog.New(slog.DiscardHandler)
 	cfg := config.GetDefaultConfig()
 	tr := i18n.EnglishTranslationSet()
 	c := common.NewCommon(log, tr, cfg, &common.AppState{}, fs)

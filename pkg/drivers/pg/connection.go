@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 	"sync/atomic"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/logs"
@@ -66,9 +66,9 @@ func (c *Connection) Close() error {
 		if outstanding > 0 {
 			_, _ = fmt.Fprintf(os.Stderr, "WARN: pg: closing Connection with %d outstanding session(s); pool will drain them\n", outstanding)
 		}
-		logs.Event(pkgLogger(), "db", "conn_close", logrus.Fields{
-			"outstanding_sessions": outstanding,
-		})
+		logs.Event(pkgLogger(), "db", "conn_close",
+			slog.Int("outstanding_sessions", int(outstanding)),
+		)
 		c.pool.Close()
 	})
 	return nil
@@ -181,15 +181,15 @@ func (c *Connection) Cancel(ctx context.Context, qid models.QueryID) error {
 
 	log := pkgLogger()
 	emitCancel := func(err error) {
-		fields := logrus.Fields{
-			"sid":         uint64(qid.SessionID),
-			"qid_nonce":   qid.Nonce,
-			"backend_pid": uint64(qid.BackendPID),
+		attrs := []slog.Attr{
+			slog.Uint64("sid", uint64(qid.SessionID)),
+			slog.Uint64("qid_nonce", qid.Nonce),
+			slog.Uint64("backend_pid", uint64(qid.BackendPID)),
 		}
 		if err != nil {
-			fields["err"] = err.Error()
+			attrs = append(attrs, slog.Any("err", err.Error()))
 		}
-		logs.Event(log, "db", "query_cancel", fields)
+		logs.Event(log, "db", "query_cancel", attrs...)
 	}
 
 	cancelErr := c.cancelInner(ctx, qid)

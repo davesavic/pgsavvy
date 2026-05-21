@@ -2,11 +2,11 @@ package orchestrator_test
 
 import (
 	"errors"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
@@ -30,10 +30,15 @@ func buildTestGui(t *testing.T) (*orchestrator.Gui, *testfake.RecorderGuiDriver)
 // buildTestGuiWithCommon is buildTestGui plus the *common.Common it built,
 // for tests that need to assign field-only additions like LogCloser (AD-18).
 func buildTestGuiWithCommon(t *testing.T) (*orchestrator.Gui, *testfake.RecorderGuiDriver, *common.Common) {
+	return buildTestGuiWithLogger(t, slog.New(slog.DiscardHandler))
+}
+
+// buildTestGuiWithLogger mirrors buildTestGuiWithCommon but injects the
+// supplied *slog.Logger into the Common bag at construction time. Used
+// by event-emission tests that need to capture cat=state lines.
+func buildTestGuiWithLogger(t *testing.T, log *slog.Logger) (*orchestrator.Gui, *testfake.RecorderGuiDriver, *common.Common) {
 	t.Helper()
 	fs := afero.NewMemMapFs()
-	log := logrus.New()
-	log.SetLevel(logrus.PanicLevel)
 	cfg := config.GetDefaultConfig()
 	c := common.NewCommon(log, i18n.EnglishTranslationSet(), cfg, &common.AppState{}, fs)
 	store := common.NewAppStateStore(fs, "/tmp/state.yml", common.DefaultClock())

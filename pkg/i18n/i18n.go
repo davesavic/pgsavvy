@@ -4,11 +4,12 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"path"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 )
 
@@ -36,18 +37,22 @@ var embeddedTranslations embed.FS
 //   - malformed JSON: a freshly allocated English baseline is returned so
 //     callers never observe partial unmarshal state from the failed read.
 //
-// LoadAndMerge never panics and never returns a nil *TranslationSet.
-func LoadAndMerge(filesystem afero.Fs, lang string) (*TranslationSet, error) {
+// If logger is nil, a discard logger is used. LoadAndMerge never panics and
+// never returns a nil *TranslationSet.
+func LoadAndMerge(filesystem afero.Fs, lang string, logger *slog.Logger) (*TranslationSet, error) {
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	set := EnglishTranslationSet()
 	if lang == "" {
-		logrus.Debugf("i18n: empty lang; using English baseline")
+		logger.Debug("i18n: empty lang; using English baseline")
 		return set, nil
 	}
 
 	rel := path.Join("translations", lang+".json")
-	data, source, found := readOverlay(filesystem, rel)
+	data, source, found := readOverlay(filesystem, rel, logger)
 	if !found {
-		logrus.Debugf("i18n: no overlay found for %q; using English baseline", lang)
+		logger.Debug(fmt.Sprintf("i18n: no overlay found for %q; using English baseline", lang))
 		return set, nil
 	}
 
@@ -55,12 +60,12 @@ func LoadAndMerge(filesystem afero.Fs, lang string) (*TranslationSet, error) {
 	// payload larger than the cap is rejected before unmarshal to bound
 	// memory and avoid trusting attacker-controlled file sizes.
 	if len(data) > maxOverlayBytes {
-		logrus.Warnf("i18n: overlay %q (source=%s) exceeds %d bytes; using English baseline", lang, source, maxOverlayBytes)
+		logger.Warn(fmt.Sprintf("i18n: overlay %q (source=%s) exceeds %d bytes; using English baseline", lang, source, maxOverlayBytes))
 		return EnglishTranslationSet(), nil
 	}
 
 	if err := json.Unmarshal(data, set); err != nil {
-		logrus.Warnf("i18n: overlay %q (source=%s) is malformed: %v; using English baseline", lang, source, err)
+		logger.Warn(fmt.Sprintf("i18n: overlay %q (source=%s) is malformed: %v; using English baseline", lang, source, err))
 		// Re-allocate so callers never see partial mutation from the
 		// failed unmarshal.
 		return EnglishTranslationSet(), nil
@@ -76,47 +81,47 @@ func LoadAndMerge(filesystem afero.Fs, lang string) (*TranslationSet, error) {
 //
 // Reads are bounded by maxOverlayBytes+1: callers detect oversize by checking
 // len(data) > maxOverlayBytes.
-func readOverlay(filesystem afero.Fs, rel string) ([]byte, string, bool) {
+func readOverlay(filesystem afero.Fs, rel string, logger *slog.Logger) ([]byte, string, bool) {
 	if filesystem != nil {
-		if data, ok := readAferoFile(filesystem, rel); ok {
+		if data, ok := readAferoFile(filesystem, rel, logger); ok {
 			return data, "afero", true
 		}
 	}
-	if data, ok := readEmbeddedFile(rel); ok {
+	if data, ok := readEmbeddedFile(rel, logger); ok {
 		return data, "embed", true
 	}
 	return nil, "", false
 }
 
-func readAferoFile(filesystem afero.Fs, rel string) ([]byte, bool) {
+func readAferoFile(filesystem afero.Fs, rel string, logger *slog.Logger) ([]byte, bool) {
 	f, err := filesystem.Open(rel)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			logrus.Warnf("i18n: open afero overlay %q: %v", rel, err)
+			logger.Warn(fmt.Sprintf("i18n: open afero overlay %q: %v", rel, err))
 		}
 		return nil, false
 	}
 	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(io.LimitReader(f, maxOverlayBytes+1))
 	if err != nil {
-		logrus.Warnf("i18n: read afero overlay %q: %v", rel, err)
+		logger.Warn(fmt.Sprintf("i18n: read afero overlay %q: %v", rel, err))
 		return nil, false
 	}
 	return data, true
 }
 
-func readEmbeddedFile(rel string) ([]byte, bool) {
+func readEmbeddedFile(rel string, logger *slog.Logger) ([]byte, bool) {
 	f, err := embeddedTranslations.Open(rel)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			logrus.Warnf("i18n: open embedded overlay %q: %v", rel, err)
+			logger.Warn(fmt.Sprintf("i18n: open embedded overlay %q: %v", rel, err))
 		}
 		return nil, false
 	}
 	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(io.LimitReader(f, maxOverlayBytes+1))
 	if err != nil {
-		logrus.Warnf("i18n: read embedded overlay %q: %v", rel, err)
+		logger.Warn(fmt.Sprintf("i18n: read embedded overlay %q: %v", rel, err))
 		return nil, false
 	}
 	return data, true

@@ -50,8 +50,8 @@ func (m *mouseFakeDriver) Close() error                              { return ni
 
 type warnRecorder struct{ msgs []string }
 
-func (w *warnRecorder) Warnf(format string, _ ...any) {
-	w.msgs = append(w.msgs, format)
+func (w *warnRecorder) Warn(msg string, _ ...any) {
+	w.msgs = append(w.msgs, msg)
 }
 
 func TestRegisterMouseBindingHappyPath(t *testing.T) {
@@ -89,7 +89,7 @@ func TestRegisterMouseBindingSwallowsErrorAndLogsOnce(t *testing.T) {
 			t.Fatalf("RegisterMouseBinding[%d] returned err = %v; want swallowed", i, err)
 		}
 	}
-	// All 3 calls reached the driver; only 1 Warnf fired (sync.Once gate).
+	// All 3 calls reached the driver; only 1 Warn fired (sync.Once gate).
 	if len(d.bindings) != 3 {
 		t.Fatalf("driver SetViewClickBinding calls = %d; want 3", len(d.bindings))
 	}

@@ -2,13 +2,13 @@ package pg
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/logs"
@@ -68,10 +68,10 @@ func newSession(pgxConn *pgxpool.Conn, parent *Connection) *Session {
 	if parent.notices != nil {
 		parent.notices.bindConn(pgc, s.id)
 	}
-	logs.Event(pkgLogger(), "db", "session_open", logrus.Fields{
-		"sid":         uint64(s.id),
-		"backend_pid": uint64(pid),
-	})
+	logs.Event(pkgLogger(), "db", "session_open",
+		slog.Uint64("sid", uint64(s.id)),
+		slog.Uint64("backend_pid", uint64(pid)),
+	)
 	return s
 }
 
@@ -142,10 +142,10 @@ func (s *Session) Close() error {
 	}
 	s.conn.Release()
 	s.parent.sessions.Add(-1)
-	logs.Event(pkgLogger(), "db", "session_close", logrus.Fields{
-		"sid": uint64(s.id),
-		"ms":  time.Since(s.openedAt).Milliseconds(),
-	})
+	logs.Event(pkgLogger(), "db", "session_close",
+		slog.Uint64("sid", uint64(s.id)),
+		slog.Int64("ms", time.Since(s.openedAt).Milliseconds()),
+	)
 	return nil
 }
 
@@ -470,15 +470,15 @@ func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (pl
 	start := time.Now()
 	log := pkgLogger()
 	defer func() {
-		fields := logrus.Fields{
-			"sid":     uint64(s.id),
-			"analyze": analyze,
-			"ms":      time.Since(start).Milliseconds(),
+		attrs := []slog.Attr{
+			slog.Uint64("sid", uint64(s.id)),
+			slog.Bool("analyze", analyze),
+			slog.Int64("ms", time.Since(start).Milliseconds()),
 		}
 		if retErr != nil {
-			fields["err"] = retErr.Error()
+			attrs = append(attrs, slog.Any("err", retErr.Error()))
 		}
-		logs.Event(log, "db", "explain", fields)
+		logs.Event(log, "db", "explain", attrs...)
 	}()
 
 	jsonSQL := "EXPLAIN (FORMAT JSON) " + q.SQL

@@ -11,10 +11,10 @@ import (
 )
 
 // DebugLogger is the minimal logging surface keys helpers depend on.
-// *logrus.Logger satisfies it without further wrapping. Defined locally
+// *slog.Logger satisfies it without further wrapping. Defined locally
 // so this package does not import pkg/common just for one method.
 type DebugLogger interface {
-	Debugf(format string, args ...any)
+	Debug(msg string, args ...any)
 }
 
 // ChordKeyToGocui converts a types.ChordKey to the (gocui.Key,

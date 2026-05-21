@@ -3,22 +3,17 @@ package gui
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
-
-	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// newCapturingLogger returns a DEBUG-level *logrus.Logger that writes
+// newCapturingLogger returns a DEBUG-level *slog.Logger that writes
 // JSON-formatted lines to buf. Used by the cat=input event tests.
-func newCapturingLogger(buf *bytes.Buffer) *logrus.Logger {
-	l := logrus.New()
-	l.SetLevel(logrus.DebugLevel)
-	l.SetOutput(buf)
-	l.SetFormatter(&logrus.JSONFormatter{})
-	return l
+func newCapturingLogger(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
 
 func findEvents(t *testing.T, buf *bytes.Buffer, name string) []map[string]any {

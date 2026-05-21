@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -38,10 +37,7 @@ func installCaptureLogger(t *testing.T) *syncBuf {
 	t.Helper()
 	prev := globalLogger.Load()
 	buf := &syncBuf{}
-	l := logrus.New()
-	l.SetOutput(buf)
-	l.SetLevel(logrus.DebugLevel)
-	l.SetFormatter(&logrus.JSONFormatter{})
+	l := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	SetGlobalLogger(l)
 	t.Cleanup(func() { globalLogger.Store(prev) })
 	return buf
@@ -70,7 +66,7 @@ func TestSetGlobalLogger_RoundTrips(t *testing.T) {
 	prev := globalLogger.Load()
 	t.Cleanup(func() { globalLogger.Store(prev) })
 
-	l := logrus.New()
+	l := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 	SetGlobalLogger(l)
 	if got := pkgLogger(); got != l {
 		t.Errorf("pkgLogger() = %p, want %p", got, l)
@@ -166,7 +162,7 @@ func TestEvent_NilLoggerNoOps(t *testing.T) {
 		t.Fatalf("pkgLogger() not nil")
 	}
 	// Direct call into logs.Event with nil logger: must be a no-op.
-	// (logs.Event tolerates a nil *logrus.Logger; this is the same call
+	// (logs.Event tolerates a nil *slog.Logger; this is the same call
 	// shape used by every emit site in the package.)
 	defer func() {
 		if r := recover(); r != nil {

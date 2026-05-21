@@ -2,12 +2,11 @@ package keys
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unicode"
-
-	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -109,7 +108,7 @@ type Matcher struct {
 	registers  *RegisterStore
 	whichkey   WhichKeyNotifier
 	log        DebugLogger
-	sessionLog *logrus.Logger
+	sessionLog *slog.Logger
 	toaster    ToastFunc
 
 	mu       sync.Mutex
@@ -183,7 +182,7 @@ func NewMatcher(initial *TrieSet, cfg MatcherConfig) (*Matcher, error) {
 // SetSessionLog installs the per-session logger used by handleLookup
 // to emit cat=input chord_resolved events. nil disables emission;
 // orchestrator wires this at bootstrap.
-func (m *Matcher) SetSessionLog(l *logrus.Logger) {
+func (m *Matcher) SetSessionLog(l *slog.Logger) {
 	m.mu.Lock()
 	m.sessionLog = l
 	m.mu.Unlock()
@@ -445,13 +444,13 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		reg := m.register
 		m.cancelLocked()
 		m.mu.Unlock()
-		logs.Event(log, "input", "chord_resolved", logrus.Fields{
-			"seq":          chordSeqLabel(seq),
-			"scope":        string(scope),
-			"leaf":         true,
-			"has_children": false,
-			"cmd_id":       cmdIDOf(cmd),
-		})
+		logs.Event(log, "input", "chord_resolved",
+			slog.String("seq", chordSeqLabel(seq)),
+			slog.String("scope", string(scope)),
+			slog.Bool("leaf", true),
+			slog.Bool("has_children", false),
+			slog.String("cmd_id", cmdIDOf(cmd)),
+		)
 		if m.whichkey != nil {
 			m.whichkey.Hide()
 		}
@@ -465,13 +464,13 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		m.notifyWhichKeyLocked(scope, seq)
 		cmd := res.Action
 		m.mu.Unlock()
-		logs.Event(log, "input", "chord_resolved", logrus.Fields{
-			"seq":          chordSeqLabel(seq),
-			"scope":        string(scope),
-			"leaf":         true,
-			"has_children": true,
-			"cmd_id":       cmdIDOf(cmd),
-		})
+		logs.Event(log, "input", "chord_resolved",
+			slog.String("seq", chordSeqLabel(seq)),
+			slog.String("scope", string(scope)),
+			slog.Bool("leaf", true),
+			slog.Bool("has_children", true),
+			slog.String("cmd_id", cmdIDOf(cmd)),
+		)
 		return Pending, nil
 
 	case !res.IsLeaf && res.HasChildren:
@@ -482,13 +481,13 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		m.scheduleTimerLocked(scope, mode)
 		m.notifyWhichKeyLocked(scope, seq)
 		m.mu.Unlock()
-		logs.Event(log, "input", "chord_resolved", logrus.Fields{
-			"seq":          chordSeqLabel(seq),
-			"scope":        string(scope),
-			"leaf":         false,
-			"has_children": true,
-			"cmd_id":       "",
-		})
+		logs.Event(log, "input", "chord_resolved",
+			slog.String("seq", chordSeqLabel(seq)),
+			slog.String("scope", string(scope)),
+			slog.Bool("leaf", false),
+			slog.Bool("has_children", true),
+			slog.String("cmd_id", ""),
+		)
 		return Pending, nil
 
 	default:
@@ -618,7 +617,7 @@ func (m *Matcher) onTimerFire(id uint64) {
 		// present.
 		if r := recover(); r != nil {
 			if m.log != nil {
-				m.log.Debugf("matcher: timer-fire handler panic: %v", r)
+				m.log.Debug("matcher: timer-fire handler panic", "err", r)
 			}
 		}
 	}()

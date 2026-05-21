@@ -1,10 +1,9 @@
 package keys
 
 import (
+	"log/slog"
 	"maps"
 	"sync"
-
-	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/logs"
@@ -21,7 +20,7 @@ import (
 type ModeStore struct {
 	mu         sync.RWMutex
 	m          map[types.ContextKey]types.Mode
-	sessionLog *logrus.Logger
+	sessionLog *slog.Logger
 }
 
 // NewModeStore returns a ModeStore with a non-nil backing map.
@@ -52,11 +51,11 @@ func (s *ModeStore) Set(k types.ContextKey, mode types.Mode) {
 	s.m[k] = mode
 	log := s.sessionLog
 	s.mu.Unlock()
-	logs.Event(log, "input", "mode_set", logrus.Fields{
-		"ctx":      string(k),
-		"old_mode": old.String(),
-		"new_mode": mode.String(),
-	})
+	logs.Event(log, "input", "mode_set",
+		slog.String("ctx", string(k)),
+		slog.String("old_mode", old.String()),
+		slog.String("new_mode", mode.String()),
+	)
 }
 
 // Reset deletes the entry for k. No-op if k is absent.
@@ -66,18 +65,18 @@ func (s *ModeStore) Reset(k types.ContextKey) {
 	delete(s.m, k)
 	log := s.sessionLog
 	s.mu.Unlock()
-	logs.Event(log, "input", "mode_reset", logrus.Fields{
-		"ctx":      string(k),
-		"old_mode": old.String(),
-		"new_mode": types.ModeNormal.String(),
-	})
+	logs.Event(log, "input", "mode_reset",
+		slog.String("ctx", string(k)),
+		slog.String("old_mode", old.String()),
+		slog.String("new_mode", types.ModeNormal.String()),
+	)
 }
 
 // SetSessionLog installs the per-session logger used by Set/Reset to
 // emit cat=input mode_set / mode_reset events. nil disables emission.
 // Wired by the orchestrator at bootstrap; nil-default keeps test
 // fixtures that never call this method silent.
-func (s *ModeStore) SetSessionLog(l *logrus.Logger) {
+func (s *ModeStore) SetSessionLog(l *slog.Logger) {
 	s.mu.Lock()
 	s.sessionLog = l
 	s.mu.Unlock()

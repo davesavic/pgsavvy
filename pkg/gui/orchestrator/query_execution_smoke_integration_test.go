@@ -24,6 +24,7 @@ package orchestrator_test
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,7 +32,6 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"go.uber.org/goleak"
 
@@ -71,8 +71,7 @@ func setupQuerySmoke(t *testing.T) *queryExecutionSmoke {
 	registerSmokeDriver()
 
 	fs := afero.NewMemMapFs()
-	log := logrus.New()
-	log.SetLevel(logrus.PanicLevel)
+	log := slog.New(slog.DiscardHandler)
 	cfg := config.GetDefaultConfig()
 	tr := i18n.EnglishTranslationSet()
 	c := common.NewCommon(log, tr, cfg, &common.AppState{}, fs)

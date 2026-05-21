@@ -1,13 +1,13 @@
 package orchestrator_test
 
 import (
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
@@ -144,8 +144,7 @@ func assertCaretEnabled(t *testing.T, rec *serializedDriver, want bool) {
 func bootstrapAddConnGui(t *testing.T) (g *orchestrator.Gui, drv *serializedDriver, fs afero.Fs, connsPath string) {
 	t.Helper()
 	fs = afero.NewMemMapFs()
-	log := logrus.New()
-	log.SetLevel(logrus.PanicLevel)
+	log := slog.New(slog.DiscardHandler)
 	cfg := config.GetDefaultConfig()
 	tr := i18n.EnglishTranslationSet()
 	c := common.NewCommon(log, tr, cfg, &common.AppState{}, fs)

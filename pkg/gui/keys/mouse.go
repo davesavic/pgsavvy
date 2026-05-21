@@ -7,10 +7,10 @@ import (
 )
 
 // WarnLogger is the minimal logging surface the mouse helper uses to
-// record the single "mouse mode unsupported" warning per session. The
-// real *logrus.Logger satisfies it; tests can supply a recorder.
+// record the single "mouse mode unsupported" warning per session.
+// *slog.Logger satisfies it; tests can supply a recorder.
 type WarnLogger interface {
-	Warnf(format string, args ...any)
+	Warn(msg string, args ...any)
 }
 
 // mouseWarnOnce is the package-level guard ensuring the "mouse mode
@@ -63,7 +63,7 @@ func RegisterMouseBinding(
 		// when the terminal refuses to enter mouse mode.
 		if log != nil {
 			mouseWarnOnce.Do(func() {
-				log.Warnf("mouse: SetViewClickBinding failed (mouse mode may be unsupported by this terminal): %v", err)
+				log.Warn("mouse: SetViewClickBinding failed (mouse mode may be unsupported by this terminal)", "err", err)
 			})
 		}
 		return nil

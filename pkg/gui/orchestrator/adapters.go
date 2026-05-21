@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
-	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
@@ -172,9 +170,7 @@ func (c *connectInvoker) populateSchemasRail(ctx context.Context) {
 	}
 	schemas, err := c.helper.LoadSchemas(ctx, "")
 	if err != nil {
-		if c.g.deps.Common != nil && c.g.deps.Common.Log != nil {
-			c.g.deps.Common.Log.Warnf("gui: load schemas after connect: %v", err)
-		}
+		c.g.deps.Common.Logger().Warn("gui: load schemas after connect", "err", err)
 		return
 	}
 	visible := schemas
@@ -217,9 +213,7 @@ func (c *connectInvoker) populateTablesRail(ctx context.Context, schema string) 
 	}
 	tables, err := c.helper.LoadTables(ctx, schema)
 	if err != nil {
-		if c.g.deps.Common != nil && c.g.deps.Common.Log != nil {
-			c.g.deps.Common.Log.Warnf("gui: load tables for schema %q: %v", schema, err)
-		}
+		c.g.deps.Common.Logger().Warn(fmt.Sprintf("gui: load tables for schema %q: %v", schema, err))
 		return
 	}
 	items := make([]any, len(tables))
@@ -249,9 +243,7 @@ func (c *connectInvoker) populateColumnsRail(ctx context.Context, schema, table 
 	}
 	cols, err := c.helper.LoadColumns(ctx, schema, table)
 	if err != nil {
-		if c.g.deps.Common != nil && c.g.deps.Common.Log != nil {
-			c.g.deps.Common.Log.Warnf("gui: load columns for %s.%s: %v", schema, table, err)
-		}
+		c.g.deps.Common.Logger().Warn(fmt.Sprintf("gui: load columns for %s.%s: %v", schema, table, err))
 		return
 	}
 	items := make([]any, len(cols))
@@ -294,9 +286,7 @@ func (c *connectInvoker) hydrateQueryEditorBuffer(profile *models.Connection) {
 	}
 	buf, err := editor.LoadBuffer(common.Fs, common.StateDir, connID, uuid)
 	if err != nil {
-		if common.Log != nil {
-			common.Log.Warnf("gui: load query-editor buffer for %q: %v", connID, err)
-		}
+		common.Logger().Warn(fmt.Sprintf("gui: load query-editor buffer for %q: %v", connID, err))
 		return
 	}
 	c.g.registry.QueryEditor.SetBuffer(buf)
@@ -319,8 +309,8 @@ func (c *connectInvoker) wireQueryRuntime(ctx context.Context, conn drivers.Conn
 		return fmt.Errorf("orchestrator: acquire query session: %w", err)
 	}
 	opts := session.Options{}
-	if c.g != nil && c.g.deps.Common != nil && c.g.deps.Common.Log != nil {
-		opts.Logger = slog.New(logs.NewSlogHandler(c.g.deps.Common.Log))
+	if c.g != nil {
+		opts.Logger = c.g.deps.Common.Logger()
 	}
 	if c.history != nil {
 		opts.HistoryRecorder = c.history.AsSessionRecorder(profile.Name)

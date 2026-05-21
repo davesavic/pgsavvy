@@ -2,22 +2,19 @@ package ui_test
 
 import (
 	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 )
 
-func newBufLogger() (*logrus.Logger, *bytes.Buffer) {
+func newBufLogger() (*slog.Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
-	l := logrus.New()
-	l.SetOutput(buf)
-	l.SetLevel(logrus.DebugLevel)
-	l.SetFormatter(&logrus.JSONFormatter{})
+	l := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	return l, buf
 }
 
