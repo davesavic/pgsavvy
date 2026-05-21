@@ -6,7 +6,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
+
+	"github.com/davesavic/dbsavvy/pkg/logs"
 )
 
 // DebounceWindow is the idle period after the last MutateAndSave call before a
@@ -89,7 +92,20 @@ type AppStateStore struct {
 
 	// lastSaveErr records the most recent debounced-save error. Read under mu.
 	lastSaveErr error
+
+	// log is the optional structured logger used by dbsavvy-8s2.7 to emit
+	// cat=state events (appstate_mutate_scheduled / appstate_save_fire /
+	// appstate_close). Wired post-construction via SetLogger so the
+	// existing NewAppStateStore signature stays stable for the many test
+	// call sites that don't care about logging. Nil-tolerant — every emit
+	// goes through logs.Event which no-ops on nil.
+	log *logrus.Logger
 }
+
+// SetLogger wires the per-session structured logger used by the
+// dbsavvy-8s2.7 state-mutation instrumentation. Safe to call once before
+// the store is published; not safe to swap concurrently with mutations.
+func (s *AppStateStore) SetLogger(l *logrus.Logger) { s.log = l }
 
 // NewAppStateStore constructs a store wrapping a zero-value AppState. The
 // store owns the *AppState — callers MUST NOT read or mutate fields directly;
@@ -124,12 +140,14 @@ func (s *AppStateStore) MutateAndSave(fn func(*AppState)) {
 	s.mu.Lock()
 	fn(s.state)
 	// Mark pending and (re)arm the debounce timer.
+	hadPending := s.pending
 	s.pending = true
 	if s.timer != nil {
 		s.timer.Stop()
 	}
 	s.timer = s.clock.AfterFunc(DebounceWindow, s.debouncedFire)
 	s.mu.Unlock()
+	logs.Event(s.log, "state", "appstate_mutate_scheduled", logrus.Fields{"has_pending": hadPending})
 }
 
 // debouncedFire is invoked by the Clock after the debounce window elapses. It
@@ -141,12 +159,14 @@ func (s *AppStateStore) debouncedFire() {
 	if s.closed.Load() {
 		return
 	}
+	start := time.Now()
 	err := s.saveSnapshot()
 	s.mu.Lock()
 	s.lastSaveErr = err
 	s.pending = false
 	s.pendingCond.Broadcast()
 	s.mu.Unlock()
+	logs.Event(s.log, "state", "appstate_save_fire", logrus.Fields{"err": err, "ms": time.Since(start).Milliseconds()})
 }
 
 // saveSnapshot is the shared core: under mu, take a deep-copy snapshot of the
@@ -200,6 +220,10 @@ func (s *AppStateStore) Close() error {
 		return nil
 	}
 	s.mu.Lock()
+	drainedPending := 0
+	if s.pending {
+		drainedPending = 1
+	}
 	if s.timer != nil {
 		// If Stop returns false the timer either already fired (debouncedFire
 		// is running concurrently — we'll wait via pendingCond) or was already
@@ -223,6 +247,7 @@ func (s *AppStateStore) Close() error {
 	}
 	err := s.lastSaveErr
 	s.mu.Unlock()
+	logs.Event(s.log, "state", "appstate_close", logrus.Fields{"drained_pending": drainedPending})
 	return err
 }
 

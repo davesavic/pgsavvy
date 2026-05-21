@@ -5,7 +5,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
@@ -80,7 +83,16 @@ type ToastHelper struct {
 	// Clear() so a subsequent ShowOrUpdate with the same key starts a
 	// fresh toast rather than silently replacing nothing.
 	key string
+
+	// log is the optional structured logger used by dbsavvy-8s2.7 for the
+	// cat=state toast_set instrumentation. Nil-tolerant.
+	log *logrus.Logger
 }
+
+// SetLogger wires the per-session structured logger consumed by the
+// cat=state toast_set emit. Must be set before the first Show /
+// ShowOrUpdate to be observed.
+func (h *ToastHelper) SetLogger(l *logrus.Logger) { h.log = l }
 
 // toastHistoryCap caps the in-memory message history. The history is a
 // test/diagnostic surface only; cap keeps long-running sessions from
@@ -122,6 +134,7 @@ func (h *ToastHelper) Show(message string, ttl time.Duration) {
 	}
 	h.mu.Unlock()
 
+	logs.Event(h.log, "state", "toast_set", logrus.Fields{"key": "", "msg_preview": redacted, "ttl_ms": ttl.Milliseconds(), "gen": gen})
 	h.scheduleAutoClear(gen, ttl)
 }
 
@@ -159,6 +172,7 @@ func (h *ToastHelper) ShowOrUpdate(key, message string, ttl time.Duration) {
 	}
 	h.mu.Unlock()
 
+	logs.Event(h.log, "state", "toast_set", logrus.Fields{"key": key, "msg_preview": redacted, "ttl_ms": ttl.Milliseconds(), "gen": gen})
 	h.scheduleAutoClear(gen, ttl)
 }
 

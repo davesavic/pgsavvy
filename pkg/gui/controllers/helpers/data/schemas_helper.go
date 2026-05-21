@@ -4,8 +4,11 @@ import (
 	"errors"
 	"path"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -150,7 +153,18 @@ func (h *SchemasHelper) HideSchema(connID, schemaName string) error {
 		}
 		s.HiddenSchemas[connID] = append(existing, schemaName)
 	})
+	logs.Event(h.logger(), "state", "schema_hide", logrus.Fields{"conn_id": connID, "schema": schemaName})
 	return nil
+}
+
+// logger returns the per-session logger threaded through *common.Common,
+// or nil if Common is unwired (test fixtures). logs.Event is nil-tolerant
+// so this stays safe in both paths.
+func (h *SchemasHelper) logger() *logrus.Logger {
+	if h.c == nil {
+		return nil
+	}
+	return h.c.Log
 }
 
 // UnhideSchema removes schemaName from AppState.HiddenSchemas[connID] via
@@ -175,6 +189,7 @@ func (h *SchemasHelper) UnhideSchema(connID, schemaName string, builtin, profile
 		return ErrNeedsConfirmation
 	}
 
+	var removed bool
 	h.store.MutateAndSave(func(s *common.AppState) {
 		if s.HiddenSchemas == nil {
 			return
@@ -184,7 +199,6 @@ func (h *SchemasHelper) UnhideSchema(connID, schemaName string, builtin, profile
 			return
 		}
 		out := existing[:0:0] // fresh backing array — avoid mutating the snapshot
-		removed := false
 		for _, n := range existing {
 			if n == schemaName {
 				removed = true
@@ -206,6 +220,11 @@ func (h *SchemasHelper) UnhideSchema(connID, schemaName string, builtin, profile
 		}
 		s.HiddenSchemas[connID] = out
 	})
+	// AC: emit ONLY on actual removal — skip the not-present no-op and the
+	// ErrNeedsConfirmation early return (handled above).
+	if removed {
+		logs.Event(h.logger(), "state", "schema_unhide", logrus.Fields{"conn_id": connID, "schema": schemaName})
+	}
 	return nil
 }
 

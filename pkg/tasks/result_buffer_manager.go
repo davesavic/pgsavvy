@@ -6,8 +6,10 @@ import (
 	"sync/atomic"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
+	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -80,7 +82,17 @@ type ResultBufferManager struct {
 	// always 0 in production; consumers must handle the unknown case.
 	// TODO(dbsavvy-uv0.4+): wire a real EXPLAIN seed.
 	estimatedRows atomic.Int64
+
+	// log is the optional structured logger used by dbsavvy-8s2.7 for
+	// cat=state RBM lifecycle events. Nil-tolerant via logs.Event.
+	log *logrus.Logger
 }
+
+// SetLogger wires the per-session structured logger consumed by the
+// dbsavvy-8s2.7 cat=state instrumentation (rbm_task_launch /
+// rbm_task_cleanup / rbm_estimated_rows). Safe to call post-construction
+// before the first NewQueryTask.
+func (m *ResultBufferManager) SetLogger(l *logrus.Logger) { m.log = l }
 
 // New constructs a ResultBufferManager wired to the given orchestrator
 // threading helpers. Pass orchestrator.Gui.OnWorker and
@@ -119,6 +131,7 @@ func (m *ResultBufferManager) EstimatedRows() int64 {
 // EXPLAIN result. dbsavvy-uv0.3.
 func (m *ResultBufferManager) SetEstimatedRows(n int64) {
 	m.estimatedRows.Store(n)
+	logs.Event(m.log, "state", "rbm_estimated_rows", logrus.Fields{"n": n})
 }
 
 // ReadRows requests the worker pull up to n more rows from the
@@ -216,6 +229,16 @@ func (m *ResultBufferManager) NewQueryTask(
 
 	priorStop := m.stopCurrentTask
 	m.mu.Unlock()
+
+	// Capture preempted_prior BEFORE running priorStop (AC: the field
+	// must reflect "there was a prior task" at the time NewQueryTask
+	// was invoked, not what the manager state looks like afterwards).
+	preemptedPrior := priorStop != nil
+	logs.Event(m.log, "state", "rbm_task_launch", logrus.Fields{
+		"taskKey":         taskKey,
+		"preempted_prior": preemptedPrior,
+		"rows_to_read":    initialRows,
+	})
 
 	// Preempt the prior task synchronously. priorStop blocks until
 	// the prior worker has closed its RowStream and fired its
@@ -315,7 +338,8 @@ func (m *ResultBufferManager) runTask(
 		m.mu.Lock()
 		// Only clear if we are still the active task. A preempt
 		// from NewQueryTask has already replaced these fields.
-		if m.rowsToRead == myRowsToRead {
+		cleared := m.rowsToRead == myRowsToRead
+		if cleared {
 			m.taskKey = ""
 			m.stopCurrentTask = nil
 			m.rowsToRead = nil
@@ -328,6 +352,7 @@ func (m *ResultBufferManager) runTask(
 		fireOnDone()
 		close(doneCh)
 		_ = myStopFn // keep referenced; prevents Go vet noise about unused capture
+		logs.Event(m.log, "state", "rbm_task_cleanup", logrus.Fields{"taskKey": taskKey, "cleared": cleared})
 	}
 	defer cleanup()
 

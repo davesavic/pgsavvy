@@ -5,9 +5,16 @@ import (
 	"sync/atomic"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
+	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 )
+
+// onWorkerSampleN is the AD-20 sample period: emit a worker_start /
+// worker_end line every Nth OnWorker call in addition to mandatory
+// quiescence-transition emits.
+const onWorkerSampleN = 10
 
 // Threading helpers — direct port of lazygit's
 // pkg/gui/gui_common.go OnUIThread / OnUIThreadContentOnly / OnWorker
@@ -95,25 +102,79 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 	if fn == nil {
 		return
 	}
-	g.busyDelta(+1)
+	busyAfter := g.busyDelta(+1)
+	busyBefore := busyAfter - 1
 	g.workersWG.Add(1)
 	task := gocui.NewFakeTask()
+
+	// AD-20 sampling gate (starts): always emit on the start-of-busy
+	// transition (busy_before == 0); else emit every Nth call so bursts
+	// stay loud enough to debug without flooding the file. Sampling
+	// applies to worker_start only — worker_end always emits when the
+	// counter returns to quiescence (busy_after == 0) and never on
+	// non-transition completions. Together this yields the 2 + N/10
+	// shape the AD-20 burst-sampling test asserts.
+	sampleTick := g.onWorkerSampleCounter.Add(1)
+	if busyBefore == 0 || sampleTick%onWorkerSampleN == 0 {
+		g.emitWorkerEvent("worker_start", logrus.Fields{
+			"busy_before": busyBefore,
+			"busy_after":  busyAfter,
+		})
+	}
+
 	go func() {
 		defer g.workersWG.Done()
-		defer g.busyDelta(-1)
+		defer func() {
+			endBusyAfter := g.busyDelta(-1)
+			endBusyBefore := endBusyAfter + 1
+			// Quiescence-only emit: only the worker whose decrement
+			// returns the busy counter to zero records the transition.
+			// Non-transition completions are intentionally dropped
+			// (sampling lives on the start side only) to keep the
+			// per-burst line budget at 2 + N/10.
+			if endBusyAfter == 0 {
+				g.emitWorkerEvent("worker_end", logrus.Fields{
+					"busy_before": endBusyBefore,
+					"busy_after":  endBusyAfter,
+				})
+			}
+		}()
 		defer func() {
 			if r := recover(); r != nil {
 				if g.deps.Common != nil && g.deps.Common.Log != nil {
 					g.deps.Common.Log.Errorf("gui: OnWorker panic recovered: %v", r)
 				}
+				// AD-20 edge: panic-recover always emits a worker_end with
+				// panic_recovered=true (regardless of the sampling gate)
+				// so silent crashes always leave a trace. The deferred
+				// quiescence emit above ALSO fires — that one carries the
+				// busy counters; this one carries the panic payload.
+				g.emitWorkerEvent("worker_end", logrus.Fields{
+					"panic_recovered": true,
+					"err":             r,
+				})
 			}
 		}()
 		if err := fn(task); err != nil {
 			if g.deps.Common != nil && g.deps.Common.Log != nil {
 				g.deps.Common.Log.Errorf("gui: OnWorker returned error: %v", err)
 			}
+			// AD-20 edge: a non-nil fn error always emits worker_end with
+			// err alongside the existing Errorf — sampling never decimates
+			// the failure trail.
+			g.emitWorkerEvent("worker_end", logrus.Fields{"err": err})
 		}
 	}()
+}
+
+// emitWorkerEvent funnels every cat=state worker_* emit through a single
+// nil-tolerant helper so the OnWorker hot path stays one-line per
+// call-site.
+func (g *Gui) emitWorkerEvent(evt string, fields logrus.Fields) {
+	if g == nil || g.deps.Common == nil {
+		return
+	}
+	logs.Event(g.deps.Common.Log, "state", evt, fields)
 }
 
 // WaitWorkers blocks until every in-flight OnWorker goroutine has
