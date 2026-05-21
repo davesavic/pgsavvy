@@ -97,6 +97,13 @@ func New(conn drivers.Connection, inner drivers.Session, opts Options) *SQLSessi
 	if s.logger == nil {
 		s.logger = slog.New(slog.DiscardHandler)
 	}
+	// AD-87v: every event emitted by SQLSession is in the "db" category. Pre-
+	// bind cat=db on s.logger so the CategoryFilterHandler in the production
+	// handler chain (RedactingHandler → CategoryFilterHandler → TeeHandler)
+	// routes session events to the file sink. The deleted slog_bridge.go used
+	// to inject this attr globally; SQLSession is the right ownership
+	// boundary now.
+	s.logger = s.logger.With(slog.String("cat", "db"))
 
 	if na, ok := inner.(noticeAttacher); ok {
 		s.noticeCh = make(chan pgconn.Notice, sqlSessionNoticeBuffer)

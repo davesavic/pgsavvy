@@ -20,11 +20,10 @@ import (
 func newLoggedSession(t *testing.T, opts ...func(*session.Options)) (*session.SQLSession, *fakeConn, *fakeSess, *syncBuf) {
 	t.Helper()
 	buf := &syncBuf{}
-	// SQLSession emits via raw slog.LogAttrs without setting cat=db itself
-	// — in production that attr is injected by the slog handler stack
-	// (AD-22 cat=db bridge). The test fixture mimics that by pre-binding
-	// cat="db" on the logger so audit assertions on `cat` continue to hold.
-	lg := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})).With(slog.String("cat", "db"))
+	// AD-87v: SQLSession.New now pre-binds cat="db" on the logger it stores,
+	// so this fixture deliberately passes a logger WITHOUT cat=db. The test
+	// assertions on `cat` therefore exercise the production path.
+	lg := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	conn := &fakeConn{}
 	sess := &fakeSess{id: 42}
