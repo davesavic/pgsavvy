@@ -20,8 +20,8 @@ type Options struct {
 	FS             afero.Fs // typed as INTERFACE; never type-asserted
 	Clock          Clock    // for filename generation; defaults to wallClock if nil
 	RetentionCount int      // count of *.log files to keep (>=1; 20 is canonical)
-	Redactor       Redactor // hook applied to every entry; may be nil (no-op)
-	Categories     []string // if non-empty, only entries with matching `cat` field are written. Nil/empty = allow-all.
+	Redactor       Redactor // applied to every record before downstream handlers; may be nil (no-op)
+	Categories     []string // if non-empty, only entries with matching `cat` attr are written to the file. Nil/empty = allow-all.
 	BuildInfo      BuildInfo
 	Pid            int       // optional override for tests; 0 → os.Getpid()
 	Stderr         io.Writer // optional override for tests; nil → os.Stderr

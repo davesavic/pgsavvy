@@ -1,49 +1,62 @@
 package logs
 
 import (
-	"io"
+	"log/slog"
 	"testing"
-
-	"github.com/sirupsen/logrus"
 )
 
-// captureHook records the last entry seen.
-type captureHook struct {
-	last *logrus.Entry
-}
-
-func (h *captureHook) Levels() []logrus.Level { return logrus.AllLevels }
-func (h *captureHook) Fire(e *logrus.Entry) error {
-	// Copy data to a fresh map so subsequent mutations don't race.
-	cp := logrus.Fields{}
-	for k, v := range e.Data {
-		cp[k] = v
-	}
-	dup := *e
-	dup.Data = cp
-	h.last = &dup
-	return nil
+// attrByKey looks up an attr by key in r. Returns the value and true if found.
+func attrByKey(r slog.Record, key string) (slog.Value, bool) {
+	var v slog.Value
+	var found bool
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == key {
+			v, found = a.Value, true
+			return false
+		}
+		return true
+	})
+	return v, found
 }
 
 func TestEvent_AlwaysSetsCatField(t *testing.T) {
-	l := logrus.New()
-	l.SetOutput(io.Discard)
-	l.SetLevel(logrus.DebugLevel)
-	h := &captureHook{}
-	l.AddHook(h)
+	h := NewRecordingHandler()
+	l := slog.New(h)
 
-	Event(l, "cat1", "evt1", logrus.Fields{"cat": "overridden", "extra": 42})
+	Event(l, "cat1", "evt1",
+		slog.String("cat", "overridden"),
+		slog.String("evt", "overridden"),
+		slog.Int("extra", 42),
+	)
 
-	if h.last == nil {
-		t.Fatal("no entry captured")
+	recs := h.Records()
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(recs))
 	}
-	if got := h.last.Data["cat"]; got != "cat1" {
-		t.Fatalf("cat = %v, want cat1", got)
+	r := recs[0]
+
+	if v, ok := attrByKey(r, "cat"); !ok || v.String() != "cat1" {
+		t.Fatalf("cat = %v (ok=%v), want cat1", v, ok)
 	}
-	if got := h.last.Data["evt"]; got != "evt1" {
-		t.Fatalf("evt = %v, want evt1", got)
+	if v, ok := attrByKey(r, "evt"); !ok || v.String() != "evt1" {
+		t.Fatalf("evt = %v (ok=%v), want evt1", v, ok)
 	}
-	if got := h.last.Data["extra"]; got != 42 {
-		t.Fatalf("extra = %v, want 42", got)
+	if v, ok := attrByKey(r, "extra"); !ok || v.Int64() != 42 {
+		t.Fatalf("extra = %v (ok=%v), want 42", v, ok)
 	}
+	if r.Message != "evt1" {
+		t.Fatalf("message = %q, want evt1", r.Message)
+	}
+	if r.Level != slog.LevelDebug {
+		t.Fatalf("level = %v, want Debug", r.Level)
+	}
+}
+
+func TestEvent_NilLoggerNoop(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("panic with nil logger: %v", r)
+		}
+	}()
+	Event(nil, "x", "y", slog.Int("n", 1))
 }

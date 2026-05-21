@@ -2,27 +2,25 @@ package logs
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"reflect"
 	"regexp"
 	"strings"
 	"sync"
-
-	"github.com/sirupsen/logrus"
 )
 
-// Redactor is the hook contract. The default implementation walks
-// logrus.Entry.Data reflectively, redacts fields tagged `log:"redact"`, and
-// applies DSN-credential regex scrubs to all string-typed values + the
-// entry's message. It also redacts values that exactly match any env-var
-// whose name contains PASSWORD/SECRET/TOKEN.
+// Redactor scrubs secret material from a slog.Record in-place. The default
+// implementation walks the record's attrs reflectively, redacts fields tagged
+// `log:"redact"`, applies DSN-credential regex scrubs to all string-typed
+// values + the record's message, and replaces values that exactly match any
+// env-var whose name contains PASSWORD/SECRET/TOKEN.
 type Redactor interface {
-	Levels() []logrus.Level
-	Fire(*logrus.Entry) error
+	Redact(*slog.Record)
 }
 
 // DefaultRedactor returns the production redactor used by Open() to scrub
-// secrets before log lines reach disk. Safe for concurrent Fire() calls.
+// secrets before log lines reach disk. Safe for concurrent calls.
 func DefaultRedactor() Redactor { return &defaultRedactor{} }
 
 // Redaction placeholder constants. Kept exported-ish for test assertions
@@ -35,8 +33,7 @@ const (
 
 // Duplicated from pkg/session/profile.go to avoid an import cycle if/when
 // pkg/session grows to depend on pkg/logs. Keep these in sync with the
-// canonical definitions there. (T2 deliberately duplicates rather than
-// importing — see implementation notes in dbsavvy-8s2.2.)
+// canonical definitions there.
 var (
 	logsDSNInlineCredRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^:/@?\s]+):[^@/?\s]+@`)
 	logsKVDSNCredRe     = regexp.MustCompile(`(?i)\b(password|sslpassword)=('[^']*'|"[^"]*"|\S+)`)
@@ -46,33 +43,71 @@ type defaultRedactor struct {
 	depthWarnOnce sync.Once
 }
 
-func (*defaultRedactor) Levels() []logrus.Level { return logrus.AllLevels }
-
-// Fire walks entry.Data + entry.Message and replaces secret material with
-// [REDACTED]. logrus does NOT recover panics inside hooks, so the body is
-// wrapped in defer/recover — a panic here would otherwise crash any logging
-// call site.
-func (r *defaultRedactor) Fire(entry *logrus.Entry) error {
+// Redact mutates *r in place: it rebuilds the record's attrs with redacted
+// copies and scrubs r.Message. A panic during redaction leaves the record
+// unchanged (the caller's redactingHandler ALSO defers recover for safety).
+func (r *defaultRedactor) Redact(rec *slog.Record) {
 	defer func() {
 		_ = recover()
 	}()
 
 	envSecrets := buildEnvSecretSet()
 
-	// Walk top-level Data entries. Always replace with a redacted copy
-	// rather than mutating the caller's value.
-	if entry.Data != nil {
-		for k, v := range entry.Data {
-			entry.Data[k] = r.redactValue(reflect.ValueOf(v), envSecrets, 0)
-		}
+	// Collect original attrs.
+	origAttrs := make([]slog.Attr, 0, rec.NumAttrs())
+	rec.Attrs(func(a slog.Attr) bool {
+		origAttrs = append(origAttrs, a)
+		return true
+	})
+
+	// Rebuild attrs with redacted values.
+	newAttrs := make([]slog.Attr, 0, len(origAttrs))
+	for _, a := range origAttrs {
+		newAttrs = append(newAttrs, r.redactAttr(a, envSecrets, 0))
 	}
 
-	// Scrub the message string itself.
-	entry.Message = scrubString(entry.Message, envSecrets)
-	return nil
+	newMsg := scrubString(rec.Message, envSecrets)
+
+	// Build a new record (slog.Record's attrs are append-only).
+	nr := slog.NewRecord(rec.Time, rec.Level, newMsg, rec.PC)
+	nr.AddAttrs(newAttrs...)
+	*rec = nr
 }
 
-// buildEnvSecretSet rebuilds the env-value allowlist on every Fire so vars
+// redactAttr returns a new slog.Attr whose value has been recursively
+// redacted. Strings get scrubString applied; structs (incl. via Any) get
+// reflected-into; the kindGroup case recurses.
+func (r *defaultRedactor) redactAttr(a slog.Attr, env map[string]struct{}, depth int) slog.Attr {
+	val := a.Value.Resolve()
+	switch val.Kind() {
+	case slog.KindString:
+		return slog.String(a.Key, scrubString(val.String(), env))
+	case slog.KindGroup:
+		nested := val.Group()
+		out := make([]slog.Attr, 0, len(nested))
+		for _, sub := range nested {
+			out = append(out, r.redactAttr(sub, env, depth+1))
+		}
+		return slog.Group(a.Key, attrsToAny(out)...)
+	case slog.KindAny:
+		any := r.redactValue(reflect.ValueOf(val.Any()), env, depth)
+		return slog.Any(a.Key, any)
+	default:
+		// Numbers, bools, time, duration — pass through.
+		return a
+	}
+}
+
+// attrsToAny converts []slog.Attr to []any for the slog.Group variadic.
+func attrsToAny(in []slog.Attr) []any {
+	out := make([]any, len(in))
+	for i, a := range in {
+		out[i] = a
+	}
+	return out
+}
+
+// buildEnvSecretSet rebuilds the env-value allowlist on every Redact so vars
 // set AFTER the redactor was constructed are still scrubbed.
 func buildEnvSecretSet() map[string]struct{} {
 	out := make(map[string]struct{})
@@ -154,7 +189,7 @@ func (r *defaultRedactor) redactValue(v reflect.Value, env map[string]struct{}, 
 
 // redactStruct produces a map[string]any of fieldName -> (maybe redacted)
 // value. Field name resolution prefers `json` tag, then `yaml`, then Go
-// name (matching logrus's own field-naming pragmatics).
+// name.
 func (r *defaultRedactor) redactStruct(v reflect.Value, env map[string]struct{}, depth int) any {
 	t := v.Type()
 	out := make(map[string]any, t.NumField())

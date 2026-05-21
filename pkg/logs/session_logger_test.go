@@ -2,8 +2,10 @@ package logs
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 )
 
@@ -99,7 +100,6 @@ func TestOpen_PrunesOldestBeyondRetention(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	// Seed 20 files with descending mtimes. Use Chtimes via afero.
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 20; i++ {
 		name := filepath.Join(sessionsDir, sessionFilePrefix+
@@ -115,7 +115,6 @@ func TestOpen_PrunesOldestBeyondRetention(t *testing.T) {
 		}
 	}
 
-	// Now open — should add a 21st, then prune oldest to leave 20.
 	clk := &fakeClock{now: base.Add(100 * time.Hour)}
 	_, closer, err := Open(Options{Dir: "/state", FS: fs, Clock: clk, RetentionCount: 20, Pid: 1234})
 	if err != nil {
@@ -152,7 +151,6 @@ func TestOpen_RetentionSkipsSymlink(t *testing.T) {
 			t.Fatalf("chtimes: %v", err)
 		}
 	}
-	// Add a symlink that matches the prefix/suffix.
 	symPath := filepath.Join(sessionsDir, sessionFilePrefix+"99999999-999999-0000-000000000"+sessionFileSuffix)
 	if err := os.Symlink("/tmp/nonexistent-target.log", symPath); err != nil {
 		t.Fatalf("symlink: %v", err)
@@ -165,7 +163,6 @@ func TestOpen_RetentionSkipsSymlink(t *testing.T) {
 	}
 	defer func() { _ = closer.Close() }()
 
-	// Symlink should still be present.
 	if _, lerr := os.Lstat(symPath); lerr != nil {
 		t.Fatalf("symlink got pruned: %v", lerr)
 	}
@@ -183,7 +180,6 @@ func TestOpen_RefusesSymlinkAtPath_ELOOP(t *testing.T) {
 	}
 
 	clk := &fakeClock{now: time.Date(2026, 5, 21, 12, 0, 0, 123, time.UTC)}
-	// Compute the same filename Open() will pick.
 	expectedName := sessionFilePrefix +
 		clk.now.Format("20060102-150405") + "-1234-" +
 		formatNano(clk.now.UnixNano()%1_000_000_000) + sessionFileSuffix
@@ -263,10 +259,12 @@ func TestOpen_LevelSplit_WarnGoesToStderr(t *testing.T) {
 	}
 	defer func() { _ = closer.Close() }()
 
-	Event(l, "x", "dbg", nil)
-	l.WithFields(logrus.Fields{"cat": "x", "evt": "warn"}).Warn("something")
+	Event(l, "x", "dbg")
+	l.LogAttrs(context.Background(), slog.LevelWarn, "something",
+		slog.String("cat", "x"),
+		slog.String("evt", "warn"),
+	)
 
-	// Read file content.
 	names := readSessionFiles(t, fs, "/state/"+sessionsSubdir)
 	if len(names) != 1 {
 		t.Fatalf("expected 1 file, got %v", names)
@@ -289,10 +287,10 @@ func TestOpen_LevelSplit_WarnGoesToStderr(t *testing.T) {
 	}
 
 	se := stderr.String()
-	if strings.Contains(se, "dbg") {
+	if strings.Contains(se, "evt=dbg") {
 		t.Fatalf("stderr contains debug line: %s", se)
 	}
-	if !strings.Contains(se, "warn") && !strings.Contains(se, "something") {
+	if !strings.Contains(se, "evt=warn") && !strings.Contains(se, "something") {
 		t.Fatalf("stderr missing warn line: %s", se)
 	}
 }
@@ -313,8 +311,8 @@ func TestOpen_CategoryFilter(t *testing.T) {
 	}
 	defer func() { _ = closer.Close() }()
 
-	Event(l, "db", "query", nil)
-	Event(l, "input", "key", nil)
+	Event(l, "db", "query")
+	Event(l, "input", "key")
 
 	names := readSessionFiles(t, fs, "/state/"+sessionsSubdir)
 	f, _ := fs.Open(filepath.Join("/state/"+sessionsSubdir, names[0]))
@@ -328,7 +326,6 @@ func TestOpen_CategoryFilter(t *testing.T) {
 	if strings.Contains(cs, `"evt":"key"`) {
 		t.Fatalf("input line leaked past filter: %s", cs)
 	}
-	// startup_marker should also have been filtered out (cat=lifecycle not in {db}).
 	if strings.Contains(cs, `"evt":"startup_marker"`) {
 		t.Fatalf("startup_marker leaked past filter: %s", cs)
 	}
@@ -375,8 +372,7 @@ func TestOpen_StartupMarker_FirstLine(t *testing.T) {
 	}
 }
 
-// writeErroringFs wraps a MemMapFs to inject ENOSPC on Write to test disk-full
-// resilience.
+// writeErroringFs wraps a MemMapFs to inject ENOSPC on Write.
 type writeErroringFs struct {
 	afero.Fs
 }
@@ -391,7 +387,7 @@ func (w writeErroringFs) OpenFile(name string, flag int, perm os.FileMode) (afer
 
 type enospcFile struct{ afero.File }
 
-func (f *enospcFile) Write(p []byte) (int, error) { return 0, syscall.ENOSPC }
+func (f *enospcFile) Write(_ []byte) (int, error) { return 0, syscall.ENOSPC }
 
 func TestOpen_DiskFullReturnsSilent(t *testing.T) {
 	defer func() {
@@ -410,7 +406,6 @@ func TestOpen_DiskFullReturnsSilent(t *testing.T) {
 	if cerr := closer.Close(); cerr != nil {
 		t.Fatalf("close: %v", cerr)
 	}
-	// Second close — must be idempotent.
 	if cerr := closer.Close(); cerr != nil {
 		t.Fatalf("second close: %v", cerr)
 	}
@@ -426,4 +421,137 @@ func TestOpen_FsAcceptsMemMapFs(t *testing.T) {
 		t.Fatal("nil logger or closer")
 	}
 	_ = closer.Close()
+}
+
+// blockingCloseFile wraps an afero.File so that Close() blocks until the test
+// signals it. Used to exercise CloseWithDeadline timeouts.
+type blockingCloseFile struct {
+	afero.File
+	release chan struct{}
+}
+
+func (b *blockingCloseFile) Close() error {
+	<-b.release
+	return b.File.Close()
+}
+
+// blockingCloseFs wraps a MemMapFs and yields blockingCloseFile from OpenFile.
+type blockingCloseFs struct {
+	afero.Fs
+	release chan struct{}
+}
+
+func (b *blockingCloseFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	f, err := b.Fs.OpenFile(name, flag, perm)
+	if err != nil {
+		return nil, err
+	}
+	return &blockingCloseFile{File: f, release: b.release}, nil
+}
+
+func TestSessionCloser_ForceClosesOnDeadline(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release) // ensure the blocked Close eventually returns so goroutines don't leak
+
+	fs := &blockingCloseFs{Fs: afero.NewMemMapFs(), release: release}
+	clk := &fakeClock{now: time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)}
+
+	_, closer, err := Open(Options{Dir: "/state", FS: fs, Clock: clk, Pid: 1})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	start := time.Now()
+	cerr := closer.CloseWithDeadline(50 * time.Millisecond)
+	elapsed := time.Since(start)
+
+	if cerr == nil {
+		t.Fatal("expected deadline-exceeded error, got nil")
+	}
+	if !strings.Contains(cerr.Error(), "close deadline exceeded") {
+		t.Fatalf("error %q does not mention deadline", cerr.Error())
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("CloseWithDeadline took too long: %v", elapsed)
+	}
+}
+
+func TestOpen_ReplaysPruneWarnings(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("symlink semantics: linux/darwin")
+	}
+
+	tmp := t.TempDir()
+	sessionsDir := filepath.Join(tmp, sessionsSubdir)
+	if err := os.MkdirAll(sessionsDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 20; i++ {
+		name := filepath.Join(sessionsDir, sessionFilePrefix+
+			base.Add(time.Duration(i)*time.Hour).Format("20060102-150405")+
+			"-0000-000000000"+sessionFileSuffix)
+		if err := os.WriteFile(name, []byte("x"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	symPath := filepath.Join(sessionsDir, sessionFilePrefix+"99999999-999999-0000-000000000"+sessionFileSuffix)
+	if err := os.Symlink("/tmp/nonexistent-target.log", symPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	clk := &fakeClock{now: base.Add(100 * time.Hour)}
+	_, closer, err := Open(Options{Dir: tmp, Clock: clk, RetentionCount: 20, Pid: 1234})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = closer.Close() }()
+
+	// Find the newly opened session file and inspect contents.
+	names := readSessionFiles(t, afero.NewOsFs(), sessionsDir)
+	// Find the freshly created one (matches pid 1234).
+	var target string
+	for _, n := range names {
+		if strings.Contains(n, "-1234-") {
+			target = filepath.Join(sessionsDir, n)
+			break
+		}
+	}
+	if target == "" {
+		t.Fatalf("could not locate fresh session file in %v", names)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("readfile: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected >=2 lines, got %d: %s", len(lines), string(content))
+	}
+
+	// First line must be the startup marker.
+	var first map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("first line not JSON: %v", err)
+	}
+	if first["evt"] != "startup_marker" {
+		t.Fatalf("first line evt = %v, want startup_marker", first["evt"])
+	}
+
+	// At least one subsequent line must be a retention_warn at WARN level.
+	found := false
+	for _, ln := range lines[1:] {
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(ln), &obj); err != nil {
+			continue
+		}
+		if obj["evt"] == "retention_warn" && obj["level"] == "WARN" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no retention_warn line found in:\n%s", string(content))
+	}
 }

@@ -1,21 +1,27 @@
 package logs
 
-import "github.com/sirupsen/logrus"
+import (
+	"context"
+	"log/slog"
+)
 
-// Event emits a structured DEBUG entry with the conventional schema fields
-// {cat, evt, ...fields}. Always sets `cat` and `evt`, overriding any value
-// passed in fields.
+// Event emits a structured DEBUG entry with the conventional schema attrs
+// {cat, evt, ...attrs}. Always sets cat and evt; any user-supplied "cat" or
+// "evt" attrs are stripped to preserve the invariant.
 //
-// NOTE: This helper is the canonical way for T5/T6/T7 to emit instrumentation.
-// Callers should NOT bypass it (lest the cat-gate at write time stop working).
-func Event(l *logrus.Logger, cat, evt string, fields logrus.Fields) {
+// NOTE: This helper is the canonical way for instrumentation. Callers should
+// NOT bypass it (lest the cat-gate at write time stop working).
+func Event(l *slog.Logger, cat, evt string, attrs ...slog.Attr) {
 	if l == nil {
 		return
 	}
-	if fields == nil {
-		fields = logrus.Fields{}
+	out := make([]slog.Attr, 0, len(attrs)+2)
+	out = append(out, slog.String("cat", cat), slog.String("evt", evt))
+	for _, a := range attrs {
+		if a.Key == "cat" || a.Key == "evt" {
+			continue
+		}
+		out = append(out, a)
 	}
-	fields["cat"] = cat
-	fields["evt"] = evt
-	l.WithFields(fields).Debug(evt)
+	l.LogAttrs(context.Background(), slog.LevelDebug, evt, out...)
 }

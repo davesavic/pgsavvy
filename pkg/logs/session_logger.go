@@ -1,9 +1,11 @@
 package logs
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 )
 
@@ -32,12 +33,14 @@ const (
 )
 
 // Open creates a per-session log file under opts.Dir/sessions/ and returns a
-// logrus logger configured to route DEBUG+ to that file (gated by
-// opts.Categories, if non-empty) and WARN+ to opts.Stderr.
+// *slog.Logger wired to a handler chain that:
+//   - redacts secrets first (RedactingHandler),
+//   - tees the redacted record to (a) a JSON file sink gated by opts.Categories
+//     and (b) a stderr text sink gated to >= Warn.
 //
 // The returned LogCloser closes only the underlying file; close is idempotent.
 // CloseWithDeadline force-closes the fd on timeout (AD-16).
-func Open(opts Options) (*logrus.Logger, LogCloser, error) {
+func Open(opts Options) (*slog.Logger, LogCloser, error) {
 	if opts.Dir == "" {
 		return nil, nil, errors.New("logs: Options.Dir is empty (HOME/XDG_STATE_HOME may be unset)")
 	}
@@ -90,56 +93,48 @@ func Open(opts Options) (*logrus.Logger, LogCloser, error) {
 	// errors here that we ignore (it's a no-op for non-os backends).
 	_ = fs.Chmod(target, 0o600)
 
-	// Build logger.
-	logger := logrus.New()
-	logger.SetLevel(logrus.DebugLevel)
-	logger.SetOutput(io.Discard) // hooks do all routing
-	logger.SetFormatter(&logrus.JSONFormatter{TimestampFormat: "2006-01-02T15:04:05.000000000Z07:00"})
-
-	// Redactor first so subsequent hooks see redacted entries.
-	if opts.Redactor != nil {
-		logger.AddHook(opts.Redactor)
+	// Build the handler chain:
+	//   RedactingHandler -> Tee{ CategoryFilter -> FileJSONHandler , StderrLevelGated }
+	fileH := newFileJSONHandler(f)
+	var fileBranch slog.Handler = fileH
+	if cats := categorySet(opts.Categories); cats != nil {
+		fileBranch = &categoryFilterHandler{next: fileH, categories: cats}
 	}
-
-	fh := &fileHook{
-		file:       f,
-		formatter:  &logrus.JSONFormatter{TimestampFormat: "2006-01-02T15:04:05.000000000Z07:00"},
-		categories: categorySet(opts.Categories),
-	}
-	logger.AddHook(fh)
-
-	sh := &stderrHook{
-		w:         stderr,
-		formatter: &logrus.TextFormatter{DisableColors: true, FullTimestamp: true},
-	}
-	logger.AddHook(sh)
+	stderrH := newStderrLevelGated(stderr)
+	tee := &teeHandler{branches: []slog.Handler{fileBranch, stderrH}}
+	top := &redactingHandler{next: tee, redactor: opts.Redactor}
+	logger := slog.New(top)
 
 	// Retention sweep — post-open. Collect warnings, replay after startup marker.
 	pruneWarnings := pruneSessions(fs, sessionsDir, retention)
 
 	// Startup marker — first event written.
-	Event(logger, "lifecycle", "startup_marker", logrus.Fields{
-		"version":      opts.BuildInfo.Version,
-		"commit":       opts.BuildInfo.Commit,
-		"build_date":   opts.BuildInfo.Date,
-		"pid":          pid,
-		"os":           runtime.GOOS,
-		"arch":         runtime.GOARCH,
-		"state_dir":    opts.Dir,
-		"sessions_dir": sessionsDir,
-	})
+	Event(logger, "lifecycle", "startup_marker",
+		slog.String("version", opts.BuildInfo.Version),
+		slog.String("commit", opts.BuildInfo.Commit),
+		slog.String("build_date", opts.BuildInfo.Date),
+		slog.Int("pid", pid),
+		slog.String("os", runtime.GOOS),
+		slog.String("arch", runtime.GOARCH),
+		slog.String("state_dir", opts.Dir),
+		slog.String("sessions_dir", sessionsDir),
+	)
 
-	// Replay any pruning warnings.
+	// Replay any pruning warnings as Warn-level entries.
 	for _, w := range pruneWarnings {
-		logger.WithFields(logrus.Fields{"cat": "lifecycle", "evt": "retention_warn"}).Warn(w)
+		logger.LogAttrs(context.Background(), slog.LevelWarn, w,
+			slog.String("cat", "lifecycle"),
+			slog.String("evt", "retention_warn"),
+		)
 	}
 
-	return logger, &sessionCloser{f: f}, nil
+	return logger, &sessionCloser{mu: &fileH.mu, f: f}, nil
 }
 
 // --- closer -----------------------------------------------------------------
 
 type sessionCloser struct {
+	mu   *sync.Mutex // shared with fileJSONHandler — coordinates Write vs Close
 	f    afero.File
 	once sync.Once
 	err  error
@@ -147,7 +142,9 @@ type sessionCloser struct {
 
 func (c *sessionCloser) Close() error {
 	c.once.Do(func() {
+		c.mu.Lock()
 		c.err = c.f.Close()
+		c.mu.Unlock()
 	})
 	return c.err
 }
@@ -169,62 +166,196 @@ func (c *sessionCloser) CloseWithDeadline(d time.Duration) error {
 	}
 }
 
-// --- hooks ------------------------------------------------------------------
+// --- handlers ---------------------------------------------------------------
 
-type fileHook struct {
-	mu         sync.Mutex
-	file       afero.File
-	formatter  logrus.Formatter
+// redactingHandler wraps next with a Redactor. A nil redactor means passthrough.
+type redactingHandler struct {
+	next     slog.Handler
+	redactor Redactor
+}
+
+func (h *redactingHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return h.next.Enabled(ctx, l)
+}
+
+func (h *redactingHandler) Handle(ctx context.Context, r slog.Record) error {
+	if h.redactor != nil {
+		// Defensive: if the redactor panics we still forward the (unredacted)
+		// record so the application's logging call site doesn't crash. The
+		// default redactor ALSO recovers internally; this is belt-and-braces.
+		func() {
+			defer func() { _ = recover() }()
+			h.redactor.Redact(&r)
+		}()
+	}
+	return h.next.Handle(ctx, r)
+}
+
+func (h *redactingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &redactingHandler{next: h.next.WithAttrs(attrs), redactor: h.redactor}
+}
+
+func (h *redactingHandler) WithGroup(name string) slog.Handler {
+	return &redactingHandler{next: h.next.WithGroup(name), redactor: h.redactor}
+}
+
+// categoryFilterHandler drops records whose "cat" attr is not in the
+// allowlist. A nil categories map means allow-all (defensive — Open() only
+// installs this handler when categories is non-empty).
+type categoryFilterHandler struct {
+	next       slog.Handler
 	categories map[string]struct{}
 }
 
-func (h *fileHook) Levels() []logrus.Level { return logrus.AllLevels }
+func (h *categoryFilterHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return h.next.Enabled(ctx, l)
+}
 
-func (h *fileHook) Fire(entry *logrus.Entry) error {
-	if len(h.categories) > 0 {
-		raw, ok := entry.Data["cat"]
-		if !ok {
-			return nil
+func (h *categoryFilterHandler) Handle(ctx context.Context, r slog.Record) error {
+	if h.categories == nil {
+		return h.next.Handle(ctx, r)
+	}
+	var cat string
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == "cat" {
+			cat = a.Value.String()
+			return false
 		}
-		catStr, _ := raw.(string)
-		if _, found := h.categories[catStr]; !found {
-			return nil
-		}
-	}
-	b, err := h.formatter.Format(entry)
-	if err != nil {
-		return nil // swallow formatter errors
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	_, _ = h.file.Write(b) // swallow write errors (disk-full path)
-	return nil
-}
-
-type stderrHook struct {
-	mu        sync.Mutex
-	w         io.Writer
-	formatter logrus.Formatter
-}
-
-func (h *stderrHook) Levels() []logrus.Level {
-	return []logrus.Level{
-		logrus.PanicLevel,
-		logrus.FatalLevel,
-		logrus.ErrorLevel,
-		logrus.WarnLevel,
-	}
-}
-
-func (h *stderrHook) Fire(entry *logrus.Entry) error {
-	b, err := h.formatter.Format(entry)
-	if err != nil {
+		return true
+	})
+	if _, ok := h.categories[cat]; !ok {
 		return nil
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	_, _ = h.w.Write(b)
+	return h.next.Handle(ctx, r)
+}
+
+func (h *categoryFilterHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &categoryFilterHandler{next: h.next.WithAttrs(attrs), categories: h.categories}
+}
+
+func (h *categoryFilterHandler) WithGroup(name string) slog.Handler {
+	return &categoryFilterHandler{next: h.next.WithGroup(name), categories: h.categories}
+}
+
+// teeHandler fans out Handle to multiple branches. The record is Clone()d
+// before being forwarded to each branch so branches can independently
+// AddAttrs without corrupting siblings.
+type teeHandler struct {
+	branches []slog.Handler
+}
+
+func (h *teeHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	for _, b := range h.branches {
+		if b.Enabled(ctx, l) {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *teeHandler) Handle(ctx context.Context, r slog.Record) error {
+	for _, b := range h.branches {
+		_ = b.Handle(ctx, r.Clone())
+	}
 	return nil
+}
+
+func (h *teeHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	nb := make([]slog.Handler, len(h.branches))
+	for i, b := range h.branches {
+		nb[i] = b.WithAttrs(attrs)
+	}
+	return &teeHandler{branches: nb}
+}
+
+func (h *teeHandler) WithGroup(name string) slog.Handler {
+	nb := make([]slog.Handler, len(h.branches))
+	for i, b := range h.branches {
+		nb[i] = b.WithGroup(name)
+	}
+	return &teeHandler{branches: nb}
+}
+
+// fileJSONHandler wraps slog.JSONHandler around an afero.File and serializes
+// Write+Close through a sync.Mutex (shared with sessionCloser).
+type fileJSONHandler struct {
+	mu    sync.Mutex
+	file  afero.File
+	inner slog.Handler
+}
+
+func newFileJSONHandler(f afero.File) *fileJSONHandler {
+	h := &fileJSONHandler{file: f}
+	h.inner = slog.NewJSONHandler(&lockedWriter{h: h}, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})
+	return h
+}
+
+// lockedWriter is a tiny io.Writer that acquires h.mu while writing to h.file.
+// It is what slog.JSONHandler emits to, ensuring Write and Close serialize.
+type lockedWriter struct{ h *fileJSONHandler }
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.h.mu.Lock()
+	defer w.h.mu.Unlock()
+	// Defensive: swallow Write errors (disk-full path tested in
+	// TestOpen_DiskFullReturnsSilent). Returning an error from Write would
+	// propagate to slog.Handle and eventually the caller; the existing
+	// contract is to drop silently.
+	n, _ := w.h.file.Write(p)
+	if n != len(p) {
+		// Pretend success so JSONHandler doesn't surface the error.
+		return len(p), nil
+	}
+	return n, nil
+}
+
+func (h *fileJSONHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return h.inner.Enabled(ctx, l)
+}
+
+func (h *fileJSONHandler) Handle(ctx context.Context, r slog.Record) error {
+	return h.inner.Handle(ctx, r)
+}
+
+func (h *fileJSONHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return h.inner.WithAttrs(attrs)
+}
+
+func (h *fileJSONHandler) WithGroup(name string) slog.Handler {
+	return h.inner.WithGroup(name)
+}
+
+// stderrLevelGatedHandler emits only records with Level >= Warn, via an
+// internal slog.TextHandler.
+type stderrLevelGatedHandler struct {
+	inner slog.Handler
+}
+
+func newStderrLevelGated(w io.Writer) *stderrLevelGatedHandler {
+	return &stderrLevelGatedHandler{
+		inner: slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelWarn}),
+	}
+}
+
+func (h *stderrLevelGatedHandler) Enabled(_ context.Context, l slog.Level) bool {
+	return l >= slog.LevelWarn
+}
+
+func (h *stderrLevelGatedHandler) Handle(ctx context.Context, r slog.Record) error {
+	if r.Level < slog.LevelWarn {
+		return nil
+	}
+	return h.inner.Handle(ctx, r)
+}
+
+func (h *stderrLevelGatedHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &stderrLevelGatedHandler{inner: h.inner.WithAttrs(attrs)}
+}
+
+func (h *stderrLevelGatedHandler) WithGroup(name string) slog.Handler {
+	return &stderrLevelGatedHandler{inner: h.inner.WithGroup(name)}
 }
 
 // --- helpers ----------------------------------------------------------------
