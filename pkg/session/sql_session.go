@@ -32,9 +32,15 @@ const sqlSessionNoticeBuffer = 128
 // Options configures a SQLSession at New time. HistoryRecorder may be nil
 // (the package installs noopHistoryRecorder); Logger may be nil (a no-op
 // discard handler is installed if so).
+//
+// ConnectionPassword is the active connection-profile password. When non-
+// empty it is used to scrub literal substring matches in SQL previews and
+// pg notice/error text emitted to the log file (AD-14). Empty is the safe
+// default — emits then rely on the redactor hook + RedactConnectionString.
 type Options struct {
-	HistoryRecorder HistoryRecorder
-	Logger          *slog.Logger
+	HistoryRecorder    HistoryRecorder
+	Logger             *slog.Logger
+	ConnectionPassword string
 }
 
 // SQLSession is the driver-agnostic facade that wraps a drivers.Connection
@@ -55,6 +61,7 @@ type SQLSession struct {
 	registry *CancelRegistry
 	history  HistoryRecorder
 	logger   *slog.Logger
+	connPwd  string
 
 	streamMu  sync.Mutex
 	runActive atomic.Pointer[RunHandle]
@@ -82,6 +89,7 @@ func New(conn drivers.Connection, inner drivers.Session, opts Options) *SQLSessi
 		registry: NewCancelRegistry(),
 		history:  opts.HistoryRecorder,
 		logger:   opts.Logger,
+		connPwd:  opts.ConnectionPassword,
 	}
 	if s.history == nil {
 		s.history = noopHistoryRecorder{}
@@ -117,6 +125,16 @@ func (s *SQLSession) Execute(ctx context.Context, q models.Query) (models.Result
 	s.streamMu.Lock()
 	defer s.streamMu.Unlock()
 
+	sid := s.SessionID()
+	preview := sqlPreview(q.SQL, s.connPwd)
+	s.logger.LogAttrs(ctx, slog.LevelDebug, "exec_start",
+		slog.String("evt", "exec_start"),
+		slog.Uint64("sid", uint64(sid)),
+		slog.String("sql_preview", preview),
+		slog.Int("params_count", len(q.Args)),
+		slog.Any("params_hashes", paramsHashes(q.Args)),
+	)
+
 	start := time.Now()
 	res, err := s.inner.Execute(ctx, q)
 	durMs := time.Since(start).Milliseconds()
@@ -124,6 +142,17 @@ func (s *SQLSession) Execute(ctx context.Context, q models.Query) (models.Result
 	if err == nil {
 		rows = res.RowsAffected
 	}
+	endAttrs := []slog.Attr{
+		slog.String("evt", "exec_end"),
+		slog.Uint64("sid", uint64(sid)),
+		slog.Int64("ms", durMs),
+		slog.Int64("rows_affected", rows),
+	}
+	if err != nil {
+		endAttrs = append(endAttrs, slog.String("err", err.Error()))
+	}
+	s.logger.LogAttrs(ctx, slog.LevelDebug, "exec_end", endAttrs...)
+
 	if !LoggingSuppressed(ctx) {
 		s.recordHistory(q.SQL, durMs, rows, err == nil)
 	}
@@ -148,10 +177,28 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 	s.streamMu.Lock()
 
 	suppressLog := LoggingSuppressed(ctx)
+	sid := s.SessionID()
+	preview := sqlPreview(q.SQL, s.connPwd)
+
+	s.logger.LogAttrs(ctx, slog.LevelDebug, "stream_start",
+		slog.String("evt", "stream_start"),
+		slog.Uint64("sid", uint64(sid)),
+		slog.String("sql_preview", preview),
+		slog.Int("params_count", len(q.Args)),
+		slog.Any("params_hashes", paramsHashes(q.Args)),
+	)
 
 	rs, err := s.inner.Stream(ctx, q)
 	if err != nil {
 		s.streamMu.Unlock()
+		s.logger.LogAttrs(ctx, slog.LevelDebug, "stream_end",
+			slog.String("evt", "stream_end"),
+			slog.Uint64("sid", uint64(sid)),
+			slog.Int64("rows_observed", 0),
+			slog.Uint64("dropped_notices", 0),
+			slog.String("term_err", err.Error()),
+			slog.Int64("ms", 0),
+		)
 		// A Stream that fails before producing a RowStream still counts as
 		// a terminated run for the recorder.
 		if !suppressLog {
@@ -162,7 +209,21 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 
 	rh := newRunHandle(rs, q.SQL)
 	start := time.Now()
-	sid := s.SessionID()
+
+	// noticeHook emits a structured `evt=notice` line for every notice
+	// received on this run; message_preview is pre-scrubbed for the
+	// connection-password substring AND DSN-shaped strings (AC).
+	connPwd := s.connPwd
+	logger := s.logger
+	rh.noticeHook = func(n pgconn.Notice) {
+		logger.LogAttrs(context.Background(), slog.LevelDebug, "notice",
+			slog.String("evt", "notice"),
+			slog.Uint64("sid", uint64(sid)),
+			slog.String("severity", n.Severity),
+			slog.String("code", n.Code),
+			slog.String("message_preview", noticePreview(n.Message, connPwd)),
+		)
+	}
 
 	rh.cancelFn = func() error {
 		return s.conn.Cancel(context.Background(), rh.QueryID())
@@ -171,6 +232,19 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 		s.runActive.Store(nil)
 		s.registry.Unregister(sid)
 		durMs := time.Since(start).Milliseconds()
+		termErrStr := ""
+		if termErr != nil {
+			termErrStr = termErr.Error()
+		}
+		s.logger.LogAttrs(context.Background(), slog.LevelDebug, "stream_end",
+			slog.String("evt", "stream_end"),
+			slog.Uint64("sid", uint64(sid)),
+			slog.Uint64("qid_nonce", rh.QueryID().Nonce),
+			slog.Int64("rows_observed", rh.rowsObserved.Load()),
+			slog.Uint64("dropped_notices", rh.DroppedNotices()),
+			slog.String("term_err", termErrStr),
+			slog.Int64("ms", durMs),
+		)
 		// Clean EOF reports succeeded=true; any other termination is a
 		// failure for history purposes (ctx.Canceled, driver errors, ...).
 		if !suppressLog {
@@ -210,7 +284,22 @@ func (s *SQLSession) Cancel(qid models.QueryID) error {
 	if rh.QueryID() != qid {
 		return nil
 	}
-	return rh.Cancel()
+	err := rh.Cancel()
+	// Cancel dedup (AC): atomic.Bool on RunHandle guarantees exactly one
+	// query_cancel emit per qid even under concurrent Cancel.
+	if rh.cancelLogged.CompareAndSwap(false, true) {
+		attrs := []slog.Attr{
+			slog.String("evt", "query_cancel"),
+			slog.Uint64("sid", uint64(qid.SessionID)),
+			slog.Uint64("qid_nonce", qid.Nonce),
+			slog.Uint64("backend_pid", uint64(qid.BackendPID)),
+		}
+		if err != nil {
+			attrs = append(attrs, slog.String("err", err.Error()))
+		}
+		s.logger.LogAttrs(context.Background(), slog.LevelDebug, "query_cancel", attrs...)
+	}
+	return err
 }
 
 // Close releases the inner session, rolls back any active transaction, and
@@ -283,5 +372,12 @@ func (s *SQLSession) recordHistory(stmt string, durMs, rowsAffected int64, succe
 				"recover", r, "sid", s.inner.ID())
 		}
 	}()
+	s.logger.LogAttrs(context.Background(), slog.LevelDebug, "history_record",
+		slog.String("evt", "history_record"),
+		slog.Uint64("sid", uint64(s.inner.ID())),
+		slog.String("sql_preview", sqlPreview(stmt, s.connPwd)),
+		slog.Int64("ms", durMs),
+		slog.Bool("success", succeeded),
+	)
 	s.history.Record(stmt, durMs, rowsAffected, succeeded)
 }

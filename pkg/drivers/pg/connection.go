@@ -10,8 +10,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -60,9 +62,13 @@ type Connection struct {
 // the pool is closed.
 func (c *Connection) Close() error {
 	c.closeOnce.Do(func() {
-		if n := c.sessions.Load(); n > 0 {
-			_, _ = fmt.Fprintf(os.Stderr, "WARN: pg: closing Connection with %d outstanding session(s); pool will drain them\n", n)
+		outstanding := c.sessions.Load()
+		if outstanding > 0 {
+			_, _ = fmt.Fprintf(os.Stderr, "WARN: pg: closing Connection with %d outstanding session(s); pool will drain them\n", outstanding)
 		}
+		logs.Event(pkgLogger(), "db", "conn_close", logrus.Fields{
+			"outstanding_sessions": outstanding,
+		})
 		c.pool.Close()
 	})
 	return nil
@@ -173,6 +179,28 @@ func (c *Connection) Cancel(ctx context.Context, qid models.QueryID) error {
 		return err
 	}
 
+	log := pkgLogger()
+	emitCancel := func(err error) {
+		fields := logrus.Fields{
+			"sid":         uint64(qid.SessionID),
+			"qid_nonce":   qid.Nonce,
+			"backend_pid": uint64(qid.BackendPID),
+		}
+		if err != nil {
+			fields["err"] = err.Error()
+		}
+		logs.Event(log, "db", "query_cancel", fields)
+	}
+
+	cancelErr := c.cancelInner(ctx, qid)
+	emitCancel(cancelErr)
+	return cancelErr
+}
+
+// cancelInner is the implementation of Cancel without the instrumentation
+// emit. Split out so Cancel emits exactly one query_cancel event regardless
+// of which error branch fires.
+func (c *Connection) cancelInner(ctx context.Context, qid models.QueryID) error {
 	secretKey, _ := c.lookupCancelKey(qid.BackendPID)
 
 	// Pool.Config() returns a defensive copy, so reading ConnConfig.Config is

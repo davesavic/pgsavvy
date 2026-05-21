@@ -47,6 +47,16 @@ type RunHandle struct {
 
 	once         sync.Once
 	rowsObserved atomic.Int64
+
+	// cancelLogged guards the SQLSession.Cancel emit so concurrent Cancel
+	// calls for the same qid produce exactly one `evt=query_cancel` log
+	// line (AC). Set via CompareAndSwap by SQLSession.Cancel.
+	cancelLogged atomic.Bool
+
+	// noticeHook is installed by SQLSession.Stream so routeNotice can emit
+	// a structured `evt=notice` log line for every received notice. nil
+	// when no hook is set (notice still routed to the channel).
+	noticeHook func(pgconn.Notice)
 }
 
 // newRunHandle constructs a RunHandle wrapping rs. The caller is responsible
@@ -121,6 +131,9 @@ func (r *RunHandle) finish(err error) {
 // send with drop-oldest semantics: when the channel is full we evict one
 // pending notice (the oldest in the buffer) and increment droppedNotices.
 func (r *RunHandle) routeNotice(n pgconn.Notice) {
+	if r.noticeHook != nil {
+		r.noticeHook(n)
+	}
 	select {
 	case r.notices <- n:
 	default:

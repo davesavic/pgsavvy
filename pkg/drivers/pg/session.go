@@ -8,8 +8,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -40,6 +42,7 @@ type Session struct {
 	parent     *Connection
 	closed     atomic.Bool
 	inFlight   atomic.Int32
+	openedAt   time.Time // session_open timestamp; used for session_close ms field
 }
 
 // newSession constructs a *Session bound to pgxConn and parent. Session.ID is
@@ -59,11 +62,16 @@ func newSession(pgxConn *pgxpool.Conn, parent *Connection) *Session {
 		secretKey:  secret,
 		pgConn:     pgc,
 		parent:     parent,
+		openedAt:   time.Now(),
 	}
 	parent.registerCancel(pid, secret)
 	if parent.notices != nil {
 		parent.notices.bindConn(pgc, s.id)
 	}
+	logs.Event(pkgLogger(), "db", "session_open", logrus.Fields{
+		"sid":         uint64(s.id),
+		"backend_pid": uint64(pid),
+	})
 	return s
 }
 
@@ -134,6 +142,10 @@ func (s *Session) Close() error {
 	}
 	s.conn.Release()
 	s.parent.sessions.Add(-1)
+	logs.Event(pkgLogger(), "db", "session_close", logrus.Fields{
+		"sid": uint64(s.id),
+		"ms":  time.Since(s.openedAt).Milliseconds(),
+	})
 	return nil
 }
 
@@ -446,7 +458,7 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 // q.Timeout, when positive, is applied as a context.WithTimeout to the
 // caller's ctx for the duration of the call. The inFlight guard is held for
 // the whole call.
-func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (models.Plan, error) {
+func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (plan models.Plan, retErr error) {
 	defer s.guard()()
 
 	if q.Timeout > 0 {
@@ -454,6 +466,20 @@ func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (mo
 		ctx, cancel = context.WithTimeout(ctx, q.Timeout)
 		defer cancel()
 	}
+
+	start := time.Now()
+	log := pkgLogger()
+	defer func() {
+		fields := logrus.Fields{
+			"sid":     uint64(s.id),
+			"analyze": analyze,
+			"ms":      time.Since(start).Milliseconds(),
+		}
+		if retErr != nil {
+			fields["err"] = retErr.Error()
+		}
+		logs.Event(log, "db", "explain", fields)
+	}()
 
 	jsonSQL := "EXPLAIN (FORMAT JSON) " + q.SQL
 	textSQL := "EXPLAIN " + q.SQL

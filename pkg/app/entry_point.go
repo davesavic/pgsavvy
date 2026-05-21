@@ -15,6 +15,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
 	"github.com/davesavic/dbsavvy/pkg/env"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
@@ -83,6 +84,16 @@ func Start(build *BuildInfo, args []string) error {
 	c := common.NewCommon(log, tr, cfg, &common.AppState{}, fs)
 	c.StateDir = stateDir
 	c.LogCloser = logCloser
+	// dbsavvy-8s2.7: wire the per-session logger into the store so
+	// MutateAndSave / debouncedFire / Close emit cat=state events.
+	store.SetLogger(log)
+	// dbsavvy-8s2.6: hand the per-session logger to the pg driver package
+	// so Driver.Open / Connection.Cancel / Session lifecycle emits land in
+	// the per-session log file. Invoked AFTER logs.Open and BEFORE
+	// g.RunAndHandleError() (AD-11 — preserves the init-time
+	// drivers.Register invariant; the registration in main.go runs before
+	// logs.Open has been called).
+	pg.SetGlobalLogger(log)
 
 	connectionsProvider := func() []models.Connection {
 		conns, _ := config.LoadConnections(fs, connectionsPath)
