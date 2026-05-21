@@ -1,24 +1,20 @@
 package common
 
 import (
-	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
-	"github.com/sirupsen/logrus"
-	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 )
 
-func newSilentLogger() *logrus.Logger {
-	l := logrus.New()
-	l.SetOutput(io.Discard)
-	l.SetLevel(logrus.PanicLevel)
-	return l
+func newSilentLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
 }
 
 func TestNewCommon_ConstructsWithNonNilFields(t *testing.T) {
@@ -30,7 +26,7 @@ func TestNewCommon_ConstructsWithNonNilFields(t *testing.T) {
 
 	c := NewCommon(log, tr, cfg, app, fs)
 	require.NotNil(t, c)
-	require.NotNil(t, c.Log)
+	require.NotNil(t, c.Logger())
 	require.NotNil(t, c.Tr)
 	require.NotNil(t, c.AppState)
 	require.NotNil(t, c.Fs)
@@ -45,7 +41,7 @@ func TestNewCommon_ParameterOrder_PointerEquality(t *testing.T) {
 	fs := afero.NewMemMapFs()
 
 	c := NewCommon(log, tr, cfg, app, fs)
-	require.Same(t, log, c.Log)
+	require.Same(t, log, c.Logger())
 	require.Same(t, tr, c.Tr)
 	require.Same(t, app, c.AppState)
 	require.Same(t, cfg, c.UserConfig.Load())
@@ -64,30 +60,63 @@ func TestNewCommon_NilCfg_Panics(t *testing.T) {
 	})
 }
 
+// TestNewCommon_NilLog_Panics verifies AD-A4: NewCommon refuses a nil
+// *slog.Logger. The cfg-nil check still runs first (AMD-F2-5), so this
+// test supplies a non-nil cfg.
+func TestNewCommon_NilLog_Panics(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	cfg := config.GetDefaultConfig()
+	app := &AppState{}
+	fs := afero.NewMemMapFs()
+
+	require.PanicsWithValue(t, "NewCommon: log is nil", func() {
+		NewCommon(nil, tr, cfg, app, fs)
+	})
+}
+
+// TestNewCommon_BothNil_PanicsOnCfgFirst documents the ordering invariant
+// from AMD-F2-5: when both cfg and log are nil, the cfg panic message wins.
+func TestNewCommon_BothNil_PanicsOnCfgFirst(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	app := &AppState{}
+	fs := afero.NewMemMapFs()
+
+	require.PanicsWithValue(t, "NewCommon: cfg is nil", func() {
+		NewCommon(nil, tr, nil, app, fs)
+	})
+}
+
+func TestCommon_Logger_NilSafe(t *testing.T) {
+	var c *Common
+	require.NotNil(t, c.Logger())
+	// Calling against a zero-value Common (no log field set) also returns a
+	// non-nil discarding logger.
+	z := &Common{}
+	require.NotNil(t, z.Logger())
+}
+
 func TestNewCommon_GOOSWarning_Windows(t *testing.T) {
 	// Capture and restore getGOOS.
 	saved := getGOOS
 	t.Cleanup(func() { getGOOS = saved })
 	getGOOS = func() string { return "windows" }
 
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	logger.SetLevel(logrus.WarnLevel)
-	hook := logrustest.NewLocal(logger)
+	rh := logs.NewRecordingHandler()
+	logger := slog.New(rh)
 
 	c := NewCommon(logger, i18n.EnglishTranslationSet(), config.GetDefaultConfig(), &AppState{}, afero.NewMemMapFs())
 	require.NotNil(t, c)
 
-	entries := hook.AllEntries()
-	require.NotEmpty(t, entries, "expected at least one log entry from NewCommon")
+	records := rh.Records()
+	require.NotEmpty(t, records, "expected at least one log record from NewCommon")
 	found := false
-	for _, e := range entries {
-		if e.Level == logrus.WarnLevel && strings.Contains(e.Message, "OS not officially supported") {
+	for _, r := range records {
+		if r.Level == slog.LevelWarn && strings.Contains(r.Message, "OS not officially supported") {
 			found = true
 			break
 		}
 	}
-	require.True(t, found, "expected warning containing 'OS not officially supported', got entries: %+v", entries)
+	require.True(t, found, "expected warning containing 'OS not officially supported'; records: %+v", records)
 }
 
 func TestNewCommon_GOOSWarning_Linux_NoWarning(t *testing.T) {
@@ -95,14 +124,12 @@ func TestNewCommon_GOOSWarning_Linux_NoWarning(t *testing.T) {
 	t.Cleanup(func() { getGOOS = saved })
 	getGOOS = func() string { return "linux" }
 
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	logger.SetLevel(logrus.DebugLevel)
-	hook := logrustest.NewLocal(logger)
+	rh := logs.NewRecordingHandler()
+	logger := slog.New(rh)
 
 	_ = NewCommon(logger, i18n.EnglishTranslationSet(), config.GetDefaultConfig(), &AppState{}, afero.NewMemMapFs())
-	for _, e := range hook.AllEntries() {
-		require.NotContains(t, e.Message, "OS not officially supported")
+	for _, r := range rh.Records() {
+		require.NotContains(t, r.Message, "OS not officially supported")
 	}
 }
 
@@ -111,13 +138,11 @@ func TestNewCommon_GOOSWarning_Darwin_NoWarning(t *testing.T) {
 	t.Cleanup(func() { getGOOS = saved })
 	getGOOS = func() string { return "darwin" }
 
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	logger.SetLevel(logrus.DebugLevel)
-	hook := logrustest.NewLocal(logger)
+	rh := logs.NewRecordingHandler()
+	logger := slog.New(rh)
 
 	_ = NewCommon(logger, i18n.EnglishTranslationSet(), config.GetDefaultConfig(), &AppState{}, afero.NewMemMapFs())
-	for _, e := range hook.AllEntries() {
-		require.NotContains(t, e.Message, "OS not officially supported")
+	for _, r := range rh.Records() {
+		require.NotContains(t, r.Message, "OS not officially supported")
 	}
 }

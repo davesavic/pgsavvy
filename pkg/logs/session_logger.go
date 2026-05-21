@@ -168,6 +168,15 @@ func (c *sessionCloser) CloseWithDeadline(d time.Duration) error {
 
 // --- handlers ---------------------------------------------------------------
 
+// NewRedactingHandler wraps next with a Redactor so every record is scrubbed
+// before reaching downstream handlers. A nil redactor is treated as
+// passthrough. Exposed for callers that build their own slog chain (e.g.
+// entry_point's fallback / kill-switch paths in dbsavvy-962.2) and want the
+// same redaction guarantee that Open() applies.
+func NewRedactingHandler(next slog.Handler, r Redactor) slog.Handler {
+	return &redactingHandler{next: next, redactor: r}
+}
+
 // redactingHandler wraps next with a Redactor. A nil redactor means passthrough.
 type redactingHandler struct {
 	next     slog.Handler

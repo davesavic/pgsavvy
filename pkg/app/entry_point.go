@@ -4,12 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
@@ -124,16 +124,17 @@ func Start(build *BuildInfo, args []string) error {
 }
 
 // wireSessionLogger builds the primary logger. Behavior:
-//   - DBSAVVY_DISABLE_SESSION_LOG=1 → pre-feature stderr-only WarnLevel logger
-//     with no file and no redaction hook (SC#8 kill switch).
-//   - logs.Open success → DEBUG-level file logger + stderr Warn+ + redaction hook.
-//   - logs.Open failure → fallback stderr logger WITH redaction hook installed
-//     (AD-13d) and a single Warn line documenting the failure. App still starts.
-func wireSessionLogger(stateDir string, fs afero.Fs, build *BuildInfo) (*logrus.Logger, io.Closer) {
+//   - DBSAVVY_DISABLE_SESSION_LOG=1 → stderr-only WarnLevel slog logger,
+//     no file, but RedactingHandler is still wired (AMD-F2-6 closes the
+//     pre-migration gap where the kill-switch path leaked unredacted DSNs).
+//   - logs.Open success → DEBUG-level file logger + stderr Warn+ via the
+//     handler chain Open() builds.
+//   - logs.Open failure → fallback stderr slog WITH RedactingHandler over a
+//     JSON sink at WarnLevel + a single Warn line documenting the failure.
+//     App still starts.
+func wireSessionLogger(stateDir string, fs afero.Fs, build *BuildInfo) (*slog.Logger, io.Closer) {
 	if os.Getenv(disableSessionLogEnv) == "1" {
-		log := logrus.New()
-		log.SetLevel(logrus.WarnLevel)
-		return log, nil
+		return newKillSwitchLogger(), nil
 	}
 
 	logger, closer, err := logs.Open(logs.Options{
@@ -149,17 +150,23 @@ func wireSessionLogger(stateDir string, fs afero.Fs, build *BuildInfo) (*logrus.
 	})
 	if err != nil {
 		fb := newFallbackLogger()
-		fb.WithError(err).Warn("logs: session logger open failed; using stderr fallback")
+		fb.Warn("logs: session logger open failed; using stderr fallback", "err", err)
 		return fb, nil
 	}
 	return logger, closer
 }
 
-// newFallbackLogger builds a stderr WarnLevel logrus with the default
-// redactor hook installed (AD-13d). Used when logs.Open fails.
-func newFallbackLogger() *logrus.Logger {
-	log := logrus.New()
-	log.SetLevel(logrus.WarnLevel)
-	log.AddHook(logs.DefaultRedactor())
-	return log
+// newFallbackLogger builds a stderr Warn+ slog wrapped in
+// RedactingHandler (AD-13d / AMD-F2-6). Used when logs.Open fails.
+func newFallbackLogger() *slog.Logger {
+	base := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})
+	return slog.New(logs.NewRedactingHandler(base, logs.DefaultRedactor()))
+}
+
+// newKillSwitchLogger builds the DBSAVVY_DISABLE_SESSION_LOG=1 logger:
+// stderr text output at WarnLevel, RedactingHandler retained so that the
+// emergency-rollback path does not leak credentials (AMD-F2-6).
+func newKillSwitchLogger() *slog.Logger {
+	base := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})
+	return slog.New(logs.NewRedactingHandler(base, logs.DefaultRedactor()))
 }

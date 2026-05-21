@@ -2,25 +2,23 @@ package common
 
 import (
 	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-// newLoggerWithBuf returns a DebugLevel JSON logger whose output the
-// returned buffer captures. Used by the cat=state instrumentation tests
-// (dbsavvy-8s2.7) to verify the expected line is emitted.
-func newLoggerWithBuf() (*logrus.Logger, *bytes.Buffer) {
+// newLoggerWithBuf returns a DEBUG-level slog logger whose JSON output is
+// captured into the returned buffer. Used by the cat=state instrumentation
+// tests (dbsavvy-8s2.7, ported to slog by dbsavvy-962.2) to verify the
+// expected line is emitted.
+func newLoggerWithBuf() (*slog.Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
-	l := logrus.New()
-	l.SetOutput(buf)
-	l.SetLevel(logrus.DebugLevel)
-	l.SetFormatter(&logrus.JSONFormatter{})
-	return l, buf
+	h := slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	return slog.New(h), buf
 }
 
 // linesContaining returns every line in buf that contains all of subs.
@@ -73,7 +71,7 @@ func TestSaveFire_EmitsEvent(t *testing.T) {
 
 	lines := linesContaining(buf, `"cat":"state"`, `"evt":"appstate_save_fire"`)
 	require.Len(t, lines, 1, "expected one appstate_save_fire line; got %v", buf.String())
-	// `ms` field must be present; err is nil → null in JSON.
+	// `ms` field must be present.
 	require.Contains(t, lines[0], `"ms":`)
 }
 

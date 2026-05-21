@@ -2,11 +2,11 @@ package common
 
 import (
 	"errors"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 
 	"github.com/davesavic/dbsavvy/pkg/logs"
@@ -99,13 +99,13 @@ type AppStateStore struct {
 	// existing NewAppStateStore signature stays stable for the many test
 	// call sites that don't care about logging. Nil-tolerant — every emit
 	// goes through logs.Event which no-ops on nil.
-	log *logrus.Logger
+	log *slog.Logger
 }
 
 // SetLogger wires the per-session structured logger used by the
 // dbsavvy-8s2.7 state-mutation instrumentation. Safe to call once before
 // the store is published; not safe to swap concurrently with mutations.
-func (s *AppStateStore) SetLogger(l *logrus.Logger) { s.log = l }
+func (s *AppStateStore) SetLogger(l *slog.Logger) { s.log = l }
 
 // NewAppStateStore constructs a store wrapping a zero-value AppState. The
 // store owns the *AppState — callers MUST NOT read or mutate fields directly;
@@ -147,7 +147,7 @@ func (s *AppStateStore) MutateAndSave(fn func(*AppState)) {
 	}
 	s.timer = s.clock.AfterFunc(DebounceWindow, s.debouncedFire)
 	s.mu.Unlock()
-	logs.Event(s.log, "state", "appstate_mutate_scheduled", logrus.Fields{"has_pending": hadPending})
+	logs.Event(s.log, "state", "appstate_mutate_scheduled", slog.Bool("has_pending", hadPending))
 }
 
 // debouncedFire is invoked by the Clock after the debounce window elapses. It
@@ -166,7 +166,10 @@ func (s *AppStateStore) debouncedFire() {
 	s.pending = false
 	s.pendingCond.Broadcast()
 	s.mu.Unlock()
-	logs.Event(s.log, "state", "appstate_save_fire", logrus.Fields{"err": err, "ms": time.Since(start).Milliseconds()})
+	logs.Event(s.log, "state", "appstate_save_fire",
+		slog.Any("err", err),
+		slog.Int64("ms", time.Since(start).Milliseconds()),
+	)
 }
 
 // saveSnapshot is the shared core: under mu, take a deep-copy snapshot of the
@@ -247,7 +250,7 @@ func (s *AppStateStore) Close() error {
 	}
 	err := s.lastSaveErr
 	s.mu.Unlock()
-	logs.Event(s.log, "state", "appstate_close", logrus.Fields{"drained_pending": drainedPending})
+	logs.Event(s.log, "state", "appstate_close", slog.Int("drained_pending", drainedPending))
 	return err
 }
 

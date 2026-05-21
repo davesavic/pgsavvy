@@ -14,7 +14,7 @@ import (
 func TestNewDummyCommon_RoundTrip(t *testing.T) {
 	c := NewDummyCommon()
 	require.NotNil(t, c)
-	require.NotNil(t, c.Log)
+	require.NotNil(t, c.Logger())
 	require.NotNil(t, c.Tr)
 	require.NotNil(t, c.AppState)
 	require.NotNil(t, c.Fs)
