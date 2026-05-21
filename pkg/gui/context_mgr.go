@@ -3,7 +3,10 @@ package gui
 import (
 	"errors"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 )
 
 // ErrPopAtBottom is returned by ContextTree.Pop when the stack contains
@@ -37,14 +40,49 @@ var ErrPopAtBottom = errors.New("gui: cannot pop the root context")
 // switch). Added per dbsavvy-zro T7b — keeps the OneshotArm cancel path
 // simple without polling on every keypress.
 type ContextTree struct {
-	stack     []types.IBaseContext
-	swapHooks []func()
+	stack      []types.IBaseContext
+	swapHooks  []func()
+	sessionLog *logrus.Logger
 }
 
 // NewContextTree returns an empty ContextTree. Callers are expected to
 // Push a root context immediately; Pop refuses to drop the final entry.
 func NewContextTree() *ContextTree {
 	return &ContextTree{}
+}
+
+// SetSessionLog installs the per-session logger used by Push/Pop/
+// Replace/wipeStack/removeMain to emit cat=input ctx_* events. nil
+// disables emission. Wired by the orchestrator at bootstrap; the
+// nil-default keeps test fixtures that never call this method silent.
+func (t *ContextTree) SetSessionLog(l *logrus.Logger) {
+	t.sessionLog = l
+}
+
+// kindLabel renders a ContextKind as a short stable string for log
+// events. Falls back to a kind(<int>) form for unknown values so a new
+// kind never blows up logging.
+func kindLabel(k types.ContextKind) string {
+	switch k {
+	case types.SIDE_CONTEXT:
+		return "side"
+	case types.MAIN_CONTEXT:
+		return "main"
+	case types.PERSISTENT_POPUP:
+		return "persistent_popup"
+	case types.TEMPORARY_POPUP:
+		return "temporary_popup"
+	case types.EXTRAS_CONTEXT:
+		return "extras"
+	case types.GLOBAL_CONTEXT:
+		return "global"
+	case types.DISPLAY_CONTEXT:
+		return "display"
+	case types.STUB:
+		return "stub"
+	default:
+		return "kind"
+	}
 }
 
 // Push installs c on top of the stack per the kind-specific rules
@@ -54,6 +92,7 @@ func (t *ContextTree) Push(c types.IBaseContext) error {
 		return nil
 	}
 
+	depthBefore := len(t.stack)
 	switch c.GetKind() {
 	case types.SIDE_CONTEXT:
 		t.wipeStack()
@@ -70,6 +109,13 @@ func (t *ContextTree) Push(c types.IBaseContext) error {
 		t.stack = append(t.stack, c)
 	}
 
+	logs.Event(t.sessionLog, "input", "ctx_push", logrus.Fields{
+		"key":                string(c.GetKey()),
+		"kind":               kindLabel(c.GetKind()),
+		"stack_depth_before": depthBefore,
+		"stack_depth_after":  len(t.stack),
+	})
+
 	if err := c.HandleFocus(types.OnFocusOpts{NewContextKey: c.GetKey()}); err != nil {
 		return err
 	}
@@ -84,9 +130,16 @@ func (t *ContextTree) Pop() error {
 	if len(t.stack) <= 1 {
 		return ErrPopAtBottom
 	}
+	depthBefore := len(t.stack)
 	popped := t.stack[len(t.stack)-1]
 	t.stack = t.stack[:len(t.stack)-1]
 	newTop := t.stack[len(t.stack)-1]
+	logs.Event(t.sessionLog, "input", "ctx_pop", logrus.Fields{
+		"key":                string(popped.GetKey()),
+		"kind":               kindLabel(popped.GetKind()),
+		"stack_depth_before": depthBefore,
+		"stack_depth_after":  len(t.stack),
+	})
 	if err := popped.HandleFocusLost(types.OnFocusLostOpts{NewContextKey: newTop.GetKey()}); err != nil {
 		return err
 	}
@@ -101,11 +154,25 @@ func (t *ContextTree) Pop() error {
 // hooks. Used for tab switches within a single window slot.
 func (t *ContextTree) Replace(c types.IBaseContext) error {
 	if len(t.stack) == 0 {
+		depthBefore := 0
 		t.stack = append(t.stack, c)
+		logs.Event(t.sessionLog, "input", "ctx_replace", logrus.Fields{
+			"key":                string(c.GetKey()),
+			"kind":               kindLabel(c.GetKind()),
+			"stack_depth_before": depthBefore,
+			"stack_depth_after":  len(t.stack),
+		})
 		t.fireSwapHooks()
 		return nil
 	}
+	depthBefore := len(t.stack)
 	t.stack[len(t.stack)-1] = c
+	logs.Event(t.sessionLog, "input", "ctx_replace", logrus.Fields{
+		"key":                string(c.GetKey()),
+		"kind":               kindLabel(c.GetKind()),
+		"stack_depth_before": depthBefore,
+		"stack_depth_after":  len(t.stack),
+	})
 	t.fireSwapHooks()
 	return nil
 }
@@ -166,10 +233,17 @@ func (t *ContextTree) peek() types.IBaseContext {
 // bottom. Errors from individual hooks are ignored so the stack always
 // ends up empty.
 func (t *ContextTree) wipeStack() {
+	depthBefore := len(t.stack)
 	for i := len(t.stack) - 1; i >= 0; i-- {
 		_ = t.stack[i].HandleFocusLost(types.OnFocusLostOpts{})
 	}
 	t.stack = t.stack[:0]
+	logs.Event(t.sessionLog, "input", "ctx_wipe", logrus.Fields{
+		"key":                "",
+		"kind":               "",
+		"stack_depth_before": depthBefore,
+		"stack_depth_after":  len(t.stack),
+	})
 }
 
 // removeMain drops the first MAIN_CONTEXT found in the stack (there is
@@ -177,8 +251,15 @@ func (t *ContextTree) wipeStack() {
 func (t *ContextTree) removeMain() {
 	for i, c := range t.stack {
 		if c.GetKind() == types.MAIN_CONTEXT {
+			depthBefore := len(t.stack)
 			_ = c.HandleFocusLost(types.OnFocusLostOpts{})
 			t.stack = append(t.stack[:i], t.stack[i+1:]...)
+			logs.Event(t.sessionLog, "input", "ctx_remove_main", logrus.Fields{
+				"key":                string(c.GetKey()),
+				"kind":               kindLabel(c.GetKind()),
+				"stack_depth_before": depthBefore,
+				"stack_depth_after":  len(t.stack),
+			})
 			return
 		}
 	}

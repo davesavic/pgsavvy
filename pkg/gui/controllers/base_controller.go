@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
+	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
@@ -169,4 +170,17 @@ func (b *baseController) tr() *i18n.TranslationSet {
 		return b.c.Tr
 	}
 	return i18n.EnglishTranslationSet()
+}
+
+// Log returns the per-session *logrus.Logger this controller's
+// common.Common bag carries, or nil when c (or c.Log) is nil. Per
+// AD-19: instrumentation paths reach the session logger through this
+// accessor rather than widening the narrower DebugLogger interface.
+// logs.Event tolerates a nil logger, so callers may pass the return
+// value through without nil-checking.
+func (b *baseController) Log() *logrus.Logger {
+	if b.c == nil {
+		return nil
+	}
+	return b.c.Log
 }

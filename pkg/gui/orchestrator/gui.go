@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
@@ -194,6 +195,15 @@ type Gui struct {
 	busy      int64
 	workersWG sync.WaitGroup
 	mutexes   types.Mutexes
+
+	// onWorkerSampleCounter implements the AD-20 quiescence-preserving
+	// sampling for cat=state worker_start / worker_end emits. Every
+	// OnWorker invocation increments it; the counter % 10 == 0 sample
+	// gate plus mandatory quiescence-transition emits (busy_before==0 /
+	// busy_after==0) together yield 2 + N/10 worker lines per burst.
+	// Per AD-20 this MUST be a field on *Gui (not package-level) so
+	// concurrent test Guis don't share state.
+	onWorkerSampleCounter atomic.Uint64
 }
 
 // NewGui builds every collaborator that doesn't depend on the live
@@ -282,6 +292,14 @@ func (g *Gui) wireWithDriver() error {
 	g.whichkey = keys.NewWhichKey()
 	g.exRegistry = keys.NewExRegistry()
 
+	// dbsavvy-8s2.5: wire the per-session logger into the input-side
+	// stores so mode_set / mode_reset / ctx_* events flow through
+	// logs.Event. nil-safe — logs.Event short-circuits on nil.
+	g.modeStore.SetSessionLog(g.deps.Common.Log)
+	if g.tree != nil {
+		g.tree.SetSessionLog(g.deps.Common.Log)
+	}
+
 	leader, _ := leaderRunesFromCfg(cfg)
 	tlen, ttlen, wdelay := resolveKeyDelays(cfg, g.delayOverrides)
 	matcher, err := keys.NewMatcher(nil, keys.MatcherConfig{
@@ -298,6 +316,9 @@ func (g *Gui) wireWithDriver() error {
 		return fmt.Errorf("gui: NewMatcher: %w", err)
 	}
 	g.matcher = matcher
+	// dbsavvy-8s2.5: wire the per-session logger into the matcher so
+	// chord_resolved events flow through logs.Event. nil-safe.
+	g.matcher.SetSessionLog(g.deps.Common.Log)
 	runtime := keys.NewRuntime(g.cmdRegistry, matcher, g.modeStore, g.whichkey, g.exRegistry)
 	g.kbRuntime = runtime
 
@@ -378,6 +399,9 @@ func (g *Gui) wireWithDriver() error {
 	g.promptHelp = ui.NewPromptHelper(g.tree, g.registry.Prompt)
 	g.choiceHelp = ui.NewChoiceHelper(g.tree, g.registry.Selection)
 	g.toastHelp = ui.NewToastHelper(g.driver)
+	if g.deps.Common != nil {
+		g.toastHelp.SetLogger(g.deps.Common.Log)
+	}
 	g.tablesHelp = ui.NewTablesHelper(g.toastHelp, tr)
 	g.tipHelp = ui.NewTipHelper(g.tree, g.deps.Store)
 
@@ -392,7 +416,11 @@ func (g *Gui) wireWithDriver() error {
 		Choice:     g.choiceHelp,
 		OnUIThread: g.OnUIThread,
 		StreamFactory: func() ui.StreamRunner {
-			return tasks.New(g.OnWorker, g.OnUIThreadContentOnly)
+			rbm := tasks.New(g.OnWorker, g.OnUIThreadContentOnly)
+			if g.deps.Common != nil {
+				rbm.SetLogger(g.deps.Common.Log)
+			}
+			return rbm
 		},
 		// dbsavvy-uv0.6: AppStateStore drives the per-(connID, baseTable)
 		// hidden-column persistence used by the <leader>gH overlay.
@@ -837,7 +865,7 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 					g.masterEditors[key] = editor.NewVimEditor(g.registry.QueryEditor, g.matcher, key)
 				}
 			default:
-				g.masterEditors[key] = NewMasterEditor(ngocui, g.matcher, key)
+				g.masterEditors[key] = NewMasterEditor(ngocui, g.matcher, key, WithSessionLog(g.deps.Common.Log))
 			}
 			continue
 		}
@@ -867,7 +895,7 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 	// cheap, and re-pushes between tabs do not strand a stale editor on
 	// the prior view (gocui's per-view Editor pointer is replaced on
 	// attach, and result_tab views never become editable text targets).
-	g.masterEditors[types.RESULT_GRID] = NewMasterEditor(ngocui, g.matcher, types.RESULT_GRID)
+	g.masterEditors[types.RESULT_GRID] = NewMasterEditor(ngocui, g.matcher, types.RESULT_GRID, WithSessionLog(g.deps.Common.Log))
 	return nil
 }
 

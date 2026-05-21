@@ -7,8 +7,11 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 )
 
 // DispatchResult classifies the outcome of Matcher.Dispatch.
@@ -103,10 +106,11 @@ type Matcher struct {
 	ttlen  time.Duration
 	wdelay time.Duration
 
-	registers *RegisterStore
-	whichkey  WhichKeyNotifier
-	log       DebugLogger
-	toaster   ToastFunc
+	registers  *RegisterStore
+	whichkey   WhichKeyNotifier
+	log        DebugLogger
+	sessionLog *logrus.Logger
+	toaster    ToastFunc
 
 	mu       sync.Mutex
 	pending  []Key
@@ -174,6 +178,15 @@ func NewMatcher(initial *TrieSet, cfg MatcherConfig) (*Matcher, error) {
 	}
 	m.trieSet.Store(initial)
 	return m, nil
+}
+
+// SetSessionLog installs the per-session logger used by handleLookup
+// to emit cat=input chord_resolved events. nil disables emission;
+// orchestrator wires this at bootstrap.
+func (m *Matcher) SetSessionLog(l *logrus.Logger) {
+	m.mu.Lock()
+	m.sessionLog = l
+	m.mu.Unlock()
 }
 
 // IsPartial reports whether the Matcher currently holds a pending
@@ -423,6 +436,7 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 // handleLookup resolves a Lookup that returned Found=true. The caller
 // holds m.mu; this method releases m.mu BEFORE invoking the Handler.
 func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextKey, mode types.Mode) (DispatchResult, error) {
+	log := m.sessionLog
 	switch {
 	case res.IsLeaf && !res.HasChildren:
 		// Unambiguous leaf: fire immediately.
@@ -431,6 +445,13 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		reg := m.register
 		m.cancelLocked()
 		m.mu.Unlock()
+		logs.Event(log, "input", "chord_resolved", logrus.Fields{
+			"seq":          chordSeqLabel(seq),
+			"scope":        string(scope),
+			"leaf":         true,
+			"has_children": false,
+			"cmd_id":       cmdIDOf(cmd),
+		})
 		if m.whichkey != nil {
 			m.whichkey.Hide()
 		}
@@ -442,7 +463,15 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		m.lastLeaf = res.Action
 		m.scheduleTimerLocked(scope, mode)
 		m.notifyWhichKeyLocked(scope, seq)
+		cmd := res.Action
 		m.mu.Unlock()
+		logs.Event(log, "input", "chord_resolved", logrus.Fields{
+			"seq":          chordSeqLabel(seq),
+			"scope":        string(scope),
+			"leaf":         true,
+			"has_children": true,
+			"cmd_id":       cmdIDOf(cmd),
+		})
 		return Pending, nil
 
 	case !res.IsLeaf && res.HasChildren:
@@ -453,6 +482,13 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		m.scheduleTimerLocked(scope, mode)
 		m.notifyWhichKeyLocked(scope, seq)
 		m.mu.Unlock()
+		logs.Event(log, "input", "chord_resolved", logrus.Fields{
+			"seq":          chordSeqLabel(seq),
+			"scope":        string(scope),
+			"leaf":         false,
+			"has_children": true,
+			"cmd_id":       "",
+		})
 		return Pending, nil
 
 	default:
@@ -462,6 +498,31 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		m.mu.Unlock()
 		return FellThrough, nil
 	}
+}
+
+// chordSeqLabel renders a chord key sequence as a compact string for
+// log events. Best-effort: uses each Key's String() if available, else
+// falls back to a rune/special form. Never panics.
+func chordSeqLabel(seq []Key) string {
+	if len(seq) == 0 {
+		return ""
+	}
+	out := make([]byte, 0, len(seq)*2)
+	for i, k := range seq {
+		if i > 0 {
+			out = append(out, ' ')
+		}
+		out = append(out, k.String()...)
+	}
+	return string(out)
+}
+
+// cmdIDOf returns cmd.ID safely (empty string when cmd is nil).
+func cmdIDOf(cmd *commands.Command) string {
+	if cmd == nil {
+		return ""
+	}
+	return cmd.ID
 }
 
 // invokeHandler runs cmd.Handler with the supplied ExecCtx. Panics are

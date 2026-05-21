@@ -3,12 +3,40 @@ package orchestrator
 import (
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
+	"github.com/sirupsen/logrus"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 )
+
+// sensitiveScopes is the set of context keys whose keysym must be
+// redacted before being emitted as a cat=input event (AD-21). Defensive
+// across all modes — anything pushed into a sensitive scope is treated
+// as potentially carrying credential text. Currently only the
+// credentials prompt; expand here when new sensitive contexts ship.
+var sensitiveScopes = map[types.ContextKey]struct{}{
+	// "credentials_prompt" is a forward-declared sentinel for the future
+	// credentials prompt context (not yet defined as a types.ContextKey
+	// constant). The literal must match the eventual constant value.
+	types.ContextKey("credentials_prompt"): {},
+}
+
+// MasterEditorOption mutates a *masterEditor before NewMasterEditor
+// returns. Used to inject optional collaborators (session logger)
+// without changing the constructor signature for existing call sites.
+type MasterEditorOption func(*masterEditor)
+
+// WithSessionLog injects the per-session logger the master editor uses
+// to emit cat=input key / dispatch_result events. nil disables emission.
+func WithSessionLog(l *logrus.Logger) MasterEditorOption {
+	return func(e *masterEditor) {
+		e.sessionLog = l
+	}
+}
 
 // Dispatcher is the side-channel a master Editor exposes so test
 // harnesses (testfake.RecorderGuiDriver.FeedChord) can drive a chord
@@ -34,12 +62,17 @@ type Dispatcher interface {
 // viewName is used to look up the live view at flush time (no cached
 // pointer; re-pushes create a fresh view and a cached pointer would
 // dangle).
-func NewMasterEditor(g *gocui.Gui, matcher *keys.Matcher, scope types.ContextKey) gocui.Editor {
+func NewMasterEditor(g *gocui.Gui, matcher *keys.Matcher, scope types.ContextKey, opts ...MasterEditorOption) gocui.Editor {
 	e := &masterEditor{
 		gui:      g,
 		matcher:  matcher,
 		scope:    scope,
 		viewName: string(scope),
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(e)
+		}
 	}
 	if matcher != nil {
 		matcher.OnInsertPendingFlush(func(s types.ContextKey, runes []rune) {
@@ -55,10 +88,11 @@ func NewMasterEditor(g *gocui.Gui, matcher *keys.Matcher, scope types.ContextKey
 // masterEditor is the concrete gocui.Editor that bridges gocui's
 // per-view editor mechanism and keys.Matcher chord dispatch.
 type masterEditor struct {
-	gui      *gocui.Gui
-	matcher  *keys.Matcher
-	scope    types.ContextKey
-	viewName string
+	gui        *gocui.Gui
+	matcher    *keys.Matcher
+	scope      types.ContextKey
+	viewName   string
+	sessionLog *logrus.Logger
 
 	mu           sync.Mutex
 	pendingRunes []rune
@@ -72,6 +106,7 @@ func (e *masterEditor) Edit(v *gocui.View, key gocui.Key) bool {
 		return false
 	}
 	k := keys.KeyFromGocui(key)
+	start := time.Now()
 	result, err := e.matcher.Dispatch(e.scope, k)
 	// gocui.Editor.Edit returns only bool, so a Dispatched handler
 	// returning gocui.ErrQuit (e.g. the :q ex-command) would otherwise
@@ -80,7 +115,9 @@ func (e *masterEditor) Edit(v *gocui.View, key gocui.Key) bool {
 	if errors.Is(err, gocui.ErrQuit) && e.gui != nil {
 		e.gui.Update(func(*gocui.Gui) error { return gocui.ErrQuit })
 	}
-	return e.applyResult(v, key, k, result)
+	out := e.applyResult(v, key, k, result)
+	e.emitInputEvents(k, result, time.Since(start))
+	return out
 }
 
 // Dispatch satisfies Dispatcher; the testfake recorder uses it to drive
@@ -92,9 +129,65 @@ func (e *masterEditor) Dispatch(v *gocui.View, key gocui.Key) (keys.DispatchResu
 		return keys.FellThrough, nil
 	}
 	k := keys.KeyFromGocui(key)
+	start := time.Now()
 	result, err := e.matcher.Dispatch(e.scope, k)
 	e.applyResult(v, key, k, result)
+	e.emitInputEvents(k, result, time.Since(start))
 	return result, err
+}
+
+// emitInputEvents emits the cat=input key + dispatch_result pair for a
+// single keystroke. Centralized so both Edit (gocui runtime) and
+// Dispatch (testfake recorder) cover the same event surface (AD-20).
+// When the active scope is in sensitiveScopes the keysym is replaced
+// with "<redacted>" — mode + scope remain logged (AD-21).
+func (e *masterEditor) emitInputEvents(decoded keys.Key, result keys.DispatchResult, elapsed time.Duration) {
+	log := e.sessionLog
+	if log == nil {
+		return
+	}
+	mode := types.ModeNormal
+	if e.matcher != nil {
+		mode = e.matcher.CurrentMode(e.scope)
+	}
+	keyLabel := decoded.String()
+	if _, sensitive := sensitiveScopes[e.scope]; sensitive {
+		keyLabel = "<redacted>"
+	}
+	logs.Event(log, "input", "key", logrus.Fields{
+		"key":   keyLabel,
+		"scope": string(e.scope),
+		"mode":  mode.String(),
+	})
+	logs.Event(log, "input", "dispatch_result", logrus.Fields{
+		"result": dispatchResultLabel(result),
+		"scope":  string(e.scope),
+		"mode":   mode.String(),
+		"ms":     elapsed.Microseconds(),
+	})
+}
+
+// dispatchResultLabel renders the canonical PascalCase label for r as
+// required by AC ("Dispatched|Pending|FellThrough|Cancelled|
+// Passthrough|Swallowed"). Falls back to keys.DispatchResult.String
+// for unknown values so a new variant never blows up logging.
+func dispatchResultLabel(r keys.DispatchResult) string {
+	switch r {
+	case keys.Dispatched:
+		return "Dispatched"
+	case keys.Pending:
+		return "Pending"
+	case keys.FellThrough:
+		return "FellThrough"
+	case keys.Cancelled:
+		return "Cancelled"
+	case keys.Passthrough:
+		return "Passthrough"
+	case keys.Swallowed:
+		return "Swallowed"
+	default:
+		return r.String()
+	}
 }
 
 // applyResult performs the side effects implied by result and returns

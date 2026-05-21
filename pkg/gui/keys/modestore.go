@@ -4,7 +4,10 @@ import (
 	"maps"
 	"sync"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 )
 
 // ModeStore is the canonical per-context modal-state store. It maps a
@@ -16,8 +19,9 @@ import (
 // the store safe for test goroutines (the AC suite races concurrent
 // Set/Get calls under -race).
 type ModeStore struct {
-	mu sync.RWMutex
-	m  map[types.ContextKey]types.Mode
+	mu         sync.RWMutex
+	m          map[types.ContextKey]types.Mode
+	sessionLog *logrus.Logger
 }
 
 // NewModeStore returns a ModeStore with a non-nil backing map.
@@ -44,14 +48,38 @@ func (s *ModeStore) Get(k types.ContextKey) types.Mode {
 // should call Reset.
 func (s *ModeStore) Set(k types.ContextKey, mode types.Mode) {
 	s.mu.Lock()
+	old := s.m[k]
 	s.m[k] = mode
+	log := s.sessionLog
 	s.mu.Unlock()
+	logs.Event(log, "input", "mode_set", logrus.Fields{
+		"ctx":      string(k),
+		"old_mode": old.String(),
+		"new_mode": mode.String(),
+	})
 }
 
 // Reset deletes the entry for k. No-op if k is absent.
 func (s *ModeStore) Reset(k types.ContextKey) {
 	s.mu.Lock()
+	old := s.m[k]
 	delete(s.m, k)
+	log := s.sessionLog
+	s.mu.Unlock()
+	logs.Event(log, "input", "mode_reset", logrus.Fields{
+		"ctx":      string(k),
+		"old_mode": old.String(),
+		"new_mode": types.ModeNormal.String(),
+	})
+}
+
+// SetSessionLog installs the per-session logger used by Set/Reset to
+// emit cat=input mode_set / mode_reset events. nil disables emission.
+// Wired by the orchestrator at bootstrap; nil-default keeps test
+// fixtures that never call this method silent.
+func (s *ModeStore) SetSessionLog(l *logrus.Logger) {
+	s.mu.Lock()
+	s.sessionLog = l
 	s.mu.Unlock()
 }
 
