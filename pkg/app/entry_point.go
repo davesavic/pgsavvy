@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/afero"
@@ -29,6 +30,10 @@ import (
 // problems.
 const disableSessionLogEnv = "DBSAVVY_DISABLE_SESSION_LOG"
 
+// logDirEnv overrides the directory that holds the per-session log file's
+// sessions/ subdir. Precedence: --log-dir flag > DBSAVVY_LOG_DIR > state dir.
+const logDirEnv = "DBSAVVY_LOG_DIR"
+
 // BuildInfo carries build-time metadata injected via -ldflags.
 type BuildInfo struct {
 	Commit      string
@@ -47,6 +52,8 @@ func Start(build *BuildInfo, args []string) error {
 	flags := flag.NewFlagSet("dbsavvy", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	showVersion := flags.Bool("version", false, "print version and exit")
+	logDirFlag := flags.String("log-dir", "",
+		"directory for per-session log files (overrides $DBSAVVY_LOG_DIR and $XDG_STATE_HOME/dbsavvy); logs land in <dir>/sessions/")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -58,6 +65,8 @@ func Start(build *BuildInfo, args []string) error {
 	configDir := env.GetConfigDir()
 	stateDir := env.GetStateDir()
 	fs := afero.NewOsFs()
+
+	logDir, logDirOverridden := resolveLogDir(*logDirFlag, os.Getenv(logDirEnv), stateDir)
 
 	if err := config.EnsureInitialConfig(fs, configDir); err != nil {
 		return fmt.Errorf("app: ensure config: %w", err)
@@ -79,7 +88,10 @@ func Start(build *BuildInfo, args []string) error {
 	_ = store.Load() // missing state file → defaults; not an error.
 
 	tr := i18n.EnglishTranslationSet()
-	log, logCloser := wireSessionLogger(stateDir, fs, build)
+	log, logCloser, err := wireSessionLogger(logDir, logDirOverridden, fs, build)
+	if err != nil {
+		return err
+	}
 
 	c := common.NewCommon(log, tr, cfg, &common.AppState{}, fs)
 	c.StateDir = stateDir
@@ -123,22 +135,39 @@ func Start(build *BuildInfo, args []string) error {
 	return g.RunAndHandleError()
 }
 
+// resolveLogDir applies the precedence flag > env > stateDir. Empty / whitespace
+// values fall through to the next-lower precedence. Returns the chosen dir and
+// whether an explicit override (flag or env) was applied — callers use the
+// override flag to fail fast on mkdir errors instead of silently falling back.
+func resolveLogDir(flagVal, envVal, stateDir string) (string, bool) {
+	if v := strings.TrimSpace(flagVal); v != "" {
+		return v, true
+	}
+	if v := strings.TrimSpace(envVal); v != "" {
+		return v, true
+	}
+	return stateDir, false
+}
+
 // wireSessionLogger builds the primary logger. Behavior:
 //   - DBSAVVY_DISABLE_SESSION_LOG=1 → stderr-only WarnLevel slog logger,
 //     no file, but RedactingHandler is still wired (AMD-F2-6 closes the
 //     pre-migration gap where the kill-switch path leaked unredacted DSNs).
 //   - logs.Open success → DEBUG-level file logger + stderr Warn+ via the
 //     handler chain Open() builds.
-//   - logs.Open failure → fallback stderr slog WITH RedactingHandler over a
-//     JSON sink at WarnLevel + a single Warn line documenting the failure.
-//     App still starts.
-func wireSessionLogger(stateDir string, fs afero.Fs, build *BuildInfo) (*slog.Logger, io.Closer) {
+//   - logs.Open failure with no override → fallback stderr slog WITH
+//     RedactingHandler over a JSON sink at WarnLevel + a single Warn line
+//     documenting the failure. App still starts.
+//   - logs.Open failure with override (flag or env) → return error so the
+//     caller surfaces it. Operators who chose an explicit path want to know
+//     it failed, not to silently get a stderr fallback.
+func wireSessionLogger(logDir string, overridden bool, fs afero.Fs, build *BuildInfo) (*slog.Logger, io.Closer, error) {
 	if os.Getenv(disableSessionLogEnv) == "1" {
-		return newKillSwitchLogger(), nil
+		return newKillSwitchLogger(), nil, nil
 	}
 
 	logger, closer, err := logs.Open(logs.Options{
-		Dir:            stateDir,
+		Dir:            logDir,
 		FS:             fs,
 		RetentionCount: 20,
 		Redactor:       logs.DefaultRedactor(),
@@ -149,11 +178,14 @@ func wireSessionLogger(stateDir string, fs afero.Fs, build *BuildInfo) (*slog.Lo
 		},
 	})
 	if err != nil {
+		if overridden {
+			return nil, nil, fmt.Errorf("app: open session log at %q: %w", logDir, err)
+		}
 		fb := newFallbackLogger()
 		fb.Warn("logs: session logger open failed; using stderr fallback", "err", err)
-		return fb, nil
+		return fb, nil, nil
 	}
-	return logger, closer
+	return logger, closer, nil
 }
 
 // newFallbackLogger builds a stderr Warn+ slog wrapped in

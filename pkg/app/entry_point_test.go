@@ -23,7 +23,8 @@ func TestWireSessionLogger_CreatesSessionFile(t *testing.T) {
 	stateDir := "/state/dbsavvy"
 	t.Setenv(disableSessionLogEnv, "")
 
-	log, closer := wireSessionLogger(stateDir, fs, newBuildInfo())
+	log, closer, err := wireSessionLogger(stateDir, false, fs, newBuildInfo())
+	require.NoError(t, err)
 	require.NotNil(t, log)
 	require.NotNil(t, closer, "expected file-backed closer on primary path")
 	defer func() { _ = closer.Close() }()
@@ -43,7 +44,8 @@ func TestWireSessionLogger_PrimaryPath_WritesJSONWithFourKeys(t *testing.T) {
 	stateDir := "/state/dbsavvy"
 	t.Setenv(disableSessionLogEnv, "")
 
-	log, closer := wireSessionLogger(stateDir, fs, newBuildInfo())
+	log, closer, err := wireSessionLogger(stateDir, false, fs, newBuildInfo())
+	require.NoError(t, err)
 	require.NotNil(t, log)
 	require.NotNil(t, closer)
 
@@ -78,7 +80,8 @@ func TestWireSessionLogger_FallbackPath_RedactsDSN(t *testing.T) {
 
 	got := withStderrCaptured(t, func() {
 		// Empty stateDir → logs.Open returns an error → fallback path runs.
-		log, closer := wireSessionLogger("", afero.NewMemMapFs(), newBuildInfo())
+		log, closer, err := wireSessionLogger("", false, afero.NewMemMapFs(), newBuildInfo())
+		require.NoError(t, err)
 		require.NotNil(t, log)
 		require.Nil(t, closer, "fallback path must return nil closer")
 		log.Warn("connect failed", "dsn", "postgres://u:secret@h/d")
@@ -99,7 +102,9 @@ func TestWireSessionLogger_DisableEnvVar(t *testing.T) {
 	var log *slog.Logger
 	var closer io.Closer
 	got := withStderrCaptured(t, func() {
-		log, closer = wireSessionLogger(stateDir, fs, newBuildInfo())
+		var err error
+		log, closer, err = wireSessionLogger(stateDir, false, fs, newBuildInfo())
+		require.NoError(t, err)
 		require.NotNil(t, log)
 		require.Nil(t, closer, "kill-switch must return nil closer (no file opened)")
 		log.Warn("rollback emit", "dsn", "postgres://u:hunter2@h/d")
@@ -111,6 +116,87 @@ func TestWireSessionLogger_DisableEnvVar(t *testing.T) {
 
 	require.NotContains(t, got, "hunter2", "kill-switch path leaked plaintext password: %s", got)
 	require.Contains(t, got, "***", "kill-switch path should mask the password with ***; got: %s", got)
+}
+
+// TestResolveLogDir_Precedence covers dbsavvy-qbe: flag > env > stateDir, with
+// empty/whitespace values falling through. The overridden bool MUST be true
+// only when flag or env supplied the value (so mkdir failure on that path
+// surfaces an error instead of falling back to stderr).
+func TestResolveLogDir_Precedence(t *testing.T) {
+	const stateDir = "/state/dbsavvy"
+
+	tests := []struct {
+		name      string
+		flagVal   string
+		envVal    string
+		wantDir   string
+		wantOverr bool
+	}{
+		{"flag wins over env", "/flag", "/env", "/flag", true},
+		{"env used when no flag", "", "/env", "/env", true},
+		{"state dir when neither set", "", "", stateDir, false},
+		{"whitespace flag falls through to env", "   ", "/env", "/env", true},
+		{"whitespace env falls through to state", "", "  \t ", stateDir, false},
+		{"both whitespace falls through to state", " ", " ", stateDir, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, overr := resolveLogDir(tc.flagVal, tc.envVal, stateDir)
+			require.Equal(t, tc.wantDir, got)
+			require.Equal(t, tc.wantOverr, overr)
+		})
+	}
+}
+
+// TestWireSessionLogger_OverrideMkdirFailureSurfacesError validates the
+// dbsavvy-qbe AC: "mkdir failure on override path returns clear error (not
+// silent fallback)". When the operator explicitly chose a log dir via flag or
+// env and logs.Open fails, the error MUST propagate so they see it.
+func TestWireSessionLogger_OverrideMkdirFailureSurfacesError(t *testing.T) {
+	t.Setenv(disableSessionLogEnv, "")
+	// Empty Dir triggers logs.Open's "Options.Dir is empty" error path; we
+	// don't actually need a real filesystem failure to exercise the branch.
+	log, closer, err := wireSessionLogger("", true, afero.NewMemMapFs(), newBuildInfo())
+	require.Error(t, err, "override path must surface logs.Open errors")
+	require.Nil(t, log)
+	require.Nil(t, closer)
+}
+
+// TestWireSessionLogger_OverrideDirIsHonored validates that when an explicit
+// log dir is supplied, sessions land under <log-dir>/sessions/ (NOT under the
+// process state dir). Pairs with state.yml staying at env.GetStateDir() —
+// asserted indirectly by Start() not being exercised here.
+func TestWireSessionLogger_OverrideDirIsHonored(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	logDir := "/custom/logs"
+	t.Setenv(disableSessionLogEnv, "")
+
+	log, closer, err := wireSessionLogger(logDir, true, fs, newBuildInfo())
+	require.NoError(t, err)
+	require.NotNil(t, log)
+	require.NotNil(t, closer)
+	defer func() { _ = closer.Close() }()
+
+	entries, err := afero.ReadDir(fs, filepath.Join(logDir, "sessions"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "expected session file at override location")
+}
+
+// TestWireSessionLogger_DisableEnvWinsOverOverride validates that the
+// DBSAVVY_DISABLE_SESSION_LOG kill switch still beats --log-dir /
+// DBSAVVY_LOG_DIR. Operators must always be able to disable session logging
+// regardless of which path was configured.
+func TestWireSessionLogger_DisableEnvWinsOverOverride(t *testing.T) {
+	t.Setenv(disableSessionLogEnv, "1")
+	fs := afero.NewMemMapFs()
+
+	log, closer, err := wireSessionLogger("/custom/logs", true, fs, newBuildInfo())
+	require.NoError(t, err)
+	require.NotNil(t, log)
+	require.Nil(t, closer, "kill switch must return nil closer even with override set")
+
+	exists, _ := afero.Exists(fs, "/custom/logs/sessions")
+	require.False(t, exists, "kill switch must not create the override sessions dir")
 }
 
 // withStderrCaptured redirects os.Stderr to a pipe for the duration of fn and
