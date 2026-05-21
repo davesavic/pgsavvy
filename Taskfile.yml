@@ -56,3 +56,8 @@ tasks:
     desc: Cut a release (stub until release pipeline lands).
     cmds:
       - 'echo "release: not yet wired"'
+
+  smoke:p8:
+    desc: Run the dbsavvy-962 P8 session-log smoke harness (requires bin/dbsavvy + docker postgres).
+    cmds:
+      - bash docs/smoke_p8.sh
