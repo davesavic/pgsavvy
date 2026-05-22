@@ -11,6 +11,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -706,6 +707,31 @@ func (g *Gui) wireWithDriver() error {
 		return types.GLOBAL_CONTEXT
 	}
 
+	// dbsavvy-56u.3: validate UserConfig now that cmdRegistry and the
+	// context registry are populated. Deviation from AD-2 literal ordering
+	// (validate-after-NewGui-before-RunAndHandleError) — registries are
+	// built inside wireWithDriver, so validation moves here. AD-2's safety
+	// rationale (deferred g.Close fires) is preserved: g.Close is idempotent
+	// (gui.go:986-989) and entry_point.go's `defer func() { _ = g.Close() }()`
+	// runs regardless of where the error originates.
+	if cfg != nil {
+		deps := config.ValidationDeps{
+			ActionExists: func(id string) bool { return g.cmdRegistry.Has(id) },
+			ScopeExists:  g.scopeExistsPredicate(),
+		}
+		cfgWarns, cfgErrs := config.ValidateUserConfig(cfg, deps)
+		for _, w := range cfgWarns {
+			fmt.Fprintf(os.Stderr, "config: warning: %s\n", w)
+		}
+		if len(cfgErrs) > 0 {
+			for _, e := range cfgErrs {
+				fmt.Fprintf(os.Stderr, "config: %s\n", e)
+			}
+			return fmt.Errorf("config: %d validation error(s)", len(cfgErrs))
+		}
+		g.deps.Common.Logger().Info("config: validated", "warnings", len(cfgWarns), "cat", "app")
+	}
+
 	// Build the trie.
 	svc := keys.NewKeybindingService()
 	defaults := controllers.AllDefaultBindings(g.controllers)
@@ -1241,4 +1267,22 @@ func fsFromCommon(c *common.Common) afero.Fs {
 		return nil
 	}
 	return c.Fs
+}
+
+// scopeExistsPredicate returns the ScopeExists predicate used by
+// config.ValidateUserConfig. A scope string is valid if it is one of:
+//   - "" or "global" (collapsed to GLOBAL by KeybindingService),
+//   - "all" (pseudo-scope expanded by KeybindingService.scopesFor),
+//   - any ContextKey registered in g.registry (matched via ByKey).
+func (g *Gui) scopeExistsPredicate() func(string) bool {
+	return func(s string) bool {
+		switch s {
+		case "", "global", "all":
+			return true
+		}
+		if g.registry == nil {
+			return false
+		}
+		return g.registry.ByKey(types.ContextKey(s)) != nil
+	}
 }

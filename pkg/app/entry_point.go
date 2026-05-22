@@ -87,11 +87,21 @@ func Start(build *BuildInfo, args []string) error {
 	store := common.NewAppStateStore(fs, statePath, common.DefaultClock())
 	_ = store.Load() // missing state file → defaults; not an error.
 
-	tr := i18n.EnglishTranslationSet()
 	log, logCloser, err := wireSessionLogger(logDir, logDirOverridden, fs, build)
 	if err != nil {
 		return err
 	}
+
+	// dbsavvy-56u.3: detect host locale and merge any overlay JSON over the
+	// English baseline. LoadAndMerge's contract guarantees a non-nil
+	// *TranslationSet even on error and only returns non-nil error in soft
+	// cases; we Warn-log and continue with whatever set LoadAndMerge returns.
+	lang := i18n.DetectLocale().String()
+	tr, lerr := i18n.LoadAndMerge(nil, lang, log)
+	if lerr != nil {
+		log.Warn("i18n: LoadAndMerge failed; using returned set", "err", lerr, "cat", "app")
+	}
+	log.Info("i18n: bootstrap", "lang", lang, "cat", "app")
 
 	c := common.NewCommon(log, tr, cfg, &common.AppState{}, fs)
 	c.StateDir = stateDir
