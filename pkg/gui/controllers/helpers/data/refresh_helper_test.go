@@ -7,12 +7,12 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 )
 
-// Nil-connect tests confirm the controller-friendly contract: a
-// RefreshHelper bound to a nil ConnectHelper is a silent no-op so
+// Nil-closure tests confirm the controller-friendly contract: a
+// RefreshHelper with no closures wired is a silent no-op so
 // early-boot wiring order does not panic the controllers.
 
 func TestRefreshNilConnectIsNoop(t *testing.T) {
-	h := data.NewRefreshHelper(nil)
+	h := data.NewRefreshHelper()
 	if err := h.RefreshSchemas(context.Background()); err != nil {
 		t.Errorf("RefreshSchemas: %v", err)
 	}

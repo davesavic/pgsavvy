@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
+	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -194,6 +196,50 @@ func TestClose_LogCloserRespectsDeadline(t *testing.T) {
 	}
 	if elapsed < 1900*time.Millisecond {
 		t.Fatalf("Close returned in %v; expected near 2 s deadline", elapsed)
+	}
+}
+
+// dbsavvy-56u.1 AD-3: OnTableActivate enqueues ONE composite worker
+// that loads both COLUMNS and INDEXES rails. The single-enqueue rule
+// prevents stale-load races and double focus-jumps between the two
+// rails.
+func TestOnTableActivate_CompositeSingleWorker(t *testing.T) {
+	g, _ := buildTestGuiWithHistory(t)
+
+	caps := drivers.Capabilities{}
+	driverName, conn := registerWireFake(t, caps)
+	conn.columns = []models.Column{
+		{Name: "id"},
+		{Name: "email"},
+	}
+	conn.indexes = []models.Index{
+		{Name: "users_pkey", Schema: "public", Table: "users"},
+	}
+
+	bag := g.HelperBagForTest()
+	profile := &models.Connection{Name: "composite", Driver: driverName, DSN: "postgres://stub"}
+	if err := bag.Connect.Connect(context.Background(), profile); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	before := g.OnWorkerCountForTest()
+
+	tbl := &models.Table{Schema: "public", Name: "users"}
+	if err := g.OnTableActivateForTest(tbl); err != nil {
+		t.Fatalf("OnTableActivateForTest: %v", err)
+	}
+	g.WaitForWorkersForTest()
+
+	after := g.OnWorkerCountForTest()
+	if got := after - before; got != 1 {
+		t.Fatalf("OnWorker enqueue count = %d, want 1 (composite single-worker AD-3)", got)
+	}
+
+	if got := len(g.Registry().Columns.Items()); got != 2 {
+		t.Fatalf("Columns.Items() = %d, want 2 after composite activate", got)
+	}
+	if got := len(g.Registry().Indexes.Items()); got != 1 {
+		t.Fatalf("Indexes.Items() = %d, want 1 after composite activate", got)
 	}
 }
 

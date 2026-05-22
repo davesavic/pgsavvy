@@ -189,6 +189,10 @@ type ActionTranslations struct {
 	Up      string
 	Confirm string
 	Cancel  string
+
+	// RefreshRail is the description for the `r` per-rail refresh
+	// binding (dbsavvy-56u.1).
+	RefreshRail string
 }
 
 // EnglishTranslationSet returns a freshly allocated TranslationSet populated
@@ -335,6 +339,8 @@ func EnglishTranslationSet() *TranslationSet {
 			Up:      "Up",
 			Confirm: "Select",
 			Cancel:  "Cancel",
+
+			RefreshRail: "Refresh",
 		},
 	}
 }

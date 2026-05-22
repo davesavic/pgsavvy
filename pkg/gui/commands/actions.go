@@ -59,6 +59,13 @@ const (
 	RailSwitchResults     = "rail.switch.results"
 	RailSwitchNext        = "rail.switch.next"
 
+	// RailRefresh — published per-rail by the five side-rail controllers
+	// (Connections / Schemas / Tables / Columns / Indexes). Bound to `r`
+	// in Normal mode. Each rail's handler dispatches through
+	// HelperBag.Refresh, which reloads the underlying data and pushes it
+	// back into the rail context (dbsavvy-56u.1).
+	RailRefresh = "rail.refresh"
+
 	// MenuConfirm / MenuCancel — owned by MenuController. `<cr>` / `<esc>`
 	// inside the MENU popup context.
 	MenuConfirm = "menu.confirm"
@@ -378,6 +385,7 @@ func AllActionIDs() []string {
 		RailSwitchQueryEditor,
 		RailSwitchResults,
 		RailSwitchNext,
+		RailRefresh,
 		MenuConfirm,
 		MenuCancel,
 		PromptSubmit,

@@ -32,6 +32,8 @@ import (
 type wireFakeSession struct {
 	id      models.SessionID
 	schemas []models.Schema
+	indexes []models.Index
+	columns []models.Column
 }
 
 func (s *wireFakeSession) Close() error         { return nil }
@@ -49,11 +51,11 @@ func (s *wireFakeSession) ListTables(_ context.Context, _ string) ([]*models.Tab
 }
 
 func (s *wireFakeSession) ListColumns(_ context.Context, _, _ string) ([]models.Column, error) {
-	return nil, nil
+	return s.columns, nil
 }
 
 func (s *wireFakeSession) ListIndexes(_ context.Context, _, _ string) ([]models.Index, error) {
-	return nil, nil
+	return s.indexes, nil
 }
 
 func (s *wireFakeSession) ListConstraints(_ context.Context, _, _ string) ([]models.Constraint, error) {
@@ -92,6 +94,8 @@ func (nopEncoder) EncodeLiteral(_ any, _ uint32) string { return "NULL" }
 type wireFakeConn struct {
 	acquired atomic.Int32
 	schemas  []models.Schema
+	indexes  []models.Index
+	columns  []models.Column
 }
 
 func (c *wireFakeConn) Close() error                                     { return nil }
@@ -100,7 +104,12 @@ func (c *wireFakeConn) ServerVersion() string                            { retur
 func (c *wireFakeConn) Cancel(_ context.Context, _ models.QueryID) error { return nil }
 func (c *wireFakeConn) AcquireSession(_ context.Context) (drivers.Session, error) {
 	n := c.acquired.Add(1)
-	return &wireFakeSession{id: models.SessionID(n), schemas: c.schemas}, nil
+	return &wireFakeSession{
+		id:      models.SessionID(n),
+		schemas: c.schemas,
+		indexes: c.indexes,
+		columns: c.columns,
+	}, nil
 }
 
 type wireFakeDriver struct {

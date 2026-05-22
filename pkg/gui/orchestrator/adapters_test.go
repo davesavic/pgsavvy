@@ -120,3 +120,60 @@ func TestConnectAndBind_PassesLoggerToSQLSession(t *testing.T) {
 		t.Errorf("expected attr cat=db in record; got %+v", last)
 	}
 }
+
+// dbsavvy-56u.1: populateIndexesRail loads indexes via the live
+// ConnectHelper and pushes them onto IndexesContext so the rail
+// renders rows on the next layout frame. Mirrors the SCHEMAS-rail
+// population AC.
+func TestPopulateIndexesRailPopulatesRail(t *testing.T) {
+	g, _ := buildTestGuiWithHistory(t)
+
+	caps := drivers.Capabilities{}
+	driverName, conn := registerWireFake(t, caps)
+	conn.indexes = []models.Index{
+		{Name: "users_pkey", Schema: "public", Table: "users"},
+		{Name: "users_email_idx", Schema: "public", Table: "users"},
+	}
+
+	bag := g.HelperBagForTest()
+	profile := &models.Connection{Name: "wire-indexes", Driver: driverName, DSN: "postgres://stub"}
+	if err := bag.Connect.Connect(context.Background(), profile); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	g.PopulateIndexesRailForTest("public", "users")
+
+	idx := g.Registry().Indexes
+	if idx == nil {
+		t.Fatal("registry.Indexes is nil")
+	}
+	items := idx.Items()
+	if len(items) != 2 {
+		t.Fatalf("IndexesContext.Items() = %d entries, want 2; items=%+v", len(items), items)
+	}
+}
+
+// dbsavvy-56u.1: populateIndexesRail with an empty schema or table is
+// a silent no-op — the existing IndexesContext.items are left intact.
+func TestPopulateIndexesRailEmptyKeysIsNoop(t *testing.T) {
+	g, _ := buildTestGuiWithHistory(t)
+
+	caps := drivers.Capabilities{}
+	driverName, conn := registerWireFake(t, caps)
+	conn.indexes = []models.Index{{Name: "x", Schema: "public", Table: "t"}}
+
+	bag := g.HelperBagForTest()
+	profile := &models.Connection{Name: "wire-indexes-noop", Driver: driverName, DSN: "postgres://stub"}
+	if err := bag.Connect.Connect(context.Background(), profile); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	g.PopulateIndexesRailForTest("", "users")
+	if got := len(g.Registry().Indexes.Items()); got != 0 {
+		t.Fatalf("empty schema: Items() = %d, want 0", got)
+	}
+	g.PopulateIndexesRailForTest("public", "")
+	if got := len(g.Registry().Indexes.Items()); got != 0 {
+		t.Fatalf("empty table: Items() = %d, want 0", got)
+	}
+}

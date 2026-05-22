@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"context"
+
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -38,19 +40,50 @@ func NewTablesController(
 	return ctrl
 }
 
+// RefreshRail is the `r` handler — reloads the TABLES rail for the
+// currently-selected schema via HelperBag.Refresh. Nil-safe.
+func (c *TablesController) RefreshRail(_ commands.ExecCtx) error {
+	if c.helpers.Refresh == nil {
+		return nil
+	}
+	schema := ""
+	if c.helpers.Schemas != nil {
+		schema = c.helpers.Schemas.SelectedSchemaName()
+	}
+	if schema == "" {
+		return nil
+	}
+	return c.helpers.Refresh.RefreshTables(context.Background(), schema)
+}
+
 // GetKeybindings returns the tables rail bindings.
 func (c *TablesController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	tr := c.tr()
 	view := viewName(types.TABLES)
 	out := c.baseBindings()
+	out = append(out, &types.ChordBinding{
+		Sequence:    []types.ChordKey{{Code: 'r'}},
+		Mode:        types.ModeNormal,
+		Scope:       types.TABLES,
+		ActionID:    listActionID(commands.RailRefresh, view),
+		Description: tr.Actions.RefreshRail,
+	})
 	out = append(out, railSwitchBindings(view, tr)...)
 	return out
 }
 
-// RegisterActions has no rail-specific actions to register beyond the
-// shared trait + rail-switch set. Implemented for symmetry; future
-// epics may attach table-specific actions here.
-func (c *TablesController) RegisterActions(_ *commands.Registry) {}
+// RegisterActions registers the `r` rail-refresh handler under the
+// per-rail action ID.
+func (c *TablesController) RegisterActions(reg *commands.Registry) {
+	if reg == nil {
+		return
+	}
+	_ = reg.Register(&commands.Command{
+		ID:          listActionID(commands.RailRefresh, viewName(types.TABLES)),
+		Description: "Refresh tables rail",
+		Handler:     c.RefreshRail,
+	})
+}
 
 // AttachToContext registers GetKeybindings.
 func (c *TablesController) AttachToContext(ctx attachable) {

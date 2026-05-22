@@ -170,6 +170,12 @@ type Gui struct {
 	// Connection state surfaced by the activeConnAdapter.
 	activeConnID string
 
+	// onTableActivate stashes the HelperBag.OnTableActivate closure
+	// wireWithDriver installed, so tests can invoke the composite
+	// TABLES <CR> path without reaching through AttachControllers.
+	// dbsavvy-56u.1.
+	onTableActivate func(*models.Table) error
+
 	// Query runtime (dbsavvy-66p.16). queryRunner is built empty in
 	// wireWithDriver and stashed in the HelperBag so controllers' value-
 	// copy of the bag stays valid across Bind / Unbind. history is a
@@ -220,7 +226,7 @@ func NewGui(deps Deps, opts ...Option) *Gui {
 	g.connectHelper = data.NewConnectHelper()
 	g.schemasHelper = data.NewSchemasHelper(deps.Common, deps.Store)
 	g.formHelper = data.NewConnectionFormHelper(deps.Common, fsFromCommon(deps.Common), deps.ConnectionsPath, deps.DriverNamesFn)
-	g.refreshHelper = data.NewRefreshHelper(g.connectHelper)
+	g.refreshHelper = data.NewRefreshHelper()
 	for _, opt := range opts {
 		if opt != nil {
 			opt(g)
@@ -521,6 +527,53 @@ func (g *Gui) wireWithDriver() error {
 
 	connectInv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
 
+	// dbsavvy-56u.1: wire the RefreshHelper closures over the live
+	// populateXxxRail helpers + refreshConnectionsRail. Each closure
+	// reloads driver data AND pushes it through the rail context's
+	// SetItems. RefreshTables/Columns/Indexes apply a stale-guard
+	// against the rail's currently-selected schema/table identifier:
+	// if the user navigated away while Load was in flight, the load
+	// result is discarded so a stale list never overwrites the new
+	// focus's rail.
+	g.refreshHelper.SetSchemasRefresher(func(ctx context.Context) error {
+		connectInv.populateSchemasRail(ctx)
+		return nil
+	})
+	g.refreshHelper.SetTablesRefresher(func(ctx context.Context, schema string) error {
+		if g.registry != nil && g.registry.Schemas != nil {
+			cur := schemasPickerAdapter{registry: g.registry.Schemas}.SelectedSchemaName()
+			if cur != "" && cur != schema {
+				return nil
+			}
+		}
+		connectInv.populateTablesRail(ctx, schema)
+		return nil
+	})
+	g.refreshHelper.SetColumnsRefresher(func(ctx context.Context, schema, table string) error {
+		if g.registry != nil && g.registry.Tables != nil {
+			t := tablesPickerAdapter{registry: g.registry.Tables}.SelectedTable()
+			if t != nil && (t.Schema != schema || t.Name != table) {
+				return nil
+			}
+		}
+		connectInv.populateColumnsRail(ctx, schema, table)
+		return nil
+	})
+	g.refreshHelper.SetIndexesRefresher(func(ctx context.Context, schema, table string) error {
+		if g.registry != nil && g.registry.Tables != nil {
+			t := tablesPickerAdapter{registry: g.registry.Tables}.SelectedTable()
+			if t != nil && (t.Schema != schema || t.Name != table) {
+				return nil
+			}
+		}
+		connectInv.populateIndexesRail(ctx, schema, table)
+		return nil
+	})
+	g.refreshHelper.SetConnectionsRefresher(func() error {
+		g.refreshConnectionsRail()
+		return nil
+	})
+
 	helperBag := controllers.HelperBag{
 		Driver:           g.driver,
 		Logger:           g.deps.Common.Logger(),
@@ -573,24 +626,13 @@ func (g *Gui) wireWithDriver() error {
 			})
 		},
 
-		// <CR> on a table row loads the COLUMNS rail for the selected
-		// table on a worker (mirrors OnSchemaActivate). The driver
-		// LoadColumns call must not block MainLoop; the focus push runs
-		// inside the worker after items are set, so the next layout frame
-		// sees the populated rail.
-		OnTableActivate: func(table *models.Table) error {
-			if table == nil {
-				return nil
-			}
-			g.OnWorker(func(_ gocui.Task) error {
-				connectInv.populateColumnsRail(context.Background(), table.Schema, table.Name)
-				if len(g.registry.Columns.Items()) != 0 {
-					_ = g.tree.Push(g.registry.Columns)
-				}
-				return nil
-			})
-			return nil
-		},
+		// <CR> on a table row loads the COLUMNS and INDEXES rails for
+		// the selected table on a single worker (dbsavvy-56u.1 AD-3 —
+		// one composite enqueue prevents double-focus-jumps and stale-
+		// load races between the two rails). Both rails are pushed
+		// atomically after Load completes; the focus push targets the
+		// COLUMNS rail, matching the pre-56u.1 behaviour.
+		OnTableActivate: g.buildOnTableActivate(connectInv),
 
 		// Threading helpers (DESIGN.md §17 / dbsavvy-66p.1). Bound to the
 		// Gui's methods so controllers can schedule UI-thread work and
@@ -876,6 +918,13 @@ func (g *Gui) wireWithDriver() error {
 	// hook reports renderEmpty=false.
 	g.refreshConnectionsRail()
 
+	// dbsavvy-56u.1: restore the CONNECTIONS rail cursor to the
+	// profile recorded in AppState.LastConnectionID so the user lands
+	// on their previous selection on the next boot. Nil-safe — empty
+	// LastConnectionID or a missing match collapses to "leave cursor
+	// at 0".
+	g.restoreConnectionsCursor()
+
 	// Push the initial CONNECTIONS context.
 	if err := g.tree.Push(g.registry.Connections); err != nil {
 		return err
@@ -896,6 +945,58 @@ func (g *Gui) wireWithDriver() error {
 		}
 	}
 	return nil
+}
+
+// buildOnTableActivate constructs (and stashes on g.onTableActivate) the
+// closure HelperBag.OnTableActivate consumes. The closure enqueues ONE
+// OnWorker that loads columns + indexes atomically (dbsavvy-56u.1
+// AD-3 — single enqueue avoids stale-load races and double focus jumps),
+// then pushes the COLUMNS rail focus.
+func (g *Gui) buildOnTableActivate(connectInv *connectInvoker) func(*models.Table) error {
+	fn := func(table *models.Table) error {
+		if table == nil {
+			return nil
+		}
+		g.OnWorker(func(_ gocui.Task) error {
+			ctx := context.Background()
+			connectInv.populateColumnsRail(ctx, table.Schema, table.Name)
+			connectInv.populateIndexesRail(ctx, table.Schema, table.Name)
+			if len(g.registry.Columns.Items()) != 0 {
+				_ = g.tree.Push(g.registry.Columns)
+			}
+			return nil
+		})
+		return nil
+	}
+	g.onTableActivate = fn
+	return fn
+}
+
+// restoreConnectionsCursor positions the CONNECTIONS rail cursor on the
+// profile whose Name matches AppState.LastConnectionID. No-op when the
+// registry is unwired, the AppState is missing, LastConnectionID is
+// empty, or no matching profile lives in the rail. dbsavvy-56u.1.
+func (g *Gui) restoreConnectionsCursor() {
+	if g == nil || g.registry == nil || g.registry.Connections == nil {
+		return
+	}
+	if g.deps.Common == nil || g.deps.Common.AppState == nil {
+		return
+	}
+	last := g.deps.Common.AppState.LastConnectionID
+	if last == "" {
+		return
+	}
+	for i, it := range g.registry.Connections.Items() {
+		conn, ok := it.(*models.Connection)
+		if !ok || conn == nil {
+			continue
+		}
+		if conn.Name == last {
+			g.registry.Connections.SetCursor(i)
+			return
+		}
+	}
 }
 
 // refreshConnectionsRail re-loads the connection profiles from
@@ -1222,6 +1323,60 @@ func (g *Gui) HelperBagForTest() controllers.HelperBag {
 // ActiveSQLSessionForTest returns the SQLSession the most recent Connect
 // installed, or nil. Test-only.
 func (g *Gui) ActiveSQLSessionForTest() *session.SQLSession { return g.activeSQLSession }
+
+// PopulateIndexesRailForTest invokes the side-effect of <CR>-on-TABLES
+// against the connectInvoker built by wireWithDriver: it loads indexes
+// for (schema, table) via the live ConnectHelper and pushes them into
+// IndexesContext. Test-only — exercised by adapters_test.go to assert
+// the dbsavvy-56u.1 INDEXES-rail population path.
+func (g *Gui) PopulateIndexesRailForTest(schema, table string) {
+	if g == nil {
+		return
+	}
+	inv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
+	inv.populateIndexesRail(context.Background(), schema, table)
+}
+
+// PopulateColumnsRailForTest mirrors PopulateIndexesRailForTest for the
+// COLUMNS rail. Test-only.
+func (g *Gui) PopulateColumnsRailForTest(schema, table string) {
+	if g == nil {
+		return
+	}
+	inv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
+	inv.populateColumnsRail(context.Background(), schema, table)
+}
+
+// OnTableActivateForTest invokes the HelperBag.OnTableActivate closure
+// that wireWithDriver installed. The closure enqueues ONE OnWorker that
+// loads BOTH columns and indexes for table, then pushes the COLUMNS
+// rail focus. dbsavvy-56u.1 composite-load AC.
+func (g *Gui) OnTableActivateForTest(table *models.Table) error {
+	if g == nil || g.onTableActivate == nil {
+		return nil
+	}
+	return g.onTableActivate(table)
+}
+
+// OnWorkerCountForTest returns the cumulative OnWorker invocation count
+// since wireWithDriver. Backed by onWorkerSampleCounter (also used by
+// AD-20 sampling). dbsavvy-56u.1 composite-load AC.
+func (g *Gui) OnWorkerCountForTest() uint64 {
+	if g == nil {
+		return 0
+	}
+	return g.onWorkerSampleCounter.Load()
+}
+
+// WaitForWorkersForTest blocks until every OnWorker goroutine launched
+// before this call has finished. Test-only quiescence helper that
+// piggybacks on the workersWG used by Close.
+func (g *Gui) WaitForWorkersForTest() {
+	if g == nil {
+		return
+	}
+	g.workersWG.Wait()
+}
 
 // ChoiceHelperForTest returns the ChoiceHelper wired by wireWithDriver,
 // or nil before that pass ran. Test accessor used by m47.4 wiring tests

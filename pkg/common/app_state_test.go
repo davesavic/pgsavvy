@@ -155,3 +155,44 @@ func TestAppState_Save_ReadOnlyFs_ReturnsError(t *testing.T) {
 	_, statErr = base.Stat("/state.yml.tmp")
 	require.True(t, os.IsNotExist(statErr))
 }
+
+// dbsavvy-56u.1: PushRecentConnectionID prepends, dedupes, and caps the
+// returned slice at 10 entries.
+
+func TestPushRecentConnectionID_EmptyConnIDLeavesSliceUnchanged(t *testing.T) {
+	in := []string{"a", "b"}
+	out := PushRecentConnectionID(in, "")
+	require.Equal(t, in, out)
+	// Defensive copy: the returned slice does not alias the input so
+	// callers may safely assign it under MutateAndSave.
+	out[0] = "MUTATED"
+	require.Equal(t, []string{"a", "b"}, in)
+}
+
+func TestPushRecentConnectionID_PrependsNewID(t *testing.T) {
+	out := PushRecentConnectionID([]string{"a", "b"}, "c")
+	require.Equal(t, []string{"c", "a", "b"}, out)
+}
+
+func TestPushRecentConnectionID_DedupesAndMovesToFront(t *testing.T) {
+	out := PushRecentConnectionID([]string{"a", "b", "c"}, "b")
+	require.Equal(t, []string{"b", "a", "c"}, out)
+}
+
+func TestPushRecentConnectionID_CapsAtTen(t *testing.T) {
+	prior := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}
+	out := PushRecentConnectionID(prior, "z")
+	require.Len(t, out, 10)
+	require.Equal(t, "z", out[0])
+	// Tail entry from the prior slice ("j") falls off.
+	require.Equal(t, "i", out[len(out)-1])
+}
+
+func TestPushRecentConnectionID_OrderingAfterRepeatedPushes(t *testing.T) {
+	var recent []string
+	recent = PushRecentConnectionID(recent, "a")
+	recent = PushRecentConnectionID(recent, "b")
+	recent = PushRecentConnectionID(recent, "c")
+	recent = PushRecentConnectionID(recent, "a") // re-add bumps a to front
+	require.Equal(t, []string{"a", "c", "b"}, recent)
+}

@@ -72,6 +72,38 @@ func (a *AppState) Load(fs afero.Fs, path string) error {
 	return yaml.Unmarshal(data, a)
 }
 
+// recentConnectionsCap is the maximum number of entries retained in
+// AppState.RecentConnectionIDs. Older entries fall off the tail on each
+// push. dbsavvy-56u.1.
+const recentConnectionsCap = 10
+
+// PushRecentConnectionID inserts connID at the front of recent, dedupes
+// any prior occurrence, and caps the result at recentConnectionsCap.
+// Empty connID returns recent unchanged so callers can pipe Connect
+// failures through without a guard. The returned slice is always a
+// freshly allocated value (never aliases recent) so callers may assign
+// it directly into AppState.RecentConnectionIDs under MutateAndSave
+// without further copying. dbsavvy-56u.1.
+func PushRecentConnectionID(recent []string, connID string) []string {
+	if connID == "" {
+		out := make([]string, len(recent))
+		copy(out, recent)
+		return out
+	}
+	out := make([]string, 0, len(recent)+1)
+	out = append(out, connID)
+	for _, id := range recent {
+		if id == connID {
+			continue
+		}
+		out = append(out, id)
+		if len(out) >= recentConnectionsCap {
+			break
+		}
+	}
+	return out
+}
+
 // connIDHashKey returns the 16-hex-char key used to index LastBufferUUIDs:
 // hex(sha256(connID)[:8]). Empty connID returns "".
 func connIDHashKey(connID string) string {

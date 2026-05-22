@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"errors"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
@@ -108,6 +109,15 @@ func (s *SchemasController) UnhideSchema(_ commands.ExecCtx) error {
 	return s.wrapErr("schemas.unhide", err)
 }
 
+// RefreshRail is the `r` handler — reloads the SCHEMAS rail through
+// HelperBag.Refresh. Nil-safe.
+func (s *SchemasController) RefreshRail(_ commands.ExecCtx) error {
+	if s.helpers.Refresh == nil {
+		return nil
+	}
+	return s.helpers.Refresh.RefreshSchemas(context.Background())
+}
+
 // ToggleShowHidden is the `<leader>H` handler.
 func (s *SchemasController) ToggleShowHidden(_ commands.ExecCtx) error {
 	if s.picker == nil {
@@ -137,6 +147,13 @@ func (s *SchemasController) GetKeybindings(_ types.KeybindingsOpts) []*types.Cho
 			Scope:       types.SCHEMAS,
 			ActionID:    commands.SchemaUnhide,
 			Description: tr.Actions.UnhideSchema,
+		},
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Code: 'r'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.SCHEMAS,
+			ActionID:    listActionID(commands.RailRefresh, view),
+			Description: tr.Actions.RefreshRail,
 		},
 	)
 
@@ -177,6 +194,11 @@ func (s *SchemasController) RegisterActions(reg *commands.Registry) {
 		ID:          commands.SchemaToggleShowHidden,
 		Description: "Toggle show-hidden schemas",
 		Handler:     s.ToggleShowHidden,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          listActionID(commands.RailRefresh, viewName(types.SCHEMAS)),
+		Description: "Refresh schemas rail",
+		Handler:     s.RefreshRail,
 	})
 }
 

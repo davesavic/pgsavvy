@@ -63,6 +63,15 @@ func NewConnectionsController(
 	return ctrl
 }
 
+// RefreshRail is the `r` handler — reloads the CONNECTIONS rail via
+// HelperBag.Refresh. Nil-safe.
+func (c *ConnectionsController) RefreshRail(_ commands.ExecCtx) error {
+	if c.helpers.Refresh == nil {
+		return nil
+	}
+	return c.helpers.Refresh.RefreshConnections()
+}
+
 // AddConnection is the `a` handler. It invokes the WalkAddConnection
 // flow through the helper interface; the real chained prompt lives in
 // T7b's prompt helper and is plumbed into ConnectionFormHelper at the
@@ -89,6 +98,14 @@ func (c *ConnectionsController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		ActionID:    commands.ConnectionAdd,
 		Description: tr.Actions.AddConnection,
 	})
+	// `r` -> refresh rail.
+	out = append(out, &types.ChordBinding{
+		Sequence:    []types.ChordKey{{Code: 'r'}},
+		Mode:        types.ModeNormal,
+		Scope:       types.CONNECTIONS,
+		ActionID:    listActionID(commands.RailRefresh, view),
+		Description: tr.Actions.RefreshRail,
+	})
 
 	out = append(out, railSwitchBindings(view, tr)...)
 	return out
@@ -104,6 +121,11 @@ func (c *ConnectionsController) RegisterActions(reg *commands.Registry) {
 		ID:          commands.ConnectionAdd,
 		Description: "Add connection",
 		Handler:     c.AddConnection,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          listActionID(commands.RailRefresh, viewName(types.CONNECTIONS)),
+		Description: "Refresh connections rail",
+		Handler:     c.RefreshRail,
 	})
 }
 

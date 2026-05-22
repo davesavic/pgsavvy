@@ -108,6 +108,43 @@ func (f *fakeTableDouble) DoubleClickStub(t *models.Table) error {
 	return f.err
 }
 
+// fakeRefresh records RefreshXxx calls so per-rail `r` binding tests
+// can assert dispatch. dbsavvy-56u.1.
+type fakeRefresh struct {
+	schemas     int
+	tables      []string
+	columns     []refreshTC
+	indexes     []refreshTC
+	connections int
+}
+
+type refreshTC struct{ Schema, Table string }
+
+func (f *fakeRefresh) RefreshSchemas(_ context.Context) error {
+	f.schemas++
+	return nil
+}
+
+func (f *fakeRefresh) RefreshTables(_ context.Context, schema string) error {
+	f.tables = append(f.tables, schema)
+	return nil
+}
+
+func (f *fakeRefresh) RefreshColumns(_ context.Context, schema, table string) error {
+	f.columns = append(f.columns, refreshTC{schema, table})
+	return nil
+}
+
+func (f *fakeRefresh) RefreshIndexes(_ context.Context, schema, table string) error {
+	f.indexes = append(f.indexes, refreshTC{schema, table})
+	return nil
+}
+
+func (f *fakeRefresh) RefreshConnections() error {
+	f.connections++
+	return nil
+}
+
 type fakeMenuPush struct {
 	pushed int
 	popped int

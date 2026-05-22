@@ -74,12 +74,17 @@ type ToastHelper interface {
 	Show(message string, ttl time.Duration)
 }
 
-// RefreshHelper reloads side-rail data after a hide/unhide mutation.
+// RefreshHelper reloads side-rail data after a hide/unhide mutation or
+// the per-rail `r` keypress (dbsavvy-56u.1). Each method loads fresh
+// data via the underlying driver AND pushes the result back into the
+// rail context's SetItems — the controllers only need to know which
+// rail to refresh.
 type RefreshHelper interface {
 	RefreshSchemas(ctx context.Context) error
 	RefreshTables(ctx context.Context, schema string) error
 	RefreshColumns(ctx context.Context, schema, table string) error
 	RefreshIndexes(ctx context.Context, schema, table string) error
+	RefreshConnections() error
 }
 
 // TipHelper handles the first-run tip popup lifecycle.

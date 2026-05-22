@@ -6,6 +6,7 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/gui"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -144,6 +145,17 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 		}
 		return err
 	}
+	// dbsavvy-56u.1: stamp LastConnectionID and prepend the profile to
+	// the LIFO RecentConnectionIDs ring (deduped, capped at 10). Persisted
+	// AFTER wireQueryRuntime succeeds so a wiring rollback does not leave
+	// a debounced write pointing at a profile that failed to connect.
+	if profile != nil && c.g != nil && c.g.deps.Store != nil {
+		name := profile.Name
+		c.g.deps.Store.MutateAndSave(func(a *common.AppState) {
+			a.LastConnectionID = name
+			a.RecentConnectionIDs = common.PushRecentConnectionID(a.RecentConnectionIDs, name)
+		})
+	}
 	c.hydrateQueryEditorBuffer(profile)
 	c.populateSchemasRail(ctx)
 
@@ -257,6 +269,37 @@ func (c *connectInvoker) populateColumnsRail(ctx context.Context, schema, table 
 		items[i] = cols[i]
 	}
 	c.g.registry.Columns.SetItems(items)
+}
+
+// populateIndexesRail loads the index list for (schema, table) via
+// ConnectHelper.LoadIndexes and pushes the result onto IndexesContext so
+// the INDEXES rail draws rows on the next layout frame. Mirrors
+// populateColumnsRail — wired alongside it from the TABLES-rail <CR>
+// composite worker (dbsavvy-56u.1).
+//
+// Best-effort: a LoadIndexes error is logged and swallowed; the existing
+// IndexesContext.items are left intact so a transient failure does not
+// blank a previously-loaded list. Empty schema/table is a silent no-op.
+func (c *connectInvoker) populateIndexesRail(ctx context.Context, schema, table string) {
+	if c == nil || c.g == nil || c.helper == nil {
+		return
+	}
+	if schema == "" || table == "" {
+		return
+	}
+	if c.g.registry == nil || c.g.registry.Indexes == nil {
+		return
+	}
+	idxs, err := c.helper.LoadIndexes(ctx, schema, table)
+	if err != nil {
+		c.g.deps.Common.Logger().Warn(fmt.Sprintf("gui: load indexes for %s.%s: %v", schema, table, err))
+		return
+	}
+	items := make([]any, len(idxs))
+	for i := range idxs {
+		items[i] = idxs[i]
+	}
+	c.g.registry.Indexes.SetItems(items)
 }
 
 // hydrateQueryEditorBuffer is the dbsavvy-wwd.9 post-Connect hook. It
