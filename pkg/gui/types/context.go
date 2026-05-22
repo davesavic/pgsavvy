@@ -71,6 +71,10 @@ const (
 	// user's first launch. PERSISTENT_POPUP kind so subsequent popup
 	// pushes do not auto-evict it (AD-1 / dbsavvy-56u.2).
 	FIRST_RUN_TIP ContextKey = "first_run_tip"
+	// TABLE_INSPECT is the tabbed popup that replaces the columns/indexes
+	// side rails (epic dbsavvy-3vf). Non-editable; sized larger than the
+	// generic 50% × 50% popup to fit table metadata.
+	TABLE_INSPECT ContextKey = "table_inspect"
 )
 
 // IsEditable reports whether the view associated with k receives text

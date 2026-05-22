@@ -52,14 +52,6 @@ var ExpectedBindings = []ExpectedBinding{
 	{View: "tables", Key: gocui.NewKeyName(gocui.KeyEnter), Mod: gocui.ModNone},
 	{View: "tables", Key: gocui.NewKeyName(gocui.KeyTab), Mod: gocui.ModNone},
 
-	// Columns rail.
-	{View: "columns", Key: gocui.NewKeyRune('j'), Mod: gocui.ModNone},
-	{View: "columns", Key: gocui.NewKeyRune('k'), Mod: gocui.ModNone},
-
-	// Indexes rail.
-	{View: "indexes", Key: gocui.NewKeyRune('j'), Mod: gocui.ModNone},
-	{View: "indexes", Key: gocui.NewKeyRune('k'), Mod: gocui.ModNone},
-
 	// Menu popup bindings.
 	{View: "menu", Key: gocui.NewKeyName(gocui.KeyEnter), Mod: gocui.ModNone},
 	{View: "menu", Key: gocui.NewKeyName(gocui.KeyEsc), Mod: gocui.ModNone},

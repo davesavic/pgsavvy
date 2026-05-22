@@ -45,14 +45,14 @@ func TestListControllerTraitDownAndUp(t *testing.T) {
 func TestListControllerTraitConfirmDelegates(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
-	ctrl := controllers.NewColumnsController(nil, b.HelperBag, cur)
+	ctrl := controllers.NewTablesController(nil, b.HelperBag, cur, b.TablePicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 	for _, kb := range bindings {
 		if isSpecial(kb, types.KeyEnter) {
 			if err := invokeAction(reg, kb); err != nil {
-				t.Fatalf("<CR> on columns: %v", err)
+				t.Fatalf("<CR> on tables: %v", err)
 			}
 		}
 	}

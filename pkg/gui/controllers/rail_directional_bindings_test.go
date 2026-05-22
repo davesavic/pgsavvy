@@ -39,7 +39,7 @@ func TestRailDirectionalBindings_PerScope(t *testing.T) {
 			{ctrlJ, commands.RailSwitchDown},
 			{ctrlL, commands.RailSwitchQueryEditor},
 		}},
-		{"indexes", types.INDEXES, []want{
+		{"tables", types.TABLES, []want{
 			{ctrlK, commands.RailSwitchUp},
 			{ctrlJ, commands.RailSwitchDown},
 			{ctrlL, commands.RailSwitchQueryEditor},

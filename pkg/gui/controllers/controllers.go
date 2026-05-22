@@ -17,8 +17,6 @@ type Controllers struct {
 	Connections  *ConnectionsController
 	Schemas      *SchemasController
 	Tables       *TablesController
-	Columns      *ColumnsController
-	Indexes      *IndexesController
 	Menu         *MenuController
 	Prompt       *PromptController
 	Selection    *SelectionController
@@ -30,6 +28,11 @@ type Controllers struct {
 	ExportMenu   *ExportMenuController
 	VimEditor    *VimEditorController
 	Plan         *PlanController
+	// TableInspect is constructed by the orchestrator (it needs a
+	// Pop-capable focus-stack handle outside this package). The
+	// orchestrator assigns it after AttachControllers returns so the
+	// bundle's binding-inventory + RegisterActions paths include it.
+	TableInspect *TableInspectController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -76,12 +79,6 @@ func AttachControllers(
 
 	tables := NewTablesController(c, helpers, &tree.Tables.SideListContext, helpers.Tables)
 	tables.AttachToContext(&tree.Tables.BaseContext)
-
-	columns := NewColumnsController(c, helpers, &tree.Columns.SideListContext)
-	columns.AttachToContext(&tree.Columns.BaseContext)
-
-	indexes := NewIndexesController(c, helpers, &tree.Indexes.SideListContext)
-	indexes.AttachToContext(&tree.Indexes.BaseContext)
 
 	menu := NewMenuController(c, helpers)
 	menu.AttachToContext(&tree.Menu.BaseContext)
@@ -192,8 +189,6 @@ func AttachControllers(
 		Connections:  connections,
 		Schemas:      schemas,
 		Tables:       tables,
-		Columns:      columns,
-		Indexes:      indexes,
 		Menu:         menu,
 		Prompt:       prompt,
 		Selection:    selection,
@@ -235,12 +230,6 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	if b.Tables != nil && b.Tables.ListControllerTrait != nil {
 		b.Tables.ListControllerTrait.RegisterActions(reg)
 	}
-	if b.Columns != nil && b.Columns.ListControllerTrait != nil {
-		b.Columns.ListControllerTrait.RegisterActions(reg)
-	}
-	if b.Indexes != nil && b.Indexes.ListControllerTrait != nil {
-		b.Indexes.ListControllerTrait.RegisterActions(reg)
-	}
 	if b.Quit != nil {
 		b.Quit.RegisterActions(reg)
 	}
@@ -252,12 +241,6 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.Tables != nil {
 		b.Tables.RegisterActions(reg)
-	}
-	if b.Columns != nil {
-		b.Columns.RegisterActions(reg)
-	}
-	if b.Indexes != nil {
-		b.Indexes.RegisterActions(reg)
 	}
 	if b.Menu != nil {
 		b.Menu.RegisterActions(reg)
@@ -288,6 +271,9 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.Plan != nil {
 		b.Plan.RegisterActions(reg)
+	}
+	if b.TableInspect != nil {
+		b.TableInspect.RegisterActions(reg)
 	}
 }
 

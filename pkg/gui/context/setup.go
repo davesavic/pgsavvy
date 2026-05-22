@@ -35,6 +35,9 @@ type ContextTree struct {
 	// ExportMenu is the <leader>oe export-result menu
 	// (dbsavvy-uv0.9). TEMPORARY_POPUP kind.
 	ExportMenu *ExportMenuContext
+	// TableInspect is the tabbed columns/indexes inspect popup
+	// (epic dbsavvy-3vf). TEMPORARY_POPUP kind.
+	TableInspect *TableInspectContext
 
 	// Live EXTRAS / GLOBAL / DISPLAY instances.
 	Messages   *MessagesContext
@@ -88,13 +91,13 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 		Columns: NewColumnsContext(NewBaseContext(BaseContextOpts{
 			Key:      types.COLUMNS,
 			ViewName: string(types.COLUMNS),
-			Kind:     types.SIDE_CONTEXT,
+			Kind:     types.STUB,
 			Title:    "Columns",
 		}), deps),
 		Indexes: NewIndexesContext(NewBaseContext(BaseContextOpts{
 			Key:      types.INDEXES,
 			ViewName: string(types.INDEXES),
-			Kind:     types.SIDE_CONTEXT,
+			Kind:     types.STUB,
 			Title:    "Indexes",
 		}), deps),
 
@@ -138,6 +141,12 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			Key:      types.EXPORT_MENU,
 			ViewName: string(types.EXPORT_MENU),
 			Kind:     types.TEMPORARY_POPUP,
+		}), deps),
+		TableInspect: NewTableInspectContext(NewBaseContext(BaseContextOpts{
+			Key:      types.TABLE_INSPECT,
+			ViewName: string(types.TABLE_INSPECT),
+			Kind:     types.TEMPORARY_POPUP,
+			Title:    "Table inspect",
 		}), deps),
 
 		// EXTRAS / GLOBAL / DISPLAY.
@@ -202,15 +211,13 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 }
 
 // Flatten returns every Context (live + stub) in a stable order. Order
-// is: side rail (5) -> temporary popups (8) -> extras/global/display (5)
-// -> persistent popups (1) -> main + stubs (5). Total length is always 24.
+// is: side rail (3) -> temporary popups (9) -> extras/global/display (5)
+// -> persistent popups (1) -> main + stubs (5). Total length is always 23.
 func (t *ContextTree) Flatten() []types.IBaseContext {
 	return []types.IBaseContext{
 		t.Connections,
 		t.Schemas,
 		t.Tables,
-		t.Columns,
-		t.Indexes,
 		t.Menu,
 		t.Confirmation,
 		t.Prompt,
@@ -219,6 +226,7 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 		t.CommandLine,
 		t.HideOverlay,
 		t.ExportMenu,
+		t.TableInspect,
 		t.Messages,
 		t.Global,
 		t.Limit,

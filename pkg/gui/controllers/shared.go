@@ -22,7 +22,7 @@ func viewName(k types.ContextKey) string { return string(k) }
 
 // railSwitchBindings returns the digit-1..5 + <tab> bindings every side
 // rail (and the QUERY_EDITOR main pane) registers so the user can hop
-// between SCHEMAS/TABLES/COLUMNS/INDEXES/QUERY_EDITOR from any of them.
+// between SCHEMAS/TABLES/QUERY_EDITOR/RESULTS from any of them.
 // The handlers are registered ONCE per process via
 // RegisterRailSwitchActions; the per-controller bindings just publish
 // ActionID strings the Matcher resolves through the commands.Registry.
@@ -57,23 +57,11 @@ func railSwitchBindings(view string, tr *i18n.TranslationSet) []*types.ChordBind
 		{
 			Sequence:    []types.ChordKey{{Code: '3'}},
 			Scope:       scope,
-			ActionID:    commands.RailSwitchColumns,
-			Description: tr.Actions.RailColumns,
-		},
-		{
-			Sequence:    []types.ChordKey{{Code: '4'}},
-			Scope:       scope,
-			ActionID:    commands.RailSwitchIndexes,
-			Description: tr.Actions.RailIndexes,
-		},
-		{
-			Sequence:    []types.ChordKey{{Code: '5'}},
-			Scope:       scope,
 			ActionID:    commands.RailSwitchQueryEditor,
 			Description: tr.Actions.RailQueryEditor,
 		},
 		{
-			Sequence:    []types.ChordKey{{Code: '6'}},
+			Sequence:    []types.ChordKey{{Code: '4'}},
 			Scope:       scope,
 			ActionID:    commands.RailSwitchResults,
 			Description: tr.Actions.RailResults,
@@ -100,7 +88,7 @@ func railDirectionalBindings(scope types.ContextKey, tr *i18n.TranslationSet) []
 	ctrlK := types.ChordKey{Code: 'k', Mod: types.ChordModCtrl}
 	ctrlL := types.ChordKey{Code: 'l', Mod: types.ChordModCtrl}
 	switch scope {
-	case types.CONNECTIONS, types.SCHEMAS, types.TABLES, types.COLUMNS, types.INDEXES:
+	case types.CONNECTIONS, types.SCHEMAS, types.TABLES:
 		return []*types.ChordBinding{
 			{Sequence: []types.ChordKey{ctrlK}, Scope: scope, ActionID: commands.RailSwitchUp, Description: tr.Actions.RailUp},
 			{Sequence: []types.ChordKey{ctrlJ}, Scope: scope, ActionID: commands.RailSwitchDown, Description: tr.Actions.RailDown},
@@ -156,8 +144,6 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 		for _, id := range []string{
 			commands.RailSwitchSchemas,
 			commands.RailSwitchTables,
-			commands.RailSwitchColumns,
-			commands.RailSwitchIndexes,
 			commands.RailSwitchQueryEditor,
 			commands.RailSwitchResults,
 			commands.RailSwitchNext,
@@ -172,7 +158,7 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 
 	// dbsavvy-xs0: last-focused rail tracking for the editor's Ctrl+H
 	// round-trip. Updated by pushRail whenever the push lands on one
-	// of the five SIDE_CONTEXT rails; consumed by RailSwitchLastRail.
+	// of the three SIDE_CONTEXT rails; consumed by RailSwitchLastRail.
 	// Defaults to SCHEMAS so the very first Ctrl+H from the editor
 	// (before any rail has been focused this session) lands somewhere
 	// sensible. Rail-switch handlers all run on the gocui dispatch
@@ -181,16 +167,12 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 		ctxTree.Connections,
 		ctxTree.Schemas,
 		ctxTree.Tables,
-		ctxTree.Columns,
-		ctxTree.Indexes,
 	}
 	lastRailKey := types.SCHEMAS
 	railKeys := map[types.ContextKey]struct{}{
 		types.CONNECTIONS: {},
 		types.SCHEMAS:     {},
 		types.TABLES:      {},
-		types.COLUMNS:     {},
-		types.INDEXES:     {},
 	}
 	pushRail := func(target types.IBaseContext) error {
 		if target == nil {
@@ -213,8 +195,6 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 
 	_ = reg.Register(&commands.Command{ID: commands.RailSwitchSchemas, Description: commands.RailSwitchSchemas, Handler: jumpTo(ctxTree.Schemas)})
 	_ = reg.Register(&commands.Command{ID: commands.RailSwitchTables, Description: commands.RailSwitchTables, Handler: jumpTo(ctxTree.Tables)})
-	_ = reg.Register(&commands.Command{ID: commands.RailSwitchColumns, Description: commands.RailSwitchColumns, Handler: jumpTo(ctxTree.Columns)})
-	_ = reg.Register(&commands.Command{ID: commands.RailSwitchIndexes, Description: commands.RailSwitchIndexes, Handler: jumpTo(ctxTree.Indexes)})
 	_ = reg.Register(&commands.Command{ID: commands.RailSwitchQueryEditor, Description: commands.RailSwitchQueryEditor, Handler: jumpTo(ctxTree.QueryEditor)})
 
 	// dbsavvy-xs0: directional rail navigation handlers (Ctrl+K/J/H on
@@ -315,8 +295,6 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 		staticEntry(ctxTree.Connections),
 		staticEntry(ctxTree.Schemas),
 		staticEntry(ctxTree.Tables),
-		staticEntry(ctxTree.Columns),
-		staticEntry(ctxTree.Indexes),
 		staticEntry(ctxTree.QueryEditor),
 		{
 			resolve: func() types.IBaseContext {

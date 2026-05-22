@@ -146,6 +146,12 @@ type ActionTranslations struct {
 	ExportMenuConfirm  string
 	ExportMenuCancel   string
 
+	// Table-inspect popup (dbsavvy-3vf).
+	TableInspectOpen    string
+	TableInspectNextTab string
+	TableInspectPrevTab string
+	TableInspectClose   string
+
 	// Expanded view mode + result-grid motion (dbsavvy-uv0.7).
 	ResultViewToggle      string
 	ResultCursorDown      string
@@ -177,8 +183,6 @@ type ActionTranslations struct {
 	// Side rail navigation.
 	RailSchemas     string
 	RailTables      string
-	RailColumns     string
-	RailIndexes     string
 	RailQueryEditor string
 	RailResults     string
 
@@ -311,6 +315,11 @@ func EnglishTranslationSet() *TranslationSet {
 			ExportMenuConfirm:  "Start export",
 			ExportMenuCancel:   "Cancel",
 
+			TableInspectOpen:    "Open table inspect",
+			TableInspectNextTab: "Next tab",
+			TableInspectPrevTab: "Previous tab",
+			TableInspectClose:   "Close",
+
 			ResultViewToggle:      "Toggle expanded view",
 			ResultCursorDown:      "Cursor down",
 			ResultCursorUp:        "Cursor up",
@@ -337,8 +346,6 @@ func EnglishTranslationSet() *TranslationSet {
 
 			RailSchemas:     "Schemas",
 			RailTables:      "Tables",
-			RailColumns:     "Columns",
-			RailIndexes:     "Indexes",
 			RailQueryEditor: "Query Editor",
 			RailResults:     "Results",
 

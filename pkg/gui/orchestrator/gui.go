@@ -35,6 +35,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
+	"github.com/davesavic/dbsavvy/pkg/gui/popup"
 	"github.com/davesavic/dbsavvy/pkg/gui/presentation"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/logs"
@@ -684,8 +685,31 @@ func (g *Gui) wireWithDriver() error {
 		})
 	}
 
+	// dbsavvy-3vf.9: build the TABLE_INSPECT popup controller and attach
+	// it to its context so its bindings reach the trie via
+	// AllDefaultBindings (the bundle is consumed two blocks down at
+	// trie-build time). Constructed here — not in AttachControllers —
+	// because it needs a Pop-capable handle on the focus-stack
+	// (*gui.ContextTree), which the controllers package must not import.
+	if g.registry != nil && g.registry.TableInspect != nil && g.tree != nil {
+		inspectCtx := g.registry.TableInspect
+		inspectCtrl := controllers.NewTableInspectController(
+			g.deps.Common, helperBag, inspectCtx, g.tree,
+		)
+		inspectCtrl.AttachToContext(&inspectCtx.BaseContext)
+		g.controllers.TableInspect = inspectCtrl
+	}
+
 	// Register every controller's action handlers with the registry.
 	g.controllers.RegisterActions(g.cmdRegistry)
+
+	// dbsavvy-3vf.9: TableInspectOpen — `i` on TABLES opens the tabbed
+	// popup, sets the target (schema, table), and dispatches column +
+	// index refreshes via OnWorker. Re-pressing `i` while the popup is
+	// already on top re-targets without a second Push.
+	if g.registry != nil && g.registry.TableInspect != nil && g.tree != nil {
+		g.registerTableInspectOpen(connectInv)
+	}
 
 	// Rail-switch (1-6, Tab) needs the focus tree + context registry,
 	// which the Controllers aggregate does not hold; register here. The
@@ -947,25 +971,90 @@ func (g *Gui) wireWithDriver() error {
 	return nil
 }
 
-// buildOnTableActivate constructs (and stashes on g.onTableActivate) the
-// closure HelperBag.OnTableActivate consumes. The closure enqueues ONE
-// OnWorker that loads columns + indexes atomically (dbsavvy-56u.1
-// AD-3 — single enqueue avoids stale-load races and double focus jumps),
-// then pushes the COLUMNS rail focus.
-func (g *Gui) buildOnTableActivate(connectInv *connectInvoker) func(*models.Table) error {
+// registerTableInspectOpen registers the TableInspectOpen action handler.
+// `i` on the TABLES rail invokes this; it:
+//
+//   - Snapshots the selected table's (schema, name) — guards TOCTOU.
+//   - Either pushes the TABLE_INSPECT popup onto the focus stack, OR
+//     (when the popup is already on top) re-targets it without a second
+//     Push (AD-24 re-open semantics).
+//   - Marks the context loading and fans out TWO OnWorker dispatches —
+//     one for columns, one for indexes. Whichever finishes second flips
+//     loading=false on the UI thread.
+//
+// dbsavvy-3vf.9.
+func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
+	inspectCtx := g.registry.TableInspect
+	columnsCtx := g.registry.Columns
+	indexesCtx := g.registry.Indexes
+
+	_ = g.cmdRegistry.Register(&commands.Command{
+		ID:          commands.TableInspectOpen,
+		Description: "Open table inspect",
+		Handler: func(_ commands.ExecCtx) error {
+			if g.registry == nil || g.registry.Tables == nil {
+				return nil
+			}
+			sel := g.registry.Tables.SelectedItem()
+			tbl, ok := sel.(*models.Table)
+			if !ok || tbl == nil {
+				return nil
+			}
+			sch, tname := tbl.Schema, tbl.Name
+
+			// Re-open semantics (AD-24): if popup already on top, re-target.
+			cur := g.tree.Current()
+			if cur != nil && cur.GetKey() == types.TABLE_INSPECT {
+				inspectCtx.SetTarget(sch, tname)
+				if s := inspectCtx.State(); s != nil {
+					s.SetActive(0)
+				}
+			} else {
+				state := popup.NewTabbedPopup([]popup.Tab{
+					{Title: "Columns", Panel: controllers.NewColumnsPanel(columnsCtx)},
+					{Title: "Indexes", Panel: controllers.NewIndexesPanel(indexesCtx)},
+				})
+				inspectCtx.SetTarget(sch, tname)
+				inspectCtx.SetState(state)
+				if err := g.tree.Push(inspectCtx); err != nil {
+					return err
+				}
+			}
+
+			inspectCtx.SetLoading(true)
+			var ack atomic.Int32
+			ack.Store(2)
+			done := func() {
+				if ack.Add(-1) == 0 {
+					g.OnUIThreadContentOnly(func() error {
+						inspectCtx.SetLoading(false)
+						return nil
+					})
+				}
+			}
+			g.OnWorker(func(_ gocui.Task) error {
+				defer done()
+				connectInv.populateColumnsRail(context.Background(), sch, tname)
+				return nil
+			})
+			g.OnWorker(func(_ gocui.Task) error {
+				defer done()
+				connectInv.populateIndexesRail(context.Background(), sch, tname)
+				return nil
+			})
+			return nil
+		},
+	})
+}
+
+// buildOnTableActivate stashes a no-op closure on g.onTableActivate.
+// The popup-open handler (dbsavvy-3vf T9) will own the column/index
+// dispatch site now that COLUMNS/INDEXES are STUB contexts.
+func (g *Gui) buildOnTableActivate(_ *connectInvoker) func(*models.Table) error {
 	fn := func(table *models.Table) error {
 		if table == nil {
 			return nil
 		}
-		g.OnWorker(func(_ gocui.Task) error {
-			ctx := context.Background()
-			connectInv.populateColumnsRail(ctx, table.Schema, table.Name)
-			connectInv.populateIndexesRail(ctx, table.Schema, table.Name)
-			if len(g.registry.Columns.Items()) != 0 {
-				_ = g.tree.Push(g.registry.Columns)
-			}
-			return nil
-		})
 		return nil
 	}
 	g.onTableActivate = fn
@@ -1345,17 +1434,6 @@ func (g *Gui) PopulateColumnsRailForTest(schema, table string) {
 	}
 	inv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
 	inv.populateColumnsRail(context.Background(), schema, table)
-}
-
-// OnTableActivateForTest invokes the HelperBag.OnTableActivate closure
-// that wireWithDriver installed. The closure enqueues ONE OnWorker that
-// loads BOTH columns and indexes for table, then pushes the COLUMNS
-// rail focus. dbsavvy-56u.1 composite-load AC.
-func (g *Gui) OnTableActivateForTest(table *models.Table) error {
-	if g == nil || g.onTableActivate == nil {
-		return nil
-	}
-	return g.onTableActivate(table)
 }
 
 // OnWorkerCountForTest returns the cumulative OnWorker invocation count

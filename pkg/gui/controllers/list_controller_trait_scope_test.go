@@ -9,11 +9,11 @@ import (
 )
 
 // TestListControllerTrait_PerRailDispatch guards dbsavvy-6m9: j/k on the
-// SCHEMAS (or TABLES / COLUMNS / INDEXES) rail must move THAT rail's
-// cursor, not the CONNECTIONS rail's cursor. Before the fix every rail
-// emitted bindings with a single shared ActionID (commands.ListDown /
-// ListUp) and only the Connections trait registered handlers — so j on
-// SCHEMAS moved the Connections cursor through the global ActionID.
+// SCHEMAS (or TABLES) rail must move THAT rail's cursor, not the
+// CONNECTIONS rail's cursor. Before the fix every rail emitted bindings
+// with a single shared ActionID (commands.ListDown / ListUp) and only
+// the Connections trait registered handlers — so j on SCHEMAS moved the
+// Connections cursor through the global ActionID.
 //
 // The test wires every rail-cursor with its own fakeCursor, has every
 // rail register its trait actions on the same Registry, then fires
@@ -24,21 +24,15 @@ func TestListControllerTrait_PerRailDispatch(t *testing.T) {
 	connCur := &fakeCursor{items: []any{1, 2, 3}}
 	schemaCur := &fakeCursor{items: []any{1, 2, 3}}
 	tableCur := &fakeCursor{items: []any{1, 2, 3}}
-	colCur := &fakeCursor{items: []any{1, 2, 3}}
-	idxCur := &fakeCursor{items: []any{1, 2, 3}}
 
 	conn := controllers.NewConnectionsController(nil, b.HelperBag, connCur, b.ConnPicker)
 	schemas := controllers.NewSchemasController(nil, b.HelperBag, schemaCur, b.SchemaPicker)
 	tables := controllers.NewTablesController(nil, b.HelperBag, tableCur, b.TablePicker)
-	cols := controllers.NewColumnsController(nil, b.HelperBag, colCur)
-	idx := controllers.NewIndexesController(nil, b.HelperBag, idxCur)
 
 	reg := commands.NewRegistry()
 	conn.ListControllerTrait.RegisterActions(reg)
 	schemas.ListControllerTrait.RegisterActions(reg)
 	tables.ListControllerTrait.RegisterActions(reg)
-	cols.ListControllerTrait.RegisterActions(reg)
-	idx.ListControllerTrait.RegisterActions(reg)
 
 	// Fire SCHEMAS rail's j binding. Only schemaCur must advance.
 	fireJOn(t, reg, schemas.GetKeybindings(types.KeybindingsOpts{}), "schemas")
@@ -48,9 +42,8 @@ func TestListControllerTrait_PerRailDispatch(t *testing.T) {
 	if connCur.idx != 0 {
 		t.Errorf("connections cursor moved to %d after j on SCHEMAS — should stay 0", connCur.idx)
 	}
-	if tableCur.idx != 0 || colCur.idx != 0 || idxCur.idx != 0 {
-		t.Errorf("non-target rail moved: tables=%d cols=%d idx=%d, all want 0",
-			tableCur.idx, colCur.idx, idxCur.idx)
+	if tableCur.idx != 0 {
+		t.Errorf("non-target rail moved: tables=%d, want 0", tableCur.idx)
 	}
 
 	// Symmetric check on TABLES.

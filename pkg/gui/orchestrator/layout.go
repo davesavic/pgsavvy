@@ -500,6 +500,15 @@ func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int)
 			return rect{}, false
 		}
 		return centeredRect(canvas, 0.5, 0.5), true
+	case types.TABLE_INSPECT:
+		// TABLE_INSPECT replaces the columns/indexes side rails with a
+		// tabbed popup (epic dbsavvy-3vf). Larger than the generic
+		// 50% × 50% rect so column/index tables have room to breathe.
+		canvas, ok := dims["popup-overlay"]
+		if !ok {
+			return rect{}, false
+		}
+		return centeredRect(canvas, 0.6, 0.6), true
 	case types.COMMAND_LINE:
 		r := commandLineRect(dims)
 		if r == (rect{}) {

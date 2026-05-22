@@ -68,6 +68,16 @@ func (c *TablesController) GetKeybindings(_ types.KeybindingsOpts) []*types.Chor
 		ActionID:    listActionID(commands.RailRefresh, view),
 		Description: tr.Actions.RefreshRail,
 	})
+	// dbsavvy-3vf.9: `i` opens the TABLE_INSPECT popup for the currently
+	// selected table. Handler is registered in the orchestrator
+	// (gui.go) because it needs the focus tree + connectInvoker.
+	out = append(out, &types.ChordBinding{
+		Sequence:    []types.ChordKey{{Code: 'i'}},
+		Mode:        types.ModeNormal,
+		Scope:       types.TABLES,
+		ActionID:    commands.TableInspectOpen,
+		Description: tr.Actions.TableInspectOpen,
+	})
 	out = append(out, railSwitchBindings(view, tr)...)
 	return out
 }

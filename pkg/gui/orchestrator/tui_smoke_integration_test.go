@@ -294,6 +294,107 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 		_ = idxs
 	})
 
+	t.Run("step05b_table_inspect_popup", func(t *testing.T) {
+		if schemaPick == "" {
+			t.Skip("no schema picked in step04")
+		}
+
+		// Drive Connect via the orchestrator's HelperBag so the
+		// orchestrator-owned ConnectHelper (used by connectInvoker.populate*Rail)
+		// has a live session — TableInspectOpen fans out two OnWorker calls
+		// through that path.
+		bag := s.g.HelperBagForTest()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := bag.Connect.Connect(ctx, &profile); err != nil {
+			t.Fatalf("bag.Connect.Connect: %v", err)
+		}
+
+		// Load tables independently to seed the Tables rail selection.
+		h := data.NewConnectHelper()
+		if _, _, err := h.Connect(ctx, &profile); err != nil {
+			t.Fatalf("Connect (loader): %v", err)
+		}
+		defer h.Disconnect()
+		tables, err := h.LoadTables(ctx, schemaPick)
+		if err != nil {
+			t.Fatalf("LoadTables(%q): %v", schemaPick, err)
+		}
+		if len(tables) == 0 {
+			t.Skip("no tables in picked schema")
+		}
+		first := tables[0]
+		if first == nil {
+			t.Fatalf("LoadTables: first table is nil")
+		}
+
+		// Seed Tables.SelectedItem so the open handler finds a target.
+		tablesCtx := s.g.Registry().Tables
+		items := make([]any, len(tables))
+		for i, tbl := range tables {
+			items[i] = tbl
+		}
+		tablesCtx.SetItems(items)
+		tablesCtx.SetCursor(0)
+
+		// Fire TableInspectOpen.
+		cmd, ok := s.g.CommandRegistry().Get(commands.TableInspectOpen)
+		if !ok || cmd == nil || cmd.Handler == nil {
+			t.Fatalf("TableInspectOpen not registered")
+		}
+		if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+			t.Fatalf("TableInspectOpen handler: %v", err)
+		}
+
+		// Assert TABLE_INSPECT is on top of the focus stack.
+		top := s.g.ContextTree().Current()
+		if top == nil || top.GetKey() != types.TABLE_INSPECT {
+			var key types.ContextKey
+			if top != nil {
+				key = top.GetKey()
+			}
+			t.Fatalf("expected TABLE_INSPECT on top, got %q", key)
+		}
+
+		// Drain both refresh workers and verify loading cleared.
+		s.g.WaitForWorkersForTest()
+		inspect := s.g.Registry().TableInspect
+		if inspect.IsLoading() {
+			t.Fatalf("popup still loading after WaitForWorkersForTest")
+		}
+
+		// Target snapshot landed.
+		if sch, tbl := inspect.Target(); sch != schemaPick || tbl != first.Name {
+			t.Fatalf("Target = (%q,%q), want (%q,%q)", sch, tbl, schemaPick, first.Name)
+		}
+
+		// Tab cycling: NextTab advances to Indexes (1), PrevTab returns to Columns (0).
+		state := inspect.State()
+		if state == nil {
+			t.Fatal("popup state is nil")
+		}
+		if got := state.Active(); got != 0 {
+			t.Fatalf("Active() initial = %d, want 0", got)
+		}
+		state.NextTab()
+		if got := state.Active(); got != 1 {
+			t.Fatalf("Active() after NextTab = %d, want 1", got)
+		}
+		state.PrevTab()
+		if got := state.Active(); got != 0 {
+			t.Fatalf("Active() after PrevTab = %d, want 0", got)
+		}
+
+		// Close via Pop (the Close action handler does the same).
+		if err := s.g.ContextTree().Pop(); err != nil {
+			t.Fatalf("Pop: %v", err)
+		}
+		top = s.g.ContextTree().Current()
+		if top != nil && top.GetKey() == types.TABLE_INSPECT {
+			t.Fatalf("TABLE_INSPECT still on top after Pop")
+		}
+	})
+
 	t.Run("step06_hide_schema", func(t *testing.T) {
 		if schemaPick == "" {
 			t.Skip("no schema picked in step04")

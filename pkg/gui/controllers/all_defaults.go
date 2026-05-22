@@ -8,7 +8,7 @@ import (
 // AllDefaultBindings returns the union of every controller's
 // GetKeybindings output plus the COMMAND_LINE default bindings.
 //
-// The order is: Quit, Connections, Schemas, Tables, Columns, Indexes,
+// The order is: Quit, Connections, Schemas, Tables,
 // Menu, then keys.DefaultCommandLineBindings. Nil controllers are
 // skipped. This is the shipped-default slice the orchestrator hands to
 // keys.KeybindingService.Build during wireWithDriver and re-uses on
@@ -29,12 +29,6 @@ func AllDefaultBindings(c *Controllers) []*types.ChordBinding {
 	}
 	if c.Tables != nil {
 		out = append(out, c.Tables.GetKeybindings(types.KeybindingsOpts{})...)
-	}
-	if c.Columns != nil {
-		out = append(out, c.Columns.GetKeybindings(types.KeybindingsOpts{})...)
-	}
-	if c.Indexes != nil {
-		out = append(out, c.Indexes.GetKeybindings(types.KeybindingsOpts{})...)
 	}
 	if c.Menu != nil {
 		out = append(out, c.Menu.GetKeybindings(types.KeybindingsOpts{})...)
@@ -65,6 +59,9 @@ func AllDefaultBindings(c *Controllers) []*types.ChordBinding {
 	}
 	if c.ExportMenu != nil {
 		out = append(out, c.ExportMenu.GetKeybindings(types.KeybindingsOpts{})...)
+	}
+	if c.TableInspect != nil {
+		out = append(out, c.TableInspect.GetKeybindings(types.KeybindingsOpts{})...)
 	}
 	out = append(out, keys.DefaultCommandLineBindings()...)
 	return out

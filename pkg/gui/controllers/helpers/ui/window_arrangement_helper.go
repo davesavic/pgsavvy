@@ -17,8 +17,6 @@ var requiredWindows = []string{
 	"connections",
 	"schemas",
 	"tables",
-	"columns",
-	"indexes",
 	"main",
 	"secondary",
 	"extras",
@@ -44,9 +42,7 @@ var requiredWindows = []string{
 //	│   │   ├── left rail ROW size=24
 //	│   │   │   ├── "connections" weight=1
 //	│   │   │   ├── "schemas"     weight=1
-//	│   │   │   ├── "tables"      weight=1
-//	│   │   │   ├── "columns"     weight=1
-//	│   │   │   └── "indexes"     weight=1
+//	│   │   │   └── "tables"      weight=1
 //	│   │   └── right ROW (weight 1)
 //	│   │       ├── "main"      weight=1
 //	│   │       └── "secondary" weight=1
@@ -78,8 +74,6 @@ func GetWindowDimensions(width, height int) map[string]Dimensions {
 									{Window: "connections", Weight: 1},
 									{Window: "schemas", Weight: 1},
 									{Window: "tables", Weight: 1},
-									{Window: "columns", Weight: 1},
-									{Window: "indexes", Weight: 1},
 								},
 							},
 							{

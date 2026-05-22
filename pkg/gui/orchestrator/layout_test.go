@@ -122,8 +122,6 @@ func TestRunLayoutCreatesSideRails(t *testing.T) {
 		string(types.CONNECTIONS),
 		string(types.SCHEMAS),
 		string(types.TABLES),
-		string(types.COLUMNS),
-		string(types.INDEXES),
 	} {
 		if !rec.HasSetView(name) {
 			t.Errorf("side rail %q not laid out at 120x40", name)

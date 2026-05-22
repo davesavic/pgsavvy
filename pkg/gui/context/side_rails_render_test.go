@@ -34,45 +34,7 @@ func TestTablesContext_HandleRenderWritesRows(t *testing.T) {
 	}
 }
 
-// TestColumnsContext_HandleRenderWritesRows mirrors the schemas/tables
-// guard for the COLUMNS rail.
-func TestColumnsContext_HandleRenderWritesRows(t *testing.T) {
-	drv := &captureDriver{}
-	base := NewBaseContext(BaseContextOpts{Key: types.COLUMNS, ViewName: string(types.COLUMNS), Kind: types.SIDE_CONTEXT})
-	c := NewColumnsContext(base, types.ContextTreeDeps{GuiDriver: drv})
-	c.SetItems([]any{
-		&models.Column{Name: "id"},
-		&models.Column{Name: "email"},
-	})
-	if err := c.HandleRender(); err != nil {
-		t.Fatalf("HandleRender: %v", err)
-	}
-	body := drv.lastContent
-	if !strings.Contains(body, "id") || !strings.Contains(body, "email") {
-		t.Errorf("body = %q, want both column names", body)
-	}
-}
-
-// TestIndexesContext_HandleRenderWritesRows mirrors the guard for the
-// INDEXES rail.
-func TestIndexesContext_HandleRenderWritesRows(t *testing.T) {
-	drv := &captureDriver{}
-	base := NewBaseContext(BaseContextOpts{Key: types.INDEXES, ViewName: string(types.INDEXES), Kind: types.SIDE_CONTEXT})
-	c := NewIndexesContext(base, types.ContextTreeDeps{GuiDriver: drv})
-	c.SetItems([]any{
-		&models.Index{Name: "users_pkey"},
-		&models.Index{Name: "users_email_idx"},
-	})
-	if err := c.HandleRender(); err != nil {
-		t.Fatalf("HandleRender: %v", err)
-	}
-	body := drv.lastContent
-	if !strings.Contains(body, "users_pkey") || !strings.Contains(body, "users_email_idx") {
-		t.Errorf("body = %q, want both index names", body)
-	}
-}
-
-// TestEmptyRailRenderClears ensures the empty-rail path on all four
+// TestEmptyRailRenderClears ensures the empty-rail path on all
 // side contexts writes empty content (not stale) so a disconnect
 // clears prior data.
 func TestEmptyRailRenderClears(t *testing.T) {
@@ -87,14 +49,6 @@ func TestEmptyRailRenderClears(t *testing.T) {
 		{"tables", func(drv *captureDriver) error {
 			base := NewBaseContext(BaseContextOpts{Key: types.TABLES, ViewName: string(types.TABLES), Kind: types.SIDE_CONTEXT})
 			return NewTablesContext(base, types.ContextTreeDeps{GuiDriver: drv}).HandleRender()
-		}},
-		{"columns", func(drv *captureDriver) error {
-			base := NewBaseContext(BaseContextOpts{Key: types.COLUMNS, ViewName: string(types.COLUMNS), Kind: types.SIDE_CONTEXT})
-			return NewColumnsContext(base, types.ContextTreeDeps{GuiDriver: drv}).HandleRender()
-		}},
-		{"indexes", func(drv *captureDriver) error {
-			base := NewBaseContext(BaseContextOpts{Key: types.INDEXES, ViewName: string(types.INDEXES), Kind: types.SIDE_CONTEXT})
-			return NewIndexesContext(base, types.ContextTreeDeps{GuiDriver: drv}).HandleRender()
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

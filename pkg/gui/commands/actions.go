@@ -53,8 +53,6 @@ const (
 	// jump to a specific rail; `<tab>` cycles to the next rail.
 	RailSwitchSchemas     = "rail.switch.schemas"
 	RailSwitchTables      = "rail.switch.tables"
-	RailSwitchColumns     = "rail.switch.columns"
-	RailSwitchIndexes     = "rail.switch.indexes"
 	RailSwitchQueryEditor = "rail.switch.query_editor"
 	RailSwitchResults     = "rail.switch.results"
 	RailSwitchNext        = "rail.switch.next"
@@ -234,6 +232,15 @@ const (
 	ExportMenuCancel                     = "export.menu.cancel"
 	ExportMenuConfirmFullScopeWithFilter = "export.menu.confirm.full.filter"
 
+	// TableInspectOpen opens the TABLE_INSPECT popup from the TABLES rail
+	// (`i` in Normal mode). TableInspectNextTab / PrevTab cycle the tabs of
+	// the TABLE_INSPECT popup (dbsavvy-3vf). Close pops the popup back to
+	// the Tables rail.
+	TableInspectOpen    = "table_inspect.open"
+	TableInspectNextTab = "table_inspect.next_tab"
+	TableInspectPrevTab = "table_inspect.prev_tab"
+	TableInspectClose   = "table_inspect.close"
+
 	// Plan family — owned by PlanController (dbsavvy-uv0.8). All PLAN-
 	// scoped; published only when a plan tab is the focused context.
 	//   PlanToggle        - <CR> toggles collapse on the cursor node
@@ -390,8 +397,6 @@ func AllActionIDs() []string {
 		ListConfirm,
 		RailSwitchSchemas,
 		RailSwitchTables,
-		RailSwitchColumns,
-		RailSwitchIndexes,
 		RailSwitchQueryEditor,
 		RailSwitchResults,
 		RailSwitchNext,
@@ -468,6 +473,10 @@ func AllActionIDs() []string {
 		ExportMenuConfirm,
 		ExportMenuCancel,
 		ExportMenuConfirmFullScopeWithFilter,
+		TableInspectOpen,
+		TableInspectNextTab,
+		TableInspectPrevTab,
+		TableInspectClose,
 		PlanToggle,
 		PlanExpandAll,
 		PlanCollapseAll,
