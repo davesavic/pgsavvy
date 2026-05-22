@@ -2,12 +2,22 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 )
+
+// ErrPromptBusy is returned by PromptString / PromptChoice when another
+// prompt is already in flight on this adapter. The helpers are
+// single-popup resources and the adapter rejects overlapping calls at
+// the entry gate rather than clobbering the live call's callbacks.
+// Callers (e.g. orchestrator flows) inspect this sentinel to decide
+// whether to log, surface a toast, or back off.
+var ErrPromptBusy = errors.New("prompt: another prompt is in flight")
 
 // promptPopup is the subset of *ui.PromptHelper the adapter touches.
 // Declared as an interface so tests can inject a fake that captures the
@@ -55,17 +65,36 @@ type choicePopup interface {
 //     channel; the raw input is kept in lastValue only for the next
 //     re-push.
 //
-// Single-use per call: the adapter does not guard against concurrent
-// PromptString / PromptChoice calls. The helpers are single-popup
-// resources; a second call's Prompt/Choose overwrites the first call's
-// callbacks. This is by design — the TUI is single-user — but callers
-// (and tests) MUST NOT issue overlapping calls. See
-// TestChainedPrompterAdapter_PromptString_ConcurrentCallsIsolatedPerInvocation
-// for the documented behavior under accidental overlap.
+// Overlapping-call contract: PromptString and PromptChoice share a
+// single busy flag guarded by mu. The first caller wins; any
+// PromptString / PromptChoice call that arrives while another is in
+// flight returns ("", ErrPromptBusy) immediately, without touching the
+// helpers. The in-flight call proceeds undisturbed. The busy flag
+// clears on every return path (submit success, validate-then-success,
+// user cancel, ctx cancel) via a deferred reset installed right after
+// the gate. See TestChainedPrompterAdapter_PromptString_
+// OverlappingCallsRejectedWithErrPromptBusy and
+// TestChainedPrompterAdapter_RejectsConcurrentCalls.
+//
+// Known limitation: a panic inside the onSubmit / onCancel closure
+// executes on the gocui UI goroutine, not on the caller goroutine
+// where the deferred reset lives. The caller stays blocked on the
+// result channel, so a UI-goroutine panic does NOT clear busy.
+// Production callbacks must not panic; the helpers' own recovery
+// boundary covers accidental panics inside the popup machinery.
 type chainedPrompterAdapter struct {
 	promptHelp promptPopup
 	choiceHelp choicePopup
 	onUIThread func(func() error)
+
+	// mu guards busy. Held only across the flag transitions at
+	// entry and the deferred reset — never held across helper IO
+	// or the blocking result select.
+	mu sync.Mutex
+	// busy is true while a PromptString or PromptChoice call is
+	// in flight. Shared across both methods because the helpers
+	// share the same single popup surface.
+	busy bool
 }
 
 // newChainedPrompterAdapter constructs the adapter. All three fields are
@@ -92,8 +121,23 @@ type promptResult struct {
 // value (so the user can edit, not retype). Returns ctx.Err() if ctx
 // fires before the user acts.
 //
-// Not safe for concurrent calls (see chainedPrompterAdapter godoc).
+// Overlapping calls return ("", ErrPromptBusy) immediately; the
+// in-flight call proceeds undisturbed (see chainedPrompterAdapter
+// godoc).
 func (a *chainedPrompterAdapter) PromptString(ctx context.Context, title, label string, validate func(string) error) (string, error) {
+	a.mu.Lock()
+	if a.busy {
+		a.mu.Unlock()
+		return "", ErrPromptBusy
+	}
+	a.busy = true
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.busy = false
+		a.mu.Unlock()
+	}()
+
 	result := make(chan promptResult, 1)
 	done := make(chan struct{})
 
@@ -177,8 +221,23 @@ func (a *chainedPrompterAdapter) PromptString(ctx context.Context, title, label 
 // (defensive — ChoiceHelper.Submit already guards), the adapter
 // re-pushes the popup.
 //
-// Not safe for concurrent calls (see chainedPrompterAdapter godoc).
+// Overlapping calls return ("", ErrPromptBusy) immediately; the
+// in-flight call proceeds undisturbed (see chainedPrompterAdapter
+// godoc).
 func (a *chainedPrompterAdapter) PromptChoice(ctx context.Context, title, label string, choices []string) (string, error) {
+	a.mu.Lock()
+	if a.busy {
+		a.mu.Unlock()
+		return "", ErrPromptBusy
+	}
+	a.busy = true
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.busy = false
+		a.mu.Unlock()
+	}()
+
 	result := make(chan promptResult, 1)
 	done := make(chan struct{})
 

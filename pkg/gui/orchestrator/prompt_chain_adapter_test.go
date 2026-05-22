@@ -104,8 +104,8 @@ func newUIExecutor() *uiExecutor {
 }
 
 // submit is no-op once the executor has been shut down. This lets
-// late-firing ctx-watcher goroutines from orphaned PromptString calls
-// (see TestChainedPrompterAdapter_PromptString_ConcurrentCallsIsolated...)
+// late-firing ctx-watcher goroutines (e.g. from a still-running
+// PromptString call whose ctx fires after the test body returns)
 // safely race with t.Cleanup without panicking on a closed channel.
 func (e *uiExecutor) submit(fn func() error) {
 	e.mu.Lock()
@@ -706,62 +706,176 @@ func TestChainedPrompterAdapter_PromptChoice_OutOfRangeRePushes(t *testing.T) {
 	}
 }
 
-// TestChainedPrompterAdapter_PromptString_ConcurrentCallsIsolatedPerInvocation
-// documents the adapter's behavior under overlapping PromptString calls.
-// The TUI is single-user and callers MUST NOT overlap, but if they do,
-// the second call clobbers the helper's onSubmit/onCancel callbacks;
-// each call still owns its own result channel and ctx watcher, so the
-// "orphaned" first call can still cleanly return via ctx-cancel — the
-// Active() guard added in fix #1 ensures the orphaned watcher's Cancel
-// is a safe no-op when the helper is already inactive.
-func TestChainedPrompterAdapter_PromptString_ConcurrentCallsIsolatedPerInvocation(t *testing.T) {
+// TestChainedPrompterAdapter_PromptString_OverlappingCallsRejectedWithErrPromptBusy
+// proves the busy-gate contract for PromptString: while a call is in
+// flight, a second PromptString returns ("", ErrPromptBusy) immediately
+// without touching the helper, and the in-flight call proceeds
+// undisturbed. The helper's label stays on the first call's text — no
+// clobber — and the first call still completes cleanly on submit.
+func TestChainedPrompterAdapter_PromptString_OverlappingCallsRejectedWithErrPromptBusy(t *testing.T) {
 	adapter, ph, _, _, exec := newTestAdapter(t)
 
 	type res struct {
 		v   string
 		err error
 	}
-	ctx1, cancel1 := context.WithCancel(context.Background())
-	defer cancel1()
 	done1 := make(chan res, 1)
 	go func() {
-		v, err := adapter.PromptString(ctx1, "First", "F", nil)
+		v, err := adapter.PromptString(context.Background(), "First", "F", nil)
 		done1 <- res{v, err}
 	}()
 
 	if !waitForPromptActive(ph, 200*time.Millisecond) {
 		t.Fatal("first prompt did not become active")
 	}
-
-	// Launch second call; its Prompt clobbers the first call's
-	// callbacks. The helper itself stays active.
-	done2 := make(chan res, 1)
-	go func() {
-		v, err := adapter.PromptString(context.Background(), "Second", "S", nil)
-		done2 <- res{v, err}
-	}()
-
-	// Wait until the helper's label reflects the second call's push
-	// (the easiest stable signal that call #2's Prompt landed on the
-	// UI lane and overwrote call #1's callbacks).
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if strings.Contains(ph.Label(), "Second") {
-			break
-		}
-		time.Sleep(2 * time.Millisecond)
+	// Snapshot the live label so we can prove it never changes when
+	// the second call is rejected.
+	firstLabel := ph.Label()
+	if !strings.Contains(firstLabel, "First") {
+		t.Fatalf("first label = %q; want it to contain \"First\"", firstLabel)
 	}
-	if !strings.Contains(ph.Label(), "Second") {
-		t.Fatalf("helper label = %q; want it to reflect Second call's clobber", ph.Label())
+
+	// Second call MUST return ErrPromptBusy immediately. No helper
+	// IO, no clobber, no goroutine wait.
+	v, err := adapter.PromptString(context.Background(), "Second", "S", nil)
+	if !errors.Is(err, ErrPromptBusy) {
+		t.Fatalf("second call err = %v; want ErrPromptBusy", err)
+	}
+	if v != "" {
+		t.Fatalf("second call value = %q; want empty string", v)
+	}
+
+	// Helper label still reflects the first call — no clobber.
+	if got := ph.Label(); got != firstLabel {
+		t.Fatalf("helper label after ErrPromptBusy = %q; want unchanged %q", got, firstLabel)
 	}
 	if !ph.Active() {
-		t.Fatal("helper must still be Active() after the second Prompt")
+		t.Fatal("helper unexpectedly inactive after ErrPromptBusy reject")
 	}
 
-	// Submit a value: the LIVE onSubmit is the second call's, so the
-	// second call returns ("x", nil). The first call is orphaned —
-	// its result channel never gets a value through the helper.
-	if err := exec.runOnUI(func() error { return ph.Submit("x") }); err != nil {
+	// Complete the first call cleanly.
+	if err := exec.runOnUI(func() error { return ph.Submit("ok") }); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	select {
+	case r := <-done1:
+		if r.err != nil {
+			t.Fatalf("first call err = %v", r.err)
+		}
+		if r.v != "ok" {
+			t.Fatalf("first call value = %q; want ok", r.v)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("first PromptString did not return after submit")
+	}
+}
+
+// TestChainedPrompterAdapter_RejectsConcurrentCalls covers the
+// PromptChoice side of the busy gate AND the cross-method case (a
+// PromptString in flight blocks PromptChoice and vice versa) since both
+// methods share the same `busy` flag.
+func TestChainedPrompterAdapter_RejectsConcurrentCalls(t *testing.T) {
+	adapter, ph, ch, _, exec := newTestAdapter(t)
+
+	t.Run("PromptChoice rejects overlapping PromptChoice", func(t *testing.T) {
+		type res struct {
+			v   string
+			err error
+		}
+		done := make(chan res, 1)
+		go func() {
+			v, err := adapter.PromptChoice(context.Background(), "Driver", "Pick", []string{"postgres", "mysql"})
+			done <- res{v, err}
+		}()
+		if !waitForChoiceActive(ch, 200*time.Millisecond) {
+			t.Fatal("first choice popup did not become active")
+		}
+
+		v, err := adapter.PromptChoice(context.Background(), "Other", "Pick", []string{"a", "b"})
+		if !errors.Is(err, ErrPromptBusy) {
+			t.Fatalf("overlapping PromptChoice err = %v; want ErrPromptBusy", err)
+		}
+		if v != "" {
+			t.Fatalf("overlapping PromptChoice value = %q; want empty", v)
+		}
+
+		// Cancel the in-flight call to clean up before the next subtest.
+		if err := exec.runOnUI(func() error { return ch.Cancel() }); err != nil {
+			t.Fatalf("Cancel: %v", err)
+		}
+		<-done
+	})
+
+	t.Run("PromptChoice rejected while PromptString in flight", func(t *testing.T) {
+		type res struct {
+			v   string
+			err error
+		}
+		done := make(chan res, 1)
+		go func() {
+			v, err := adapter.PromptString(context.Background(), "Name", "L", nil)
+			done <- res{v, err}
+		}()
+		if !waitForPromptActive(ph, 200*time.Millisecond) {
+			t.Fatal("prompt did not become active")
+		}
+
+		v, err := adapter.PromptChoice(context.Background(), "Driver", "Pick", []string{"a", "b"})
+		if !errors.Is(err, ErrPromptBusy) {
+			t.Fatalf("cross-method PromptChoice err = %v; want ErrPromptBusy", err)
+		}
+		if v != "" {
+			t.Fatalf("cross-method PromptChoice value = %q; want empty", v)
+		}
+
+		// Clean up.
+		if err := exec.runOnUI(func() error { return ph.Cancel() }); err != nil {
+			t.Fatalf("Cancel: %v", err)
+		}
+		<-done
+	})
+}
+
+// TestChainedPrompterAdapter_BusyClearsAfterCancel proves the deferred
+// reset fires on the cancel path: after a cancelled PromptString
+// returns, a sequential PromptString call succeeds (i.e. busy was
+// cleared, not stuck).
+func TestChainedPrompterAdapter_BusyClearsAfterCancel(t *testing.T) {
+	adapter, ph, _, _, exec := newTestAdapter(t)
+
+	type res struct {
+		v   string
+		err error
+	}
+
+	// First call: user cancels.
+	done1 := make(chan res, 1)
+	go func() {
+		v, err := adapter.PromptString(context.Background(), "T1", "L1", nil)
+		done1 <- res{v, err}
+	}()
+	if !waitForPromptActive(ph, 200*time.Millisecond) {
+		t.Fatal("first prompt did not become active")
+	}
+	if err := exec.runOnUI(func() error { return ph.Cancel() }); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	select {
+	case <-done1:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("first PromptString did not return after Cancel")
+	}
+
+	// Second call (sequential): must succeed — busy must have cleared.
+	done2 := make(chan res, 1)
+	go func() {
+		v, err := adapter.PromptString(context.Background(), "T2", "L2", nil)
+		done2 <- res{v, err}
+	}()
+	if !waitForPromptActive(ph, 200*time.Millisecond) {
+		t.Fatal("second prompt did not become active — busy may not have cleared on cancel path")
+	}
+	if err := exec.runOnUI(func() error { return ph.Submit("ok") }); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	select {
@@ -769,41 +883,12 @@ func TestChainedPrompterAdapter_PromptString_ConcurrentCallsIsolatedPerInvocatio
 		if r.err != nil {
 			t.Fatalf("second call err = %v", r.err)
 		}
-		if r.v != "x" {
-			t.Fatalf("second call value = %q; want x", r.v)
+		if r.v != "ok" {
+			t.Fatalf("second call value = %q; want ok", r.v)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("second PromptString did not return")
 	}
-
-	// First call is orphaned. Cancel its ctx — the watcher fires
-	// helper.Cancel via onUIThread, but the Active() guard makes that
-	// a no-op (the helper was already inactive after the Submit
-	// above). The first call returns ctx.Err().
-	cancel1()
-	select {
-	case r := <-done1:
-		if !errors.Is(r.err, context.Canceled) {
-			t.Fatalf("first call err = %v; want context.Canceled", r.err)
-		}
-		if r.v != "" {
-			t.Fatalf("first call value = %q; want empty", r.v)
-		}
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("orphaned first PromptString did not return after ctx cancel")
-	}
-
-	// Helper must still be inactive — the Active()-guarded Cancel did
-	// not double-pop the focus tree.
-	if ph.Active() {
-		t.Fatal("helper unexpectedly Active after orphan ctx-cancel")
-	}
-
-	// Drain the UI executor with a sync barrier so the orphaned
-	// watcher's onUIThread submission lands BEFORE t.Cleanup closes
-	// the jobs channel. Without this, the watcher's `e.jobs <- fn`
-	// races the close in shutdown and the race detector flags it.
-	_ = exec.runOnUI(func() error { return nil })
 }
 
 // fakePromptPopup is the prompt-side analogue of fakeChoicePopup: it

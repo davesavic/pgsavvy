@@ -62,13 +62,14 @@ func CollectOptionsForScope(
 			if !leaf.ShowInBar || leaf.Action == nil {
 				return
 			}
-			// Probe Disabled with the zero ExecCtx — the options bar
-			// renders per-frame and has no dispatch context. Static
-			// disables (DisabledReasonStatic) are unconditional and
-			// dynamic predicates that need richer state must tolerate
-			// a zero ctx (or remain enabled until the actual dispatch
-			// re-evaluates them).
-			_, disabled := leaf.Action.Disabled(commands.ExecCtx{})
+			// Probe Disabled with the focused (mode, scope) populated
+			// on ExecCtx. Count/Register stay zero — the options bar
+			// renders per-frame with no chord-prefix state. Predicates
+			// that key off Mode/Scope (e.g. "disable in Insert mode",
+			// "only enabled inside QUERY_EDITOR") now see the same
+			// dispatch signal the Matcher will use, so the bar's
+			// disabled markers stay consistent with actual dispatch.
+			_, disabled := leaf.Action.Disabled(commands.ExecCtx{Mode: mode, Scope: scope})
 			entries = append(entries, entry{
 				tag:         leaf.Action.Tag,
 				key:         keys.SequenceString(seq),
