@@ -182,6 +182,13 @@ type ActionTranslations struct {
 	RailQueryEditor string
 	RailResults     string
 
+	// Directional rail navigation (dbsavvy-xs0). RailUp/RailDown describe
+	// the Ctrl+K / Ctrl+J chords on the five side rails; RailLastRail
+	// describes the QueryEditor's Ctrl+H "return to last rail" jump.
+	RailUp       string
+	RailDown     string
+	RailLastRail string
+
 	// Cursor movement and confirmation primitives used by every side
 	// rail controller. Added by T7a (enn.8) to satisfy the M11i rule
 	// that every KeyBinding.Description sources from Tr.Actions.*.
@@ -334,6 +341,10 @@ func EnglishTranslationSet() *TranslationSet {
 			RailIndexes:     "Indexes",
 			RailQueryEditor: "Query Editor",
 			RailResults:     "Results",
+
+			RailUp:       "Previous rail",
+			RailDown:     "Next rail",
+			RailLastRail: "Last rail",
 
 			Down:    "Down",
 			Up:      "Up",

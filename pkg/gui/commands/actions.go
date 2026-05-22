@@ -59,6 +59,16 @@ const (
 	RailSwitchResults     = "rail.switch.results"
 	RailSwitchNext        = "rail.switch.next"
 
+	// Directional rail navigation (dbsavvy-xs0). Bound to Ctrl+K/J on the
+	// five side rails (move focus up/down through the vertical stack;
+	// no-op at the ends). RailSwitchLastRail is bound to Ctrl+H on the
+	// QueryEditor — returns focus to the most-recently-focused rail so
+	// Ctrl+L→editor / Ctrl+H→back-to-rail round-trips. Defaults to Schemas
+	// before any rail has been focused.
+	RailSwitchUp       = "rail.switch.up"
+	RailSwitchDown     = "rail.switch.down"
+	RailSwitchLastRail = "rail.switch.last_rail"
+
 	// RailRefresh — published per-rail by the five side-rail controllers
 	// (Connections / Schemas / Tables / Columns / Indexes). Bound to `r`
 	// in Normal mode. Each rail's handler dispatches through
@@ -385,6 +395,9 @@ func AllActionIDs() []string {
 		RailSwitchQueryEditor,
 		RailSwitchResults,
 		RailSwitchNext,
+		RailSwitchUp,
+		RailSwitchDown,
+		RailSwitchLastRail,
 		RailRefresh,
 		MenuConfirm,
 		MenuCancel,
