@@ -67,6 +67,10 @@ const (
 	// EXPORT_MENU is the <leader>oe export-result menu opened from the
 	// result-grid context. TEMPORARY_POPUP kind. dbsavvy-uv0.9.
 	EXPORT_MENU ContextKey = "export_menu"
+	// FIRST_RUN_TIP is the welcome popup shown above CONNECTIONS on the
+	// user's first launch. PERSISTENT_POPUP kind so subsequent popup
+	// pushes do not auto-evict it (AD-1 / dbsavvy-56u.2).
+	FIRST_RUN_TIP ContextKey = "first_run_tip"
 )
 
 // IsEditable reports whether the view associated with k receives text

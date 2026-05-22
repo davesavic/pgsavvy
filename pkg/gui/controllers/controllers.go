@@ -14,21 +14,22 @@ import (
 // Returned by AttachControllers; T10 (bootstrap) keeps the bundle so
 // individual controllers remain accessible after wiring completes.
 type Controllers struct {
-	Connections *ConnectionsController
-	Schemas     *SchemasController
-	Tables      *TablesController
-	Columns     *ColumnsController
-	Indexes     *IndexesController
-	Menu        *MenuController
-	Prompt      *PromptController
-	Selection   *SelectionController
-	Quit        *QuitController
-	QueryEditor *QueryEditorController
-	ResultTabs  *ResultTabsController
-	HideOverlay *HideOverlayController
-	ExportMenu  *ExportMenuController
-	VimEditor   *VimEditorController
-	Plan        *PlanController
+	Connections  *ConnectionsController
+	Schemas      *SchemasController
+	Tables       *TablesController
+	Columns      *ColumnsController
+	Indexes      *IndexesController
+	Menu         *MenuController
+	Prompt       *PromptController
+	Selection    *SelectionController
+	Confirmation *ConfirmationController
+	Quit         *QuitController
+	QueryEditor  *QueryEditorController
+	ResultTabs   *ResultTabsController
+	HideOverlay  *HideOverlayController
+	ExportMenu   *ExportMenuController
+	VimEditor    *VimEditorController
+	Plan         *PlanController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -90,6 +91,9 @@ func AttachControllers(
 
 	selection := NewSelectionController(c, helpers)
 	selection.AttachToContext(&tree.Selection.BaseContext)
+
+	confirmation := NewConfirmationController(c, helpers)
+	confirmation.AttachToContext(&tree.Confirmation.BaseContext)
 
 	quit := NewQuitController(c, helpers)
 	quit.AttachToContext(&tree.Global.BaseContext)
@@ -185,21 +189,22 @@ func AttachControllers(
 	plan.AttachToContext(tree.Plan)
 
 	return &Controllers{
-		Connections: connections,
-		Schemas:     schemas,
-		Tables:      tables,
-		Columns:     columns,
-		Indexes:     indexes,
-		Menu:        menu,
-		Prompt:      prompt,
-		Selection:   selection,
-		Quit:        quit,
-		QueryEditor: queryEditor,
-		ResultTabs:  resultTabs,
-		HideOverlay: hideOverlay,
-		ExportMenu:  exportMenu,
-		VimEditor:   vimEditor,
-		Plan:        plan,
+		Connections:  connections,
+		Schemas:      schemas,
+		Tables:       tables,
+		Columns:      columns,
+		Indexes:      indexes,
+		Menu:         menu,
+		Prompt:       prompt,
+		Selection:    selection,
+		Confirmation: confirmation,
+		Quit:         quit,
+		QueryEditor:  queryEditor,
+		ResultTabs:   resultTabs,
+		HideOverlay:  hideOverlay,
+		ExportMenu:   exportMenu,
+		VimEditor:    vimEditor,
+		Plan:         plan,
 	}
 }
 
@@ -262,6 +267,9 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.Selection != nil {
 		b.Selection.RegisterActions(reg)
+	}
+	if b.Confirmation != nil {
+		b.Confirmation.RegisterActions(reg)
 	}
 	if b.QueryEditor != nil {
 		b.QueryEditor.RegisterActions(reg)

@@ -61,6 +61,8 @@ func (f *fakeConnectionForm) WalkAdd(_ context.Context) error {
 type fakeConfirm struct {
 	calls []confirmCall
 	err   error
+	yes   int
+	no    int
 }
 
 type confirmCall struct {
@@ -73,6 +75,9 @@ func (f *fakeConfirm) Confirm(title, body string, onYes, onNo func() error) erro
 	f.calls = append(f.calls, confirmCall{title, body, onYes, onNo})
 	return f.err
 }
+
+func (f *fakeConfirm) Yes() error { f.yes++; return nil }
+func (f *fakeConfirm) No() error  { f.no++; return nil }
 
 type (
 	fakeToast struct{ msgs []toastMsg }

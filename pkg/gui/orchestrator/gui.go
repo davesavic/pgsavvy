@@ -11,6 +11,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -392,6 +393,20 @@ func (g *Gui) wireWithDriver() error {
 		// the closure short-circuits via SaveBufferLines' empty-path
 		// guard so this stays safe for fixtures.
 		SaveBuffer: g.saveQueryEditorBuffer,
+		// dbsavvy-56u.4: runtime-hidden lookup for SchemasContext.
+		// renderRows uses this to skip AppState.HiddenSchemas[connID]
+		// entries unless showHiddenMode is on. Closure captures the live
+		// AppState pointer and the activeConnID; both can be empty in
+		// test wiring → empty slice, no filtering applied.
+		HiddenSchemasForActiveConn: g.hiddenSchemasForActiveConn,
+		// dbsavvy-56u.2: first-run welcome tip copy. Nil-safe when tr is
+		// absent (test fixtures) — the context renders nothing.
+		FirstRunTipText: func() (string, string) {
+			if tr == nil {
+				return "", ""
+			}
+			return tr.FirstRunTipTitle, tr.FirstRunTipBody
+		},
 	}
 	g.registry = guicontext.NewContextTree(ctxDeps)
 
@@ -673,6 +688,51 @@ func (g *Gui) wireWithDriver() error {
 		return g.tree.Pop()
 	})
 
+	// dbsavvy-56u.2: TipDismiss handler. Pops the FIRST_RUN_TIP popup
+	// and stamps StartupTipsSeenAt via AppStateStore.StampStartupTips.
+	// The action is wired regardless of whether the tip is currently
+	// visible — the popped Pop() error is logged at warn and the dismiss
+	// proceeds (AC: "if StampStartupTips fails to persist, tip still
+	// dismisses; error logged at warn"). The store's debounced save is
+	// fire-and-forget; any persistence failure is captured by the store
+	// itself via LastSaveErr + its own slog cat=state event.
+	_ = g.cmdRegistry.Register(&commands.Command{
+		ID:          commands.TipDismiss,
+		Description: "Dismiss first-run tip",
+		Handler: func(commands.ExecCtx) error {
+			if g.deps.Store != nil {
+				g.deps.Store.StampStartupTips()
+			}
+			if g.tree != nil {
+				if err := g.tree.Pop(); err != nil && err != gui.ErrPopAtBottom {
+					if g.deps.Common != nil {
+						logs.Event(g.deps.Common.Logger(), "gui", "first_run_tip_pop_failed",
+							slog.String("err", err.Error()),
+						)
+					}
+				}
+			}
+			if g.deps.Common != nil {
+				logs.Event(g.deps.Common.Logger(), "gui", "first_run_tip_dismissed")
+			}
+			return nil
+		},
+	})
+
+	// <esc> / <cr> on the FIRST_RUN_TIP view dispatch TipDismiss directly
+	// via the driver. FIRST_RUN_TIP carries no controller bindings (it's a
+	// minimal welcome popup); the driver shim mirrors the CHEATSHEET <esc>
+	// pattern above.
+	dismissTip := func() error {
+		cmd, ok := g.cmdRegistry.Get(commands.TipDismiss)
+		if !ok || cmd == nil || cmd.Handler == nil {
+			return nil
+		}
+		return cmd.Handler(commands.ExecCtx{})
+	}
+	_ = g.driver.SetKeybinding(string(types.FIRST_RUN_TIP), gocui.NewKeyName(gocui.KeyEsc), gocui.ModNone, dismissTip)
+	_ = g.driver.SetKeybinding(string(types.FIRST_RUN_TIP), gocui.NewKeyName(gocui.KeyEnter), gocui.ModNone, dismissTip)
+
 	// COMMAND_LINE action commands. The CommandLineContext doubles as
 	// the holder (it implements types.IBaseContext + ReadAndClearBuffer).
 	toaster := func(msg string) {
@@ -817,7 +877,25 @@ func (g *Gui) wireWithDriver() error {
 	g.refreshConnectionsRail()
 
 	// Push the initial CONNECTIONS context.
-	return g.tree.Push(g.registry.Connections)
+	if err := g.tree.Push(g.registry.Connections); err != nil {
+		return err
+	}
+
+	// dbsavvy-56u.2: push the first-run welcome tip on top of CONNECTIONS
+	// when the user has never dismissed it AND has no profiles. The
+	// FIRST_RUN_TIP context is a PERSISTENT_POPUP so subsequent popup
+	// pushes do not auto-evict it. The dismiss action (TipDismiss) pops
+	// it and stamps StartupTipsSeenAt.
+	if g.registry.FirstRunTip != nil &&
+		data.ShouldShowFirstRunTip(g.deps.Store, g.deps.ConnectionsProvider) {
+		if g.deps.Common != nil {
+			logs.Event(g.deps.Common.Logger(), "gui", "first_run_tip_shown")
+		}
+		if err := g.tree.Push(g.registry.FirstRunTip); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // refreshConnectionsRail re-loads the connection profiles from
@@ -1102,6 +1180,25 @@ func (g *Gui) saveQueryEditorBuffer(connID, uuid, content string) {
 		}
 		return nil
 	})
+}
+
+// hiddenSchemasForActiveConn returns AppState.HiddenSchemas[activeConnID]
+// for SchemasContext.renderRows (dbsavvy-56u.4). Nil / empty Common,
+// AppState, or active connection ID collapse to a nil slice so the
+// context applies no runtime filter — matching the test-wiring contract.
+func (g *Gui) hiddenSchemasForActiveConn() []string {
+	if g == nil || g.deps.Common == nil {
+		return nil
+	}
+	state := g.deps.Common.AppState
+	if state == nil {
+		return nil
+	}
+	connID := g.activeConnID
+	if connID == "" {
+		return nil
+	}
+	return state.HiddenSchemas[connID]
 }
 
 // HelperBagForTest returns the HelperBag the most recent wireWithDriver

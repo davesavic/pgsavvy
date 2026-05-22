@@ -59,18 +59,42 @@ func (s *SchemasContext) renderRows() string {
 	if len(s.items) == 0 {
 		return ""
 	}
+	// Runtime-hidden filter: when showHiddenMode is false (default), skip
+	// items whose name is in AppState.HiddenSchemas[activeConnID]. When
+	// true, render everything so the user can see and unhide entries.
+	// The hook is nil-safe — without it, no runtime filtering applies.
+	var hidden map[string]struct{}
+	if !s.showHiddenMode.Load() && s.deps.HiddenSchemasForActiveConn != nil {
+		names := s.deps.HiddenSchemasForActiveConn()
+		if len(names) > 0 {
+			hidden = make(map[string]struct{}, len(names))
+			for _, n := range names {
+				hidden[n] = struct{}{}
+			}
+		}
+	}
+
+	// Cursor tracks the source items slice (SelectedItem reads
+	// items[cursor]). We walk that slice but skip rows that hit the
+	// hidden filter; the "> " marker only paints when the cursor lands
+	// on a row that survives the filter. j/k clamping is unchanged.
 	var b strings.Builder
 	for i, item := range s.items {
+		name := schemaName(item)
+		if name != "" {
+			if _, skip := hidden[name]; skip {
+				continue
+			}
+		}
 		marker := "  "
 		if i == s.cursor {
 			marker = "> "
 		}
-		name := schemaName(item)
 		if name == "" {
 			fmt.Fprintf(&b, "%s%v\n", marker, item)
-			continue
+		} else {
+			fmt.Fprintf(&b, "%s%s\n", marker, name)
 		}
-		fmt.Fprintf(&b, "%s%s\n", marker, name)
 	}
 	return b.String()
 }

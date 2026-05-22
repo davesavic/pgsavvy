@@ -78,12 +78,18 @@ func TestNewGuiAttachesControllers(t *testing.T) {
 
 func TestNewGuiPushesConnectionsContextInitially(t *testing.T) {
 	g, _ := buildTestGui(t)
-	top := g.ContextTree().Current()
-	if top == nil {
-		t.Fatal("focus stack is empty after wireWithDriver")
+	// dbsavvy-56u.2: with a fresh AppStateStore + empty profiles
+	// provider, the first-run tip is pushed on top of CONNECTIONS.
+	// CONNECTIONS must still sit just under the tip on the focus stack.
+	stack := g.ContextTree().Stack()
+	if len(stack) < 2 {
+		t.Fatalf("focus stack has %d entries after wireWithDriver, want >=2 (CONNECTIONS + FIRST_RUN_TIP)", len(stack))
 	}
-	if got := top.GetKey(); got != types.CONNECTIONS {
-		t.Fatalf("initial context = %q, want %q", got, types.CONNECTIONS)
+	if got := stack[0].GetKey(); got != types.CONNECTIONS {
+		t.Fatalf("focus stack bottom = %q, want %q", got, types.CONNECTIONS)
+	}
+	if got := stack[len(stack)-1].GetKey(); got != types.FIRST_RUN_TIP {
+		t.Fatalf("focus stack top = %q, want %q", got, types.FIRST_RUN_TIP)
 	}
 }
 

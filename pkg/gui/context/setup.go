@@ -12,8 +12,8 @@ import (
 // Concrete Context fields are exposed by name so the gui bootstrap (T10)
 // and the controller registration shim (T7) can target a specific
 // Context by reference without re-lookup. Flatten() and ByKey() walk all
-// 23 entries (18 live + 5 stub) for the cases where ordered iteration is
-// preferable.
+// 24 entries (19 live + 4 stub + 1 PERSISTENT_POPUP) for the cases where
+// ordered iteration is preferable.
 type ContextTree struct {
 	// Live SIDE_CONTEXT instances.
 	Connections *ConnectionsContext
@@ -42,6 +42,9 @@ type ContextTree struct {
 	Limit      *LimitContext
 	WhichKey   *WhichKeyContext
 	Cheatsheet *CheatsheetContext
+
+	// Live PERSISTENT_POPUP instances.
+	FirstRunTip *FirstRunTipContext
 
 	// QueryEditor is the live top-right MAIN_CONTEXT pane that hosts
 	// the vim-style SQL editor (epic dbsavvy-wwd). Promoted from
@@ -165,6 +168,15 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			Kind:     types.DISPLAY_CONTEXT,
 		}), deps, deps.CheatsheetRender),
 
+		// FirstRunTip is the welcome popup shown above CONNECTIONS on
+		// the user's first launch (dbsavvy-56u.2). PERSISTENT_POPUP so
+		// subsequent popup pushes don't auto-evict it.
+		FirstRunTip: NewFirstRunTipContext(NewBaseContext(BaseContextOpts{
+			Key:      types.FIRST_RUN_TIP,
+			ViewName: string(types.FIRST_RUN_TIP),
+			Kind:     types.PERSISTENT_POPUP,
+		}), deps),
+
 		// QUERY_EDITOR is the live top-right MAIN_CONTEXT pane (epic
 		// dbsavvy-wwd). wwd.1 promotes it from stub to a real
 		// BaseContext-embedding type; modes + matcher come straight
@@ -190,8 +202,8 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 }
 
 // Flatten returns every Context (live + stub) in a stable order. Order
-// is: side rail (5) -> popups (8) -> extras/global/display (5) -> stubs
-// (5). Total length is always 23.
+// is: side rail (5) -> temporary popups (8) -> extras/global/display (5)
+// -> persistent popups (1) -> main + stubs (5). Total length is always 24.
 func (t *ContextTree) Flatten() []types.IBaseContext {
 	return []types.IBaseContext{
 		t.Connections,
@@ -212,6 +224,7 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 		t.Limit,
 		t.WhichKey,
 		t.Cheatsheet,
+		t.FirstRunTip,
 		t.QueryEditor,
 		t.TableDataEditor,
 		t.ResultGrid,

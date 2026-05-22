@@ -67,6 +67,12 @@ func (a schemasPickerAdapter) ToggleShowHidden() {
 		return
 	}
 	a.registry.SetShowHiddenMode(!a.registry.GetShowHiddenMode())
+	// Force a re-render: the SCHEMAS view content is recomputed by
+	// renderRows on the next HandleRender pass and the toggle changes
+	// which rows survive the runtime-hidden filter. Without this kick
+	// the user only sees the new content on the next ambient layout
+	// pass (e.g. a key press); the H toggle would feel laggy.
+	_ = a.registry.HandleRender()
 }
 
 // tablesPickerAdapter exposes the TABLES rail's selected *models.Table.

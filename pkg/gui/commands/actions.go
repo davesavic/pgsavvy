@@ -99,6 +99,18 @@ const (
 	// HelpCheatsheet — opens the auto-generated cheatsheet popup. `?`
 	HelpCheatsheet = "help.cheatsheet"
 
+	// ConfirmYes / ConfirmNo — owned by ConfirmationController (dbsavvy-56u.2).
+	// CONFIRMATION-scoped. y / <cr> invoke ConfirmHelper.Yes; n / <esc>
+	// invoke ConfirmHelper.No. Defaults are hardcoded, not user-overridable
+	// (AD-4).
+	ConfirmYes = "confirm.yes"
+	ConfirmNo  = "confirm.no"
+
+	// TipDismiss — owned by the orchestrator's FirstRunTip wiring
+	// (dbsavvy-56u.2). FIRST_RUN_TIP-scoped. Pops the tip popup and
+	// stamps the seen-at timestamp via AppStateStore.StampStartupTips.
+	TipDismiss = "tip.dismiss"
+
 	// Query family — owned by QueryEditorController (dbsavvy-66p.11).
 	// Default bindings: <leader>r, <leader>R, <leader>e, <leader>E,
 	// <leader>x, <leader>! respectively.
@@ -502,5 +514,8 @@ func AllActionIDs() []string {
 		EditorUndo,
 		EditorRedo,
 		EditorRepeat,
+		ConfirmYes,
+		ConfirmNo,
+		TipDismiss,
 	}
 }

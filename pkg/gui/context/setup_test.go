@@ -12,8 +12,8 @@ func TestNewContextTreeReturnsAllContexts(t *testing.T) {
 		t.Fatal("NewContextTree returned nil")
 	}
 	flat := tree.Flatten()
-	if len(flat) != 23 {
-		t.Fatalf("Flatten() len = %d, want 23 (18 live + 5 stub)", len(flat))
+	if len(flat) != 24 {
+		t.Fatalf("Flatten() len = %d, want 24 (19 live + 4 stub + 1 main)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -27,16 +27,17 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 	tree := NewContextTree(types.ContextTreeDeps{})
 
 	allKeys := []types.ContextKey{
-		// Live (18 — 5 side + 8 popup + 1 extras + 1 global + 3 display).
+		// Live (19 — 5 side + 8 temp popup + 1 extras + 1 global + 3 display + 1 persistent popup).
 		types.CONNECTIONS, types.SCHEMAS, types.TABLES, types.COLUMNS, types.INDEXES,
 		types.MENU, types.CONFIRMATION, types.PROMPT, types.SELECTION, types.SUGGESTIONS, types.COMMAND_LINE, types.HIDE_OVERLAY, types.EXPORT_MENU,
 		types.MESSAGES, types.GLOBAL, types.LIMIT, types.WHICH_KEY, types.CHEATSHEET,
-		// Stub (5).
+		types.FIRST_RUN_TIP,
+		// Main + stub (5).
 		types.QUERY_EDITOR, types.TABLE_DATA_EDITOR, types.RESULT_GRID,
 		types.PLAN, types.HISTORY,
 	}
-	if len(allKeys) != 23 {
-		t.Fatalf("test bug: allKeys len = %d, want 23", len(allKeys))
+	if len(allKeys) != 24 {
+		t.Fatalf("test bug: allKeys len = %d, want 24", len(allKeys))
 	}
 	for _, k := range allKeys {
 		c := tree.ByKey(k)
@@ -78,6 +79,8 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.LIMIT, types.DISPLAY_CONTEXT},
 		{types.WHICH_KEY, types.DISPLAY_CONTEXT},
 		{types.CHEATSHEET, types.DISPLAY_CONTEXT},
+		// 1 PERSISTENT_POPUP (FIRST_RUN_TIP — dbsavvy-56u.2).
+		{types.FIRST_RUN_TIP, types.PERSISTENT_POPUP},
 		// 1 MAIN_CONTEXT (QUERY_EDITOR promoted by dbsavvy-wwd.1).
 		{types.QUERY_EDITOR, types.MAIN_CONTEXT},
 		// 4 STUB (TABLE_DATA_EDITOR + RESULT_GRID + PLAN + HISTORY).
@@ -86,8 +89,8 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.PLAN, types.STUB},
 		{types.HISTORY, types.STUB},
 	}
-	if len(cases) != 23 {
-		t.Fatalf("test bug: cases len = %d, want 23", len(cases))
+	if len(cases) != 24 {
+		t.Fatalf("test bug: cases len = %d, want 24", len(cases))
 	}
 	for _, c := range cases {
 		got := tree.ByKey(c.key)
@@ -116,15 +119,14 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		// MAIN_CONTEXT, so STUB drops 5→4 and MAIN_CONTEXT rises 0→1.
 		types.MAIN_CONTEXT: 1,
 		types.STUB:         4,
+		// dbsavvy-56u.2 introduces FIRST_RUN_TIP, the first
+		// PERSISTENT_POPUP shipped by the app.
+		types.PERSISTENT_POPUP: 1,
 	}
 	for k, w := range want {
 		if counts[k] != w {
 			t.Fatalf("kind %d count = %d, want %d (full = %+v)", k, counts[k], w, counts)
 		}
-	}
-	// Make sure nothing leaked into a kind we still don't ship.
-	if counts[types.PERSISTENT_POPUP] != 0 {
-		t.Fatalf("PERSISTENT_POPUP count = %d, want 0", counts[types.PERSISTENT_POPUP])
 	}
 }
 

@@ -106,6 +106,23 @@ func (h *HideOverlayController) GetKeybindings(_ types.KeybindingsOpts) []*types
 			ActionID:    commands.HideOverlayUp,
 			Description: tr.Actions.Up,
 		},
+		// <C-n> / <C-p> mirror Down / Up per AD-9 (dbsavvy-56u.2). The
+		// controller godoc at the top of this file claims emacs-style
+		// navigation; the bindings ship here so claim matches behavior.
+		{
+			Sequence:    []types.ChordKey{{Code: 'n', Mod: types.ChordModCtrl}},
+			Mode:        types.ModeNormal,
+			Scope:       types.HIDE_OVERLAY,
+			ActionID:    commands.HideOverlayDown,
+			Description: tr.Actions.Down,
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'p', Mod: types.ChordModCtrl}},
+			Mode:        types.ModeNormal,
+			Scope:       types.HIDE_OVERLAY,
+			ActionID:    commands.HideOverlayUp,
+			Description: tr.Actions.Up,
+		},
 		{
 			Sequence:    []types.ChordKey{{Code: ' '}},
 			Mode:        types.ModeNormal,

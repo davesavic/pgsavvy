@@ -14,6 +14,17 @@ const (
 	optionSep  = " "
 )
 
+// spinnerGlyphs is the braille spinner frame set indexed by busy count.
+// Precomputed at package init so the BuildStatusLine spinner segment is
+// allocation-free per frame (the only allocation per call is the wrapping
+// string returned to the caller; selecting the glyph itself is a single
+// indexed []rune read). Order matches the Unicode dot-pattern walk used
+// by ora / cli-spinners' "dots" preset.
+var spinnerGlyphs = [...]rune{
+	'⠋', '⠙', '⠹', '⠸', '⠼',
+	'⠴', '⠦', '⠧', '⠇', '⠏',
+}
+
 // ANSI SGR pair used to tint the connection header (icon + label) with
 // the profile's `color:` field. dbsavvy-sgc: the header MUST be visibly
 // distinct after connect so the user can tell at a glance which
@@ -26,11 +37,14 @@ const (
 
 // BuildStatusLine renders the plain text shown in the status slot.
 //
-// Layout: "<modeLabel> | <icon> <label> | [RO] <option1> <option2> … | <Tr.OptionsBarMore>".
+// Layout: "<modeLabel> | <spinner> | <icon> <label> | [RO] <option1> <option2> … | <Tr.OptionsBarMore>".
 //
 // Each section is omitted when empty:
 //   - the mode banner slot is omitted when modeLabel is the empty string
 //     (no leading separator);
+//   - the spinner slot is omitted when busyCount <= 0 (quiescent); when
+//     positive it renders a single braille glyph from a 10-frame cycle
+//     indexed by busyCount % 10 so successive ticks animate;
 //   - the connection header slot is omitted when activeConn is nil or the
 //     connection has neither an icon nor a label;
 //   - the [RO] tag is omitted unless activeConn.ReadOnly == true;
@@ -41,7 +55,7 @@ const (
 //
 // A nil tr yields the empty string; the rendering layer treats that as
 // "skip the status slot entirely".
-func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []string, tr *i18n.TranslationSet) string {
+func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []string, tr *i18n.TranslationSet, busyCount int64) string {
 	if tr == nil {
 		return ""
 	}
@@ -50,6 +64,14 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 
 	if modeLabel != "" {
 		sections = append(sections, modeLabel)
+	}
+
+	if busyCount > 0 {
+		// Index into the precomputed glyph table; allocation-free aside
+		// from the single-rune string conversion the section join
+		// consumes downstream.
+		idx := busyCount % int64(len(spinnerGlyphs))
+		sections = append(sections, string(spinnerGlyphs[idx]))
 	}
 
 	if header := presentation.HeaderTextFor(activeConn); header != "" {

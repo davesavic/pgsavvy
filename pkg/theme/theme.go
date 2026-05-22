@@ -2,7 +2,9 @@ package theme
 
 import (
 	"errors"
+	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -149,8 +151,54 @@ func Apply(cfg *config.ThemeConfig) error {
 // values still produce a non-nil Style so downstream code can rely on the
 // pointer being valid; the rendering layer decides what an unrecognised Fg
 // means in practice.
+//
+// Tokenization (AD-5, dbsavvy-56u.4): the value is split on whitespace and
+// each token is classified greedily:
+//   - "bold" / "underline" / "italic" set the matching flag (any position,
+//     order-insensitive);
+//   - "on" consumes the next token as Bg;
+//   - the FIRST non-attribute, non-"on" token becomes Fg;
+//   - any further non-attribute tokens (after Fg is already set) are
+//     unknown and skipped with a slog Debug emit under cat=theme so a
+//     misconfigured theme leaves a trace without spamming the user.
+//
+// Backward compat: a single-token "red" continues to land as Fg=red with
+// every flag at the zero value, so existing user configs keep working
+// unchanged.
 func parseStyle(s string) *Style {
-	return &Style{Fg: s}
+	out := &Style{}
+	if s == "" {
+		return out
+	}
+	tokens := strings.Fields(s)
+	for i := 0; i < len(tokens); i++ {
+		tok := strings.ToLower(tokens[i])
+		switch tok {
+		case "bold":
+			out.Bold = true
+		case "underline":
+			out.Underline = true
+		case "italic":
+			out.Italic = true
+		case "on":
+			// Consume the next token as Bg. A trailing "on" with no
+			// follower is logged and ignored — same policy as unknown
+			// tokens.
+			if i+1 < len(tokens) {
+				out.Bg = tokens[i+1]
+				i++
+			} else {
+				slog.Debug("theme: trailing 'on' without bg token", "cat", "theme", "input", s)
+			}
+		default:
+			if out.Fg == "" {
+				out.Fg = tokens[i]
+				continue
+			}
+			slog.Debug("theme: unknown style token", "cat", "theme", "token", tokens[i], "input", s)
+		}
+	}
+	return out
 }
 
 func init() {

@@ -425,6 +425,7 @@ func (g *Gui) RunLayout(w, h int) error {
 			ActiveConn: activeConn,
 			Tr:         tr,
 			Toast:      g.toastHelp,
+			BusyCount:  g.BusyCount,
 		})
 	}
 

@@ -85,6 +85,12 @@ type ContextTreeDeps struct {
 	// terminal-too-small overlay (typically Tr.TerminalTooSmall).
 	LimitText func() string
 
+	// FirstRunTipText returns the (title, body) pair rendered by
+	// FirstRunTipContext on first launch (dbsavvy-56u.2). The
+	// orchestrator binds this to Tr.FirstRunTipTitle / Tr.FirstRunTipBody.
+	// Nil-safe: FirstRunTipContext.HandleRender is a no-op when nil.
+	FirstRunTipText func() (title, body string)
+
 	// WhichKey is the live which-key notifier consumed by WhichKeyContext
 	// to fetch visibility + snapshot. Nil at construction time before
 	// the orchestrator wires it (dlp.8c). Nil-safe: WhichKeyContext
@@ -127,6 +133,17 @@ type ContextTreeDeps struct {
 	// the raw `.sql` file from a worker goroutine. Nil-safe: a nil
 	// hook is a no-op so HandleFocusLost stays correct in tests.
 	SaveBuffer func(connID, uuid, content string)
+
+	// HiddenSchemasForActiveConn returns the runtime-hidden schema names
+	// for the currently active connection (AppState.HiddenSchemas[connID]).
+	// SchemasContext.renderRows consults this when showHiddenMode == false
+	// to skip rows whose name is in the list; when showHiddenMode == true
+	// the filter is bypassed so the user can see (and unhide) them.
+	// populateSchemasRail intentionally does NOT apply this filter at
+	// build-time (see adapters.go) so the toggle flips render output
+	// without re-loading the rail. Nil hook → no runtime filtering (all
+	// items render regardless of the toggle).
+	HiddenSchemasForActiveConn func() []string
 }
 
 // ModeSetter is the minimal surface contexts use to flip / reset modal

@@ -25,8 +25,16 @@ import (
 
 // ConfirmHelper pushes a confirmation popup. onYes runs after the user
 // approves; onNo (may be nil) runs after Esc / "No".
+//
+// Yes and No are the dismissal handlers invoked by ConfirmationController's
+// y/<cr> and n/<esc> bindings respectively. They consume the recorded
+// onYes/onNo callback, pop the popup off the focus stack, and clear the
+// helper's pending state. Concrete impl: *ui.ConfirmHelper (see
+// helpers/ui/confirm_helper.go).
 type ConfirmHelper interface {
 	Confirm(title, body string, onYes func() error, onNo func() error) error
+	Yes() error
+	No() error
 }
 
 // PromptHelper pushes a single-line prompt. Used by connections_controller

@@ -45,6 +45,9 @@ func AllDefaultBindings(c *Controllers) []*types.ChordBinding {
 	if c.Selection != nil {
 		out = append(out, c.Selection.GetKeybindings(types.KeybindingsOpts{})...)
 	}
+	if c.Confirmation != nil {
+		out = append(out, c.Confirmation.GetKeybindings(types.KeybindingsOpts{})...)
+	}
 	if c.QueryEditor != nil {
 		out = append(out, c.QueryEditor.GetKeybindings(types.KeybindingsOpts{})...)
 	}

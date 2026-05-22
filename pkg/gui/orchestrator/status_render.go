@@ -59,6 +59,10 @@ type StatusRenderDeps struct {
 	// overrides the default status line for its TTL window. Nil falls
 	// back to default-line rendering on every pass.
 	Toast ToastSource
+	// BusyCount returns the live OnWorker in-flight counter for the
+	// status-bar spinner segment (dbsavvy-56u.4). Nil → no spinner
+	// rendered, which is the correct fallback for partial test wiring.
+	BusyCount func() int64
 }
 
 // RenderStatusLine resolves the focused context's mode label, builds the
@@ -139,7 +143,11 @@ func RenderStatusLine(d StatusRenderDeps) {
 		conn = d.ActiveConn()
 	}
 
-	line := status.BuildStatusLine(label, conn, options, d.Tr)
+	var busy int64
+	if d.BusyCount != nil {
+		busy = d.BusyCount()
+	}
+	line := status.BuildStatusLine(label, conn, options, d.Tr, busy)
 	_ = d.Driver.SetContent(AppStatusViewName, line)
 }
 

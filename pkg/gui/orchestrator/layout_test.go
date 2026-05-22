@@ -97,6 +97,11 @@ func TestRunLayoutEnablesCaretOnQueryEditorFocus(t *testing.T) {
 // prior QUERY_EDITOR frame doesn't bleed a cursor onto the rail list.
 func TestRunLayoutDisablesCaretOnSideRailFocus(t *testing.T) {
 	g, rec := buildTestGui(t)
+	// dbsavvy-56u.2: pop the first-run tip pushed at bootstrap so the
+	// assertion measures CONNECTIONS focus, not the popup on top of it.
+	if err := g.ContextTree().Pop(); err != nil {
+		t.Fatalf("Pop first-run tip: %v", err)
+	}
 	// Pre-stain the caret state so the assertion catches "layout never
 	// touched it" as a failure too.
 	rec.SetCaretEnabled(true)
