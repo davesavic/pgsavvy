@@ -101,5 +101,6 @@ type Capabilities struct {
 	HasNotice            bool
 	HasListenNotify      bool
 	SupportsCursor       bool
+	SupportsInlineEdit   bool
 	MaxIdentifierLen     int
 }

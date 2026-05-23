@@ -303,6 +303,71 @@ func TestPgStreamLargeResultDoesNotAccumulate(t *testing.T) {
 	}
 }
 
+// TestFieldDescriptionTableOIDPopulated — dbsavvy-bwq.1 F1.
+//
+// Verifies fieldDescriptionsToColumnMetas copies pgconn.FieldDescription's
+// TableOID through to models.ColumnMeta so later editability detection (B3+)
+// can distinguish base-table columns from computed/CTE/expression columns.
+//   - Plain SELECT against a base table → every column has non-zero TableOID.
+//   - Computed column (SELECT now() AS t) → TableOID == 0.
+//   - CTE column → TableOID == 0.
+func TestFieldDescriptionTableOIDPopulated(t *testing.T) {
+	sess := requirePGSession(t)
+	ctx := context.Background()
+
+	t.Run("BaseTable", func(t *testing.T) {
+		stream, err := sess.Stream(ctx, models.Query{SQL: "SELECT id, email FROM app.users LIMIT 1"})
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		defer func() { _ = stream.Close() }()
+		cols := stream.Columns()
+		if len(cols) != 2 {
+			t.Fatalf("Columns len = %d, want 2", len(cols))
+		}
+		for _, c := range cols {
+			if c.TableOID == 0 {
+				t.Errorf("column %q TableOID = 0, want non-zero for base-table column", c.Name)
+			}
+			if c.TableAttributeNumber == 0 {
+				t.Errorf("column %q TableAttributeNumber = 0, want non-zero for base-table column", c.Name)
+			}
+		}
+	})
+
+	t.Run("Computed", func(t *testing.T) {
+		stream, err := sess.Stream(ctx, models.Query{SQL: "SELECT now() AS t"})
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		defer func() { _ = stream.Close() }()
+		cols := stream.Columns()
+		if len(cols) != 1 {
+			t.Fatalf("Columns len = %d, want 1", len(cols))
+		}
+		if cols[0].TableOID != 0 {
+			t.Errorf("computed column TableOID = %d, want 0", cols[0].TableOID)
+		}
+	})
+
+	t.Run("CTE", func(t *testing.T) {
+		stream, err := sess.Stream(ctx, models.Query{
+			SQL: "WITH c AS (SELECT 1 AS x) SELECT x FROM c",
+		})
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		defer func() { _ = stream.Close() }()
+		cols := stream.Columns()
+		if len(cols) != 1 {
+			t.Fatalf("Columns len = %d, want 1", len(cols))
+		}
+		if cols[0].TableOID != 0 {
+			t.Errorf("CTE column TableOID = %d, want 0", cols[0].TableOID)
+		}
+	})
+}
+
 // TestPgStreamEOFReleasesGuardForReStream — dbsavvy-zzy regression.
 //
 // Draining a stream to clean EOF must release the parent Session's inFlight

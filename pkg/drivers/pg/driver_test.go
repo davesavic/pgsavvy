@@ -78,6 +78,7 @@ func TestPgCapabilitiesShape(t *testing.T) {
 		HasNotice:            true,
 		HasListenNotify:      true,
 		SupportsCursor:       true,
+		SupportsInlineEdit:   true,
 		MaxIdentifierLen:     63,
 	}
 	require.Equal(t, expected, pgCapabilities)

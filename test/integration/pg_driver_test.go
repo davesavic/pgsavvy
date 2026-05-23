@@ -446,12 +446,13 @@ func TestCapabilitiesShape(t *testing.T) {
 		// HasLiveCancel flipped from false to true in epic dbsavvy-66p.4
 		// (Connection.Cancel now dials a CancelRequest packet using the
 		// per-session secret key captured at AcquireSession time).
-		HasLiveCancel:     true,
-		HasExplainAnalyze: true,
-		HasNotice:         true,
-		HasListenNotify:   true,
-		SupportsCursor:    true,
-		MaxIdentifierLen:  63,
+		HasLiveCancel:      true,
+		HasExplainAnalyze:  true,
+		HasNotice:          true,
+		HasListenNotify:    true,
+		SupportsCursor:     true,
+		SupportsInlineEdit: true,
+		MaxIdentifierLen:   63,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Capabilities mismatch:\n  got=  %+v\n  want= %+v", got, want)

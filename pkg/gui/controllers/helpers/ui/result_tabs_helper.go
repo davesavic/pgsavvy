@@ -307,6 +307,13 @@ type ResultTabsHelper struct {
 	// exportMenu tracks the currently-open <leader>oe export menu.
 	// nil when no menu is active. Accessed under h.mu. dbsavvy-uv0.9.
 	exportMenu *activeExportMenu
+
+	// onTabRemoved fires after a tab is removed via Close (which is also
+	// the eviction path: allocTab calls Close(victim) when at cap). The
+	// callback receives the closed tab's stringified ID so collaborators
+	// (e.g. ResultJumpList.PruneByTab) can drop stale references. Default
+	// no-op; wired via SetOnTabRemoved. dbsavvy-bwq.15.
+	onTabRemoved func(tabID string)
 }
 
 // NewResultTabsHelper constructs a helper with deps. The returned value
@@ -725,6 +732,7 @@ func (h *ResultTabsHelper) Close(t *Tab) error {
 		return nil
 	}
 	closedSlot := h.tabs[idx].slot
+	closedID := h.tabs[idx].id
 	h.tabs = append(h.tabs[:idx], h.tabs[idx+1:]...)
 	// Re-pick active: prefer the tab whose slot is closedSlot-1, fall
 	// back to slot 0.
@@ -754,11 +762,26 @@ func (h *ResultTabsHelper) Close(t *Tab) error {
 		newActive = best.id
 	}
 	h.activeID = newActive
+	cb := h.onTabRemoved
 	h.mu.Unlock()
 	if h.deps.Driver != nil {
 		_ = h.deps.Driver.DeleteView(t.ViewName())
 	}
+	if cb != nil {
+		cb(fmt.Sprintf("%d", closedID))
+	}
 	return nil
+}
+
+// SetOnTabRemoved registers a callback fired after a tab is removed
+// (via Close OR the eviction path in allocTab, which itself calls Close
+// on the victim). The callback receives the closed tab's stringified ID
+// so collaborators (e.g. ResultJumpList.PruneByTab) can drop stale
+// references. Passing nil unhooks. dbsavvy-bwq.15.
+func (h *ResultTabsHelper) SetOnTabRemoved(fn func(tabID string)) {
+	h.mu.Lock()
+	h.onTabRemoved = fn
+	h.mu.Unlock()
 }
 
 // PinActive toggles the pinned flag on the active tab. Returns the new

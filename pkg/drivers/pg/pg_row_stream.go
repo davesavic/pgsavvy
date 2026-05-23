@@ -148,10 +148,12 @@ func fieldDescriptionsToColumnMetas(fds []pgconn.FieldDescription) []models.Colu
 			typeName = t.Name
 		}
 		out[i] = models.ColumnMeta{
-			Name:     fd.Name,
-			TypeOID:  fd.DataTypeOID,
-			TypeName: typeName,
-			Nullable: true, // pgx wire protocol does not report nullability
+			Name:                 fd.Name,
+			TypeOID:              fd.DataTypeOID,
+			TypeName:             typeName,
+			Nullable:             true, // pgx wire protocol does not report nullability
+			TableOID:             fd.TableOID,
+			TableAttributeNumber: fd.TableAttributeNumber,
 		}
 	}
 	return out

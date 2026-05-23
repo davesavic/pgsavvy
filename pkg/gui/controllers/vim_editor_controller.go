@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	stdctx "context"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
@@ -36,6 +38,16 @@ type VimEditorController struct {
 	// this session — vim's system-clipboard registers (+/*) fall back to
 	// the in-memory store and surface a one-shot notice only.
 	clipboardToasted bool
+
+	// completionEngine is the optional completion driver. Wired
+	// post-construction via SetCompletionEngine. Nil = TriggerCompletion
+	// is a silent no-op.
+	completionEngine *editor.Engine
+
+	// suggestions is the optional SuggestionsContext the controller
+	// pushes completion results into. Wired post-construction via
+	// SetSuggestionsContext. Nil = TriggerCompletion is a silent no-op.
+	suggestions *context.SuggestionsContext
 }
 
 // NewVimEditorController constructs the controller. Either argument
@@ -53,6 +65,54 @@ func NewVimEditorController(qec *context.QueryEditorContext, matcher *keys.Match
 // ToastHelper. Unit tests typically leave the sink unset.
 func (c *VimEditorController) SetToaster(t func(msg string)) {
 	c.toaster = t
+}
+
+// SetCompletionEngine wires the completion engine the controller
+// invokes on the `<c-x><c-o>` insert-mode action. Nil disables the
+// trigger (silent no-op). Z1 wires the live engine from setup; tests
+// may pass their own engine.
+func (c *VimEditorController) SetCompletionEngine(e *editor.Engine) {
+	c.completionEngine = e
+}
+
+// SetSuggestionsContext wires the SuggestionsContext the controller
+// pushes suggestions into on TriggerCompletion. Nil disables the
+// popup surface (the engine still runs but its results have nowhere
+// to land). Z1 wires the live context from setup.
+func (c *VimEditorController) SetSuggestionsContext(s *context.SuggestionsContext) {
+	c.suggestions = s
+}
+
+// TriggerCompletion is the `<c-x><c-o>` insert-mode action. Returns
+// silently when the controller is not in Insert mode, when the
+// engine is unwired, when the suggestions context is unwired, or
+// when the engine returns no candidates. The keybinding registration
+// for the action lives in Z1; this method is the action body Z1
+// invokes from the central registry.
+func (c *VimEditorController) TriggerCompletion() error {
+	if c.qec == nil || c.completionEngine == nil || c.suggestions == nil {
+		return nil
+	}
+	// Defensive mode check — Z1 registers the binding under an
+	// Insert-only Mode mask so the dispatcher already gates this,
+	// but a direct programmatic call (or a misconfigured binding)
+	// must not pop the popup in Normal mode.
+	if c.matcher != nil {
+		if c.matcher.CurrentMode(types.QUERY_EDITOR) != types.ModeInsert {
+			return nil
+		}
+	}
+	buf := c.buffer()
+	if buf == nil {
+		return nil
+	}
+	pos := buf.CursorPos()
+	got := c.completionEngine.Trigger(stdctx.Background(), buf, pos)
+	if len(got) == 0 {
+		return nil
+	}
+	c.suggestions.Show(got, pos)
+	return nil
 }
 
 // emitToast forwards msg to the wired toaster, or drops it when no

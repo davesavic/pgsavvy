@@ -55,6 +55,7 @@ var pgCapabilities = drivers.Capabilities{
 	HasNotice:            true,
 	HasListenNotify:      true,
 	SupportsCursor:       true,
+	SupportsInlineEdit:   true,
 	MaxIdentifierLen:     63,
 }
 
