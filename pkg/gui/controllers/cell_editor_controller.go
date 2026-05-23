@@ -7,6 +7,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -402,9 +403,19 @@ func (e *CellEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			ActionID:    CellEditDiscard,
 			Description: "Discard edit",
 		},
-		// A2 placeholders — bindings declared here so the user-visible
-		// chord surface is stable. Handlers route through the registry
-		// to a no-op until A2 ships the real per-type helpers.
+		// A2 (dbsavvy-bwq.5) — per-type entry helpers. Key→ActionID
+		// mapping mirrors the AC:
+		//   <c-n>  → CellEditSetNull           (set NULL; disabled NOT NULL)
+		//   <c-d>  → CellEditExprNow           (inject now())
+		//   <c-t>  → CellEditExprCurrentDate   (inject current_date)
+		//   <c-e>  → CellEditExprPrompt        (free-form expression)
+		//
+		// NOTE: the epic spec was originally authored against
+		// `<leader>cn` / `<leader>ce` chords. A1 routed them through
+		// <c-n>/<c-e> as the in-popup chord surface so the prefix
+		// doesn't double-handle the `<leader>` waiter from the master
+		// editor. Z1 (dbsavvy-bwq.23) reconciles both chord surfaces
+		// once central keybinding registration lands.
 		{
 			Sequence:    []types.ChordKey{{Code: 'n', Mod: types.ChordModCtrl}},
 			Mode:        types.ModeInsert,
@@ -413,14 +424,14 @@ func (e *CellEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			Description: "Set NULL",
 		},
 		{
-			Sequence:    []types.ChordKey{{Code: 't', Mod: types.ChordModCtrl}},
+			Sequence:    []types.ChordKey{{Code: 'd', Mod: types.ChordModCtrl}},
 			Mode:        types.ModeInsert,
 			Scope:       scope,
 			ActionID:    CellEditExprNow,
 			Description: "Insert now() expression",
 		},
 		{
-			Sequence:    []types.ChordKey{{Code: 'd', Mod: types.ChordModCtrl}},
+			Sequence:    []types.ChordKey{{Code: 't', Mod: types.ChordModCtrl}},
 			Mode:        types.ModeInsert,
 			Scope:       scope,
 			ActionID:    CellEditExprCurrentDate,
@@ -466,24 +477,191 @@ func (e *CellEditorController) RegisterActions(reg *commands.Registry) {
 		Handler:     e.Discard,
 	})
 
-	// A2 placeholders — register the IDs so the binding's ActionID
-	// resolves (otherwise the Matcher would log "unknown action" on
-	// every <c-n>/<c-t>/<c-d>/<c-e>). A2 will replace these with
-	// real handlers that close over the per-type entry helpers.
-	noop := func(commands.ExecCtx) error { return nil }
-	for _, id := range []string{
-		CellEditSetNull,
-		CellEditExprNow,
-		CellEditExprCurrentDate,
-		CellEditExprPrompt,
-	} {
-		_ = reg.Register(&commands.Command{
-			ID:          id,
-			Description: id + " (pending A2)",
-			Tag:         "Cell Edit",
-			Handler:     noop,
-		})
+	// A2 (dbsavvy-bwq.5) — real handlers backing the per-type entry
+	// chord surface. SetNull carries a GetDisabled predicate so the
+	// Matcher surfaces "column is NOT NULL" without dispatching.
+	_ = reg.Register(&commands.Command{
+		ID:          CellEditSetNull,
+		Description: "Set cell value to NULL",
+		Tag:         "Cell Edit",
+		Handler:     e.SetNull,
+		GetDisabled: func(_ commands.ExecCtx) (string, bool) {
+			return e.setNullDisabled()
+		},
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          CellEditExprNow,
+		Description: "Inject now() expression",
+		Tag:         "Cell Edit",
+		Handler:     e.ExprNow,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          CellEditExprCurrentDate,
+		Description: "Inject current_date expression",
+		Tag:         "Cell Edit",
+		Handler:     e.ExprCurrentDate,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          CellEditExprPrompt,
+		Description: "Prompt for SQL expression (verbatim)",
+		Tag:         "Cell Edit",
+		Handler:     e.ExprPrompt,
+		GetDisabled: func(_ commands.ExecCtx) (string, bool) {
+			return e.exprPromptDisabled()
+		},
+	})
+}
+
+// SetNull is the `<c-n>` handler on CELL_EDITOR. Stages a literal-kind
+// PendingEdit with NewValue=nil for the active cell. Disabled (via
+// setNullDisabled / the registered GetDisabled predicate) when the
+// target column is NOT NULL.
+//
+// On success the popup is closed and the focus stack is popped — same
+// terminal shape as Commit so the user lands back on the result grid.
+func (e *CellEditorController) SetNull(_ commands.ExecCtx) error {
+	if e.ctx == nil || !e.ctx.Active() {
+		return nil
 	}
+	col := e.ctx.Column()
+	pk := e.ctx.PrimaryKey()
+	if len(pk) == 0 || e.store == nil {
+		// No store / no row identity — nothing to record. Still close
+		// the popup so the user isn't trapped.
+		e.ctx.Close()
+		return e.popFocus()
+	}
+	edit, err := helpers.BuildSetNullEdit(pk, col, e.ctx.OriginalValue())
+	if err != nil {
+		// Predicate should have gated this; if we get here (test path
+		// or stale ctx) surface the error and still close cleanly.
+		e.ctx.Close()
+		_ = e.popFocus()
+		return e.wrapErr("cell.edit.set_null", err)
+	}
+	if err := e.store.Add(edit); err != nil {
+		e.ctx.Close()
+		_ = e.popFocus()
+		return e.wrapErr("cell.edit.set_null", err)
+	}
+	e.ctx.Close()
+	return e.popFocus()
+}
+
+// ExprNow is the `<c-d>` handler on CELL_EDITOR. Stages an Expression-
+// kind PendingEdit with NewExpr="now()" for the active cell.
+func (e *CellEditorController) ExprNow(_ commands.ExecCtx) error {
+	return e.injectExpression("cell.edit.expr.now",
+		helpers.InjectNow)
+}
+
+// ExprCurrentDate is the `<c-t>` handler on CELL_EDITOR. Stages an
+// Expression-kind PendingEdit with NewExpr="current_date".
+func (e *CellEditorController) ExprCurrentDate(_ commands.ExecCtx) error {
+	return e.injectExpression("cell.edit.expr.current_date",
+		helpers.InjectCurrentDate)
+}
+
+// injectExpression is the shared body of ExprNow / ExprCurrentDate.
+// builder closes over the per-action canned expression.
+func (e *CellEditorController) injectExpression(
+	label string,
+	builder func(pk []any, col models.ColumnMeta, old any) models.PendingEdit,
+) error {
+	if e.ctx == nil || !e.ctx.Active() {
+		return nil
+	}
+	col := e.ctx.Column()
+	pk := e.ctx.PrimaryKey()
+	if len(pk) == 0 || e.store == nil {
+		e.ctx.Close()
+		return e.popFocus()
+	}
+	edit := builder(pk, col, e.ctx.OriginalValue())
+	if err := e.store.Add(edit); err != nil {
+		e.ctx.Close()
+		_ = e.popFocus()
+		return e.wrapErr(label, err)
+	}
+	e.ctx.Close()
+	return e.popFocus()
+}
+
+// ExprPrompt is the `<c-e>` handler on CELL_EDITOR. Opens a warning-
+// themed PROMPT (TEMPORARY_POPUP) for free-form SQL expression entry.
+// On submit, stages an Expression-kind PendingEdit with NewExpr=user
+// input. Disabled on read_only connections (the predicate carries the
+// reason); visually marked on confirm_writes — that marking is a
+// PromptContext concern wired by Z1.
+//
+// The warning text is helpers.WarnExprPromptLabel and asserts
+// "expressions are injected verbatim" per amendment.
+//
+// TODO(dbsavvy-bwq.23 / Z1): switch the prompt's border colour to
+// WarnBorder once the theme key lands. Until then the standard PROMPT
+// border is used and the warning text alone carries the message.
+func (e *CellEditorController) ExprPrompt(_ commands.ExecCtx) error {
+	if e.ctx == nil || !e.ctx.Active() {
+		return nil
+	}
+	if e.helpers.Prompt == nil {
+		// No prompt helper wired (unit-test path); nothing else to do.
+		return nil
+	}
+	// Capture the per-edit snapshot NOW — the PROMPT push will pop the
+	// CELL_EDITOR popup off the focus stack in Z1's final wiring, so
+	// the controller can't rely on ctx.Active() being true on submit.
+	col := e.ctx.Column()
+	pk := e.ctx.PrimaryKey()
+	old := e.ctx.OriginalValue()
+
+	onSubmit := func(value string) error {
+		if value == "" || e.store == nil || len(pk) == 0 {
+			return nil
+		}
+		edit := helpers.BuildExprEdit(pk, col, old, value)
+		if err := e.store.Add(edit); err != nil {
+			return e.wrapErr("cell.edit.expr.prompt", err)
+		}
+		// The cell-editor popup is still on the stack underneath the
+		// prompt (the prompt is pushed on top). Close + pop it now so
+		// the user lands back on the grid after the prompt dismisses.
+		if e.ctx != nil {
+			e.ctx.Close()
+		}
+		return e.popFocus()
+	}
+	onCancel := func() error { return nil }
+	return e.wrapErr("cell.edit.expr.prompt",
+		e.helpers.Prompt.Prompt(helpers.WarnExprPromptLabel, "", onSubmit, onCancel))
+}
+
+// setNullDisabled returns ("column is NOT NULL", true) when the
+// currently-edited column is NOT NULL. The predicate is checked by the
+// Matcher before SetNull is dispatched.
+//
+// Falls back to ("", false) on no active context so unit tests that
+// skip the popup open path don't see a spurious disable.
+func (e *CellEditorController) setNullDisabled() (string, bool) {
+	if e.ctx == nil || !e.ctx.Active() {
+		return "", false
+	}
+	if !e.ctx.Column().Nullable {
+		return helpers.ErrColumnNotNullable.Error(), true
+	}
+	return "", false
+}
+
+// exprPromptDisabled returns ("read-only connection", true) on read-
+// only connections; otherwise enabled. Mirrors the Enter predicate's
+// read-only branch — the warning prompt MUST NOT open against a read-
+// only conn since the user could spend time crafting an expression
+// that's guaranteed to fail at commit time.
+func (e *CellEditorController) exprPromptDisabled() (string, bool) {
+	if e.picker != nil && e.picker.IsReadOnly() {
+		return "read-only connection", true
+	}
+	return "", false
 }
 
 // AttachToContext registers GetKeybindings on both RESULT_GRID (for

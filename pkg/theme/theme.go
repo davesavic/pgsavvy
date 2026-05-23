@@ -69,6 +69,7 @@ type themeState struct {
 	DiffRemovedFg   *Style
 	DiffChangedFg   *Style
 	PromptFg        *Style
+	DirtyCellBg     *Style // dbsavvy-bwq.6 (A3) — Z1 wires ThemeConfig + builtins
 }
 
 var (

@@ -289,7 +289,10 @@ func renderHeaderLine(snap viewSnapshot, innerW int) string {
 	used := 0
 	for _, c := range visibleCols {
 		w := effectiveWidth(snap.widths, c)
-		name := padRight(snap.cols[c].Name, w)
+		// headerLabel folds in the FK `→ ` prefix when col.IsForeignKey;
+		// padRight handles the truncation case if a narrow locked width
+		// can't accommodate the full label. dbsavvy-bwq.14 (B3).
+		name := padRight(headerLabel(snap.cols[c]), w)
 		if used+w > innerW {
 			break
 		}

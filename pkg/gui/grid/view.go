@@ -174,6 +174,13 @@ type View struct {
 	editable       bool
 	rowIdentity    []int
 	disabledReason string
+
+	// pendingEdits is the per-View staged-edit set. Read by the dirty-cell
+	// renderer (DecorateDirtyCell / GutterMarker) and the status indicator
+	// (BuildPendingIndicator). Owned externally — A1 records edits, A7
+	// clears them on discard. Nil means "no edits staged" (treated as
+	// IsEmpty by the helpers). dbsavvy-bwq.6 (A3).
+	pendingEdits *models.PendingEditSet
 }
 
 // headerClickState is the per-View state used by HandleHeaderClick to

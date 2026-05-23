@@ -71,6 +71,23 @@ func renderCell(value any, col models.ColumnMeta) (visible, decorated string) {
 	return visible, decorated
 }
 
+// renderCellWithDirty wraps renderCell with the dirty-cell decorator.
+// When isDirty is true the decorated string is layered with the
+// DirtyCellBg style and gains a trailing `●` glyph; visible carries the
+// glyph as well so width budgeting downstream keeps decoration in sync
+// with layout. When isDirty is false the result is identical to
+// renderCell. dbsavvy-bwq.6 (A3).
+func renderCellWithDirty(value any, col models.ColumnMeta, isDirty bool) (visible, decorated string) {
+	visible, decorated = renderCell(value, col)
+	if !isDirty {
+		return visible, decorated
+	}
+	dirtyStyle := dereferenceStyle(theme.Current().DirtyCellBg)
+	visible = visible + dirtyCellMarker
+	decorated = DecorateDirtyCell(decorated, true, dirtyStyle)
+	return visible, decorated
+}
+
 // renderCellPlain is the unstyled cell stringifier. Used for column
 // auto-sizing (where SGR escapes would skew the width) and for TSV
 // yank output (which must not carry colour codes). All non-NULL
