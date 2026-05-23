@@ -180,6 +180,43 @@ func TestVisibleRows_EmptyBeforeRender(t *testing.T) {
 	require.Empty(t, v.VisibleRows(), "VisibleRows before any Render must be empty")
 }
 
+// TestEditability_DefaultsAndSetAndReset verifies the SetEditability /
+// Editable / RowIdentity / DisabledReason surface, including the defensive
+// copy behaviour on the RowIdentity getter and the SetColumns reset.
+// dbsavvy-bwq.2 (F2).
+func TestEditability_DefaultsAndSetAndReset(t *testing.T) {
+	v := NewView()
+	// Defaults.
+	require.False(t, v.Editable(), "default Editable must be false")
+	require.Nil(t, v.RowIdentity(), "default RowIdentity must be nil")
+	require.Equal(t, "", v.DisabledReason(), "default DisabledReason must be empty")
+
+	// Install columns then populate editability.
+	v.SetColumns(makeSingleCol("c1", "text"))
+	v.SetEditability(true, []int{0, 2}, "")
+	require.True(t, v.Editable())
+	require.Equal(t, []int{0, 2}, v.RowIdentity())
+	require.Equal(t, "", v.DisabledReason())
+
+	// RowIdentity getter must return a defensive copy.
+	got := v.RowIdentity()
+	got[0] = 99
+	require.Equal(t, []int{0, 2}, v.RowIdentity(),
+		"mutating the returned RowIdentity slice must not affect View state")
+
+	// SetColumns clears editability fields back to zero.
+	v.SetColumns(makeSingleCol("c1", "text"))
+	require.False(t, v.Editable(), "SetColumns must reset Editable")
+	require.Nil(t, v.RowIdentity(), "SetColumns must reset RowIdentity")
+	require.Equal(t, "", v.DisabledReason(), "SetColumns must reset DisabledReason")
+
+	// Disabled-reason path: SetEditability with editable=false + reason.
+	v.SetEditability(false, nil, "no row identity")
+	require.False(t, v.Editable())
+	require.Nil(t, v.RowIdentity())
+	require.Equal(t, "no row identity", v.DisabledReason())
+}
+
 // TestAllRows_ConcurrentSafety runs a producer goroutine appending rows
 // alongside a reader goroutine repeatedly calling AllRows. Run with
 // -race to catch any data race. dbsavvy-uv0.9.

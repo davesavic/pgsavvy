@@ -32,3 +32,6 @@ var sqlListIndexes string
 
 //go:embed sql/list_constraints.sql
 var sqlListConstraints string
+
+//go:embed sql/editability_introspect.sql
+var sqlEditabilityIntrospect string

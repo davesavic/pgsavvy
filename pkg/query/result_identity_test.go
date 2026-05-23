@@ -1,6 +1,9 @@
 package query
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestResultIdentity_DetectFromQuery(t *testing.T) {
 	tests := []struct {
@@ -205,7 +208,7 @@ func TestResultIdentity_DetectFromQuery(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := DetectFromQuery(tc.sql)
-			if got != tc.want {
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("DetectFromQuery(%q)\n  got  = %+v\n  want = %+v", tc.sql, got, tc.want)
 			}
 		})

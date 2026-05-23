@@ -166,6 +166,14 @@ type View struct {
 	// clampOffsetsLocked so export-time readers see a consistent value.
 	// dbsavvy-uv0.9.
 	viewHeight int
+
+	// editable, rowIdentity, disabledReason carry the post-introspection
+	// editability state populated by Z1 via SetEditability. SetColumns
+	// resets all three to zero (a fresh schema attach invalidates the
+	// previous decision). dbsavvy-bwq.2 (F2).
+	editable       bool
+	rowIdentity    []int
+	disabledReason string
 }
 
 // headerClickState is the per-View state used by HandleHeaderClick to
@@ -262,6 +270,56 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 	// Callers reseed via SetHiddenCols after re-translating persisted names
 	// against the new cols slice. dbsavvy-uv0.6 AD-5.
 	v.hiddenColSet = nil
+	// Reset editability — the prior introspection no longer describes
+	// the new schema. Z1 re-runs EditabilityIntrospect on each schema
+	// attach. dbsavvy-bwq.2 (F2).
+	v.editable = false
+	v.rowIdentity = nil
+	v.disabledReason = ""
+}
+
+// SetEditability installs the post-introspection editability decision.
+// All three fields are stored atomically under the write lock so a
+// concurrent reader sees a consistent triple. A nil rowIdentity is stored
+// as-is; getters return defensive copies. dbsavvy-bwq.2 (F2).
+func (v *View) SetEditability(editable bool, rowIdentity []int, disabledReason string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.editable = editable
+	if len(rowIdentity) == 0 {
+		v.rowIdentity = nil
+	} else {
+		v.rowIdentity = append([]int(nil), rowIdentity...)
+	}
+	v.disabledReason = disabledReason
+}
+
+// Editable reports whether the current result set is inline-editable.
+func (v *View) Editable() bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.editable
+}
+
+// RowIdentity returns a defensive copy of the SELECT-order indexes that
+// form the minimal row identity. Returns nil when no row identity is set.
+func (v *View) RowIdentity() []int {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if len(v.rowIdentity) == 0 {
+		return nil
+	}
+	out := make([]int, len(v.rowIdentity))
+	copy(out, v.rowIdentity)
+	return out
+}
+
+// DisabledReason returns the frozen reason string explaining why the
+// result is not inline-editable. Empty when Editable() is true.
+func (v *View) DisabledReason() string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.disabledReason
 }
 
 // SetHiddenCols installs the set of column indices to hide from the

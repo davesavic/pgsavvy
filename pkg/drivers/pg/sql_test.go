@@ -82,6 +82,19 @@ func TestEmbeddedSQL_ContainsExpectedIdentifiers(t *testing.T) {
 				"$2",
 			},
 		},
+		{
+			name:  "editability_introspect",
+			query: sqlEditabilityIntrospect,
+			contains: []string{
+				"pg_class",
+				"pg_index",
+				"pg_namespace",
+				"$1",
+				"$2",
+				"indisprimary",
+				"indisunique",
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -102,7 +115,7 @@ func TestEmbeddedSQL_ContainsExpectedIdentifiers(t *testing.T) {
 	}
 }
 
-func TestEmbeddedSQL_FilesystemHasExactlySevenSQLFiles(t *testing.T) {
+func TestEmbeddedSQL_FilesystemHasExactlyEightSQLFiles(t *testing.T) {
 	entries, err := sqlFS.ReadDir("sql")
 	require.NoError(t, err)
 
@@ -119,8 +132,8 @@ func TestEmbeddedSQL_FilesystemHasExactlySevenSQLFiles(t *testing.T) {
 	require.Len(
 		t,
 		sqlFiles,
-		7,
-		"expected exactly 7 embedded .sql files (got %v); add the new file's //go:embed directive in embed.go",
+		8,
+		"expected exactly 8 embedded .sql files (got %v); add the new file's //go:embed directive in embed.go",
 		sqlFiles,
 	)
 }
