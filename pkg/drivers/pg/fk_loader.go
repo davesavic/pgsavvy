@@ -26,6 +26,41 @@ func (s *Session) ListForeignKeys(ctx context.Context, schema, table string) ([]
 	return scanForeignKeys(rows)
 }
 
+// TableReltuples returns the pg_class.reltuples upper-bound row estimate
+// for (schema, table). reltuples is a float4 in the catalog; positive
+// values are the planner's row estimate (round up to derive `~N rows`),
+// zero means "table has zero rows", and a negative value (typically -1)
+// signals "no ANALYZE since last reset", which the caller renders as
+// `~? rows`. Returns 0 + an error when the table is not found. dbsavvy-bwq.17 (B6).
+func (s *Session) TableReltuples(ctx context.Context, schema, table string) (float32, error) {
+	defer s.guard()()
+	const q = `SELECT c.reltuples FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2`
+	row := s.conn.QueryRow(ctx, q, schema, table)
+	var rt float32
+	if err := row.Scan(&rt); err != nil {
+		return 0, wrapPgError(err)
+	}
+	return rt, nil
+}
+
+// ListInboundForeignKeys returns every foreign-key constraint whose
+// REFERENCED side is (schema, table) — i.e. the FKs that point AT this
+// table from other tables. The model shape mirrors ListForeignKeys: ref*
+// fields hold the input table (schema, table), and Schema/Table/Columns
+// hold the REFERENCING table. The result is empty (non-nil) when no other
+// table references this one. Self-referencing FKs appear in the result
+// just like any other reference. See B6 / dbsavvy-bwq.17.
+func (s *Session) ListInboundForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
+	defer s.guard()()
+	s.parent.warnIfPostgresGE18()
+	rows, err := s.conn.Query(ctx, sqlListInboundForeignKeys, schema, table)
+	if err != nil {
+		return nil, wrapPgError(err)
+	}
+	defer rows.Close()
+	return scanForeignKeys(rows)
+}
+
 // scanForeignKeys consumes a *pgx.Rows iterator whose column shape matches
 // sql/list_foreign_keys.sql and returns the materialized slice. It is
 // factored out so tests can exercise the scan logic against an in-memory

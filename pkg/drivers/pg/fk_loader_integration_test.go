@@ -157,6 +157,144 @@ func TestListForeignKeys_SelfReferenceAndCrossSchemaAndComposite(t *testing.T) {
 	}
 }
 
+// TestFKReverse_InboundForFixtureUsers verifies that the inbound FK loader
+// returns both fixture-defined references to app.users
+// (app.posts.user_id and app.user_roles.user_id), both with ON DELETE
+// CASCADE per the fixture schema. dbsavvy-bwq.17 (B6).
+func TestFKReverse_InboundForFixtureUsers(t *testing.T) {
+	sess := openIntegrationSession(t)
+	fks, err := sess.ListInboundForeignKeys(context.Background(), "app", "users")
+	if err != nil {
+		t.Fatalf("ListInboundForeignKeys: %v", err)
+	}
+	if len(fks) != 2 {
+		t.Fatalf("len(fks) = %d, want 2 inbound FKs on app.users; got %+v", len(fks), fks)
+	}
+	byTable := map[string]models.ForeignKey{}
+	for _, fk := range fks {
+		byTable[fk.Table] = fk
+	}
+	posts, ok := byTable["posts"]
+	if !ok {
+		t.Fatalf("expected inbound FK from app.posts; got %+v", fks)
+	}
+	if posts.Schema != "app" || posts.Table != "posts" {
+		t.Errorf("posts inbound FK Schema/Table = %s.%s, want app.posts", posts.Schema, posts.Table)
+	}
+	if posts.RefSchema != "app" || posts.RefTable != "users" {
+		t.Errorf("posts inbound FK ref = %s.%s, want app.users", posts.RefSchema, posts.RefTable)
+	}
+	if !equalStrings(posts.Columns, []string{"user_id"}) {
+		t.Errorf("posts inbound FK Columns = %v, want [user_id]", posts.Columns)
+	}
+	if !equalStrings(posts.RefColumns, []string{"id"}) {
+		t.Errorf("posts inbound FK RefColumns = %v, want [id]", posts.RefColumns)
+	}
+	if posts.OnDelete != "CASCADE" {
+		t.Errorf("posts inbound FK OnDelete = %q, want CASCADE", posts.OnDelete)
+	}
+
+	ur, ok := byTable["user_roles"]
+	if !ok {
+		t.Fatalf("expected inbound FK from app.user_roles; got %+v", fks)
+	}
+	if ur.OnDelete != "CASCADE" {
+		t.Errorf("user_roles inbound FK OnDelete = %q, want CASCADE", ur.OnDelete)
+	}
+	if !equalStrings(ur.Columns, []string{"user_id"}) {
+		t.Errorf("user_roles inbound FK Columns = %v, want [user_id]", ur.Columns)
+	}
+}
+
+// TestFKReverse_NoInboundReturnsEmpty confirms the empty-case contract
+// (non-nil empty slice). app.user_roles is a join table that no other
+// fixture table references. dbsavvy-bwq.17 (B6).
+func TestFKReverse_NoInboundReturnsEmpty(t *testing.T) {
+	sess := openIntegrationSession(t)
+	fks, err := sess.ListInboundForeignKeys(context.Background(), "app", "user_roles")
+	if err != nil {
+		t.Fatalf("ListInboundForeignKeys: %v", err)
+	}
+	if len(fks) != 0 {
+		t.Fatalf("expected 0 inbound FKs on app.user_roles, got %+v", fks)
+	}
+	if fks == nil {
+		t.Fatalf("expected empty (non-nil) slice; got nil")
+	}
+}
+
+// TestFKReverse_SelfAndCompositeCrossSchema mirrors the outbound loader's
+// self-ref + composite + cross-schema coverage from the reverse side.
+// dbsavvy-bwq.17 (B6).
+func TestFKReverse_SelfAndCompositeCrossSchema(t *testing.T) {
+	sess := openIntegrationSession(t)
+	ctx := context.Background()
+
+	stmts := []string{
+		`DROP SCHEMA IF EXISTS fkreverse_test CASCADE`,
+		`DROP SCHEMA IF EXISTS fkreverse_test_other CASCADE`,
+		`CREATE SCHEMA fkreverse_test`,
+		`CREATE SCHEMA fkreverse_test_other`,
+		`CREATE TABLE fkreverse_test.tree (
+			id BIGINT PRIMARY KEY,
+			parent_id BIGINT REFERENCES fkreverse_test.tree(id) ON DELETE SET NULL
+		)`,
+		`CREATE TABLE fkreverse_test_other.parent (a INT NOT NULL, b INT NOT NULL, PRIMARY KEY (a, b))`,
+		`CREATE TABLE fkreverse_test.child (
+			a INT NOT NULL,
+			b INT NOT NULL,
+			CONSTRAINT child_parent_fkey FOREIGN KEY (a, b) REFERENCES fkreverse_test_other.parent (a, b)
+		)`,
+	}
+	for _, s := range stmts {
+		if _, err := sess.Execute(ctx, models.Query{SQL: s}); err != nil {
+			t.Fatalf("setup %q: %v", s, err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = sess.Execute(ctx, models.Query{SQL: `DROP SCHEMA IF EXISTS fkreverse_test CASCADE`})
+		_, _ = sess.Execute(ctx, models.Query{SQL: `DROP SCHEMA IF EXISTS fkreverse_test_other CASCADE`})
+	})
+
+	// Self-ref: fkreverse_test.tree references itself, so it shows up as
+	// its own inbound FK.
+	treeIn, err := sess.ListInboundForeignKeys(ctx, "fkreverse_test", "tree")
+	if err != nil {
+		t.Fatalf("ListInboundForeignKeys tree: %v", err)
+	}
+	if len(treeIn) != 1 {
+		t.Fatalf("expected 1 self-ref inbound FK on tree; got %+v", treeIn)
+	}
+	if treeIn[0].Schema != "fkreverse_test" || treeIn[0].Table != "tree" {
+		t.Errorf("self inbound FK referrer = %s.%s, want fkreverse_test.tree",
+			treeIn[0].Schema, treeIn[0].Table)
+	}
+	if treeIn[0].RefSchema != "fkreverse_test" || treeIn[0].RefTable != "tree" {
+		t.Errorf("self inbound FK ref = %s.%s, want fkreverse_test.tree",
+			treeIn[0].RefSchema, treeIn[0].RefTable)
+	}
+
+	// Cross-schema composite: parent in _other is referenced by child in
+	// fkreverse_test.
+	parentIn, err := sess.ListInboundForeignKeys(ctx, "fkreverse_test_other", "parent")
+	if err != nil {
+		t.Fatalf("ListInboundForeignKeys parent: %v", err)
+	}
+	if len(parentIn) != 1 {
+		t.Fatalf("expected 1 inbound FK on parent; got %+v", parentIn)
+	}
+	if parentIn[0].Schema != "fkreverse_test" || parentIn[0].Table != "child" {
+		t.Errorf("parent inbound FK referrer = %s.%s, want fkreverse_test.child",
+			parentIn[0].Schema, parentIn[0].Table)
+	}
+	if !equalStrings(parentIn[0].Columns, []string{"a", "b"}) {
+		t.Errorf("parent inbound FK Columns = %v, want [a b]", parentIn[0].Columns)
+	}
+	if !equalStrings(parentIn[0].RefColumns, []string{"a", "b"}) {
+		t.Errorf("parent inbound FK RefColumns = %v, want [a b]", parentIn[0].RefColumns)
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

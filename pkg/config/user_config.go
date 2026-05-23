@@ -28,6 +28,11 @@ type EditorConfig struct {
 	// Setting `editor.autocomplete: false` disables auto-trigger only;
 	// the manual omni-complete chord remains available. (ADR-16)
 	Autocomplete bool `yaml:"autocomplete"`
+
+	// FKForwardLimit caps the row count of the parameterized SELECT
+	// issued by the `gd` forward foreign-key navigation. Default 1000.
+	// Must be > 0. dbsavvy-bwq.16 (B5).
+	FKForwardLimit int `yaml:"fk_forward_limit"`
 }
 
 // UIConfig groups settings that govern UI behaviour (vs. data /
@@ -210,7 +215,8 @@ func GetDefaultConfig() *UserConfig {
 			},
 		},
 		Editor: EditorConfig{
-			Autocomplete: true,
+			Autocomplete:   true,
+			FKForwardLimit: 1000,
 		},
 	}
 }

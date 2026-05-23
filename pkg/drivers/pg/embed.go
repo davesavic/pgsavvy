@@ -36,6 +36,9 @@ var sqlListConstraints string
 //go:embed sql/list_foreign_keys.sql
 var sqlListForeignKeys string
 
+//go:embed sql/list_inbound_foreign_keys.sql
+var sqlListInboundForeignKeys string
+
 //go:embed sql/list_functions.sql
 var sqlListFunctions string
 

@@ -186,6 +186,24 @@ func (r *QueryRunner) Run(ctx context.Context, sql string, opts RunOptions) (*se
 	return rh, nil
 }
 
+// RunQuery streams q (SQL + bound Args) via the SQLSession queue, mirroring
+// Run but allowing parameter placeholders ($1, $2, ...) to be bound at the
+// driver. The returned RunHandle is stashed for Cancel(). Used by the
+// FKForwardHelper (dbsavvy-bwq.16) to issue the parameterized parent-table
+// SELECT for `gd`.
+func (r *QueryRunner) RunQuery(ctx context.Context, q models.Query) (*session.RunHandle, error) {
+	b := r.load()
+	if b == nil || b.sess == nil {
+		return nil, ErrNoSession
+	}
+	rh, err := b.sess.Stream(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	r.last.Store(rh)
+	return rh, nil
+}
+
 // Explain delegates to SQLSession.Explain. When analyze is true and no
 // transaction is currently open the call is wrapped in BEGIN/ROLLBACK
 // so a side-effecting ANALYZE never auto-commits (§D14). When a

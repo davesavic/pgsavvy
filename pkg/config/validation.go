@@ -160,6 +160,11 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 		errs = append(errs, fmt.Errorf("config: ui.mouse.double_click_ms must be in [100, 2000], got %d", cfg.UI.Mouse.DoubleClickMs))
 	}
 
+	// Editor.FKForwardLimit (dbsavvy-bwq.16, B5).
+	if cfg.Editor.FKForwardLimit <= 0 {
+		errs = append(errs, fmt.Errorf("config: editor.fk_forward_limit must be > 0, got %d", cfg.Editor.FKForwardLimit))
+	}
+
 	// Export bounds (dbsavvy-uv0.9).
 	if cfg.UI.Export.BufferedRowWarnThreshold <= 0 {
 		errs = append(errs, fmt.Errorf("config: ui.export.buffered_row_warn_threshold must be > 0, got %d", cfg.UI.Export.BufferedRowWarnThreshold))

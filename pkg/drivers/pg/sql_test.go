@@ -96,6 +96,21 @@ func TestEmbeddedSQL_ContainsExpectedIdentifiers(t *testing.T) {
 			},
 		},
 		{
+			name:  "list_inbound_foreign_keys",
+			query: sqlListInboundForeignKeys,
+			contains: []string{
+				"pg_constraint",
+				"confkey",
+				"conkey",
+				"with ordinality",
+				"'f'",
+				"$1",
+				"$2",
+				"rn.nspname",
+				"rc.relname",
+			},
+		},
+		{
 			name:  "list_functions",
 			query: sqlListFunctions,
 			contains: []string{
@@ -138,7 +153,7 @@ func TestEmbeddedSQL_ContainsExpectedIdentifiers(t *testing.T) {
 	}
 }
 
-func TestEmbeddedSQL_FilesystemHasExactlyTenSQLFiles(t *testing.T) {
+func TestEmbeddedSQL_FilesystemHasExactlyElevenSQLFiles(t *testing.T) {
 	entries, err := sqlFS.ReadDir("sql")
 	require.NoError(t, err)
 
@@ -155,8 +170,8 @@ func TestEmbeddedSQL_FilesystemHasExactlyTenSQLFiles(t *testing.T) {
 	require.Len(
 		t,
 		sqlFiles,
-		10,
-		"expected exactly 10 embedded .sql files (got %v); add the new file's //go:embed directive in embed.go",
+		11,
+		"expected exactly 11 embedded .sql files (got %v); add the new file's //go:embed directive in embed.go",
 		sqlFiles,
 	)
 }
