@@ -14,6 +14,20 @@ type UserConfig struct {
 	WhichKeyDelay time.Duration      `yaml:"whichkey_delay"`
 	Keybindings   []KeybindingConfig `yaml:"keybindings"`
 	UI            UIConfig           `yaml:"ui"`
+	Editor        EditorConfig       `yaml:"editor"`
+}
+
+// EditorConfig groups settings that govern the SQL editor behaviour.
+// dbsavvy-bwq.22 (C5) introduces the Autocomplete toggle controlling
+// auto-trigger of the completion popup. Manual `<c-x><c-o>` is not
+// gated by this flag — it continues to fire regardless.
+type EditorConfig struct {
+	// Autocomplete enables auto-triggering of the completion popup when
+	// the cursor sits after a recognised SQL context (e.g. trailing
+	// `FROM `, `JOIN `, `<word>.`). Default true on fresh install.
+	// Setting `editor.autocomplete: false` disables auto-trigger only;
+	// the manual omni-complete chord remains available. (ADR-16)
+	Autocomplete bool `yaml:"autocomplete"`
 }
 
 // UIConfig groups settings that govern UI behaviour (vs. data /
@@ -194,6 +208,9 @@ func GetDefaultConfig() *UserConfig {
 				BufferedRowWarnThreshold: 100_000,
 				ClipboardMaxBytes:        16 * 1024 * 1024,
 			},
+		},
+		Editor: EditorConfig{
+			Autocomplete: true,
 		},
 	}
 }

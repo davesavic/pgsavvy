@@ -283,6 +283,27 @@ func (h *ConnectHelper) LoadIndexes(ctx context.Context, schema, table string) (
 	return out, nil
 }
 
+// LoadForeignKeys wraps drivers.Session.ListForeignKeys.
+func (h *ConnectHelper) LoadForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
+	var out []models.ForeignKey
+	err := h.submit(ctx, func(ctx context.Context) error {
+		sess, err := h.requireSession()
+		if err != nil {
+			return err
+		}
+		result, err := sess.ListForeignKeys(ctx, schema, table)
+		if err != nil {
+			return err
+		}
+		out = result
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // requireSession returns the current Session or errNotConnected. It must be
 // called from inside the worker goroutine: when the helper is reconnected
 // (Disconnect+Connect) BEFORE a queued item runs, the queued item observes

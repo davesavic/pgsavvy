@@ -62,6 +62,14 @@ func (s *wireFakeSession) ListConstraints(_ context.Context, _, _ string) ([]mod
 	return nil, nil
 }
 
+func (s *wireFakeSession) ListForeignKeys(_ context.Context, _, _ string) ([]models.ForeignKey, error) {
+	return nil, nil
+}
+
+func (s *wireFakeSession) ListFunctions(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+
 func (s *wireFakeSession) DescribeFunction(_ context.Context, _, _ string) (models.FunctionDetail, error) {
 	return models.FunctionDetail{}, nil
 }

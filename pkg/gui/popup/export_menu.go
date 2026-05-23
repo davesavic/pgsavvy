@@ -40,6 +40,13 @@ type ExportMenu struct {
 	// enabled, OR the row is absent entirely).
 	sqlInsertsIdx int
 
+	// sqlInsertsDisabledReason is the inline reason rendered next to the
+	// disabled SQL-INSERTs row and surfaced via ConfirmBlockedReason.
+	// Empty falls back to the historical default text.
+	// dbsavvy-bwq.11 (A8): sourced from GridView.DisabledReason() so the
+	// menu reuses F2's single source of truth.
+	sqlInsertsDisabledReason string
+
 	// markdownIdx and jsonArrayIdx track which format indexes are
 	// "buffered" so the menu knows when to hard-block Confirm under
 	// bufferedThresholdExceeded. -1 when not registered.
@@ -205,6 +212,26 @@ func (m *ExportMenu) IsSQLInsertsSelected() bool {
 	return m.sqlInsertsIdx >= 0 && m.formatIdx == m.sqlInsertsIdx
 }
 
+// SetSQLInsertsDisabledReason installs the per-entry disabled-reason
+// text used when the SQL-INSERTs row is shown-but-disabled. The caller
+// sources the string from GridView.DisabledReason() so the menu reuses
+// the editability decision instead of inventing its own. Empty string
+// preserves the historical default annotation. dbsavvy-bwq.11 (A8).
+func (m *ExportMenu) SetSQLInsertsDisabledReason(reason string) {
+	m.sqlInsertsDisabledReason = reason
+}
+
+// sqlInsertsAnnotation returns the inline annotation text rendered next
+// to the disabled SQL-INSERTs row. Prefers the F2-sourced reason when
+// set; otherwise falls back to the legacy "not a single base table" text
+// so callers that never call SetSQLInsertsDisabledReason keep prior UX.
+func (m *ExportMenu) sqlInsertsAnnotation() string {
+	if m.sqlInsertsDisabledReason != "" {
+		return "disabled: " + m.sqlInsertsDisabledReason
+	}
+	return "disabled — result is not a single base table"
+}
+
 // SetBufferedFormatIndexes registers which formats are "buffered" so the
 // menu can hard-block Confirm under bufferedThresholdExceeded. Pass -1
 // for either index to indicate the format is not present.
@@ -245,6 +272,9 @@ func (m *ExportMenu) RequiresFullWithFilterConfirmation() bool {
 //   - filterActive AND scope == Full AND typed-YES not collected.
 func (m *ExportMenu) ConfirmBlockedReason() string {
 	if m.IsSQLInsertsSelected() {
+		if m.sqlInsertsDisabledReason != "" {
+			return "SQL INSERTs disabled: " + m.sqlInsertsDisabledReason
+		}
 		return "SQL INSERTs disabled — result is not a single base table"
 	}
 	if m.bufferedThresholdExceeded && m.isBufferedFormat() {
@@ -290,7 +320,9 @@ func (m *ExportMenu) Body() string {
 	b.WriteString("Format:      ")
 	b.WriteString(m.FormatLabel())
 	if m.IsSQLInsertsSelected() {
-		b.WriteString("  (disabled — result is not a single base table)")
+		b.WriteString("  (")
+		b.WriteString(m.sqlInsertsAnnotation())
+		b.WriteByte(')')
 	}
 	b.WriteByte('\n')
 

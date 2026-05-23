@@ -74,6 +74,13 @@ type SQLSession struct {
 
 	closeOnce sync.Once
 	closed    atomic.Bool
+
+	// fkCache is the per-Connection foreign-key cache. Constructed lazily on
+	// first FKCache() call so SQLSessions whose callers never need FK metadata
+	// pay zero cost. Guarded by fkCacheOnce. See pkg/session/fk_cache.go and
+	// task dbsavvy-bwq.13.
+	fkCache     *FKCache
+	fkCacheOnce sync.Once
 }
 
 // New constructs a SQLSession over conn + inner. inner MUST be a session
@@ -117,6 +124,19 @@ func New(conn drivers.Connection, inner drivers.Session, opts Options) *SQLSessi
 
 // SessionID returns the underlying driver session's identifier.
 func (s *SQLSession) SessionID() models.SessionID { return s.inner.ID() }
+
+// FKCache returns the per-Connection foreign-key cache, constructing it on
+// first call. The loader wraps the inner driver session's ListForeignKeys.
+// Subsequent calls return the same cache instance for the lifetime of this
+// SQLSession; closing the SQLSession drops it. See dbsavvy-bwq.13 / ADR-8.
+func (s *SQLSession) FKCache() *FKCache {
+	s.fkCacheOnce.Do(func() {
+		s.fkCache = NewFKCache(func(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
+			return s.inner.ListForeignKeys(ctx, schema, table)
+		})
+	})
+	return s.fkCache
+}
 
 // InTransaction reports whether the underlying session currently has an
 // open transaction. Delegates straight to the driver.

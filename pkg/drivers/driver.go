@@ -52,6 +52,8 @@ type Session interface {
 	ListColumns(ctx context.Context, schema, table string) ([]models.Column, error)
 	ListIndexes(ctx context.Context, schema, table string) ([]models.Index, error)
 	ListConstraints(ctx context.Context, schema, table string) ([]models.Constraint, error)
+	ListForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error)
+	ListFunctions(ctx context.Context) ([]string, error)
 	DescribeFunction(ctx context.Context, schema, name string) (models.FunctionDetail, error)
 
 	Execute(ctx context.Context, q models.Query) (models.Result, error)

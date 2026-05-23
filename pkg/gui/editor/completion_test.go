@@ -151,3 +151,56 @@ func suggestionTexts(s []Suggestion) []string {
 	}
 	return out
 }
+
+// TestAutoTriggerFromContext_Cases pins the C5 auto-trigger detection
+// behaviour. Reuses bufWithCursor (defined in completion_schema_source_test.go).
+func TestAutoTriggerFromContext_Cases(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want bool
+	}{
+		// Positive — table-context keywords with trailing space.
+		{"trailing FROM space", "SELECT * FROM ", true},
+		{"trailing JOIN space", "SELECT * FROM users JOIN ", true},
+		{"trailing INNER JOIN", "SELECT * FROM a INNER JOIN ", true},
+		{"trailing LEFT JOIN", "SELECT * FROM a LEFT JOIN ", true},
+		{"trailing RIGHT JOIN", "SELECT * FROM a RIGHT JOIN ", true},
+		{"trailing CROSS JOIN", "SELECT * FROM a CROSS JOIN ", true},
+		{"trailing UPDATE", "UPDATE ", true},
+		{"trailing INTO", "INSERT INTO ", true},
+		// Positive — identifier dot.
+		{"users dot", "SELECT users.", true},
+		{"qualified dot mid-expr", "WHERE u.id = users.", true},
+		// Case-insensitivity sanity.
+		{"lowercase from", "select * from ", true},
+		// Negative — no trigger context.
+		{"bare identifier", "SELECT user", false},
+		{"trailing comma", "SELECT a, ", false},
+		// Negative — inside string literal (stripNoise drops it).
+		{"FROM inside string", "SELECT 'FROM ", false},
+		// Negative — inside line comment.
+		{"FROM inside line comment", "SELECT 1 -- FROM ", false},
+		// Negative — empty / nil-equivalent line.
+		{"empty line", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, p := bufWithCursor(tc.line)
+			got := AutoTriggerFromContext(b, p)
+			if got != tc.want {
+				t.Errorf("AutoTriggerFromContext(%q) = %v; want %v", tc.line, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAutoTriggerFromContext_NilBuffer guards against panics when the
+// editor wires a nil buffer (defensive: VimEditor itself nil-checks
+// before invoking the callback, but the helper must be safe in
+// isolation).
+func TestAutoTriggerFromContext_NilBuffer(t *testing.T) {
+	if AutoTriggerFromContext(nil, Position{}) {
+		t.Fatal("AutoTriggerFromContext(nil, _) = true; want false")
+	}
+}

@@ -34,6 +34,15 @@ type VimEditor struct {
 	qec     BufferProvider
 	matcher *keys.Matcher
 	scope   types.ContextKey
+
+	// autoCompleter is an optional callback invoked after every
+	// printable insert-mode keystroke (Buffer.Apply already ran; the
+	// buffer cursor reflects the new position). The callback is
+	// responsible for the config gate + popup-already-visible guard +
+	// AutoTriggerFromContext check + engine Trigger + popup Show.
+	// VimEditor only owns the seam; the closure is wired post-
+	// construction by Z1 (dbsavvy-bwq.22 / .23). Nil = no auto-trigger.
+	autoCompleter func(buf *Buffer, pos Position)
 }
 
 // NewVimEditor builds a VimEditor bound to qec / matcher / scope. Any
@@ -94,6 +103,16 @@ func (e *VimEditor) flushPendingRunes(runes []rune) {
 		return
 	}
 	buf.SetCursor(advancePos(cur, text))
+}
+
+// SetAutoCompleter wires the optional callback VimEditor invokes after
+// every printable insert-mode keystroke. The callback receives the
+// buffer + post-insert cursor position; it owns the config gate,
+// popup-visibility check, AutoTriggerFromContext check, and the actual
+// engine Trigger / popup Show. Passing nil clears any previously-
+// installed callback. dbsavvy-bwq.22 (C5).
+func (e *VimEditor) SetAutoCompleter(fn func(buf *Buffer, pos Position)) {
+	e.autoCompleter = fn
 }
 
 // Edit implements gocui.Editor.
@@ -168,6 +187,13 @@ func (e *VimEditor) insertKey(v *gocui.View, k keys.Key) bool {
 			return true
 		}
 		buf.SetCursor(advancePos(cur, string(k.Code)))
+		// Auto-trigger completion (dbsavvy-bwq.22 / C5). The callback
+		// is responsible for the config gate, popup-visible guard, and
+		// AutoTriggerFromContext check. Only fired on printable runes —
+		// Enter / Backspace do not auto-trigger.
+		if e.autoCompleter != nil {
+			e.autoCompleter(buf, buf.CursorPos())
+		}
 	case k.Special == keys.KeyEnter && k.Mod == 0:
 		cur := buf.CursorPos()
 		if err := buf.Apply(Edit{

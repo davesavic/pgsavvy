@@ -3,6 +3,8 @@ package config
 import (
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // TestGetDefaultConfigUIMouseEnabled pins the default per dbsavvy-zro AC.
@@ -68,5 +70,43 @@ func TestGetDefaultConfigUIExportDefaults(t *testing.T) {
 	}
 	if cfg.UI.Export.ClipboardMaxBytes != 16*1024*1024 {
 		t.Errorf("UI.Export.ClipboardMaxBytes = %d, want %d (16 MiB)", cfg.UI.Export.ClipboardMaxBytes, 16*1024*1024)
+	}
+}
+
+// TestGetDefaultConfigEditorAutocompleteDefault pins the dbsavvy-bwq.22
+// (C5) default per ADR-16: auto-trigger completion is on by default on
+// fresh install. Users opt out via `editor.autocomplete: false`.
+func TestGetDefaultConfigEditorAutocompleteDefault(t *testing.T) {
+	cfg := GetDefaultConfig()
+	if !cfg.Editor.Autocomplete {
+		t.Fatal("GetDefaultConfig().Editor.Autocomplete = false; want true (default per ADR-16)")
+	}
+}
+
+// TestParseYAML_EditorAutocomplete_Disabled asserts the top-level
+// `editor.autocomplete` YAML path decodes onto UserConfig.Editor.Autocomplete.
+// Locks ADR-16: the path is `editor.autocomplete`, NOT
+// `keys.editor.autocomplete`.
+func TestParseYAML_EditorAutocomplete_Disabled(t *testing.T) {
+	src := []byte("editor:\n  autocomplete: false\n")
+	var cfg UserConfig
+	if err := yaml.Unmarshal(src, &cfg); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if cfg.Editor.Autocomplete {
+		t.Errorf("Editor.Autocomplete = true after parsing %q; want false", string(src))
+	}
+}
+
+// TestParseYAML_EditorAutocomplete_Enabled is the symmetric positive
+// case — explicit `true` is preserved on decode.
+func TestParseYAML_EditorAutocomplete_Enabled(t *testing.T) {
+	src := []byte("editor:\n  autocomplete: true\n")
+	var cfg UserConfig
+	if err := yaml.Unmarshal(src, &cfg); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if !cfg.Editor.Autocomplete {
+		t.Errorf("Editor.Autocomplete = false after parsing %q; want true", string(src))
 	}
 }

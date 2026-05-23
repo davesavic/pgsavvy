@@ -1,0 +1,101 @@
+package session
+
+import (
+	"context"
+	"sync"
+
+	"github.com/davesavic/dbsavvy/pkg/models"
+)
+
+// FKLoader resolves the foreign keys defined on (schema, table) on a cache
+// miss. Implementations typically wrap drivers.Session.ListForeignKeys but
+// the indirection keeps FKCache testable without a live driver.
+type FKLoader func(ctx context.Context, schema, table string) ([]models.ForeignKey, error)
+
+// fkKey identifies a cached entry. Schema + Table are the only inputs because
+// FKs are scoped to a single owning table; the cache itself is per-Connection
+// (one FKCache per SQLSession), so cross-connection collisions are impossible.
+type fkKey struct {
+	Schema string
+	Table  string
+}
+
+// FKCache is an in-memory, per-Connection cache of foreign-key metadata.
+// Cached entries are loaded lazily on first Get via the injected Loader and
+// retained until Invalidate / InvalidateAll. Errors from the loader are NOT
+// cached so a transient failure does not poison subsequent reads.
+//
+// Concurrency: a sync.RWMutex protects the map. Get takes the read lock for
+// the hot path; only the slow path (cache miss) escalates to the write lock
+// to insert. FKCache is safe for concurrent use under -race per task AC.
+//
+// Lifecycle: bound to a single SQLSession; closing the SQLSession drops the
+// only reference so the cache is GC'd. No AppState persistence (ADR-8).
+type FKCache struct {
+	loader FKLoader
+
+	mu      sync.RWMutex
+	entries map[fkKey][]models.ForeignKey
+}
+
+// NewFKCache returns an empty cache backed by loader. loader must be non-nil;
+// passing nil panics at first Get rather than silently dropping requests.
+func NewFKCache(loader FKLoader) *FKCache {
+	return &FKCache{
+		loader:  loader,
+		entries: make(map[fkKey][]models.ForeignKey),
+	}
+}
+
+// Get returns the cached FKs for (schema, table), loading them via the
+// injected Loader on a cache miss. The empty-FK case is cached as a non-nil
+// empty slice so subsequent calls do not re-hit the driver. Loader errors
+// are NOT cached — the caller may retry.
+//
+// Two Gets racing for the same key may both invoke Loader; the last writer
+// wins. This is intentionally simple: FK metadata is small + idempotent, so
+// a redundant fetch is cheaper than serializing all callers behind a per-key
+// mutex.
+func (c *FKCache) Get(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
+	key := fkKey{Schema: schema, Table: table}
+
+	c.mu.RLock()
+	if fks, ok := c.entries[key]; ok {
+		c.mu.RUnlock()
+		return fks, nil
+	}
+	c.mu.RUnlock()
+
+	fks, err := c.loader(ctx, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	if fks == nil {
+		fks = []models.ForeignKey{}
+	}
+
+	c.mu.Lock()
+	c.entries[key] = fks
+	c.mu.Unlock()
+
+	return fks, nil
+}
+
+// Invalidate drops the cached entry for (schema, table) if present.
+// Invalidating an absent key is a no-op.
+func (c *FKCache) Invalidate(schema, table string) {
+	c.mu.Lock()
+	delete(c.entries, fkKey{Schema: schema, Table: table})
+	c.mu.Unlock()
+}
+
+// InvalidateAll clears every cached entry. Called from the schema-rail
+// refresh path so a manual rail reload also drops stale FK metadata.
+func (c *FKCache) InvalidateAll() {
+	c.mu.Lock()
+	// Replace the map rather than ranging+delete so any in-flight Get reader
+	// that has already returned its slice keeps a valid reference (the slice
+	// is immutable post-store; we never mutate cached values in place).
+	c.entries = make(map[fkKey][]models.ForeignKey)
+	c.mu.Unlock()
+}

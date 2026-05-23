@@ -248,6 +248,26 @@ func TestExportMenu_Body_RendersDisabledSQLInsertsAnnotation(t *testing.T) {
 	}
 }
 
+// TestExportMenu_Body_RendersF2DisabledReason verifies that when
+// SetSQLInsertsDisabledReason is called (A8 wiring from GridView), the
+// disabled annotation reflects the caller-supplied reason instead of
+// the legacy default text. dbsavvy-bwq.11 (A8).
+func TestExportMenu_Body_RendersF2DisabledReason(t *testing.T) {
+	single := []string{"SQL INSERTs"}
+	m := NewExportMenu(single, defaultDestinations(), defaultScopes(), 0, false, false)
+	m.SetSQLInsertsDisabledReason("result spans multiple tables")
+	body := m.Body()
+	if !strings.Contains(body, "disabled: result spans multiple tables") {
+		t.Errorf("body should annotate with F2-supplied reason: %q", body)
+	}
+	if strings.Contains(body, "not a single base table") {
+		t.Errorf("body should not fall back to legacy text when reason is set: %q", body)
+	}
+	if got := m.ConfirmBlockedReason(); !strings.Contains(got, "result spans multiple tables") {
+		t.Errorf("ConfirmBlockedReason should include F2 reason: %q", got)
+	}
+}
+
 func TestExportMenu_Body_RendersWarningFooter(t *testing.T) {
 	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, true, false)
 	m.SetBufferedFormatIndexes(4, 3)

@@ -537,6 +537,14 @@ func (g *Gui) wireWithDriver() error {
 	// result is discarded so a stale list never overwrites the new
 	// focus's rail.
 	g.refreshHelper.SetSchemasRefresher(func(ctx context.Context) error {
+		// dbsavvy-bwq.13: a manual schemas-rail refresh is the user's signal
+		// that on-disk schema/table shape may have changed, so drop the FK
+		// metadata cache; B5/B6 navigation will repopulate on demand.
+		if g.activeSQLSession != nil {
+			if fkc := g.activeSQLSession.FKCache(); fkc != nil {
+				fkc.InvalidateAll()
+			}
+		}
 		connectInv.populateSchemasRail(ctx)
 		return nil
 	})

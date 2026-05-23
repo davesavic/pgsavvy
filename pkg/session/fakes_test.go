@@ -113,6 +113,14 @@ func (s *fakeSess) ListConstraints(context.Context, string, string) ([]models.Co
 	return nil, nil
 }
 
+func (s *fakeSess) ListForeignKeys(context.Context, string, string) ([]models.ForeignKey, error) {
+	return nil, nil
+}
+
+func (s *fakeSess) ListFunctions(context.Context) ([]string, error) {
+	return nil, nil
+}
+
 func (s *fakeSess) DescribeFunction(context.Context, string, string) (models.FunctionDetail, error) {
 	return models.FunctionDetail{}, nil
 }

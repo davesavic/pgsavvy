@@ -1956,9 +1956,28 @@ func (h *ResultTabsHelper) PromptExport() {
 	destinations := []string{"File", "Clipboard", "stdout"}
 	scopes := []string{"Visible", "Loaded", "Full"}
 
-	m := popup.NewExportMenu(formats, destinations, scopes, -1, bufferedThresholdExceeded, filterActive)
+	// dbsavvy-bwq.11 (A8): when SQL-INSERTs is in the format list, gate
+	// it on the GridView's editability decision (F2's single source of
+	// truth). When the grid says not editable AND provides a reason,
+	// surface the row as shown-but-disabled with that reason inline.
+	// Pre-Z1 defaults (editable=false, reason="") preserve current UX:
+	// SQL-INSERTs stays enabled when ri.HasRowIdentity placed it in the
+	// list.
+	sqlInsertsIdx := -1
+	sqlInsertsReason := ""
+	if pos := indexOf(formats, "SQL INSERTs"); pos >= 0 {
+		if !g.Editable() && g.DisabledReason() != "" {
+			sqlInsertsIdx = pos
+			sqlInsertsReason = g.DisabledReason()
+		}
+	}
+
+	m := popup.NewExportMenu(formats, destinations, scopes, sqlInsertsIdx, bufferedThresholdExceeded, filterActive)
 	m.SetBufferedFormatIndexes(indexOf(formats, "Markdown"), indexOf(formats, "JSON Array"))
 	m.SetBufferedThresholdLabel(fmt.Sprintf("≥ %d rows", threshold))
+	if sqlInsertsReason != "" {
+		m.SetSQLInsertsDisabledReason(sqlInsertsReason)
+	}
 
 	h.mu.Lock()
 	h.exportMenu = &activeExportMenu{tab: t, menu: m}

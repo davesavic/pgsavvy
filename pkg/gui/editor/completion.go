@@ -111,3 +111,36 @@ func (e *Engine) Sources() []Source {
 	copy(cp, e.sources)
 	return cp
 }
+
+// AutoTriggerFromContext reports whether the cursor sits at a position
+// that should auto-trigger the completion popup. Returns true when the
+// line-up-to-cursor ends in one of:
+//
+//   - a trailing whitespace-terminated table-context keyword:
+//     `FROM `, `JOIN `, `INNER JOIN `, `LEFT JOIN `, `RIGHT JOIN `,
+//     `CROSS JOIN `, `UPDATE `, `INTO ` (case-insensitive)
+//   - a trailing `<ident>.` (no whitespace before the dot)
+//
+// Detection delegates to the same regex matchers SchemaSource uses
+// (reKeywordTable, reIdentDot) so behaviour stays consistent. Noise
+// (string literals, comments, dollar-quoted strings) is stripped via
+// stripNoise — auto-trigger does NOT fire inside a quoted string or
+// comment.
+//
+// Nil buf is treated as "no context"; returns false.
+//
+// dbsavvy-bwq.22 (C5).
+func AutoTriggerFromContext(buf *Buffer, pos Position) bool {
+	if buf == nil {
+		return false
+	}
+	line := lineUpToCursor(buf, pos)
+	if line == "" {
+		return false
+	}
+	stripped := stripNoise(line)
+	if reIdentDot.MatchString(stripped) {
+		return true
+	}
+	return reKeywordTable.MatchString(stripped)
+}

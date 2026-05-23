@@ -184,6 +184,104 @@ func TestVimEditor_ModeSwitchDoesNotRewriteView(t *testing.T) {
 	}
 }
 
+// TestVimEditor_AutoCompleterFiresOnPrintableInsert pins the C5 seam:
+// every printable insert-mode rune invokes the wired auto-completer
+// callback with the post-insert buffer + cursor. The callback is
+// responsible for the config/popup-visible gate; VimEditor itself
+// fires unconditionally so the callback can decide.
+func TestVimEditor_AutoCompleterFiresOnPrintableInsert(t *testing.T) {
+	rig := newVimRig(t, types.ModeInsert)
+	v := newViewForVimTest()
+	var calls int
+	var lastCol int
+	rig.ve.SetAutoCompleter(func(_ *editor.Buffer, pos editor.Position) {
+		calls++
+		lastCol = pos.Col
+	})
+	for _, r := range []rune{'a', 'b', 'c'} {
+		rig.ve.Edit(v, gocui.NewKeyRune(r))
+	}
+	if calls != 3 {
+		t.Errorf("autoCompleter calls = %d; want 3 (one per printable rune)", calls)
+	}
+	if lastCol != 3 {
+		t.Errorf("last cursor col = %d; want 3 (post-insert position)", lastCol)
+	}
+}
+
+// TestVimEditor_AutoCompleterNotFiredOnEnter pins the rule that only
+// printable runes trigger auto-completion. Enter / Backspace splitting
+// or joining lines are not auto-trigger candidates (Enter ending a
+// statement is not a SQL completion context).
+func TestVimEditor_AutoCompleterNotFiredOnEnter(t *testing.T) {
+	rig := newVimRig(t, types.ModeInsert)
+	v := newViewForVimTest()
+	var calls int
+	rig.ve.SetAutoCompleter(func(_ *editor.Buffer, _ editor.Position) {
+		calls++
+	})
+	rig.ve.Edit(v, gocui.NewKeyName(gocui.KeyEnter))
+	rig.ve.Edit(v, gocui.NewKeyName(gocui.KeyBackspace))
+	if calls != 0 {
+		t.Errorf("autoCompleter calls = %d; want 0 (Enter + Backspace must not trigger)", calls)
+	}
+}
+
+// TestVimEditor_AutoCompleterNotFiredInNormalMode confirms the callback
+// only runs from the Insert-mode insertKey path. Passthrough / fell-
+// through in Normal mode is short-circuited before insertKey runs, so
+// the callback must remain quiet.
+func TestVimEditor_AutoCompleterNotFiredInNormalMode(t *testing.T) {
+	rig := newVimRig(t, types.ModeNormal)
+	v := newViewForVimTest()
+	var calls int
+	rig.ve.SetAutoCompleter(func(_ *editor.Buffer, _ editor.Position) {
+		calls++
+	})
+	rig.ve.Edit(v, gocui.NewKeyRune('a'))
+	if calls != 0 {
+		t.Errorf("autoCompleter calls = %d; want 0 (Normal-mode key must not trigger)", calls)
+	}
+}
+
+// TestVimEditor_AutoCompleter_CallbackCanGate demonstrates the
+// popup-already-visible / config-disabled pattern Z1 will use: the
+// callback inspects external state and chooses whether to act. The
+// VimEditor seam does not enforce the gate — it invokes the callback
+// on every printable rune and trusts the closure.
+func TestVimEditor_AutoCompleter_CallbackCanGate(t *testing.T) {
+	rig := newVimRig(t, types.ModeInsert)
+	v := newViewForVimTest()
+	popupVisible := true
+	var triggers int
+	rig.ve.SetAutoCompleter(func(buf *editor.Buffer, pos editor.Position) {
+		// Simulate the Z1 closure: skip when popup already shown or
+		// the context isn't trigger-worthy.
+		if popupVisible {
+			return
+		}
+		if !editor.AutoTriggerFromContext(buf, pos) {
+			return
+		}
+		triggers++
+	})
+	// Type "SELECT * FROM " — last char is a space which is the
+	// trigger boundary. With popup visible the callback exits early.
+	for _, r := range "SELECT * FROM " {
+		rig.ve.Edit(v, gocui.NewKeyRune(r))
+	}
+	if triggers != 0 {
+		t.Errorf("triggers = %d; want 0 (popup-visible gate blocks)", triggers)
+	}
+	// Drop the popup and type one more space — buffer now ends in
+	// "FROM  " which still matches reKeywordTable (`\s+$`).
+	popupVisible = false
+	rig.ve.Edit(v, gocui.NewKeyRune(' '))
+	if triggers != 1 {
+		t.Errorf("triggers = %d; want 1 (after popup hidden + matching context)", triggers)
+	}
+}
+
 // TestVimEditor_FeedChordViaRecorder confirms VimEditor satisfies the
 // chordDispatcher contract (testfake.RecorderGuiDriver.FeedChord) just
 // like masterEditor does. This is the acceptance criterion that wires
