@@ -487,6 +487,18 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			Tag:         "Operator",
 		})
 	}
+	// dbsavvy-bwq.Z1: `<c-x><c-o>` triggers the completion engine. Insert-
+	// only mode mask so the chord doesn't shadow Normal-mode bindings.
+	if seq, err := keys.SequenceFromShorthand("<c-x><c-o>"); err == nil {
+		out = append(out, &types.ChordBinding{
+			Sequence:    seq,
+			Mode:        types.ModeInsert,
+			Scope:       types.QUERY_EDITOR,
+			ActionID:    commands.EditorCompletionTrigger,
+			Description: "Trigger completion",
+			Tag:         "Insert",
+		})
+	}
 	// (op-pending cancel: the existing `<esc>` → mode.normal binding from
 	// the insert-entry specs covers OperatorPending too — its mode mask
 	// was widened in wwd.8 via insertExitModeMask.)
@@ -706,6 +718,17 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 		Description: "Repeat last edit (vim `.`)",
 		Tag:         "Edit history",
 		Handler:     c.repeatHandler(),
+	})
+	// dbsavvy-bwq.Z1: `<c-x><c-o>` completion trigger. TriggerCompletion
+	// is a silent no-op when the engine / suggestions context are unwired,
+	// so the binding is safe to register before either lands.
+	_ = reg.Register(&commands.Command{
+		ID:          commands.EditorCompletionTrigger,
+		Description: "Trigger completion",
+		Tag:         "Insert",
+		Handler: func(_ commands.ExecCtx) error {
+			return c.TriggerCompletion()
+		},
 	})
 }
 

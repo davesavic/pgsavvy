@@ -75,6 +75,9 @@ func AllDefaultBindings(c *Controllers) []*types.ChordBinding {
 	if c.FKReversePicker != nil {
 		out = append(out, c.FKReversePicker.GetKeybindings(types.KeybindingsOpts{})...)
 	}
+	if c.Cheatsheet != nil {
+		out = append(out, c.Cheatsheet.GetKeybindings(types.KeybindingsOpts{})...)
+	}
 	out = append(out, keys.DefaultCommandLineBindings()...)
 	return out
 }

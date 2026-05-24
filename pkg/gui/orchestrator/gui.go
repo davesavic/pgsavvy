@@ -769,6 +769,18 @@ func (g *Gui) wireWithDriver() error {
 		g.controllers.TableInspect = inspectCtrl
 	}
 
+	// dbsavvy-bwq.Z1: build the CHEATSHEET popup controller and attach it
+	// to the context so the [, ], <tab>, <esc>, q bindings reach the trie
+	// via AllDefaultBindings. Constructed here — not in AttachControllers
+	// — because it needs a Pop-capable handle on the focus-stack.
+	if g.registry != nil && g.registry.Cheatsheet != nil && g.tree != nil {
+		cheatCtrl := controllers.NewCheatsheetController(
+			g.deps.Common, helperBag, g.registry.Cheatsheet, g.tree,
+		)
+		cheatCtrl.AttachToContext(&g.registry.Cheatsheet.BaseContext)
+		g.controllers.Cheatsheet = cheatCtrl
+	}
+
 	// dbsavvy-bwq.py4: build the four inline-edit popup controllers and
 	// attach each to its context so their bindings reach the trie via
 	// AllDefaultBindings. Mirrors the TableInspect path above —
@@ -845,10 +857,12 @@ func (g *Gui) wireWithDriver() error {
 	}
 	controllers.RegisterRailSwitchActions(g.cmdRegistry, g.tree, g.registry, resolveResults)
 
-	// Cheatsheet popup: capture the focused scope, hand it to the
+	// Cheatsheet popup: capture the focused scope, build a TabbedPopup
+	// with one tab per scope (focused + global), install it on the
 	// CheatsheetContext, then push the context onto the focus stack.
 	// RunLayout's Tier-3 popup pass (layout.go) renders the popup on
-	// the next layout frame; <esc> pops it back to the previous context.
+	// the next layout frame. Tab cycling + close run through the trie
+	// via CheatsheetController bindings (dbsavvy-bwq.Z1).
 	_ = g.cmdRegistry.Register(&commands.Command{
 		ID:          commands.HelpCheatsheet,
 		Description: "Show cheatsheet",
@@ -862,16 +876,11 @@ func (g *Gui) wireWithDriver() error {
 				scope = top.GetKey()
 			}
 			g.registry.Cheatsheet.SetScope(scope)
+			g.registry.Cheatsheet.SetState(
+				controllers.BuildCheatsheetTabs(scope, cheatsheetRender),
+			)
 			return g.tree.Push(g.registry.Cheatsheet)
 		},
-	})
-
-	// <esc> on the CHEATSHEET view pops it off the focus stack so the
-	// user returns to the prior context (e.g. MENU or TABLES) intact.
-	// Installed directly via the driver because CHEATSHEET is a
-	// DISPLAY_CONTEXT and does not flow through the Matcher.
-	_ = g.driver.SetKeybinding(string(types.CHEATSHEET), gocui.NewKeyName(gocui.KeyEsc), gocui.ModNone, func() error {
-		return g.tree.Pop()
 	})
 
 	// dbsavvy-56u.2: TipDismiss handler. Pops the FIRST_RUN_TIP popup
@@ -1018,11 +1027,38 @@ func (g *Gui) wireWithDriver() error {
 	// the submit dispatcher can propagate it up through the gocui main
 	// loop. CommandSubmitCommand recognises ErrQuit specifically and
 	// skips its default toast-and-swallow path.
+	//
+	// dbsavvy-bwq.Z1: `:q` consults the PendingDiscardHelper before
+	// returning ErrQuit. When the PendingEditSet is non-empty the guard
+	// surfaces an instructional toast (`:w` / `:q!` / `<leader>cU`) and
+	// the quit is aborted (return nil so submit doesn't propagate
+	// ErrQuit). `:q!` bypasses the guard; `:w` opens the commit dialog.
 	quitExHandler := func(_ []string, _ commands.ExecCtx) error {
+		if g.pendingDiscardH != nil {
+			if err := g.pendingDiscardH.BlockQuitIfPending(); err != nil {
+				toaster(err.Error())
+				return nil
+			}
+		}
 		return gocui.ErrQuit
+	}
+	forceQuitHandler := func(_ []string, _ commands.ExecCtx) error {
+		return gocui.ErrQuit
+	}
+	writeExHandler := func(_ []string, _ commands.ExecCtx) error {
+		if g.cmdRegistry == nil {
+			return nil
+		}
+		cmd, ok := g.cmdRegistry.Get(commands.CommitDialogOpen)
+		if !ok || cmd == nil || cmd.Handler == nil {
+			return nil
+		}
+		return cmd.Handler(commands.ExecCtx{})
 	}
 	_ = g.exRegistry.Register(keys.ExCommand{Name: "q", Description: "Quit", Handler: quitExHandler})
 	_ = g.exRegistry.Register(keys.ExCommand{Name: "quit", Description: "Quit", Handler: quitExHandler})
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "q!", Description: "Force quit", Handler: forceQuitHandler})
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "w", Description: "Open commit dialog", Handler: writeExHandler})
 
 	// Master Editor on editable views (today only COMMAND_LINE) +
 	// per-key SetKeybinding shims on every non-editable view.

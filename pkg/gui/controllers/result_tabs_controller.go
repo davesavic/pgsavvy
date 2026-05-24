@@ -1,10 +1,13 @@
 package controllers
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
@@ -187,6 +190,34 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 	// the master editor (scope=RESULT_GRID) dispatches FellThrough for
 	// every digit and Tab, leaving the user stranded on the active tab.
 	out = append(out, railSwitchBindings(string(types.RESULT_GRID), tr)...)
+
+	// dbsavvy-bwq.Z1: inline-edit + jump-list chords on RESULT_GRID. These
+	// are registered AFTER railSwitchBindings so the trie's most-specific
+	// match wins for `<c-i>` (ResultJumpForward) over the bare `<tab>`
+	// RailSwitchNext binding above. CellEditEnter (`i`) is published by
+	// CellEditorController, so it is intentionally absent here.
+	bwqSpecs := []bspec{
+		{"gd", commands.FKJumpForward, "FK forward jump", types.RESULT_GRID},
+		{"gD", commands.FKReverseMenu, "FK reverse menu", types.RESULT_GRID},
+		{"<c-o>", commands.ResultJumpBack, "Result jump back", types.RESULT_GRID},
+		{"<c-i>", commands.ResultJumpForward, "Result jump forward", types.RESULT_GRID},
+		{"<leader>cu", commands.PendingDiscardAtCursor, "Discard pending edit at cursor", types.RESULT_GRID},
+		{"<leader>cU", commands.PendingDiscardAll, "Discard all pending edits", types.RESULT_GRID},
+		{"<leader>cw", commands.CommitDialogOpen, "Open commit dialog", types.RESULT_GRID},
+	}
+	for _, s := range bwqSpecs {
+		seq, err := keys.SequenceFromShorthand(s.shorthand)
+		if err != nil {
+			continue
+		}
+		out = append(out, &types.ChordBinding{
+			Sequence:    seq,
+			Mode:        types.ModeNormal,
+			Scope:       s.scope,
+			ActionID:    s.actionID,
+			Description: s.description,
+		})
+	}
 	return out
 }
 
@@ -421,6 +452,150 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 	r.registerMotionHandler(reg, commands.ResultWrappedLineUp, tr.Actions.ResultWrappedLineUp, func() { r.mgr.WrappedLineUp() })
 	r.registerMotionHandler(reg, commands.ResultSelectRow, tr.Actions.ResultSelectRow, func() { r.mgr.SelectRow() })
 	r.registerMotionHandler(reg, commands.ResultSelectBlock, tr.Actions.ResultSelectBlock, func() { r.mgr.SelectBlock() })
+
+	// dbsavvy-bwq.Z1: inline-edit + jump-list action handlers. Several of
+	// these are stub-toasts today because the underlying helper wiring
+	// (FKCache, active-grid cursor picker) lands in a follow-up; the
+	// chord registration itself is the Z1 deliverable.
+	r.registerBwqHandlers(reg)
+}
+
+// registerBwqHandlers wires the Z1 (dbsavvy-bwq.23) action handlers for
+// the new RESULT_GRID chords. Split out so the main RegisterActions body
+// stays readable. Each handler nil-checks the helper / collaborator and
+// surfaces a toast describing the missing wire when called pre-wiring
+// (the FK forward / reverse handlers exercise that path today).
+func (r *ResultTabsController) registerBwqHandlers(reg *commands.Registry) {
+	_ = reg.Register(&commands.Command{
+		ID:          commands.FKJumpForward,
+		Description: "FK forward jump (gd)",
+		Tag:         "Row",
+		Handler:     r.fkForwardHandler,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.FKReverseMenu,
+		Description: "FK reverse menu (gD)",
+		Tag:         "Row",
+		Handler:     r.fkReverseHandler,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ResultJumpBack,
+		Description: "Result jump back (<c-o>)",
+		Tag:         "Result",
+		Handler:     r.jumpBackHandler,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ResultJumpForward,
+		Description: "Result jump forward (<c-i>)",
+		Tag:         "Result",
+		Handler:     r.jumpForwardHandler,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.PendingDiscardAtCursor,
+		Description: "Discard pending edit at cursor (<leader>cu)",
+		Tag:         "Edit",
+		Handler:     r.pendingDiscardAtCursorHandler,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.PendingDiscardAll,
+		Description: "Discard all pending edits (<leader>cU)",
+		Tag:         "Edit",
+		Handler:     r.pendingDiscardAllHandler,
+	})
+}
+
+// bwqToastTTL bounds the informational toasts the Z1 stub handlers emit
+// for unwired collaborators / no-op outcomes. Matches the surrounding
+// short-lived toast TTLs used elsewhere in this controller.
+const bwqToastTTL = 2 * time.Second
+
+// fkForwardHandler dispatches `gd`. The FK cache is wired post-Z1, so
+// the FKForwardHelper.Jump call surfaces a descriptive error today; we
+// toast the message and return nil so the chord is consumed.
+func (r *ResultTabsController) fkForwardHandler(_ commands.ExecCtx) error {
+	h := r.helpers.FKForward
+	if h == nil {
+		r.toast("fk forward: helper not wired")
+		return nil
+	}
+	// CurrentTab + cursor (row, col) resolution lands in a follow-up;
+	// today the helper's nil-cache guard fires before any tab lookup so
+	// passing a nil CurrentTab is moot — Jump returns "cache not wired".
+	var tab helpers.CurrentTab // nil — Jump nil-checks before deref
+	if err := h.Jump(context.Background(), tab, 0, 0); err != nil {
+		r.toast(err.Error())
+	}
+	return nil
+}
+
+// fkReverseHandler dispatches `gD`. Real wiring needs an FKCache to
+// resolve inbound foreign keys; stub-toast today.
+func (r *ResultTabsController) fkReverseHandler(_ commands.ExecCtx) error {
+	r.toast("fk reverse: cache wiring pending follow-up")
+	return nil
+}
+
+// jumpBackHandler dispatches `<c-o>` — pops the jump list. The actual
+// "navigate to (tab, row, col)" glue is a follow-up; for Z1 we just call
+// Back and surface the outcome via toast.
+func (r *ResultTabsController) jumpBackHandler(_ commands.ExecCtx) error {
+	jl := r.helpers.JumpList
+	if jl == nil {
+		r.toast("jump list: not wired")
+		return nil
+	}
+	e, ok := jl.Back()
+	if !ok {
+		r.toast("no jump back")
+		return nil
+	}
+	r.toast(fmt.Sprintf("jumped back to row %d col %d", e.Row, e.Col))
+	return nil
+}
+
+// jumpForwardHandler dispatches `<c-i>` — the forward counterpart to
+// jumpBackHandler.
+func (r *ResultTabsController) jumpForwardHandler(_ commands.ExecCtx) error {
+	jl := r.helpers.JumpList
+	if jl == nil {
+		r.toast("jump list: not wired")
+		return nil
+	}
+	e, ok := jl.Forward()
+	if !ok {
+		r.toast("no jump forward")
+		return nil
+	}
+	r.toast(fmt.Sprintf("jumped forward to row %d col %d", e.Row, e.Col))
+	return nil
+}
+
+// pendingDiscardAtCursorHandler dispatches `<leader>cu`. Resolving the
+// active grid's (pk, col) from the cursor lands in a follow-up; stub-
+// toast today so the binding is observable but no edit is mutated.
+func (r *ResultTabsController) pendingDiscardAtCursorHandler(_ commands.ExecCtx) error {
+	r.toast("pending discard at cursor: not yet wired")
+	return nil
+}
+
+// pendingDiscardAllHandler dispatches `<leader>cU` — clears every
+// staged PendingEdit, prompting above the threshold via the helper.
+func (r *ResultTabsController) pendingDiscardAllHandler(_ commands.ExecCtx) error {
+	h := r.helpers.PendingDiscard
+	if h == nil {
+		r.toast("pending discard: not wired")
+		return nil
+	}
+	return h.DiscardAll()
+}
+
+// toast surfaces msg via the helper bag's ToastHelper. No-op when the
+// helper is nil — keeps the Z1 stub handlers safe under partial wiring.
+func (r *ResultTabsController) toast(msg string) {
+	if r.helpers.Toast == nil {
+		return
+	}
+	r.helpers.Toast.Show(msg, bwqToastTTL)
 }
 
 // registerMotionHandler wires a no-arg manager call into the command

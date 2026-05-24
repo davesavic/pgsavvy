@@ -625,6 +625,53 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 		if body == "" {
 			t.Fatalf("cheatsheet.Render returned empty string for live TrieSet")
 		}
+
+		// dbsavvy-bwq.Z1: every new (key, scope, mode, actionID) tuple
+		// MUST be registered in the live TrieSet after wireWithDriver.
+		// Table-driven so a missing or moved binding surfaces a precise
+		// failure (which tuple) rather than a generic count mismatch.
+		ts := s.g.Matcher().TrieSet()
+		if ts == nil {
+			t.Fatalf("Matcher.TrieSet is nil; cannot assert Z1 bindings")
+		}
+		bwqCases := []struct {
+			actionID string
+			scope    types.ContextKey
+			mode     types.Mode
+			wantKeys []keys.Key
+		}{
+			{commands.CellEditEnter, types.RESULT_GRID, types.ModeNormal, []keys.Key{{Code: 'i'}}},
+			{commands.FKJumpForward, types.RESULT_GRID, types.ModeNormal, []keys.Key{{Code: 'g'}, {Code: 'd'}}},
+			{commands.FKReverseMenu, types.RESULT_GRID, types.ModeNormal, []keys.Key{{Code: 'g'}, {Code: 'D'}}},
+			{commands.ResultJumpBack, types.RESULT_GRID, types.ModeNormal, []keys.Key{{Code: 'o', Mod: keys.ModCtrl}}},
+			{commands.ResultJumpForward, types.RESULT_GRID, types.ModeNormal, []keys.Key{{Code: 'i', Mod: keys.ModCtrl}}},
+			{commands.PendingDiscardAtCursor, types.RESULT_GRID, types.ModeNormal, []keys.Key{{Code: ' '}, {Code: 'c'}, {Code: 'u'}}},
+			{commands.PendingDiscardAll, types.RESULT_GRID, types.ModeNormal, []keys.Key{{Code: ' '}, {Code: 'c'}, {Code: 'U'}}},
+			{commands.CommitDialogOpen, types.RESULT_GRID, types.ModeNormal, []keys.Key{{Code: ' '}, {Code: 'c'}, {Code: 'w'}}},
+			{commands.EditorCompletionTrigger, types.QUERY_EDITOR, types.ModeInsert, []keys.Key{{Code: 'x', Mod: keys.ModCtrl}, {Code: 'o', Mod: keys.ModCtrl}}},
+		}
+		for _, tc := range bwqCases {
+			seq, leaf, ok := findLeaf(ts, tc.mode, tc.scope, tc.actionID)
+			if !ok {
+				t.Errorf("Z1: missing leaf for actionID=%q scope=%s mode=%v", tc.actionID, tc.scope, tc.mode)
+				continue
+			}
+			if !leaf.IsLeaf || leaf.Action == nil || leaf.Action.ID != tc.actionID {
+				t.Errorf("Z1: leaf for %q is malformed: %+v", tc.actionID, leaf)
+				continue
+			}
+			if len(seq) != len(tc.wantKeys) {
+				t.Errorf("Z1: actionID=%q sequence length = %d, want %d (seq=%+v)",
+					tc.actionID, len(seq), len(tc.wantKeys), seq)
+				continue
+			}
+			for i, want := range tc.wantKeys {
+				got := seq[i]
+				if got.Code != want.Code || got.Special != want.Special || got.Mod != want.Mod {
+					t.Errorf("Z1: actionID=%q seq[%d] = %+v, want %+v", tc.actionID, i, got, want)
+				}
+			}
+		}
 	})
 
 	t.Run("step15_collision_warning_emitted", func(t *testing.T) {

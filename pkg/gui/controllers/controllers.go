@@ -42,6 +42,12 @@ type Controllers struct {
 	CommitDialog    *CommitDialogController
 	ConflictDialog  *ConflictDialogController
 	FKReversePicker *FKReversePickerController
+
+	// Cheatsheet is constructed by the orchestrator (it needs a Pop-
+	// capable focus-stack handle outside this package). dbsavvy-bwq.Z1
+	// promoted the help popup to TabbedPopup; the controller owns the
+	// [, ], <tab>, <esc>, q bindings on CHEATSHEET scope.
+	Cheatsheet *CheatsheetController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -295,6 +301,9 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.FKReversePicker != nil {
 		b.FKReversePicker.RegisterActions(reg)
+	}
+	if b.Cheatsheet != nil {
+		b.Cheatsheet.RegisterActions(reg)
 	}
 }
 

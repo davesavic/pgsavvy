@@ -3,6 +3,7 @@ package context
 import (
 	"sync"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/popup"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
@@ -30,6 +31,7 @@ type CheatsheetContext struct {
 
 	mu    sync.Mutex
 	scope types.ContextKey
+	state *popup.TabbedPopup
 }
 
 // NewCheatsheetContext builds the CHEATSHEET context. render may be nil
@@ -73,16 +75,44 @@ func (c *CheatsheetContext) SetRender(render func(scope types.ContextKey) string
 	c.render = render
 }
 
-// HandleRender invokes the wired render closure and writes its output
-// to the CHEATSHEET view through the driver. No-ops cleanly when the
-// render closure is nil (e.g. early bootstrap) or when render returns
-// the empty string.
+// SetState installs a TabbedPopup state object (dbsavvy-bwq.Z1). When
+// non-nil, HandleRender writes state.Body() into the view — replacing
+// the single-scope render-closure path. The orchestrator's
+// help.cheatsheet action builds a state with one tab per relevant scope
+// before pushing the context. nil clears the state, restoring the
+// legacy render-closure fallback.
+//
+// Concurrent-safe; HandleRender takes the same mutex when reading.
+func (c *CheatsheetContext) SetState(s *popup.TabbedPopup) {
+	c.mu.Lock()
+	c.state = s
+	c.mu.Unlock()
+}
+
+// State returns the installed TabbedPopup or nil. Concurrent-safe.
+func (c *CheatsheetContext) State() *popup.TabbedPopup {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.state
+}
+
+// HandleRender writes the cheatsheet body into the gocui view. When a
+// TabbedPopup state has been installed (the Z1 path) the active tab's
+// body wins; otherwise HandleRender falls back to the single-scope
+// render closure so legacy callers (test fixtures, pre-Z1 wiring) keep
+// working. No-ops cleanly when both inputs are unset.
 func (c *CheatsheetContext) HandleRender() error {
-	if c.render == nil {
-		return nil
+	state := c.State()
+	var body string
+	if state != nil {
+		body = state.Body()
 	}
-	scope := c.Scope()
-	body := c.render(scope)
+	if body == "" {
+		if c.render == nil {
+			return nil
+		}
+		body = c.render(c.Scope())
+	}
 	if body == "" {
 		return nil
 	}
