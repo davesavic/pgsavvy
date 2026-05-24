@@ -687,7 +687,7 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 			},
 			config.KeybindingConfig{
 				Mode: "n", Scope: string(types.TABLES), Key: "Z",
-				Action: commands.ListDown, Description: "second",
+				Action: commands.HelpCheatsheet, Description: "second",
 			},
 		)
 		_, warnings, err := s.runBuildWithCfg(&synthetic)
@@ -713,7 +713,7 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 			},
 			config.KeybindingConfig{
 				Mode: "n", Scope: string(types.TABLES), Key: "gg",
-				Action: commands.ListDown, Description: "leaf-gg",
+				Action: commands.HelpCheatsheet, Description: "leaf-gg",
 			},
 		)
 		_, warnings, err := s.runBuildWithCfg(&synthetic)
