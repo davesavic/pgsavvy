@@ -195,7 +195,7 @@ func (h *CellApplyHelper) Apply(
 
 	for i := range edits {
 		e := edits[i]
-		stmt, args := buildUpdateStatement(qualified, pkCols, e)
+		stmt, args := buildUpdateStatement(qualified, pkCols, e, false)
 		res, execErr := sess.Execute(ctx, models.Query{SQL: stmt, Args: args})
 		if execErr != nil {
 			rollback(ctx, sess)
@@ -261,6 +261,98 @@ func (h *CellApplyHelper) Apply(
 	return out, nil, nil
 }
 
+// Overwrite is like Apply but issues PK-only UPDATEs (no IS NOT DISTINCT
+// FROM guard). Used by the conflict dialog's `[o]` handler on
+// non-confirm_writes connections — the user has explicitly chosen to let
+// the staged NewValues land over server drift. dbsavvy-lda (dbsavvy-8oo #7).
+//
+// Behavioural differences from Apply:
+//   - No dry-run mode (callers reach here only after the user accepted
+//     the overwrite).
+//   - No conflict collection: a RowsAffected==0 statement means the row
+//     was deleted between conflict display and overwrite. We rollback and
+//     surface it as an error so the caller can re-fetch.
+//   - Same refetch-by-PK on success so the grid can update.
+func (h *CellApplyHelper) Overwrite(
+	ctx context.Context,
+	set *models.PendingEditSet,
+	pkCols []string,
+) (ApplyResult, error) {
+	if h == nil || h.acquirer == nil {
+		return ApplyResult{}, ErrNoAcquirer
+	}
+	if set == nil || set.IsEmpty() {
+		return ApplyResult{}, nil
+	}
+	if len(pkCols) == 0 {
+		return ApplyResult{}, ErrMissingPKColumns
+	}
+
+	edits := set.Edits()
+	for i := range edits {
+		if len(edits[i].PrimaryKey) != len(pkCols) {
+			return ApplyResult{}, fmt.Errorf("%w: edit[%d] has %d pk values, expected %d",
+				ErrPKLengthMismatch, i, len(edits[i].PrimaryKey), len(pkCols))
+		}
+	}
+
+	if _, ok := ctx.Deadline(); !ok {
+		timeout := h.timeout
+		if timeout <= 0 {
+			timeout = DefaultCellApplyTimeout
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	sess, err := h.acquirer.AcquireSession(ctx)
+	if err != nil {
+		return ApplyResult{}, fmt.Errorf("%w: %w", ErrPoolExhausted, err)
+	}
+	defer func() { _ = sess.Close() }()
+
+	schema := set.Table.Schema
+	table := set.Table.Table
+	qualified := pg.QuoteQualified(schema, table)
+
+	if _, err := sess.Execute(ctx, models.Query{SQL: "BEGIN"}); err != nil {
+		return ApplyResult{}, fmt.Errorf("cell overwrite: BEGIN: %w", err)
+	}
+
+	rowsAffected := make([]int, len(edits))
+	for i := range edits {
+		e := edits[i]
+		stmt, args := buildUpdateStatement(qualified, pkCols, e, true)
+		res, execErr := sess.Execute(ctx, models.Query{SQL: stmt, Args: args})
+		if execErr != nil {
+			rollback(ctx, sess)
+			return ApplyResult{}, fmt.Errorf("cell overwrite: UPDATE %s.%s.%s: %w",
+				schema, table, e.Column, execErr)
+		}
+		if res.RowsAffected == 0 {
+			rollback(ctx, sess)
+			return ApplyResult{}, fmt.Errorf("cell overwrite: row not found for %s (deleted by another session?)", e.Column)
+		}
+		rowsAffected[i] = int(res.RowsAffected)
+	}
+
+	if _, err := sess.Execute(ctx, models.Query{SQL: "COMMIT"}); err != nil {
+		return ApplyResult{}, fmt.Errorf("cell overwrite: COMMIT: %w", err)
+	}
+
+	pkRows := distinctPKs(edits)
+	refRes, err := refetchByPK(ctx, sess, qualified, pkCols, pkRows)
+	if err != nil {
+		return ApplyResult{RowsAffected: rowsAffected}, fmt.Errorf("cell overwrite: refetch after commit: %w", err)
+	}
+	return ApplyResult{
+		RowsAffected:     rowsAffected,
+		RefetchedColumns: refRes.cols,
+		RefetchedRows:    refRes.rows,
+	}, nil
+}
+
 // buildUpdateStatement returns the parameterized UPDATE for a single
 // PendingEdit plus the args slice. Layout:
 //
@@ -270,8 +362,12 @@ func (h *CellApplyHelper) Apply(
 // For Expression edits the SET RHS is the verbatim NewExpr (NOT
 // parameterized — this is the deliberate, documented behaviour of
 // EditKind.Expression). The args slice carries: [optional NewValue,
-// pk values..., OldValue].
-func buildUpdateStatement(qualified string, pkCols []string, e models.PendingEdit) (string, []any) {
+// pk values..., OldValue (when !force)].
+//
+// When force is true, the IS NOT DISTINCT FROM guard is omitted so the
+// staged NewValue lands regardless of the server-side drift — used by
+// Overwrite. The OldValue is NOT appended to args in that case.
+func buildUpdateStatement(qualified string, pkCols []string, e models.PendingEdit, force bool) (string, []any) {
 	var b strings.Builder
 	args := make([]any, 0, len(pkCols)+2)
 
@@ -297,10 +393,12 @@ func buildUpdateStatement(qualified string, pkCols []string, e models.PendingEdi
 		b.WriteString(pg.QuoteIdent(pkc))
 		fmt.Fprintf(&b, " = $%d", len(args))
 	}
-	args = append(args, e.OldValue)
-	b.WriteString(" AND ")
-	b.WriteString(pg.QuoteIdent(e.Column))
-	fmt.Fprintf(&b, " IS NOT DISTINCT FROM $%d", len(args))
+	if !force {
+		args = append(args, e.OldValue)
+		b.WriteString(" AND ")
+		b.WriteString(pg.QuoteIdent(e.Column))
+		fmt.Fprintf(&b, " IS NOT DISTINCT FROM $%d", len(args))
+	}
 
 	return b.String(), args
 }

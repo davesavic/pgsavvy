@@ -1,5 +1,7 @@
 # dbsavvy — Design Document
 
+# DISCLAIMER: THIS IS A GUIDE ONLY! The design is evolving and the implementation may deviate as we progress.
+
 A terminal database client modeled on **lazygit**'s architecture, with
 **fully customizable vim-style keybindings** (modes, leader keys,
 arbitrary chord sequences, per-context maps).
@@ -2293,6 +2295,8 @@ current SELECT result. If any are missing, `gd` is disabled with
 `DisabledReason: "FK '<name>' requires columns <missing> in the
 result"`. The user can re-run with the missing columns added; the
 jumplist entry is preserved across the re-run.
+
+Multiple FKs on same column: chooses first by FK.Name lex order.
 
 **Reverse `gD`** — cursor on a PK (or unique-key) value, find all
 inbound foreign keys:

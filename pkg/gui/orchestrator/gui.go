@@ -846,23 +846,49 @@ func (g *Gui) wireWithDriver() error {
 	// the apply pipeline and per-table store land.
 	if g.registry != nil && g.tree != nil {
 		if cellCtx := g.registry.CellEditor; cellCtx != nil {
-			// picker and store land in bwq.23: picker resolves the active
-			// result tab's grid + RunHandle; store resolves the per-table
-			// PendingEditSet. Both nil today — the controller's
-			// enterDisabled() gates the `i` binding with the "no active
-			// result grid" reason until Z1 wires the real collaborators.
 			cellCtrl := controllers.NewCellEditorController(
 				g.deps.Common, helperBag, cellCtx, g.tree, nil, nil,
 			)
 			cellCtrl.AttachToContext(&cellCtx.BaseContext)
+			// dbsavvy-6lq / dbsavvy-8oo #9: picker resolves the active tab's
+			// grid + cursor per call; store resolves the per-(connID,
+			// baseTable) PendingEditSet via the same helperBag closure the
+			// commit dialog uses, keeping both flows on the same set.
+			cellCtrl.SetPicker(cellEditorPicker{tabs: g.resultTabsH})
+			cellCtrl.SetStore(cellEditorStore{resolve: helperBag.ActivePendingEditSet})
 			g.controllers.CellEditor = cellCtrl
 		}
+		// dbsavvy-bb6 (#6) + dbsavvy-lda (#7): a single CellApplyHelper
+		// instance is shared by the commit-dialog apply/dry-run hooks and
+		// the conflict-dialog overwrite hook. The helper is stateless
+		// beyond its acquirer; both dialogs route through the same
+		// connHelperAcquirer so per-call session resolution stays unified.
+		cellApply := helpers.NewCellApplyHelper(helpers.CellApplyDeps{
+			Acquirer: connHelperAcquirer{h: g.connectHelper},
+		})
 		if commitCtx := g.registry.CommitDialog; commitCtx != nil {
 			commitCtrl := controllers.NewCommitDialogController(
 				g.deps.Common, helperBag, commitCtx, g.tree,
 			)
 			commitCtrl.AttachToContext(&commitCtx.BaseContext)
 			g.controllers.CommitDialog = commitCtrl
+
+			// dbsavvy-bb6 / dbsavvy-8oo #6: wire the apply / dry-run /
+			// show-sql hooks. CellApplyHelper acquires its own session
+			// per call via connHelperAcquirer so it does not entangle
+			// with the user's main SQLSession transactions.
+			cdDeps := commitDialogDeps{
+				apply:       cellApply,
+				tabs:        g.resultTabsH,
+				conflictCtx: g.registry.ConflictDialog,
+				tree:        g.tree,
+				toast:       g.toastHelp,
+				logger:      g.deps.Common.Logger(),
+				onUI:        g.OnUIThread,
+			}
+			commitCtrl.SetApplyHook(commitApplyHook{deps: cdDeps})
+			commitCtrl.SetDryRunHook(commitDryRunHook{deps: cdDeps})
+			commitCtrl.SetShowSqlHook(commitShowSqlHook{logger: cdDeps.logger})
 		}
 		if conflictCtx := g.registry.ConflictDialog; conflictCtx != nil {
 			conflictCtrl := controllers.NewConflictDialogController(
@@ -870,6 +896,18 @@ func (g *Gui) wireWithDriver() error {
 			)
 			conflictCtrl.AttachToContext(&conflictCtx.BaseContext)
 			g.controllers.ConflictDialog = conflictCtrl
+
+			// dbsavvy-lda / dbsavvy-8oo #7: wire refresh + overwrite hooks.
+			// Cancel is intentionally unwired — the controller's default
+			// pop already covers the no-mutation Esc path.
+			cfDeps := conflictDialogDeps{
+				apply:         cellApply,
+				tabs:          g.resultTabsH,
+				toast:         g.toastHelp,
+				activeSetFunc: helperBag.ActivePendingEditSet,
+			}
+			conflictCtrl.SetRefreshHook(conflictRefreshHook{deps: cfDeps})
+			conflictCtrl.SetOverwriteHook(conflictOverwriteHook{deps: cfDeps})
 		}
 		if pickerCtx := g.registry.FKReversePicker; pickerCtx != nil {
 			pickerCtrl := controllers.NewFKReversePickerController(
@@ -885,6 +923,38 @@ func (g *Gui) wireWithDriver() error {
 			pickerCtrl.AttachToContext(&pickerCtx.BaseContext)
 			g.controllers.FKReversePicker = pickerCtrl
 		}
+	}
+
+	// dbsavvy-qsb / dbsavvy-8oo #8: wire the completion engine + the
+	// SUGGESTIONS overlay context to VimEditorController so the
+	// `<c-x><c-o>` trigger stops being a silent no-op. SchemaSource and
+	// FunctionSource close over the live ConnectHelper session + the
+	// SCHEMAS rail's current selection; KeywordsSource is static; the
+	// HistorySource pulls from the per-process query.History opened
+	// earlier in wireWithDriver. Every source no-ops on nil deps so the
+	// popup degrades cleanly before the first Connect.
+	if g.controllers != nil && g.controllers.VimEditor != nil && g.registry != nil && g.registry.Suggestions != nil {
+		sessionProv := func() drivers.Session {
+			if g.connectHelper == nil {
+				return nil
+			}
+			return g.connectHelper.Session()
+		}
+		schemaPicker := schemasPickerAdapter{registry: g.registry.Schemas}
+		schemaProv := func() string { return schemaPicker.SelectedSchemaName() }
+		sources := []editor.Source{
+			editor.NewSchemaSource(sessionProv, schemaProv),
+			editor.NewFunctionSource(sessionProv),
+			editor.KeywordsSource{PriorityVal: 20},
+		}
+		if g.history != nil {
+			sources = append(sources, editor.HistorySource{
+				Store:       g.history,
+				PriorityVal: 10,
+			})
+		}
+		g.controllers.VimEditor.SetCompletionEngine(editor.NewEngine(sources))
+		g.controllers.VimEditor.SetSuggestionsContext(g.registry.Suggestions)
 	}
 
 	// Register every controller's action handlers with the registry.
