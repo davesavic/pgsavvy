@@ -78,14 +78,12 @@ func TestIsResultPaneKey(t *testing.T) {
 		want bool
 	}{
 		{types.QUERY_EDITOR, true},
-		{types.ResultTabKey(0), true},
-		{types.ResultTabKey(7), true},
-		{types.ResultTabActiveKey, true}, // "result_tab_active" — matches prefix
+		{types.RESULT_GRID, true},
 		{types.SCHEMAS, false},
 		{types.TABLES, false},
 		{types.CONNECTIONS, false},
 		{"", false},
-		{"result_tab", false}, // missing trailing underscore
+		{types.ResultTabActiveKey, false}, // sentinel for pair lookup; never on focus stack
 	}
 	for _, tc := range cases {
 		if got := isResultPaneKey(tc.key); got != tc.want {
@@ -144,23 +142,23 @@ func TestSwapHookWithinPaneNoCancel(t *testing.T) {
 		t.Fatalf("after bootstrap-swap state = %v, want Running", tab.State())
 	}
 
-	// QUERY_EDITOR -> result_tab_0: within-pane, no cancel.
-	pushKey(t, tree, types.ResultTabKey(0))
+	// QUERY_EDITOR -> RESULT_GRID: within-pane, no cancel.
+	pushKey(t, tree, types.RESULT_GRID)
 	if tab.State() != ui.StateRunning {
-		t.Errorf("QUERY_EDITOR -> result_tab_0 cancelled tab; state = %v, want Running", tab.State())
+		t.Errorf("QUERY_EDITOR -> RESULT_GRID cancelled tab; state = %v, want Running", tab.State())
 	}
 }
 
 func TestSwapHookWithinPaneReverseNoCancel(t *testing.T) {
 	h, tab := makeRunningTab(t)
-	tree := seedTree(t, types.ResultTabKey(0))
+	tree := seedTree(t, types.RESULT_GRID)
 	installResultTabsSwapHook(tree, h)
-	pushKey(t, tree, types.ResultTabKey(0)) // settle prev
+	pushKey(t, tree, types.RESULT_GRID) // settle prev
 
-	// result_tab_0 -> QUERY_EDITOR: within-pane reverse, no cancel.
+	// RESULT_GRID -> QUERY_EDITOR: within-pane reverse, no cancel.
 	pushKey(t, tree, types.QUERY_EDITOR)
 	if tab.State() != ui.StateRunning {
-		t.Errorf("result_tab_0 -> QUERY_EDITOR cancelled tab; state = %v, want Running", tab.State())
+		t.Errorf("RESULT_GRID -> QUERY_EDITOR cancelled tab; state = %v, want Running", tab.State())
 	}
 }
 
@@ -179,14 +177,14 @@ func TestSwapHookLeavingFromEditorCancels(t *testing.T) {
 
 func TestSwapHookLeavingFromResultTabCancels(t *testing.T) {
 	h, tab := makeRunningTab(t)
-	tree := seedTree(t, types.ResultTabKey(0))
+	tree := seedTree(t, types.RESULT_GRID)
 	installResultTabsSwapHook(tree, h)
-	pushKey(t, tree, types.ResultTabKey(0)) // settle prev=result_tab_0
+	pushKey(t, tree, types.RESULT_GRID) // settle prev=RESULT_GRID
 
-	// result_tab_0 -> SCHEMAS: leaving pane, Running tab → cancel.
+	// RESULT_GRID -> SCHEMAS: leaving pane, Running tab → cancel.
 	pushKey(t, tree, types.SCHEMAS)
 	if tab.State() != ui.StateCancelled {
-		t.Errorf("result_tab_0 -> SCHEMAS did not cancel; state = %v, want Cancelled", tab.State())
+		t.Errorf("RESULT_GRID -> SCHEMAS did not cancel; state = %v, want Cancelled", tab.State())
 	}
 }
 

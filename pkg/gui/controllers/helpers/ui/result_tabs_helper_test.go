@@ -1521,12 +1521,12 @@ func TestActiveContext_NilWhenNoTabs(t *testing.T) {
 	}
 }
 
-// TestActiveContext_ResultTabReturnsResultTabKey verifies that the
-// IBaseContext surfaced for a non-plan tab carries the slot-specific
-// result_tab_<slot> Key and matching ViewName, and is MAIN_CONTEXT
-// (so ContextTree.Push lands it correctly on the main slot).
-// dbsavvy-usj.
-func TestActiveContext_ResultTabReturnsResultTabKey(t *testing.T) {
+// TestActiveContext_ResultTabReturnsResultGridKey verifies that the
+// IBaseContext surfaced for a non-plan tab carries the RESULT_GRID Key
+// (shared by all tabs so the cheatsheet + matcher resolve scope-keyed
+// bindings) and a slot-specific ViewName, and is MAIN_CONTEXT (so
+// ContextTree.Push lands it correctly on the main slot).
+func TestActiveContext_ResultTabReturnsResultGridKey(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
 	if err := h.openTab("SELECT 1", nil); err != nil {
 		t.Fatalf("openTab: %v", err)
@@ -1539,12 +1539,12 @@ func TestActiveContext_ResultTabReturnsResultTabKey(t *testing.T) {
 	if tab == nil {
 		t.Fatal("Active() with one open tab returned nil")
 	}
-	wantKey := types.ResultTabKey(tab.Slot())
-	if ctx.GetKey() != wantKey {
-		t.Errorf("ctx.GetKey() = %q, want %q", ctx.GetKey(), wantKey)
+	if ctx.GetKey() != types.RESULT_GRID {
+		t.Errorf("ctx.GetKey() = %q, want %q", ctx.GetKey(), types.RESULT_GRID)
 	}
-	if ctx.GetViewName() != string(wantKey) {
-		t.Errorf("ctx.GetViewName() = %q, want %q", ctx.GetViewName(), string(wantKey))
+	wantView := string(types.ResultTabKey(tab.Slot()))
+	if ctx.GetViewName() != wantView {
+		t.Errorf("ctx.GetViewName() = %q, want %q", ctx.GetViewName(), wantView)
 	}
 	if ctx.GetKind() != types.MAIN_CONTEXT {
 		t.Errorf("ctx.GetKind() = %v, want MAIN_CONTEXT", ctx.GetKind())

@@ -1,30 +1,21 @@
 package orchestrator
 
 import (
-	"strings"
-
 	"github.com/davesavic/dbsavvy/pkg/gui"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// resultTabKeyPrefix is the shared prefix the ResultTabsHelper uses to
-// name per-slot context keys ("result_tab_<i>"). Defined in
-// pkg/gui/types/pair.go (types.ResultTabKey). Centralised here so the
-// pane-membership check stays in one place.
-const resultTabKeyPrefix = "result_tab_"
-
 // isResultPaneKey reports whether k belongs to the PairNormal pane —
-// i.e. the QueryEditor or any dynamically-allocated result tab. The
+// i.e. the QueryEditor or any result tab. Result tabs share the
+// RESULT_GRID context key so the cheatsheet and matcher resolve the
+// bindings ResultTabsController publishes under that scope. The
 // orchestrator's mid-query preempt only triggers when the user moves
 // OUT of this pane (e.g. rail-switch to SCHEMAS / TABLES); transitions
-// inside the pane (QueryEditor <-> result_tab_N) keep the active
-// stream alive.
+// inside the pane (QueryEditor <-> RESULT_GRID) keep the active stream
+// alive.
 func isResultPaneKey(k types.ContextKey) bool {
-	if k == types.QUERY_EDITOR {
-		return true
-	}
-	return strings.HasPrefix(string(k), resultTabKeyPrefix)
+	return k == types.QUERY_EDITOR || k == types.RESULT_GRID
 }
 
 // installResultTabsSwapHook wires a ContextTree swap hook that cancels
@@ -64,7 +55,7 @@ func installResultTabsSwapHook(tree *gui.ContextTree, helper *ui.ResultTabsHelpe
 		if was == "" {
 			return
 		}
-		// Within-pane transition (e.g. QueryEditor -> result_tab_0): keep
+		// Within-pane transition (e.g. QueryEditor -> RESULT_GRID): keep
 		// the stream alive.
 		if isResultPaneKey(was) && isResultPaneKey(current) {
 			return

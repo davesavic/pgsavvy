@@ -1128,7 +1128,12 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 		doneCh:    make(chan struct{}),
 		grid:      grid.NewView(),
 		baseCtx: guicontext.NewBaseContext(guicontext.BaseContextOpts{
-			Key:      types.ResultTabKey(slot),
+			// Key=RESULT_GRID so all tabs share the scope the
+			// ResultTabsController and master editor publish bindings
+			// under (gd, gD, <c-o>, <c-i>, <leader>c*, gt/gT, …).
+			// ViewName stays per-slot so gocui SetCurrentView targets
+			// the right dynamic view.
+			Key:      types.RESULT_GRID,
 			ViewName: string(types.ResultTabKey(slot)),
 			Kind:     types.MAIN_CONTEXT,
 			Title:    label,
