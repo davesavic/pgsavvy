@@ -133,6 +133,7 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	}
 	if profile != nil && c.g != nil {
 		c.g.activeConnID = profile.Name
+		c.g.activeConnProfile = profile
 	}
 	if err := c.wireQueryRuntime(ctx, conn, profile); err != nil {
 		// Roll back the ConnectHelper.Connect so we don't leak the schema-
@@ -142,6 +143,7 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 		c.helper.Disconnect()
 		if c.g != nil {
 			c.g.activeConnID = ""
+			c.g.activeConnProfile = nil
 		}
 		return err
 	}

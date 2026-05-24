@@ -143,10 +143,14 @@ type Gui struct {
 	// Inline-edit helpers (epic dbsavvy-bwq). Built by wireWithDriver
 	// alongside the existing UI helpers; pinned on Gui so future bd
 	// issues (notably bwq.23 / Z1) can plumb them through dispatchers
-	// without re-instantiating. PendingEditSet is a single process-wide
-	// shared set today; A4/A5 will swap it for a per-(connID, baseTable)
-	// registry once the apply pipeline lands.
+	// without re-instantiating. pendingEditSet is the legacy single
+	// process-wide set retained for the discard helper + status
+	// indicator surfaces that have not yet been migrated to per-table
+	// resolution; pendingEditReg is the per-(connID, baseTable) registry
+	// (dbsavvy-8oo stub #10) that CommitDialogOpen and CellEditor route
+	// through to land each edit on the right table's set.
 	pendingEditSet  *models.PendingEditSet
+	pendingEditReg  *pendingEditRegistry
 	pendingDiscardH *helpers.PendingDiscardHelper
 	jumpListH       *ui.ResultJumpList
 	fkForwardH      *helpers.FKForwardHelper
@@ -181,7 +185,8 @@ type Gui struct {
 	delayOverrides *keyDelayOverrides
 
 	// Connection state surfaced by the activeConnAdapter.
-	activeConnID string
+	activeConnID      string
+	activeConnProfile *models.Connection
 
 	// onTableActivate stashes the HelperBag.OnTableActivate closure
 	// wireWithDriver installed, so tests can invoke the composite
@@ -548,6 +553,9 @@ func (g *Gui) wireWithDriver() error {
 	if g.pendingEditSet == nil {
 		g.pendingEditSet = &models.PendingEditSet{}
 	}
+	if g.pendingEditReg == nil {
+		g.pendingEditReg = newPendingEditRegistry()
+	}
 	g.pendingDiscardH = helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{
 		Set:     g.pendingEditSet,
 		Confirm: g.confirmHelp,
@@ -563,15 +571,14 @@ func (g *Gui) wireWithDriver() error {
 			g.jumpListH.PruneByTab(tabID)
 		})
 	}
-	// FKForwardHelper drives `gd` forward FK navigation. Cache and Busy
-	// are intentionally nil at boot: the FKCache lives on the active
-	// SQLSession (per-Connect lifecycle) and BusyChecker is wired by
-	// later tasks. Z1 (dbsavvy-bwq.23) will swap a per-Connect adapter
-	// in once the dispatch surface is in place. Jump() nil-checks each
-	// collaborator and returns a descriptive error, so the helper is
-	// safe to retain in this partially-wired state.
+	// FKForwardHelper drives `gd` forward FK navigation. Cache routes
+	// each Get through activeSessionFKCacheAdapter so per-Connect
+	// FKCache rotation is invisible to the helper. BusyChecker remains
+	// nil (the optional "gd queued behind active stream" toast lights
+	// up when a later task wires a session-busy reporter); the helper
+	// treats nil busy as "no informational toast".
 	g.fkForwardH = helpers.NewFKForwardHelper(helpers.FKForwardDeps{
-		Cache:    nil,
+		Cache:    &activeSessionFKCacheAdapter{g: g},
 		JumpList: g.jumpListH,
 		Runner:   g.queryRunner,
 		Tabs:     g.resultTabsH,
@@ -710,6 +717,54 @@ func (g *Gui) wireWithDriver() error {
 		JumpList:       g.jumpListH,
 		FKForward:      g.fkForwardH,
 		PendingEditSet: g.pendingEditSet,
+
+		// gD picker open — resolves through g.controllers at dispatch
+		// time so the closure works despite the controllers aggregate
+		// being filled in AttachControllers AFTER this HelperBag is
+		// composed. dbsavvy-8oo stub #2.
+		OpenFKReversePicker: func(entries []controllers.ReverseEntry, origin controllers.FKReverseOriginTab, row, col int) bool {
+			if g.controllers.FKReversePicker == nil {
+				return false
+			}
+			return g.controllers.FKReversePicker.Open(entries, origin, row, col)
+		},
+		// Reverse-FK resolver — routes each lookup through the active
+		// SQLSession's FKCache so per-Connect rotation is invisible to
+		// the picker handler. Returns an error when no session is bound.
+		// dbsavvy-8oo stub #2.
+		ReverseFKLookup: func(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
+			if g.activeSQLSession == nil {
+				return nil, fmt.Errorf("no active session")
+			}
+			fkc := g.activeSQLSession.FKCache()
+			if fkc == nil {
+				return nil, fmt.Errorf("active session has no fk cache")
+			}
+			return fkc.GetReverse(ctx, schema, table)
+		},
+		// ActivePendingEditSet resolves the per-(connID, baseTable) set
+		// from the registry using the currently-active tab's identity.
+		// Returns nil when no tab is active OR the tab has no row
+		// identity (non-table-backed result). dbsavvy-8oo stub #10 / #3.
+		ActivePendingEditSet: func() *models.PendingEditSet {
+			if g.resultTabsH == nil || g.pendingEditReg == nil {
+				return nil
+			}
+			tab := g.resultTabsH.Active()
+			if tab == nil {
+				return nil
+			}
+			connID, ri := tab.Identity()
+			if connID == "" || ri.BaseTable == "" || !ri.HasRowIdentity {
+				return nil
+			}
+			return g.pendingEditReg.For(connID, ri.BaseTable)
+		},
+		// ActiveConnectionProfile surfaces the live profile captured at
+		// connectInvoker.Connect. nil until the first successful Connect.
+		ActiveConnectionProfile: func() *models.Connection {
+			return g.activeConnProfile
+		},
 	}
 	g.controllers = controllers.AttachControllers(g.registry, g.deps.Common, helperBag)
 

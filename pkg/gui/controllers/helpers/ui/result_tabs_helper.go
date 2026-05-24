@@ -807,6 +807,24 @@ func (h *ResultTabsHelper) Pin(t *Tab) bool {
 	return pinned
 }
 
+// SwitchToTabByID activates the tab whose ID stringifies to tabID and
+// returns it. Returns nil when the tab no longer exists (closed since
+// the JumpEntry was pushed) — callers (jump-back/forward) treat nil as
+// a stale entry and surface a toast. The active grid is NOT moved here;
+// the caller positions the cursor via grid.View.SetCursor after the
+// switch. dbsavvy-8oo stub #4.
+func (h *ResultTabsHelper) SwitchToTabByID(tabID string) *Tab {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, t := range h.tabs {
+		if fmt.Sprintf("%d", t.id) == tabID {
+			h.activeID = t.id
+			return t
+		}
+	}
+	return nil
+}
+
 // Jump activates the tab at 1-based index i (i.e. <leader>1 → slot 0).
 // Out-of-range indices toast "no tab N" and leave the active selection
 // unchanged.

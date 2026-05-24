@@ -96,6 +96,9 @@ func (f *fakeSession) ListConstraints(context.Context, string, string) ([]models
 func (f *fakeSession) ListForeignKeys(context.Context, string, string) ([]models.ForeignKey, error) {
 	panic("ListForeignKeys not used")
 }
+func (f *fakeSession) ListInboundForeignKeys(context.Context, string, string) ([]models.ForeignKey, error) {
+	panic("ListInboundForeignKeys not used")
+}
 func (f *fakeSession) ListFunctions(context.Context) ([]string, error) {
 	panic("ListFunctions not used")
 }

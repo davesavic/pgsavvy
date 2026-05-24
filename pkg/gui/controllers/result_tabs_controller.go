@@ -3,11 +3,12 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
@@ -83,6 +84,16 @@ type ResultTabsManager interface {
 	WrappedLineUp()
 	SelectRow()
 	SelectBlock()
+
+	// Active returns the currently-active result tab, or nil when no
+	// tab exists. Wired by Z1 follow-up (dbsavvy-8oo) so handlers can
+	// resolve the tab + its grid for FK navigation, pending-edit
+	// dispatch, and jump-list glue. *ui.ResultTabsHelper satisfies it.
+	Active() *ui.Tab
+	// SwitchToTabByID activates the tab whose ID stringifies to tabID
+	// and returns it. Returns nil for stale entries. Used by <c-o> /
+	// <c-i> jump navigation. dbsavvy-8oo stub #4.
+	SwitchToTabByID(tabID string) *ui.Tab
 }
 
 // ResultTabsController publishes the multi-tab keybindings:
@@ -509,35 +520,174 @@ func (r *ResultTabsController) registerBwqHandlers(reg *commands.Registry) {
 // short-lived toast TTLs used elsewhere in this controller.
 const bwqToastTTL = 2 * time.Second
 
-// fkForwardHandler dispatches `gd`. The FK cache is wired post-Z1, so
-// the FKForwardHelper.Jump call surfaces a descriptive error today; we
-// toast the message and return nil so the chord is consumed.
+// fkForwardHandler dispatches `gd`. Resolves the active result tab,
+// reads the grid cursor, and hands a CurrentTab adapter (wrapping the
+// tab + its grid) to FKForwardHelper.Jump. The helper's guards surface
+// as toasts so the chord is always consumed.
 func (r *ResultTabsController) fkForwardHandler(_ commands.ExecCtx) error {
 	h := r.helpers.FKForward
 	if h == nil {
 		r.toast("fk forward: helper not wired")
 		return nil
 	}
-	// CurrentTab + cursor (row, col) resolution lands in a follow-up;
-	// today the helper's nil-cache guard fires before any tab lookup so
-	// passing a nil CurrentTab is moot — Jump returns "cache not wired".
-	var tab helpers.CurrentTab // nil — Jump nil-checks before deref
-	if err := h.Jump(context.Background(), tab, 0, 0); err != nil {
+	if r.mgr == nil {
+		r.toast("fk forward: result tabs not wired")
+		return nil
+	}
+	tab := r.mgr.Active()
+	if tab == nil {
+		r.toast("fk forward: no active result tab")
+		return nil
+	}
+	grid := tab.Grid()
+	if grid == nil {
+		r.toast("fk forward: active tab has no grid")
+		return nil
+	}
+	row, col := grid.CursorPosition()
+	if err := h.Jump(context.Background(), &fkCurrentTabAdapter{tab: tab}, row, col); err != nil {
 		r.toast(err.Error())
 	}
 	return nil
 }
 
-// fkReverseHandler dispatches `gD`. Real wiring needs an FKCache to
-// resolve inbound foreign keys; stub-toast today.
+// fkCurrentTabAdapter satisfies helpers.CurrentTab by delegating to a
+// *ui.Tab and its grid. Kept in the controllers package (rather than
+// on ui.Tab itself) so ui.Tab stays focused on tab lifecycle and the
+// FK-specific projection (BaseTable split, row-values copy semantics)
+// lives next to its consumer.
+type fkCurrentTabAdapter struct {
+	tab *ui.Tab
+}
+
+func (a *fkCurrentTabAdapter) Slot() int { return a.tab.Slot() }
+func (a *fkCurrentTabAdapter) ID() int64 { return a.tab.ID() }
+
+// BaseTable splits the tab's ResultIdentity.BaseTable on the first dot
+// into (schema, table). A bare identifier (no dot) returns ("", id).
+func (a *fkCurrentTabAdapter) BaseTable() (string, string) {
+	_, ri := a.tab.Identity()
+	bt := ri.BaseTable
+	if i := strings.IndexByte(bt, '.'); i >= 0 {
+		return bt[:i], bt[i+1:]
+	}
+	return "", bt
+}
+
+func (a *fkCurrentTabAdapter) ColumnNames() []string {
+	g := a.tab.Grid()
+	if g == nil {
+		return nil
+	}
+	cols := g.Columns()
+	out := make([]string, len(cols))
+	for i := range cols {
+		out[i] = cols[i].Name
+	}
+	return out
+}
+
+// RowValues returns a defensive copy of row's values so the caller
+// (which captures the slice on a JumpEntry / FK query) doesn't share
+// backing storage with the grid's AppendRows buffer.
+func (a *fkCurrentTabAdapter) RowValues(row int) ([]any, bool) {
+	g := a.tab.Grid()
+	if g == nil {
+		return nil, false
+	}
+	rows := g.AllRows()
+	if row < 0 || row >= len(rows) {
+		return nil, false
+	}
+	src := rows[row].Values
+	out := make([]any, len(src))
+	copy(out, src)
+	return out, true
+}
+
+// fkReverseHandler dispatches `gD`. Resolves the active tab + cursor
+// row, looks up inbound FKs via the FK cache (routed through the active
+// SQLSession), assembles ReverseEntry records bound to the row's PK,
+// and opens the picker. Each guard surfaces an explanatory toast so
+// the chord is always consumed.
 func (r *ResultTabsController) fkReverseHandler(_ commands.ExecCtx) error {
-	r.toast("fk reverse: cache wiring pending follow-up")
+	if r.mgr == nil {
+		r.toast("fk reverse: result tabs not wired")
+		return nil
+	}
+	tab := r.mgr.Active()
+	if tab == nil {
+		r.toast("fk reverse: no active result tab")
+		return nil
+	}
+	grid := tab.Grid()
+	if grid == nil {
+		r.toast("fk reverse: active tab has no grid")
+		return nil
+	}
+	row, col := grid.CursorPosition()
+	adapter := &fkCurrentTabAdapter{tab: tab}
+	schema, table := adapter.BaseTable()
+	if table == "" {
+		r.toast("fk reverse: active result has no base table")
+		return nil
+	}
+	rowIdent := grid.RowIdentity()
+	if len(rowIdent) == 0 {
+		r.toast("fk reverse: active result has no row identity")
+		return nil
+	}
+	values, ok := adapter.RowValues(row)
+	if !ok {
+		r.toast("fk reverse: row not yet loaded")
+		return nil
+	}
+	pkValues := make([]any, 0, len(rowIdent))
+	for _, idx := range rowIdent {
+		if idx < 0 || idx >= len(values) {
+			r.toast("fk reverse: row identity column out of range")
+			return nil
+		}
+		pkValues = append(pkValues, values[idx])
+	}
+
+	if r.helpers.ReverseFKLookup == nil {
+		r.toast("fk reverse: reverse lookup not wired")
+		return nil
+	}
+	fks, err := r.helpers.ReverseFKLookup(context.Background(), schema, table)
+	if err != nil {
+		r.toast(fmt.Sprintf("fk reverse: %s", err.Error()))
+		return nil
+	}
+	if len(fks) == 0 {
+		r.toast("fk reverse: no inbound foreign keys")
+		return nil
+	}
+
+	entries := make([]ReverseEntry, 0, len(fks))
+	for _, fk := range fks {
+		entries = append(entries, ReverseEntry{
+			FK:        fk,
+			Reltuples: -1,
+			PKValues:  append([]any(nil), pkValues...),
+		})
+	}
+
+	if r.helpers.OpenFKReversePicker == nil {
+		r.toast("fk reverse: picker not wired")
+		return nil
+	}
+	if !r.helpers.OpenFKReversePicker(entries, tab, row, col) {
+		r.toast("fk reverse: picker open failed")
+	}
 	return nil
 }
 
-// jumpBackHandler dispatches `<c-o>` — pops the jump list. The actual
-// "navigate to (tab, row, col)" glue is a follow-up; for Z1 we just call
-// Back and surface the outcome via toast.
+
+// jumpBackHandler dispatches `<c-o>` — pops the jump list back and
+// navigates to (tab, row, col). Stale entries (tab no longer exists)
+// surface a "stale" toast and consume the keystroke.
 func (r *ResultTabsController) jumpBackHandler(_ commands.ExecCtx) error {
 	jl := r.helpers.JumpList
 	if jl == nil {
@@ -549,7 +699,7 @@ func (r *ResultTabsController) jumpBackHandler(_ commands.ExecCtx) error {
 		r.toast("no jump back")
 		return nil
 	}
-	r.toast(fmt.Sprintf("jumped back to row %d col %d", e.Row, e.Col))
+	r.navigateToJumpEntry(e.TabID, e.Row, e.Col, "jump back")
 	return nil
 }
 
@@ -566,15 +716,90 @@ func (r *ResultTabsController) jumpForwardHandler(_ commands.ExecCtx) error {
 		r.toast("no jump forward")
 		return nil
 	}
-	r.toast(fmt.Sprintf("jumped forward to row %d col %d", e.Row, e.Col))
+	r.navigateToJumpEntry(e.TabID, e.Row, e.Col, "jump forward")
 	return nil
 }
 
-// pendingDiscardAtCursorHandler dispatches `<leader>cu`. Resolving the
-// active grid's (pk, col) from the cursor lands in a follow-up; stub-
-// toast today so the binding is observable but no edit is mutated.
+// navigateToJumpEntry switches to tabID and positions the grid cursor
+// at (row, col). A nil tab (stale entry) is reported via toast prefixed
+// with the chord label so the user knows which direction missed.
+func (r *ResultTabsController) navigateToJumpEntry(tabID string, row, col int, label string) {
+	if r.mgr == nil {
+		r.toast(fmt.Sprintf("%s: result tabs not wired", label))
+		return
+	}
+	tab := r.mgr.SwitchToTabByID(tabID)
+	if tab == nil {
+		r.toast(fmt.Sprintf("%s: tab no longer exists", label))
+		return
+	}
+	g := tab.Grid()
+	if g == nil {
+		return
+	}
+	g.SetCursor(row, col)
+}
+
+// pendingDiscardAtCursorHandler dispatches `<leader>cu`. Resolves the
+// active tab's per-table PendingEditSet via the registry, snapshots
+// the cursor (pk, col), and removes the staged edit if present. A
+// miss (no edit at that cell) is silent — pressing cu on a clean cell
+// just no-ops.
 func (r *ResultTabsController) pendingDiscardAtCursorHandler(_ commands.ExecCtx) error {
-	r.toast("pending discard at cursor: not yet wired")
+	if r.mgr == nil {
+		r.toast("pending discard: result tabs not wired")
+		return nil
+	}
+	tab := r.mgr.Active()
+	if tab == nil {
+		r.toast("pending discard: no active result tab")
+		return nil
+	}
+	grid := tab.Grid()
+	if grid == nil {
+		r.toast("pending discard: active tab has no grid")
+		return nil
+	}
+	if r.helpers.ActivePendingEditSet == nil {
+		r.toast("pending discard: registry not wired")
+		return nil
+	}
+	set := r.helpers.ActivePendingEditSet()
+	if set == nil {
+		r.toast("pending discard: tab has no editable target")
+		return nil
+	}
+	row, col := grid.CursorPosition()
+	cols := grid.Columns()
+	if col < 0 || col >= len(cols) {
+		r.toast("pending discard: cursor column out of range")
+		return nil
+	}
+	colName := cols[col].Name
+	rowIdent := grid.RowIdentity()
+	if len(rowIdent) == 0 {
+		r.toast("pending discard: no row identity on result")
+		return nil
+	}
+	adapter := &fkCurrentTabAdapter{tab: tab}
+	values, ok := adapter.RowValues(row)
+	if !ok {
+		r.toast("pending discard: row not yet loaded")
+		return nil
+	}
+	pk := make([]any, 0, len(rowIdent))
+	for _, idx := range rowIdent {
+		if idx < 0 || idx >= len(values) {
+			r.toast("pending discard: row identity out of range")
+			return nil
+		}
+		pk = append(pk, values[idx])
+	}
+	if !set.HasEdit(pk, colName) {
+		return nil
+	}
+	set.Remove(pk, colName)
+	r.toast(fmt.Sprintf("discarded pending edit on %s", colName))
 	return nil
 }
 

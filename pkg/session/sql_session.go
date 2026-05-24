@@ -134,6 +134,9 @@ func (s *SQLSession) FKCache() *FKCache {
 		s.fkCache = NewFKCache(func(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
 			return s.inner.ListForeignKeys(ctx, schema, table)
 		})
+		s.fkCache.SetReverseLoader(func(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
+			return s.inner.ListInboundForeignKeys(ctx, schema, table)
+		})
 	})
 	return s.fkCache
 }

@@ -117,6 +117,10 @@ func (s *fakeSess) ListForeignKeys(context.Context, string, string) ([]models.Fo
 	return nil, nil
 }
 
+func (s *fakeSess) ListInboundForeignKeys(context.Context, string, string) ([]models.ForeignKey, error) {
+	return nil, nil
+}
+
 func (s *fakeSess) ListFunctions(context.Context) ([]string, error) {
 	return nil, nil
 }

@@ -216,12 +216,54 @@ func (e *CommitDialogController) Cancel(_ commands.ExecCtx) error {
 	return e.popFocus()
 }
 
-// Open is the no-op handler registered for CommitDialogOpen. The
-// real open path lives in A5 / Z1 (they hold the per-table
-// PendingEditSet handle the controller doesn't see). Registered so
-// the Matcher resolves the ActionID even before Z1 wires the chord
-// + ExCommand dispatchers.
-func (e *CommitDialogController) Open(_ commands.ExecCtx) error { return nil }
+// Open is the `:w` / `<leader>cw` handler. Resolves the per-table
+// PendingEditSet via the registry closure on HelperBag, captures the
+// active connection profile, transitions the context into the active
+// state with that snapshot, and pushes the dialog onto the focus
+// stack. A missing set / connection / tree surfaces a toast and
+// consumes the keystroke (the chord must never silently fail).
+func (e *CommitDialogController) Open(_ commands.ExecCtx) error {
+	if e.ctx == nil {
+		return nil
+	}
+	if e.helpers.ActivePendingEditSet == nil {
+		e.toastOpen("commit dialog: pending registry not wired")
+		return nil
+	}
+	set := e.helpers.ActivePendingEditSet()
+	if set == nil {
+		e.toastOpen("commit dialog: no editable target")
+		return nil
+	}
+	if set.IsEmpty() {
+		e.toastOpen("commit dialog: no pending edits")
+		return nil
+	}
+	if e.helpers.ActiveConnectionProfile == nil {
+		e.toastOpen("commit dialog: connection profile not wired")
+		return nil
+	}
+	conn := e.helpers.ActiveConnectionProfile()
+	if conn == nil {
+		e.toastOpen("commit dialog: no active connection")
+		return nil
+	}
+	if e.tree == nil {
+		e.toastOpen("commit dialog: focus tree not wired")
+		return nil
+	}
+	e.ctx.Open(set, conn)
+	return e.wrapErr("commit.dialog.open", e.tree.Push(e.ctx))
+}
+
+// toastOpen routes Open-path messages through the shared toast helper.
+// Centralised so the failure modes share a consistent prefix.
+func (e *CommitDialogController) toastOpen(msg string) {
+	if e.helpers.Toast == nil {
+		return
+	}
+	e.helpers.Toast.Show(msg, 0)
+}
 
 // popFocus dispatches the focus-stack pop. Centralised so apply +
 // cancel share the same error-wrapping label.

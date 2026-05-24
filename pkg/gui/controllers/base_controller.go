@@ -120,7 +120,37 @@ type HelperBag struct {
 	JumpList       *ui.ResultJumpList
 	FKForward      *helpers.FKForwardHelper
 	PendingEditSet *models.PendingEditSet
+
+	// OpenFKReversePicker pushes the reverse-FK picker popup. Wired by
+	// the orchestrator to FKReversePickerController.Open; ResultTabs-
+	// Controller's gD handler invokes it after assembling the entries.
+	// Nil-safe — the handler surfaces a toast when unwired.
+	OpenFKReversePicker FKReversePickerOpener
+
+	// ReverseFKLookup resolves inbound foreign keys for (schema, table)
+	// against the currently-active SQLSession's FKCache. The orchestrator
+	// wires a closure that routes through activeSQLSession.FKCache().
+	// GetReverse. Nil-safe.
+	ReverseFKLookup func(ctx context.Context, schema, table string) ([]models.ForeignKey, error)
+
+	// ActivePendingEditSet returns the PendingEditSet for the currently-
+	// active result tab's (connID, baseTable), creating one on first
+	// access via the per-table registry. Returns nil when no editable
+	// tab is active. dbsavvy-8oo stub #10 / #3.
+	ActivePendingEditSet func() *models.PendingEditSet
+
+	// ActiveConnectionProfile returns the currently-bound connection
+	// profile, or nil when no connection is active. CommitDialogOpen
+	// needs the full profile (Color, ConfirmWrites, ReadOnly) to drive
+	// the dialog's gates + styling. dbsavvy-8oo stub #5.
+	ActiveConnectionProfile func() *models.Connection
 }
+
+// FKReversePickerOpener is the narrow surface ResultTabsController uses
+// to push the reverse-FK picker. The concrete satisfier is
+// *FKReversePickerController; orchestrator wiring captures it as a
+// closure so this package stays free of an inter-controller reference.
+type FKReversePickerOpener func(entries []ReverseEntry, origin FKReverseOriginTab, cursorRow, cursorCol int) bool
 
 // DebugLogger is the minimal logging surface controllers expect.
 // *slog.Logger satisfies it.

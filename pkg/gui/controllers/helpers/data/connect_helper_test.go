@@ -92,6 +92,10 @@ func (s *fakeSession) ListForeignKeys(_ context.Context, _, _ string) ([]models.
 	return nil, nil
 }
 
+func (s *fakeSession) ListInboundForeignKeys(_ context.Context, _, _ string) ([]models.ForeignKey, error) {
+	return nil, nil
+}
+
 func (s *fakeSession) ListFunctions(_ context.Context) ([]string, error) {
 	return nil, nil
 }

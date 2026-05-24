@@ -126,6 +126,21 @@ func (s *PendingEditSet) Count() int {
 	return len(s.edits)
 }
 
+// HasEdit reports whether (pk, col) already has a staged edit. Drives
+// the CellEditor "dirty cell" branch where re-entering a cell that was
+// previously staged surfaces the pending edit instead of the server
+// value.
+func (s *PendingEditSet) HasEdit(pk []any, col string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := range s.edits {
+		if s.edits[i].Column == col && pkEqual(s.edits[i].PrimaryKey, pk) {
+			return true
+		}
+	}
+	return false
+}
+
 // Edits returns a defensive copy of the staged edits. The returned slice
 // may be mutated by the caller without affecting the set.
 func (s *PendingEditSet) Edits() []PendingEdit {

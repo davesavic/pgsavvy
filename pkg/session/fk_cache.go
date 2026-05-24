@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -31,20 +32,39 @@ type fkKey struct {
 //
 // Lifecycle: bound to a single SQLSession; closing the SQLSession drops the
 // only reference so the cache is GC'd. No AppState persistence (ADR-8).
+//
+// Forward + reverse: Get resolves outbound FKs (the table's own FK
+// constraints); GetReverse resolves inbound FKs (other tables' FKs
+// that reference this table). Each direction has its own loader and
+// its own cache map — they are intentionally independent so a forward
+// Invalidate does not nuke reverse entries the user just paid for.
 type FKCache struct {
-	loader FKLoader
+	loader        FKLoader
+	reverseLoader FKLoader
 
-	mu      sync.RWMutex
-	entries map[fkKey][]models.ForeignKey
+	mu             sync.RWMutex
+	entries        map[fkKey][]models.ForeignKey
+	reverseEntries map[fkKey][]models.ForeignKey
 }
 
 // NewFKCache returns an empty cache backed by loader. loader must be non-nil;
 // passing nil panics at first Get rather than silently dropping requests.
+// SetReverseLoader wires the inbound-FK loader; without it GetReverse
+// returns an error.
 func NewFKCache(loader FKLoader) *FKCache {
 	return &FKCache{
-		loader:  loader,
-		entries: make(map[fkKey][]models.ForeignKey),
+		loader:         loader,
+		entries:        make(map[fkKey][]models.ForeignKey),
+		reverseEntries: make(map[fkKey][]models.ForeignKey),
 	}
+}
+
+// SetReverseLoader installs the inbound-FK loader used by GetReverse.
+// Safe to call before any GetReverse caller observes the cache.
+func (c *FKCache) SetReverseLoader(rl FKLoader) {
+	c.mu.Lock()
+	c.reverseLoader = rl
+	c.mu.Unlock()
 }
 
 // Get returns the cached FKs for (schema, table), loading them via the
@@ -81,21 +101,58 @@ func (c *FKCache) Get(ctx context.Context, schema, table string) ([]models.Forei
 	return fks, nil
 }
 
+// GetReverse returns the cached inbound FKs for (schema, table) — every
+// FK constraint whose referenced (target) table is (schema, table).
+// Mirrors Get's hot/slow path and never-cache-errors semantics. Returns
+// an error when no reverse loader has been wired via SetReverseLoader.
+func (c *FKCache) GetReverse(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
+	key := fkKey{Schema: schema, Table: table}
+
+	c.mu.RLock()
+	if fks, ok := c.reverseEntries[key]; ok {
+		c.mu.RUnlock()
+		return fks, nil
+	}
+	loader := c.reverseLoader
+	c.mu.RUnlock()
+
+	if loader == nil {
+		return nil, errors.New("fk cache: reverse loader not wired")
+	}
+
+	fks, err := loader(ctx, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	if fks == nil {
+		fks = []models.ForeignKey{}
+	}
+
+	c.mu.Lock()
+	c.reverseEntries[key] = fks
+	c.mu.Unlock()
+
+	return fks, nil
+}
+
 // Invalidate drops the cached entry for (schema, table) if present.
-// Invalidating an absent key is a no-op.
+// Invalidating an absent key is a no-op. Only touches forward entries;
+// reverse entries are dropped via InvalidateAll.
 func (c *FKCache) Invalidate(schema, table string) {
 	c.mu.Lock()
 	delete(c.entries, fkKey{Schema: schema, Table: table})
 	c.mu.Unlock()
 }
 
-// InvalidateAll clears every cached entry. Called from the schema-rail
-// refresh path so a manual rail reload also drops stale FK metadata.
+// InvalidateAll clears every cached entry, forward and reverse. Called
+// from the schema-rail refresh path so a manual rail reload drops every
+// kind of stale FK metadata in one shot.
 func (c *FKCache) InvalidateAll() {
 	c.mu.Lock()
-	// Replace the map rather than ranging+delete so any in-flight Get reader
+	// Replace the maps rather than ranging+delete so any in-flight reader
 	// that has already returned its slice keeps a valid reference (the slice
 	// is immutable post-store; we never mutate cached values in place).
 	c.entries = make(map[fkKey][]models.ForeignKey)
+	c.reverseEntries = make(map[fkKey][]models.ForeignKey)
 	c.mu.Unlock()
 }

@@ -200,6 +200,34 @@ func (v *View) CursorPosition() (row, col int) {
 	return v.cursorRow, v.cursorCol
 }
 
+// SetCursor positions the cursor at (row, col), clamping each axis to
+// the loaded data range. Out-of-range values clamp to the nearest valid
+// cell rather than failing — callers (jump-back, FK navigation) can
+// hand in stale entries against a tab whose buffer has since shrunk
+// without surfacing an error. Negative inputs clamp to 0.
+func (v *View) SetCursor(row, col int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if row < 0 {
+		row = 0
+	}
+	if col < 0 {
+		col = 0
+	}
+	if n := len(v.rows); n > 0 && row >= n {
+		row = n - 1
+	} else if n == 0 {
+		row = 0
+	}
+	if n := len(v.cols); n > 0 && col >= n {
+		col = n - 1
+	} else if n == 0 {
+		col = 0
+	}
+	v.cursorRow = row
+	v.cursorCol = col
+}
+
 // renderBody is the pure function that turns a snapshot into the
 // styled text Render writes into the gocui.View. Lives here (next to
 // the scroll logic) because the layout walk is intertwined with the

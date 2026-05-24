@@ -53,6 +53,11 @@ type Session interface {
 	ListIndexes(ctx context.Context, schema, table string) ([]models.Index, error)
 	ListConstraints(ctx context.Context, schema, table string) ([]models.Constraint, error)
 	ListForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error)
+	// ListInboundForeignKeys returns every FK constraint whose
+	// referenced (target) table is (schema, table) — i.e. the inbound
+	// edges into the supplied table. Drives the `gD` reverse-FK picker
+	// (dbsavvy-bwq.17 / dbsavvy-8oo stub #2).
+	ListInboundForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error)
 	ListFunctions(ctx context.Context) ([]string, error)
 	DescribeFunction(ctx context.Context, schema, name string) (models.FunctionDetail, error)
 
