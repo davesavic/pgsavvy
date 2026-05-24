@@ -12,39 +12,20 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// Local ActionID constants for the inline cell-edit lifecycle. Z1
-// (dbsavvy-bwq.23) upstreams these into pkg/gui/commands/actions.go so
-// they participate in the action-registry audit. Until then the
-// constants live here so the controller can compile + test in isolation.
-//
-// Z1 will:
-//  1. Move these into pkg/gui/commands/actions.go (and AllActionIDs()).
-//  2. Replace the local consts with references to commands.CellEdit*.
-//  3. Wire central keybinding registration through the master editor.
+// Package-level ActionID aliases. The canonical constants now live in
+// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A,
+// dbsavvy-bwq.23); these aliases retain the original
+// controllers.CellEdit* names so existing callers (notably this
+// package's tests) keep compiling. New code should reference commands.*
+// directly.
 const (
-	// CellEditEnter is bound to `i` on RESULT_GRID scope. The handler
-	// validates editability preconditions and, on success, opens the
-	// CELL_EDITOR popup pre-seeded with the cursor cell's current value.
-	CellEditEnter = "cell.edit.enter"
-
-	// CellEditCommit is bound to `<cr>` and `<esc>` on CELL_EDITOR
-	// scope. Reads the buffer, records a PendingEdit if it differs
-	// from OriginalValue, then pops the popup.
-	CellEditCommit = "cell.edit.commit"
-
-	// CellEditDiscard is bound to `<c-c>` on CELL_EDITOR scope. Pops
-	// the popup without recording; on a dirty cell, also removes any
-	// pre-existing PendingEdit for (pk, col) and emits a status toast.
-	CellEditDiscard = "cell.edit.discard"
-
-	// CellEditSetNull, CellEditExpr* are reserved for A2 (per-type
-	// entry helpers). A1 declares the bindings (so the user-visible
-	// key surface is stable) but routes them through nil handlers
-	// until A2 wires the real per-type entry logic.
-	CellEditSetNull         = "cell.edit.set_null"
-	CellEditExprNow         = "cell.edit.expr.now"
-	CellEditExprCurrentDate = "cell.edit.expr.current_date"
-	CellEditExprPrompt      = "cell.edit.expr.prompt"
+	CellEditEnter           = commands.CellEditEnter
+	CellEditCommit          = commands.CellEditCommit
+	CellEditDiscard         = commands.CellEditDiscard
+	CellEditSetNull         = commands.CellEditSetNull
+	CellEditExprNow         = commands.CellEditExprNow
+	CellEditExprCurrentDate = commands.CellEditExprCurrentDate
+	CellEditExprPrompt      = commands.CellEditExprPrompt
 )
 
 // GridStatePicker is the narrow read-only surface CellEditorController

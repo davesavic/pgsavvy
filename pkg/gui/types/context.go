@@ -75,6 +75,18 @@ const (
 	// side rails (epic dbsavvy-3vf). Non-editable; sized larger than the
 	// generic 50% × 50% popup to fit table metadata.
 	TABLE_INSPECT ContextKey = "table_inspect"
+	// CELL_EDITOR is the in-grid cell mini-buffer (TEMPORARY_POPUP). Owned by
+	// dbsavvy-bwq A1 / Z1.
+	CELL_EDITOR ContextKey = "cell_editor"
+	// COMMIT_DIALOG is the pending-edit commit dialog (TEMPORARY_POPUP). Owned by
+	// dbsavvy-bwq A4 / Z1.
+	COMMIT_DIALOG ContextKey = "commit_dialog"
+	// CONFLICT_DIALOG is the per-conflict refresh/overwrite dialog (TEMPORARY_POPUP).
+	// Owned by dbsavvy-bwq A6 / Z1.
+	CONFLICT_DIALOG ContextKey = "conflict_dialog"
+	// FK_REVERSE_PICKER is the reverse-FK referencing-table picker (TEMPORARY_POPUP).
+	// Owned by dbsavvy-bwq B6 / Z1.
+	FK_REVERSE_PICKER ContextKey = "fk_reverse_picker"
 )
 
 // IsEditable reports whether the view associated with k receives text
@@ -95,7 +107,7 @@ const (
 // context, so flipping here has no runtime effect until the real
 // QUERY_EDITOR context lands.
 func (k ContextKey) IsEditable() bool {
-	return k == COMMAND_LINE || k == QUERY_EDITOR || k == PROMPT
+	return k == COMMAND_LINE || k == QUERY_EDITOR || k == PROMPT || k == CELL_EDITOR
 }
 
 // KeybindingsOpts is the (currently empty) bag passed to GetKeybindings

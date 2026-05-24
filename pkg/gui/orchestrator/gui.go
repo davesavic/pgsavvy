@@ -31,6 +31,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
@@ -138,6 +139,17 @@ type Gui struct {
 	tipHelp     *ui.TipHelper
 	resultTabsH *ui.ResultTabsHelper
 	noticeHelp  *ui.NoticeHelper
+
+	// Inline-edit helpers (epic dbsavvy-bwq). Built by wireWithDriver
+	// alongside the existing UI helpers; pinned on Gui so future bd
+	// issues (notably bwq.23 / Z1) can plumb them through dispatchers
+	// without re-instantiating. PendingEditSet is a single process-wide
+	// shared set today; A4/A5 will swap it for a per-(connID, baseTable)
+	// registry once the apply pipeline lands.
+	pendingEditSet  *models.PendingEditSet
+	pendingDiscardH *helpers.PendingDiscardHelper
+	jumpListH       *ui.ResultJumpList
+	fkForwardH      *helpers.FKForwardHelper
 
 	// Keybinding system (built by wireWithDriver).
 	cmdRegistry *commands.Registry
@@ -526,6 +538,48 @@ func (g *Gui) wireWithDriver() error {
 		g.queryRunner = data.NewQueryRunner(nil, drivers.Capabilities{})
 	}
 
+	// dbsavvy-bwq.py4: instantiate the inline-edit helpers. Each is built
+	// once at boot and pinned on *Gui so subsequent re-wires (bwq.23 /
+	// Z1) can extend the dispatch surface without rebuilding the state.
+	//
+	// PendingEditSet is a single process-wide shared set today; A4/A5
+	// swap this for a per-(connID, baseTable) registry once the apply
+	// pipeline lands.
+	if g.pendingEditSet == nil {
+		g.pendingEditSet = &models.PendingEditSet{}
+	}
+	g.pendingDiscardH = helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{
+		Set:     g.pendingEditSet,
+		Confirm: g.confirmHelp,
+		Toast:   g.toastHelp,
+	})
+	g.jumpListH = ui.NewResultJumpList()
+	// dbsavvy-bwq.15: prune jump entries belonging to a closed result
+	// tab so <c-o>/<c-i> never resurface stale references. Wired after
+	// both helpers exist; ResultTabsHelper invokes the callback during
+	// tab removal on the UI thread.
+	if g.resultTabsH != nil {
+		g.resultTabsH.SetOnTabRemoved(func(tabID string) {
+			g.jumpListH.PruneByTab(tabID)
+		})
+	}
+	// FKForwardHelper drives `gd` forward FK navigation. Cache and Busy
+	// are intentionally nil at boot: the FKCache lives on the active
+	// SQLSession (per-Connect lifecycle) and BusyChecker is wired by
+	// later tasks. Z1 (dbsavvy-bwq.23) will swap a per-Connect adapter
+	// in once the dispatch surface is in place. Jump() nil-checks each
+	// collaborator and returns a descriptive error, so the helper is
+	// safe to retain in this partially-wired state.
+	g.fkForwardH = helpers.NewFKForwardHelper(helpers.FKForwardDeps{
+		Cache:    nil,
+		JumpList: g.jumpListH,
+		Runner:   g.queryRunner,
+		Tabs:     g.resultTabsH,
+		Toast:    g.toastHelp,
+		Busy:     nil,
+		Limit:    0,
+	})
+
 	connectInv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
 
 	// dbsavvy-56u.1: wire the RefreshHelper closures over the live
@@ -649,6 +703,13 @@ func (g *Gui) wireWithDriver() error {
 		OnUIThread:            g.OnUIThread,
 		OnUIThreadContentOnly: g.OnUIThreadContentOnly,
 		OnWorker:              g.OnWorker,
+
+		// Inline-edit helpers (dbsavvy-bwq.py4). Pinned here so future
+		// dispatcher wiring (bwq.23 / Z1) can reach them via the bag.
+		PendingDiscard: g.pendingDiscardH,
+		JumpList:       g.jumpListH,
+		FKForward:      g.fkForwardH,
+		PendingEditSet: g.pendingEditSet,
 	}
 	g.controllers = controllers.AttachControllers(g.registry, g.deps.Common, helperBag)
 
@@ -706,6 +767,57 @@ func (g *Gui) wireWithDriver() error {
 		)
 		inspectCtrl.AttachToContext(&inspectCtx.BaseContext)
 		g.controllers.TableInspect = inspectCtrl
+	}
+
+	// dbsavvy-bwq.py4: build the four inline-edit popup controllers and
+	// attach each to its context so their bindings reach the trie via
+	// AllDefaultBindings. Mirrors the TableInspect path above —
+	// constructed here because every controller needs a FocusPopper
+	// handle on the focus-stack (*gui.ContextTree), which the controllers
+	// package cannot import. Z1 (dbsavvy-bwq.23) follows up to plumb the
+	// per-controller hooks (apply, dry-run, picker, store, runner) once
+	// the apply pipeline and per-table store land.
+	if g.registry != nil && g.tree != nil {
+		if cellCtx := g.registry.CellEditor; cellCtx != nil {
+			// picker and store land in bwq.23: picker resolves the active
+			// result tab's grid + RunHandle; store resolves the per-table
+			// PendingEditSet. Both nil today — the controller's
+			// enterDisabled() gates the `i` binding with the "no active
+			// result grid" reason until Z1 wires the real collaborators.
+			cellCtrl := controllers.NewCellEditorController(
+				g.deps.Common, helperBag, cellCtx, g.tree, nil, nil,
+			)
+			cellCtrl.AttachToContext(&cellCtx.BaseContext)
+			g.controllers.CellEditor = cellCtrl
+		}
+		if commitCtx := g.registry.CommitDialog; commitCtx != nil {
+			commitCtrl := controllers.NewCommitDialogController(
+				g.deps.Common, helperBag, commitCtx, g.tree,
+			)
+			commitCtrl.AttachToContext(&commitCtx.BaseContext)
+			g.controllers.CommitDialog = commitCtrl
+		}
+		if conflictCtx := g.registry.ConflictDialog; conflictCtx != nil {
+			conflictCtrl := controllers.NewConflictDialogController(
+				g.deps.Common, helperBag, conflictCtx, g.tree,
+			)
+			conflictCtrl.AttachToContext(&conflictCtx.BaseContext)
+			g.controllers.ConflictDialog = conflictCtrl
+		}
+		if pickerCtx := g.registry.FKReversePicker; pickerCtx != nil {
+			pickerCtrl := controllers.NewFKReversePickerController(
+				g.deps.Common, helperBag, controllers.FKReversePickerDeps{
+					Context: pickerCtx,
+					Tree:    g.tree,
+					Runner:  g.queryRunner,
+					Tabs:    g.resultTabsH,
+					Jumps:   g.jumpListH,
+					Toast:   g.toastHelp,
+				},
+			)
+			pickerCtrl.AttachToContext(&pickerCtx.BaseContext)
+			g.controllers.FKReversePicker = pickerCtrl
+		}
 	}
 
 	// Register every controller's action handlers with the registry.

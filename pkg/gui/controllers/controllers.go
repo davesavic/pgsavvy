@@ -33,6 +33,15 @@ type Controllers struct {
 	// orchestrator assigns it after AttachControllers returns so the
 	// bundle's binding-inventory + RegisterActions paths include it.
 	TableInspect *TableInspectController
+	// CellEditor / CommitDialog / ConflictDialog / FKReversePicker are
+	// constructed by the orchestrator alongside TableInspect: each takes
+	// a FocusPopper-capable handle on the focus-stack (*gui.ContextTree)
+	// which this package cannot import. The bundle still owns them so
+	// RegisterActions + AllDefaultBindings include their bindings.
+	CellEditor      *CellEditorController
+	CommitDialog    *CommitDialogController
+	ConflictDialog  *ConflictDialogController
+	FKReversePicker *FKReversePickerController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -274,6 +283,18 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	}
 	if b.TableInspect != nil {
 		b.TableInspect.RegisterActions(reg)
+	}
+	if b.CellEditor != nil {
+		b.CellEditor.RegisterActions(reg)
+	}
+	if b.CommitDialog != nil {
+		b.CommitDialog.RegisterActions(reg)
+	}
+	if b.ConflictDialog != nil {
+		b.ConflictDialog.RegisterActions(reg)
+	}
+	if b.FKReversePicker != nil {
+		b.FKReversePicker.RegisterActions(reg)
 	}
 }
 

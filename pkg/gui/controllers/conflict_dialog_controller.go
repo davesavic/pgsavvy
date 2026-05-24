@@ -13,34 +13,14 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// Local ActionID constants for the conflict-dialog lifecycle. Z1
-// (dbsavvy-bwq.23) upstreams these into pkg/gui/commands/actions.go so
-// they participate in the action-registry audit. Until then the
-// constants live here so the controller can compile + test in isolation.
-// Mirrors A4's local-const pattern in commit_dialog_controller.go.
-//
-// Z1 will:
-//  1. Move these into pkg/gui/commands/actions.go (and AllActionIDs()).
-//  2. Replace the local consts with references to commands.ConflictDialog*.
-//  3. Wire the open path that pushes the dialog after A5 returns
-//     conflicts != nil.
+// Package-level ActionID aliases. Canonical constants live in
+// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A,
+// dbsavvy-bwq.23). Aliases retain the controllers.ConflictDialog* names
+// so existing callers (notably this package's tests) keep compiling.
 const (
-	// ConflictDialogRefresh is bound to `[r]` on CONFLICT_DIALOG. The
-	// handler invokes OnRefresh (which re-fetches conflicted rows by PK
-	// and drops conflicting edits from the PendingEditSet) and pops the
-	// dialog. Non-conflicting edits remain staged.
-	ConflictDialogRefresh = "conflict.dialog.refresh"
-
-	// ConflictDialogOverwrite is bound to `[o]` on CONFLICT_DIALOG. The
-	// handler invokes OnOverwrite (which re-runs conflicted UPDATEs
-	// with a PK-only predicate) and pops the dialog. NOT bound on
-	// confirm_writes:true connections — GetKeybindings omits the chord
-	// entirely so the key is unmapped, not visibly disabled.
-	ConflictDialogOverwrite = "conflict.dialog.overwrite"
-
-	// ConflictDialogCancel is bound to `[Esc]` on CONFLICT_DIALOG. Pops
-	// the popup without modifying the PendingEditSet.
-	ConflictDialogCancel = "conflict.dialog.cancel"
+	ConflictDialogRefresh   = commands.ConflictDialogRefresh
+	ConflictDialogOverwrite = commands.ConflictDialogOverwrite
+	ConflictDialogCancel    = commands.ConflictDialogCancel
 )
 
 // ConflictDialogRefreshHook is invoked when `[r]` is pressed. The

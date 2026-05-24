@@ -5,18 +5,6 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// cellEditorKey is the placeholder ContextKey for the inline cell-edit
-// popup until Z1 (dbsavvy-bwq.23) upstreams CELL_EDITOR into
-// pkg/gui/types/context.go. Lives in this file so the rest of the
-// codebase has one grep target when Z1 lands ("cell_editor" → switch to
-// types.CELL_EDITOR).
-//
-// Z1 will:
-//  1. Declare types.CELL_EDITOR ContextKey = "cell_editor".
-//  2. Replace cellEditorKey usages with types.CELL_EDITOR.
-//  3. Delete this constant.
-const cellEditorKey types.ContextKey = "cell_editor"
-
 // CellEditorContext is the TEMPORARY_POPUP that renders a single-line
 // buffer over the cursor cell of the focused result grid. The popup is
 // pushed by CellEditorController.Enter on `i`; popped by `<esc>`/`<cr>`
@@ -70,17 +58,16 @@ type CellEditorContext struct {
 	view types.View
 }
 
-// NewCellEditorContext builds a CellEditorContext bound to the
-// CELL_EDITOR placeholder key. Z1 swaps the key for types.CELL_EDITOR
-// when it ships the central wiring.
+// NewCellEditorContext builds a CellEditorContext bound to
+// types.CELL_EDITOR.
 func NewCellEditorContext(base BaseContext, deps Deps) *CellEditorContext {
 	return &CellEditorContext{BaseContext: base, deps: deps}
 }
 
 // CellEditorKey returns the ContextKey CellEditorContext is bound to.
-// Exists so Z1's central registration code can resolve the key without
-// reaching into a package-private constant.
-func CellEditorKey() types.ContextKey { return cellEditorKey }
+// Retained as an accessor so callers don't need to import the types
+// package directly; resolves to types.CELL_EDITOR.
+func CellEditorKey() types.ContextKey { return types.CELL_EDITOR }
 
 // SetModes records the ModeSetter the focus hooks toggle. Mirrors
 // PromptContext: CELL_EDITOR is an editable popup, so focus flips the

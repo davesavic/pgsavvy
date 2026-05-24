@@ -5,18 +5,6 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// commitDialogKey is the placeholder ContextKey for the commit-dialog
-// popup until Z1 (dbsavvy-bwq.23) upstreams COMMIT_DIALOG into
-// pkg/gui/types/context.go. Lives in this file so the rest of the
-// codebase has one grep target when Z1 lands ("commit_dialog" → switch
-// to types.COMMIT_DIALOG). Mirrors the cellEditorKey pattern.
-//
-// Z1 will:
-//  1. Declare types.COMMIT_DIALOG ContextKey = "commit_dialog".
-//  2. Replace commitDialogKey usages with types.COMMIT_DIALOG.
-//  3. Delete this constant.
-const commitDialogKey types.ContextKey = "commit_dialog"
-
 // CommitDialogMode selects which body the dialog renders.
 type CommitDialogMode int
 
@@ -119,18 +107,16 @@ type CommitDialogView struct {
 	DryRunResult []DryRunStmtResult
 }
 
-// NewCommitDialogContext builds a CommitDialogContext bound to the
-// commitDialogKey placeholder. Z1 swaps the key for types.COMMIT_DIALOG
-// when it ships the central wiring.
+// NewCommitDialogContext builds a CommitDialogContext bound to
+// types.COMMIT_DIALOG.
 func NewCommitDialogContext(base BaseContext, deps Deps) *CommitDialogContext {
 	return &CommitDialogContext{BaseContext: base, deps: deps}
 }
 
 // CommitDialogKey returns the ContextKey CommitDialogContext is bound
-// to. Exists so Z1's central registration code can resolve the key
-// without reaching into a package-private constant. Mirrors
-// CellEditorKey().
-func CommitDialogKey() types.ContextKey { return commitDialogKey }
+// to. Retained as an accessor so callers don't need to import the types
+// package directly; resolves to types.COMMIT_DIALOG.
+func CommitDialogKey() types.ContextKey { return types.COMMIT_DIALOG }
 
 // SetRenderHook installs the body renderer the controller supplies.
 // Nil is treated as "no render" (HandleRender writes an empty body).

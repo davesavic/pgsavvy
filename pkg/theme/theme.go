@@ -70,6 +70,7 @@ type themeState struct {
 	DiffChangedFg   *Style
 	PromptFg        *Style
 	DirtyCellBg     *Style // dbsavvy-bwq.6 (A3) — Z1 wires ThemeConfig + builtins
+	WarnBorder      *Style // dbsavvy-bwq A1 — Z1 Phase A wires ThemeConfig + builtins
 }
 
 var (
@@ -143,6 +144,8 @@ func Apply(cfg *config.ThemeConfig) error {
 		DiffRemovedFg:   parseStyle(cfg.DiffRemovedFg),
 		DiffChangedFg:   parseStyle(cfg.DiffChangedFg),
 		PromptFg:        parseStyle(cfg.PromptFg),
+		DirtyCellBg:     parseStyle(cfg.DirtyCellBg),
+		WarnBorder:      parseStyle(cfg.WarnBorder),
 	}
 	current.Store(next)
 	return nil

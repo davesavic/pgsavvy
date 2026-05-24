@@ -366,6 +366,65 @@ const (
 	// and re-invokes the operator via the same applyPending pathway.
 	EditorRepeat = "editor.repeat"
 
+	// Cell-edit family — owned by CellEditorController (dbsavvy-bwq A1/A2/Z1).
+	// `i` enters the CELL_EDITOR popup over the cursor cell; `<cr>`/`<esc>`
+	// commit; `<c-c>` discards; SetNull / Expr* are the per-type entry
+	// helpers (<c-n>/<c-t>/<c-d>/<c-e>).
+	CellEditEnter           = "cell.edit.enter"
+	CellEditCommit          = "cell.edit.commit"
+	CellEditDiscard         = "cell.edit.discard"
+	CellEditSetNull         = "cell.edit.set_null"
+	CellEditExprNow         = "cell.edit.expr.now"
+	CellEditExprCurrentDate = "cell.edit.expr.current_date"
+	CellEditExprPrompt      = "cell.edit.expr.prompt"
+
+	// Commit-dialog family — owned by CommitDialogController (dbsavvy-bwq A4/A5/Z1).
+	// `:w`/`<leader>cw` open; `[a]` apply (gated); `[d]` dry-run; `[s]` SQL
+	// preview toggle; `[Esc]`/`[c]` cancel; TypeChar/Backspace drive the
+	// typed-name input.
+	CommitDialogOpen      = "commit.dialog.open"
+	CommitDialogApply     = "commit.dialog.apply"
+	CommitDialogDryRun    = "commit.dialog.dryrun"
+	CommitDialogShowSql   = "commit.dialog.show_sql"
+	CommitDialogCancel    = "commit.dialog.cancel"
+	CommitDialogTypeChar  = "commit.dialog.type_char"
+	CommitDialogBackspace = "commit.dialog.backspace"
+
+	// Conflict-dialog family — owned by ConflictDialogController (dbsavvy-bwq A6/Z1).
+	// `[r]` refresh; `[o]` overwrite (omitted on confirm_writes); `[Esc]` cancel.
+	ConflictDialogRefresh   = "conflict.dialog.refresh"
+	ConflictDialogOverwrite = "conflict.dialog.overwrite"
+	ConflictDialogCancel    = "conflict.dialog.cancel"
+
+	// FK reverse-picker family — owned by FKReversePickerController
+	// (dbsavvy-bwq B6/Z1). `gD` opens the picker; <tab>/]/[ cycle tabs;
+	// <cr> selects; <esc>/q closes.
+	FKReverseMenu    = "row.fk_reverse_menu"
+	FKReverseNextTab = "fk_reverse_picker.next_tab"
+	FKReversePrevTab = "fk_reverse_picker.prev_tab"
+	FKReverseSelect  = "fk_reverse_picker.select"
+	FKReverseClose   = "fk_reverse_picker.close"
+
+	// Pending-edit discard / force-quit family — owned by PendingDiscardHelper
+	// + result_tabs_controller (dbsavvy-bwq A8/Z1). `<leader>cu` discards at
+	// cursor; `<leader>cU` discards all (with confirmation > threshold);
+	// `:q!` force-quits regardless of staged edits.
+	PendingDiscardAtCursor = "pending.discard.at_cursor"
+	PendingDiscardAll      = "pending.discard.all"
+	QuitForce              = "app.quit.force"
+
+	// FK forward-jump (dbsavvy-bwq B5/Z1). `gd` jumps to the referenced row.
+	FKJumpForward = "row.fk_forward"
+
+	// Result jump history (dbsavvy-bwq B5/B6/Z1). `<c-o>` back; `<c-i>` forward
+	// through the per-grid jump list pushed by gd / gD.
+	ResultJumpBack    = "result.jump.back"
+	ResultJumpForward = "result.jump.forward"
+
+	// Editor completion (dbsavvy-bwq/Z1). Manually triggers the completion
+	// popup in QUERY_EDITOR insert mode (`<c-space>` default).
+	EditorCompletionTrigger = "editor.completion.trigger"
+
 	// Visual / Selection family — owned by VimEditorController (dbsavvy-wwd.7).
 	// Bindings: `v` / `V` / `<c-v>` enter char/line/block visual from Normal;
 	// `<esc>` exits to Normal. SelectionExtend is the action ID covering
@@ -547,5 +606,34 @@ func AllActionIDs() []string {
 		ConfirmYes,
 		ConfirmNo,
 		TipDismiss,
+		CellEditEnter,
+		CellEditCommit,
+		CellEditDiscard,
+		CellEditSetNull,
+		CellEditExprNow,
+		CellEditExprCurrentDate,
+		CellEditExprPrompt,
+		CommitDialogOpen,
+		CommitDialogApply,
+		CommitDialogDryRun,
+		CommitDialogShowSql,
+		CommitDialogCancel,
+		CommitDialogTypeChar,
+		CommitDialogBackspace,
+		ConflictDialogRefresh,
+		ConflictDialogOverwrite,
+		ConflictDialogCancel,
+		FKReverseMenu,
+		FKReverseNextTab,
+		FKReversePrevTab,
+		FKReverseSelect,
+		FKReverseClose,
+		PendingDiscardAtCursor,
+		PendingDiscardAll,
+		QuitForce,
+		FKJumpForward,
+		ResultJumpBack,
+		ResultJumpForward,
+		EditorCompletionTrigger,
 	}
 }

@@ -8,7 +8,9 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
@@ -103,6 +105,21 @@ type HelperBag struct {
 	OnUIThread            func(fn func() error)
 	OnUIThreadContentOnly func(fn func() error)
 	OnWorker              func(fn func(gocui.Task) error)
+
+	// Inline-edit collaborators (epic dbsavvy-bwq). PendingDiscard drives
+	// the `<leader>cu` / `<leader>cU` discard flows + table-switch guard.
+	// JumpList records originating-cell entries for `<c-o>` / `<c-i>` jump
+	// navigation (consumed by both FK forward and FK reverse). FKForward
+	// owns the `gd` forward FK navigation. PendingEditSet is the
+	// process-wide pending-edit collection — A4/A5 will switch to a
+	// per-(connID, baseTable) registry; today a single shared set keeps
+	// the wiring trivial. Z1 (dbsavvy-bwq.23) layers the keybindings +
+	// ExCommands on top of these. All four are nil-safe: controllers
+	// nil-check on dispatch.
+	PendingDiscard *helpers.PendingDiscardHelper
+	JumpList       *ui.ResultJumpList
+	FKForward      *helpers.FKForwardHelper
+	PendingEditSet *models.PendingEditSet
 }
 
 // DebugLogger is the minimal logging surface controllers expect.

@@ -7,18 +7,6 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// conflictDialogKey is the placeholder ContextKey for the conflict-dialog
-// popup until Z1 (dbsavvy-bwq.23) upstreams CONFLICT_DIALOG into
-// pkg/gui/types/context.go. Mirrors commitDialogKey: lives in this file
-// so the rest of the codebase has one grep target when Z1 lands
-// ("conflict_dialog" → switch to types.CONFLICT_DIALOG).
-//
-// Z1 will:
-//  1. Declare types.CONFLICT_DIALOG ContextKey = "conflict_dialog".
-//  2. Replace conflictDialogKey usages with types.CONFLICT_DIALOG.
-//  3. Delete this constant.
-const conflictDialogKey types.ContextKey = "conflict_dialog"
-
 // ErrNoConflicts is returned by Open when called with a nil/empty
 // Conflicts slice. The dialog is meaningless without at least one
 // conflict to display; the caller (A5's apply path) is responsible for
@@ -74,18 +62,16 @@ type ConflictDialogView struct {
 	Conn      *models.Connection
 }
 
-// NewConflictDialogContext builds a ConflictDialogContext bound to the
-// conflictDialogKey placeholder. Z1 swaps the key for
-// types.CONFLICT_DIALOG when it ships the central wiring.
+// NewConflictDialogContext builds a ConflictDialogContext bound to
+// types.CONFLICT_DIALOG.
 func NewConflictDialogContext(base BaseContext, deps Deps) *ConflictDialogContext {
 	return &ConflictDialogContext{BaseContext: base, deps: deps}
 }
 
 // ConflictDialogKey returns the ContextKey ConflictDialogContext is
-// bound to. Exists so Z1's central registration code can resolve the
-// key without reaching into a package-private constant. Mirrors
-// CommitDialogKey().
-func ConflictDialogKey() types.ContextKey { return conflictDialogKey }
+// bound to. Retained as an accessor so callers don't need to import the
+// types package directly; resolves to types.CONFLICT_DIALOG.
+func ConflictDialogKey() types.ContextKey { return types.CONFLICT_DIALOG }
 
 // SetRenderHook installs the body renderer the controller supplies.
 // Nil is treated as "no render" (HandleRender writes an empty body).

@@ -20,16 +20,19 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
-// Action IDs for the reverse FK picker (gD). Declared as local
-// constants because pkg/gui/commands/actions.go is owned by the Z1
-// integration commit (epic dbsavvy-bwq Z1 invariant). Z1 promotes these
-// to commands.* and keeps the string values identical. dbsavvy-bwq.17 (B6).
+// Package-level ActionID aliases. Canonical constants live in
+// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A,
+// dbsavvy-bwq.23). Aliases retain the controllers.FKReverse* names so
+// existing callers (notably this package's tests) keep compiling.
 const (
-	FKReverseMenu     = "row.fk_reverse_menu"
-	FKReverseNextTab  = "fk_reverse_picker.next_tab"
-	FKReversePrevTab  = "fk_reverse_picker.prev_tab"
-	FKReverseSelect   = "fk_reverse_picker.select"
-	FKReverseClose    = "fk_reverse_picker.close"
+	FKReverseMenu    = commands.FKReverseMenu
+	FKReverseNextTab = commands.FKReverseNextTab
+	FKReversePrevTab = commands.FKReversePrevTab
+	FKReverseSelect  = commands.FKReverseSelect
+	FKReverseClose   = commands.FKReverseClose
+)
+
+const (
 	fkReverseToastTTL = 4 * time.Second
 	// fkReverseTabLabelMax bounds the result-tab title rendered after a
 	// successful select. Mirrors the cap used by the forward FK helper.

@@ -8,33 +8,6 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// Local ActionID constants for the pending-edit discard surface. Z1
-// (dbsavvy-bwq.23) upstreams these into pkg/gui/commands/actions.go so
-// they participate in the action-registry audit. Until then the
-// constants live here so the helper + future bindings can compile +
-// test in isolation.
-//
-// Z1 will:
-//  1. Move these into pkg/gui/commands/actions.go (and AllActionIDs()).
-//  2. Replace the local consts with references to commands.PendingDiscard*.
-//  3. Wire central keybinding registration through result_tabs_controller
-//     and the `:q!` ExCommand handler in orchestrator/gui.go.
-const (
-	// PendingDiscardAtCursor is bound to `<leader>cu` on RESULT_GRID
-	// scope. Removes the PendingEdit (if any) for the cursor (pk, col).
-	PendingDiscardAtCursor = "pending.discard.at_cursor"
-
-	// PendingDiscardAll is bound to `<leader>cU` on RESULT_GRID scope.
-	// Clears the entire PendingEditSet; when Count > 5 the helper opens
-	// a y/N confirmation popup before clearing.
-	PendingDiscardAll = "pending.discard.all"
-
-	// QuitForce is bound to the `:q!` ExCommand. Bypasses
-	// BlockQuitIfPending and forces gocui.ErrQuit regardless of staged
-	// edits.
-	QuitForce = "app.quit.force"
-)
-
 // DiscardConfirmThreshold is the size above which DiscardAll prompts
 // the user before clearing the PendingEditSet. At-or-below the
 // threshold the discard runs immediately.

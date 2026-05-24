@@ -63,6 +63,18 @@ func AllDefaultBindings(c *Controllers) []*types.ChordBinding {
 	if c.TableInspect != nil {
 		out = append(out, c.TableInspect.GetKeybindings(types.KeybindingsOpts{})...)
 	}
+	if c.CellEditor != nil {
+		out = append(out, c.CellEditor.GetKeybindings(types.KeybindingsOpts{})...)
+	}
+	if c.CommitDialog != nil {
+		out = append(out, c.CommitDialog.GetKeybindings(types.KeybindingsOpts{})...)
+	}
+	if c.ConflictDialog != nil {
+		out = append(out, c.ConflictDialog.GetKeybindings(types.KeybindingsOpts{})...)
+	}
+	if c.FKReversePicker != nil {
+		out = append(out, c.FKReversePicker.GetKeybindings(types.KeybindingsOpts{})...)
+	}
 	out = append(out, keys.DefaultCommandLineBindings()...)
 	return out
 }

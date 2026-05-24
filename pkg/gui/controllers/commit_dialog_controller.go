@@ -8,53 +8,18 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// Local ActionID constants for the commit-dialog lifecycle. Z1
-// (dbsavvy-bwq.23) upstreams these into pkg/gui/commands/actions.go so
-// they participate in the action-registry audit. Until then the
-// constants live here so the controller can compile + test in isolation.
-// Mirrors A1's local-const pattern in cell_editor_controller.go.
-//
-// Z1 will:
-//  1. Move these into pkg/gui/commands/actions.go (and AllActionIDs()).
-//  2. Replace the local consts with references to commands.CommitDialog*.
-//  3. Register the `:w` ExCommand + `<leader>cw` chord that fires
-//     CommitDialogOpen.
+// Package-level ActionID aliases. Canonical constants live in
+// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A,
+// dbsavvy-bwq.23). Aliases retain the controllers.CommitDialog* names
+// so existing callers (notably this package's tests) keep compiling.
 const (
-	// CommitDialogOpen is fired by `:w` (ExCommand) and `<leader>cw`
-	// (chord) on RESULT_GRID. Z1 wires both dispatchers; this controller
-	// only exposes the action so the registry can resolve it. The
-	// handler itself is owned by A5 / Z1 (the open path needs access
-	// to the per-table PendingEditSet + the active connection), NOT
-	// by this controller. A no-op handler is registered here so the
-	// Matcher doesn't log "unknown action" before Z1 lands.
-	CommitDialogOpen = "commit.dialog.open"
-
-	// CommitDialogApply is bound to `[a]` on COMMIT_DIALOG. The handler
-	// gates on ApplyEnabled() (read_only / empty / typed-name) and,
-	// when allowed, invokes the OnApply hook A5 wires.
-	CommitDialogApply = "commit.dialog.apply"
-
-	// CommitDialogDryRun is bound to `[d]` on COMMIT_DIALOG. The
-	// handler flips the body mode and invokes OnDryRun.
-	CommitDialogDryRun = "commit.dialog.dryrun"
-
-	// CommitDialogShowSql is bound to `[s]` on COMMIT_DIALOG. Toggles
-	// between SqlPreview and Preview body modes; OnShowSql is invoked
-	// each time the body flips into SqlPreview so the helper can log
-	// the rendered SQL (ADR-28 emit-once contract).
-	CommitDialogShowSql = "commit.dialog.show_sql"
-
-	// CommitDialogCancel is bound to `[Esc]` and `[c]` on COMMIT_DIALOG.
-	// Pops the popup without modifying the PendingEditSet.
-	CommitDialogCancel = "commit.dialog.cancel"
-
-	// CommitDialogTypeChar / CommitDialogBackspace drive the typed-name
-	// input. The runtime view will be wired as a gocui editable view by
-	// Z1 (so printable runes + Backspace flow through gocui.DefaultEditor)
-	// — until then the controller exposes these IDs so unit tests can
-	// drive the buffer directly.
-	CommitDialogTypeChar  = "commit.dialog.type_char"
-	CommitDialogBackspace = "commit.dialog.backspace"
+	CommitDialogOpen      = commands.CommitDialogOpen
+	CommitDialogApply     = commands.CommitDialogApply
+	CommitDialogDryRun    = commands.CommitDialogDryRun
+	CommitDialogShowSql   = commands.CommitDialogShowSql
+	CommitDialogCancel    = commands.CommitDialogCancel
+	CommitDialogTypeChar  = commands.CommitDialogTypeChar
+	CommitDialogBackspace = commands.CommitDialogBackspace
 )
 
 // CommitDialogApplyHook is invoked when `[a]` is pressed on a default

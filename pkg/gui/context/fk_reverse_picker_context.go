@@ -5,13 +5,12 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// FKReversePickerContextKey is the ContextKey under which the reverse
-// FK picker popup is registered. Declared here (rather than in
-// pkg/gui/types/context.go) because the central registry write is part
-// of the Z1 integration commit; this constant exists so B6 can construct
-// + test the context standalone. Z1 promotes the constant into the
-// central enum and uses the same string. dbsavvy-bwq.17 (B6).
-const FKReversePickerContextKey types.ContextKey = "fk_reverse_picker"
+// FKReversePickerContextKey aliases types.FK_REVERSE_PICKER. Z1
+// (dbsavvy-bwq.23 Phase A) promoted the canonical ContextKey into
+// pkg/gui/types/context.go; this alias is retained so existing callers
+// (controllers, tests) keep compiling without a wider rename. New code
+// should reference types.FK_REVERSE_PICKER directly.
+const FKReversePickerContextKey = types.FK_REVERSE_PICKER
 
 // FKReversePickerContext renders the gD reverse FK picker as a TabbedPopup
 // (one tab per inbound FK). TEMPORARY_POPUP kind — the orchestrator's

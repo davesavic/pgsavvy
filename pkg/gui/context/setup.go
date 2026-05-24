@@ -12,7 +12,7 @@ import (
 // Concrete Context fields are exposed by name so the gui bootstrap (T10)
 // and the controller registration shim (T7) can target a specific
 // Context by reference without re-lookup. Flatten() and ByKey() walk all
-// 24 entries (19 live + 4 stub + 1 PERSISTENT_POPUP) for the cases where
+// 27 entries (22 live + 4 stub + 1 PERSISTENT_POPUP) for the cases where
 // ordered iteration is preferable.
 type ContextTree struct {
 	// Live SIDE_CONTEXT instances.
@@ -38,6 +38,18 @@ type ContextTree struct {
 	// TableInspect is the tabbed columns/indexes inspect popup
 	// (epic dbsavvy-3vf). TEMPORARY_POPUP kind.
 	TableInspect *TableInspectContext
+	// CellEditor is the inline cell-edit mini-buffer popup
+	// (epic dbsavvy-bwq A1). TEMPORARY_POPUP kind.
+	CellEditor *CellEditorContext
+	// CommitDialog is the pending-edit commit dialog (epic
+	// dbsavvy-bwq A4). TEMPORARY_POPUP kind.
+	CommitDialog *CommitDialogContext
+	// ConflictDialog is the per-conflict refresh/overwrite dialog
+	// (epic dbsavvy-bwq A4). TEMPORARY_POPUP kind.
+	ConflictDialog *ConflictDialogContext
+	// FKReversePicker is the reverse-FK referencing-table picker
+	// (epic dbsavvy-bwq B6). TEMPORARY_POPUP kind.
+	FKReversePicker *FKReversePickerContext
 
 	// Live EXTRAS / GLOBAL / DISPLAY instances.
 	Messages   *MessagesContext
@@ -148,6 +160,30 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 			Kind:     types.TEMPORARY_POPUP,
 			Title:    "Table inspect",
 		}), deps),
+		CellEditor: NewCellEditorContext(NewBaseContext(BaseContextOpts{
+			Key:      types.CELL_EDITOR,
+			ViewName: string(types.CELL_EDITOR),
+			Kind:     types.TEMPORARY_POPUP,
+			Title:    "Cell editor",
+		}), deps),
+		CommitDialog: NewCommitDialogContext(NewBaseContext(BaseContextOpts{
+			Key:      types.COMMIT_DIALOG,
+			ViewName: string(types.COMMIT_DIALOG),
+			Kind:     types.TEMPORARY_POPUP,
+			Title:    "Commit",
+		}), deps),
+		ConflictDialog: NewConflictDialogContext(NewBaseContext(BaseContextOpts{
+			Key:      types.CONFLICT_DIALOG,
+			ViewName: string(types.CONFLICT_DIALOG),
+			Kind:     types.TEMPORARY_POPUP,
+			Title:    "Conflicts",
+		}), deps),
+		FKReversePicker: NewFKReversePickerContext(NewBaseContext(BaseContextOpts{
+			Key:      types.FK_REVERSE_PICKER,
+			ViewName: string(types.FK_REVERSE_PICKER),
+			Kind:     types.TEMPORARY_POPUP,
+			Title:    "Reverse FK",
+		}), deps),
 
 		// EXTRAS / GLOBAL / DISPLAY.
 		Messages: NewMessagesContext(NewBaseContext(BaseContextOpts{
@@ -211,8 +247,8 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 }
 
 // Flatten returns every Context (live + stub) in a stable order. Order
-// is: side rail (3) -> temporary popups (9) -> extras/global/display (5)
-// -> persistent popups (1) -> main + stubs (5). Total length is always 23.
+// is: side rail (3) -> temporary popups (13) -> extras/global/display (5)
+// -> persistent popups (1) -> main + stubs (5). Total length is always 27.
 func (t *ContextTree) Flatten() []types.IBaseContext {
 	return []types.IBaseContext{
 		t.Connections,
@@ -227,6 +263,10 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 		t.HideOverlay,
 		t.ExportMenu,
 		t.TableInspect,
+		t.CellEditor,
+		t.CommitDialog,
+		t.ConflictDialog,
+		t.FKReversePicker,
 		t.Messages,
 		t.Global,
 		t.Limit,
@@ -242,7 +282,7 @@ func (t *ContextTree) Flatten() []types.IBaseContext {
 }
 
 // ByKey returns the Context registered under the given key, or nil when
-// the key is unknown. Lookup is O(n) over Flatten() — 19 entries — which
+// the key is unknown. Lookup is O(n) over Flatten() — 27 entries — which
 // is cheaper than maintaining a separate map for this size.
 func (t *ContextTree) ByKey(key types.ContextKey) types.IBaseContext {
 	for _, c := range t.Flatten() {

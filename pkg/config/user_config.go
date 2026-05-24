@@ -175,6 +175,13 @@ type ThemeConfig struct {
 	DiffRemovedFg   string `yaml:"diff_removed_fg"`
 	DiffChangedFg   string `yaml:"diff_changed_fg"`
 	PromptFg        string `yaml:"prompt_fg"`
+	// DirtyCellBg is the background colour painted on grid cells that have
+	// a staged PendingEdit. dbsavvy-bwq A3 (Z1 Phase A upstream).
+	DirtyCellBg string `yaml:"dirty_cell_bg"`
+	// WarnBorder is the popup border colour used by warning-themed
+	// prompts (e.g. the free-form Expression prompt). dbsavvy-bwq A1 (Z1
+	// Phase A upstream).
+	WarnBorder string `yaml:"warn_border"`
 }
 
 // GetDefaultConfig returns the built-in default UserConfig. The returned
