@@ -1018,6 +1018,62 @@ func (h *ResultTabsHelper) CancelActive() error {
 	return h.cancelTab(t)
 }
 
+// PreemptInFlight stops every in-flight result-tab stream so the
+// per-session queue serializer (SQLSession.streamMu) is released before a
+// new run tries to acquire it. dbsavvy-dk6: a streamed result larger than
+// the initial-fill window parks its RBM worker on the chan loop while
+// still holding streamMu — the worker never reaches EOF, so RunHandle's
+// finish() (which unlocks the queue) never runs. A subsequent synchronous
+// Stream on the UI goroutine would then block on streamMu forever and
+// freeze the TUI. rh.Cancel() does not help (a parked worker never calls
+// Next to observe the driver cancel); only Stop() makes the worker return,
+// close its stream, and release the lock — and it does so on the worker's
+// own goroutine, so the caller's next Stream.Lock proceeds rather than
+// deadlocking.
+//
+// Running tabs keep the rows already rendered; their state flips to
+// Cancelled. Queued tabs' waiters are aborted (their queuedCancel is
+// closed) without a driver round-trip — and before Running tabs are
+// stopped, so a queued waiter cannot auto-start when the prior stream's
+// Done closes.
+func (h *ResultTabsHelper) PreemptInFlight() {
+	h.mu.Lock()
+	var queuedChans []chan struct{}
+	var runners []StreamRunner
+	for _, t := range h.tabs {
+		t.mu.Lock()
+		switch t.state {
+		case StateQueued:
+			t.state = StateCancelled
+			t.cancelled = true
+			if t.queuedCancel != nil {
+				queuedChans = append(queuedChans, t.queuedCancel)
+			}
+		case StateRunning:
+			t.state = StateCancelled
+			t.cancelled = true
+			if t.runner != nil {
+				runners = append(runners, t.runner)
+			}
+		}
+		t.mu.Unlock()
+	}
+	h.mu.Unlock()
+
+	// Abort queued waiters first so stopping a Running tab (which closes
+	// its RunHandle Done) cannot wake a waiter into starting its stream.
+	for _, ch := range queuedChans {
+		select {
+		case <-ch:
+		default:
+			close(ch)
+		}
+	}
+	for _, r := range runners {
+		r.Stop()
+	}
+}
+
 func (h *ResultTabsHelper) cancelTab(t *Tab) error {
 	t.mu.Lock()
 	state := t.state
@@ -1049,11 +1105,24 @@ func (h *ResultTabsHelper) cancelTab(t *Tab) error {
 		t.mu.Lock()
 		t.state = StateCancelled
 		rh := t.rh
+		runner := t.runner
 		t.mu.Unlock()
+		var cancelErr error
 		if rh != nil {
-			return rh.Cancel()
+			cancelErr = rh.Cancel()
 		}
-		return nil
+		// rh.Cancel() alone does not release the per-session streamMu: a
+		// worker parked past the initial-fill window never calls Next to
+		// observe the driver cancel, so RunHandle.finish() (which unlocks
+		// the queue) never runs and the lock leaks under this now-Cancelled
+		// tab — a subsequent run then deadlocks the UI thread on
+		// Stream.Lock() (dbsavvy-dk6). Stop() forces the worker to return,
+		// close its stream, and release the lock (on the worker goroutine,
+		// before close(doneCh)), mirroring dispose()/Close on a running tab.
+		if runner != nil {
+			runner.Stop()
+		}
+		return cancelErr
 	default:
 		// Complete / Errored / Plan / Detached tabs: cancellation is a
 		// no-op (idempotent).

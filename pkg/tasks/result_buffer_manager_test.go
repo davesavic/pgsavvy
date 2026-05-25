@@ -373,6 +373,68 @@ func TestNewQueryTaskStopClosesStreamAndFiresOnDoneOnce(t *testing.T) {
 	h.stopUI()
 }
 
+// TestNewQueryTaskStopBeforeStreamFnStillClosesStream is the dbsavvy-dk6
+// deadlock regression guard at the RBM layer. In dbsavvy the pgx stream is
+// opened — and the per-session streamMu locked — by SQLSession.Stream
+// BEFORE NewQueryTask; the worker's streamFn merely hands back that
+// already-open stream. If a Stop arrives before the worker reaches
+// streamFn and the worker bails WITHOUT closing the stream, the stream's
+// Close()/finish() never runs and streamMu leaks — freezing the next run
+// (run_all statement-2, leader+R/leader+E with 2+ statements).
+//
+// This test forces "Stop fires before the worker runs streamFn" by gating
+// the worker goroutine until after Stop() has closed stopCh, then asserts
+// the pre-opened stream is still Closed exactly once and onDone fires once.
+func TestNewQueryTaskStopBeforeStreamFnStillClosesStream(t *testing.T) {
+	gate := make(chan struct{})
+	var workersWG sync.WaitGroup
+	onWorker := func(fn func(gocui.Task) error) {
+		workersWG.Add(1)
+		go func() {
+			defer workersWG.Done()
+			<-gate // do not start until the test has Stopped the task
+			_ = fn(nil)
+		}()
+	}
+	onUIThread := func(fn func() error) { _ = fn() }
+	mgr := tasks.New(onWorker, onUIThread)
+
+	stream := newStubRowStream(500)
+	var streamFnCalls, onDoneCalls atomic.Int32
+	streamFn := func(_ context.Context) (drivers.RowStream, error) {
+		streamFnCalls.Add(1)
+		return stream, nil
+	}
+
+	if err := mgr.NewQueryTask("k", streamFn, func([]models.Row) {}, 200, func() {
+		onDoneCalls.Add(1)
+	}); err != nil {
+		t.Fatalf("NewQueryTask: %v", err)
+	}
+
+	// Stop while the worker is still gated (before it can reach streamFn).
+	// Stop closes stopCh then blocks on the worker's doneCh, so run it on a
+	// goroutine; the 50ms gap lets Stop close stopCh before we release the
+	// worker, so the worker observes an already-closed stopCh.
+	stopped := make(chan struct{})
+	go func() { mgr.Stop(); close(stopped) }()
+	time.Sleep(50 * time.Millisecond)
+	close(gate)
+
+	<-stopped
+	workersWG.Wait()
+
+	if got := streamFnCalls.Load(); got != 1 {
+		t.Errorf("streamFn calls = %d, want 1 (a Stopped task must still acquire its stream so it can close it)", got)
+	}
+	if got := stream.closeCount.Load(); got != 1 {
+		t.Errorf("stream Close count = %d, want 1 (a Stopped task must close its pre-opened stream to release streamMu)", got)
+	}
+	if got := onDoneCalls.Load(); got != 1 {
+		t.Errorf("onDone calls = %d, want 1", got)
+	}
+}
+
 // TestNewQueryTaskPreemption — task "A" is running; NewQueryTask("B")
 // fires. A's onDone must fire before B's streamFn is called.
 func TestNewQueryTaskPreemption(t *testing.T) {

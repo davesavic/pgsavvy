@@ -349,6 +349,15 @@ func (q *QueryEditorController) handleRunAll(_ commands.ExecCtx) error {
 // stmt is non-empty.
 func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) bool {
 	runner := q.helpers.QueryRunner
+	// Preempt any in-flight stream before acquiring the session queue.
+	// A prior run whose result exceeds the initial-fill window parks its
+	// worker holding SQLSession.streamMu indefinitely; without this the
+	// synchronous Stream below would block the UI goroutine forever
+	// (dbsavvy-dk6). Runs are last-wins: each statement supersedes the
+	// previous on the single shared session.
+	if preempter, ok := q.helpers.ResultTabs.(InFlightPreempter); ok {
+		preempter.PreemptInFlight()
+	}
 	rh, err := runner.Run(context.Background(), stmt, opts)
 	if err != nil {
 		q.surfaceErr(stmt, err)

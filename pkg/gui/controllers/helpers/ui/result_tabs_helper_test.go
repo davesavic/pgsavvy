@@ -494,6 +494,106 @@ func TestCancelActiveRunningCallsRunHandleCancel(t *testing.T) {
 	}
 }
 
+// TestCancelActiveRunningStopsRunnerToReleaseLock is the cancel-then-run
+// deadlock guard (dbsavvy-dk6). Cancelling a Running tab must Stop() its
+// runner, not merely rh.Cancel() it: a parked >200-row worker never
+// observes the driver cancel, so only Stop() makes the worker return,
+// close its stream, and release the per-session streamMu. Without the
+// Stop() the lock leaks under the now-Cancelled tab and the next run
+// deadlocks the UI thread on Stream.Lock() — exactly the session-2 repro.
+func TestCancelActiveRunningStopsRunnerToReleaseLock(t *testing.T) {
+	factory := func() StreamRunner { return &fakeStreamRunner{} }
+	h, _ := newTestHelper(t, factory)
+
+	rhA := newFakeRunHandle()
+	_ = h.openTab("A", rhA)
+	tabA := h.Active()
+	if tabA.State() != StateRunning {
+		t.Fatalf("A state = %v, want Running", tabA.State())
+	}
+
+	if err := h.CancelActive(); err != nil {
+		t.Fatalf("CancelActive: %v", err)
+	}
+
+	r := tabA.runner.(*fakeStreamRunner)
+	if got := r.StopCount(); got != 1 {
+		t.Errorf("runner Stop count after cancel = %d, want 1 (cancel must Stop the parked worker to release streamMu)", got)
+	}
+	if tabA.State() != StateCancelled {
+		t.Errorf("A state after cancel = %v, want Cancelled", tabA.State())
+	}
+}
+
+// --- Preempt-in-flight (dbsavvy-dk6) --------------------------------------
+
+// TestPreemptInFlightStopsRunningTab is the deadlock regression guard: a
+// running stream parks its worker holding SQLSession.streamMu, so a new
+// run must Stop() that worker (releasing the lock) before it acquires the
+// queue. rh.Cancel() alone never releases it (a parked worker never calls
+// Next), so the assertion is specifically on Stop().
+func TestPreemptInFlightStopsRunningTab(t *testing.T) {
+	var runners []*fakeStreamRunner
+	factory := func() StreamRunner {
+		r := &fakeStreamRunner{}
+		runners = append(runners, r)
+		return r
+	}
+	h, _ := newTestHelper(t, factory)
+
+	rhA := newFakeRunHandle()
+	if err := h.openTab("A", rhA); err != nil {
+		t.Fatalf("openTab A: %v", err)
+	}
+	tabA := h.Active()
+	if tabA.State() != StateRunning {
+		t.Fatalf("A state = %v, want Running", tabA.State())
+	}
+
+	h.PreemptInFlight()
+
+	if got := runners[0].StopCount(); got != 1 {
+		t.Errorf("A runner Stop count = %d, want 1 (preempt must Stop the parked worker to release streamMu)", got)
+	}
+	if tabA.State() != StateCancelled {
+		t.Errorf("A state after preempt = %v, want Cancelled", tabA.State())
+	}
+}
+
+// TestPreemptInFlightAbortsQueuedTab covers the queued tab: its waiter is
+// aborted without a driver-side Cancel, and the prior running tab's worker
+// is stopped.
+func TestPreemptInFlightAbortsQueuedTab(t *testing.T) {
+	var runners []*fakeStreamRunner
+	factory := func() StreamRunner {
+		r := &fakeStreamRunner{}
+		runners = append(runners, r)
+		return r
+	}
+	h, _ := newTestHelper(t, factory)
+
+	rhA := newFakeRunHandle()
+	rhB := newFakeRunHandle()
+	_ = h.openTab("A", rhA)
+	_ = h.openTab("B", rhB) // queues behind A (A still running)
+	tabB := h.Active()
+	if tabB.State() != StateQueued {
+		t.Fatalf("B state = %v, want Queued", tabB.State())
+	}
+
+	h.PreemptInFlight()
+
+	if tabB.State() != StateCancelled {
+		t.Errorf("B state after preempt = %v, want Cancelled", tabB.State())
+	}
+	if rhB.wasCancelled() {
+		t.Error("queued rhB should not receive a driver Cancel")
+	}
+	if got := runners[0].StopCount(); got != 1 {
+		t.Errorf("A runner Stop count = %d, want 1", got)
+	}
+}
+
 // --- Plan / ShowError -----------------------------------------------------
 
 func TestOpenPlanTabCreatesPlanStateTab(t *testing.T) {

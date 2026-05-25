@@ -466,6 +466,57 @@ func TestQueryEditorRunAllDispatchesEverySegmentSequentially(t *testing.T) {
 	}
 }
 
+// preemptingResultTabs records, at each PreemptInFlight call, how many
+// streams the runner session has issued so far — a witness for ordering.
+type preemptingResultTabs struct {
+	fakeResultTabs
+	rec               *recordingRunnerSession
+	preemptStreamLens []int
+}
+
+func (p *preemptingResultTabs) PreemptInFlight() {
+	p.preemptStreamLens = append(p.preemptStreamLens, len(p.rec.streamCalls))
+}
+
+// TestQueryEditorRunAllPreemptsBeforeEachStream is the deadlock-fix wiring
+// guard (dbsavvy-dk6): each statement must preempt any in-flight stream
+// BEFORE it issues its own Stream, so a >200-row prior run can't leave the
+// per-session queue lock held and freeze the UI. The witness is the stream
+// count observed at each preempt: [0, 1] means preempt#1 ran before any
+// Stream and preempt#2 ran after exactly statement 1 had streamed.
+func TestQueryEditorRunAllPreemptsBeforeEachStream(t *testing.T) {
+	rec := &recordingRunnerSession{}
+	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+
+	base := newBag()
+	tabs := &preemptingResultTabs{rec: rec}
+	base.HelperBag.QueryRunner = runner
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1; SELECT 2;"}
+	base.HelperBag.ResultTabs = tabs
+
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, _ := reg.Get(commands.QueryRunAll)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("RunAll handler err = %v", err)
+	}
+
+	if got := len(rec.streamCalls); got != 2 {
+		t.Fatalf("streamCalls len = %d, want 2", got)
+	}
+	want := []int{0, 1}
+	if len(tabs.preemptStreamLens) != len(want) {
+		t.Fatalf("preempt count = %d, want %d (once per statement, before its Stream)", len(tabs.preemptStreamLens), len(want))
+	}
+	for i, w := range want {
+		if tabs.preemptStreamLens[i] != w {
+			t.Errorf("preempt[%d] saw %d prior streams, want %d (preempt must precede its statement's Stream)", i, tabs.preemptStreamLens[i], w)
+		}
+	}
+}
+
 func TestQueryEditorRunInNewTxIssuesBeginBeforeStream(t *testing.T) {
 	rec := &recordingRunnerSession{}
 	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
