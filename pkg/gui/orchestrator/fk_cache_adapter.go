@@ -35,5 +35,45 @@ func (a *activeSessionFKCacheAdapter) Get(ctx context.Context, schema, table str
 	if fkc == nil {
 		return nil, errors.New("fk forward: active session has no fk cache")
 	}
+	// Preempt any parked stream before the loader touches the shared
+	// driver session (dbsavvy-lxn.4): on a cache miss fkc.Get runs
+	// ListForeignKeys on the SAME driver session a >initial-fill parked
+	// stream still holds via its inFlight guard, so acquireInFlight would
+	// panic "session: concurrent use". Mirrors the QueryRunner chokepoint
+	// preempt (last-wins) so gd preempts the parked stream rather than
+	// racing its conn.
+	a.g.preemptForFKCacheLoad()
 	return fkc.Get(ctx, schema, table)
+}
+
+// preemptForFKCacheLoad stops any in-flight/parked result-tab stream so a
+// synchronous FK-cache loader read does not race the driver session's
+// inFlight guard (dbsavvy-lxn.4). Nil-safe; a no-op when no stream is in
+// flight. See ResultTabsHelper.PreemptInFlight for the stop semantics
+// (it blocks until the worker has closed its stream and released the
+// guard, so the loader's acquireInFlight cannot panic afterwards).
+func (g *Gui) preemptForFKCacheLoad() {
+	if g == nil || g.resultTabsH == nil {
+		return
+	}
+	g.resultTabsH.PreemptInFlight()
+}
+
+// lookupReverseFK resolves inbound foreign keys for (schema, table) through
+// the active session's FKCache, wired as the gD reverse-picker's
+// ReverseFKLookup. Like the forward gd path it preempts any parked stream
+// before the loader runs (dbsavvy-lxn.4): GetReverse's loader calls
+// ListInboundForeignKeys on the SAME driver session a parked stream holds
+// via its inFlight guard, which would otherwise panic "session: concurrent
+// use". Same last-wins rationale as activeSessionFKCacheAdapter.Get.
+func (g *Gui) lookupReverseFK(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
+	if g == nil || g.activeSQLSession == nil {
+		return nil, errors.New("no active session")
+	}
+	fkc := g.activeSQLSession.FKCache()
+	if fkc == nil {
+		return nil, errors.New("active session has no fk cache")
+	}
+	g.preemptForFKCacheLoad()
+	return fkc.GetReverse(ctx, schema, table)
 }

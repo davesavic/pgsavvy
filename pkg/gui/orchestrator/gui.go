@@ -737,18 +737,10 @@ func (g *Gui) wireWithDriver() error {
 		},
 		// Reverse-FK resolver — routes each lookup through the active
 		// SQLSession's FKCache so per-Connect rotation is invisible to
-		// the picker handler. Returns an error when no session is bound.
-		// dbsavvy-8oo stub #2.
-		ReverseFKLookup: func(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
-			if g.activeSQLSession == nil {
-				return nil, fmt.Errorf("no active session")
-			}
-			fkc := g.activeSQLSession.FKCache()
-			if fkc == nil {
-				return nil, fmt.Errorf("active session has no fk cache")
-			}
-			return fkc.GetReverse(ctx, schema, table)
-		},
+		// the picker handler (dbsavvy-8oo stub #2). Extracted to a named
+		// method so the parked-stream preempt is regression-testable
+		// (dbsavvy-lxn.4), symmetric with the forward adapter.
+		ReverseFKLookup: g.lookupReverseFK,
 		// ActivePendingEditSet resolves the per-(connID, baseTable) set
 		// from the registry using the currently-active tab's identity.
 		// Returns nil when no tab is active OR the tab has no row
