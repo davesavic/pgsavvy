@@ -581,9 +581,9 @@ func (g *Gui) wireWithDriver() error {
 	// FKForwardHelper drives `gd` forward FK navigation. Cache routes
 	// each Get through activeSessionFKCacheAdapter so per-Connect
 	// FKCache rotation is invisible to the helper. BusyChecker remains
-	// nil (the optional "gd queued behind active stream" toast lights
-	// up when a later task wires a session-busy reporter); the helper
-	// treats nil busy as "no informational toast".
+	// nil and is unused: with last-wins (dbsavvy-lxn.1) gd preempts any
+	// parked prior stream at the QueryRunner chokepoint rather than
+	// queueing, so the helper no longer branches on session busyness.
 	g.fkForwardH = helpers.NewFKForwardHelper(helpers.FKForwardDeps{
 		Cache:    &activeSessionFKCacheAdapter{g: g},
 		JumpList: g.jumpListH,

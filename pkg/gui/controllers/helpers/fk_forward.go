@@ -57,17 +57,16 @@ type JumpList interface {
 }
 
 // Toaster is the narrow toast surface FKForwardHelper uses for the
-// "queued behind active stream" / "tab cap reached" notifications. May
-// be nil — toasts then no-op.
+// "multiple FKs on column" / "tab cap reached" notifications. May be
+// nil — toasts then no-op.
 type Toaster interface {
 	Show(message string, ttl time.Duration)
 }
 
 // BusyChecker reports whether the underlying session currently has an
-// active stream. When non-nil and IsBusy() reports true, Jump still
-// proceeds (the tab will queue behind via OpenResultTab's existing
-// queueing logic) but emits the informational
-// "gd queued behind active stream" toast. May be nil.
+// active stream. Currently unused: with last-wins (dbsavvy-lxn.1) a new
+// op preempts any parked stream rather than queueing, so Jump no longer
+// branches on busyness. Retained as optional plumbing; may be nil.
 type BusyChecker interface {
 	IsBusy() bool
 }
@@ -103,10 +102,9 @@ type CurrentTab interface {
 // parent rows. See dbsavvy-bwq.16 (B5).
 //
 // The helper deliberately holds no state — every Jump call is a fresh
-// lookup. Concurrency is bounded by the underlying SQLSession queue
-// (Stream serialises via streamMu). Multiple concurrent gd presses are
-// rare in interactive use; the first wins the queue and any later one
-// queues behind it (with the informational toast).
+// lookup. Last-wins (dbsavvy-lxn.1): RunQuery preempts any parked prior
+// stream at the QueryRunner chokepoint, so a later gd press preempts an
+// earlier one rather than queueing behind it.
 type FKForwardHelper struct {
 	cache    FKCache
 	jumpList JumpList
@@ -175,7 +173,7 @@ var (
 // the guards (no FK / NULL cell / row not loaded / composite missing
 // columns) trips, OR when a downstream dependency (runner / tabs)
 // surfaces an error. A successful Jump returns nil after the new tab
-// has been opened (or queued behind an active stream).
+// has been opened (preempting any parked prior stream; dbsavvy-lxn.1).
 //
 // Guard order: invalid arguments → cache lookup → FK match → composite
 // columns → cursor row → cursor cell. We do the cheapest checks first
@@ -287,12 +285,10 @@ func (h *FKForwardHelper) Jump(ctx context.Context, tab CurrentTab, cursorRow, c
 		At:      time.Now(),
 	})
 
-	// Informational toast when an active stream forces queueing.
-	// OpenResultTab handles the actual queue; the toast is just UX.
-	if h.busy != nil && h.busy.IsBusy() {
-		h.emitToast("gd queued behind active stream")
-	}
-
+	// Last-wins (dbsavvy-lxn.1): RunQuery preempts any parked prior stream
+	// at the QueryRunner chokepoint before running, mirroring run/run_all.
+	// fk-forward therefore does NOT queue behind an active stream, so no
+	// "queued" toast is emitted — the preempt is silent, matching run_all.
 	rh, err := h.runner.RunQuery(ctx, q)
 	if err != nil {
 		return fmt.Errorf("fk forward: run parent select: %w", err)

@@ -389,7 +389,11 @@ func TestFKForward_TabCapReached_ToastsAndPropagates(t *testing.T) {
 	}
 }
 
-func TestFKForward_BusyChecker_EmitsQueuedToast(t *testing.T) {
+// TestFKForward_BusyChecker_DoesNotEmitQueuedToast asserts last-wins
+// (dbsavvy-lxn.1/.3): even when the session reports busy, Jump preempts
+// the parked stream rather than queueing, so the misleading
+// "queued behind active stream" toast is NEVER emitted.
+func TestFKForward_BusyChecker_DoesNotEmitQueuedToast(t *testing.T) {
 	t.Parallel()
 	cache := &fakeCache{fks: []models.ForeignKey{simpleFK()}}
 	runner := &fakeRunner{}
@@ -410,15 +414,14 @@ func TestFKForward_BusyChecker_EmitsQueuedToast(t *testing.T) {
 	if err := h.Jump(context.Background(), tab, 0, 1); err != nil {
 		t.Fatalf("Jump: %v", err)
 	}
-	foundToast := false
 	for _, m := range toast.messages {
-		if strings.Contains(m, "queued behind active stream") {
-			foundToast = true
-			break
+		if strings.Contains(m, "queued behind") {
+			t.Errorf("toast.messages = %+v, want NO message mentioning 'queued behind' (last-wins preempts, not queues)", toast.messages)
 		}
 	}
-	if !foundToast {
-		t.Errorf("toast.messages = %+v, want one mentioning 'queued behind active stream'", toast.messages)
+	// The jump entry must still be pushed for <C-o> back-nav.
+	if len(jumps.pushed) != 1 {
+		t.Errorf("jumps.pushed = %d, want 1 (back-nav entry must survive)", len(jumps.pushed))
 	}
 }
 
