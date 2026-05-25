@@ -630,6 +630,41 @@ func TestShowErrorCreatesErrorStateTab(t *testing.T) {
 	}
 }
 
+// TestOpenPlanTabHasNilGrid is the regression test for dbsavvy-6pb. allocTab
+// eagerly creates a grid for every tab; OpenPlanTab must clear it so Tab.Grid()
+// honors its documented "nil for plan / error tabs" contract. Otherwise
+// LayoutPaint's "if g := t.Grid(); g != nil { g.Render }" branch wins over the
+// StatePlan branch and renders the empty grid's "(0 rows)" EmptyResultIndicator
+// instead of the plan tree.
+func TestOpenPlanTabHasNilGrid(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	if err := h.OpenPlanTab("EXPLAIN SELECT", models.Plan{RawText: "Seq Scan on users"}); err != nil {
+		t.Fatalf("OpenPlanTab: %v", err)
+	}
+	active := h.Active()
+	if active == nil {
+		t.Fatal("Active = nil after OpenPlanTab")
+	}
+	if g := active.Grid(); g != nil {
+		t.Errorf("plan tab Grid() = %v, want nil (else LayoutPaint renders the empty grid '(0 rows)' over the plan body)", g)
+	}
+}
+
+// TestShowErrorHasNilGrid is the regression test for dbsavvy-6pb (error-tab
+// arm). ShowError must clear the eagerly-created grid so LayoutPaint reaches
+// the Err() branch instead of rendering the empty grid's "(0 rows)".
+func TestShowErrorHasNilGrid(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	h.ShowError("SELECT bad", errors.New("syntax error near 'WHERE'"))
+	active := h.Active()
+	if active == nil {
+		t.Fatal("Active = nil after ShowError")
+	}
+	if g := active.Grid(); g != nil {
+		t.Errorf("error tab Grid() = %v, want nil (else LayoutPaint renders the empty grid '(0 rows)' over the error message)", g)
+	}
+}
+
 // --- Title ----------------------------------------------------------------
 
 func TestTabTitleFormat(t *testing.T) {

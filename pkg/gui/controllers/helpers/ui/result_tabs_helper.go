@@ -605,6 +605,12 @@ func (h *ResultTabsHelper) OpenPlanTab(label string, plan models.Plan) error {
 	tab.plan = plan
 	tab.planRaw = plan.RawText
 	tab.planCtx = planCtx
+	// allocTab eagerly creates a grid for every tab; a plan tab has no
+	// stream so it must drop the grid. Otherwise LayoutPaint's
+	// "if g := t.Grid(); g != nil { g.Render }" branch wins over the
+	// StatePlan branch and paints the empty grid's "(0 rows)"
+	// EmptyResultIndicator over the plan tree (dbsavvy-6pb).
+	tab.grid = nil
 	tab.mu.Unlock()
 	h.setActive(tab.id)
 	h.materialiseView(tab)
@@ -664,6 +670,10 @@ func (h *ResultTabsHelper) ShowError(label string, err error) {
 	tab.mu.Lock()
 	tab.state = StateError
 	tab.err = err
+	// Drop the eagerly-created grid so LayoutPaint reaches the Err()
+	// branch instead of painting the empty grid's "(0 rows)" over the
+	// error message (dbsavvy-6pb).
+	tab.grid = nil
 	tab.mu.Unlock()
 	h.setActive(tab.id)
 	h.materialiseView(tab)
