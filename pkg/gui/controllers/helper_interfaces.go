@@ -160,18 +160,6 @@ type ResultTabIdentityAttacher interface {
 	AttachActiveTabIdentity(connID string, ri query.ResultIdentity)
 }
 
-// InFlightPreempter is the optional surface QueryEditorController uses to
-// stop any in-flight result-tab stream before launching a new run.
-// dbsavvy-dk6: a streamed result larger than the initial-fill window
-// parks its worker holding the per-session queue lock (SQLSession.streamMu)
-// without ever reaching EOF, so a subsequent synchronous Stream on the UI
-// goroutine would deadlock the TUI. The concrete *ui.ResultTabsHelper
-// satisfies this; test fakes that don't implement it simply skip the
-// preempt.
-type InFlightPreempter interface {
-	PreemptInFlight()
-}
-
 // EditorBufferReader is the narrow surface the QueryEditorController
 // queries to learn what statement to run. It returns the full buffer
 // text, the cursor's byte offset into that buffer, and (post wwd.7)

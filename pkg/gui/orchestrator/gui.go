@@ -543,6 +543,12 @@ func (g *Gui) wireWithDriver() error {
 	if g.queryRunner == nil {
 		g.queryRunner = data.NewQueryRunner(nil, drivers.Capabilities{})
 	}
+	// Centralize last-wins preemption at the QueryRunner chokepoint: every
+	// Run / RunQuery / Explain stops any parked >200-row stream before it
+	// acquires the per-session queue lock, so no synchronous session op on
+	// the UI goroutine can freeze the TUI (dbsavvy-lxn.1). Set on the runner
+	// itself so it survives Bind / Unbind on reconnect.
+	g.queryRunner.SetPreempter(g.resultTabsH.PreemptInFlight)
 
 	// dbsavvy-bwq.py4: instantiate the inline-edit helpers. Each is built
 	// once at boot and pinned on *Gui so subsequent re-wires (bwq.23 /

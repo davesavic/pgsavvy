@@ -466,33 +466,36 @@ func TestQueryEditorRunAllDispatchesEverySegmentSequentially(t *testing.T) {
 	}
 }
 
-// preemptingResultTabs records, at each PreemptInFlight call, how many
+// preemptRecorder records, at each PreemptInFlight call, how many
 // streams the runner session has issued so far — a witness for ordering.
-type preemptingResultTabs struct {
-	fakeResultTabs
+// Wired to the runner via SetPreempter (dbsavvy-lxn.1: preemption now
+// lives in the QueryRunner chokepoint, not behind the controller's
+// ResultTabs surface).
+type preemptRecorder struct {
 	rec               *recordingRunnerSession
 	preemptStreamLens []int
 }
 
-func (p *preemptingResultTabs) PreemptInFlight() {
+func (p *preemptRecorder) PreemptInFlight() {
 	p.preemptStreamLens = append(p.preemptStreamLens, len(p.rec.streamCalls))
 }
 
 // TestQueryEditorRunAllPreemptsBeforeEachStream is the deadlock-fix wiring
-// guard (dbsavvy-dk6): each statement must preempt any in-flight stream
-// BEFORE it issues its own Stream, so a >200-row prior run can't leave the
-// per-session queue lock held and freeze the UI. The witness is the stream
-// count observed at each preempt: [0, 1] means preempt#1 ran before any
-// Stream and preempt#2 ran after exactly statement 1 had streamed.
+// guard (dbsavvy-dk6, now centralized per dbsavvy-lxn.1): each statement
+// must preempt any in-flight stream BEFORE it issues its own Stream, so a
+// >200-row prior run can't leave the per-session queue lock held and freeze
+// the UI. The witness is the stream count observed at each preempt: [0, 1]
+// means preempt#1 ran before any Stream and preempt#2 ran after exactly
+// statement 1 had streamed.
 func TestQueryEditorRunAllPreemptsBeforeEachStream(t *testing.T) {
 	rec := &recordingRunnerSession{}
 	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
 
 	base := newBag()
-	tabs := &preemptingResultTabs{rec: rec}
+	tabs := &preemptRecorder{rec: rec}
+	runner.SetPreempter(tabs.PreemptInFlight)
 	base.HelperBag.QueryRunner = runner
 	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1; SELECT 2;"}
-	base.HelperBag.ResultTabs = tabs
 
 	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag)
 	reg := commands.NewRegistry()

@@ -232,3 +232,96 @@ func TestNewQueryRunnerForSessionNilSafe(t *testing.T) {
 		t.Fatal("caps were lost across nil-session bootstrap")
 	}
 }
+
+// countingRunnerSession totals every session call so a preempt hook can
+// witness how many session ops had run before it fired.
+type countingRunnerSession struct {
+	fakeRunnerSession
+}
+
+func (c *countingRunnerSession) calls() int {
+	return len(c.execCalls) + len(c.streamCalls) + len(c.explainCalls)
+}
+
+// TestPreemptInFlightFiresBeforeSessionOp proves the chokepoint contract:
+// Run, RunQuery, and Explain each invoke the preempt hook BEFORE touching
+// the session, so a parked >200-row stream is stopped before the new op
+// locks the per-session queue (dbsavvy-lxn.1).
+func TestPreemptInFlightFiresBeforeSessionOp(t *testing.T) {
+	cases := []struct {
+		name   string
+		invoke func(r *QueryRunner) error
+	}{
+		{
+			name: "Run",
+			invoke: func(r *QueryRunner) error {
+				_, err := r.Run(context.Background(), "SELECT 1", RunOptions{})
+				return err
+			},
+		},
+		{
+			name: "RunQuery",
+			invoke: func(r *QueryRunner) error {
+				_, err := r.RunQuery(context.Background(), models.Query{SQL: "SELECT 1"})
+				return err
+			},
+		},
+		{
+			name: "Explain",
+			invoke: func(r *QueryRunner) error {
+				// analyze=false hits the early-return branch; the preempt
+				// must still fire before the session Explain.
+				_, err := r.Explain(context.Background(), "SELECT 1", false)
+				return err
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := &countingRunnerSession{}
+			r := NewQueryRunner(cs, drivers.Capabilities{})
+
+			preemptCalls := 0
+			callsAtPreempt := -1
+			r.SetPreempter(func() {
+				preemptCalls++
+				callsAtPreempt = cs.calls()
+			})
+
+			if err := tc.invoke(r); err != nil {
+				t.Fatalf("%s err = %v", tc.name, err)
+			}
+			if preemptCalls != 1 {
+				t.Fatalf("preempt fired %d times, want exactly 1", preemptCalls)
+			}
+			if callsAtPreempt != 0 {
+				t.Fatalf("preempt saw %d prior session calls, want 0 (must fire before any session op)", callsAtPreempt)
+			}
+		})
+	}
+}
+
+// TestPreemptSurvivesUnbindRebind is the highest-risk regression guard:
+// the preempt hook lives on *QueryRunner, NOT on runnerBinding, so an
+// atomic Bind / Unbind swap on reconnect must not silently drop it and
+// reintroduce the UI freeze (dbsavvy-lxn.1). Bind is exercised via
+// SetPreempter + NewQueryRunner here; the production swap is identical.
+func TestPreemptSurvivesUnbindRebind(t *testing.T) {
+	r := NewQueryRunner(&fakeRunnerSession{}, drivers.Capabilities{})
+
+	fired := 0
+	r.SetPreempter(func() { fired++ })
+
+	// Swap the binding twice (Unbind then re-Bind with a fresh session),
+	// mirroring a disconnect / reconnect cycle.
+	r.Unbind()
+	r.binding.Store(&runnerBinding{sess: &fakeRunnerSession{}})
+
+	if _, err := r.Run(context.Background(), "SELECT 1", RunOptions{}); err != nil {
+		t.Fatalf("Run after rebind err = %v", err)
+	}
+	if fired != 1 {
+		t.Fatalf("preempt fired %d times after Unbind/rebind, want 1 (hook must survive the binding swap)", fired)
+	}
+}

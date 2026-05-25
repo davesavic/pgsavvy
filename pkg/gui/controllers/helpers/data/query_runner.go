@@ -63,10 +63,28 @@ type runnerBinding struct {
 // safe; they queue inside SQLSession. Bind / Unbind swap the inner
 // session atomically so a controller value-copy of the helper bag (the
 // runner pointer) keeps seeing the freshest binding after a Connect.
+//
+// UI-goroutine contract: Run, RunQuery, and Explain MUST be called on
+// the UI goroutine. Each invokes the preempt hook (see SetPreempter) as
+// its first action: a prior run whose result exceeds the initial-fill
+// window parks its worker holding SQLSession.streamMu indefinitely, so
+// the synchronous session op below would freeze the TUI without a
+// last-wins preempt first (dbsavvy-lxn). The preempt hook itself must be
+// safe to call from the UI goroutine.
+//
+// preempt lives directly on *QueryRunner (NOT on runnerBinding) so it
+// survives the atomic Bind / Unbind swap — a reconnect must not silently
+// drop the preempter and reintroduce the freeze (dbsavvy-lxn.1).
 type QueryRunner struct {
 	binding atomic.Pointer[runnerBinding]
 
 	last atomic.Pointer[session.RunHandle]
+
+	// preempt, when non-nil, stops any in-flight result-tab stream before
+	// a new session op acquires the per-session queue lock. Set once at
+	// wire time via SetPreempter; nil in unit tests that don't exercise
+	// preemption.
+	preempt func()
 }
 
 // NewQueryRunner builds a QueryRunner bound to sess. caps captures the
@@ -132,6 +150,26 @@ func (r *QueryRunner) Unbind() {
 	r.last.Store(nil)
 }
 
+// SetPreempter installs the hook invoked at the start of Run / RunQuery
+// / Explain to stop any in-flight stream before the new session op locks
+// the per-session queue (last-wins). Set once at wire time; the hook is
+// stored on the runner itself so it survives Bind / Unbind. fn may be
+// nil to clear the hook. Safe to call on a nil receiver.
+func (r *QueryRunner) SetPreempter(fn func()) {
+	if r == nil {
+		return
+	}
+	r.preempt = fn
+}
+
+// preemptInFlight invokes the preempt hook when one is installed. Nil-safe.
+func (r *QueryRunner) preemptInFlight() {
+	if r == nil || r.preempt == nil {
+		return
+	}
+	r.preempt()
+}
+
 // load returns the current binding snapshot. Never returns nil — the
 // constructor always seeds a binding so the atomic.Pointer is non-nil
 // from the first call.
@@ -169,6 +207,7 @@ func (r *QueryRunner) HasSession() bool {
 // hand it to ResultTabsHelper.OpenResultTab; the tab owns the row
 // drain afterwards.
 func (r *QueryRunner) Run(ctx context.Context, sql string, opts RunOptions) (*session.RunHandle, error) {
+	r.preemptInFlight()
 	b := r.load()
 	if b == nil || b.sess == nil {
 		return nil, ErrNoSession
@@ -192,6 +231,7 @@ func (r *QueryRunner) Run(ctx context.Context, sql string, opts RunOptions) (*se
 // FKForwardHelper (dbsavvy-bwq.16) to issue the parameterized parent-table
 // SELECT for `gd`.
 func (r *QueryRunner) RunQuery(ctx context.Context, q models.Query) (*session.RunHandle, error) {
+	r.preemptInFlight()
 	b := r.load()
 	if b == nil || b.sess == nil {
 		return nil, ErrNoSession
@@ -210,6 +250,7 @@ func (r *QueryRunner) RunQuery(ctx context.Context, q models.Query) (*session.Ru
 // transaction is already open the wrap is skipped — the caller's tx
 // retains control over commit/rollback.
 func (r *QueryRunner) Explain(ctx context.Context, sql string, analyze bool) (models.Plan, error) {
+	r.preemptInFlight()
 	b := r.load()
 	if b == nil || b.sess == nil {
 		return models.Plan{}, ErrNoSession
