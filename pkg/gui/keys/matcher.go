@@ -474,11 +474,22 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		return Pending, nil
 
 	case !res.IsLeaf && res.HasChildren:
-		// Interior node: pure prefix. Buffer; schedule inactivity timer
-		// (so an abandoned prefix doesn't sit forever); notify which-key.
+		// Interior node: pure prefix. Buffer + notify which-key.
 		m.pending = seq
 		m.lastLeaf = nil
-		m.scheduleTimerLocked(scope, mode)
+		// dbsavvy-81j: in non-insert modes a pure prefix is a which-key
+		// waypoint — keep it pending (and the popup visible) until the
+		// next key or <esc>, instead of abandoning it after timeout_len.
+		// Insert / command modes still arm the timer so buffered runes
+		// flush (dbsavvy-1yb) and their existing timeout behaviour is
+		// preserved. stopTimerLocked clears any timer armed by an earlier
+		// ambiguous-leaf in this same sequence and bumps seq so an
+		// in-flight fire is ignored.
+		if mode == types.ModeInsert || mode == types.ModeCommand {
+			m.scheduleTimerLocked(scope, mode)
+		} else {
+			m.stopTimerLocked()
+		}
 		m.notifyWhichKeyLocked(scope, seq)
 		m.mu.Unlock()
 		logs.Event(log, "input", "chord_resolved",
@@ -605,6 +616,20 @@ func (m *Matcher) scheduleTimerLocked(scope types.ContextKey, mode types.Mode) {
 	m.timer = time.AfterFunc(delay, func() {
 		m.onTimerFire(id)
 	})
+}
+
+// stopTimerLocked stops any armed inactivity timer and bumps seq so an
+// in-flight fire is ignored, WITHOUT arming a replacement and WITHOUT
+// clearing the pending chord. Used by the non-insert pure-prefix path
+// (dbsavvy-81j): the which-key popup for a pure prefix must persist until
+// the next key or <esc> rather than being abandoned after timeout_len.
+// Caller MUST hold m.mu.
+func (m *Matcher) stopTimerLocked() {
+	if m.timer != nil {
+		m.timer.Stop()
+		m.timer = nil
+	}
+	m.seq++
 }
 
 // onTimerFire runs on its own goroutine (time.AfterFunc). Compares

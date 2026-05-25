@@ -370,11 +370,12 @@ func (g *Gui) wireWithDriver() error {
 
 	// WhichKey rows resolver (dbsavvy-tro.4). Captures the live matcher +
 	// modeStore so WhichKeyContext.HandleRender pulls the immediate
-	// children of the current (scope, prefix) on every render frame.
-	// Returns nil when the matcher hasn't published a TrieSet yet, when
-	// the (mode, scope) tuple has no trie, or when prefix doesn't resolve
-	// inside that trie — the context's HandleRender treats nil rows as a
-	// silent no-op (see whichkey_context.go:73-76).
+	// children of the current (scope, prefix) on every render frame,
+	// merged across the focused scope and GLOBAL (dbsavvy-81j).
+	// Returns nil when the matcher hasn't published a TrieSet yet or when
+	// prefix doesn't resolve in either the (mode, scope) or (mode, GLOBAL)
+	// trie — the context's HandleRender treats nil rows as a silent no-op
+	// (see whichkey_context.go:73-76).
 	whichKeyRows := func(scope types.ContextKey, prefix []types.ChordKey) []types.ChildRow {
 		if g.matcher == nil || g.modeStore == nil {
 			return nil
@@ -384,11 +385,11 @@ func (g *Gui) wireWithDriver() error {
 			return nil
 		}
 		mode := g.modeStore.Get(scope)
-		trie, ok := ts.Get(mode, scope)
-		if !ok || trie == nil {
-			return nil
-		}
-		rows, ok := trie.ChildrenAt(prefix)
+		// dbsavvy-81j: union the focused scope's continuations with GLOBAL's,
+		// mirroring Dispatch's scope→GLOBAL fall-through, so the popup lists
+		// every key that would actually fire (e.g. global <leader>1..9 while
+		// focused on RESULT_GRID), not just the scope-specific ones.
+		rows, ok := ts.ChildrenAtMerged(mode, scope, prefix)
 		if !ok {
 			return nil
 		}

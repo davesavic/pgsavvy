@@ -133,6 +133,62 @@ func (s *TrieSet) Get(mode types.Mode, scope types.ContextKey) (*ChordTrie, bool
 	return t, ok
 }
 
+// ChildrenAtMerged returns the immediate continuations of prefix for the
+// focused (mode, scope) trie UNIONED with the (mode, GLOBAL) trie, mirroring
+// the scope→GLOBAL fall-through Dispatch uses so the which-key popup lists
+// exactly the keys that would fire. Scope-specific children win on a key
+// collision (Dispatch tries the scope trie first). Rows are deduped by Key
+// and sorted by Key.String() for determinism.
+//
+// Returns (nil, false) only when neither trie resolves prefix. Returns
+// (empty, true) when prefix resolves but has no continuations. When scope
+// IS GLOBAL the global trie is consulted once (no double-collect).
+// dbsavvy-81j.
+func (s *TrieSet) ChildrenAtMerged(mode types.Mode, scope types.ContextKey, prefix []Key) ([]ChildRow, bool) {
+	if s == nil {
+		return nil, false
+	}
+
+	var (
+		merged   []ChildRow
+		seen     = map[Key]struct{}{}
+		anyFound bool
+	)
+	add := func(rows []ChildRow) {
+		for _, r := range rows {
+			if _, dup := seen[r.Key]; dup {
+				continue
+			}
+			seen[r.Key] = struct{}{}
+			merged = append(merged, r)
+		}
+	}
+
+	// Scope first so scope-specific children win on a key collision.
+	if scopeTrie, ok := s.Get(mode, scope); ok && scopeTrie != nil {
+		if rows, found := scopeTrie.ChildrenAt(prefix); found {
+			anyFound = true
+			add(rows)
+		}
+	}
+	if scope != types.GLOBAL {
+		if globalTrie, ok := s.Get(mode, types.GLOBAL); ok && globalTrie != nil {
+			if rows, found := globalTrie.ChildrenAt(prefix); found {
+				anyFound = true
+				add(rows)
+			}
+		}
+	}
+
+	if !anyFound {
+		return nil, false
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].Key.String() < merged[j].Key.String()
+	})
+	return merged, true
+}
+
 // Len reports the number of distinct (Mode, Scope) tries.
 func (s *TrieSet) Len() int {
 	if s == nil {
