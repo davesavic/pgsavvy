@@ -25,3 +25,30 @@ func TestPopupRectFor_TableInspect(t *testing.T) {
 		t.Errorf("height %d not ~60", h)
 	}
 }
+
+// TestPopupRectFor_CellEditor locks in the small, height-bounded rect
+// for the CELL_EDITOR popup (dbsavvy-tzi.1). The core property is the
+// bounded height (~3 content rows + borders) so the popup does not
+// occlude the result grid; width is ~60% of the canvas. Uses a 100×100
+// popup-overlay canvas.
+func TestPopupRectFor_CellEditor(t *testing.T) {
+	canvas := ui.Dimensions{X0: 0, Y0: 0, X1: 100, Y1: 100}
+	dims := map[string]ui.Dimensions{"popup-overlay": canvas}
+
+	r, ok := popupRectFor(types.CELL_EDITOR, dims, 100, 100)
+	if !ok {
+		t.Fatalf("popupRectFor(CELL_EDITOR) ok=false, want true")
+	}
+	if h := r.Y1 - r.Y0; h > 6 {
+		t.Errorf("height %d not height-bounded (want <= 6)", h)
+	}
+	if w := r.X1 - r.X0; w < 50 || w > 70 {
+		t.Errorf("width %d not ~60%% of canvas", w)
+	}
+
+	// No "popup-overlay" entry: bail out cleanly (no panic), matching
+	// the default branch.
+	if r2, ok2 := popupRectFor(types.CELL_EDITOR, map[string]ui.Dimensions{}, 100, 100); ok2 || r2 != (rect{}) {
+		t.Errorf("missing popup-overlay: got (%v, %v), want (rect{}, false)", r2, ok2)
+	}
+}

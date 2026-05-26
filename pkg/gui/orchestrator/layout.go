@@ -521,6 +521,19 @@ func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int)
 			canvas = ui.Dimensions{X0: 0, Y0: 0, X1: w - 1, Y1: h - 1}
 		}
 		return centeredRectMaxSize(canvas, cheatsheetMaxCols, cheatsheetMaxRows), true
+	case types.CELL_EDITOR:
+		// CELL_EDITOR is a small single-line editing popup over the
+		// result grid (dbsavvy-tzi.1). Keep it height-bounded — a 50%
+		// box would occlude the grid the user is editing. Width is ~60%
+		// of the canvas; cellEditorMaxRows caps it at ~3 content rows
+		// (frame top+bottom borders consume 2).
+		canvas, ok := dims["popup-overlay"]
+		if !ok {
+			return rect{}, false
+		}
+		cw := canvas.X1 - canvas.X0
+		maxCols := cw * 3 / 5
+		return centeredRectMaxSize(canvas, maxCols, cellEditorMaxRows), true
 	default:
 		return rect{}, false
 	}
@@ -563,6 +576,12 @@ const (
 	cheatsheetMaxRows = 30
 	cheatsheetMaxCols = 60
 )
+
+// cellEditorMaxRows caps the cell-edit popup height. The frame's top and
+// bottom borders consume 2 rows, leaving ~3 content rows for the single
+// "> <buffer>" line. Height-bounded by design so the popup doesn't
+// occlude the result grid being edited (dbsavvy-tzi.1).
+const cellEditorMaxRows = 5
 
 // renderWhichKeyOverlay positions the WHICH_KEY view in the bottom
 // right corner of popup-overlay and invokes WhichKeyContext.HandleRender
