@@ -128,7 +128,10 @@ func renderCellPlain(value any, col models.ColumnMeta) string {
 		}
 		return SanitizeCellEscapes(s)
 	default:
-		s := fmt.Sprintf("%v", value)
+		s, ok := FormatArrayLiteral(value)
+		if !ok {
+			s = fmt.Sprintf("%v", value)
+		}
 		if len(s) > MaxCellRenderBytes {
 			s = s[:MaxCellRenderBytes-1] + "…"
 		}

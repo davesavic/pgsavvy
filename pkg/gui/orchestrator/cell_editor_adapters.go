@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/dbsavvy/pkg/gui/grid"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -91,6 +92,13 @@ func (p cellEditorPicker) FormatForEdit(v any) string {
 	}
 	if s, ok := v.(string); ok {
 		return s
+	}
+	// Array columns (text[] etc.) decode to a Go slice; seed the editor
+	// with Postgres array syntax {a,b,c} — the same string the grid
+	// shows — so the edited value commits as a valid array literal rather
+	// than Go's "[a b c]" form Postgres rejects (dbsavvy-26i).
+	if lit, ok := grid.FormatArrayLiteral(v); ok {
+		return lit
 	}
 	return fmt.Sprintf("%v", v)
 }

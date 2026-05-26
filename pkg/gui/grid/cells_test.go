@@ -18,6 +18,18 @@ func resetThemeForTest(t *testing.T) {
 	require.NoError(t, theme.Apply(builtin.DefaultDark()))
 }
 
+// TestRenderCellPlain_ArrayLiteral asserts a Postgres array column value
+// (decoded by pgx into a Go slice) renders as Postgres array syntax
+// {a,b,c} rather than Go's "[a b c]" slice formatting. The grid display
+// and the edit-seed share this path, so what the user sees is a valid
+// array literal they can edit and commit (dbsavvy-26i).
+func TestRenderCellPlain_ArrayLiteral(t *testing.T) {
+	resetThemeForTest(t)
+	col := models.ColumnMeta{Name: "tags", TypeName: "_text"}
+	visible := renderCellPlain([]any{"admin", "founder", "editor"}, col)
+	require.Equal(t, "{admin,founder,editor}", visible)
+}
+
 // TestRenderCell_NullItalic asserts NULL cells emit the italic SGR and
 // the literal "NULL".
 func TestRenderCell_NullItalic(t *testing.T) {

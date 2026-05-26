@@ -82,6 +82,10 @@ type Deps struct {
 	HistoryProvider func() (*query.History, error)
 }
 
+// matcherToastTTL is how long a Matcher-surfaced toast (swallowed
+// handler error or disabled-binding reason) stays before auto-clearing.
+const matcherToastTTL = 4 * time.Second
+
 // Option mutates a *Gui at construction time. Functional-option pattern
 // used to keep NewGui's signature stable while letting tests inject key
 // delay overrides without polluting Deps.
@@ -337,6 +341,16 @@ func (g *Gui) wireWithDriver() error {
 		Registers:     keys.NewRegisterStore(),
 		WhichKey:      g.whichkey,
 		Log:           g.deps.Common.Logger(),
+		// Surface swallowed handler errors and disabled-binding reasons
+		// as toasts. Late-bound: g.toastHelp is constructed later in this
+		// method, but by the time any key dispatches it is non-nil
+		// (dbsavvy-26i — without this, handler errors only hit the debug
+		// log and apply/commit failures look like silent no-ops).
+		Toaster: func(msg string) {
+			if g.toastHelp != nil {
+				g.toastHelp.Show(msg, matcherToastTTL)
+			}
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("gui: NewMatcher: %w", err)

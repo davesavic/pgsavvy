@@ -37,6 +37,7 @@
 package orchestrator_test
 
 import (
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -874,6 +875,52 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 	}
 
 	goleak.VerifyNone(t, goleak.IgnoreCurrent())
+}
+
+// TestMatcherToasterWired_HandlerErrorSurfaces proves the production Gui
+// wires a Toaster into the Matcher (dbsavvy-26i). The central error
+// boundary swallows a handler error so it never reaches gocui's MainLoop,
+// but without a Toaster the user saw nothing — apply/commit failures
+// looked like silent no-ops (only a debug-log breadcrumb). This drives a
+// real erroring handler through the live matcher and asserts the message
+// lands in the wired ToastHelper. Removing the MatcherConfig.Toaster
+// wiring makes ToastHelper.Current() empty and fails this test.
+func TestMatcherToasterWired_HandlerErrorSurfaces(t *testing.T) {
+	s := setupKbSmoke(t)
+
+	const actionID = "test.boom"
+	if err := s.g.CommandRegistry().Register(&commands.Command{
+		ID:          actionID,
+		Description: "smoke: erroring handler",
+		Handler: func(commands.ExecCtx) error {
+			return errors.New("kaboom from handler")
+		},
+	}); err != nil {
+		t.Fatalf("Register %s: %v", actionID, err)
+	}
+
+	synthetic := *s.cfg
+	synthetic.Keybindings = append([]config.KeybindingConfig(nil), s.cfg.Keybindings...)
+	synthetic.Keybindings = append(synthetic.Keybindings, config.KeybindingConfig{
+		Mode: "n", Scope: "global", Key: "K",
+		Action: actionID, Description: "smoke: boom",
+	})
+	trieSet, _, err := s.runBuildWithCfg(&synthetic)
+	if err != nil {
+		t.Fatalf("Build synthetic boom binding: %v", err)
+	}
+	s.g.Matcher().SwapTrieSet(trieSet)
+
+	res, derr := s.g.Matcher().Dispatch(types.GLOBAL, keys.Key{Code: 'K'})
+	if derr != nil {
+		t.Fatalf("Dispatch returned err=%v; the boundary must swallow handler errors", derr)
+	}
+	if res != keys.Dispatched {
+		t.Fatalf("Dispatch result = %v; want Dispatched", res)
+	}
+	if cur := s.g.ToastHelper().Current(); !strings.Contains(cur, "kaboom") {
+		t.Fatalf("ToastHelper.Current() = %q; want it to surface the swallowed handler error (Matcher Toaster not wired?)", cur)
+	}
 }
 
 // TestCellEditorPushFlipsInsertModeAndCaret proves the gui.go SetModes
