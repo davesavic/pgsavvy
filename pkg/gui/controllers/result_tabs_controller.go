@@ -78,6 +78,7 @@ type ResultTabsManager interface {
 	CursorLeft()
 	CursorRight()
 	JumpFirst()
+	JumpLast()
 	HalfPageDown()
 	HalfPageUp()
 	WrappedLineDown()
@@ -148,7 +149,7 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		// dbsavvy-uv0.3: pagination + read-to-end chords.
 		{"]p", commands.ResultPageNext, tr.Actions.ResultPageNext, types.RESULT_GRID},
 		{"[p", commands.ResultPagePrev, tr.Actions.ResultPagePrev, types.RESULT_GRID},
-		{"G", commands.ResultReadToEnd, tr.Actions.ResultReadToEnd, types.RESULT_GRID},
+		{"G", commands.ResultJumpLast, tr.Actions.ResultJumpLast, types.RESULT_GRID},
 		// dbsavvy-uv0.4: /regex filter chords.
 		{"/", commands.ResultFilterPrompt, tr.Actions.ResultFilterPrompt, types.RESULT_GRID},
 		{"<c-a>", commands.ResultFilterToggleAll, tr.Actions.ResultFilterToggleAll, types.RESULT_GRID},
@@ -457,6 +458,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 	r.registerMotionHandler(reg, commands.ResultCursorLeft, tr.Actions.ResultCursorLeft, func() { r.mgr.CursorLeft() })
 	r.registerMotionHandler(reg, commands.ResultCursorRight, tr.Actions.ResultCursorRight, func() { r.mgr.CursorRight() })
 	r.registerMotionHandler(reg, commands.ResultJumpFirst, tr.Actions.ResultJumpFirst, func() { r.mgr.JumpFirst() })
+	r.registerMotionHandler(reg, commands.ResultJumpLast, tr.Actions.ResultJumpLast, func() { r.mgr.JumpLast() })
 	r.registerMotionHandler(reg, commands.ResultHalfPageDown, tr.Actions.ResultHalfPageDown, func() { r.mgr.HalfPageDown() })
 	r.registerMotionHandler(reg, commands.ResultHalfPageUp, tr.Actions.ResultHalfPageUp, func() { r.mgr.HalfPageUp() })
 	r.registerMotionHandler(reg, commands.ResultWrappedLineDown, tr.Actions.ResultWrappedLineDown, func() { r.mgr.WrappedLineDown() })

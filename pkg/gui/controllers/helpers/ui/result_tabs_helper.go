@@ -2504,6 +2504,7 @@ func (h *ResultTabsHelper) CursorRight() {
 	h.withActiveGrid(func(g *grid.View) { g.HorizScrollRight() })
 }
 func (h *ResultTabsHelper) JumpFirst()    { h.withActiveGrid(func(g *grid.View) { g.JumpFirst() }) }
+func (h *ResultTabsHelper) JumpLast()     { h.withActiveGrid(func(g *grid.View) { g.JumpLast() }) }
 func (h *ResultTabsHelper) HalfPageDown() { h.withActiveGrid(func(g *grid.View) { g.HalfPageDown() }) }
 func (h *ResultTabsHelper) HalfPageUp()   { h.withActiveGrid(func(g *grid.View) { g.HalfPageUp() }) }
 func (h *ResultTabsHelper) WrappedLineDown() {

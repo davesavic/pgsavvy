@@ -914,6 +914,41 @@ func TestPagePlusOneRequestsReadRowsAndJumpsLast(t *testing.T) {
 	}
 }
 
+// TestJumpLastMovesCursorToLastRowInGridMode guards dbsavvy-6t9: in the
+// default grid view, JumpLast (G) moves the cursor to the last loaded
+// row. The stream is marked complete first, so the old G->ReadToEnd
+// wiring would no-op and leave the cursor at row 0 — this test would
+// fail under that regression.
+func TestJumpLastMovesCursorToLastRowInGridMode(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, _ := newTestHelper(t, factory)
+
+	rh := newFakeRunHandle()
+	_ = h.openTab("Q", rh)
+	tab := h.Active()
+	g := tab.Grid()
+	g.SetColumns([]models.ColumnMeta{{Name: "c0", TypeName: "text"}})
+	rows := make([]models.Row, 10)
+	for i := range rows {
+		rows[i] = models.Row{Values: []any{i}}
+	}
+	g.AppendRows(rows)
+	runner.fireOnDone() // mark complete: old ReadToEnd path would no-op here
+	if !tab.Complete() {
+		t.Fatalf("tab not marked complete")
+	}
+	if startRow, _ := g.CursorPosition(); startRow != 0 {
+		t.Fatalf("cursor should start at row 0, got %d", startRow)
+	}
+
+	h.JumpLast()
+
+	if row, _ := g.CursorPosition(); row != 9 {
+		t.Errorf("cursor row after JumpLast = %d, want 9 (last loaded)", row)
+	}
+}
+
 // TestPageMinusOneRewindsCursor verifies [p (Page(-1)) rewinds the
 // cursor (anchored at the top) and does NOT fire ReadRows.
 // dbsavvy-uv0.3 AC #2.
