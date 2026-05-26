@@ -1644,6 +1644,35 @@ func TestOpenTab_InstallsStreamColumnsOnGrid(t *testing.T) {
 	}
 }
 
+// TestEditabilityIntrospectedOnComplete — when a tab completes and an
+// IntrospectEditability hook is wired, the grid is marked editable.
+// dbsavvy-2b6.
+func TestEditabilityIntrospectedOnComplete(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, _ := newTestHelper(t, factory)
+
+	h.deps.IntrospectEditability = func(_ context.Context, cols []models.ColumnMeta) (bool, []int, string) {
+		return true, []int{0}, ""
+	}
+
+	_ = h.openTab("SELECT id FROM t", newFakeRunHandle())
+	tab := h.Active()
+	if tab.grid.Editable() {
+		t.Fatal("grid editable before completion; want false")
+	}
+
+	runner.fireOnDone() // OnUIThread + OnWorker nil → synchronous
+
+	if !tab.grid.Editable() {
+		t.Fatal("grid not editable after completion (Gap 2a)")
+	}
+	ri := tab.grid.RowIdentity()
+	if len(ri) != 1 || ri[0] != 0 {
+		t.Fatalf("row identity = %v, want [0]", ri)
+	}
+}
+
 // --- dbsavvy-usj: focus-stack IBaseContext for result tabs -----------------
 
 // TestActiveContext_NilWhenNoTabs verifies that ActiveContext() returns

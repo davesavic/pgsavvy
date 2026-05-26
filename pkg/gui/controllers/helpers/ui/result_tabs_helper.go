@@ -273,6 +273,14 @@ type ResultTabsHelperDeps struct {
 	// ExportClipboardMaxBytes caps the payload size pushed to the system
 	// clipboard. 0 means "use the shipped default (16 MiB)". dbsavvy-uv0.9.
 	ExportClipboardMaxBytes int64
+
+	// IntrospectEditability decides whether a completed result is inline-
+	// editable. Wired by the orchestrator to a closure that acquires a
+	// session and runs the driver-specific introspection
+	// (pg.EditabilityIntrospect + pg.ApplyConnectionGate). Returns
+	// (editable, SELECT-order row-identity indexes, disabledReason). nil
+	// keeps editability off (unit-test default). dbsavvy-2b6.
+	IntrospectEditability func(ctx context.Context, cols []models.ColumnMeta) (bool, []int, string)
 }
 
 // defaultReadToEndWarnThreshold is the shipped ceiling above which G
@@ -1311,9 +1319,11 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 	// this, the grid stays at zero columns and renders the
 	// EmptyResultIndicator "(0 rows)" regardless of how many rows the
 	// stream actually produces (dbsavvy-dqp).
+	var cols []models.ColumnMeta
 	if gridView != nil && rh != nil {
 		if rs := rh.Rows(); rs != nil {
-			gridView.SetColumns(rs.Columns())
+			cols = rs.Columns()
+			gridView.SetColumns(cols)
 		}
 	}
 
@@ -1343,6 +1353,7 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		// Render reads a consistent snapshot. Idempotent — dispose()
 		// may have already set Cancelled / etc.
 		h.markCompleteOnUI(tab)
+		h.scheduleEditabilityIntrospect(tab, cols)
 	}
 	_ = runner.NewQueryTask(taskKey, streamFn, appendRows, resultTabInitialRows, onDone)
 }
@@ -1369,6 +1380,34 @@ func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab) {
 		return
 	}
 	_ = flip()
+}
+
+// scheduleEditabilityIntrospect runs the (driver-agnostic) editability
+// introspection for a completed tab off the UI thread, then marshals the
+// SetEditability flip back onto the UI thread. No-op when the hook is
+// unwired or the tab has no grid. dbsavvy-2b6.
+func (h *ResultTabsHelper) scheduleEditabilityIntrospect(tab *Tab, cols []models.ColumnMeta) {
+	if h.deps.IntrospectEditability == nil || tab == nil || tab.grid == nil {
+		return
+	}
+	gridView := tab.grid
+	run := func() {
+		editable, rowID, reason := h.deps.IntrospectEditability(context.Background(), cols)
+		flip := func() error {
+			gridView.SetEditability(editable, rowID, reason)
+			return nil
+		}
+		if h.deps.OnUIThread != nil {
+			h.deps.OnUIThread(flip)
+			return
+		}
+		_ = flip()
+	}
+	if h.deps.OnWorker != nil {
+		h.deps.OnWorker(func(gocui.Task) error { run(); return nil })
+		return
+	}
+	run() // test path: synchronous
 }
 
 // queueBehind marks tab Queued, opens a queuedCancel chan, and spawns
