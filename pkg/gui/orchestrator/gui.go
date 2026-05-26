@@ -1561,6 +1561,17 @@ func (g *Gui) Close() error {
 		return nil
 	}
 	g.closed = true
+	// Stop in-flight result-tab streams BEFORE draining workers. A
+	// ResultBufferManager task that has reached EOF parks forever in its
+	// post-EOF chan loop (result_buffer_manager.go) and only exits when
+	// its per-task stopCh fires. Without firing it first, the
+	// g.workersWG.Wait() below blocks on that parked OnWorker goroutine
+	// and Close() never returns (the shutdown hang fixed here).
+	// PreemptInFlight stops every StateRunning/StateQueued tab and blocks
+	// until each worker has run its cleanup + workersWG.Done.
+	if g.resultTabsH != nil {
+		g.resultTabsH.PreemptInFlight()
+	}
 	// Drain any in-flight OnWorker goroutines before the store/driver
 	// teardown so the goleak smoke tests see a quiescent goroutine pool
 	// (DESIGN.md §17). Safe to call when no workers were ever spawned —
