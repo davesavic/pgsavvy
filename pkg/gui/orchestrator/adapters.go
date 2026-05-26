@@ -127,30 +127,67 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	if c == nil || c.helper == nil {
 		return nil
 	}
+	// Supersession token (dbsavvy-fow.1): bump on entry and capture the
+	// new value. A later activation bumps it again; on completion we
+	// compare via isStaleConnect and drop the result if a newer connect
+	// has started, so a slow/timed-out dial can't clobber a more recent
+	// connection. Atomic so concurrent worker-goroutine Connects don't
+	// race the bump.
+	var gen uint64
+	if c.g != nil {
+		gen = c.g.connectGen.Add(1)
+	}
+	// --- WORKER PHASE: all blocking I/O runs here (Connect itself runs on
+	// the worker goroutine — connections_controller.go schedules it via
+	// OnWorker). Nothing in this phase writes GUI state the MainLoop reads;
+	// results are collected into locals and published in the single
+	// OnUIThread closure below (dbsavvy-fow.1).
 	conn, _, err := c.helper.Connect(ctx, profile)
 	if err != nil {
 		return err
 	}
-	if profile != nil && c.g != nil {
-		c.g.activeConnID = profile.Name
-		c.g.activeConnProfile = profile
+	if c.isStaleConnect(gen) {
+		// A newer activation superseded this one mid-dial. Tear down the
+		// freshly-opened schema-rail session so we don't leak it, and drop
+		// the result without touching activeConn / the schemas rail.
+		c.helper.Disconnect()
+		return nil
 	}
-	if err := c.wireQueryRuntime(ctx, conn, profile); err != nil {
+	// Open the query session (I/O part of wireQueryRuntime). This acquires
+	// a second drivers.Session — kept on the worker so the dial+acquire
+	// never blocks the MainLoop.
+	rt, err := c.wireQueryRuntimeIO(ctx, conn, profile)
+	if err != nil {
 		// Roll back the ConnectHelper.Connect so we don't leak the schema-
 		// rail session in a half-wired state. The user sees the wiring
 		// error verbatim; a follow-up reconnect goes through the same
-		// path cleanly.
+		// path cleanly. setActiveConn is marshalled onto the UI thread to
+		// serialise with the MainLoop reads of activeConnID.
 		c.helper.Disconnect()
-		if c.g != nil {
-			c.g.activeConnID = ""
-			c.g.activeConnProfile = nil
+		if !c.isStaleConnect(gen) {
+			c.runOnUIThread(func() error {
+				if c.isStaleConnect(gen) {
+					return nil
+				}
+				c.setActiveConn(nil)
+				return nil
+			})
 		}
 		return err
 	}
+	// Load + filter the schema list (I/O+compute part of populateSchemasRail)
+	// and resolve the persistent query-editor buffer (disk read part of
+	// hydrateQueryEditorBuffer). Both run on the worker; the results are
+	// published below.
+	schemaItems, schemaOK := c.loadSchemaItems(ctx)
+	editorBuf, editorOK := c.loadQueryEditorBuffer(profile)
+
 	// dbsavvy-56u.1: stamp LastConnectionID and prepend the profile to
 	// the LIFO RecentConnectionIDs ring (deduped, capped at 10). Persisted
-	// AFTER wireQueryRuntime succeeds so a wiring rollback does not leave
+	// AFTER wireQueryRuntimeIO succeeds so a wiring rollback does not leave
 	// a debounced write pointing at a profile that failed to connect.
+	// MutateAndSave is independently synchronized and touches no gocui view
+	// state, so it stays on the worker (dbsavvy-fow.1).
 	if profile != nil && c.g != nil && c.g.deps.Store != nil {
 		name := profile.Name
 		c.g.deps.Store.MutateAndSave(func(a *common.AppState) {
@@ -158,17 +195,80 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 			a.RecentConnectionIDs = common.PushRecentConnectionID(a.RecentConnectionIDs, name)
 		})
 	}
-	c.hydrateQueryEditorBuffer(profile)
-	c.populateSchemasRail(ctx)
 
-	if len(c.g.registry.Schemas.Items()) != 0 {
-		c.g.OnUIThread(func() error {
-			// Focus the SCHEMAS rail so the user sees the loaded schemas
-			// immediately and can j/k to navigate them.
+	// --- PUBLISH PHASE: a SINGLE OnUIThread closure performs every write
+	// the MainLoop reads (activeConn, SQLSession, QueryRunner.Bind, the
+	// SCHEMAS rail items, the editor buffer, the focus push) so they
+	// serialise with render-frame reads (dbsavvy-fow.1). The stale-gen
+	// recheck runs FIRST: if a newer activation superseded us, we tear
+	// down everything the worker opened and publish NOTHING — so
+	// activeSQLSession is never written for a superseded connect and no
+	// session is orphaned (TOCTOU leak fix).
+	c.runOnUIThread(func() error {
+		if c.isStaleConnect(gen) {
+			c.helper.Disconnect()
+			if rt.sqlSess != nil {
+				_ = rt.sqlSess.Close()
+			}
+			return nil
+		}
+		c.publishQueryRuntime(rt)
+		c.publishQueryEditorBuffer(editorBuf, editorOK)
+		c.publishSchemaItems(schemaItems, schemaOK)
+		c.setActiveConn(profile)
+		if c.g != nil && c.g.registry != nil && c.g.registry.Schemas != nil &&
+			len(c.g.registry.Schemas.Items()) != 0 {
+			// Focus the SCHEMAS rail so the user sees the loaded
+			// schemas immediately and can j/k to navigate them.
 			return c.g.tree.Push(c.g.registry.Schemas)
-		})
-	}
+		}
+		return nil
+	})
 	return nil
+}
+
+// runOnUIThread marshals fn onto the UI thread via g.OnUIThread when an
+// async driver is wired, and otherwise runs it inline. The inline branch
+// preserves the synchronous test-wiring path (c.g nil or the driver not
+// yet attached) where publication must still happen on the caller
+// goroutine. dbsavvy-fow.1.
+func (c *connectInvoker) runOnUIThread(fn func() error) {
+	if c == nil || fn == nil {
+		return
+	}
+	if c.g != nil && c.g.driver != nil {
+		c.g.OnUIThread(fn)
+		return
+	}
+	_ = fn()
+}
+
+// isStaleConnect reports whether a connect that captured token gen has
+// been superseded by a newer activation (a later Connect bumped
+// connectGen past gen). Always false when g is nil (test wiring without
+// a Gui). dbsavvy-fow.1.
+func (c *connectInvoker) isStaleConnect(gen uint64) bool {
+	if c == nil || c.g == nil {
+		return false
+	}
+	return c.g.connectGen.Load() != gen
+}
+
+// setActiveConn writes the active-connection state. MUST be called on
+// the UI thread (via OnUIThread) so it serialises with the MainLoop
+// reads of activeConnID. Passing nil clears the state (wiring-rollback
+// path). dbsavvy-fow.1.
+func (c *connectInvoker) setActiveConn(profile *models.Connection) {
+	if c == nil || c.g == nil {
+		return
+	}
+	if profile == nil {
+		c.g.activeConnID = ""
+		c.g.activeConnProfile = nil
+		return
+	}
+	c.g.activeConnID = profile.Name
+	c.g.activeConnProfile = profile
 }
 
 // populateSchemasRail loads the schema list via ConnectHelper.LoadSchemas
@@ -182,16 +282,32 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 // still has the open connection and can retry by re-pressing <cr>.
 // Empty registry / context (test wiring) collapses to a silent no-op.
 func (c *connectInvoker) populateSchemasRail(ctx context.Context) {
-	if c == nil || c.g == nil || c.helper == nil {
+	items, ok := c.loadSchemaItems(ctx)
+	if !ok {
 		return
 	}
+	c.publishSchemaItems(items, ok)
+}
+
+// loadSchemaItems is the I/O+compute phase of populateSchemasRail: it
+// loads the schema list via ConnectHelper.LoadSchemas, applies the
+// builtin+profile hide-pattern filter, and builds the []any rail slice.
+// It performs NO context write (SetItems) so it is safe to run on the
+// worker goroutine; publishSchemaItems does the write on the UI thread
+// (dbsavvy-fow.1). The bool reports whether a slice was produced (false
+// on missing deps or a LoadSchemas error) so callers can skip the publish
+// and leave the existing rail items intact.
+func (c *connectInvoker) loadSchemaItems(ctx context.Context) ([]any, bool) {
+	if c == nil || c.g == nil || c.helper == nil {
+		return nil, false
+	}
 	if c.g.registry == nil || c.g.registry.Schemas == nil {
-		return
+		return nil, false
 	}
 	schemas, err := c.helper.LoadSchemas(ctx, "")
 	if err != nil {
 		c.g.deps.Common.Logger().Warn("gui: load schemas after connect", "err", err)
-		return
+		return nil, false
 	}
 	visible := schemas
 	if c.g.schemasHelper != nil {
@@ -208,6 +324,20 @@ func (c *connectInvoker) populateSchemasRail(ctx context.Context) {
 	for i := range visible {
 		s := visible[i]
 		items[i] = s
+	}
+	return items, true
+}
+
+// publishSchemaItems is the UI-thread publish phase paired with
+// loadSchemaItems: it writes the computed slice onto the SchemasContext.
+// SideListContext.SetItems is a plain mutex-free write of items+cursor
+// that the MainLoop reads every frame via Items()/HandleRender()/
+// SelectedItem(), so this MUST run on the UI thread to serialise with
+// those reads (dbsavvy-fow.1). A false ok (load skipped/failed) is a
+// no-op, leaving the existing rail intact.
+func (c *connectInvoker) publishSchemaItems(items []any, ok bool) {
+	if c == nil || !ok || c.g == nil || c.g.registry == nil || c.g.registry.Schemas == nil {
+		return
 	}
 	c.g.registry.Schemas.SetItems(items)
 }
@@ -304,60 +434,89 @@ func (c *connectInvoker) populateIndexesRail(ctx context.Context, schema, table 
 	c.g.registry.Indexes.SetItems(items)
 }
 
-// hydrateQueryEditorBuffer is the dbsavvy-wwd.9 post-Connect hook. It
-// resolves (or generates) the persistent buffer UUID for the active
-// connection via AppState.LastBufferUUIDs, loads the on-disk buffer (or
-// a fresh empty Buffer when missing), and injects it into the live
-// QueryEditorContext. Missing Common / registry / profile are silent
-// no-ops so test wiring without persistence still passes through.
-//
-// The hydration runs on the Connect goroutine (worker, via
-// onWorkerConnect) so the disk read does not block the MainLoop.
-// SetBuffer itself is mutex-free on QueryEditorContext but the swapped
-// *editor.Buffer's own sync.RWMutex serialises subsequent edits.
-func (c *connectInvoker) hydrateQueryEditorBuffer(profile *models.Connection) {
+// loadQueryEditorBuffer is the I/O phase of the dbsavvy-wwd.9 post-Connect
+// hook. It resolves (or generates) the persistent buffer UUID for the
+// active connection via AppState.LastBufferUUIDs and loads the on-disk
+// buffer (or a fresh empty Buffer when missing). It performs NO context
+// write (SetBuffer) so it is safe to run on the worker goroutine; the
+// disk read does not block the MainLoop. publishQueryEditorBuffer does the
+// write on the UI thread (dbsavvy-fow.1). Missing Common / registry /
+// profile are silent no-ops (false ok) so test wiring without persistence
+// still passes through.
+func (c *connectInvoker) loadQueryEditorBuffer(profile *models.Connection) (*editor.Buffer, bool) {
 	if c == nil || c.g == nil || profile == nil {
-		return
+		return nil, false
 	}
 	if c.g.deps.Common == nil {
-		return
+		return nil, false
 	}
 	common := c.g.deps.Common
 	if c.g.registry == nil || c.g.registry.QueryEditor == nil {
-		return
+		return nil, false
 	}
 	appState := common.AppState
 	if appState == nil {
-		return
+		return nil, false
 	}
 	connID := profile.Name
 	uuid := appState.GetOrCreateBufferUUID(connID)
 	if uuid == "" {
-		return
+		return nil, false
 	}
 	buf, err := editor.LoadBuffer(common.Fs, common.StateDir, connID, uuid)
 	if err != nil {
 		common.Logger().Warn(fmt.Sprintf("gui: load query-editor buffer for %q: %v", connID, err))
+		return nil, false
+	}
+	return buf, true
+}
+
+// publishQueryEditorBuffer is the UI-thread publish phase paired with
+// loadQueryEditorBuffer: it injects the loaded buffer into the live
+// QueryEditorContext. SetBuffer is mutex-free on QueryEditorContext and
+// the MainLoop renders the buffer every frame, so this MUST run on the UI
+// thread to serialise with those reads (dbsavvy-fow.1). The swapped
+// *editor.Buffer's own sync.RWMutex serialises subsequent edits. A false
+// ok (load skipped/failed) is a no-op.
+func (c *connectInvoker) publishQueryEditorBuffer(buf *editor.Buffer, ok bool) {
+	if c == nil || !ok || buf == nil || c.g == nil {
+		return
+	}
+	if c.g.registry == nil || c.g.registry.QueryEditor == nil {
 		return
 	}
 	c.g.registry.QueryEditor.SetBuffer(buf)
 }
 
-// wireQueryRuntime acquires the second drivers.Session, derives the
-// driver capabilities, builds the SQLSession with the orchestrator's
-// History as recorder, and Bind()s the QueryRunner. Stashes the
-// SQLSession on the Gui so Close can cancel an in-flight Stream.
-func (c *connectInvoker) wireQueryRuntime(ctx context.Context, conn drivers.Connection, profile *models.Connection) error {
+// queryRuntime carries the result of the wireQueryRuntime I/O phase
+// (worker goroutine) so the publish phase (UI thread) can Bind the runner
+// and stash the SQLSession on the Gui without re-acquiring. A nil sqlSess
+// means there was nothing to wire (runner/conn/profile absent — test
+// wiring); the publish phase then no-ops. dbsavvy-fow.1.
+type queryRuntime struct {
+	sqlSess *session.SQLSession
+	caps    drivers.Capabilities
+}
+
+// wireQueryRuntimeIO is the I/O phase of wiring the query runtime: it
+// acquires the second drivers.Session, derives the driver capabilities,
+// and builds the SQLSession with the orchestrator's History as recorder.
+// It performs NO GUI-state writes (no QueryRunner.Bind, no
+// g.activeSQLSession assignment) — those run on the UI thread in
+// publishQueryRuntime so the MainLoop's reads of activeSQLSession
+// serialise with the publication. Runs on the worker goroutine
+// (dbsavvy-fow.1).
+func (c *connectInvoker) wireQueryRuntimeIO(ctx context.Context, conn drivers.Connection, profile *models.Connection) (queryRuntime, error) {
 	if c.runner == nil || conn == nil || profile == nil {
-		return nil
+		return queryRuntime{}, nil
 	}
 	caps, capsErr := capsForDriver(ctx, profile.Driver)
 	if capsErr != nil {
-		return fmt.Errorf("orchestrator: derive capabilities: %w", capsErr)
+		return queryRuntime{}, fmt.Errorf("orchestrator: derive capabilities: %w", capsErr)
 	}
 	sessInner, err := conn.AcquireSession(ctx)
 	if err != nil {
-		return fmt.Errorf("orchestrator: acquire query session: %w", err)
+		return queryRuntime{}, fmt.Errorf("orchestrator: acquire query session: %w", err)
 	}
 	opts := session.Options{}
 	if c.g != nil {
@@ -367,11 +526,26 @@ func (c *connectInvoker) wireQueryRuntime(ctx context.Context, conn drivers.Conn
 		opts.HistoryRecorder = c.history.AsSessionRecorder(profile.Name)
 	}
 	sqlSess := session.New(conn, sessInner, opts)
-	c.runner.Bind(sqlSess, caps)
-	if c.g != nil {
-		c.g.activeSQLSession = sqlSess
+	return queryRuntime{sqlSess: sqlSess, caps: caps}, nil
+}
+
+// publishQueryRuntime is the UI-thread publish phase paired with
+// wireQueryRuntimeIO: it Bind()s the QueryRunner and stashes the
+// SQLSession on the Gui so Close can cancel an in-flight Stream. MUST run
+// on the UI thread (the MainLoop reads g.activeSQLSession every frame).
+// QueryRunner.Bind is itself atomic, but g.activeSQLSession is a plain
+// field, so this serialises with render reads. A zero queryRuntime
+// (nil sqlSess) is a no-op. dbsavvy-fow.1.
+func (c *connectInvoker) publishQueryRuntime(rt queryRuntime) {
+	if c == nil || rt.sqlSess == nil {
+		return
 	}
-	return nil
+	if c.runner != nil {
+		c.runner.Bind(rt.sqlSess, rt.caps)
+	}
+	if c.g != nil {
+		c.g.activeSQLSession = rt.sqlSess
+	}
 }
 
 // capsForDriver constructs a throwaway driver via the registered Factory

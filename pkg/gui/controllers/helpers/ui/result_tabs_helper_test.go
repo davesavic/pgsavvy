@@ -667,6 +667,134 @@ func TestShowErrorHasNilGrid(t *testing.T) {
 	}
 }
 
+// --- renderQueryErrorPanel (dbsavvy-fow.3) --------------------------------
+
+// TestRenderQueryErrorPanelWithCaret asserts the full panel for a
+// Position>0 syntax error: severity+code+message header, the offending
+// SQL line, and a `^` caret under the offending token.
+func TestRenderQueryErrorPanelWithCaret(t *testing.T) {
+	qe := &drivers.QueryError{
+		Raw:      errors.New(`syntax error at or near "SELET"`),
+		Code:     "42601",
+		Severity: "ERROR",
+		Position: 1, // 1-based byte offset → caret under the first char
+	}
+	got := renderQueryErrorPanel(qe, "SELET 1")
+	want := "ERROR 42601: syntax error at or near \"SELET\"\n\n" +
+		"SELET 1\n" +
+		"^"
+	if got != want {
+		t.Errorf("panel mismatch\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestRenderQueryErrorPanelCaretRuneBoundary asserts the caret column is
+// counted in runes, not bytes: a multibyte char before the offset shifts
+// the caret by one column (not its byte width), and a later-line position
+// echoes the correct line.
+func TestRenderQueryErrorPanelCaretRuneBoundary(t *testing.T) {
+	// "é" is 2 bytes (0xC3 0xA9). SQL: "é = 1\nbad" — the 'b' of "bad" is at
+	// byte offset 8 (é=2, " = 1"=4, "\n"=1 → 7; 'b' at byte 7, 1-based 8).
+	sql := "é = 1\nbad"
+	qe := &drivers.QueryError{
+		Raw:      errors.New("boom"),
+		Severity: "ERROR",
+		Position: 8,
+	}
+	got := renderQueryErrorPanel(qe, sql)
+	want := "ERROR: boom\n\nbad\n^"
+	if got != want {
+		t.Errorf("panel mismatch\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestRenderQueryErrorPanelNoPosition asserts Position==0 renders
+// severity+message plus Detail/Hint blocks with NO caret and no panic.
+func TestRenderQueryErrorPanelNoPosition(t *testing.T) {
+	qe := &drivers.QueryError{
+		Raw:        errors.New("duplicate key value violates unique constraint"),
+		Code:       "23505",
+		Severity:   "ERROR",
+		Detail:     "Key (id)=(1) already exists.",
+		Hint:       "Use a different id.",
+		Constraint: "users_pkey",
+		Position:   0,
+	}
+	got := renderQueryErrorPanel(qe, "INSERT INTO users VALUES (1)")
+	want := "ERROR 23505: duplicate key value violates unique constraint\n\n" +
+		"Detail: Key (id)=(1) already exists.\n\n" +
+		"Hint: Use a different id.\n\n" +
+		"Constraint: users_pkey"
+	if got != want {
+		t.Errorf("panel mismatch\n got: %q\nwant: %q", got, want)
+	}
+	if strings.Contains(got, "^") {
+		t.Errorf("Position==0 panel must not contain a caret; got %q", got)
+	}
+}
+
+// TestRenderQueryErrorPanelSanitizesFields asserts every server-controlled
+// field is routed through grid.SanitizeCellEscapes: an ANSI CSI sequence
+// in Detail and a C0 control byte in the message are stripped.
+func TestRenderQueryErrorPanelSanitizesFields(t *testing.T) {
+	qe := &drivers.QueryError{
+		Raw:      errors.New("boom\x07with-bell"), // \x07 BEL (C0) stripped
+		Severity: "ERROR",
+		Detail:   "before\x1b[31mred\x1b[0mafter", // ANSI CSI stripped
+	}
+	got := renderQueryErrorPanel(qe, "")
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("output must not contain ESC; got %q", got)
+	}
+	if strings.Contains(got, "\x07") {
+		t.Errorf("output must not contain BEL; got %q", got)
+	}
+	want := "ERROR: boomwith-bell\n\nDetail: beforeredafter"
+	if got != want {
+		t.Errorf("panel mismatch\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestRenderQueryErrorPanelPositionBeyondSQL asserts an out-of-range
+// Position omits the caret block (no panic).
+func TestRenderQueryErrorPanelPositionBeyondSQL(t *testing.T) {
+	qe := &drivers.QueryError{
+		Raw:      errors.New("boom"),
+		Severity: "ERROR",
+		Position: 999,
+	}
+	got := renderQueryErrorPanel(qe, "SELECT 1")
+	want := "ERROR: boom"
+	if got != want {
+		t.Errorf("panel mismatch\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestRenderQueryErrorPanelDefaultSeverity asserts a missing Severity
+// defaults to "ERROR" so the header is never code-less.
+func TestRenderQueryErrorPanelDefaultSeverity(t *testing.T) {
+	qe := &drivers.QueryError{Raw: errors.New("boom")}
+	got := renderQueryErrorPanel(qe, "")
+	if want := "ERROR: boom"; got != want {
+		t.Errorf("panel = %q, want %q", got, want)
+	}
+}
+
+// TestAttachActiveTabErrorSQL asserts the error SQL is recorded on the
+// active error tab so the render path can reach it for the caret.
+func TestAttachActiveTabErrorSQL(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	h.ShowError("SELET 1", &drivers.QueryError{Raw: errors.New("syntax"), Position: 1})
+	h.AttachActiveTabErrorSQL("SELET 1")
+	active := h.Active()
+	if active == nil {
+		t.Fatal("Active = nil after ShowError")
+	}
+	if got := active.errSQLSnapshot(); got != "SELET 1" {
+		t.Errorf("errSQLSnapshot = %q, want %q", got, "SELET 1")
+	}
+}
+
 // --- Title ----------------------------------------------------------------
 
 func TestTabTitleFormat(t *testing.T) {

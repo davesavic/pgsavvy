@@ -2,8 +2,11 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
@@ -16,6 +19,17 @@ import (
 // connected). Long enough for the user to read the message, short
 // enough that it disappears before they retry.
 const connectErrToastTTL = 4 * time.Second
+
+// connectToastKey tags the keyed "Connecting…" toast so a follow-up
+// success-clear or error replacement lands in the same slot
+// (dbsavvy-fow.1).
+const connectToastKey = "connect"
+
+// connectTimeout bounds the whole Connect attempt (dial + pool.Ping +
+// SELECT version()). Long enough to ride out a slow handshake, short
+// enough that an unreachable host fails fast instead of wedging the UI
+// (dbsavvy-fow.1).
+const connectTimeout = 10 * time.Second
 
 // ConnectionsController owns keyboard bindings for the CONNECTIONS
 // side rail. It composes ListControllerTrait for j/k navigation and
@@ -44,18 +58,51 @@ func NewConnectionsController(
 		if profile == nil {
 			return nil
 		}
-		err := base.helpers.Connect.Connect(context.Background(), profile)
-		if err == nil {
+		// Emit the keyed "Connecting…" toast on the UI thread (this
+		// handler runs on the gocui MainLoop) BEFORE the dial begins so
+		// the user gets immediate feedback. No TTL — it stays until the
+		// worker clears it on success or replaces it with an error
+		// (dbsavvy-fow.1).
+		if base.helpers.Toast != nil {
+			base.helpers.Toast.ShowOrUpdate(connectToastKey,
+				fmt.Sprintf("Connecting to %s…", profile.Name), 0)
+		}
+
+		// connectFn dials off the UI thread under a single-sourced
+		// timeout covering dial + pool.Ping + SELECT version(). The
+		// orchestrator's connectInvoker handles supersession + the
+		// thread-safe activeConn mutation; here we just surface the
+		// outcome to the toast slot.
+		connectFn := func(_ gocui.Task) error {
+			ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+			defer cancel()
+			err := base.helpers.Connect.Connect(ctx, profile)
+			if base.helpers.Toast == nil {
+				return nil
+			}
+			if err == nil {
+				// Drop the Connecting… toast on success; the schemas rail
+				// taking focus is the durable feedback.
+				base.helpers.Toast.ShowOrUpdate(connectToastKey, "", connectErrToastTTL)
+				return nil
+			}
+			// Log via wrapErr for debug-log breadcrumb, then surface to
+			// the user as a sanitized toast and SWALLOW the error. The
+			// worker lane never crashes the MainLoop, but we keep the
+			// swallow + sanitize contract (bugs dbsavvy-a07, dbsavvy-e9i).
+			_ = base.wrapErr("connections.confirm", err)
+			base.helpers.Toast.ShowOrUpdate(connectToastKey,
+				config.SafeText(connectErrMessage(err)), connectErrToastTTL)
 			return nil
 		}
-		// Log via wrapErr for debug-log breadcrumb, then surface to the
-		// user as a sanitized toast and SWALLOW the error. Returning it
-		// up to gocui crashes the MainLoop — for non-credential and
-		// "already connected" errors the app must stay alive (bugs
-		// dbsavvy-a07, dbsavvy-e9i).
-		_ = base.wrapErr("connections.confirm", err)
-		if base.helpers.Toast != nil {
-			base.helpers.Toast.Show(config.SafeText(connectErrMessage(err)), connectErrToastTTL)
+
+		// Run off the UI thread via the worker pool (busy counter ticks,
+		// spinner engages). Fall back to inline execution when OnWorker is
+		// unwired (unit tests that don't exercise the async path).
+		if base.helpers.OnWorker != nil {
+			base.helpers.OnWorker(connectFn)
+		} else {
+			_ = connectFn(nil)
 		}
 		return nil
 	}

@@ -495,6 +495,13 @@ func (q *QueryEditorController) toast(msg string) {
 func (q *QueryEditorController) surfaceErr(stmt string, err error) {
 	if q.helpers.ResultTabs != nil {
 		q.helpers.ResultTabs.ShowError(tabLabel(stmt), err)
+		// dbsavvy-fow.3: record the full SQL on the now-active error tab so
+		// the error panel can draw a position caret under the offending
+		// token. ShowError sets the error tab active; the attach is a no-op
+		// when the helper doesn't implement the optional surface.
+		if attacher, ok := q.helpers.ResultTabs.(ResultTabErrorSQLAttacher); ok {
+			attacher.AttachActiveTabErrorSQL(stmt)
+		}
 		return
 	}
 	q.toast(err.Error())

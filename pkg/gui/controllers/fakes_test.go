@@ -4,20 +4,31 @@ import (
 	"context"
 	"time"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// fakeConnectInvoker records Connect calls.
+// fakeConnectInvoker records Connect calls and the ctx each received so
+// the U1 timeout AC (dbsavvy-fow.1) can assert a non-zero Deadline.
 type fakeConnectInvoker struct {
-	calls []*models.Connection
-	err   error
+	calls    []*models.Connection
+	ctxs     []context.Context
+	err      error
+	deadline time.Time
+	hasDL    bool
 }
 
-func (f *fakeConnectInvoker) Connect(_ context.Context, profile *models.Connection) error {
+func (f *fakeConnectInvoker) Connect(ctx context.Context, profile *models.Connection) error {
 	f.calls = append(f.calls, profile)
+	f.ctxs = append(f.ctxs, ctx)
+	if dl, ok := ctx.Deadline(); ok {
+		f.deadline = dl
+		f.hasDL = true
+	}
 	return f.err
 }
 
@@ -80,8 +91,16 @@ func (f *fakeConfirm) Yes() error { f.yes++; return nil }
 func (f *fakeConfirm) No() error  { f.no++; return nil }
 
 type (
-	fakeToast struct{ msgs []toastMsg }
-	toastMsg  struct {
+	fakeToast struct {
+		msgs    []toastMsg
+		updates []toastUpdate
+	}
+	toastMsg struct {
+		Msg string
+		TTL time.Duration
+	}
+	toastUpdate struct {
+		Key string
 		Msg string
 		TTL time.Duration
 	}
@@ -89,6 +108,13 @@ type (
 
 func (f *fakeToast) Show(msg string, ttl time.Duration) {
 	f.msgs = append(f.msgs, toastMsg{msg, ttl})
+}
+
+// ShowOrUpdate records keyed toast calls (dbsavvy-fow.1). The Connect
+// path emits a "connecting" toast then clears/replaces it under the same
+// key; tests inspect updates to assert that sequence.
+func (f *fakeToast) ShowOrUpdate(key, msg string, ttl time.Duration) {
+	f.updates = append(f.updates, toastUpdate{key, msg, ttl})
 }
 
 type fakeTip struct{ dismissed int }
@@ -197,6 +223,11 @@ type bag struct {
 	TablePicker  *fakeTablePicker
 	Active       *fakeActiveConnection
 	Logger       *recordingLogger
+
+	// WorkerCalls counts OnWorker dispatches. The wired closure runs its
+	// fn inline so the connect path executes synchronously in tests
+	// (dbsavvy-fow.1).
+	WorkerCalls int
 }
 
 func newBag() *bag {
@@ -230,6 +261,12 @@ func newBag() *bag {
 		Tables:           b.TablePicker,
 		ActiveConnection: b.Active,
 		HiddenPatterns:   func() ([]string, []string) { return []string{"pg_*"}, []string{"audit"} },
+		OnWorker: func(fn func(gocui.Task) error) {
+			b.WorkerCalls++
+			if fn != nil {
+				_ = fn(nil)
+			}
+		},
 	}
 	return b
 }

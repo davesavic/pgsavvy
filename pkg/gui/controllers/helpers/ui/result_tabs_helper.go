@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
@@ -387,6 +388,7 @@ type Tab struct {
 	pinned    bool
 	rowCount  int64
 	err       error
+	errSQL    string // SQL text behind err, for the QueryError position caret (dbsavvy-fow.3)
 	plan      models.Plan
 	planRaw   string
 	planCtx   *guicontext.PlanContext // non-nil for plan tabs (dbsavvy-uv0.8)
@@ -569,6 +571,24 @@ func (t *Tab) Identity() (string, query.ResultIdentity) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.connID, t.resultIdentity
+}
+
+// SetErrorSQL records the SQL text behind this tab's terminal error so
+// the error-panel renderer can draw the QueryError position caret under
+// the offending token. Empty SQL is valid — the caret is simply omitted.
+// dbsavvy-fow.3.
+func (t *Tab) SetErrorSQL(sql string) {
+	t.mu.Lock()
+	t.errSQL = sql
+	t.mu.Unlock()
+}
+
+// errSQLSnapshot returns the SQL text recorded via SetErrorSQL, under the
+// tab mutex. dbsavvy-fow.3.
+func (t *Tab) errSQLSnapshot() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.errSQL
 }
 
 // --- Public surface (controllers.ResultTabsHelper) -----------------------
@@ -1578,7 +1598,12 @@ func (h *ResultTabsHelper) LayoutPaint(driver types.GuiDriver, x0, y0, x1, y1 in
 					_ = driver.SetContent(name, t.planRawSnapshot())
 				}
 			} else if errTab := t.Err(); errTab != nil {
-				_ = driver.SetContent(name, errTab.Error())
+				var qe *drivers.QueryError
+				if errors.As(errTab, &qe) {
+					_ = driver.SetContent(name, renderQueryErrorPanel(qe, t.errSQLSnapshot()))
+				} else {
+					_ = driver.SetContent(name, grid.SanitizeCellEscapes(errTab.Error()))
+				}
 			}
 		}
 		if t.id == activeID {
@@ -1595,6 +1620,107 @@ func (h *ResultTabsHelper) activeIDSnapshot() int64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.activeID
+}
+
+// renderQueryErrorPanel builds the multi-line error-tab body for a
+// structured *drivers.QueryError. The first line is the message prefixed
+// by Severity + SQLSTATE code; Detail / Hint / Constraint render as
+// distinct labeled blocks when non-empty. When qe.Position > 0 the
+// offending SQL line is echoed with a `^` caret under the offset.
+//
+// Every server-controlled field (message, Detail, Hint, Constraint,
+// Where, and the echoed SQL line) is routed through
+// grid.SanitizeCellEscapes so untrusted server strings cannot inject ANSI
+// or C0 control sequences. The caret line is generated locally and is
+// inherently safe. Diagnostic text is emitted verbatim (never truncated);
+// horizontal/vertical overflow is handled by the view. dbsavvy-fow.3.
+func renderQueryErrorPanel(qe *drivers.QueryError, sql string) string {
+	if qe == nil {
+		return ""
+	}
+
+	var b strings.Builder
+
+	// First line: Severity + SQLSTATE code + message.
+	severity := strings.TrimSpace(qe.Severity)
+	if severity == "" {
+		severity = "ERROR"
+	}
+	header := severity
+	if code := strings.TrimSpace(qe.Code); code != "" {
+		header += " " + code
+	}
+	header += ": " + queryErrorMessage(qe)
+	b.WriteString(grid.SanitizeCellEscapes(header))
+
+	// Position caret block: offending SQL line + caret under the offset.
+	if line, caret, ok := positionCaret(sql, qe.Position); ok {
+		b.WriteString("\n\n")
+		b.WriteString(grid.SanitizeCellEscapes(line))
+		b.WriteString("\n")
+		b.WriteString(caret)
+	}
+
+	// Labeled diagnostic blocks.
+	writeField := func(label, value string) {
+		if strings.TrimSpace(value) == "" {
+			return
+		}
+		b.WriteString("\n\n")
+		b.WriteString(label)
+		b.WriteString(": ")
+		b.WriteString(grid.SanitizeCellEscapes(value))
+	}
+	writeField("Detail", qe.Detail)
+	writeField("Hint", qe.Hint)
+	writeField("Constraint", qe.Constraint)
+	writeField("Where", qe.Where)
+
+	return b.String()
+}
+
+// queryErrorMessage extracts the human-readable message for the panel
+// header. Prefers the raw driver message (the native Postgres message),
+// falling back to a generic label when Raw is absent.
+func queryErrorMessage(qe *drivers.QueryError) string {
+	if qe.Raw != nil {
+		return qe.Raw.Error()
+	}
+	return "query error"
+}
+
+// positionCaret converts a pg 1-based BYTE offset into the SQL string into
+// (offendingLine, caretLine, ok). The caret line is spaces (one per rune
+// preceding the offset on that line) followed by `^`. Returns ok=false
+// when pos <= 0 or pos is beyond the SQL length, so the caller omits the
+// block. Rune boundaries are respected: the column is counted in runes,
+// not bytes. dbsavvy-fow.3.
+func positionCaret(sql string, pos int) (string, string, bool) {
+	if pos <= 0 || sql == "" {
+		return "", "", false
+	}
+	// pos is 1-based; convert to a 0-based byte index into sql.
+	byteOff := pos - 1
+	if byteOff >= len(sql) {
+		return "", "", false
+	}
+
+	// Find the line containing byteOff and the byte offset of its start.
+	lineStart := strings.LastIndexByte(sql[:byteOff], '\n') + 1
+	lineEnd := strings.IndexByte(sql[byteOff:], '\n')
+	if lineEnd < 0 {
+		lineEnd = len(sql)
+	} else {
+		lineEnd += byteOff
+	}
+	line := sql[lineStart:lineEnd]
+
+	// Rune column within the line: count runes before byteOff so the
+	// caret lands on a rune boundary even with multibyte content.
+	col := utf8.RuneCountInString(sql[lineStart:byteOff])
+
+	caret := strings.Repeat(" ", col) + "^"
+	return line, caret, true
 }
 
 // planRawSnapshot exposes the cached raw plan text for layout
@@ -2003,6 +2129,18 @@ func (h *ResultTabsHelper) AttachActiveTabIdentity(connID string, ri query.Resul
 	}
 	t.SetIdentity(connID, ri)
 	h.SeedHiddenColsFromAppState(t)
+}
+
+// AttachActiveTabErrorSQL records the SQL text behind the currently-active
+// (error) tab so the error panel can draw a position caret. The caller
+// (QueryEditorController) invokes this right after ShowError, when the
+// error tab is the active tab. No-op when no tab is active. dbsavvy-fow.3.
+func (h *ResultTabsHelper) AttachActiveTabErrorSQL(sql string) {
+	t := h.Active()
+	if t == nil {
+		return
+	}
+	t.SetErrorSQL(sql)
 }
 
 // SeedHiddenColsFromAppState looks up the persisted hidden-col name set

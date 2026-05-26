@@ -153,6 +153,32 @@ func TestPopulateIndexesRailPopulatesRail(t *testing.T) {
 	}
 }
 
+// AC dbsavvy-fow.1: a connect that is superseded mid-dial (a newer
+// activation bumps connectGen while this one is still dialing) MUST NOT
+// mutate activeConn — the stale result is dropped. We simulate the newer
+// activation via openHook, which bumps connectGen during the dial; the
+// returning connect then finds itself stale and leaves activeConnID
+// untouched.
+func TestConnectInvokerSupersededConnectDoesNotClobberActiveConn(t *testing.T) {
+	g, _ := buildTestGuiWithHistory(t)
+
+	caps := drivers.Capabilities{}
+	driverName, conn := registerWireFake(t, caps)
+	// Bump the generation during the dial so the connect that captured
+	// the earlier token is stale by the time it tries to mutate.
+	conn.openHook = func() { g.BumpConnectGenForTest() }
+
+	bag := g.HelperBagForTest()
+	profile := &models.Connection{Name: "superseded", Driver: driverName, DSN: "postgres://stub"}
+	if err := bag.Connect.Connect(context.Background(), profile); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if got := g.ActiveConnIDForTest(); got != "" {
+		t.Fatalf("activeConnID = %q after a superseded connect; want empty (stale result must not clobber)", got)
+	}
+}
+
 // dbsavvy-56u.1: populateIndexesRail with an empty schema or table is
 // a silent no-op — the existing IndexesContext.items are left intact.
 func TestPopulateIndexesRailEmptyKeysIsNoop(t *testing.T) {

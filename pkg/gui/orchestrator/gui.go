@@ -234,6 +234,16 @@ type Gui struct {
 	// Per AD-20 this MUST be a field on *Gui (not package-level) so
 	// concurrent test Guis don't share state.
 	onWorkerSampleCounter atomic.Uint64
+
+	// connectGen is the supersession token for in-flight Connects
+	// (dbsavvy-fow.1). Each connectInvoker.Connect bumps it on entry and
+	// captures the new value; on completion it only mutates activeConn /
+	// pushes the schemas rail if its captured token is still the latest.
+	// A connect that returns after a newer activation (token < current)
+	// is stale and drops its result, so a slow/timed-out dial cannot
+	// clobber a more recent connection. Atomic so concurrent worker-
+	// goroutine Connects don't race the bump.
+	connectGen atomic.Uint64
 }
 
 // NewGui builds every collaborator that doesn't depend on the live
@@ -744,9 +754,11 @@ func (g *Gui) wireWithDriver() error {
 		// <CR> on a schema row reloads the TABLES rail via a worker
 		// (dbsavvy-04n). The handler runs on the gocui MainLoop; the
 		// driver call must hop to the worker queue so MainLoop is not
-		// blocked by a slow ListTables. populateTablesRail itself is
-		// safe to call from any goroutine — SetItems just mutates the
-		// in-memory slice (see refreshConnectionsRail comment).
+		// blocked by a slow ListTables. NOTE: populateTablesRail's
+		// SetItems write is NOT goroutine-safe against MainLoop render
+		// reads (SideListContext.SetItems is a plain mutex-free write);
+		// this OnSchemaActivate path predates the dbsavvy-fow.1 publish-
+		// phase split and shares the same hazard the connect path fixed.
 		OnSchemaActivate: func(schema string) {
 			g.OnWorker(func(_ gocui.Task) error {
 				connectInv.populateTablesRail(context.Background(), schema)
@@ -1473,9 +1485,12 @@ func (g *Gui) restoreConnectionsCursor() {
 
 // refreshConnectionsRail re-loads the connection profiles from
 // Deps.ConnectionsProvider and pushes them into ConnectionsContext.items
-// so the next render frame draws the rows. Safe to call from any
-// goroutine — SideListContext.SetItems mutates an in-memory slice;
-// view writes happen in the next Layout pass.
+// so the next render frame draws the rows. The SetItems write is a plain
+// mutex-free mutation of the in-memory slice; callers that may run on a
+// worker goroutine MUST marshal it onto the UI thread (the WalkAdd
+// onComplete callback already routes through OnUIThread) so it serialises
+// with MainLoop render reads — it is NOT safe to call concurrently with a
+// layout pass from an arbitrary goroutine (dbsavvy-fow.1).
 func (g *Gui) refreshConnectionsRail() {
 	if g.registry == nil || g.registry.Connections == nil {
 		return
@@ -1806,6 +1821,16 @@ func (g *Gui) HelperBagForTest() controllers.HelperBag {
 // ActiveSQLSessionForTest returns the SQLSession the most recent Connect
 // installed, or nil. Test-only.
 func (g *Gui) ActiveSQLSessionForTest() *session.SQLSession { return g.activeSQLSession }
+
+// ActiveConnIDForTest returns the active connection ID set by the most
+// recent successful Connect. Test-only — used by the dbsavvy-fow.1
+// supersession test to assert a stale connect did not clobber it.
+func (g *Gui) ActiveConnIDForTest() string { return g.activeConnID }
+
+// BumpConnectGenForTest advances the supersession token, simulating a
+// newer activation arriving while a prior connect is still in flight.
+// Test-only (dbsavvy-fow.1).
+func (g *Gui) BumpConnectGenForTest() { g.connectGen.Add(1) }
 
 // PopulateIndexesRailForTest invokes the side-effect of <CR>-on-TABLES
 // against the connectInvoker built by wireWithDriver: it loads indexes

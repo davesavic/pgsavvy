@@ -70,8 +70,12 @@ type ChoiceHelper interface {
 }
 
 // ToastHelper writes a transient message to the status bar slot.
+// ShowOrUpdate replaces an in-place toast tagged with the given key
+// (used by the "connect" keyed Connecting… toast in dbsavvy-fow.1);
+// the concrete *ui.ToastHelper satisfies both methods.
 type ToastHelper interface {
 	Show(message string, ttl time.Duration)
+	ShowOrUpdate(key, message string, ttl time.Duration)
 }
 
 // RefreshHelper reloads side-rail data after a hide/unhide mutation or
@@ -158,6 +162,17 @@ type ResultTabsHelper interface {
 // session-only against any data those tests synthesise). dbsavvy-uv0.6.
 type ResultTabIdentityAttacher interface {
 	AttachActiveTabIdentity(connID string, ri query.ResultIdentity)
+}
+
+// ResultTabErrorSQLAttacher is the optional surface QueryEditorController
+// uses to record the SQL text behind a failed statement on the
+// currently-active (error) tab right after ShowError. The error panel
+// renderer reads it back to draw a position caret under the offending
+// token. The concrete *ui.ResultTabsHelper satisfies it; tests that don't
+// implement it cause the controller to skip the attach (the panel then
+// renders without a caret). dbsavvy-fow.3.
+type ResultTabErrorSQLAttacher interface {
+	AttachActiveTabErrorSQL(sql string)
 }
 
 // EditorBufferReader is the narrow surface the QueryEditorController

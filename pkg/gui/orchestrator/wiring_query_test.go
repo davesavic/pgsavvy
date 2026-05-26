@@ -108,6 +108,11 @@ type wireFakeConn struct {
 	schemas  []models.Schema
 	indexes  []models.Index
 	columns  []models.Column
+	// openHook fires from wireFakeDriver.Open during the dial, before the
+	// connection is returned. The dbsavvy-fow.1 supersession test uses it
+	// to bump the Gui's connectGen mid-dial (simulating a newer activation
+	// arriving while this connect is still in flight).
+	openHook func()
 }
 
 func (c *wireFakeConn) Close() error                                     { return nil }
@@ -132,6 +137,9 @@ type wireFakeDriver struct {
 func (d *wireFakeDriver) Name() string                       { return "wire-fake" }
 func (d *wireFakeDriver) Capabilities() drivers.Capabilities { return d.caps }
 func (d *wireFakeDriver) Open(_ context.Context, _ drivers.ConnectionProfile) (drivers.Connection, error) {
+	if d.conn != nil && d.conn.openHook != nil {
+		d.conn.openHook()
+	}
 	return d.conn, nil
 }
 
