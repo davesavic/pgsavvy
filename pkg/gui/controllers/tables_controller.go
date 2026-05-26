@@ -10,8 +10,8 @@ import (
 
 // TablesController owns TABLES rail bindings: j/k via the trait, and
 // <CR> fires HelperBag.OnTableActivate, which the orchestrator wires to
-// a worker that loads columns for the selected table and pushes focus
-// to the COLUMNS rail.
+// run a bounded "SELECT * FROM <table>" for the selected table and push
+// the results panel onto the focus stack.
 type TablesController struct {
 	*ListControllerTrait[TablePicker]
 }

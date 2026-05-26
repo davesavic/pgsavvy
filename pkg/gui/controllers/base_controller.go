@@ -75,9 +75,11 @@ type HelperBag struct {
 	OnSchemaActivate func(schema string)
 
 	// OnTableActivate fires when <CR> is pressed in the TABLES rail. The
-	// orchestrator wires this to a closure that loads columns for the
-	// supplied table on a worker goroutine and pushes focus to the
-	// COLUMNS rail. Nil-safe: TablesController no-ops when unwired.
+	// orchestrator wires this to a closure that runs a bounded
+	// "SELECT * FROM <table>" through the QueryEditorController run path
+	// and pushes the active result tab onto the focus stack so results
+	// take focus (dbsavvy-gj8). Nil-safe: TablesController no-ops when
+	// unwired.
 	OnTableActivate func(table *models.Table) error
 
 	// KbRuntime is the aggregate that bundles every keybinding-system

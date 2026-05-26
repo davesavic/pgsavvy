@@ -501,6 +501,65 @@ func TestQueryEditorRunAllDispatchesEverySegmentSequentially(t *testing.T) {
 	}
 }
 
+// TestQueryEditorRunSQLNoSessionReturnsFalse covers the TABLES <CR>
+// "open table data" reuse path (dbsavvy-gj8): with no active session,
+// RunSQL toasts, opens no tab, and returns false so the caller skips
+// focusing an empty results panel.
+func TestQueryEditorRunSQLNoSessionReturnsFalse(t *testing.T) {
+	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag)
+
+	if ctrl.RunSQL("SELECT 1") {
+		t.Fatal("RunSQL returned true with no active session, want false")
+	}
+	if len(b.Toast.msgs) != 1 || !strings.Contains(b.Toast.msgs[0].Msg, "no active connection") {
+		t.Fatalf("Toast = %#v, want 'no active connection'", b.Toast.msgs)
+	}
+	if len(b.Tabs.resultCalls) != 0 {
+		t.Fatalf("OpenResultTab called %d times, want 0", len(b.Tabs.resultCalls))
+	}
+}
+
+// TestQueryEditorRunSQLBlankReturnsFalse: a blank/whitespace statement
+// short-circuits before touching the runner.
+func TestQueryEditorRunSQLBlankReturnsFalse(t *testing.T) {
+	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag)
+
+	if ctrl.RunSQL("   ") {
+		t.Fatal("RunSQL returned true for a blank statement, want false")
+	}
+	if len(b.Toast.msgs) != 0 {
+		t.Fatalf("Toast = %#v, want none for blank statement", b.Toast.msgs)
+	}
+}
+
+// TestQueryEditorRunSQLDispatchesStatement: RunSQL routes the supplied
+// SQL verbatim through the runner and returns true, without reading the
+// editor buffer (none is wired here) — the property the TABLES <CR>
+// path depends on.
+func TestQueryEditorRunSQLDispatchesStatement(t *testing.T) {
+	rec := &recordingRunnerSession{}
+	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+
+	base := newBag()
+	base.HelperBag.QueryRunner = runner
+	base.HelperBag.ResultTabs = &fakeResultTabs{}
+
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag)
+
+	const sql = `SELECT * FROM "public"."users" LIMIT 100`
+	if !ctrl.RunSQL(sql) {
+		t.Fatal("RunSQL returned false with an active session, want true")
+	}
+	if len(rec.streamCalls) != 1 {
+		t.Fatalf("streamCalls = %#v, want one", rec.streamCalls)
+	}
+	if rec.streamCalls[0].SQL != sql {
+		t.Fatalf("dispatched SQL = %q, want %q", rec.streamCalls[0].SQL, sql)
+	}
+}
+
 // preemptRecorder records, at each PreemptInFlight call, how many
 // streams the runner session has issued so far — a witness for ordering.
 // Wired to the runner via SetPreempter (dbsavvy-lxn.1: preemption now

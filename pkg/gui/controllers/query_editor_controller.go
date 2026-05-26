@@ -251,6 +251,39 @@ func (q *QueryEditorController) runOne(ec commands.ExecCtx, newTx bool) error {
 	return nil
 }
 
+// RunSQL executes a single externally-supplied statement through the
+// same path as <leader>r — open a run scope, dispatch via runStatement
+// (which streams rows into a result tab), close the scope — without
+// reading the editor buffer. Lets callers outside the QUERY_EDITOR
+// context (e.g. the TABLES <CR> "open table data" path, dbsavvy-gj8)
+// reuse the full run/stream/tab machinery. Returns true when a run was
+// launched; false when stmt is blank or there is no active session, so
+// the caller can skip focusing an empty results panel.
+func (q *QueryEditorController) RunSQL(stmt string) bool {
+	stmt = strings.TrimSpace(stmt)
+	if stmt == "" {
+		return false
+	}
+	runner := q.helpers.QueryRunner
+	if runner == nil || !runner.HasSession() {
+		q.toast("no active connection")
+		return false
+	}
+	runID := newRunID()
+	if q.helpers.Notice != nil {
+		q.helpers.Notice.OnRunStart(runID)
+	}
+	attached := q.runStatement(stmt, data.RunOptions{})
+	if q.helpers.Notice != nil {
+		if attached {
+			q.helpers.Notice.Finish(runID)
+		} else {
+			q.helpers.Notice.OnRunEnd(runID)
+		}
+	}
+	return true
+}
+
 // runVisualSelection handles <leader>r when one of the Visual modes is
 // active. SelectionText -> SplitStatements -> per-statement runStatement
 // fan-out. The cap check fires BEFORE any runner.Run so over-cap

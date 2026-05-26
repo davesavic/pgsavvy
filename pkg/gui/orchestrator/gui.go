@@ -1411,13 +1411,32 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 	})
 }
 
-// buildOnTableActivate stashes a no-op closure on g.onTableActivate.
-// The popup-open handler (dbsavvy-3vf T9) will own the column/index
-// dispatch site now that COLUMNS/INDEXES are STUB contexts.
+// defaultTablePreviewLimit bounds the row count of the SELECT issued
+// when <CR> activates a table on the TABLES rail (dbsavvy-gj8), keeping
+// the preview cheap on large tables.
+const defaultTablePreviewLimit = 100
+
+// buildOnTableActivate wires the TABLES <CR> handler: run a bounded
+// "SELECT * FROM <qualified table>" through the QueryEditorController's
+// run path and push the active result tab onto the focus stack so the
+// results panel takes focus (dbsavvy-gj8). The SQL is fully qualified
+// via pg.QuoteQualified, so schema resolution against the SCHEMAS rail
+// is irrelevant here. Nil-safe: no controller / no session → no-op.
 func (g *Gui) buildOnTableActivate(_ *connectInvoker) func(*models.Table) error {
 	fn := func(table *models.Table) error {
-		if table == nil {
+		if table == nil || g.controllers == nil || g.controllers.QueryEditor == nil {
 			return nil
+		}
+		sql := fmt.Sprintf("SELECT * FROM %s LIMIT %d",
+			pg.QuoteQualified(table.Schema, table.Name), defaultTablePreviewLimit)
+		if !g.controllers.QueryEditor.RunSQL(sql) {
+			return nil
+		}
+		if g.tree == nil || g.resultTabsH == nil {
+			return nil
+		}
+		if target := g.resultTabsH.ActiveContext(); target != nil {
+			return g.tree.Push(target)
 		}
 		return nil
 	}
