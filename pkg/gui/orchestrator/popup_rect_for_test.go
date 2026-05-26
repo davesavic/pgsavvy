@@ -108,3 +108,31 @@ func TestPopupRectFor_ConflictDialog(t *testing.T) {
 		t.Errorf("missing popup-overlay: got (%v, %v), want (rect{}, false)", r2, ok2)
 	}
 }
+
+// TestPopupRectFor_FKReversePicker locks in a centered 60% × 60% rect for
+// the FK_REVERSE_PICKER popup (dbsavvy-q5j, same root cause as parent
+// dbsavvy-b0l). Without a popupRectFor case the picker was pushed onto the
+// focus stack but never got a view, so it rendered blank and never
+// received input focus. Uses a 100×100 popup-overlay canvas so 0.6
+// fractions land at 60 in either axis.
+func TestPopupRectFor_FKReversePicker(t *testing.T) {
+	canvas := ui.Dimensions{X0: 0, Y0: 0, X1: 100, Y1: 100}
+	dims := map[string]ui.Dimensions{"popup-overlay": canvas}
+
+	r, ok := popupRectFor(types.FK_REVERSE_PICKER, dims, 100, 100)
+	if !ok {
+		t.Fatalf("popupRectFor(FK_REVERSE_PICKER) ok=false, want true")
+	}
+	if w := r.X1 - r.X0; w < 55 || w > 65 {
+		t.Errorf("width %d not ~60%% of canvas", w)
+	}
+	if h := r.Y1 - r.Y0; h < 55 || h > 65 {
+		t.Errorf("height %d not ~60%% of canvas", h)
+	}
+
+	// No "popup-overlay" entry: bail out cleanly (no panic), matching
+	// the default branch.
+	if r2, ok2 := popupRectFor(types.FK_REVERSE_PICKER, map[string]ui.Dimensions{}, 100, 100); ok2 || r2 != (rect{}) {
+		t.Errorf("missing popup-overlay: got (%v, %v), want (rect{}, false)", r2, ok2)
+	}
+}

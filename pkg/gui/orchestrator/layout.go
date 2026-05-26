@@ -568,6 +568,24 @@ func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int)
 			return rect{}, false
 		}
 		return centeredRect(canvas, 0.6, 0.6), true
+	case types.FK_REVERSE_PICKER:
+		// FK_REVERSE_PICKER is the reverse-FK referencing-table picker
+		// (dbsavvy-q5j, same root cause as parent dbsavvy-b0l). Without
+		// this case popupRectFor hit the default (rect{}, false) and the
+		// Tier-3 popup loop continue'd past it, so the picker was pushed
+		// onto the focus stack but rendered blank and never took input
+		// focus. It is a non-editable TabbedPopup (ModeNormal, no
+		// TextArea/filter — not in ContextKey.IsEditable), so no
+		// SetView/TextArea plumbing is needed: the popup loop's
+		// HandleRender + SetViewOnTop and the Tier-4 SetCurrentView handle
+		// render and input focus once a rect exists. Sized like
+		// TABLE_INSPECT (the other tabbed-list popup) to give the entry
+		// list room.
+		canvas, ok := dims["popup-overlay"]
+		if !ok {
+			return rect{}, false
+		}
+		return centeredRect(canvas, 0.6, 0.6), true
 	case types.COMMAND_LINE:
 		r := commandLineRect(dims)
 		if r == (rect{}) {
