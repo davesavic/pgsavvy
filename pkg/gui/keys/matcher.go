@@ -1,6 +1,7 @@
 package keys
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -8,9 +9,11 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/logs"
+	"github.com/jesseduffield/lazygit/pkg/gocui"
 )
 
 // DispatchResult classifies the outcome of Matcher.Dispatch.
@@ -568,9 +571,32 @@ func (m *Matcher) invokeHandler(cmd *commands.Command, scope types.ContextKey, m
 		return Dispatched, nil
 	}
 	if err := cmd.Handler(ctx); err != nil {
-		return Dispatched, err
+		// Central error boundary (dbsavvy-9v1.4): a non-nil handler error
+		// is converted to a sanitized toast + debug breadcrumb and is NOT
+		// propagated upward — gocui's MainLoop treats a returned error as
+		// FATAL and exits the process. gocui.ErrQuit is the one control
+		// error that MUST escape (the :q / quit path relies on it).
+		if errors.Is(err, gocui.ErrQuit) {
+			return Dispatched, err
+		}
+		m.emitHandlerErrorToast(cmd, err)
+		return Dispatched, nil
 	}
 	return Dispatched, nil
+}
+
+// emitHandlerErrorToast surfaces a swallowed handler error as a
+// sanitized toast and logs a debug breadcrumb. Mirrors emitDisabledToast:
+// no-op toast when no Toaster is configured (test default), but the
+// debug log still fires when a logger is present.
+func (m *Matcher) emitHandlerErrorToast(cmd *commands.Command, err error) {
+	if m.log != nil {
+		m.log.Debug("matcher: handler error swallowed", "cmd_id", cmdIDOf(cmd), "err", err)
+	}
+	if m.toaster == nil {
+		return
+	}
+	m.toaster(config.SafeText(err.Error()))
 }
 
 // emitDisabledToast renders the "<action>: <reason>" template via the

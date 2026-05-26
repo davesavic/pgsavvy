@@ -651,8 +651,12 @@ func TestMatcher_HandlerErrorReturnedStateReset(t *testing.T) {
 	m := shortMatcher(t, ts, types.QUERY_EDITOR, types.ModeNormal)
 
 	res, err := m.Dispatch(types.QUERY_EDITOR, keyOf('z'))
-	if !errors.Is(err, sentinel) {
-		t.Errorf("err = %v, want %v", err, sentinel)
+	// The central error boundary (dbsavvy-9v1.4) swallows handler errors so
+	// gocui's MainLoop never sees them; the sanitized toast is covered by
+	// TestMatcher_HandlerError_ToastAndSwallowed. This test's purpose is the
+	// post-error state reset asserted below.
+	if err != nil {
+		t.Errorf("err = %v, want nil (swallowed by boundary)", err)
 	}
 	if res != Dispatched {
 		t.Errorf("res = %v, want Dispatched", res)
