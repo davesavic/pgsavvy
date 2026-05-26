@@ -89,6 +89,48 @@ const (
 	FK_REVERSE_PICKER ContextKey = "fk_reverse_picker"
 )
 
+// AllContextKeys returns every ContextKey constant declared above.
+//
+// MUST contain every ContextKey constant; the wiring invariant test
+// (orchestrator/wiring_invariant_test.go) enumerates this slice to assert
+// that each key is wired (present in the ContextTree, has a popupRectFor
+// case when it renders as a popup, and provides a non-no-op HandleRender
+// when it is a renderable context). Adding a new ContextKey without adding
+// it here — and without wiring it — makes that test fail.
+func AllContextKeys() []ContextKey {
+	return []ContextKey{
+		CONNECTIONS,
+		SCHEMAS,
+		TABLES,
+		COLUMNS,
+		INDEXES,
+		QUERY_EDITOR,
+		TABLE_DATA_EDITOR,
+		RESULT_GRID,
+		PLAN,
+		MESSAGES,
+		MENU,
+		CONFIRMATION,
+		PROMPT,
+		SELECTION,
+		SUGGESTIONS,
+		COMMAND_LINE,
+		HISTORY,
+		WHICH_KEY,
+		GLOBAL,
+		LIMIT,
+		CHEATSHEET,
+		HIDE_OVERLAY,
+		EXPORT_MENU,
+		FIRST_RUN_TIP,
+		TABLE_INSPECT,
+		CELL_EDITOR,
+		COMMIT_DIALOG,
+		CONFLICT_DIALOG,
+		FK_REVERSE_PICKER,
+	}
+}
+
 // IsEditable reports whether the view associated with k receives text
 // input through a master gocui.Editor. COMMAND_LINE, QUERY_EDITOR and
 // PROMPT are editable; TABLE_DATA_EDITOR flips when its concrete
