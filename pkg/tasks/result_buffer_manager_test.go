@@ -729,6 +729,81 @@ func TestResultBufferManagerGoleak(t *testing.T) {
 	h.stopUI()
 }
 
+// TestNewQueryTaskCompletesOnNaturalEOF — a result smaller than the
+// initial fill hits clean EOF during initial drain; onDone must fire
+// WITHOUT any Stop()/preempt (the Gap-1 fix). Before the fix the worker
+// parks on the chan loop and onDone never fires.
+func TestNewQueryTaskCompletesOnNaturalEOF(t *testing.T) {
+	h := newTestHarness()
+	defer h.stopUI()
+
+	stream := newStubRowStream(10) // < initialRows below
+	doneCh := make(chan struct{})
+
+	var (
+		mu  sync.Mutex
+		got []models.Row
+	)
+	appendF := h.makeAppendRows(&mu, &got)
+
+	if err := h.mgr.NewQueryTask(
+		"q1",
+		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
+		appendF,
+		50, // initialRows > 10 → initial fill observes clean EOF
+		func() { close(doneCh) },
+	); err != nil {
+		t.Fatalf("NewQueryTask: %v", err)
+	}
+
+	select {
+	case <-doneCh:
+	case <-time.After(time.Second):
+		t.Fatal("onDone did not fire on natural EOF within 1s (Gap 1)")
+	}
+
+	waitForCount(t, &mu, &got, 10, 200*time.Millisecond)
+	if n := stream.closeCount.Load(); n != 1 {
+		t.Fatalf("stream Close called %d times, want 1", n)
+	}
+	h.workersWG.Wait()
+}
+
+// TestNewQueryTaskCompletesOnEOFViaChanLoop — a result larger than the
+// initial fill completes when a later ReadRows drain hits clean EOF.
+func TestNewQueryTaskCompletesOnEOFViaChanLoop(t *testing.T) {
+	h := newTestHarness()
+	defer h.stopUI()
+
+	stream := newStubRowStream(60)
+	doneCh := make(chan struct{})
+
+	var (
+		mu  sync.Mutex
+		got []models.Row
+	)
+	appendF := h.makeAppendRows(&mu, &got)
+
+	if err := h.mgr.NewQueryTask(
+		"q1",
+		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
+		appendF, 50, func() { close(doneCh) },
+	); err != nil {
+		t.Fatalf("NewQueryTask: %v", err)
+	}
+	waitForCount(t, &mu, &got, 50, 200*time.Millisecond)
+
+	h.mgr.ReadRows(50) // drains remaining 10 → clean EOF → exit
+
+	select {
+	case <-doneCh:
+	case <-time.After(time.Second):
+		t.Fatal("onDone did not fire after EOF via chan loop")
+	}
+	waitForCount(t, &mu, &got, 60, 200*time.Millisecond)
+	h.workersWG.Wait()
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------

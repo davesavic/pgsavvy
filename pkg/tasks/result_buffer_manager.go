@@ -402,14 +402,17 @@ func (m *ResultBufferManager) runTask(
 	// before the chan loop starts" property is what AC scenario
 	// "Initial fill pre-paints rows" requires.
 	if initialRows > 0 {
-		initial := m.drainRows(ctx, stream, initialRows, stopCh)
+		initial, eof := m.drainRows(ctx, stream, initialRows, stopCh)
 		if len(initial) > 0 {
 			m.dispatchRows(initial, appendRows)
 		}
-		// If the initial drain hit EOF or error, there is nothing
-		// more to read — fall through to chan loop, which will exit
-		// on the next ReadRows call (stream.Next returns 0, ok=false
-		// and the loop bails). Lazygit has the same property.
+		if eof {
+			// Whole result fit within the initial fill: the stream
+			// is exhausted, so exit now. The deferred cleanup fires
+			// onDone → markCompleteOnUI (StateComplete) without
+			// needing a Stop / preempt (Gap 1).
+			return
+		}
 	}
 
 	// --- Chan-driven pull loop ---
@@ -423,27 +426,30 @@ func (m *ResultBufferManager) runTask(
 				// closed it (we never do). Treat as stop.
 				return
 			}
-			m.servicePullRequest(ctx, stream, req, appendRows, stopCh)
+			eof := m.servicePullRequest(ctx, stream, req, appendRows, stopCh)
 			if req.Then != nil {
 				req.Then()
 			}
-			// If the underlying stream is now closed (EOF or
-			// error encountered while servicing the request),
-			// continue looping — further ReadRows calls will
-			// produce empty batches and a future Stop / preempt
-			// will end the task. This matches lazygit's
-			// post-EOF behavior of staying on the chan loop
-			// rather than auto-exiting.
+			if eof {
+				// Stream exhausted by a clean EOF: exit so the
+				// deferred cleanup fires onDone → StateComplete
+				// (Gap 1). A mid-stream error returns eof=false
+				// and keeps looping until Stop / preempt.
+				return
+			}
 		}
 	}
 }
 
 // drainRows pulls up to want rows from the stream, respecting stop.
 // Returns the slice of rows pulled (possibly empty, possibly < want
-// on EOF / error / stop). Errors from Next are swallowed here —
-// drainRows treats any error as "end of stream" and lets the caller
-// observe the short read; the per-stream Close() at task end is what
-// surfaces resource cleanup.
+// on EOF / error / stop) and a bool reporting whether a *clean* EOF
+// was observed. The clean-EOF flag is distinct from error: a mid-stream
+// error returns eof=false so the worker keeps looping until Stop /
+// preempt (preserving TestNewQueryTaskNextErrorMidStream); only an
+// orderly end-of-stream (Next reports ok=false, err=nil) returns
+// eof=true, which lets the caller exit and fire onDone. Stop also
+// returns eof=false — stopCh is not EOF.
 //
 // want=-1 means "drain to end".
 func (m *ResultBufferManager) drainRows(
@@ -451,39 +457,43 @@ func (m *ResultBufferManager) drainRows(
 	stream drivers.RowStream,
 	want int,
 	stopCh <-chan struct{},
-) []models.Row {
+) ([]models.Row, bool) {
 	out := make([]models.Row, 0, max(want, 0))
 	for i := 0; want == -1 || i < want; i++ {
 		select {
 		case <-stopCh:
-			return out
+			return out, false // stop is not EOF
 		default:
 		}
 		row, ok, err := stream.Next(ctx)
-		if err != nil || !ok {
-			return out
+		if err != nil {
+			return out, false // error: NOT clean EOF (loop-until-Stop preserved)
+		}
+		if !ok {
+			return out, true // clean EOF
 		}
 		out = append(out, row)
 	}
-	return out
+	return out, false // filled `want` without observing the end
 }
 
 // servicePullRequest handles a single RowsToRead from the chan loop.
 // Pulls up to req.Total rows (req.Total=-1 means drain), dispatches
-// them in a single batch on the UI thread, and returns. The batch is
-// dispatched only if non-empty so the UI side never sees a spurious
-// zero-row append.
+// them in a single batch on the UI thread, and returns whether a clean
+// EOF was observed. The batch is dispatched only if non-empty so the UI
+// side never sees a spurious zero-row append.
 func (m *ResultBufferManager) servicePullRequest(
 	ctx context.Context,
 	stream drivers.RowStream,
 	req RowsToRead,
 	appendRows func([]models.Row),
 	stopCh <-chan struct{},
-) {
-	batch := m.drainRows(ctx, stream, req.Total, stopCh)
+) bool {
+	batch, eof := m.drainRows(ctx, stream, req.Total, stopCh)
 	if len(batch) > 0 {
 		m.dispatchRows(batch, appendRows)
 	}
+	return eof
 }
 
 // dispatchRows schedules a single appendRows call on the UI thread.
