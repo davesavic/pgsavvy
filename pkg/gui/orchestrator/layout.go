@@ -539,6 +539,19 @@ func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int)
 			return rect{}, false
 		}
 		return centeredRect(canvas, 0.6, 0.6), true
+	case types.COMMIT_DIALOG:
+		// COMMIT_DIALOG renders the staged-edit diff, a generated-SQL
+		// preview, and dry-run results (dbsavvy-b0l). Wider than the
+		// generic rect so SQL lines and column-by-column diffs fit
+		// without truncating. COMMIT_DIALOG is ModeNormal / non-editable,
+		// so no SetView/TextArea plumbing is needed — the popup loop's
+		// HandleRender + SetViewOnTop and the Tier-4 SetCurrentView
+		// handle render and input focus once a rect exists.
+		canvas, ok := dims["popup-overlay"]
+		if !ok {
+			return rect{}, false
+		}
+		return centeredRect(canvas, 0.7, 0.6), true
 	case types.COMMAND_LINE:
 		r := commandLineRect(dims)
 		if r == (rect{}) {

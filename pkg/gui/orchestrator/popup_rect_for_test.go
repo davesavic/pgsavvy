@@ -52,3 +52,31 @@ func TestPopupRectFor_CellEditor(t *testing.T) {
 		t.Errorf("missing popup-overlay: got (%v, %v), want (rect{}, false)", r2, ok2)
 	}
 }
+
+// TestPopupRectFor_CommitDialog locks in a centered rect for the
+// COMMIT_DIALOG popup (dbsavvy-b0l). Without a popupRectFor case the
+// dialog was pushed onto the focus stack but never got a view, so it
+// rendered blank and never received input focus. Width is ~70% of the
+// canvas (room for SQL preview lines), height ~60%. Uses a 100×100
+// popup-overlay canvas.
+func TestPopupRectFor_CommitDialog(t *testing.T) {
+	canvas := ui.Dimensions{X0: 0, Y0: 0, X1: 100, Y1: 100}
+	dims := map[string]ui.Dimensions{"popup-overlay": canvas}
+
+	r, ok := popupRectFor(types.COMMIT_DIALOG, dims, 100, 100)
+	if !ok {
+		t.Fatalf("popupRectFor(COMMIT_DIALOG) ok=false, want true")
+	}
+	if w := r.X1 - r.X0; w < 65 || w > 75 {
+		t.Errorf("width %d not ~70%% of canvas", w)
+	}
+	if h := r.Y1 - r.Y0; h < 55 || h > 65 {
+		t.Errorf("height %d not ~60%% of canvas", h)
+	}
+
+	// No "popup-overlay" entry: bail out cleanly (no panic), matching
+	// the default branch.
+	if r2, ok2 := popupRectFor(types.COMMIT_DIALOG, map[string]ui.Dimensions{}, 100, 100); ok2 || r2 != (rect{}) {
+		t.Errorf("missing popup-overlay: got (%v, %v), want (rect{}, false)", r2, ok2)
+	}
+}
