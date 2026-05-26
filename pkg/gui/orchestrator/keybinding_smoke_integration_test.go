@@ -875,3 +875,54 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 
 	goleak.VerifyNone(t, goleak.IgnoreCurrent())
 }
+
+// TestCellEditorPushFlipsInsertModeAndCaret proves the gui.go SetModes
+// wiring end-to-end (dbsavvy-tzi.3): pushing the live CELL_EDITOR context
+// onto the focus stack fires HandleFocus, which flips the per-scope mode
+// to ModeInsert (NOT ModeCommand) and enables the terminal caret. It also
+// confirms the commit chord is reachable in that exact (mode, scope)
+// cell, so SetModes and the ModeInsert binding line up.
+func TestCellEditorPushFlipsInsertModeAndCaret(t *testing.T) {
+	s := setupKbSmoke(t)
+
+	cellCtx := s.g.Registry().CellEditor
+	if cellCtx == nil {
+		t.Fatal("Registry().CellEditor is nil")
+	}
+
+	// Open captures the per-edit snapshot; Push fires HandleFocus.
+	cellCtx.Open("v", models.ColumnMeta{}, []any{1}, "v")
+	if err := s.g.ContextTree().Push(cellCtx); err != nil {
+		t.Fatalf("Push(CELL_EDITOR): %v", err)
+	}
+
+	// 1) The mode store must report ModeInsert for the CELL_EDITOR scope.
+	//    This is the direct proof that gui.go's cellCtx.SetModes(modeStore)
+	//    ran and HandleFocus toggled it. ModeInsert, not ModeCommand.
+	if got := s.g.ModeStore().Get(types.CELL_EDITOR); got != types.ModeInsert {
+		t.Errorf("CELL_EDITOR mode after push = %v; want ModeInsert", got)
+	}
+
+	// 2) The commit chord must resolve under (ModeInsert, CELL_EDITOR) —
+	//    the HandleFocus mode set — so keystrokes that aren't the commit/
+	//    discard chords fall through Passthrough to the TextArea while the
+	//    commit chord stays reachable.
+	ts := s.g.Matcher().TrieSet()
+	if ts == nil {
+		t.Fatal("Matcher.TrieSet is nil")
+	}
+	seq, leaf, ok := findLeaf(ts, types.ModeInsert, types.CELL_EDITOR, commands.CellEditCommit)
+	if !ok {
+		t.Fatalf("no leaf for CellEditCommit at (ModeInsert, CELL_EDITOR)")
+	}
+	if !leaf.IsLeaf || leaf.Action == nil || leaf.Action.ID != commands.CellEditCommit {
+		t.Errorf("CellEditCommit leaf malformed: %+v (seq=%+v)", leaf, seq)
+	}
+
+	// 3) BONUS: the registry context's deps.GuiDriver is the same recorder
+	//    (gui.go:401 sets registry deps.GuiDriver = g.driver = rec), so
+	//    HandleFocus's SetCaretEnabled(true) is observable on rec.
+	if !s.rec.CaretEnabled {
+		t.Errorf("recorder caret enabled = false after push; want true")
+	}
+}

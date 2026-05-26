@@ -81,6 +81,39 @@ func CellEditorKey() types.ContextKey { return types.CELL_EDITOR }
 // text input).
 func (c *CellEditorContext) SetModes(m types.ModeSetter) { c.modes = m }
 
+// HandleFocus flips the CELL_EDITOR scope into ModeInsert so the master
+// Editor's Passthrough routes printable runes (and arrow/backspace/paste
+// dispatches with no chord binding) through gocui.DefaultEditor into the
+// view's TextArea, and enables the terminal caret so the edit point is
+// visible. ModeInsert (not ModeCommand) is intentional: the commit/discard
+// chords bind under ModeInsert. nil modes / nil driver → no-op. dbsavvy-tzi.3.
+func (c *CellEditorContext) HandleFocus(_ types.OnFocusOpts) error {
+	if c.modes != nil {
+		c.modes.Set(types.CELL_EDITOR, types.ModeInsert)
+	}
+	if c.deps.GuiDriver != nil {
+		c.deps.GuiDriver.SetCaretEnabled(true)
+	}
+	return nil
+}
+
+// HandleFocusLost resets the CELL_EDITOR mode, disables the caret, and
+// drops the cached view + buffer. The orchestrator DeleteView's the popup
+// on pop and re-creates it on re-push, so a cached pointer would dangle;
+// clearing buf prevents a prior cell's value leaking into a re-open.
+// Mirrors PromptContext.HandleFocusLost. dbsavvy-tzi.3.
+func (c *CellEditorContext) HandleFocusLost(_ types.OnFocusLostOpts) error {
+	if c.modes != nil {
+		c.modes.Reset(types.CELL_EDITOR)
+	}
+	if c.deps.GuiDriver != nil {
+		c.deps.GuiDriver.SetCaretEnabled(false)
+	}
+	c.view = nil
+	c.buf = ""
+	return nil
+}
+
 // SetView is called by the orchestrator's Layout pass each frame the
 // CELL_EDITOR popup is on the focus stack. ReadAndClearBuffer reads
 // typed text from the supplied view's TextArea.

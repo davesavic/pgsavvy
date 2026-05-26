@@ -882,6 +882,13 @@ func (g *Gui) wireWithDriver() error {
 	// the apply pipeline and per-table store land.
 	if g.registry != nil && g.tree != nil {
 		if cellCtx := g.registry.CellEditor; cellCtx != nil {
+			// Wire the per-scope ModeSetter so CellEditorContext.HandleFocus
+			// can flip the CELL_EDITOR scope into ModeInsert on push — the
+			// master Editor's Passthrough then delegates printable runes to
+			// gocui.DefaultEditor (TextArea). Mirrors Prompt.SetModes
+			// (gui.go ~822). NOTE: ModeInsert, not ModeCommand — the
+			// commit/discard chords bind under ModeInsert. dbsavvy-tzi.3.
+			cellCtx.SetModes(g.modeStore)
 			cellCtrl := controllers.NewCellEditorController(
 				g.deps.Common, helperBag, cellCtx, g.tree, nil, nil,
 			)

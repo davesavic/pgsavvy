@@ -161,6 +161,84 @@ func TestCellEditorContext_SatisfiesIBaseContext(t *testing.T) {
 	var _ types.IBaseContext = &CellEditorContext{}
 }
 
+// caretCaptureDriver embeds captureDriver (which records SetContent) and
+// additionally records the last SetCaretEnabled call so the focus hooks'
+// caret toggle is observable. The embedded stubDriver's SetCaretEnabled is
+// a no-op; overriding it here makes it assertable. dbsavvy-tzi.3.
+type caretCaptureDriver struct {
+	captureDriver
+	caretEnabled bool
+	caretSet     bool
+}
+
+func (c *caretCaptureDriver) SetCaretEnabled(enabled bool) {
+	c.caretEnabled = enabled
+	c.caretSet = true
+}
+
+func TestCellEditorHandleFocusSetsInsertModeAndCaret(t *testing.T) {
+	drv := &caretCaptureDriver{}
+	c := newTestCellEditor(drv)
+	modes := newFakeModeStore()
+	c.SetModes(modes)
+
+	if err := c.HandleFocus(types.OnFocusOpts{}); err != nil {
+		t.Fatalf("HandleFocus: %v", err)
+	}
+
+	if got, ok := modes.set[types.CELL_EDITOR]; !ok || got != types.ModeInsert {
+		t.Errorf("mode for CELL_EDITOR = %v (set=%v); want ModeInsert", got, ok)
+	}
+	if got := modes.set[types.CELL_EDITOR]; got == types.ModeCommand {
+		t.Errorf("mode = ModeCommand; want ModeInsert (deliberate divergence from PROMPT)")
+	}
+	if !drv.caretSet || !drv.caretEnabled {
+		t.Errorf("caret enabled = %v (set=%v); want true", drv.caretEnabled, drv.caretSet)
+	}
+}
+
+func TestCellEditorHandleFocusLostResets(t *testing.T) {
+	drv := &caretCaptureDriver{}
+	c := newTestCellEditor(drv)
+	modes := newFakeModeStore()
+	c.SetModes(modes)
+
+	// Focus first so there's a mode to reset and a caret that was on.
+	if err := c.HandleFocus(types.OnFocusOpts{}); err != nil {
+		t.Fatalf("HandleFocus: %v", err)
+	}
+	// Seed a buffer so we can prove HandleFocusLost clears it.
+	c.SetBuffer("leftover")
+
+	if err := c.HandleFocusLost(types.OnFocusLostOpts{}); err != nil {
+		t.Fatalf("HandleFocusLost: %v", err)
+	}
+
+	if len(modes.resets) != 1 || modes.resets[0] != types.CELL_EDITOR {
+		t.Errorf("resets = %v; want [CELL_EDITOR]", modes.resets)
+	}
+	if _, ok := modes.set[types.CELL_EDITOR]; ok {
+		t.Errorf("CELL_EDITOR mode still set after HandleFocusLost; want cleared")
+	}
+	if !drv.caretSet || drv.caretEnabled {
+		t.Errorf("caret enabled = %v (set=%v); want false", drv.caretEnabled, drv.caretSet)
+	}
+	if c.Buffer() != "" {
+		t.Errorf("Buffer = %q after HandleFocusLost; want empty (buf cleared)", c.Buffer())
+	}
+}
+
+func TestCellEditorFocusHooksNilSafe(t *testing.T) {
+	// No SetModes (modes nil) and nil GuiDriver: focus hooks must not panic.
+	c := newTestCellEditor(nil)
+	if err := c.HandleFocus(types.OnFocusOpts{}); err != nil {
+		t.Fatalf("HandleFocus with nil modes/driver: %v", err)
+	}
+	if err := c.HandleFocusLost(types.OnFocusLostOpts{}); err != nil {
+		t.Fatalf("HandleFocusLost with nil modes/driver: %v", err)
+	}
+}
+
 func TestCellEditorKey_Stable(t *testing.T) {
 	// Z1 will replace cellEditorKey with types.CELL_EDITOR. Until
 	// then the value MUST remain "cell_editor" so the orchestrator's
