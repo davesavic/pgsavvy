@@ -90,7 +90,7 @@ func TestQueryRunnerExplainAnalyzeAutoRollbackPreservesRows(t *testing.T) {
 		t.Fatalf("pre-explain row count = %d, want 0", got)
 	}
 
-	plan, err := runner.Explain(ctx, "INSERT INTO "+tbl+" (body) VALUES ('x') RETURNING id", true)
+	plan, err := runner.Explain(ctx, "INSERT INTO "+tbl+" (body) VALUES ('x') RETURNING id", true, "")
 	if err != nil {
 		t.Fatalf("Explain(analyze=true) err = %v", err)
 	}
@@ -111,7 +111,7 @@ func TestQueryRunnerExplainPlainPathDoesNotWrap(t *testing.T) {
 	// SELECT-only EXPLAIN with analyze=false should not need a wrap;
 	// the call succeeds outside of a transaction and the session
 	// remains tx-free.
-	plan, err := runner.Explain(ctx, "SELECT 1", false)
+	plan, err := runner.Explain(ctx, "SELECT 1", false, "")
 	if err != nil {
 		t.Fatalf("Explain plain err = %v", err)
 	}

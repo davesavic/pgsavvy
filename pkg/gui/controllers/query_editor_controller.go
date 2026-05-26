@@ -392,7 +392,13 @@ func (q *QueryEditorController) explain(_ commands.ExecCtx, analyze bool) error 
 		q.toast("no active connection")
 		return nil
 	}
-	plan, err := runner.Explain(context.Background(), stmt, analyze)
+	// Resolve unqualified names against the selected schema, mirroring the run
+	// path so EXPLAIN reflects what Run would execute (dbsavvy-u1n).
+	defaultSchema := ""
+	if q.helpers.Schemas != nil {
+		defaultSchema = q.helpers.Schemas.SelectedSchemaName()
+	}
+	plan, err := runner.Explain(context.Background(), stmt, analyze, defaultSchema)
 	if err != nil {
 		q.surfaceErr(stmt, err)
 		return nil

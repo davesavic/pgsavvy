@@ -255,20 +255,24 @@ func (r *QueryRunner) RunQuery(ctx context.Context, q models.Query) (*session.Ru
 // so a side-effecting ANALYZE never auto-commits (§D14). When a
 // transaction is already open the wrap is skipped — the caller's tx
 // retains control over commit/rollback.
-func (r *QueryRunner) Explain(ctx context.Context, sql string, analyze bool) (models.Plan, error) {
+//
+// defaultSchema, when non-empty, resolves unqualified object names against
+// that schema for the EXPLAIN'd statement (pg: SET search_path), matching the
+// run path so a plan reflects what Run would execute (dbsavvy-u1n).
+func (r *QueryRunner) Explain(ctx context.Context, sql string, analyze bool, defaultSchema string) (models.Plan, error) {
 	r.preemptInFlight()
 	b := r.load()
 	if b == nil || b.sess == nil {
 		return models.Plan{}, ErrNoSession
 	}
 	if !analyze || b.sess.InTransaction() {
-		return b.sess.Explain(ctx, models.Query{SQL: sql}, analyze)
+		return b.sess.Explain(ctx, models.Query{SQL: sql, DefaultSchema: defaultSchema}, analyze)
 	}
 
 	if _, err := b.sess.Execute(session.WithoutLogging(ctx), models.Query{SQL: "BEGIN"}); err != nil {
 		return models.Plan{}, err
 	}
-	plan, explainErr := b.sess.Explain(ctx, models.Query{SQL: sql}, analyze)
+	plan, explainErr := b.sess.Explain(ctx, models.Query{SQL: sql, DefaultSchema: defaultSchema}, analyze)
 	// Always issue ROLLBACK even if Explain errored — the BEGIN would
 	// otherwise leak. The rollback error is swallowed because the
 	// user-visible failure is the Explain error.

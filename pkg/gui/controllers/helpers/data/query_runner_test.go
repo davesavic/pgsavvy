@@ -127,7 +127,7 @@ func TestQueryRunnerExplainPlainPath(t *testing.T) {
 	fs := &fakeRunnerSession{}
 	r := NewQueryRunner(fs, drivers.Capabilities{})
 
-	plan, err := r.Explain(context.Background(), "SELECT 1", false)
+	plan, err := r.Explain(context.Background(), "SELECT 1", false, "")
 	if err != nil {
 		t.Fatalf("Explain err = %v", err)
 	}
@@ -146,7 +146,7 @@ func TestQueryRunnerExplainAnalyzeWrapsInBeginRollback(t *testing.T) {
 	fs := &fakeRunnerSession{} // inTx == false
 	r := NewQueryRunner(fs, drivers.Capabilities{})
 
-	plan, err := r.Explain(context.Background(), "INSERT INTO t VALUES (1)", true)
+	plan, err := r.Explain(context.Background(), "INSERT INTO t VALUES (1)", true, "")
 	if err != nil {
 		t.Fatalf("Explain err = %v", err)
 	}
@@ -168,7 +168,7 @@ func TestQueryRunnerExplainAnalyzeInsideTxSkipsWrap(t *testing.T) {
 	fs := &fakeRunnerSession{inTx: true}
 	r := NewQueryRunner(fs, drivers.Capabilities{})
 
-	if _, err := r.Explain(context.Background(), "INSERT INTO t VALUES (1)", true); err != nil {
+	if _, err := r.Explain(context.Background(), "INSERT INTO t VALUES (1)", true, ""); err != nil {
 		t.Fatalf("Explain err = %v", err)
 	}
 	if len(fs.execCalls) != 0 {
@@ -184,7 +184,7 @@ func TestQueryRunnerExplainAnalyzeStillRollsBackOnExplainError(t *testing.T) {
 	fs := &fakeRunnerSession{explainErr: boom}
 	r := NewQueryRunner(fs, drivers.Capabilities{})
 
-	_, err := r.Explain(context.Background(), "INSERT INTO t VALUES (1)", true)
+	_, err := r.Explain(context.Background(), "INSERT INTO t VALUES (1)", true, "")
 	if !errors.Is(err, boom) {
 		t.Fatalf("Explain err = %v, want %v", err, boom)
 	}
@@ -284,7 +284,7 @@ func TestPreemptInFlightFiresBeforeSessionOp(t *testing.T) {
 			invoke: func(r *QueryRunner) error {
 				// analyze=false hits the early-return branch; the preempt
 				// must still fire before the session Explain.
-				_, err := r.Explain(context.Background(), "SELECT 1", false)
+				_, err := r.Explain(context.Background(), "SELECT 1", false, "")
 				return err
 			},
 		},

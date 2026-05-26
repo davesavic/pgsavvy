@@ -490,6 +490,14 @@ func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (pl
 		defer cancel()
 	}
 
+	// Resolve unqualified object names against q.DefaultSchema (then public)
+	// for the EXPLAIN'd statement. No-op when empty (dbsavvy-u1n).
+	if stmt := searchPathStmt(q.DefaultSchema); stmt != "" {
+		if _, err := s.conn.Exec(ctx, stmt); err != nil {
+			return models.Plan{}, wrapPgError(err)
+		}
+	}
+
 	start := time.Now()
 	log := pkgLogger()
 	defer func() {

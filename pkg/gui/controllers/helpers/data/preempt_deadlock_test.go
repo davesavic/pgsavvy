@@ -312,7 +312,7 @@ func TestParkedStreamThenExplainDoesNotDeadlock(t *testing.T) {
 	f.startParkedStream(t)
 
 	runWithDeadline(t, "Explain(analyze=false)", func() error {
-		_, err := f.runner.Explain(context.Background(), "SELECT 1", false)
+		_, err := f.runner.Explain(context.Background(), "SELECT 1", false, "")
 		return err
 	})
 
@@ -328,7 +328,7 @@ func TestParkedStreamThenExplainAnalyzeDoesNotDeadlock(t *testing.T) {
 	f.startParkedStream(t)
 
 	runWithDeadline(t, "Explain(analyze=true)", func() error {
-		_, err := f.runner.Explain(context.Background(), "INSERT INTO t VALUES (1)", true)
+		_, err := f.runner.Explain(context.Background(), "INSERT INTO t VALUES (1)", true, "")
 		return err
 	})
 

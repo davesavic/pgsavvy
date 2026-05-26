@@ -83,3 +83,32 @@ func TestStream_DefaultSchemaResolvesUnqualifiedName(t *testing.T) {
 		t.Errorf("qualified sp_probe_b.probe with DefaultSchema=sp_probe_a = %q, want from_b", got)
 	}
 }
+
+func TestExplain_DefaultSchemaResolvesUnqualifiedName(t *testing.T) {
+	sess := openIntegrationSession(t)
+	ctx := context.Background()
+
+	spExec(t, sess, "DROP SCHEMA IF EXISTS sp_explain CASCADE")
+	spExec(t, sess, "CREATE SCHEMA sp_explain")
+	t.Cleanup(func() {
+		_, _ = sess.Execute(ctx, models.Query{SQL: "DROP SCHEMA IF EXISTS sp_explain CASCADE"})
+	})
+	// probe lives ONLY in sp_explain — never on the default search_path.
+	spExec(t, sess, "CREATE TABLE sp_explain.probe (label text)")
+
+	// Fresh session: without a default schema the unqualified name is
+	// unresolvable, so EXPLAIN errors. Run this branch FIRST, before any
+	// SET search_path has touched the pinned connection.
+	if _, err := sess.Explain(ctx, models.Query{SQL: "SELECT label FROM probe"}, false); err == nil {
+		t.Fatalf("expected EXPLAIN of unqualified probe to fail with no default schema")
+	}
+
+	// With the schema, search_path is set first and EXPLAIN resolves it.
+	plan, err := sess.Explain(ctx, models.Query{SQL: "SELECT label FROM probe", DefaultSchema: "sp_explain"}, false)
+	if err != nil {
+		t.Fatalf("EXPLAIN with DefaultSchema=sp_explain: %v", err)
+	}
+	if plan.RawText == "" {
+		t.Fatalf("expected a non-empty plan, got empty RawText")
+	}
+}
