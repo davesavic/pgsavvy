@@ -178,6 +178,41 @@ func TestQueryEditorControllerLeaderBindingsExcludeInsertMode(t *testing.T) {
 	}
 }
 
+// dbsavvy-8u4: <leader>r must fire in Normal mode. ModeNormal is the
+// zero sentinel (types/mode.go), so it CANNOT be OR'd into a multi-mode
+// mask without vanishing (0 | X == X). A run binding built as
+// `ModeNormal | ModeVisual | ...` therefore fans out to the Visual modes
+// ONLY, leaving <leader>r dead in Normal mode — the mode you are in when
+// you run a query — so no statement executes and no result tab ever
+// opens. Guard: GetKeybindings must publish a QueryRun binding that
+// fires in Normal mode AND one that fires in Visual mode (the wwd.7
+// visual-selection fan-out must be preserved).
+func TestQueryEditorControllerRunBindingFiresInNormalMode(t *testing.T) {
+	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag)
+	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
+
+	normalRun := false
+	visualRun := false
+	for _, kb := range kbs {
+		if kb.ActionID != commands.QueryRun {
+			continue
+		}
+		if kb.Mode.Is(types.ModeNormal) {
+			normalRun = true
+		}
+		if kb.Mode&(types.ModeVisual|types.ModeVisualLine|types.ModeVisualBlock) != 0 {
+			visualRun = true
+		}
+	}
+	if !normalRun {
+		t.Errorf("no QueryRun binding fires in Normal mode; <leader>r is dead where queries are run")
+	}
+	if !visualRun {
+		t.Errorf("no QueryRun binding fires in Visual mode; visual-selection run (wwd.7) regressed")
+	}
+}
+
 func TestQueryEditorControllerRegisterActionsRegistersAllSix(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
 	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag)

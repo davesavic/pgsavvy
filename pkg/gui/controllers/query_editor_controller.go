@@ -68,10 +68,11 @@ func NewQueryEditorController(c *common.Common, helpers HelperBag) *QueryEditorC
 	return &QueryEditorController{baseController: newBase(c, helpers)}
 }
 
-// GetKeybindings publishes the six query-editor bindings under
-// QUERY_EDITOR scope. All six are leader-prefixed; SequenceFromShorthand
-// emits a KeyLeader placeholder that Build expands to the configured
-// leader rune before trie insert.
+// GetKeybindings publishes the query-editor bindings under QUERY_EDITOR
+// scope. All are leader-prefixed; SequenceFromShorthand emits a
+// KeyLeader placeholder that Build expands to the configured leader rune
+// before trie insert. <leader>r appears twice on purpose — once for
+// Normal mode and once for the Visual modes (see the spec block below).
 func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	tr := q.tr()
 	type bspec struct {
@@ -83,14 +84,24 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		// EXCLUDED (dbsavvy-1yb): with leader=<space>, an INSERT-mode
 		// mask makes the space rune a chord prefix, so the matcher
 		// buffers it until tlen — producing the "select*" → "select *"
-		// reordering bug. <leader>r still extends to Visual modes so
-		// the fan-out path lands (wwd.7).
+		// reordering bug. Normal + Visual coverage is published as two
+		// specs (never one OR'd mask) because ModeNormal is a zero
+		// sentinel that vanishes from a multi-bit mask (dbsavvy-8u4).
 		mode types.Mode
 	}
 	defaultMode := types.ModeNormal
-	runMode := defaultMode | types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
+	// <leader>r runs the statement under cursor in Normal mode AND runs
+	// the selection in the Visual modes (wwd.7). It MUST be published as
+	// two separate specs: ModeNormal is the zero sentinel (types/mode.go),
+	// so `ModeNormal | ModeVisual | …` collapses to the Visual bits only
+	// (0 | X == X) and fanOutBinding — which only treats Normal specially
+	// when cb.Mode == ModeNormal exactly — would silently drop the Normal
+	// entry, leaving <leader>r dead in the very mode queries are run from
+	// (dbsavvy-8u4).
+	visualRunModes := types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 	specs := []bspec{
-		{"<leader>r", commands.QueryRun, tr.Actions.RunQuery, runMode},
+		{"<leader>r", commands.QueryRun, tr.Actions.RunQuery, defaultMode},
+		{"<leader>r", commands.QueryRun, tr.Actions.RunQuery, visualRunModes},
 		{"<leader>R", commands.QueryRunAll, tr.Actions.QueryRunAll, 0},
 		{"<leader>e", commands.QueryExplain, tr.Actions.QueryExplain, 0},
 		{"<leader>E", commands.QueryExplainAnalyze, tr.Actions.QueryExplainAnalyze, 0},
