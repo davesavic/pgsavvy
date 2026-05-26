@@ -167,13 +167,17 @@ type View struct {
 	// dbsavvy-uv0.9.
 	viewHeight int
 
-	// editable, rowIdentity, disabledReason carry the post-introspection
-	// editability state populated by Z1 via SetEditability. SetColumns
-	// resets all three to zero (a fresh schema attach invalidates the
-	// previous decision). dbsavvy-bwq.2 (F2).
+	// editable, rowIdentity, disabledReason, identitySchema carry the
+	// post-introspection editability state populated by Z1 via
+	// SetEditability. SetColumns resets all to zero (a fresh schema attach
+	// invalidates the previous decision). identitySchema is the catalog-
+	// resolved schema (pg_namespace.nspname) used to schema-qualify the
+	// apply-path UPDATE; the SQL-parsed base table loses it for unqualified
+	// SELECTs (dbsavvy-8q6). dbsavvy-bwq.2 (F2).
 	editable       bool
 	rowIdentity    []int
 	disabledReason string
+	identitySchema string
 
 	// pendingEdits is the per-View staged-edit set. Read by the dirty-cell
 	// renderer (DecorateDirtyCell / GutterMarker) and the status indicator
@@ -283,13 +287,16 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 	v.editable = false
 	v.rowIdentity = nil
 	v.disabledReason = ""
+	v.identitySchema = ""
 }
 
 // SetEditability installs the post-introspection editability decision.
-// All three fields are stored atomically under the write lock so a
-// concurrent reader sees a consistent triple. A nil rowIdentity is stored
-// as-is; getters return defensive copies. dbsavvy-bwq.2 (F2).
-func (v *View) SetEditability(editable bool, rowIdentity []int, disabledReason string) {
+// All fields are stored atomically under the write lock so a concurrent
+// reader sees a consistent snapshot. A nil rowIdentity is stored as-is;
+// getters return defensive copies. schema is the catalog-resolved schema
+// of the base relation (empty when unknown). dbsavvy-bwq.2 (F2),
+// dbsavvy-8q6 (schema).
+func (v *View) SetEditability(editable bool, rowIdentity []int, disabledReason, schema string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.editable = editable
@@ -299,6 +306,7 @@ func (v *View) SetEditability(editable bool, rowIdentity []int, disabledReason s
 		v.rowIdentity = append([]int(nil), rowIdentity...)
 	}
 	v.disabledReason = disabledReason
+	v.identitySchema = schema
 }
 
 // Editable reports whether the current result set is inline-editable.
@@ -319,6 +327,16 @@ func (v *View) RowIdentity() []int {
 	out := make([]int, len(v.rowIdentity))
 	copy(out, v.rowIdentity)
 	return out
+}
+
+// IdentitySchema returns the catalog-resolved schema of the editable base
+// relation, or "" when unknown / not editable. The apply path uses it to
+// schema-qualify the UPDATE so an unqualified SELECT against a non-public
+// table still writes back correctly (dbsavvy-8q6).
+func (v *View) IdentitySchema() string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.identitySchema
 }
 
 // DisabledReason returns the frozen reason string explaining why the
@@ -565,6 +583,8 @@ func (v *View) snapshot() viewSnapshot {
 		viewMode:           normaliseViewMode(v.viewMode),
 		estimatedRows:      v.loadEstimatedRowsLocked(),
 		expandedLineOffset: v.expandedLineOffset,
+		pendingEdits:       v.pendingEdits,
+		rowIdentity:        v.rowIdentity,
 	}
 }
 
@@ -658,6 +678,14 @@ type viewSnapshot struct {
 	viewMode           string
 	estimatedRows      int64
 	expandedLineOffset int
+
+	// pendingEdits + rowIdentity are the dirty-cell projection inputs.
+	// renderDataLine reads the snapshot (never v.* directly) so a
+	// concurrent SetPendingEdits / SetEditability cannot tear the frame.
+	// rowIdentity holds the SELECT-order PK column indexes used to match a
+	// row against staged edits. dbsavvy-cyh.
+	pendingEdits *models.PendingEditSet
+	rowIdentity  []int
 }
 
 // Render draws the current grid into the target gocui view. target may

@@ -88,6 +88,26 @@ func renderCellWithDirty(value any, col models.ColumnMeta, isDirty bool) (visibl
 	return visible, decorated
 }
 
+// renderCellPadded renders value for col, padded to display width w, with
+// the type-aware cell style. When isDirty is true the dirty marker (`●`) is
+// appended inside the width budget and the DirtyCellBg tint is layered over
+// the cell so a staged (unsaved) edit reads as dirty. Padding the plain
+// visible string before wrapping mirrors renderDataLine's clean path so a
+// digit in the SGR prefix can never collide with a padded value.
+// dbsavvy-cyh (A3 wiring).
+func renderCellPadded(value any, col models.ColumnMeta, w int, isDirty bool) string {
+	visible := renderCellPlain(value, col)
+	if isDirty {
+		visible += dirtyCellMarker
+	}
+	padded := padRight(visible, w)
+	styled := wrapWithStyle(padded, styleForCell(value, col))
+	if isDirty {
+		styled = wrapWithStyle(styled, dereferenceStyle(theme.Current().DirtyCellBg))
+	}
+	return styled
+}
+
 // renderCellPlain is the unstyled cell stringifier. Used for column
 // auto-sizing (where SGR escapes would skew the width) and for TSV
 // yank output (which must not carry colour codes). All non-NULL

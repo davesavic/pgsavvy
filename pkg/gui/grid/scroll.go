@@ -357,15 +357,20 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 		if c < len(row.Values) {
 			value = row.Values[c]
 		}
-		// Pad the visible string to column width, then wrap with the
-		// style. We must NOT splice padded into the already-decorated
-		// string via strings.Replace: the visible value (e.g. "3" or
-		// "5") can collide with a digit inside the SGR prefix itself
-		// (e.g. \x1b[35m for magenta), corrupting the escape sequence
-		// and dumping its remnants onto the screen.
-		visible := renderCellPlain(value, snap.cols[c])
-		padded := padRight(visible, w)
-		styled := wrapWithStyle(padded, styleForCell(value, snap.cols[c]))
+		// Dirty-cell substitution: if this (rowPK, column) carries a staged
+		// edit, render the staged NewValue (decorated with the ● marker +
+		// tint) instead of the stale DB value so an unsaved edit is visible
+		// (dbsavvy-cyh). renderCellPadded pads the plain visible string
+		// before wrapping, so a digit in the SGR prefix can never collide
+		// with a padded value.
+		isDirty := false
+		if pk := rowPKValues(row, snap.rowIdentity); pk != nil {
+			if e, ok := cellPendingEdit(snap.pendingEdits, pk, snap.cols[c].Name); ok {
+				value = e.NewValue
+				isDirty = true
+			}
+		}
+		styled := renderCellPadded(value, snap.cols[c], w, isDirty)
 		if inSelection(snap, r, c) {
 			styled = applySelectionHighlight(styled)
 		}

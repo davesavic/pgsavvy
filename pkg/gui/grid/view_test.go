@@ -190,13 +190,16 @@ func TestEditability_DefaultsAndSetAndReset(t *testing.T) {
 	require.False(t, v.Editable(), "default Editable must be false")
 	require.Nil(t, v.RowIdentity(), "default RowIdentity must be nil")
 	require.Equal(t, "", v.DisabledReason(), "default DisabledReason must be empty")
+	require.Equal(t, "", v.IdentitySchema(), "default IdentitySchema must be empty")
 
 	// Install columns then populate editability.
 	v.SetColumns(makeSingleCol("c1", "text"))
-	v.SetEditability(true, []int{0, 2}, "")
+	v.SetEditability(true, []int{0, 2}, "", "myschema")
 	require.True(t, v.Editable())
 	require.Equal(t, []int{0, 2}, v.RowIdentity())
 	require.Equal(t, "", v.DisabledReason())
+	require.Equal(t, "myschema", v.IdentitySchema(),
+		"IdentitySchema must carry the catalog-resolved schema (dbsavvy-8q6)")
 
 	// RowIdentity getter must return a defensive copy.
 	got := v.RowIdentity()
@@ -209,9 +212,10 @@ func TestEditability_DefaultsAndSetAndReset(t *testing.T) {
 	require.False(t, v.Editable(), "SetColumns must reset Editable")
 	require.Nil(t, v.RowIdentity(), "SetColumns must reset RowIdentity")
 	require.Equal(t, "", v.DisabledReason(), "SetColumns must reset DisabledReason")
+	require.Equal(t, "", v.IdentitySchema(), "SetColumns must reset IdentitySchema")
 
 	// Disabled-reason path: SetEditability with editable=false + reason.
-	v.SetEditability(false, nil, "no row identity")
+	v.SetEditability(false, nil, "no row identity", "")
 	require.False(t, v.Editable())
 	require.Nil(t, v.RowIdentity())
 	require.Equal(t, "no row identity", v.DisabledReason())

@@ -278,9 +278,12 @@ type ResultTabsHelperDeps struct {
 	// editable. Wired by the orchestrator to a closure that acquires a
 	// session and runs the driver-specific introspection
 	// (pg.EditabilityIntrospect + pg.ApplyConnectionGate). Returns
-	// (editable, SELECT-order row-identity indexes, disabledReason). nil
-	// keeps editability off (unit-test default). dbsavvy-2b6.
-	IntrospectEditability func(ctx context.Context, cols []models.ColumnMeta) (bool, []int, string)
+	// (editable, SELECT-order row-identity indexes, disabledReason,
+	// catalog-resolved base-relation schema). The schema is threaded onto
+	// the grid so the apply path can schema-qualify the UPDATE even when the
+	// SELECT was unqualified (dbsavvy-8q6). nil keeps editability off
+	// (unit-test default). dbsavvy-2b6.
+	IntrospectEditability func(ctx context.Context, cols []models.ColumnMeta) (bool, []int, string, string)
 }
 
 // defaultReadToEndWarnThreshold is the shipped ceiling above which G
@@ -1392,9 +1395,9 @@ func (h *ResultTabsHelper) scheduleEditabilityIntrospect(tab *Tab, cols []models
 	}
 	gridView := tab.grid
 	run := func() {
-		editable, rowID, reason := h.deps.IntrospectEditability(context.Background(), cols)
+		editable, rowID, reason, schema := h.deps.IntrospectEditability(context.Background(), cols)
 		flip := func() error {
-			gridView.SetEditability(editable, rowID, reason)
+			gridView.SetEditability(editable, rowID, reason, schema)
 			return nil
 		}
 		if h.deps.OnUIThread != nil {

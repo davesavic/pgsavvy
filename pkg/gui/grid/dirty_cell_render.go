@@ -58,15 +58,43 @@ func RowHasPendingEdit(set *models.PendingEditSet, rowPK []any) bool {
 // whether DecorateDirtyCell should apply the dirty tint + glyph.
 // dbsavvy-bwq.6 (A3).
 func CellHasPendingEdit(set *models.PendingEditSet, rowPK []any, column string) bool {
+	_, ok := cellPendingEdit(set, rowPK, column)
+	return ok
+}
+
+// cellPendingEdit returns the staged edit for the (rowPK, column) pair and
+// true when one exists. The per-cell render path uses it to substitute the
+// staged NewValue for the stale DB value so an unsaved edit is visible
+// (dbsavvy-cyh). A nil/empty set, empty rowPK, or empty column yields
+// (zero, false).
+func cellPendingEdit(set *models.PendingEditSet, rowPK []any, column string) (models.PendingEdit, bool) {
 	if set == nil || len(rowPK) == 0 || column == "" || set.IsEmpty() {
-		return false
+		return models.PendingEdit{}, false
 	}
 	for _, e := range set.Edits() {
 		if e.Column == column && pkSliceEqual(e.PrimaryKey, rowPK) {
-			return true
+			return e, true
 		}
 	}
-	return false
+	return models.PendingEdit{}, false
+}
+
+// rowPKValues extracts the primary-key value slice for a row using the
+// SELECT-order identity column indexes. Returns nil when any index is out
+// of range (treated as "row identity unavailable" — the caller then renders
+// no dirty decoration rather than risk a bad match). dbsavvy-cyh.
+func rowPKValues(row models.Row, rowIdentity []int) []any {
+	if len(rowIdentity) == 0 {
+		return nil
+	}
+	pk := make([]any, len(rowIdentity))
+	for i, idx := range rowIdentity {
+		if idx < 0 || idx >= len(row.Values) {
+			return nil
+		}
+		pk[i] = row.Values[idx]
+	}
+	return pk
 }
 
 // GutterMarker returns the gutter glyph to render alongside rowIdx. When

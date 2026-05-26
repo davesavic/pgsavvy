@@ -1654,8 +1654,8 @@ func TestEditabilityIntrospectedOnComplete(t *testing.T) {
 	factory := func() StreamRunner { return runner }
 	h, _ := newTestHelper(t, factory)
 
-	h.deps.IntrospectEditability = func(_ context.Context, cols []models.ColumnMeta) (bool, []int, string) {
-		return true, []int{0}, ""
+	h.deps.IntrospectEditability = func(_ context.Context, cols []models.ColumnMeta) (bool, []int, string, string) {
+		return true, []int{0}, "", "myschema"
 	}
 
 	_ = h.openTab("SELECT id FROM t", newFakeRunHandle())
@@ -1672,6 +1672,11 @@ func TestEditabilityIntrospectedOnComplete(t *testing.T) {
 	ri := tab.grid.RowIdentity()
 	if len(ri) != 1 || ri[0] != 0 {
 		t.Fatalf("row identity = %v, want [0]", ri)
+	}
+	// The catalog-resolved schema must be threaded onto the grid so the
+	// apply path can schema-qualify the UPDATE (dbsavvy-8q6).
+	if got := tab.grid.IdentitySchema(); got != "myschema" {
+		t.Fatalf("grid IdentitySchema = %q, want %q", got, "myschema")
 	}
 }
 

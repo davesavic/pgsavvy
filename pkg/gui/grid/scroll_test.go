@@ -299,3 +299,55 @@ func TestRenderDataLine_DigitInSGRPrefixDoesNotCorruptEscape(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderDataLine_DirtyCellShowsStagedValue verifies that once a result
+// grid is wired to a PendingEditSet (SetPendingEdits) and has a row
+// identity, renderDataLine renders a staged edit's NewValue — not the
+// stale DB value — with the dirty marker. This is the integration the A3
+// feature was missing (dbsavvy-cyh): the staged set must reach the render
+// snapshot and be looked up per cell by PK + column.
+func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{
+		{Name: "id", TypeName: "int4"},
+		{Name: "name", TypeName: "text"},
+	})
+	v.AppendRows([]models.Row{
+		{Values: []any{1, "alice"}},
+		{Values: []any{2, "carol"}},
+	})
+	// Row identity = column 0 (id); editable result.
+	v.SetEditability(true, []int{0}, "", "public")
+
+	set := &models.PendingEditSet{}
+	if err := set.Add(models.PendingEdit{
+		PrimaryKey: []any{1}, Column: "name",
+		OldValue: "alice", NewValue: "bob", Kind: models.Literal,
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	v.SetPendingEdits(set)
+
+	snap := v.snapshot()
+
+	// Row 0 (id=1): name is staged alice -> bob.
+	line0 := renderDataLine(snap, 0, 80)
+	if !strings.Contains(line0, "bob") {
+		t.Errorf("dirty cell must render staged NewValue 'bob'; line=%q", line0)
+	}
+	if !strings.Contains(line0, "●") {
+		t.Errorf("dirty cell must carry the ● marker; line=%q", line0)
+	}
+	if strings.Contains(line0, "alice") {
+		t.Errorf("dirty cell must NOT render the stale value 'alice'; line=%q", line0)
+	}
+
+	// Row 1 (id=2): no staged edit — original value, no marker.
+	line1 := renderDataLine(snap, 1, 80)
+	if !strings.Contains(line1, "carol") {
+		t.Errorf("clean row must render original value 'carol'; line=%q", line1)
+	}
+	if strings.Contains(line1, "●") {
+		t.Errorf("clean row must not carry a dirty marker; line=%q", line1)
+	}
+}

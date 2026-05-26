@@ -496,29 +496,29 @@ func (g *Gui) wireWithDriver() error {
 	// the live connection at call time (it is invalidated on Disconnect),
 	// acquire a fresh pooled session, and run the pg introspector. Non-pg
 	// drivers or no connection leave editability off.
-	resultTabsDeps.IntrospectEditability = func(ctx context.Context, cols []models.ColumnMeta) (bool, []int, string) {
+	resultTabsDeps.IntrospectEditability = func(ctx context.Context, cols []models.ColumnMeta) (bool, []int, string, string) {
 		if g.connectHelper == nil {
-			return false, nil, ""
+			return false, nil, "", ""
 		}
 		conn := g.connectHelper.Connection()
 		if conn == nil {
-			return false, nil, ""
+			return false, nil, "", ""
 		}
 		sess, err := conn.AcquireSession(ctx)
 		if err != nil {
-			return false, nil, ""
+			return false, nil, "", ""
 		}
 		defer func() { _ = sess.Close() }()
 
 		pgSess, ok := sess.(*pg.Session)
 		if !ok {
-			return false, nil, "" // non-pg driver: no introspection yet
+			return false, nil, "", "" // non-pg driver: no introspection yet
 		}
-		_, rowID, reason, err := pg.EditabilityIntrospect(ctx, pgSess, cols)
+		baseRelation, rowID, reason, err := pg.EditabilityIntrospect(ctx, pgSess, cols)
 		if err != nil {
 			// reason already carries the canonical "introspection failed: …"
 			// string (editability.go); don't re-prefix it.
-			return false, nil, reason
+			return false, nil, reason, ""
 		}
 		editable := reason == ""
 
@@ -527,7 +527,11 @@ func (g *Gui) wireWithDriver() error {
 			readOnly = p.ReadOnly
 		}
 		editable, reason = pg.ApplyConnectionGate(editable, reason, readOnly, true /* pg SupportsInlineEdit */)
-		return editable, rowID, reason
+		// baseRelation.Schema is the catalog-resolved schema (pg_namespace.
+		// nspname). Thread it out so the apply path can schema-qualify the
+		// UPDATE; the SQL-parsed base table is unqualified for a bare
+		// `SELECT ... FROM tbl` (dbsavvy-8q6).
+		return editable, rowID, reason, baseRelation.Schema
 	}
 	if tr != nil {
 		resultTabsDeps.SortPickLabel = tr.Actions.ResultSortPickLabel
@@ -793,7 +797,30 @@ func (g *Gui) wireWithDriver() error {
 			if connID == "" || ri.BaseTable == "" || !ri.HasRowIdentity {
 				return nil
 			}
-			return g.pendingEditReg.For(connID, ri.BaseTable)
+			set := g.pendingEditReg.For(connID, ri.BaseTable)
+			if set != nil {
+				if gv := tab.Grid(); gv != nil {
+					// ri.BaseTable comes from SQL-text parsing, so it carries
+					// no schema for an unqualified `SELECT ... FROM tbl`.
+					// Backfill the catalog-resolved schema editability
+					// introspection stored on the grid, otherwise the
+					// apply-path UPDATE is unqualified and fails to resolve on
+					// a fresh pooled session whose search_path doesn't include
+					// the table's schema (dbsavvy-8q6).
+					if set.Table.Schema == "" {
+						if sch := gv.IdentitySchema(); sch != "" {
+							set.Table.Schema = sch
+						}
+					}
+					// Point the grid at this exact set so the dirty-cell
+					// renderer shows staged values. The pointer is stable per
+					// (connID, baseTable) and the cell editor stages into the
+					// same instance via this resolver, so a staged edit
+					// reflects on the next render (dbsavvy-cyh).
+					gv.SetPendingEdits(set)
+				}
+			}
+			return set
 		},
 		// ActiveConnectionProfile surfaces the live profile captured at
 		// connectInvoker.Connect. nil until the first successful Connect.
