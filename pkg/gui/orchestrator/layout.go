@@ -612,6 +612,15 @@ func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int)
 		maxCols := cw * 3 / 5
 		return centeredRectMaxSize(canvas, maxCols, cellEditorMaxRows), true
 	default:
+		// The silent default is intentional and load-bearing: WHICH_KEY
+		// and LIMIT are DISPLAY_CONTEXT keys that render via dedicated
+		// overlays (the which-key overlay / renderLimitOverlay), not this
+		// Tier-3 loop, so they legitimately have no case here. Enforcement
+		// that every *other* popup-kind ContextKey has a rect lives in
+		// TestWiringInvariant (dbsavvy-9v1.1): a new TEMPORARY_POPUP /
+		// DISPLAY_CONTEXT key wired into the tree without a case here fails
+		// that test instead of silently rendering blank (the
+		// dbsavvy-b0l/xp2/q5j/tzi.1 failure mode).
 		return rect{}, false
 	}
 }
