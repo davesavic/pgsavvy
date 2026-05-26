@@ -65,11 +65,11 @@ type ConflictDialogCancelHook interface {
 type ConflictDialogController struct {
 	baseController
 
-	ctx          *guicontext.ConflictDialogContext
-	tree         FocusPopper
-	refreshHook  ConflictDialogRefreshHook
-	overwriteFn  ConflictDialogOverwriteHook
-	cancelFn     ConflictDialogCancelHook
+	ctx         *guicontext.ConflictDialogContext
+	tree        FocusPopper
+	refreshHook ConflictDialogRefreshHook
+	overwriteFn ConflictDialogOverwriteHook
+	cancelFn    ConflictDialogCancelHook
 }
 
 // NewConflictDialogController constructs the controller. Every

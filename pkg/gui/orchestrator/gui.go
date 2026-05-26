@@ -735,8 +735,7 @@ func (g *Gui) wireWithDriver() error {
 
 				// Push the refreshed TABLES context onto the focus stack so the
 				// user lands there after picking a schema.
-				connectInv.g.tree.Push(g.registry.Tables)
-				return nil
+				return connectInv.g.tree.Push(g.registry.Tables)
 			})
 		},
 

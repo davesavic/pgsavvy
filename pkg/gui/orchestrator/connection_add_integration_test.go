@@ -53,7 +53,7 @@ func (s *serializedDriver) UpdateContentOnly(fn func() error) {
 func (s *serializedDriver) FeedKeySerialized(view string, key types.Key, mod types.Modifier) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.RecorderGuiDriver.FeedKey(view, key, mod)
+	return s.FeedKey(view, key, mod)
 }
 
 // assertPopupRendered drives RunLayout (mirroring the production
@@ -212,7 +212,7 @@ func feedSpecialEditable(t *testing.T, drv *serializedDriver, view string, name 
 	drv.mu.Lock()
 	defer drv.mu.Unlock()
 	chordKey := keys.KeyFromGocui(gocui.NewKeyName(name))
-	if _, err := drv.RecorderGuiDriver.FeedChord(view, []keys.Key{chordKey}); err != nil {
+	if _, err := drv.FeedChord(view, []keys.Key{chordKey}); err != nil {
 		t.Fatalf("FeedChord(view=%q, special=%v): %v", view, name, err)
 	}
 }

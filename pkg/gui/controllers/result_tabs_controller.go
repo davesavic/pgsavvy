@@ -684,7 +684,6 @@ func (r *ResultTabsController) fkReverseHandler(_ commands.ExecCtx) error {
 	return nil
 }
 
-
 // jumpBackHandler dispatches `<c-o>` — pops the jump list back and
 // navigates to (tab, row, col). Stale entries (tab no longer exists)
 // surface a "stale" toast and consume the keystroke.

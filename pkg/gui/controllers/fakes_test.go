@@ -277,16 +277,3 @@ func invokeAction(reg *commands.Registry, b *types.ChordBinding) error {
 	}
 	return cmd.Handler(commands.ExecCtx{})
 }
-
-// buildRegistryFor returns a fresh Registry with reg.RegisterActions
-// invoked on the supplied bundle. Used by tests that want to dispatch
-// a binding's ActionID through the live handler.
-func buildRegistryFor(actions ...func(*commands.Registry)) *commands.Registry {
-	reg := commands.NewRegistry()
-	for _, a := range actions {
-		if a != nil {
-			a(reg)
-		}
-	}
-	return reg
-}

@@ -658,4 +658,3 @@ func (e *CellEditorController) AttachToContext(ctx attachable) {
 	}
 	ctx.AddKeybindingsFn(e.GetKeybindings)
 }
-

@@ -132,7 +132,7 @@ func TestRenderReltuples_Cases(t *testing.T) {
 		{in: 50, want: "~50 rows"},
 		{in: 0, want: "~0 rows"},
 		{in: -1, want: "~? rows"},
-		{in: 0.7, want: "~1 rows"},   // fractional → ceil
+		{in: 0.7, want: "~1 rows"},    // fractional → ceil
 		{in: 1.0001, want: "~2 rows"}, // rounds UP
 	}
 	for _, c := range cases {

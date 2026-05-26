@@ -42,8 +42,8 @@ type fakeSession struct {
 	beginErr error
 }
 
-func (f *fakeSession) Close() error            { f.closed = true; return nil }
-func (f *fakeSession) ID() models.SessionID    { return f.id }
+func (f *fakeSession) Close() error             { f.closed = true; return nil }
+func (f *fakeSession) ID() models.SessionID     { return f.id }
 func (f *fakeSession) Encoder() drivers.Encoder { return nil }
 
 func (f *fakeSession) Execute(_ context.Context, q models.Query) (models.Result, error) {
@@ -78,46 +78,58 @@ func (f *fakeSession) Execute(_ context.Context, q models.Query) (models.Result,
 func (f *fakeSession) ListDatabases(context.Context) ([]models.Database, error) {
 	panic("ListDatabases not used")
 }
+
 func (f *fakeSession) ListSchemas(context.Context, string) ([]models.Schema, error) {
 	panic("ListSchemas not used")
 }
+
 func (f *fakeSession) ListTables(context.Context, string) ([]*models.Table, error) {
 	panic("ListTables not used")
 }
+
 func (f *fakeSession) ListColumns(context.Context, string, string) ([]models.Column, error) {
 	panic("ListColumns not used")
 }
+
 func (f *fakeSession) ListIndexes(context.Context, string, string) ([]models.Index, error) {
 	panic("ListIndexes not used")
 }
+
 func (f *fakeSession) ListConstraints(context.Context, string, string) ([]models.Constraint, error) {
 	panic("ListConstraints not used")
 }
+
 func (f *fakeSession) ListForeignKeys(context.Context, string, string) ([]models.ForeignKey, error) {
 	panic("ListForeignKeys not used")
 }
+
 func (f *fakeSession) ListInboundForeignKeys(context.Context, string, string) ([]models.ForeignKey, error) {
 	panic("ListInboundForeignKeys not used")
 }
+
 func (f *fakeSession) ListFunctions(context.Context) ([]string, error) {
 	panic("ListFunctions not used")
 }
+
 func (f *fakeSession) DescribeFunction(context.Context, string, string) (models.FunctionDetail, error) {
 	panic("DescribeFunction not used")
 }
+
 func (f *fakeSession) Stream(context.Context, models.Query) (drivers.RowStream, error) {
 	panic("Stream not used")
 }
+
 func (f *fakeSession) Explain(context.Context, models.Query, bool) (models.Plan, error) {
 	panic("Explain not used")
 }
+
 func (f *fakeSession) Begin(context.Context, models.TxOptions) (drivers.Transaction, error) {
 	if f.beginErr != nil {
 		return nil, f.beginErr
 	}
 	panic("Begin not used (apply uses Execute BEGIN)")
 }
-func (f *fakeSession) InTransaction() bool                  { return false }
+func (f *fakeSession) InTransaction() bool                     { return false }
 func (f *fakeSession) CurrentTransaction() drivers.Transaction { return nil }
 
 // fakeAcquirer hands out a pre-built fakeSession (or an error). Mirrors
@@ -234,10 +246,10 @@ func TestApply_DedicatedSession_AcquireFailure(t *testing.T) {
 func TestApply_HappyPath_LiteralAndExpression(t *testing.T) {
 	sess := &fakeSession{
 		script: []execResponse{
-			{},                             // 0: BEGIN
-			{RowsAffected: 1},              // 1: UPDATE name
-			{RowsAffected: 1},              // 2: UPDATE flags (expression)
-			{},                             // 3: COMMIT
+			{},                // 0: BEGIN
+			{RowsAffected: 1}, // 1: UPDATE name
+			{RowsAffected: 1}, // 2: UPDATE flags (expression)
+			{},                // 3: COMMIT
 			{Cols: []string{"id", "name"}, Rows: [][]any{{int64(1), "bob"}}}, // 4: SELECT refetch
 		},
 	}
@@ -313,10 +325,10 @@ func TestApply_HappyPath_LiteralAndExpression(t *testing.T) {
 func TestApply_Conflict_RollsBackAndCollects(t *testing.T) {
 	sess := &fakeSession{
 		script: []execResponse{
-			{},                                    // 0: BEGIN
-			{RowsAffected: 0},                     // 1: UPDATE (conflict)
+			{},                // 0: BEGIN
+			{RowsAffected: 0}, // 1: UPDATE (conflict)
 			{Cols: []string{"name"}, Rows: [][]any{{"server-side-name"}}}, // 2: SELECT server value
-			{},                                    // 3: ROLLBACK
+			{}, // 3: ROLLBACK
 		},
 	}
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
