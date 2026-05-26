@@ -11,18 +11,21 @@ import (
 // a single character of right padding.
 const whichKeyMaxRowWidth = 38
 
-// whichKeyBodyRows is the number of newline-separated rows the popup
-// body is padded to when sparse, so the WHICH_KEY view's SetContent
-// payload spans the popup's interior height. Without this, a body with
-// (say) 3 binding rows produces only 3 lines and the rect's remaining
-// rows hold whatever the underlying gocui view layer happened to paint
-// last — gocui's clearRunes() handles this in the lazygit fork today,
-// but the padding is the orchestrator-level invariant that locks the
-// popup-rect = popup-body equivalence regardless of downstream changes.
+// whichKeyBodyRows is the minimum number of newline-separated rows the
+// popup body is padded to when sparse, so the WHICH_KEY view's
+// SetContent payload spans the popup's interior height. Without this, a
+// body with (say) 3 binding rows produces only 3 lines and the rect's
+// remaining rows hold whatever the underlying gocui view layer happened
+// to paint last — gocui's clearRunes() handles this in the lazygit fork
+// today, but the padding is the orchestrator-level invariant that locks
+// the popup-rect = popup-body equivalence regardless of downstream
+// changes.
 //
-// Mirrors `whichKeyMaxRows - 2` from pkg/gui/orchestrator/layout.go
-// (popup rect height minus the 2-row gocui frame). If the orchestrator
-// constant changes, update this one too.
+// The popup rect height is now content-driven (dbsavvy-y5t): it grows to
+// fit len(rows) rows plus the gocui frame, so the body always covers the
+// interior (body lines = max(len(rows), whichKeyBodyRows) >= interior).
+// When len(rows) exceeds this floor every row is emitted, so a long
+// binding list is no longer clipped.
 const whichKeyBodyRows = 10
 
 // WhichKeyContext renders the which-key popup (DISPLAY_CONTEXT). It
@@ -111,6 +114,18 @@ func (w *WhichKeyContext) HasRows(scope types.ContextKey, prefix []types.ChordKe
 		return false
 	}
 	return len(w.rows(scope, prefix)) > 0
+}
+
+// RowCount returns the number of children the wired resolver yields for
+// (scope, prefix), or 0 when the resolver is nil. The orchestrator's
+// layout pass uses it to size the popup rect to fit every binding
+// instead of a fixed height that clipped overflow with no scroll
+// (dbsavvy-y5t).
+func (w *WhichKeyContext) RowCount(scope types.ContextKey, prefix []types.ChordKey) int {
+	if w.rows == nil {
+		return 0
+	}
+	return len(w.rows(scope, prefix))
 }
 
 // formatWhichKeyRows renders rows as "key   label" lines. Keys are

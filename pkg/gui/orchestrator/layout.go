@@ -645,12 +645,15 @@ func (g *Gui) renderLimitOverlay(w, h int) error {
 	return nil
 }
 
-// whichKeyMaxRows / whichKeyMaxCols cap the popup rectangle. The
-// renderer truncates per-row content separately; the dims here only
-// bound the SetView rect so the popup doesn't dominate the screen.
+// whichKeyMaxCols caps the popup width; the renderer truncates per-row
+// content to fit. whichKeyFrameRows is the gocui top+bottom border the
+// popup height must add on top of one row per binding — the height is
+// content-driven (dbsavvy-y5t) and clamped to the canvas by
+// bottomRightRect, so a long binding list expands to fit instead of
+// clipping overflow that the read-only popup cannot scroll.
 const (
-	whichKeyMaxRows = 12
-	whichKeyMaxCols = 40
+	whichKeyMaxCols   = 40
+	whichKeyFrameRows = 2
 )
 
 // cheatsheetMaxRows / cheatsheetMaxCols cap the cheatsheet popup
@@ -701,7 +704,11 @@ func (g *Gui) renderWhichKeyOverlay(w, h int, dims map[string]ui.Dimensions) err
 	if !ok {
 		canvas = ui.Dimensions{X0: 0, Y0: 0, X1: w - 1, Y1: h - 1}
 	}
-	r := bottomRightRect(canvas, whichKeyMaxCols, whichKeyMaxRows)
+	// Size the popup to fit every binding row (one row each + the gocui
+	// frame); bottomRightRect clamps the height to the canvas so it never
+	// exceeds the screen (dbsavvy-y5t).
+	rowCount := g.registry.WhichKey.RowCount(scope, prefix)
+	r := bottomRightRect(canvas, whichKeyMaxCols, rowCount+whichKeyFrameRows)
 	if _, err := g.driver.SetView(string(types.WHICH_KEY), r.X0, r.Y0, r.X1, r.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
 		return err
 	}

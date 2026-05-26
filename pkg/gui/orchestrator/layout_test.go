@@ -271,6 +271,49 @@ func TestRunLayoutWhichKeyOverlayFillsRectBody(t *testing.T) {
 	}
 }
 
+// TestRunLayoutWhichKeyOverlayExpandsToFitRows (dbsavvy-y5t): the
+// which-key popup height must grow to fit every wired binding row
+// (clamped to the screen), not a fixed 12-row rect that clipped
+// everything past ~10 children with no way to scroll. Here 15 rows are
+// wired; the popup's interior height (rect height minus the 2-row gocui
+// frame) must be >= 15 so no binding is clipped off-screen.
+func TestRunLayoutWhichKeyOverlayExpandsToFitRows(t *testing.T) {
+	g, rec := buildTestGui(t)
+
+	const rowCount = 15
+	wk := g.Registry().WhichKey
+	if wk == nil {
+		t.Fatal("registry.WhichKey is nil")
+	}
+	wk.SetRows(func(_ types.ContextKey, _ []types.ChordKey) []types.ChildRow {
+		rows := make([]types.ChildRow, rowCount)
+		for i := range rows {
+			rows[i] = types.ChildRow{Key: types.ChordKey{Code: rune('a' + i)}, Label: "row", IsLeaf: true}
+		}
+		return rows
+	})
+	g.WhichKey().ShowAfter(0, types.GLOBAL, nil)
+
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+
+	h := -1
+	for _, c := range rec.AllSetViewCalls() {
+		if c.Name == string(types.WHICH_KEY) {
+			h = c.Y1 - c.Y0
+		}
+	}
+	if h < 0 {
+		t.Fatal("WHICH_KEY SetView not invoked while notifier reports visible")
+	}
+	// Interior = rect height - 2 (top + bottom gocui frame).
+	if h-2 < rowCount {
+		t.Errorf("WHICH_KEY rect height = %d (interior %d); want interior >= %d so all %d bindings are visible without scrolling",
+			h, h-2, rowCount, rowCount)
+	}
+}
+
 // TestWhichKeyRowsResolverWiredAtBoot (dbsavvy-tro.4): the orchestrator
 // MUST install a non-nil WhichKeyRows closure on the WhichKeyContext at
 // boot so HandleRender can resolve children for the live trie. Without
