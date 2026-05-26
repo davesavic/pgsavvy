@@ -492,6 +492,43 @@ func (g *Gui) wireWithDriver() error {
 		}
 	}
 	resultTabsDeps.OnWorker = g.OnWorker
+	// dbsavvy-s8y (Gap 2b): production editability introspection. Resolve
+	// the live connection at call time (it is invalidated on Disconnect),
+	// acquire a fresh pooled session, and run the pg introspector. Non-pg
+	// drivers or no connection leave editability off.
+	resultTabsDeps.IntrospectEditability = func(ctx context.Context, cols []models.ColumnMeta) (bool, []int, string) {
+		if g.connectHelper == nil {
+			return false, nil, ""
+		}
+		conn := g.connectHelper.Connection()
+		if conn == nil {
+			return false, nil, ""
+		}
+		sess, err := conn.AcquireSession(ctx)
+		if err != nil {
+			return false, nil, ""
+		}
+		defer func() { _ = sess.Close() }()
+
+		pgSess, ok := sess.(*pg.Session)
+		if !ok {
+			return false, nil, "" // non-pg driver: no introspection yet
+		}
+		_, rowID, reason, err := pg.EditabilityIntrospect(ctx, pgSess, cols)
+		if err != nil {
+			// reason already carries the canonical "introspection failed: …"
+			// string (editability.go); don't re-prefix it.
+			return false, nil, reason
+		}
+		editable := reason == ""
+
+		readOnly := false
+		if p := g.activeConnProfile; p != nil {
+			readOnly = p.ReadOnly
+		}
+		editable, reason = pg.ApplyConnectionGate(editable, reason, readOnly, true /* pg SupportsInlineEdit */)
+		return editable, rowID, reason
+	}
 	if tr != nil {
 		resultTabsDeps.SortPickLabel = tr.Actions.ResultSortPickLabel
 	}

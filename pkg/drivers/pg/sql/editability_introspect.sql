@@ -17,7 +17,7 @@
 
 SELECT
     c.oid                                              AS oid,
-    c.relkind                                          AS relkind,
+    c.relkind::text                                    AS relkind,
     n.nspname                                          AS schemaname,
     c.relname                                          AS relname,
     (n.nspname LIKE 'pg_temp%')                        AS is_temp_schema,

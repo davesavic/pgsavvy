@@ -156,3 +156,35 @@ func TestEditabilityIntrospect_NoPKTable(t *testing.T) {
 		t.Fatalf("reason = %q, want one of {no row identity, temporary table}", reason)
 	}
 }
+
+// TestEditabilityIntrospect_AppliesConnectionGate exercises the full
+// orchestrator flow: introspect a single editable base table, then fold in
+// the connection read-only flag via ApplyConnectionGate (the part wired into
+// the orchestrator closure for dbsavvy-s8y / Gap 2b).
+func TestEditabilityIntrospect_AppliesConnectionGate(t *testing.T) {
+	sess := openIntegrationSession(t)
+	cols := columnsFromSelect(t, sess, "SELECT id, email FROM app.users LIMIT 0")
+	_, rowID, reason, err := pg.EditabilityIntrospect(context.Background(), sess, cols)
+	if err != nil {
+		t.Fatalf("EditabilityIntrospect: %v", err)
+	}
+	editable := reason == ""
+
+	// Read-write connection: gate leaves an editable result editable.
+	gotEditable, gotReason := pg.ApplyConnectionGate(editable, reason, false /*connReadOnly*/, true /*supportsInlineEdit*/)
+	if !gotEditable || gotReason != "" {
+		t.Fatalf("rw gate: editable=%v reason=%q, want true/\"\"", gotEditable, gotReason)
+	}
+	if len(rowID) != 1 || rowID[0] != 0 {
+		t.Fatalf("rowIdentity = %v, want [0]", rowID)
+	}
+
+	// Read-only connection: gate disables with the read-only reason.
+	roEditable, roReason := pg.ApplyConnectionGate(editable, reason, true /*connReadOnly*/, true)
+	if roEditable {
+		t.Fatal("ro gate: expected result NOT editable on a read-only connection")
+	}
+	if roReason != "read-only connection" {
+		t.Fatalf("ro reason = %q", roReason)
+	}
+}
