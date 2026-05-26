@@ -92,6 +92,13 @@ type RecorderGuiDriver struct {
 
 	views   map[string]*viewState
 	manager types.Manager
+
+	// realViewNames opts specific view names into returning a real
+	// *gocui.View from SetView (instead of nil). realViews caches the
+	// backing view per enabled name so repeated SetView calls return the
+	// same handle (and DeleteView evicts it). dbsavvy-tzi.2.
+	realViewNames map[string]bool
+	realViews     map[string]*gocui.View
 }
 
 type viewState struct {
@@ -332,12 +339,57 @@ func (r *RecorderGuiDriver) GetViewBuffer(viewName string) string {
 	return string(v.buf)
 }
 
+// EnableRealView makes SetView(name, ...) return a real *gocui.View
+// (with an auto-initialized TextArea) instead of nil, so tests can
+// assert TextArea seeding done by the layout. Opt-in per view name;
+// names not enabled keep the historical nil-view behavior. dbsavvy-tzi.2.
+func (r *RecorderGuiDriver) EnableRealView(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.realViewNames == nil {
+		r.realViewNames = map[string]bool{}
+	}
+	r.realViewNames[name] = true
+}
+
+// RealView returns the cached *gocui.View created for an enabled name
+// (via EnableRealView + a SetView call), or nil if none exists yet.
+// Test-only accessor. dbsavvy-tzi.2.
+func (r *RecorderGuiDriver) RealView(name string) *gocui.View {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.realViews == nil {
+		return nil
+	}
+	return r.realViews[name]
+}
+
 func (r *RecorderGuiDriver) SetView(name string, x0, y0, x1, y1 int, overlaps byte) (types.View, error) {
 	r.mu.Lock()
 	r.SetViewCalls = append(r.SetViewCalls, SetViewCall{Name: name, X0: x0, Y0: y0, X1: x1, Y1: y1, Overlaps: overlaps})
 	_, existed := r.views[name]
 	if !existed {
 		r.views[name] = &viewState{}
+	}
+	// Opt-in real-view path (dbsavvy-tzi.2): when enabled, lazily create a
+	// real *gocui.View on first SetView for the name and cache it. First
+	// creation returns (view, ErrUnknownView); subsequent calls return
+	// (view, nil) — mirrors gocui's "fresh view paired with ErrUnknownView"
+	// semantics. Names not enabled keep the historical nil-view behavior.
+	if r.realViewNames != nil && r.realViewNames[name] {
+		if r.realViews == nil {
+			r.realViews = map[string]*gocui.View{}
+		}
+		v, cached := r.realViews[name]
+		if !cached {
+			v = gocui.NewView(name, x0, y0, x1, y1, gocui.OutputNormal)
+			r.realViews[name] = v
+		}
+		r.mu.Unlock()
+		if !cached {
+			return v, gocui.ErrUnknownView
+		}
+		return v, nil
 	}
 	r.mu.Unlock()
 	if !existed {
@@ -471,6 +523,12 @@ func (r *RecorderGuiDriver) DeleteView(name string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.DeleteViews = append(r.DeleteViews, name)
+	// Evict any cached real view (dbsavvy-tzi.2) so the next SetView for an
+	// enabled name re-creates a fresh view (returning ErrUnknownView again),
+	// matching gocui teardown semantics on pop/re-push.
+	if r.realViews != nil {
+		delete(r.realViews, name)
+	}
 	if _, ok := r.views[name]; !ok {
 		return gocui.ErrUnknownView
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
 func TestRunLayoutGatesLimitOverlay(t *testing.T) {
@@ -737,5 +738,99 @@ func TestRunLayoutStatusBarRectHasVisibleInnerRow(t *testing.T) {
 	if got := found.Y0 + 1; got != wantInnerRow {
 		t.Errorf("status visible inner row = %d (Y0=%d), want %d (bottom of 40-row canvas)",
 			got, found.Y0, wantInnerRow)
+	}
+}
+
+// TestRunLayoutSeedsCellEditorTextAreaFromInitial (dbsavvy-tzi.2): the
+// layout's CELL_EDITOR branch must plumb the live view into the context
+// and seed the fresh view's TextArea from Initial() exactly once, so
+// Buffer()/ReadAndClearBuffer() read the live TextArea (not the test-mode
+// buf). Uses the recorder's opt-in real-view path so there is a real
+// *gocui.View with a TextArea to seed.
+func TestRunLayoutSeedsCellEditorTextAreaFromInitial(t *testing.T) {
+	g, rec := buildTestGui(t)
+
+	cec := g.Registry().CellEditor
+	if cec == nil {
+		t.Fatal("Registry().CellEditor is nil")
+	}
+	name := cec.GetViewName()
+	rec.EnableRealView(name)
+
+	cec.Open("alice", models.ColumnMeta{}, []any{1}, "alice")
+	if err := g.ContextTree().Push(cec); err != nil {
+		t.Fatalf("Push(CELL_EDITOR): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+
+	// Buffer() reads view.TextArea.GetContent() once the view is plumbed —
+	// proves the view was both plumbed (SetView) AND seeded from Initial().
+	if got := cec.Buffer(); got != "alice" {
+		t.Fatalf("Buffer() = %q, want %q (TextArea not plumbed/seeded)", got, "alice")
+	}
+
+	// Type an extra char into the LIVE TextArea so it diverges from the
+	// test-mode buf ("alice"). ReadAndClearBuffer must read the TextArea
+	// ("aliceX"), proving the source-of-truth is the live view, not buf.
+	v := rec.RealView(name)
+	if v == nil || v.TextArea == nil {
+		t.Fatal("RealView returned nil view/TextArea after layout")
+	}
+	v.TextArea.TypeCharacter("X")
+	if got := cec.ReadAndClearBuffer(); got != "aliceX" {
+		t.Fatalf("ReadAndClearBuffer() = %q, want %q (read buf instead of live TextArea)", got, "aliceX")
+	}
+}
+
+// TestRunLayoutCellEditorRePushSeedsNewValue (dbsavvy-tzi.2): popping the
+// CELL_EDITOR and running a layout pass tears down the view (the off-stack
+// teardown loop DeleteViews it, which evicts the recorder's cached real
+// view). Re-opening on a new value and re-pushing must seed a FRESH view
+// with the new value — no leftover "alice".
+func TestRunLayoutCellEditorRePushSeedsNewValue(t *testing.T) {
+	g, rec := buildTestGui(t)
+
+	cec := g.Registry().CellEditor
+	if cec == nil {
+		t.Fatal("Registry().CellEditor is nil")
+	}
+	name := cec.GetViewName()
+	rec.EnableRealView(name)
+
+	// First edit: "alice".
+	cec.Open("alice", models.ColumnMeta{}, []any{1}, "alice")
+	if err := g.ContextTree().Push(cec); err != nil {
+		t.Fatalf("Push #1: %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout #1: %v", err)
+	}
+	if got := cec.Buffer(); got != "alice" {
+		t.Fatalf("Buffer() after first open = %q, want %q", got, "alice")
+	}
+
+	// Pop + layout: the off-stack teardown loop DeleteViews CELL_EDITOR,
+	// which evicts the recorder's cached real view so the next SetView
+	// re-creates a fresh one (returning ErrUnknownView → freshView=true).
+	if err := g.ContextTree().Pop(); err != nil {
+		t.Fatalf("Pop: %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout (teardown): %v", err)
+	}
+	cec.Close()
+
+	// Second edit: "bob".
+	cec.Open("bob", models.ColumnMeta{}, []any{2}, "bob")
+	if err := g.ContextTree().Push(cec); err != nil {
+		t.Fatalf("Push #2: %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout #2: %v", err)
+	}
+	if got := cec.Buffer(); got != "bob" {
+		t.Fatalf("Buffer() after re-open = %q, want %q (leftover state or stale view)", got, "bob")
 	}
 }

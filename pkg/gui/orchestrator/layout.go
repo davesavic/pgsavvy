@@ -335,6 +335,36 @@ func (g *Gui) RunLayout(w, h int) error {
 					}
 				}
 			}
+			// CELL_EDITOR view-plumb + seed + caret anchor (dbsavvy-tzi.2).
+			// Like PROMPT, CELL_EDITOR is an editable popup whose keystrokes
+			// flow through the master Editor's Passthrough into
+			// gocui.DefaultEditor (TextArea). Plumb the live view so
+			// Buffer()/ReadAndClearBuffer() read the TextArea, seed the fresh
+			// view's TextArea once from Initial() (the single seed source —
+			// the Open()-time seed was removed), and anchor the caret after
+			// the "> " body prefix that HandleRender writes.
+			if ctx.GetKey() == types.CELL_EDITOR {
+				if cl, ok := ctx.(interface{ SetView(types.View) }); ok {
+					cl.SetView(view)
+				}
+				if freshView && view != nil && view.TextArea != nil {
+					if cur, ok := ctx.(interface{ Initial() string }); ok {
+						if initial := cur.Initial(); initial != "" {
+							for _, r := range initial {
+								view.TextArea.TypeCharacter(string(r))
+							}
+							view.RenderTextArea()
+						}
+					}
+				}
+				// Caret tracks the TextArea cursor, offset by len("> ")=2 for
+				// the body prefix HandleRender writes via SetContent. Under the
+				// recorder driver view is nil → skip (no real caret to place).
+				if view != nil && view.TextArea != nil {
+					cx, cy := view.TextArea.GetCursorXY()
+					_ = g.driver.SetViewCursor(name, cx+2, cy)
+				}
+			}
 			_ = ctx.HandleRender()
 			_, _ = g.driver.SetViewOnTop(name)
 			onStack[ctx.GetKey()] = struct{}{}

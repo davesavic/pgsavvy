@@ -52,6 +52,12 @@ type CellEditorContext struct {
 	// TextArea via SetView (mirrors PromptContext).
 	buf string
 
+	// initial is the value captured at Open() time, read back by the
+	// layout's freshView seed path (single seed source) via Initial().
+	// Independent of buf/view so seeding survives buf being cleared.
+	// dbsavvy-tzi.2.
+	initial string
+
 	// view is the live gocui view handle the orchestrator plumbs in
 	// via SetView each Layout frame. Nil during unit tests; Buffer()
 	// falls back to buf in that case.
@@ -83,9 +89,10 @@ func (c *CellEditorContext) SetView(v types.View) { c.view = v }
 // Open transitions the context into the active state and captures the
 // per-edit snapshot (original value, column metadata, row identity).
 // The seeded `initial` text is the value the user sees in the cell —
-// typically the string form of originalValue — and lands in both the
-// view's TextArea (so Backspace / Left / Right work) and the test-mode
-// buf (so tests that skip view wiring still see the seed).
+// typically the string form of originalValue. The TextArea seed now
+// happens in the layout freshView path (dbsavvy-tzi.2); Open only
+// captures `initial` (for the layout to read back via Initial()) and
+// `buf` (the test-mode fallback for tests that skip view wiring).
 func (c *CellEditorContext) Open(originalValue any, column models.ColumnMeta, primaryKey []any, initial string) {
 	c.active = true
 	c.originalValue = originalValue
@@ -99,12 +106,7 @@ func (c *CellEditorContext) Open(originalValue any, column models.ColumnMeta, pr
 		c.primaryKey = append([]any(nil), primaryKey...)
 	}
 	c.buf = initial
-	if c.view != nil && c.view.TextArea != nil {
-		c.view.TextArea.Clear()
-		for _, r := range initial {
-			c.view.TextArea.TypeCharacter(string(r))
-		}
-	}
+	c.initial = initial
 }
 
 // Close transitions the context back to inactive and clears the
@@ -117,6 +119,7 @@ func (c *CellEditorContext) Close() {
 	c.column = models.ColumnMeta{}
 	c.primaryKey = nil
 	c.buf = ""
+	c.initial = ""
 	if c.view != nil && c.view.TextArea != nil {
 		c.view.TextArea.Clear()
 	}
@@ -136,6 +139,13 @@ func (c *CellEditorContext) OriginalValue() any { return c.originalValue }
 // Name (PendingEdit.Column) and TypeOID / TypeName (per-type entry
 // helpers — A2).
 func (c *CellEditorContext) Column() models.ColumnMeta { return c.column }
+
+// Initial returns the value captured at Open() time, independent of the
+// plumbed view. The layout's freshView path reads this to seed a fresh
+// view's TextArea exactly once (it must NOT route through Buffer(),
+// which returns the empty TextArea content once a view is plumbed).
+// dbsavvy-tzi.2.
+func (c *CellEditorContext) Initial() string { return c.initial }
 
 // PrimaryKey returns a defensive copy of the row identity captured at
 // Open() time. Becomes PendingEdit.PrimaryKey on commit.
