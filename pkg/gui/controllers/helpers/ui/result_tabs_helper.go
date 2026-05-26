@@ -1554,9 +1554,15 @@ func (h *ResultTabsHelper) LayoutPaint(driver types.GuiDriver, x0, y0, x1, y1 in
 		}
 		// Refresh title every frame (state / row count may have changed).
 		if view != nil {
-			view.Title = t.Title()
+			title := t.Title()
+			view.Title = title // stands for plan/error/empty tabs (which skip Grid.Render)
 			// Render grid contents (no-op for plan / error tabs).
 			if g := t.Grid(); g != nil {
+				// Propagate the tab title into the grid so Render's
+				// snapshot (v.title + sortIndicator) carries it; otherwise
+				// Render's `target.Title = snap.title` clobbers the line
+				// above with an empty title. dbsavvy-tzi.4.
+				g.SetTitle(title)
 				g.Render(view)
 			} else if t.State() == StatePlan {
 				// dbsavvy-uv0.8: prefer the PlanContext-rendered tree

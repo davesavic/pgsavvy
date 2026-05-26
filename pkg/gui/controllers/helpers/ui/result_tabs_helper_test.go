@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -1730,5 +1732,135 @@ func TestActiveContext_PlanTabSurfacesPlanContext(t *testing.T) {
 	}
 	if ctx.GetKey() != types.PLAN {
 		t.Errorf("plan tab ctx.GetKey() = %q, want PLAN", ctx.GetKey())
+	}
+}
+
+// --- dbsavvy-tzi.4: LayoutPaint renders the data-tab title ------------------
+
+// TestLayoutPaintRendersDataTabTitle is the clobber regression for
+// dbsavvy-tzi.4. LayoutPaint set view.Title = t.Title() then called
+// grid.Render(view), whose snapshot did target.Title = (grid.title +
+// sortIndicator). Because nothing seeded the grid's title, Render
+// overwrote the freshly-assigned data-tab title with an empty one, so the
+// data tab rendered no title (plan/error tabs were spared because they
+// skip Grid.Render). The fix propagates the tab title into the grid via
+// SetTitle before Render so the snapshot carries it.
+func TestLayoutPaintRendersDataTabTitle(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, _ := newTestHelper(t, factory)
+
+	if err := h.openTab("SELECT id FROM t", newFakeRunHandle()); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	if tab == nil {
+		t.Fatal("Active = nil after openTab")
+	}
+	g := tab.Grid()
+	if g == nil {
+		t.Fatal("data tab Grid() = nil; want non-nil so the data branch runs")
+	}
+	g.SetColumns([]models.ColumnMeta{{Name: "id", TypeName: "int"}})
+	g.AppendRows([]models.Row{{Values: []any{1}}, {Values: []any{2}}, {Values: []any{3}}})
+
+	// Mark the tab COMPLETE via the streaming onDone path so Title()
+	// carries the "(complete)" suffix (OnUIThread nil → synchronous).
+	runner.fireOnDone()
+	if !tab.Complete() {
+		t.Fatal("tab not complete after fireOnDone; title would lack '(complete)'")
+	}
+
+	rec := testfake.NewRecorderGuiDriver()
+	name := tab.ViewName()
+	rec.EnableRealView(name)
+
+	h.LayoutPaint(rec, 0, 0, 80, 24)
+
+	v := rec.RealView(name)
+	if v == nil {
+		t.Fatalf("RealView(%q) = nil; expected a real view after LayoutPaint", name)
+	}
+	if v.Title == "" {
+		t.Fatalf("data-tab view.Title is empty after LayoutPaint (clobbered by Grid.Render); want %q", tab.Title())
+	}
+	if !strings.Contains(v.Title, "(complete") {
+		t.Errorf("view.Title = %q, want it to contain %q", v.Title, "(complete")
+	}
+	if !strings.Contains(v.Title, "rows") {
+		t.Errorf("view.Title = %q, want it to contain %q", v.Title, "rows")
+	}
+}
+
+// TestLayoutPaintRendersEmptyDataTabTitle covers the AC edge case: a
+// completed data tab with zero rows must still render a non-empty title
+// (the grid still runs through Grid.Render with an empty result set).
+func TestLayoutPaintRendersEmptyDataTabTitle(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, _ := newTestHelper(t, factory)
+
+	if err := h.openTab("SELECT id FROM t WHERE false", newFakeRunHandle()); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	g := tab.Grid()
+	if g == nil {
+		t.Fatal("data tab Grid() = nil; want non-nil")
+	}
+	g.SetColumns([]models.ColumnMeta{{Name: "id", TypeName: "int"}})
+	// No rows appended.
+	runner.fireOnDone()
+
+	rec := testfake.NewRecorderGuiDriver()
+	name := tab.ViewName()
+	rec.EnableRealView(name)
+	h.LayoutPaint(rec, 0, 0, 80, 24)
+
+	v := rec.RealView(name)
+	if v == nil {
+		t.Fatalf("RealView(%q) = nil after LayoutPaint", name)
+	}
+	if v.Title == "" {
+		t.Fatalf("empty (0-row) completed data-tab view.Title is empty; want %q", tab.Title())
+	}
+	if !strings.Contains(v.Title, "(complete") {
+		t.Errorf("view.Title = %q, want it to contain %q", v.Title, "(complete")
+	}
+}
+
+// TestLayoutPaintRendersPlanAndErrorTabTitles is the non-regression guard
+// for the non-grid branches: plan and error tabs (which skip Grid.Render)
+// must keep rendering their titles after the dbsavvy-tzi.4 fix.
+func TestLayoutPaintRendersPlanAndErrorTabTitles(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+
+	if err := h.OpenPlanTab("EXPLAIN SELECT", models.Plan{RawText: "Seq Scan on users"}); err != nil {
+		t.Fatalf("OpenPlanTab: %v", err)
+	}
+	planTab := h.Active()
+	if planTab.State() != StatePlan {
+		t.Fatalf("plan tab State = %v, want Plan", planTab.State())
+	}
+
+	h.ShowError("SELECT bad", errors.New("syntax error near 'WHERE'"))
+	errTab := h.Active()
+	if errTab.State() != StateError {
+		t.Fatalf("error tab State = %v, want Error", errTab.State())
+	}
+
+	rec := testfake.NewRecorderGuiDriver()
+	rec.EnableRealView(planTab.ViewName())
+	rec.EnableRealView(errTab.ViewName())
+
+	h.LayoutPaint(rec, 0, 0, 80, 24)
+
+	pv := rec.RealView(planTab.ViewName())
+	if pv == nil || pv.Title == "" {
+		t.Fatalf("plan-tab view/title empty after LayoutPaint: view=%v", pv)
+	}
+	ev := rec.RealView(errTab.ViewName())
+	if ev == nil || ev.Title == "" {
+		t.Fatalf("error-tab view/title empty after LayoutPaint: view=%v", ev)
 	}
 }
