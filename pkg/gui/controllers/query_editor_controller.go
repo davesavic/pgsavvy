@@ -349,6 +349,12 @@ func (q *QueryEditorController) handleRunAll(_ commands.ExecCtx) error {
 // stmt is non-empty.
 func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) bool {
 	runner := q.helpers.QueryRunner
+	// Resolve unqualified object names against the currently selected schema
+	// (SCHEMAS rail). Empty when no schema is selected, leaving resolution to
+	// the session default (dbsavvy-u1n).
+	if q.helpers.Schemas != nil {
+		opts.DefaultSchema = q.helpers.Schemas.SelectedSchemaName()
+	}
 	// Last-wins preemption of any in-flight stream is centralized in the
 	// QueryRunner chokepoint (QueryRunner.Run preempts before acquiring the
 	// per-session queue lock), covering run / RunQuery / Explain uniformly

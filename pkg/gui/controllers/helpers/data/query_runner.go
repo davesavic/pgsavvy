@@ -38,6 +38,12 @@ var _ RunnerSession = (*session.SQLSession)(nil)
 // already rolls back any active tx in Close — dbsavvy-66p §D14).
 type RunOptions struct {
 	NewTx bool
+
+	// DefaultSchema is the currently selected schema; when non-empty it is
+	// forwarded on the streamed Query so unqualified object names resolve
+	// against it (pg: SET search_path). Empty leaves resolution unchanged
+	// (dbsavvy-u1n).
+	DefaultSchema string
 }
 
 // runnerBinding is the (sess, caps) pair swapped atomically by Bind /
@@ -217,7 +223,7 @@ func (r *QueryRunner) Run(ctx context.Context, sql string, opts RunOptions) (*se
 			return nil, err
 		}
 	}
-	rh, err := b.sess.Stream(ctx, models.Query{SQL: sql})
+	rh, err := b.sess.Stream(ctx, models.Query{SQL: sql, DefaultSchema: opts.DefaultSchema})
 	if err != nil {
 		return nil, err
 	}

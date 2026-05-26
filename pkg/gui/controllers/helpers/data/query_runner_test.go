@@ -75,6 +75,19 @@ func TestQueryRunnerRunDispatchesStream(t *testing.T) {
 	}
 }
 
+func TestQueryRunnerRunForwardsDefaultSchema(t *testing.T) {
+	fs := &fakeRunnerSession{}
+	r := NewQueryRunner(fs, drivers.Capabilities{})
+
+	_, err := r.Run(context.Background(), "SELECT 1", RunOptions{DefaultSchema: "sales"})
+	if err != nil {
+		t.Fatalf("Run returned err = %v", err)
+	}
+	if len(fs.streamCalls) != 1 || fs.streamCalls[0].DefaultSchema != "sales" {
+		t.Fatalf("Stream calls = %#v, want one with DefaultSchema=sales", fs.streamCalls)
+	}
+}
+
 func TestQueryRunnerRunWithNewTxPrependsBegin(t *testing.T) {
 	fs := &fakeRunnerSession{}
 	r := NewQueryRunner(fs, drivers.Capabilities{})

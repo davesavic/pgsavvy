@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -423,6 +424,15 @@ func (s *Session) Execute(ctx context.Context, q models.Query) (models.Result, e
 func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream, error) {
 	s.acquireInFlight()
 
+	// Resolve unqualified object names against q.DefaultSchema (then public)
+	// for this statement. No-op when empty (dbsavvy-u1n).
+	if stmt := searchPathStmt(q.DefaultSchema); stmt != "" {
+		if _, err := s.conn.Exec(ctx, stmt); err != nil {
+			s.releaseInFlight()
+			return nil, wrapPgError(err)
+		}
+	}
+
 	// q.Timeout is intentionally NOT applied here in v1: a derived ctx
 	// would require a cancel func captured by the stream so Close can
 	// release it; that plumbing belongs with task 66p.4 (Cancel).
@@ -441,6 +451,19 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 	}
 
 	return newPgRowStream(rows, qid, s.releaseInFlight), nil
+}
+
+// searchPathStmt builds the SET search_path statement that makes unqualified
+// object names resolve against schema first, then public. The schema is
+// quoted via pgx.Identifier.Sanitize so names with special characters (or a
+// crafted name) cannot break out of the identifier. Returns "" when schema is
+// empty, which callers treat as "leave the search_path untouched"
+// (dbsavvy-u1n).
+func searchPathStmt(schema string) string {
+	if schema == "" {
+		return ""
+	}
+	return "SET search_path TO " + pgx.Identifier{schema}.Sanitize() + ", public"
 }
 
 // Explain runs EXPLAIN against q.SQL in both FORMAT JSON (parsed into
