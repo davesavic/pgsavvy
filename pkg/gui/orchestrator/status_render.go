@@ -63,6 +63,11 @@ type StatusRenderDeps struct {
 	// status-bar spinner segment (dbsavvy-56u.4). Nil → no spinner
 	// rendered, which is the correct fallback for partial test wiring.
 	BusyCount func() int64
+	// SpinnerFrame returns the wall-clock frame index that selects the
+	// spinner glyph (U8). Advanced by the periodic re-render ticker while
+	// busy>0 so a single worker still animates. Nil → frame 0 (the glyph
+	// stays static, the pre-U8 single-worker behaviour).
+	SpinnerFrame func() int64
 }
 
 // RenderStatusLine resolves the focused context's mode label, builds the
@@ -147,7 +152,11 @@ func RenderStatusLine(d StatusRenderDeps) {
 	if d.BusyCount != nil {
 		busy = d.BusyCount()
 	}
-	line := status.BuildStatusLine(label, conn, options, d.Tr, busy)
+	var frame int64
+	if d.SpinnerFrame != nil {
+		frame = d.SpinnerFrame()
+	}
+	line := status.BuildStatusLine(label, conn, options, d.Tr, busy, frame)
 	_ = d.Driver.SetContent(AppStatusViewName, line)
 }
 

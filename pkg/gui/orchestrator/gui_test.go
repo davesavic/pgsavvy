@@ -33,6 +33,29 @@ func buildTestGuiWithCommon(t *testing.T) (*orchestrator.Gui, *testfake.Recorder
 	return buildTestGuiWithLogger(t, slog.New(slog.DiscardHandler))
 }
 
+// buildTestGuiWithClock is buildTestGui with an injected Clock so the
+// spinner-ticker tests (U8) can drive ticks and Now() deterministically.
+func buildTestGuiWithClock(t *testing.T, clk orchestrator.Clock) (*orchestrator.Gui, *testfake.RecorderGuiDriver) {
+	t.Helper()
+	fs := afero.NewMemMapFs()
+	cfg := config.GetDefaultConfig()
+	c := common.NewCommon(slog.New(slog.DiscardHandler), i18n.EnglishTranslationSet(), cfg, &common.AppState{}, fs)
+	store := common.NewAppStateStore(fs, "/tmp/state.yml", common.DefaultClock())
+
+	g := orchestrator.NewGui(orchestrator.Deps{
+		Common:              c,
+		Store:               store,
+		ConnectionsPath:     "/tmp/connections.yml",
+		ConnectionsProvider: func() []models.Connection { return nil },
+		DriverNamesFn:       func() []string { return []string{"postgres"} },
+	}, orchestrator.WithClock(clk))
+	rec := testfake.NewRecorderGuiDriver()
+	if err := g.UseDriverForTest(rec); err != nil {
+		t.Fatalf("UseDriverForTest: %v", err)
+	}
+	return g, rec
+}
+
 // buildTestGuiWithLogger mirrors buildTestGuiWithCommon but injects the
 // supplied *slog.Logger into the Common bag at construction time. Used
 // by event-emission tests that need to capture cat=state lines.
@@ -55,6 +78,29 @@ func buildTestGuiWithLogger(t *testing.T, log *slog.Logger) (*orchestrator.Gui, 
 		t.Fatalf("UseDriverForTest: %v", err)
 	}
 	return g, rec, c
+}
+
+// buildTestGuiWithDriverAndClock builds a Gui with a caller-supplied
+// driver and Clock. Lets the spinner-ticker tests (U8) install a driver
+// that observes UpdateContentOnly calls deterministically.
+func buildTestGuiWithDriverAndClock(t *testing.T, drv types.GuiDriver, clk orchestrator.Clock) *orchestrator.Gui {
+	t.Helper()
+	fs := afero.NewMemMapFs()
+	cfg := config.GetDefaultConfig()
+	c := common.NewCommon(slog.New(slog.DiscardHandler), i18n.EnglishTranslationSet(), cfg, &common.AppState{}, fs)
+	store := common.NewAppStateStore(fs, "/tmp/state.yml", common.DefaultClock())
+
+	g := orchestrator.NewGui(orchestrator.Deps{
+		Common:              c,
+		Store:               store,
+		ConnectionsPath:     "/tmp/connections.yml",
+		ConnectionsProvider: func() []models.Connection { return nil },
+		DriverNamesFn:       func() []string { return []string{"postgres"} },
+	}, orchestrator.WithClock(clk))
+	if err := g.UseDriverForTest(drv); err != nil {
+		t.Fatalf("UseDriverForTest: %v", err)
+	}
+	return g
 }
 
 func TestNewGuiAttachesControllers(t *testing.T) {
