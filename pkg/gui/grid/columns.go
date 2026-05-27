@@ -1,6 +1,11 @@
 package grid
 
-import "unicode/utf8"
+import (
+	"strings"
+	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
+)
 
 // autoSizeFromSampleLocked walks the first AutoSizeSampleRowCount rows
 // (plus the header) and locks in per-column widths. Called from
@@ -66,6 +71,44 @@ func (v *View) autoSizeFromSampleLocked() {
 // over-allocation is harmless.
 func displayWidth(s string) int {
 	return utf8.RuneCountInString(s)
+}
+
+// displayCols returns the terminal display width of s in columns,
+// counting East Asian wide / fullwidth runes (CJK, emoji) as 2 cells
+// and combining marks as 0 via go-runewidth. Used by the rune-boundary
+// truncation paths so wide chars budget correctly (dbsavvy-fow.9 U22).
+func displayCols(s string) int {
+	return runewidth.StringWidth(s)
+}
+
+// truncateToWidth returns s clamped to at most maxCols display columns,
+// cutting on a rune boundary and appending the ellipsis "…" (1 column)
+// when content was dropped. The result is always valid UTF-8 — runes
+// are never sliced mid-byte — and its display width never exceeds
+// maxCols. maxCols ≤ 0 yields "". When s already fits it is returned
+// unchanged. A wide rune that would straddle the budget is dropped
+// rather than half-rendered (dbsavvy-fow.9 U22).
+func truncateToWidth(s string, maxCols int) string {
+	if maxCols <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= maxCols {
+		return s
+	}
+	// Reserve one column for the ellipsis. With only one column to give
+	// we still must emit the ellipsis so overflow is visible.
+	budget := maxCols - 1
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		w := runewidth.RuneWidth(r)
+		if used+w > budget {
+			break
+		}
+		b.WriteRune(r)
+		used += w
+	}
+	return b.String() + "…"
 }
 
 // padRight returns s padded with spaces to width w. If s is wider than

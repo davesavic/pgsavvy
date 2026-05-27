@@ -3,6 +3,8 @@ package grid
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // ViewModeGrid / ViewModeExpanded are the two render modes a grid View
@@ -195,11 +197,8 @@ func expandedSeparator(n int, total int64, innerW int) string {
 // shows `name | value`; continuation lines show `<gutter spaces> | rest`.
 // name is truncated to the gutter width with an ellipsis when needed.
 func expandedRecordLines(name, value string, gutter, valueWidth int) []string {
-	displayName := name
-	if len(displayName) > gutter {
-		displayName = displayName[:gutter-1] + "…"
-	}
-	padded := displayName + strings.Repeat(" ", gutter-displayName_DisplayWidth(displayName))
+	displayName := truncateToWidth(name, gutter)
+	padded := displayName + strings.Repeat(" ", gutter-displayCols(displayName))
 	if value == "" {
 		return []string{padded + " | "}
 	}
@@ -215,21 +214,12 @@ func expandedRecordLines(name, value string, gutter, valueWidth int) []string {
 	return out
 }
 
-// displayName_DisplayWidth returns the visible width of name (already
-// stripped of the gutter pad). Same byte count == display width for
-// ASCII; the ellipsis rune is multi-byte so we count runes for the
-// truncated case.
-func displayName_DisplayWidth(s string) int {
-	if !strings.Contains(s, "…") {
-		return len(s)
-	}
-	// One ellipsis rune = 3 bytes but 1 column.
-	return len(s) - 2
-}
-
-// wrapValue splits s into chunks of at most width bytes, respecting
-// existing newlines (each \n forces a wrap). Values that fit in one
-// chunk return a single-element slice. width must be > 0.
+// wrapValue splits s into chunks of at most width DISPLAY columns,
+// respecting existing newlines (each \n forces a wrap). Chunks are cut
+// on rune boundaries (never mid-byte) and wide runes are kept whole, so
+// a multibyte / CJK value never corrupts into invalid UTF-8. Values
+// that fit in one chunk return a single-element slice. width must be
+// > 0 (dbsavvy-fow.9 U22).
 func wrapValue(s string, width int) []string {
 	if width <= 0 {
 		return []string{s}
@@ -242,11 +232,29 @@ func wrapValue(s string, width int) []string {
 			out = append(out, "")
 			continue
 		}
-		for len(line) > width {
-			out = append(out, line[:width])
-			line = line[width:]
-		}
-		out = append(out, line)
+		out = append(out, wrapLineToWidth(line, width)...)
 	}
+	return out
+}
+
+// wrapLineToWidth breaks line (no embedded newlines) into chunks of at
+// most width display columns, cutting on rune boundaries. A wide rune
+// that would straddle the boundary starts the next chunk instead of
+// being split.
+func wrapLineToWidth(line string, width int) []string {
+	var out []string
+	var b strings.Builder
+	used := 0
+	for _, r := range line {
+		w := runewidth.RuneWidth(r)
+		if used+w > width && used > 0 {
+			out = append(out, b.String())
+			b.Reset()
+			used = 0
+		}
+		b.WriteRune(r)
+		used += w
+	}
+	out = append(out, b.String())
 	return out
 }

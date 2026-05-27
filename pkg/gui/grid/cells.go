@@ -123,20 +123,40 @@ func renderCellPlain(value any, col models.ColumnMeta) string {
 		return renderBytesCell(value)
 	case kindJSON:
 		s := fmt.Sprintf("%v", value)
-		if len(s) > MaxCellRenderBytes {
-			s = s[:MaxCellRenderBytes-1] + "…"
-		}
+		s = capCellBytes(s)
 		return SanitizeCellEscapes(s)
 	default:
 		s, ok := FormatArrayLiteral(value)
 		if !ok {
 			s = fmt.Sprintf("%v", value)
 		}
-		if len(s) > MaxCellRenderBytes {
-			s = s[:MaxCellRenderBytes-1] + "…"
-		}
+		s = capCellBytes(s)
 		return SanitizeCellEscapes(s)
 	}
+}
+
+// capCellBytes enforces the MaxCellRenderBytes safety cap (so a huge
+// cell can't blow memory) while cutting on a rune boundary, not
+// mid-byte — the previous s[:MaxCellRenderBytes-1] slice could split a
+// multibyte rune and emit invalid UTF-8. When truncation occurs the
+// ellipsis "…" is appended; the retained prefix is the largest rune
+// sequence whose byte length is < MaxCellRenderBytes. Cells within the
+// cap are returned unchanged (dbsavvy-fow.9 U22).
+func capCellBytes(s string) string {
+	if len(s) <= MaxCellRenderBytes {
+		return s
+	}
+	// Largest rune boundary < MaxCellRenderBytes (leave headroom for the
+	// multibyte ellipsis so the result stays under the byte cap).
+	limit := MaxCellRenderBytes - len("…")
+	cut := 0
+	for i := range s {
+		if i > limit {
+			break
+		}
+		cut = i
+	}
+	return s[:cut] + "…"
 }
 
 // renderBytesCell produces the `\x48656c6c6f… (5B)` preview spec'd in

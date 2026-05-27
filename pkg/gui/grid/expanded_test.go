@@ -3,7 +3,9 @@ package grid
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/mattn/go-runewidth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -213,6 +215,71 @@ func TestWrappedLineDown_GridModeIsNoop(t *testing.T) {
 	v := NewView()
 	v.WrappedLineDown()
 	// No panic, no state corruption. (No public accessor; just smoke-test.)
+}
+
+// TestTruncateToWidth_RuneBoundary asserts width-aware truncation never
+// splits a multibyte rune and never exceeds the column budget. The AC
+// edge case: "中文测试abc" to width 4 must yield valid UTF-8 on a rune
+// boundary (中 + … = 2+1 = 3 cols) with width ≤ 4. dbsavvy-fow.9 U22.
+func TestTruncateToWidth_RuneBoundary(t *testing.T) {
+	cases := []struct {
+		name     string
+		in       string
+		maxCols  int
+		wantText string // exact expectation where deterministic
+	}{
+		{"cjk to 4", "中文测试abc", 4, "中…"},
+		{"ascii fits", "abc", 8, "abc"},
+		{"cjk fits exactly", "中文", 4, "中文"},
+		{"emoji narrow", "😀😀😀", 3, "😀…"},
+		{"combining", "éééé", 2, "é…"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateToWidth(tc.in, tc.maxCols)
+			require.True(t, utf8.ValidString(got),
+				"truncated string must be valid UTF-8, got %q", got)
+			require.LessOrEqual(t, runewidth.StringWidth(got), tc.maxCols,
+				"display width of %q must not exceed %d", got, tc.maxCols)
+			if tc.wantText != "" {
+				require.Equal(t, tc.wantText, got)
+			}
+		})
+	}
+}
+
+// TestWrapValue_WideRunesNeverSplit asserts the value-wrap path cuts on
+// rune boundaries by display width, so CJK / emoji content wrapping at
+// a narrow value column never corrupts a rune. dbsavvy-fow.9 U22.
+func TestWrapValue_WideRunesNeverSplit(t *testing.T) {
+	// 5 CJK runes = 10 display cols, wrapped at width 4 (2 wide runes
+	// per line). No line may exceed 4 cols and every chunk valid UTF-8.
+	chunks := wrapValue("中文测试中", 4)
+	for _, ch := range chunks {
+		require.True(t, utf8.ValidString(ch),
+			"wrapped chunk must be valid UTF-8, got %q", ch)
+		require.LessOrEqual(t, runewidth.StringWidth(ch), 4,
+			"wrapped chunk %q exceeds width budget", ch)
+	}
+	// Re-joining the chunks reproduces the original (no rune lost/added).
+	require.Equal(t, "中文测试中", strings.Join(chunks, ""))
+}
+
+// TestExpandedRecordLines_WideName asserts a CJK column name longer than
+// the gutter is truncated on a rune boundary with the ellipsis and the
+// gutter padding lands the pipe at the gutter column. dbsavvy-fow.9 U22.
+func TestExpandedRecordLines_WideName(t *testing.T) {
+	name := strings.Repeat("名", 30) // 60 display cols, well over gutter
+	lines := expandedRecordLines(name, "v", expandedGutterMax, 40)
+	require.NotEmpty(t, lines)
+	first := lines[0]
+	require.True(t, utf8.ValidString(first),
+		"record line must be valid UTF-8, got %q", first)
+	pipeIdx := strings.Index(first, "|")
+	require.GreaterOrEqual(t, pipeIdx, 0)
+	gutterPart := first[:pipeIdx]
+	require.Equal(t, expandedGutterMax, runewidth.StringWidth(gutterPart)-1,
+		"gutter content (excluding trailing space before pipe) should fill the gutter width")
 }
 
 func TestRender_DispatchesOnViewMode(t *testing.T) {

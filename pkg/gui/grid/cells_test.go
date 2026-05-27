@@ -3,6 +3,7 @@ package grid
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -130,4 +131,42 @@ func TestRenderCell_HugeCellTruncates(t *testing.T) {
 		"20KB cell must be truncated below the input length")
 	require.True(t, strings.HasSuffix(visible, "…"),
 		"truncated huge cell must end with the ellipsis rune")
+}
+
+// TestCapCellBytes_RuneBoundary asserts the byte-cap truncation cuts on
+// a rune boundary and never emits invalid UTF-8, even when a multibyte
+// rune straddles the MaxCellRenderBytes cap. The previous byte-slice
+// implementation could split a 3-byte CJK rune into mojibake.
+// dbsavvy-fow.9 U22.
+func TestCapCellBytes_RuneBoundary(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+	}{
+		// Each CJK rune is 3 bytes; repeat so total bytes overflow the cap
+		// and the cap lands mid-rune.
+		{"cjk", strings.Repeat("中", MaxCellRenderBytes)},
+		// Emoji are 4 bytes each.
+		{"emoji", strings.Repeat("😀", MaxCellRenderBytes)},
+		// Combining marks: base 'e' + U+0301 combining acute.
+		{"combining", strings.Repeat("é", MaxCellRenderBytes)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := capCellBytes(tc.in)
+			require.True(t, utf8.ValidString(got),
+				"capped cell must remain valid UTF-8, got %q", got)
+			require.LessOrEqual(t, len(got), MaxCellRenderBytes,
+				"capped cell must stay within the byte cap")
+			require.True(t, strings.HasSuffix(got, "…"),
+				"overflowing cell must end with the ellipsis rune")
+		})
+	}
+}
+
+// TestCapCellBytes_UnderCap leaves small cells untouched.
+func TestCapCellBytes_UnderCap(t *testing.T) {
+	in := "中文测试abc"
+	require.Equal(t, in, capCellBytes(in),
+		"cells within the cap must be returned unchanged")
 }
