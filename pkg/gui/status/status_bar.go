@@ -1,6 +1,7 @@
 package status
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/presentation"
@@ -32,7 +33,9 @@ var spinnerGlyphs = [...]rune{
 // 8-colour ANSI palette; hex / unknown tokens fall through to an
 // untinted header (we never emit a malformed escape).
 const (
-	ansiResetSGR = "\x1b[0m"
+	ansiResetSGR    = "\x1b[0m"
+	ansiYellowFgSGR = "\x1b[33m" // WarningFg: active transaction
+	ansiRedFgSGR    = "\x1b[31m" // ErrorFg: aborted transaction
 )
 
 // BuildStatusLine renders the plain text shown in the status slot.
@@ -58,7 +61,7 @@ const (
 //
 // A nil tr yields the empty string; the rendering layer treats that as
 // "skip the status slot entirely".
-func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []string, tr *i18n.TranslationSet, busyCount, spinnerFrame int64) string {
+func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []string, tr *i18n.TranslationSet, busyCount, spinnerFrame int64, txStatus models.TxStatus, savepoints []string) string {
 	if tr == nil {
 		return ""
 	}
@@ -84,6 +87,10 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 		sections = append(sections, tintHeaderForConn(header, activeConn))
 	}
 
+	if tag := txIndicator(txStatus, savepoints); tag != "" {
+		sections = append(sections, tag)
+	}
+
 	var mid []string
 	if activeConn != nil && activeConn.ReadOnly && tr.ReadOnlyTag != "" {
 		mid = append(mid, tr.ReadOnlyTag)
@@ -96,6 +103,26 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 	sections = append(sections, tr.OptionsBarMore)
 
 	return strings.Join(sections, sectionSep)
+}
+
+// txIndicator renders the transaction status badge for the status bar.
+// Returns "" when no transaction is active (zero-value TxStatus or
+// committed/rolled-back). Active transactions render [TX] (no savepoints)
+// or [TX:sp1,sp2] (with savepoints) in WarningFg (yellow). Aborted
+// transactions render [TX*] in ErrorFg (red).
+func txIndicator(st models.TxStatus, savepoints []string) string {
+	switch st {
+	case models.TxActive:
+		if len(savepoints) > 0 {
+			tag := fmt.Sprintf("[TX:%s]", strings.Join(savepoints, ","))
+			return ansiYellowFgSGR + tag + ansiResetSGR
+		}
+		return ansiYellowFgSGR + "[TX]" + ansiResetSGR
+	case models.TxAbortedInTx:
+		return ansiRedFgSGR + "[TX*]" + ansiResetSGR
+	default:
+		return ""
+	}
 }
 
 // tintHeaderForConn wraps the header text with an ANSI SGR foreground

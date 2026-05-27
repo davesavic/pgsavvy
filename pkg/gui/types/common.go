@@ -128,6 +128,11 @@ type ContextTreeDeps struct {
 	// without re-loading the rail. Nil hook → no runtime filtering (all
 	// items render regardless of the toggle).
 	HiddenSchemasForActiveConn func() []string
+
+	// IsDisconnected reports whether the active session has been marked
+	// connection-dead. When true, schema/table/column/index rails render
+	// their items dimmed. Nil-safe: nil → not disconnected. hq5.6.
+	IsDisconnected func() bool
 }
 
 // ModeSetter is the minimal surface contexts use to flip / reset modal

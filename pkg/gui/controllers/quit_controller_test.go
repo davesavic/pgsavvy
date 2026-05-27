@@ -14,7 +14,7 @@ import (
 // AC: <c-c> dispatches commands.AppQuit which returns gocui.ErrQuit.
 func TestQuitControllerCtrlCReturnsErrQuit(t *testing.T) {
 	b := newBag()
-	ctrl := controllers.NewQuitController(nil, b.HelperBag.CoreDeps)
+	ctrl := controllers.NewQuitController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.EditDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -39,7 +39,7 @@ func TestQuitControllerCtrlCReturnsErrQuit(t *testing.T) {
 // stub by the orchestrator; controller only publishes the binding).
 func TestQuitControllerQuestionMarkPublishesHelpCheatsheet(t *testing.T) {
 	b := newBag()
-	ctrl := controllers.NewQuitController(nil, b.HelperBag.CoreDeps)
+	ctrl := controllers.NewQuitController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.EditDeps)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isRune(kb, '?') {
 			if kb.ActionID != commands.HelpCheatsheet {
@@ -54,7 +54,7 @@ func TestQuitControllerQuestionMarkPublishesHelpCheatsheet(t *testing.T) {
 // RegisterActions populates commands.AppQuit.
 func TestQuitControllerRegisterActionsPopulatesAppQuit(t *testing.T) {
 	b := newBag()
-	ctrl := controllers.NewQuitController(nil, b.HelperBag.CoreDeps)
+	ctrl := controllers.NewQuitController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.EditDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	cmd, ok := reg.Get(commands.AppQuit)

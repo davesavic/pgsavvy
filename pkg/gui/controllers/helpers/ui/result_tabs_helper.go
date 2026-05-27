@@ -71,6 +71,10 @@ const (
 	// StateError — alias of StateErrored for ShowError-created tabs that
 	// never had a stream attached. Distinct from a stream error.
 	StateError TabState = "error"
+	// StateConnectionLost — the underlying connection died mid-stream.
+	// The tab preserves whatever rows were received before the failure.
+	// hq5.6.
+	StateConnectionLost TabState = "connection lost"
 )
 
 // runHandle is the helper's narrow view of *session.RunHandle. *session.RunHandle
@@ -574,6 +578,9 @@ func (t *Tab) Title() string {
 	switch state {
 	case StateErrored, StatePlan:
 		return string(state)
+	case StateConnectionLost:
+		// hq5.6: "(error: connection terminated, N rows received)"
+		return fmt.Sprintf("(error: connection terminated, %d rows received)", rows)
 	}
 
 	rowsSegment := fmt.Sprintf("%d rows", rows)
@@ -1208,6 +1215,23 @@ func (h *ResultTabsHelper) PreemptInFlight() {
 	}
 }
 
+// MarkConnectionLost flips every running/queued/sorting tab to
+// StateConnectionLost so the title reads "(error: connection terminated,
+// N rows received)". Called by the controller's handleConnectionDead
+// path after marking the session disconnected. hq5.6.
+func (h *ResultTabsHelper) MarkConnectionLost() {
+	h.mu.Lock()
+	for _, t := range h.tabs {
+		t.mu.Lock()
+		switch t.state {
+		case StateRunning, StateQueued, StateSorting:
+			t.state = StateConnectionLost
+		}
+		t.mu.Unlock()
+	}
+	h.mu.Unlock()
+}
+
 func (h *ResultTabsHelper) cancelTab(t *Tab) error {
 	t.mu.Lock()
 	state := t.state
@@ -1772,6 +1796,8 @@ func stateGlyph(s TabState) string {
 		return "⇡"
 	case StatePlan:
 		return "⊞"
+	case StateConnectionLost:
+		return "⚡" // hq5.6
 	default: // StateErrored / StateError ("error")
 		return "✗"
 	}

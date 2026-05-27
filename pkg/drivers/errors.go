@@ -3,6 +3,8 @@ package drivers
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"strings"
 )
 
@@ -68,4 +70,26 @@ func (e *QueryError) Unwrap() error {
 		return nil
 	}
 	return e.Raw
+}
+
+// IsConnectionDead classifies whether err indicates the underlying TCP
+// connection is dead and cannot be reused. Only transport-layer errors
+// qualify: net.OpError, io.EOF, io.ErrUnexpectedEOF. Server-returned errors
+// (pgconn.PgError, QueryError) and context errors are NOT connection-dead —
+// the connection is still usable after those.
+//
+// Moved from pkg/drivers/pg to pkg/drivers so both the session layer and
+// the controller layer can reference it without an import cycle. hq5.6.
+func IsConnectionDead(err error) bool {
+	if err == nil {
+		return false
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	return false
 }

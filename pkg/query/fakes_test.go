@@ -97,15 +97,15 @@ func (f *fakeExecutor) lastExplain() explainCall {
 // value (no routing in v1 — the field is set but dispatch ignores it).
 type fakeTx struct{}
 
-func (fakeTx) Commit(context.Context) error              { return nil }
-func (fakeTx) Rollback(context.Context) error            { return nil }
-func (fakeTx) Savepoint(context.Context, string) error   { return nil }
-func (fakeTx) Release(context.Context, string) error     { return nil }
-func (fakeTx) RollbackTo(context.Context, string) error  { return nil }
-func (fakeTx) Savepoints() []string                      { return nil }
-func (fakeTx) Status() models.TxStatus                   { return models.TxActive }
-func (fakeTx) ObserveError(error)                        {}
-func (fakeTx) StatementCount() int                       { return 0 }
+func (fakeTx) Commit(context.Context) error             { return nil }
+func (fakeTx) Rollback(context.Context) error           { return nil }
+func (fakeTx) Savepoint(context.Context, string) error  { return nil }
+func (fakeTx) Release(context.Context, string) error    { return nil }
+func (fakeTx) RollbackTo(context.Context, string) error { return nil }
+func (fakeTx) Savepoints() []string                     { return nil }
+func (fakeTx) Status() models.TxStatus                  { return models.TxActive }
+func (fakeTx) ObserveError(error)                       {}
+func (fakeTx) StatementCount() int                      { return 0 }
 
 var (
 	_ executor            = (*fakeExecutor)(nil)

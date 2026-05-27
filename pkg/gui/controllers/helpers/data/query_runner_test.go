@@ -16,15 +16,15 @@ type fakeTransaction struct {
 	rolledBack bool
 }
 
-func (t *fakeTransaction) Commit(_ context.Context) error   { t.committed = true; return nil }
-func (t *fakeTransaction) Rollback(_ context.Context) error  { t.rolledBack = true; return nil }
-func (t *fakeTransaction) Savepoint(_ context.Context, _ string) error { return nil }
-func (t *fakeTransaction) Release(_ context.Context, _ string) error   { return nil }
+func (t *fakeTransaction) Commit(_ context.Context) error               { t.committed = true; return nil }
+func (t *fakeTransaction) Rollback(_ context.Context) error             { t.rolledBack = true; return nil }
+func (t *fakeTransaction) Savepoint(_ context.Context, _ string) error  { return nil }
+func (t *fakeTransaction) Release(_ context.Context, _ string) error    { return nil }
 func (t *fakeTransaction) RollbackTo(_ context.Context, _ string) error { return nil }
-func (t *fakeTransaction) Savepoints() []string              { return nil }
-func (t *fakeTransaction) Status() models.TxStatus           { return models.TxActive }
-func (t *fakeTransaction) ObserveError(_ error)              {}
-func (t *fakeTransaction) StatementCount() int               { return 0 }
+func (t *fakeTransaction) Savepoints() []string                         { return nil }
+func (t *fakeTransaction) Status() models.TxStatus                      { return models.TxActive }
+func (t *fakeTransaction) ObserveError(_ error)                         {}
+func (t *fakeTransaction) StatementCount() int                          { return 0 }
 
 // fakeRunnerSession records every call and returns canned responses. It does
 // NOT produce a real *session.RunHandle — Run / Stream tests rely on a
@@ -90,6 +90,9 @@ func (f *fakeRunnerSession) Cancel(qid models.QueryID) error {
 	f.cancelCalls = append(f.cancelCalls, qid)
 	return f.cancelErr
 }
+
+func (f *fakeRunnerSession) SetDisconnected(_ bool) {}
+func (f *fakeRunnerSession) IsDisconnected() bool   { return false }
 
 func TestQueryRunnerRunDispatchesStream(t *testing.T) {
 	fs := &fakeRunnerSession{}

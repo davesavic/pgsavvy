@@ -96,7 +96,7 @@ func AttachControllers(
 	prompt := NewPromptController(c, helpers.CoreDeps, helpers.UIDeps)
 	selection := NewSelectionController(c, helpers.CoreDeps, helpers.UIDeps)
 	confirmation := NewConfirmationController(c, helpers.CoreDeps, helpers.UIDeps)
-	quit := NewQuitController(c, helpers.CoreDeps)
+	quit := NewQuitController(c, helpers.CoreDeps, helpers.UIDeps, helpers.QueryDeps, helpers.EditDeps)
 	queryEditor := NewQueryEditorController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps)
 	tx := NewTxController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps)
 

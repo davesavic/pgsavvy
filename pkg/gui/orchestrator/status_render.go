@@ -75,6 +75,10 @@ type StatusRenderDeps struct {
 	// busy>0 so a single worker still animates. Nil → frame 0 (the glyph
 	// stays static, the pre-U8 single-worker behaviour).
 	SpinnerFrame func() int64
+	// TxStatus returns the active transaction's lifecycle status and
+	// savepoint names. Nil → no transaction indicator rendered (bootstrap
+	// safety / no session connected yet).
+	TxStatus func() (models.TxStatus, []string)
 }
 
 // RenderStatusLine resolves the focused context's mode label, builds the
@@ -163,7 +167,12 @@ func RenderStatusLine(d StatusRenderDeps) {
 	if d.SpinnerFrame != nil {
 		frame = d.SpinnerFrame()
 	}
-	line := status.BuildStatusLine(label, conn, options, d.Tr, busy, frame)
+	var txSt models.TxStatus
+	var txSp []string
+	if d.TxStatus != nil {
+		txSt, txSp = d.TxStatus()
+	}
+	line := status.BuildStatusLine(label, conn, options, d.Tr, busy, frame, txSt, txSp)
 	_ = d.Driver.SetContent(AppStatusViewName, line)
 }
 

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -12,6 +13,10 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
+
+// ErrDisconnected is returned by Execute/Stream/Begin when the session
+// has been marked connection-dead via SetDisconnected. hq5.6.
+var ErrDisconnected = errors.New("session: connection lost")
 
 // noticeAttacher is the optional capability of a drivers.Session: when the
 // concrete driver supports notice plumbing (probed via
@@ -74,6 +79,11 @@ type SQLSession struct {
 
 	closeOnce sync.Once
 	closed    atomic.Bool
+
+	// disconnected is set when IsConnectionDead classifies a terminal error.
+	// Once true the session rejects new Execute/Stream/Begin attempts and the
+	// UI renders the schema rail dimmed. hq5.6.
+	disconnected atomic.Bool
 
 	// fkCache is the per-Connection foreign-key cache. Constructed lazily on
 	// first FKCache() call so SQLSessions whose callers never need FK metadata
@@ -154,6 +164,14 @@ func (s *SQLSession) CurrentTransaction() drivers.Transaction { return s.inner.C
 // SettingsSnapshot returns the session's mutable settings map.
 func (s *SQLSession) SettingsSnapshot() *SettingsSnapshot { return s.settings }
 
+// SetDisconnected marks the session as connection-dead. Once set, new
+// Execute/Stream/Begin calls return ErrDisconnected. Idempotent. hq5.6.
+func (s *SQLSession) SetDisconnected(v bool) { s.disconnected.Store(v) }
+
+// IsDisconnected reports whether the session has been marked
+// connection-dead via SetDisconnected. hq5.6.
+func (s *SQLSession) IsDisconnected() bool { return s.disconnected.Load() }
+
 // TxStatementCount returns the number of statements executed in the current
 // transaction, or 0 when no transaction is active.
 func (s *SQLSession) TxStatementCount() int {
@@ -176,6 +194,9 @@ func (s *SQLSession) SavepointNames() []string {
 // duration. Fires HistoryRecorder.Record exactly once. The inner driver
 // remains the source of truth for RowsAffected / Duration.
 func (s *SQLSession) Execute(ctx context.Context, q models.Query) (models.Result, error) {
+	if s.disconnected.Load() {
+		return models.Result{}, ErrDisconnected
+	}
 	s.streamMu.Lock()
 	defer s.streamMu.Unlock()
 
@@ -210,6 +231,10 @@ func (s *SQLSession) Execute(ctx context.Context, q models.Query) (models.Result
 	if !LoggingSuppressed(ctx) {
 		s.recordHistory(q.SQL, durMs, rows, err == nil)
 	}
+	// hq5.6: mark session disconnected on transport-level errors.
+	if err != nil && drivers.IsConnectionDead(err) {
+		s.disconnected.Store(true)
+	}
 	return res, err
 }
 
@@ -217,9 +242,16 @@ func (s *SQLSession) Execute(ctx context.Context, q models.Query) (models.Result
 // is held for the duration of the call so an EXPLAIN cannot interleave
 // with an in-flight Execute / Stream on the same session.
 func (s *SQLSession) Explain(ctx context.Context, q models.Query, analyze bool) (models.Plan, error) {
+	if s.disconnected.Load() {
+		return models.Plan{}, ErrDisconnected
+	}
 	s.streamMu.Lock()
 	defer s.streamMu.Unlock()
-	return s.inner.Explain(ctx, q, analyze)
+	plan, err := s.inner.Explain(ctx, q, analyze)
+	if err != nil && drivers.IsConnectionDead(err) {
+		s.disconnected.Store(true)
+	}
+	return plan, err
 }
 
 // Stream issues q on the inner session and returns a RunHandle whose Rows()
@@ -228,6 +260,9 @@ func (s *SQLSession) Explain(ctx context.Context, q models.Query, analyze bool) 
 // streamMu via this method) sees the queue free only after the current
 // run terminates (clean EOF, caller Close, error, or Cancel).
 func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, error) {
+	if s.disconnected.Load() {
+		return nil, ErrDisconnected
+	}
 	s.streamMu.Lock()
 
 	suppressLog := LoggingSuppressed(ctx)
@@ -308,6 +343,11 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 			if tx := s.inner.CurrentTransaction(); tx != nil {
 				tx.ObserveError(termErr)
 			}
+			// hq5.6: mark session disconnected on transport-level errors
+			// so subsequent Execute/Stream/Begin calls fail fast.
+			if drivers.IsConnectionDead(termErr) {
+				s.disconnected.Store(true)
+			}
 		}
 		s.streamMu.Unlock()
 	}
@@ -323,6 +363,9 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 // directly, not through SQLSession. Tracking the in-flight tx via
 // InTransaction() is the driver's job.
 func (s *SQLSession) Begin(ctx context.Context, opts models.TxOptions) (drivers.Transaction, error) {
+	if s.disconnected.Load() {
+		return nil, ErrDisconnected
+	}
 	s.streamMu.Lock()
 	defer s.streamMu.Unlock()
 	return s.inner.Begin(ctx, opts)

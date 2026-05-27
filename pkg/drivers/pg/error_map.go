@@ -3,8 +3,6 @@ package pg
 import (
 	"context"
 	"errors"
-	"io"
-	"net"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -69,21 +67,8 @@ func wrapPgError(err error) error {
 	}
 }
 
-// IsConnectionDead classifies whether err indicates the underlying TCP
-// connection is dead and cannot be reused. Only transport-layer errors
-// qualify: net.OpError, io.EOF, io.ErrUnexpectedEOF. Server-returned errors
-// (pgconn.PgError) and context errors are NOT connection-dead — the
-// connection is still usable after those. AD-2.
+// IsConnectionDead delegates to drivers.IsConnectionDead. Kept here for
+// backwards compatibility with callers that already import pg. hq5.6.
 func IsConnectionDead(err error) bool {
-	if err == nil {
-		return false
-	}
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
-		return true
-	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		return true
-	}
-	return false
+	return drivers.IsConnectionDead(err)
 }

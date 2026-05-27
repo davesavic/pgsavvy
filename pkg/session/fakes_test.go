@@ -200,17 +200,17 @@ func (t *fakeTx) Rollback(context.Context) error {
 	}
 	return nil
 }
-func (t *fakeTx) Savepoint(context.Context, string) error   { return nil }
-func (t *fakeTx) Release(context.Context, string) error     { return nil }
-func (t *fakeTx) RollbackTo(context.Context, string) error  { return nil }
-func (t *fakeTx) Savepoints() []string                      { return nil }
-func (t *fakeTx) Status() models.TxStatus                   { return t.status }
+func (t *fakeTx) Savepoint(context.Context, string) error  { return nil }
+func (t *fakeTx) Release(context.Context, string) error    { return nil }
+func (t *fakeTx) RollbackTo(context.Context, string) error { return nil }
+func (t *fakeTx) Savepoints() []string                     { return nil }
+func (t *fakeTx) Status() models.TxStatus                  { return t.status }
 func (t *fakeTx) ObserveError(err error) {
 	t.observeErrMu.Lock()
 	t.observeErrs = append(t.observeErrs, err)
 	t.observeErrMu.Unlock()
 }
-func (t *fakeTx) StatementCount() int                       { return 0 }
+func (t *fakeTx) StatementCount() int { return 0 }
 
 // recordingHistory captures every HistoryRecorder.Record call.
 type recordingHistory struct {
@@ -252,9 +252,9 @@ type errorTermRowStream struct {
 	closed  atomic.Bool
 }
 
-func (s *errorTermRowStream) Columns() []models.ColumnMeta     { return nil }
-func (s *errorTermRowStream) QueryID() models.QueryID          { return s.qid }
-func (s *errorTermRowStream) Close() error                     { s.closed.Store(true); return nil }
+func (s *errorTermRowStream) Columns() []models.ColumnMeta { return nil }
+func (s *errorTermRowStream) QueryID() models.QueryID      { return s.qid }
+func (s *errorTermRowStream) Close() error                 { s.closed.Store(true); return nil }
 func (s *errorTermRowStream) Next(context.Context) (models.Row, bool, error) {
 	return models.Row{}, false, s.termErr
 }

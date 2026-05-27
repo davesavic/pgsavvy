@@ -8,6 +8,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/dbsavvy/pkg/logs"
+	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
 // onWorkerSampleN is the AD-20 sample period: emit a worker_start /
@@ -61,6 +62,26 @@ func (g *Gui) SpinnerFrame() int64 {
 		return 0
 	}
 	return int64(g.clock.Now().Sub(start) / spinnerTickInterval)
+}
+
+// txStatusAccessor returns a closure suitable for StatusRenderDeps.TxStatus.
+// The closure reads the live queryRunner's transaction state. Returns nil
+// when no queryRunner exists (bootstrap safety — no connection yet).
+func (g *Gui) txStatusAccessor() func() (models.TxStatus, []string) {
+	r := g.queryRunner
+	if r == nil {
+		return nil
+	}
+	return func() (models.TxStatus, []string) {
+		if !r.InTransaction() {
+			return "", nil
+		}
+		tx := r.CurrentTransaction()
+		if tx == nil {
+			return "", nil
+		}
+		return tx.Status(), tx.Savepoints()
+	}
 }
 
 // armSpinner starts the spinner re-render ticker on the busy 0->1

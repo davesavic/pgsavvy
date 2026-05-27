@@ -153,6 +153,13 @@ type ResultTabsHelper interface {
 	ShowError(label string, err error)
 }
 
+// ResultTabConnectionLostMarker is the optional surface QueryEditorController
+// uses to mark running/queued tabs as connection-lost when a dead-connection
+// error is detected. The concrete *ui.ResultTabsHelper satisfies it. hq5.6.
+type ResultTabConnectionLostMarker interface {
+	MarkConnectionLost()
+}
+
 // ResultTabIdentityAttacher is the optional surface QueryEditorController
 // uses to record the (connID, ResultIdentity) pair on the currently-active
 // tab right after OpenResultTab — gating the <leader>gH overlay's

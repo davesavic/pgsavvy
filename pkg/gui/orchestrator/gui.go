@@ -510,6 +510,12 @@ func (g *Gui) wireWithDriver() error {
 		// AppState pointer and the activeConnID; both can be empty in
 		// test wiring → empty slice, no filtering applied.
 		HiddenSchemasForActiveConn: g.hiddenSchemasForActiveConn,
+		// hq5.6: dims schema/table/column/index rails when the session is
+		// connection-dead. The closure reads the queryRunner's live state
+		// on every render so the transition is visible immediately.
+		IsDisconnected: func() bool {
+			return g.queryRunner != nil && g.queryRunner.IsDisconnected()
+		},
 		// dbsavvy-56u.2: first-run welcome tip copy. Nil-safe when tr is
 		// absent (test fixtures) — the context renders nothing.
 		FirstRunTipText: func() (string, string) {
@@ -1335,10 +1341,13 @@ func (g *Gui) wireWithDriver() error {
 	// the quit is aborted (return nil so submit doesn't propagate
 	// ErrQuit). `:q!` bypasses the guard; `:w` opens the commit dialog.
 	quitExHandler := func(_ []string, _ commands.ExecCtx) error {
-		if g.pendingDiscardH != nil {
-			if err := g.pendingDiscardH.BlockQuitIfPending(); err != nil {
-				toaster(err.Error())
-				return nil
+		// Delegate to the AppQuit command handler so :q, <leader>q,
+		// and <c-c> share the same guard chain (pending-edit +
+		// open-tx checks). The handler is registered by
+		// QuitController.RegisterActions.
+		if g.cmdRegistry != nil {
+			if cmd, ok := g.cmdRegistry.Get(commands.AppQuit); ok && cmd != nil && cmd.Handler != nil {
+				return cmd.Handler(commands.ExecCtx{})
 			}
 		}
 		return gocui.ErrQuit

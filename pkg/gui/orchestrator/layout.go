@@ -490,6 +490,7 @@ func (g *Gui) RunLayout(w, h int) error {
 			Toast:        g.toastHelp,
 			BusyCount:    g.BusyCount,
 			SpinnerFrame: g.SpinnerFrame,
+			TxStatus:     g.txStatusAccessor(),
 		})
 	}
 

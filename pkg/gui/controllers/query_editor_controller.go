@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
@@ -611,6 +612,11 @@ func (q *QueryEditorController) toast(msg string) {
 }
 
 func (q *QueryEditorController) surfaceErr(stmt string, err error) {
+	// hq5.6: detect connection-dead errors and trigger disconnect flow.
+	if drivers.IsConnectionDead(err) {
+		q.handleConnectionDead(err)
+	}
+
 	if q.helpers.ResultTabs != nil {
 		q.helpers.ResultTabs.ShowError(tabLabel(stmt), err)
 		// dbsavvy-fow.3: record the full SQL on the now-active error tab so
@@ -623,6 +629,47 @@ func (q *QueryEditorController) surfaceErr(stmt string, err error) {
 		return
 	}
 	q.toast(err.Error())
+}
+
+// handleConnectionDead marks the session disconnected, emits a toast
+// (deduplicated — only fires once per session), and logs the event.
+// hq5.6.
+func (q *QueryEditorController) handleConnectionDead(err error) {
+	runner := q.helpers.QueryRunner
+	if runner == nil {
+		return
+	}
+	// Dedup: only fire once. MarkDisconnected returns false if no session
+	// is wired. IsDisconnected was already true → skip toast.
+	if runner.IsDisconnected() {
+		return
+	}
+	runner.MarkDisconnected()
+
+	// Mark in-flight result tabs as connection-lost so the title reads
+	// "(error: connection terminated, N rows received)".
+	if marker, ok := q.helpers.ResultTabs.(ResultTabConnectionLostMarker); ok {
+		marker.MarkConnectionLost()
+	}
+
+	// Toast — redacted via ToastHelper.Show's internal RedactDSN.
+	q.toast("connection lost")
+
+	// Log at Debug level through the DebugLogger surface with structured
+	// fields (evt, connection_id, err). The DebugLogger interface only
+	// exposes Debug; the underlying *slog.Logger interprets the key-value
+	// args as structured attrs.
+	if q.helpers.Logger != nil {
+		connID := ""
+		if q.helpers.ActiveConnection != nil {
+			connID = q.helpers.ActiveConnection.ActiveConnectionID()
+		}
+		q.helpers.Logger.Debug("connection_lost",
+			"evt", "connection_lost",
+			"connection_id", connID,
+			"err", session.RedactDSN(err.Error()),
+		)
+	}
 }
 
 func (q *QueryEditorController) openResultTab(stmt string, rh *session.RunHandle) {

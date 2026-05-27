@@ -24,7 +24,7 @@ type fakeTx struct {
 }
 
 func (f *fakeTx) Commit(_ context.Context) error   { return f.commitErr }
-func (f *fakeTx) Rollback(_ context.Context) error  { return f.rollbackErr }
+func (f *fakeTx) Rollback(_ context.Context) error { return f.rollbackErr }
 func (f *fakeTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
 	f.execCalls = append(f.execCalls, sql)
 	return pgconn.NewCommandTag(""), f.execErr

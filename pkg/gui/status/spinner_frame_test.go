@@ -17,7 +17,7 @@ func TestBuildStatusLine_SpinnerAdvancesByFrameNotBusyCount(t *testing.T) {
 
 	seen := make(map[string]int)
 	for frame := int64(0); frame < int64(len(spinnerGlyphs)); frame++ {
-		line := BuildStatusLine("", nil, nil, tr, busy, frame)
+		line := BuildStatusLine("", nil, nil, tr, busy, frame, "", nil)
 		glyph := string(spinnerGlyphs[frame%int64(len(spinnerGlyphs))])
 		if !containsRune(line, glyph) {
 			t.Fatalf("frame %d: status line %q missing glyph %q", frame, line, glyph)
@@ -35,7 +35,7 @@ func TestBuildStatusLine_SpinnerAdvancesByFrameNotBusyCount(t *testing.T) {
 func TestBuildStatusLine_NoSpinnerWhenQuiescent(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	for _, glyph := range spinnerGlyphs {
-		line := BuildStatusLine("", nil, nil, tr, 0, 42)
+		line := BuildStatusLine("", nil, nil, tr, 0, 42, "", nil)
 		if containsRune(line, string(glyph)) {
 			t.Fatalf("quiescent status line %q unexpectedly contains spinner glyph %q", line, string(glyph))
 		}

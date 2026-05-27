@@ -31,6 +31,8 @@ type RunnerSession interface {
 	InTransaction() bool
 	CurrentTransaction() drivers.Transaction
 	Cancel(qid models.QueryID) error
+	SetDisconnected(bool)
+	IsDisconnected() bool
 }
 
 var _ RunnerSession = (*session.SQLSession)(nil)
@@ -215,6 +217,28 @@ func (r *QueryRunner) HasSession() bool {
 	return b != nil && b.sess != nil
 }
 
+// MarkDisconnected sets the connection-dead flag on the underlying
+// session. Once set, new Execute/Stream/Begin attempts return
+// ErrDisconnected. Returns false when no session is wired. hq5.6.
+func (r *QueryRunner) MarkDisconnected() bool {
+	b := r.load()
+	if b == nil || b.sess == nil {
+		return false
+	}
+	b.sess.SetDisconnected(true)
+	return true
+}
+
+// IsDisconnected reports whether the underlying session has been marked
+// connection-dead. Returns false when no session is wired. hq5.6.
+func (r *QueryRunner) IsDisconnected() bool {
+	b := r.load()
+	if b == nil || b.sess == nil {
+		return false
+	}
+	return b.sess.IsDisconnected()
+}
+
 // InTransaction reports whether the underlying session currently has an
 // open transaction. Returns false when no session is wired.
 func (r *QueryRunner) InTransaction() bool {
@@ -230,6 +254,26 @@ func (r *QueryRunner) CurrentTransaction() drivers.Transaction {
 		return nil
 	}
 	return b.sess.CurrentTransaction()
+}
+
+// TxStatementCount returns the number of statements executed in the
+// current transaction, or 0 when no transaction is active.
+func (r *QueryRunner) TxStatementCount() int {
+	tx := r.CurrentTransaction()
+	if tx == nil {
+		return 0
+	}
+	return tx.StatementCount()
+}
+
+// SavepointNames returns the savepoint stack of the current transaction,
+// or nil when no transaction is active.
+func (r *QueryRunner) SavepointNames() []string {
+	tx := r.CurrentTransaction()
+	if tx == nil {
+		return nil
+	}
+	return tx.Savepoints()
 }
 
 // Begin opens a transaction on the underlying session. Calls
@@ -339,4 +383,22 @@ func (r *QueryRunner) Cancel() error {
 		return nil
 	}
 	return b.sess.Cancel(rh.QueryID())
+}
+
+// CancelAndWaitActiveRun cancels the last launched RunHandle (if any)
+// and blocks until its Done channel closes or 2 seconds elapse,
+// whichever comes first. This mirrors the cancel-then-wait pattern in
+// SQLSession.Close and ensures in-flight streams are fully drained
+// before a subsequent Commit or Rollback on the same connection
+// (hq5.5).
+func (r *QueryRunner) CancelAndWaitActiveRun() {
+	rh := r.last.Load()
+	if rh == nil {
+		return
+	}
+	_ = rh.Cancel()
+	select {
+	case <-rh.Done():
+	case <-time.After(2 * time.Second):
+	}
 }

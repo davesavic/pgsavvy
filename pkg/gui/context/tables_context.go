@@ -44,6 +44,9 @@ func (t *TablesContext) renderRows() string {
 	if len(t.items) == 0 {
 		return ""
 	}
+	// hq5.6: dim items when the session is disconnected.
+	dim := t.deps.IsDisconnected != nil && t.deps.IsDisconnected()
+
 	var b strings.Builder
 	for i, item := range t.items {
 		marker := "  "
@@ -52,10 +55,18 @@ func (t *TablesContext) renderRows() string {
 		}
 		name := tableName(item)
 		if name == "" {
-			fmt.Fprintf(&b, "%s%v\n", marker, item)
+			if dim {
+				fmt.Fprintf(&b, "%s\x1b[2m%v\x1b[0m\n", marker, item)
+			} else {
+				fmt.Fprintf(&b, "%s%v\n", marker, item)
+			}
 			continue
 		}
-		fmt.Fprintf(&b, "%s%s\n", marker, name)
+		if dim {
+			fmt.Fprintf(&b, "%s\x1b[2m%s\x1b[0m\n", marker, name)
+		} else {
+			fmt.Fprintf(&b, "%s%s\n", marker, name)
+		}
 	}
 	return b.String()
 }

@@ -92,32 +92,60 @@ func (s *pgRowStream) QueryID() models.QueryID { return s.queryID }
 //   - (zero, false, nil) — clean end-of-result
 //   - (zero, false, err) — pgx error, ctx cancellation, or use-after-Close
 //
-// ctx is currently unused by Next itself — pgx.Rows.Next has no ctx parameter,
-// and the context bound at Stream() time governs the underlying connection.
-// The parameter exists to match the drivers.RowStream contract and to allow a
-// future cursor-backed driver to honor it.
-func (s *pgRowStream) Next(_ context.Context) (models.Row, bool, error) {
+// hq5.6 watchdog: ctx is now observed. If ctx is cancelled while
+// pgx.Rows.Next is blocked on a dead socket, the watchdog goroutine
+// force-closes the rows so the read unblocks and streamMu is released
+// within a bounded window rather than hanging until TCP keepalive fires
+// (potentially minutes).
+func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 	if s.closed.Load() {
 		return models.Row{}, false, ErrRowStreamClosed
 	}
-	if !s.rows.Next() {
-		var nextErr error
-		if err := s.rows.Err(); err != nil {
-			nextErr = wrapPgError(err)
-		}
-		// EOF or terminal stream error — the underlying pgx.Rows can yield
-		// no more rows, so drop the session inFlight guard now rather than
-		// stranding it until the consumer eventually calls Close. The
-		// release path is CAS-guarded by `closed`, so a later Close is a
-		// safe no-op (dbsavvy-zzy).
+
+	// Fast path: context already done.
+	if err := ctx.Err(); err != nil {
 		s.release()
-		return models.Row{}, false, nextErr
+		return models.Row{}, false, err
 	}
-	vals, err := s.rows.Values()
-	if err != nil {
-		return models.Row{}, false, wrapPgError(err)
+
+	// Race rows.Next against context cancellation. On a healthy
+	// connection rows.Next returns promptly and the goroutine
+	// overhead is negligible relative to the network round-trip.
+	type nextResult struct {
+		ok bool
 	}
-	return models.Row{Values: vals}, true, nil
+	ch := make(chan nextResult, 1)
+	go func() {
+		ch <- nextResult{ok: s.rows.Next()}
+	}()
+
+	select {
+	case res := <-ch:
+		if !res.ok {
+			var nextErr error
+			if err := s.rows.Err(); err != nil {
+				nextErr = wrapPgError(err)
+			}
+			// EOF or terminal stream error — drop the session inFlight
+			// guard now rather than stranding it until the consumer calls
+			// Close. CAS-guarded by `closed`. (dbsavvy-zzy)
+			s.release()
+			return models.Row{}, false, nextErr
+		}
+		vals, err := s.rows.Values()
+		if err != nil {
+			return models.Row{}, false, wrapPgError(err)
+		}
+		return models.Row{Values: vals}, true, nil
+
+	case <-ctx.Done():
+		// Context cancelled while rows.Next was blocked (dead
+		// connection or Stop). Force-close the underlying rows to
+		// unblock the goroutine. Close/release is idempotent via
+		// the CAS on closed.
+		s.release()
+		return models.Row{}, false, ctx.Err()
+	}
 }
 
 // Close releases the underlying pgx.Rows and drops the parent Session's
