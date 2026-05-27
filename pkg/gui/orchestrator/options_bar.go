@@ -25,7 +25,7 @@ const optionsBarMax = 8
 // CollectOptionsForScope walks the chord trie set and gathers the
 // description / key pairs flagged ShowInBar for the focused (mode,
 // scope) plus the (mode, GLOBAL) pseudo-scope. Entries are formatted
-// as "description: key", sorted by Tag then by sequence-string label,
+// as "[key] description", sorted by Tag then by sequence-string label,
 // and capped at optionsBarMax.
 //
 // Returns an empty (non-nil) []string when the trieSet is nil, when
@@ -102,7 +102,7 @@ func CollectOptionsForScope(
 
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
-		segment := e.description + ": " + e.key
+		segment := "[" + e.key + "] " + e.description
 		if e.disabled {
 			segment += disabledSuffix
 		}

@@ -152,6 +152,56 @@ func TestApplyFocusFrameColorsNoFocusedMatch(t *testing.T) {
 	}
 }
 
+// TestResolveFocusedRailName (dbsavvy-66p): the focus-frame swap follows
+// the live active result tab instead of the stale focus-stack context.
+// When focus is pushed to the result pane the stack captures one
+// result_tab_<slot> context; gt/gT change the active tab without updating
+// the stack. resolveFocusedRailName must redirect the highlight onto the
+// active tab view whenever the stack points at any result tab, so the
+// yellow border lands on the visible tab — not only the last one whose
+// context was pushed (the original bug).
+func TestResolveFocusedRailName(t *testing.T) {
+	cases := []struct {
+		name          string
+		stackViewName string
+		activeTabView string
+		want          string
+	}{
+		{
+			name:          "non-result rail returns stack name unchanged",
+			stackViewName: string(types.SCHEMAS),
+			activeTabView: string(types.ResultTabKey(2)),
+			want:          string(types.SCHEMAS),
+		},
+		{
+			name:          "stale result tab on stack follows live active tab",
+			stackViewName: string(types.ResultTabKey(0)),
+			activeTabView: string(types.ResultTabKey(2)),
+			want:          string(types.ResultTabKey(2)),
+		},
+		{
+			name:          "stack already matches active tab is a no-op",
+			stackViewName: string(types.ResultTabKey(1)),
+			activeTabView: string(types.ResultTabKey(1)),
+			want:          string(types.ResultTabKey(1)),
+		},
+		{
+			name:          "result tab on stack but no live active tab keeps stack name",
+			stackViewName: string(types.ResultTabKey(0)),
+			activeTabView: "",
+			want:          string(types.ResultTabKey(0)),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := resolveFocusedRailName(c.stackViewName, c.activeTabView); got != c.want {
+				t.Errorf("resolveFocusedRailName(%q, %q) = %q, want %q",
+					c.stackViewName, c.activeTabView, got, c.want)
+			}
+		})
+	}
+}
+
 // TestFrameAttrFallbacks: nil *theme.Style and empty Fg collapse to
 // gocui.ColorDefault so the helper never injects a garbage Attribute
 // when the theme has not yet been Apply'd (unlikely — theme has an

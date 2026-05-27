@@ -54,7 +54,7 @@ func TestCollectOptionsForScope_DisabledSuffix(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d entries (%v), want 1", len(got), got)
 	}
-	want := "Cancel: c (disabled)"
+	want := "[c] Cancel (disabled)"
 	if got[0] != want {
 		t.Errorf("got %q, want %q", got[0], want)
 	}
@@ -79,7 +79,7 @@ func TestCollectOptionsForScope_EnabledNoSuffix(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d entries (%v), want 1", len(got), got)
 	}
-	want := "Run: r"
+	want := "[r] Run"
 	if got[0] != want {
 		t.Errorf("got %q, want %q (enabled binding must not carry a (disabled) suffix)", got[0], want)
 	}

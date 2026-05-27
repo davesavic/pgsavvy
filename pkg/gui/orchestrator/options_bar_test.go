@@ -103,10 +103,10 @@ func TestCollectOptionsForScope_ScopeAndGlobalLeavesIncluded(t *testing.T) {
 	})
 	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
 	want := []string{
-		"Quit: q",       // tag "App"
-		"Cheatsheet: ?", // tag "Help"
-		"Describe: d",   // tag "Table", key "d"
-		"Refresh: r",    // tag "Table", key "r"
+		"[q] Quit",       // tag "App"
+		"[?] Cheatsheet", // tag "Help"
+		"[d] Describe",   // tag "Table", key "d"
+		"[r] Refresh",    // tag "Table", key "r"
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
@@ -123,9 +123,9 @@ func TestCollectOptionsForScope_DeterministicSortByTagThenKey(t *testing.T) {
 	})
 	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
 	want := []string{
-		"Cee: c",   // tag "Aardvark" wins on tag sort
-		"Alpha: a", // tag "Same", key "a"
-		"Beta: b",  // tag "Same", key "b"
+		"[c] Cee",   // tag "Aardvark" wins on tag sort
+		"[a] Alpha", // tag "Same", key "a"
+		"[b] Beta",  // tag "Same", key "b"
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
@@ -148,8 +148,8 @@ func TestCollectOptionsForScope_TruncatedToMaxEight(t *testing.T) {
 		t.Fatalf("len(got) = %d, want %d", len(got), optionsBarMax)
 	}
 	want := []string{
-		"Desca: a", "Descb: b", "Descc: c", "Descd: d",
-		"Desce: e", "Descf: f", "Descg: g", "Desch: h",
+		"[a] Desca", "[b] Descb", "[c] Descc", "[d] Descd",
+		"[e] Desce", "[f] Descf", "[g] Descg", "[h] Desch",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
@@ -165,7 +165,7 @@ func TestCollectOptionsForScope_ModeMismatchExcluded(t *testing.T) {
 		{seq: "r", mode: types.ModeNormal, scope: types.TABLES, tag: "Table", description: "Refresh", showInBar: true},
 	})
 	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
-	want := []string{"Refresh: r"}
+	want := []string{"[r] Refresh"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
 	}
@@ -178,7 +178,7 @@ func TestCollectOptionsForScope_NoGlobalTrieForModeStillReturnsScope(t *testing.
 		{seq: "r", mode: types.ModeNormal, scope: types.TABLES, tag: "Table", description: "Refresh", showInBar: true},
 	})
 	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
-	want := []string{"Refresh: r"}
+	want := []string{"[r] Refresh"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
 	}
@@ -191,7 +191,7 @@ func TestCollectOptionsForScope_FocusedScopeIsGlobalNoDoubleCount(t *testing.T) 
 		{seq: "q", mode: types.ModeNormal, scope: types.GLOBAL, tag: "App", description: "Quit", showInBar: true},
 	})
 	got := CollectOptionsForScope(ts, types.ModeNormal, types.GLOBAL, nil)
-	want := []string{"Quit: q"}
+	want := []string{"[q] Quit"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
 	}

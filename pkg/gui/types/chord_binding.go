@@ -124,7 +124,12 @@ func (k ChordKey) String() string {
 	}
 	switch k.Special {
 	case KeyNone:
-		if k.Code != 0 {
+		// A bare space rune (e.g. the expanded leader, default " ")
+		// would otherwise render as an invisible literal space — show
+		// the open-box glyph so it is legible in hints/cheatsheet.
+		if k.Code == ' ' {
+			b.WriteRune('␣')
+		} else if k.Code != 0 {
 			b.WriteRune(k.Code)
 		}
 	case KeyEsc:

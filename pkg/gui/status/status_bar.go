@@ -11,7 +11,7 @@ import (
 
 const (
 	sectionSep = " | "
-	optionSep  = " "
+	optionSep  = " · "
 )
 
 // spinnerGlyphs is the braille spinner frame set indexed by busy count.

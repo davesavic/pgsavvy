@@ -47,11 +47,17 @@ var PairPlanFocus = MainContextPair{
 // active-tab key for this sentinel when rendering the pair.
 const ResultTabActiveKey ContextKey = "result_tab_active"
 
+// ResultTabViewPrefix is the shared prefix of every per-slot result-tab
+// ContextKey / gocui view name (result_tab_<slot>). The single source of
+// truth so callers can recognise a result-tab view by prefix without
+// re-hardcoding the literal.
+const ResultTabViewPrefix = "result_tab_"
+
 // ResultTabKey returns the ContextKey associated with slot i (0-based).
 // The naming scheme matches the dynamic gocui view name the
 // ResultTabsHelper allocates per tab.
 func ResultTabKey(i int) ContextKey {
-	return ContextKey("result_tab_" + itoa(i))
+	return ContextKey(ResultTabViewPrefix + itoa(i))
 }
 
 // itoa is a tiny base-10 int formatter to avoid an strconv import in

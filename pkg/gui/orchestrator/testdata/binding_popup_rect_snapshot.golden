@@ -67,7 +67,6 @@ binding	scope=global	key=<leader>7	mode=normal
 binding	scope=global	key=<leader>8	mode=normal
 binding	scope=global	key=<leader>9	mode=normal
 binding	scope=global	key=?	mode=normal
-binding	scope=hide_overlay	key= 	mode=normal
 binding	scope=hide_overlay	key=<c-n>	mode=normal
 binding	scope=hide_overlay	key=<c-p>	mode=normal
 binding	scope=hide_overlay	key=<down>	mode=normal
@@ -76,6 +75,7 @@ binding	scope=hide_overlay	key=<up>	mode=normal
 binding	scope=hide_overlay	key=j	mode=normal
 binding	scope=hide_overlay	key=k	mode=normal
 binding	scope=hide_overlay	key=q	mode=normal
+binding	scope=hide_overlay	key=␣	mode=normal
 binding	scope=menu	key=<cr>	mode=normal
 binding	scope=menu	key=<esc>	mode=normal
 binding	scope=plan	key=<c-a>	mode=normal

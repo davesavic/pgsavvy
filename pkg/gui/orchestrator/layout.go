@@ -168,6 +168,11 @@ func (g *Gui) RunLayout(w, h int) error {
 	// we SetView at the "secondary" slot rectangle, the active tab is
 	// raised to the top via SetViewOnTop. A nil helper or empty tab
 	// list collapses to a no-op so the layout pass works pre-wire.
+	// activeTabView is the live active result-tab view name (empty when
+	// the result pane is collapsed / has no tabs). Captured here so the
+	// focus-frame swap below can follow the active tab rather than the
+	// stale focus-stack context (resolveFocusedRailName).
+	activeTabView := ""
 	if g.resultTabsH != nil {
 		if d, ok := dims["secondary"]; ok && d.X1 > d.X0 && d.Y1 > d.Y0 {
 			// Reserve the top row of the result region for a tab-bar strip
@@ -197,7 +202,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				_ = g.driver.DeleteView(ResultTabBarViewName)
 			}
 
-			activeTabView := g.resultTabsH.LayoutPaint(g.driver, d.X0, contentY0, d.X1, d.Y1)
+			activeTabView = g.resultTabsH.LayoutPaint(g.driver, d.X0, contentY0, d.X1, d.Y1)
 			// Attach the RESULT_GRID master editor to the active tab's
 			// view every frame so RESULT_GRID-scoped chords (gt/gT, /, n,
 			// G, ]p, [p, <leader>X, <leader>=, <leader>x, <leader>s,
@@ -230,7 +235,7 @@ func (g *Gui) RunLayout(w, h int) error {
 	focusedName := ""
 	if g.tree != nil {
 		if top := g.tree.Current(); top != nil {
-			focusedName = top.GetViewName()
+			focusedName = resolveFocusedRailName(top.GetViewName(), activeTabView)
 		}
 	}
 	applyFocusFrameColors(rails, focusedName, frameAttr(theme.Current().ActiveBorder), frameAttr(theme.Current().InactiveBorder))
@@ -765,6 +770,22 @@ func commandLineRect(dims map[string]ui.Dimensions) rect {
 // Frame=false (e.g. COMMAND_LINE) and nil entries are skipped. Caller
 // is responsible for excluding popup-Kind views from the input map —
 // only top-level rails belong in here.
+// resolveFocusedRailName returns the rail view name that should receive
+// the ActiveBorder. Normally that is the focus-stack top's view name
+// (stackViewName). The result pane is the exception: it multiplexes
+// several result_tab_<slot> views behind a single focus-stack context
+// captured when focus was pushed to results. gt/gT (Cycle) swap the live
+// active tab without updating the stack, so the stack name goes stale.
+// Whenever the stack points at any result tab we follow the live active
+// tab view (activeTabView) instead, so the highlight tracks the visible
+// tab rather than the one that was active at push time. dbsavvy-66p.
+func resolveFocusedRailName(stackViewName, activeTabView string) string {
+	if activeTabView != "" && strings.HasPrefix(stackViewName, types.ResultTabViewPrefix) {
+		return activeTabView
+	}
+	return stackViewName
+}
+
 func applyFocusFrameColors(rails map[string]*gocui.View, focusedName string, active, inactive gocui.Attribute) {
 	for name, v := range rails {
 		if v == nil || !v.Frame {
