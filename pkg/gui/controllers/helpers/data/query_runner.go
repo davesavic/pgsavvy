@@ -229,6 +229,18 @@ func (r *QueryRunner) MarkDisconnected() bool {
 	return true
 }
 
+// ClearDisconnected resets the connection-dead flag on the underlying
+// session. Called by ReconnectController after a successful Ping or
+// reconnect proves the wire is alive again. No-op when no session is
+// wired. hq5.7.
+func (r *QueryRunner) ClearDisconnected() {
+	b := r.load()
+	if b == nil || b.sess == nil {
+		return
+	}
+	b.sess.SetDisconnected(false)
+}
+
 // IsDisconnected reports whether the underlying session has been marked
 // connection-dead. Returns false when no session is wired. hq5.6.
 func (r *QueryRunner) IsDisconnected() bool {

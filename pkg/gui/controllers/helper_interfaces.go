@@ -266,6 +266,19 @@ type NoticeReporter interface {
 	Finish(runID string)
 }
 
+// ReconnectInvoker is the narrow surface the ReconnectController calls
+// to probe the wire and re-establish a connection. PingConnection issues
+// a lightweight round-trip against the driver's connection pool (no session
+// traffic). Reconnect tears down the current connection (schema-rail +
+// query session) and re-opens with the same profile, refreshing the schema
+// rail on success. The orchestrator wires a closure that routes through
+// connectInvoker.Connect and ConnectHelper.Disconnect/Connection.Ping.
+// hq5.7.
+type ReconnectInvoker interface {
+	PingConnection(ctx context.Context) error
+	Reconnect(ctx context.Context, profile *models.Connection) error
+}
+
 // Compile-time sanity check: data.ErrNeedsConfirmation must remain an
 // exported sentinel; this assertion fails to compile if the helper
 // package renames or unexports it.

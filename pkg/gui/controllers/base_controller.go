@@ -66,6 +66,18 @@ type NavDeps struct {
 	// profile change takes effect on the next U keystroke.
 	HiddenPatterns func() (builtin []string, profile []string)
 
+	// Reconnector owns the Ping + Disconnect/Reconnect surface the
+	// ReconnectController calls when the session is disconnected. Wired
+	// by the orchestrator to a concrete adapter over ConnectHelper +
+	// connectInvoker. Nil-safe: the controller no-ops when unwired.
+	// hq5.7.
+	Reconnector ReconnectInvoker
+
+	// OnPickConnection pushes the CONNECTIONS context onto the focus
+	// stack so the user can choose a different profile. Wired by the
+	// orchestrator via tree.Push(registry.Connections). hq5.7.
+	OnPickConnection func() error
+
 	// OnSchemaActivate fires when <CR> is pressed in the SCHEMAS rail.
 	// The orchestrator wires this to a closure that reloads the TABLES
 	// rail for the supplied schema name on a worker goroutine

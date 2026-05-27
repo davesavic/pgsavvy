@@ -431,6 +431,12 @@ const (
 	// popup in QUERY_EDITOR insert mode (`<c-space>` default).
 	EditorCompletionTrigger = "editor.completion.trigger"
 
+	// Reconnect — owned by ReconnectController (hq5.7). <leader>R in
+	// GLOBAL scope triggers a Ping → reconnect dialog when the session
+	// is disconnected. (QUERY_EDITOR uses <leader>R for QueryRunAll, so
+	// this binding is GLOBAL-only and masked by the editor scope.)
+	Reconnect = "app.reconnect"
+
 	// Transaction family — owned by TxController (hq5.3). Default bindings:
 	// <leader>tb, <leader>tc, <leader>tr, <leader>ts, <leader>tR, <leader>to.
 	TxBegin               = "tx.begin"
@@ -652,6 +658,7 @@ func AllActionIDs() []string {
 		ResultJumpBack,
 		ResultJumpForward,
 		EditorCompletionTrigger,
+		Reconnect,
 		TxBegin,
 		TxCommit,
 		TxRollback,

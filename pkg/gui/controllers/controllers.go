@@ -46,6 +46,10 @@ type Controllers struct {
 	ConflictDialog  *ConflictDialogController
 	FKReversePicker *FKReversePickerController
 
+	// Reconnect owns the <leader>R GLOBAL binding and the reconnect
+	// dialog (hq5.7).
+	Reconnect *ReconnectController
+
 	// Cheatsheet is constructed by the orchestrator (it needs a Pop-
 	// capable focus-stack handle outside this package). dbsavvy-bwq.Z1
 	// promoted the help popup to TabbedPopup; the controller owns the
@@ -97,6 +101,7 @@ func AttachControllers(
 	selection := NewSelectionController(c, helpers.CoreDeps, helpers.UIDeps)
 	confirmation := NewConfirmationController(c, helpers.CoreDeps, helpers.UIDeps)
 	quit := NewQuitController(c, helpers.CoreDeps, helpers.UIDeps, helpers.QueryDeps, helpers.EditDeps)
+	reconnect := NewReconnectController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps, helpers.ThreadingDeps, helpers.EditDeps)
 	queryEditor := NewQueryEditorController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps)
 	tx := NewTxController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps)
 
@@ -179,6 +184,7 @@ func AttachControllers(
 		Selection:    selection,
 		Confirmation: confirmation,
 		Quit:         quit,
+		Reconnect:    reconnect,
 		QueryEditor:  queryEditor,
 		Tx:           tx,
 		ResultTabs:   resultTabs,
@@ -205,6 +211,7 @@ func AttachControllers(
 		"Selection":    &tree.Selection.BaseContext,
 		"Confirmation": &tree.Confirmation.BaseContext,
 		"Quit":         &tree.Global.BaseContext,
+		"Reconnect":    &tree.Global.BaseContext,
 		"QueryEditor":  tree.QueryEditor,
 		"Tx":           tree.QueryEditor,
 		"ResultTabs":   tree.ResultGrid,
@@ -300,6 +307,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "Selection", ctrl: b.Selection, attach: true},
 		{name: "Confirmation", ctrl: b.Confirmation, attach: true},
 		{name: "Quit", ctrl: b.Quit, attach: true},
+		{name: "Reconnect", ctrl: b.Reconnect, attach: true},
 		{name: "QueryEditor", ctrl: b.QueryEditor, attach: true},
 		{name: "Tx", ctrl: b.Tx, attach: true},
 		{name: "ResultTabs", ctrl: b.ResultTabs, attach: true},

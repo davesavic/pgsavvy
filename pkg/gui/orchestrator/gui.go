@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -803,15 +804,27 @@ func (g *Gui) wireWithDriver() error {
 	nav.ConnectionForm = &connectionFormInvoker{g: g, helper: g.formHelper, prompter: newChainedPrompterAdapter(g.promptHelp, g.choiceHelp, g.OnUIThread)}
 	nav.Refresh = g.refreshHelper
 	nav.HiddenPatterns = defaultHiddenPatterns
+	// hq5.7: reconnect invoker + pick-connection callback.
+	reconnInv := &reconnectInvoker{helper: g.connectHelper, inv: connectInv}
+	nav.Reconnector = reconnInv
+	nav.OnPickConnection = func() error {
+		if g.tree == nil || g.registry == nil || g.registry.Connections == nil {
+			return nil
+		}
+		return g.tree.Push(g.registry.Connections)
+	}
 	// <CR> on a schema row reloads the TABLES rail via a worker
-	// (dbsavvy-04n). The handler runs on the gocui MainLoop; the
-	// driver call must hop to the worker queue so MainLoop is not
-	// blocked by a slow ListTables. NOTE: populateTablesRail's
-	// SetItems write is NOT goroutine-safe against MainLoop render
-	// reads (SideListContext.SetItems is a plain mutex-free write);
-	// this OnSchemaActivate path predates the dbsavvy-fow.1 publish-
-	// phase split and shares the same hazard the connect path fixed.
+	// (dbsavvy-04n). When the session is disconnected the handler
+	// short-circuits into the reconnect dialog instead of attempting
+	// a ListTables call (hq5.7 ping-on-interaction).
 	nav.OnSchemaActivate = func(schema string) {
+		// hq5.7: if disconnected, trigger the reconnect flow instead.
+		if g.queryRunner != nil && g.queryRunner.IsDisconnected() {
+			if g.controllers != nil && g.controllers.Reconnect != nil {
+				_ = g.controllers.Reconnect.Reconnect(commands.ExecCtx{})
+			}
+			return
+		}
 		g.OnWorker(func(_ gocui.Task) error {
 			connectInv.populateTablesRail(context.Background(), schema)
 
@@ -1369,6 +1382,162 @@ func (g *Gui) wireWithDriver() error {
 	_ = g.exRegistry.Register(keys.ExCommand{Name: "quit", Description: "Quit", Handler: quitExHandler})
 	_ = g.exRegistry.Register(keys.ExCommand{Name: "q!", Description: "Force quit", Handler: forceQuitHandler})
 	_ = g.exRegistry.Register(keys.ExCommand{Name: "w", Description: "Open commit dialog", Handler: writeExHandler})
+
+	// :set / :reset — execute SET/RESET on the live SQL session,
+	// update SettingsSnapshot, persist to AppState.LastSessionSettings,
+	// and (for search_path) refresh the schema rail. Unrecognised
+	// settings pass through to normal SQL execution. hq5.8.
+	//
+	// Recognised settings whose successful SET updates the snapshot:
+	//   search_path, role, time zone / timezone, application_name.
+	recognisedSettings := map[string]bool{
+		"search_path":      true,
+		"role":             true,
+		"time":             true, // SET TIME ZONE — "time" is args[0], "zone" is args[1]
+		"timezone":         true,
+		"application_name": true,
+	}
+
+	setExHandler := func(args []string, _ commands.ExecCtx) error {
+		if len(args) == 0 {
+			toaster("SET requires a setting name")
+			return nil
+		}
+		sess := g.activeSQLSession
+		if sess == nil {
+			toaster("no active session")
+			return nil
+		}
+
+		// Reconstruct the full SQL from the tokens. The ex-line
+		// already split on whitespace so we rejoin.
+		fullSQL := "SET " + strings.Join(args, " ")
+
+		// Determine the canonical setting key and the value portion.
+		settingKey := strings.ToLower(args[0])
+		var settingValue string
+
+		// Handle "SET TIME ZONE ..." — two-word setting name.
+		if settingKey == "time" && len(args) >= 2 && strings.EqualFold(args[1], "zone") {
+			settingKey = "timezone"
+			// Value is everything after "TIME ZONE" (skip the TO/= if present).
+			valStart := 2
+			if len(args) > 3 && (strings.EqualFold(args[2], "to") || args[2] == "=") {
+				valStart = 3
+			}
+			if valStart < len(args) {
+				settingValue = strings.Join(args[valStart:], " ")
+			}
+		} else if len(args) >= 2 {
+			// Normal form: SET <key> TO <value> or SET <key> = <value>.
+			valStart := 1
+			if len(args) > 2 && (strings.EqualFold(args[1], "to") || args[1] == "=") {
+				valStart = 2
+			}
+			settingValue = strings.Join(args[valStart:], " ")
+		}
+
+		isRecognised := recognisedSettings[settingKey]
+
+		// AD-7: execute on worker, never block UI thread.
+		g.OnWorker(func(_ gocui.Task) error {
+			_, err := sess.Execute(context.Background(), models.Query{SQL: fullSQL})
+			if err != nil {
+				toaster(fmt.Sprintf("SET failed: %s", err))
+				return nil
+			}
+
+			if isRecognised {
+				sess.SettingsSnapshot().Set(settingKey, settingValue)
+
+				connID := g.activeConnID
+				if connID != "" && g.deps.Store != nil {
+					g.deps.Store.MutateAndSave(func(a *common.AppState) {
+						if a.LastSessionSettings == nil {
+							a.LastSessionSettings = make(map[string]map[string]string)
+						}
+						if a.LastSessionSettings[connID] == nil {
+							a.LastSessionSettings[connID] = make(map[string]string)
+						}
+						a.LastSessionSettings[connID][settingKey] = settingValue
+					})
+				}
+
+				// search_path change: refresh the schema rail.
+				// Already on a worker goroutine — call directly.
+				if settingKey == "search_path" && g.refreshHelper != nil {
+					_ = g.refreshHelper.RefreshSchemas(context.Background())
+				}
+			}
+
+			toaster(fmt.Sprintf("OK: %s", fullSQL))
+			return nil
+		})
+		return nil
+	}
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "set", Description: "Execute SET on session", Handler: setExHandler})
+
+	resetExHandler := func(args []string, _ commands.ExecCtx) error {
+		if len(args) == 0 {
+			toaster("RESET requires a setting name")
+			return nil
+		}
+		sess := g.activeSQLSession
+		if sess == nil {
+			toaster("no active session")
+			return nil
+		}
+
+		fullSQL := "RESET " + strings.Join(args, " ")
+		settingKey := strings.ToLower(args[0])
+
+		g.OnWorker(func(_ gocui.Task) error {
+			_, err := sess.Execute(context.Background(), models.Query{SQL: fullSQL})
+			if err != nil {
+				toaster(fmt.Sprintf("RESET failed: %s", err))
+				return nil
+			}
+
+			// Delete the key from the snapshot so it reverts to the
+			// server default.
+			if recognisedSettings[settingKey] {
+				sess.SettingsSnapshot().Delete(settingKey)
+
+				connID := g.activeConnID
+				if connID != "" && g.deps.Store != nil {
+					g.deps.Store.MutateAndSave(func(a *common.AppState) {
+						if a.LastSessionSettings == nil {
+							return
+						}
+						inner := a.LastSessionSettings[connID]
+						if inner == nil {
+							return
+						}
+						delete(inner, settingKey)
+					})
+				}
+
+				if (settingKey == "role" || settingKey == "search_path") && g.refreshHelper != nil {
+					_ = g.refreshHelper.RefreshSchemas(context.Background())
+				}
+			}
+
+			toaster(fmt.Sprintf("OK: %s", fullSQL))
+			return nil
+		})
+		return nil
+	}
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "reset", Description: "Execute RESET on session", Handler: resetExHandler})
+
+	// :c — reject cross-database attach (not supported). hq5.8.
+	_ = g.exRegistry.Register(keys.ExCommand{
+		Name:        "c",
+		Description: "Cross-database attach (not supported)",
+		Handler: func(_ []string, _ commands.ExecCtx) error {
+			toaster("cross-database attach not supported — create a separate connection profile")
+			return nil
+		},
+	})
 
 	// Master Editor on editable views (today only COMMAND_LINE) +
 	// per-key SetKeybinding shims on every non-editable view.

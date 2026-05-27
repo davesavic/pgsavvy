@@ -102,6 +102,34 @@ func TestExRegistry_ListIsSorted(t *testing.T) {
 	}
 }
 
+// Case-insensitive: registering "set" matches Get("SET"), Get("Set"), etc.
+func TestExRegistry_CaseInsensitive(t *testing.T) {
+	r := NewExRegistry()
+	if err := r.Register(ExCommand{Name: "set", Handler: noopExHandler}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	for _, name := range []string{"set", "SET", "Set", "sEt"} {
+		if _, ok := r.Get(name); !ok {
+			t.Errorf("Get(%q) = not found, want found", name)
+		}
+		if !r.Has(name) {
+			t.Errorf("Has(%q) = false, want true", name)
+		}
+	}
+}
+
+// Registering the same name in different cases is a duplicate.
+func TestExRegistry_CaseInsensitiveDuplicate(t *testing.T) {
+	r := NewExRegistry()
+	if err := r.Register(ExCommand{Name: "set", Handler: noopExHandler}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	err := r.Register(ExCommand{Name: "SET", Handler: noopExHandler})
+	if !errors.Is(err, ErrDuplicateExCommand) {
+		t.Fatalf("duplicate Register err = %v, want errors.Is(ErrDuplicateExCommand)", err)
+	}
+}
+
 // Concurrent Register + Get under -race: a short burst is enough; this
 // exercises the RWMutex without flake risk.
 func TestExRegistry_Concurrent(t *testing.T) {

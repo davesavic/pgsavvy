@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
@@ -52,9 +53,11 @@ type ExRegistry struct {
 // NewExRegistry constructs an empty ExRegistry.
 func NewExRegistry() *ExRegistry { return &ExRegistry{m: map[string]ExCommand{}} }
 
-// Register adds cmd to the registry. Returns ErrInvalidExCommandName on
-// empty name, ErrNilExCommandHandler on nil handler, or
-// ErrDuplicateExCommand (wrapped) if the name is already taken.
+// Register adds cmd to the registry. Names are stored in lowercase so
+// dispatch is case-insensitive (`:SET` and `:set` match the same
+// handler). Returns ErrInvalidExCommandName on empty name,
+// ErrNilExCommandHandler on nil handler, or ErrDuplicateExCommand
+// (wrapped) if the normalised name is already taken.
 func (r *ExRegistry) Register(cmd ExCommand) error {
 	if cmd.Name == "" {
 		return ErrInvalidExCommandName
@@ -62,20 +65,22 @@ func (r *ExRegistry) Register(cmd ExCommand) error {
 	if cmd.Handler == nil {
 		return ErrNilExCommandHandler
 	}
+	key := strings.ToLower(cmd.Name)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, exists := r.m[cmd.Name]; exists {
+	if _, exists := r.m[key]; exists {
 		return fmt.Errorf("%w: %q", ErrDuplicateExCommand, cmd.Name)
 	}
-	r.m[cmd.Name] = cmd
+	r.m[key] = cmd
 	return nil
 }
 
 // Get returns the ExCommand registered for name, or (zero, false).
+// Lookup is case-insensitive.
 func (r *ExRegistry) Get(name string) (ExCommand, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	c, ok := r.m[name]
+	c, ok := r.m[strings.ToLower(name)]
 	return c, ok
 }
 

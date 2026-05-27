@@ -193,6 +193,9 @@ type ActionTranslations struct {
 	UnhideSchema     string
 	ToggleShowHidden string
 
+	// Reconnect (hq5.7).
+	Reconnect string
+
 	// Global app commands.
 	QuitApp  string
 	ShowMenu string
@@ -371,6 +374,8 @@ func EnglishTranslationSet() *TranslationSet {
 			HideSchema:       "Hide Schema",
 			UnhideSchema:     "Unhide Schema",
 			ToggleShowHidden: "Toggle Show Hidden",
+
+			Reconnect: "Reconnect",
 
 			QuitApp:  "Quit",
 			ShowMenu: "Show Menu",

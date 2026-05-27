@@ -702,6 +702,51 @@ func (m *menuPushHelper) PopMenu() error {
 	return nil
 }
 
+// reconnectInvoker adapts ConnectHelper + connectInvoker into the
+// narrow ReconnectInvoker surface the ReconnectController consumes
+// (hq5.7). PingConnection issues a lightweight pool-level round-trip;
+// Reconnect tears down both sessions (schema-rail + query) and
+// re-opens with the same profile via the full connectInvoker.Connect
+// pathway (which wires the QueryRunner, reloads schemas, etc.).
+type reconnectInvoker struct {
+	helper *data.ConnectHelper
+	inv    *connectInvoker
+}
+
+// PingConnection issues a pool-level Ping against the live
+// drivers.Connection. Returns an error when the helper is not connected
+// or the Ping fails.
+func (r *reconnectInvoker) PingConnection(ctx context.Context) error {
+	if r.helper == nil {
+		return fmt.Errorf("reconnect: no connect helper")
+	}
+	conn := r.helper.Connection()
+	if conn == nil {
+		return fmt.Errorf("reconnect: not connected")
+	}
+	return conn.Ping(ctx)
+}
+
+// Reconnect tears down the current connection and re-opens with the
+// supplied profile. The full connectInvoker.Connect path wires the
+// QueryRunner, loads schemas, and pushes focus.
+func (r *reconnectInvoker) Reconnect(ctx context.Context, profile *models.Connection) error {
+	if r.helper == nil || r.inv == nil {
+		return fmt.Errorf("reconnect: not wired")
+	}
+	// Tear down the schema-rail session.
+	r.helper.Disconnect()
+	// Tear down the query session (SQLSession). The runner's Bind/Unbind
+	// is handled inside connectInvoker.Connect's publishQueryRuntime path;
+	// calling Disconnect first clears the ConnectHelper's state so Connect
+	// can proceed without "already connected".
+	if r.inv.g != nil && r.inv.g.activeSQLSession != nil {
+		_ = r.inv.g.activeSQLSession.Close()
+		r.inv.g.activeSQLSession = nil
+	}
+	return r.inv.Connect(ctx, profile)
+}
+
 // Compile-time assertions: all adapters satisfy their target interfaces.
 var (
 	_ controllers.ConnectionPicker      = connectionsPickerAdapter{}
@@ -711,4 +756,5 @@ var (
 	_ controllers.ConnectInvoker        = (*connectInvoker)(nil)
 	_ controllers.ConnectionFormInvoker = (*connectionFormInvoker)(nil)
 	_ controllers.MenuPushHelper        = (*menuPushHelper)(nil)
+	_ controllers.ReconnectInvoker      = (*reconnectInvoker)(nil)
 )
