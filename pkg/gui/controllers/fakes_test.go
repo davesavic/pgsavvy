@@ -247,25 +247,33 @@ func newBag() *bag {
 		Logger:       &recordingLogger{},
 	}
 	b.HelperBag = controllers.HelperBag{
-		Logger:           b.Logger,
-		Connect:          b.Connect,
-		SchemasHelper:    b.Schemas,
-		ConnectionForm:   b.ConnForm,
-		Confirm:          b.Confirm,
-		Toast:            b.Toast,
-		Tip:              b.Tip,
-		TableDouble:      b.TableDouble,
-		Menu:             b.Menu,
-		Connections:      b.ConnPicker,
-		Schemas:          b.SchemaPicker,
-		Tables:           b.TablePicker,
-		ActiveConnection: b.Active,
-		HiddenPatterns:   func() ([]string, []string) { return []string{"pg_*"}, []string{"audit"} },
-		OnWorker: func(fn func(gocui.Task) error) {
-			b.WorkerCalls++
-			if fn != nil {
-				_ = fn(nil)
-			}
+		CoreDeps: controllers.CoreDeps{
+			Logger: b.Logger,
+		},
+		NavDeps: controllers.NavDeps{
+			Connect:          b.Connect,
+			SchemasHelper:    b.Schemas,
+			ConnectionForm:   b.ConnForm,
+			Connections:      b.ConnPicker,
+			Schemas:          b.SchemaPicker,
+			Tables:           b.TablePicker,
+			ActiveConnection: b.Active,
+			HiddenPatterns:   func() ([]string, []string) { return []string{"pg_*"}, []string{"audit"} },
+		},
+		UIDeps: controllers.UIDeps{
+			Confirm:     b.Confirm,
+			Toast:       b.Toast,
+			Tip:         b.Tip,
+			TableDouble: b.TableDouble,
+			Menu:        b.Menu,
+		},
+		ThreadingDeps: controllers.ThreadingDeps{
+			OnWorker: func(fn func(gocui.Task) error) {
+				b.WorkerCalls++
+				if fn != nil {
+					_ = fn(nil)
+				}
+			},
 		},
 	}
 	return b

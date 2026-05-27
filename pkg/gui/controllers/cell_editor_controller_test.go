@@ -433,7 +433,7 @@ func TestCellEditorControllerDiscardDirtyCellRemovesAndToasts(t *testing.T) {
 		},
 	}
 	toast := &fakeToast{}
-	helpers := controllers.HelperBag{Toast: toast}
+	helpers := controllers.HelperBag{UIDeps: controllers.UIDeps{Toast: toast}}
 	ctrl := controllers.NewCellEditorController(nil, helpers, ctx, tree, picker, store)
 
 	if err := ctrl.Enter(commands.ExecCtx{}); err != nil {

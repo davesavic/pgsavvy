@@ -59,7 +59,7 @@ func (f *fakeChoiceHelper) SetCursor(i int) { // mirrors ui.ChoiceHelper.SetCurs
 // newSelectionBag returns a HelperBag wired with a fakeChoiceHelper.
 func newSelectionBag() (*fakeChoiceHelper, controllers.HelperBag) {
 	h := &fakeChoiceHelper{}
-	return h, controllers.HelperBag{Choice: h}
+	return h, controllers.HelperBag{UIDeps: controllers.UIDeps{Choice: h}}
 }
 
 func TestSelectionControllerHasRequiredBindings(t *testing.T) {

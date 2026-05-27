@@ -17,15 +17,37 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// HelperBag is the dependency bundle every controller receives. It
-// carries the concrete data helpers (real types from T4/T5/T6) and the
-// interface-typed UI helpers (concrete types land in T7b). All fields
-// are optional at construction time so unit tests can leave the ones
-// they do not exercise as nil; the controller code nil-checks on use.
-type HelperBag struct {
+// CoreDeps carries the two deps every controller needs: the GuiDriver
+// and the DebugLogger. Both are load-bearing and guaranteed non-nil —
+// see NewCoreDeps, which fails fast (panics) on a nil argument. Because
+// production wiring constructs CoreDeps via NewCoreDeps, controllers may
+// treat Driver/Logger as always present.
+type CoreDeps struct {
 	Driver types.GuiDriver
 	Logger DebugLogger
+}
 
+// NewCoreDeps constructs the fail-fast core dependency bundle. It PANICS
+// if driver or logger is nil: a wiring site that fails to supply either
+// is a programmer error that must surface at construction, not as a
+// silently dead keybinding at dispatch (dbsavvy-fow.10 D2, Option C).
+func NewCoreDeps(driver types.GuiDriver, logger DebugLogger) CoreDeps {
+	if driver == nil {
+		panic("controllers.NewCoreDeps: nil driver")
+	}
+	if logger == nil {
+		panic("controllers.NewCoreDeps: nil logger")
+	}
+	return CoreDeps{Driver: driver, Logger: logger}
+}
+
+// NavDeps carries the schema/object-navigation collaborators: the rail
+// pickers, the active-connection accessor, the connect/schemas/form data
+// helpers, the refresh helper, and the rail-activation closures. Connect
+// is a required constructor parameter (load-bearing — connections cannot
+// open without it); the remaining fields are optional and nil-safe, set
+// directly on the returned struct.
+type NavDeps struct {
 	// Pickers expose context cursor state.
 	Connections      ConnectionPicker
 	Schemas          SchemaPicker
@@ -37,31 +59,7 @@ type HelperBag struct {
 	SchemasHelper  SchemasInvoker
 	ConnectionForm ConnectionFormInvoker
 
-	// UI helpers (interfaces; T7b's concrete types satisfy these).
-	Confirm     ConfirmHelper
-	Prompt      PromptHelper
-	Choice      ChoiceHelper
-	Toast       ToastHelper
-	Refresh     RefreshHelper
-	Tip         TipHelper
-	TableDouble TablesDoubleClickHelper
-	Menu        MenuPushHelper
-
-	// Query-editor collaborators (dbsavvy-66p.11). QueryRunner is the
-	// data-helper that orchestrates SQLSession.Stream / Explain on
-	// behalf of the controller; ResultTabs is the narrow surface used
-	// to hand the launched RunHandle to the multi-tab pane (concrete
-	// impl in 66p.12); EditorBuffer reports the buffer + cursor offset
-	// the controller needs to extract a statement. All three are nil-
-	// safe; the controller no-ops when any is unwired.
-	QueryRunner  *data.QueryRunner
-	ResultTabs   ResultTabsHelper
-	EditorBuffer EditorBufferReader
-
-	// Notice routes server NOTICE/WARNING messages from streaming
-	// queries to the messages panel and a first-of-run toast
-	// (dbsavvy-66p.13). Nil-safe: the controller no-ops when unwired.
-	Notice NoticeReporter
+	Refresh RefreshHelper
 
 	// HiddenPatterns supplies the (builtin, profile) glob lists for
 	// SchemasInvoker.UnhideSchema. Resolved per-call so a hot-reloaded
@@ -81,13 +79,55 @@ type HelperBag struct {
 	// take focus (dbsavvy-gj8). Nil-safe: TablesController no-ops when
 	// unwired.
 	OnTableActivate func(table *models.Table) error
+}
 
-	// KbRuntime is the aggregate that bundles every keybinding-system
-	// collaborator (commands.Registry, Matcher, ModeStore, WhichKey,
-	// ExRegistry). Controllers use it to register action handlers via
-	// RegisterActions and to reach the Matcher when needed. Nil during
-	// unit tests that do not exercise dispatch.
-	KbRuntime *keys.Runtime
+// NewNavDeps constructs the navigation bundle. Connect is a required
+// parameter so a wiring site that forgets it is a compile error; nil is
+// still a legal value, so unit tests pass nil explicitly. The optional
+// pickers and closures are set on the returned struct by the caller.
+func NewNavDeps(connect ConnectInvoker) NavDeps {
+	return NavDeps{Connect: connect}
+}
+
+// UIDeps carries the interface-typed UI helpers (confirm/prompt/choice/
+// toast popups, tips, the menu push surface, and the table double-click
+// handler). Confirm and Toast are required constructor parameters
+// (load-bearing — destructive flows gate on Confirm, and connect/edit
+// feedback rides Toast); the rest are optional and nil-safe.
+type UIDeps struct {
+	Confirm     ConfirmHelper
+	Prompt      PromptHelper
+	Choice      ChoiceHelper
+	Toast       ToastHelper
+	Tip         TipHelper
+	TableDouble TablesDoubleClickHelper
+	Menu        MenuPushHelper
+}
+
+// NewUIDeps constructs the UI bundle. Confirm and Toast are required
+// parameters (compile error if a wiring site omits them); nil stays a
+// legal value, so unit tests pass nil explicitly. The remaining fields
+// are set on the returned struct.
+func NewUIDeps(confirm ConfirmHelper, toast ToastHelper) UIDeps {
+	return UIDeps{Confirm: confirm, Toast: toast}
+}
+
+// QueryDeps carries the query-editor + result-pane collaborators
+// (dbsavvy-66p.11). QueryRunner orchestrates SQLSession.Stream / Explain;
+// ResultTabs hands the launched RunHandle to the multi-tab pane;
+// EditorBuffer reports the buffer + cursor offset; Notice routes server
+// NOTICE/WARNING messages; ActivePlanContextFn resolves the focused plan
+// tab; KbRuntime bundles the keybinding-system collaborators. All are
+// optional and nil-safe — the controller no-ops when any is unwired.
+type QueryDeps struct {
+	QueryRunner  *data.QueryRunner
+	ResultTabs   ResultTabsHelper
+	EditorBuffer EditorBufferReader
+
+	// Notice routes server NOTICE/WARNING messages from streaming
+	// queries to the messages panel and a first-of-run toast
+	// (dbsavvy-66p.13). Nil-safe: the controller no-ops when unwired.
+	Notice NoticeReporter
 
 	// ActivePlanContextFn resolves the currently-active plan tab's
 	// *context.PlanContext (or nil when no plan tab is focused). Wired
@@ -97,27 +137,54 @@ type HelperBag struct {
 	// dbsavvy-uv0.8.
 	ActivePlanContextFn PlanContextResolver
 
-	// Threading helpers (DESIGN.md §17). Controllers call these to
-	// schedule UI-thread work and to spawn background workers without
-	// importing the orchestrator (which would close the import cycle:
-	// orchestrator imports controllers). In production wiring all three
-	// closures delegate to *orchestrator.Gui's methods of the same name;
-	// nil-safe so unit tests that do not exercise async paths can leave
-	// them unset.
+	// KbRuntime is the aggregate that bundles every keybinding-system
+	// collaborator (commands.Registry, Matcher, ModeStore, WhichKey,
+	// ExRegistry). Controllers use it to register action handlers via
+	// RegisterActions and to reach the Matcher when needed. Nil during
+	// unit tests that do not exercise dispatch.
+	KbRuntime *keys.Runtime
+}
+
+// ThreadingDeps carries the UI-thread / worker scheduling closures
+// (DESIGN.md §17). Controllers call these to schedule UI-thread work and
+// to spawn background workers without importing the orchestrator (which
+// would close the import cycle: orchestrator imports controllers). In
+// production wiring all three closures delegate to *orchestrator.Gui's
+// methods of the same name. All three are required constructor
+// parameters so a wiring site that forgets one is a compile error; nil
+// stays a legal value, so unit tests that do not exercise async paths
+// pass nil explicitly.
+type ThreadingDeps struct {
 	OnUIThread            func(fn func() error)
 	OnUIThreadContentOnly func(fn func() error)
 	OnWorker              func(fn func(gocui.Task) error)
+}
 
-	// Inline-edit collaborators (epic dbsavvy-bwq). PendingDiscard drives
-	// the `<leader>cu` / `<leader>cU` discard flows + table-switch guard.
-	// JumpList records originating-cell entries for `<c-o>` / `<c-i>` jump
-	// navigation (consumed by both FK forward and FK reverse). FKForward
-	// owns the `gd` forward FK navigation. PendingEditSet is the
-	// process-wide pending-edit collection — A4/A5 will switch to a
-	// per-(connID, baseTable) registry; today a single shared set keeps
-	// the wiring trivial. Z1 (dbsavvy-bwq.23) layers the keybindings +
-	// ExCommands on top of these. All four are nil-safe: controllers
-	// nil-check on dispatch.
+// NewThreadingDeps constructs the threading bundle. All three closures
+// are required parameters (compile error if a wiring site omits one);
+// nil stays a legal value, so unit tests pass nil explicitly.
+func NewThreadingDeps(
+	onUIThread func(fn func() error),
+	onUIThreadContentOnly func(fn func() error),
+	onWorker func(fn func(gocui.Task) error),
+) ThreadingDeps {
+	return ThreadingDeps{
+		OnUIThread:            onUIThread,
+		OnUIThreadContentOnly: onUIThreadContentOnly,
+		OnWorker:              onWorker,
+	}
+}
+
+// EditDeps carries the inline-edit collaborators (epic dbsavvy-bwq).
+// PendingDiscard drives the `<leader>cu` / `<leader>cU` discard flows +
+// table-switch guard. JumpList records originating-cell entries for
+// `<c-o>` / `<c-i>` jump navigation. FKForward owns `gd` forward FK
+// navigation. PendingEditSet is the process-wide pending-edit
+// collection. OpenFKReversePicker / ReverseFKLookup / ActivePendingEditSet
+// / ActiveConnectionProfile resolve the gD reverse-FK + commit-dialog
+// paths. All fields are optional and nil-safe: controllers nil-check on
+// dispatch.
+type EditDeps struct {
 	PendingDiscard *helpers.PendingDiscardHelper
 	JumpList       *ui.ResultJumpList
 	FKForward      *helpers.FKForwardHelper
@@ -146,6 +213,24 @@ type HelperBag struct {
 	// needs the full profile (Color, ConfirmWrites, ReadOnly) to drive
 	// the dialog's gates + styling. dbsavvy-8oo stub #5.
 	ActiveConnectionProfile func() *models.Connection
+}
+
+// HelperBag is the dependency bundle every controller receives. It is the
+// composition of the role-specific bundles (CoreDeps, NavDeps, UIDeps,
+// QueryDeps, ThreadingDeps, EditDeps), embedded so each bundle's fields
+// promote to the bag for backwards-compatible `helpers.Field` access.
+// Production wiring constructs each bundle via its constructor so
+// load-bearing deps are compile-time-required parameters and CoreDeps
+// fails fast on nil (dbsavvy-fow.10 D2, Option C). Unit tests that do not
+// exercise a path leave the corresponding bundle zero-valued; the
+// controller code nil-checks on use for every optional field.
+type HelperBag struct {
+	CoreDeps
+	NavDeps
+	UIDeps
+	QueryDeps
+	ThreadingDeps
+	EditDeps
 }
 
 // FKReversePickerOpener is the narrow surface ResultTabsController uses

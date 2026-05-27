@@ -716,25 +716,66 @@ func (g *Gui) wireWithDriver() error {
 		return nil
 	})
 
-	helperBag := controllers.HelperBag{
-		Driver:           g.driver,
-		Logger:           g.deps.Common.Logger(),
-		Connections:      connectionsPickerAdapter{registry: g.registry.Connections},
-		Schemas:          schemasPickerAdapter{registry: g.registry.Schemas},
-		Tables:           tablePicker,
-		ActiveConnection: &activeConnAdapter{g: g},
-		Connect:          connectInv,
-		SchemasHelper:    g.schemasHelper,
-		ConnectionForm:   &connectionFormInvoker{g: g, helper: g.formHelper, prompter: newChainedPrompterAdapter(g.promptHelp, g.choiceHelp, g.OnUIThread)},
-		Confirm:          g.confirmHelp,
-		Prompt:           g.promptHelp,
-		Choice:           g.choiceHelp,
-		Toast:            g.toastHelp,
-		Refresh:          g.refreshHelper,
-		Tip:              g.tipHelp,
-		TableDouble:      g.tablesHelp,
-		Menu:             &menuPushHelper{tree: g.tree, menu: g.registry.Menu},
-		ResultTabs:       g.resultTabsH,
+	// CoreDeps — fail-fast: NewCoreDeps panics if driver or logger is
+	// nil. wireWithDriver has already rejected a nil driver above
+	// (gui.go: "nil driver"), and Common.Logger() never returns nil, so
+	// this constructor cannot panic in production wiring; it converts the
+	// "forgot to wire a core dep" programmer error into an immediate
+	// crash rather than a silently dead keybinding (dbsavvy-fow.10 D2).
+	core := controllers.NewCoreDeps(g.driver, g.deps.Common.Logger())
+
+	// NavDeps — Connect is the required (compile-time) parameter; the
+	// optional pickers/closures are set on the returned struct.
+	nav := controllers.NewNavDeps(connectInv)
+	nav.Connections = connectionsPickerAdapter{registry: g.registry.Connections}
+	nav.Schemas = schemasPickerAdapter{registry: g.registry.Schemas}
+	nav.Tables = tablePicker
+	nav.ActiveConnection = &activeConnAdapter{g: g}
+	nav.SchemasHelper = g.schemasHelper
+	nav.ConnectionForm = &connectionFormInvoker{g: g, helper: g.formHelper, prompter: newChainedPrompterAdapter(g.promptHelp, g.choiceHelp, g.OnUIThread)}
+	nav.Refresh = g.refreshHelper
+	nav.HiddenPatterns = defaultHiddenPatterns
+	// <CR> on a schema row reloads the TABLES rail via a worker
+	// (dbsavvy-04n). The handler runs on the gocui MainLoop; the
+	// driver call must hop to the worker queue so MainLoop is not
+	// blocked by a slow ListTables. NOTE: populateTablesRail's
+	// SetItems write is NOT goroutine-safe against MainLoop render
+	// reads (SideListContext.SetItems is a plain mutex-free write);
+	// this OnSchemaActivate path predates the dbsavvy-fow.1 publish-
+	// phase split and shares the same hazard the connect path fixed.
+	nav.OnSchemaActivate = func(schema string) {
+		g.OnWorker(func(_ gocui.Task) error {
+			connectInv.populateTablesRail(context.Background(), schema)
+
+			// Push the refreshed TABLES context onto the focus stack so the
+			// user lands there after picking a schema.
+			return connectInv.g.tree.Push(g.registry.Tables)
+		})
+	}
+	// <CR> on a table row loads the COLUMNS and INDEXES rails for
+	// the selected table on a single worker (dbsavvy-56u.1 AD-3 —
+	// one composite enqueue prevents double-focus-jumps and stale-
+	// load races between the two rails). Both rails are pushed
+	// atomically after Load completes; the focus push targets the
+	// COLUMNS rail, matching the pre-56u.1 behaviour.
+	nav.OnTableActivate = g.buildOnTableActivate(connectInv)
+
+	// UIDeps — Confirm and Toast are the required (compile-time)
+	// parameters; the remaining popups are set on the returned struct.
+	uiDeps := controllers.NewUIDeps(g.confirmHelp, g.toastHelp)
+	uiDeps.Prompt = g.promptHelp
+	uiDeps.Choice = g.choiceHelp
+	uiDeps.Tip = g.tipHelp
+	uiDeps.TableDouble = g.tablesHelp
+	uiDeps.Menu = &menuPushHelper{tree: g.tree, menu: g.registry.Menu}
+
+	// QueryDeps — all optional; set directly.
+	query := controllers.QueryDeps{
+		QueryRunner:  g.queryRunner,
+		ResultTabs:   g.resultTabsH,
+		EditorBuffer: newEditorBufferAdapter(g.registry.QueryEditor),
+		Notice:       g.noticeHelp,
+		KbRuntime:    runtime,
 		// PlanController dispatches against the active plan tab's
 		// PlanContext (dbsavvy-uv0.8). Closing over g.resultTabsH so
 		// ActivePlanContext stays in lockstep with whatever the user
@@ -746,51 +787,20 @@ func (g *Gui) wireWithDriver() error {
 			}
 			return g.resultTabsH.ActivePlanContext()
 		},
-		Notice:         g.noticeHelp,
-		QueryRunner:    g.queryRunner,
-		EditorBuffer:   newEditorBufferAdapter(g.registry.QueryEditor),
-		HiddenPatterns: defaultHiddenPatterns,
-		KbRuntime:      runtime,
-		// <CR> on a schema row reloads the TABLES rail via a worker
-		// (dbsavvy-04n). The handler runs on the gocui MainLoop; the
-		// driver call must hop to the worker queue so MainLoop is not
-		// blocked by a slow ListTables. NOTE: populateTablesRail's
-		// SetItems write is NOT goroutine-safe against MainLoop render
-		// reads (SideListContext.SetItems is a plain mutex-free write);
-		// this OnSchemaActivate path predates the dbsavvy-fow.1 publish-
-		// phase split and shares the same hazard the connect path fixed.
-		OnSchemaActivate: func(schema string) {
-			g.OnWorker(func(_ gocui.Task) error {
-				connectInv.populateTablesRail(context.Background(), schema)
+	}
 
-				// Push the refreshed TABLES context onto the focus stack so the
-				// user lands there after picking a schema.
-				return connectInv.g.tree.Push(g.registry.Tables)
-			})
-		},
+	// ThreadingDeps (DESIGN.md §17 / dbsavvy-66p.1) — all three closures
+	// are required (compile-time) parameters. Bound to the Gui's methods
+	// so controllers can schedule UI-thread work and spawn background
+	// workers without importing the orchestrator.
+	threading := controllers.NewThreadingDeps(g.OnUIThread, g.OnUIThreadContentOnly, g.OnWorker)
 
-		// <CR> on a table row loads the COLUMNS and INDEXES rails for
-		// the selected table on a single worker (dbsavvy-56u.1 AD-3 —
-		// one composite enqueue prevents double-focus-jumps and stale-
-		// load races between the two rails). Both rails are pushed
-		// atomically after Load completes; the focus push targets the
-		// COLUMNS rail, matching the pre-56u.1 behaviour.
-		OnTableActivate: g.buildOnTableActivate(connectInv),
-
-		// Threading helpers (DESIGN.md §17 / dbsavvy-66p.1). Bound to the
-		// Gui's methods so controllers can schedule UI-thread work and
-		// spawn background workers without importing the orchestrator.
-		OnUIThread:            g.OnUIThread,
-		OnUIThreadContentOnly: g.OnUIThreadContentOnly,
-		OnWorker:              g.OnWorker,
-
-		// Inline-edit helpers (dbsavvy-bwq.py4). Pinned here so future
-		// dispatcher wiring (bwq.23 / Z1) can reach them via the bag.
+	// EditDeps — inline-edit helpers (dbsavvy-bwq.py4). All optional.
+	edit := controllers.EditDeps{
 		PendingDiscard: g.pendingDiscardH,
 		JumpList:       g.jumpListH,
 		FKForward:      g.fkForwardH,
 		PendingEditSet: g.pendingEditSet,
-
 		// gD picker open — resolves through g.controllers at dispatch
 		// time so the closure works despite the controllers aggregate
 		// being filled in AttachControllers AFTER this HelperBag is
@@ -853,6 +863,15 @@ func (g *Gui) wireWithDriver() error {
 		ActiveConnectionProfile: func() *models.Connection {
 			return g.activeConnProfile
 		},
+	}
+
+	helperBag := controllers.HelperBag{
+		CoreDeps:      core,
+		NavDeps:       nav,
+		UIDeps:        uiDeps,
+		QueryDeps:     query,
+		ThreadingDeps: threading,
+		EditDeps:      edit,
 	}
 	g.controllers = controllers.AttachControllers(g.registry, g.deps.Common, helperBag)
 
@@ -1812,9 +1831,13 @@ func (g *Gui) HelperBagForTest() controllers.HelperBag {
 		qec = g.registry.QueryEditor
 	}
 	return controllers.HelperBag{
-		Connect:      &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history},
-		QueryRunner:  g.queryRunner,
-		EditorBuffer: newEditorBufferAdapter(qec),
+		NavDeps: controllers.NavDeps{
+			Connect: &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history},
+		},
+		QueryDeps: controllers.QueryDeps{
+			QueryRunner:  g.queryRunner,
+			EditorBuffer: newEditorBufferAdapter(qec),
+		},
 	}
 }
 

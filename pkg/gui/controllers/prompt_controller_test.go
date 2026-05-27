@@ -45,7 +45,7 @@ func (f *fakePromptHelper) SetResetHandler(fn func(initial string)) {
 // newPromptBag returns a HelperBag wired with a fakePromptHelper.
 func newPromptBag() (*fakePromptHelper, controllers.HelperBag) {
 	h := &fakePromptHelper{}
-	return h, controllers.HelperBag{Prompt: h}
+	return h, controllers.HelperBag{UIDeps: controllers.UIDeps{Prompt: h}}
 }
 
 // dispatch resolves the binding for action ID through reg and invokes
