@@ -35,7 +35,7 @@ func (p cellEditorPicker) IsStreaming() bool {
 		return false
 	}
 	switch tab.State() {
-	case ui.StateQueued, ui.StateRunning:
+	case ui.StateQueued, ui.StateRunning, ui.StateSorting:
 		return true
 	default:
 		return false

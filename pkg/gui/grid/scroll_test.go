@@ -351,3 +351,96 @@ func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
 		t.Errorf("clean row must not carry a dirty marker; line=%q", line1)
 	}
 }
+
+// projectedView builds a single text-column view with the given label
+// values in raw (insertion) order. Used by the projected-cursor navigation
+// regression tests, which drive a non-contiguous projection via an active
+// FILTER (dbsavvy-72k.6: the grid no longer reorders for sort).
+func projectedView(t *testing.T, labels ...string) *View {
+	t.Helper()
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{{Name: "name", TypeName: "text"}})
+	for _, l := range labels {
+		v.AppendRows([]models.Row{{Values: []any{l}}})
+	}
+	return v
+}
+
+// TestCursorNavigation_FollowsProjectedOrderUnderFilter is a regression test
+// for dbsavvy-dr6: with a filter active the cursor must walk the projected
+// (visible) row order, not the raw buffer order. The filter "^m" matches
+// only every other row, so the projected list has gaps: raw [match, skip,
+// match, skip, match] → projected raw indices [0, 2, 4]. JumpFirst/Last and
+// j/k must address those raw rows in projected order.
+func TestCursorNavigation_FollowsProjectedOrderUnderFilter(t *testing.T) {
+	// Raw order alternates match/no-match so the projection is non-contiguous.
+	v := projectedView(t, "match-0", "skip-1", "match-2", "skip-3", "match-4")
+	require.NoError(t, v.SetFilter("^match", false))
+	require.Equal(t, []int{0, 2, 4}, projectIndices(v), "precondition: projected order")
+
+	// JumpFirst lands on the first PROJECTED row (raw 0).
+	v.JumpFirst()
+	r, _ := v.CursorPosition()
+	require.Equal(t, 0, r, "JumpFirst must land on the first PROJECTED row")
+
+	// Down walks projected order: raw 0 -> 2 -> 4 (skipping filtered rows),
+	// then clamps.
+	v.MoveCursorDown()
+	r, _ = v.CursorPosition()
+	require.Equal(t, 2, r, "MoveCursorDown must skip the filtered-out raw row 1")
+	v.MoveCursorDown()
+	r, _ = v.CursorPosition()
+	require.Equal(t, 4, r, "MoveCursorDown must skip the filtered-out raw row 3")
+	v.MoveCursorDown() // clamp at projected tail
+	r, _ = v.CursorPosition()
+	require.Equal(t, 4, r, "MoveCursorDown must clamp at the last PROJECTED row")
+
+	// JumpLast lands on the last PROJECTED row (raw 4).
+	v.JumpLast()
+	r, _ = v.CursorPosition()
+	require.Equal(t, 4, r, "JumpLast must land on the last PROJECTED row")
+
+	// Up walks projected order backwards: raw 4 -> 2 -> 0, then clamps.
+	v.MoveCursorUp()
+	r, _ = v.CursorPosition()
+	require.Equal(t, 2, r)
+	v.MoveCursorUp()
+	r, _ = v.CursorPosition()
+	require.Equal(t, 0, r)
+	v.MoveCursorUp() // clamp at projected head
+	r, _ = v.CursorPosition()
+	require.Equal(t, 0, r, "MoveCursorUp must clamp at the first PROJECTED row")
+}
+
+// TestRender_VerticalScroll_FollowsCursorUnderFilter is the dbsavvy-dr6
+// viewport half: after JumpLast under an active filter that subsets the
+// buffer, the viewport must scroll so the cursor's row is on-screen. The
+// bug scrolled to the raw-index tail, leaving the cursor row off-screen.
+// Only every 10th row matches, so the projected tail is a row well before
+// the raw tail.
+func TestRender_VerticalScroll_FollowsCursorUnderFilter(t *testing.T) {
+	v := NewView()
+	v.SetColumns(makeSingleCol("c1", "text"))
+	rows := make([]models.Row, 100)
+	for i := range rows {
+		// Every 10th row matches the filter; the rest are non-matching.
+		if i%10 == 0 {
+			rows[i] = models.Row{Values: []any{"match-" + rowLabel(i)}}
+		} else {
+			rows[i] = models.Row{Values: []any{rowLabel(i)}}
+		}
+	}
+	v.AppendRows(rows)
+	require.NoError(t, v.SetFilter("^match", false))
+
+	v.JumpLast() // last PROJECTED row == raw 90 (the last matching row)
+	r, _ := v.CursorPosition()
+	require.Equal(t, 90, r, "JumpLast lands on the last matching raw row, not the raw tail")
+
+	target := newTallTestView("filterscroll", 10)
+	v.Render(target)
+	buf := target.Buffer()
+
+	require.Contains(t, buf, "match-"+rowLabel(r),
+		"cursor row must be on-screen after JumpLast under a filter")
+}

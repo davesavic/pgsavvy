@@ -31,6 +31,43 @@ func TestView_SetViewMode_RoundTrips(t *testing.T) {
 	require.Equal(t, ViewModeGrid, v.ViewMode())
 }
 
+// TestRenderExpanded_FollowsProjectedCursorUnderFilter is a regression test
+// for the dbsavvy-dr6 follow-up: in expanded mode the displayed record is
+// chosen from the cursor. dbsavvy-dr6 redefined cursorRow as a RAW-buffer
+// index that navigation steps in projected order, so expanded mode must
+// translate cursorRow through projectedPos rather than treating it as a
+// position into the projection. The grid no longer reorders for sort
+// (dbsavvy-72k.6); the projected≠raw condition is exercised via an active
+// FILTER that subsets the buffer: only every 10th row matches, so the
+// projected-first record is raw row 10 (not raw 0). JumpFirst must land the
+// cursor on that record, and expanded mode must show it.
+func TestRenderExpanded_FollowsProjectedCursorUnderFilter(t *testing.T) {
+	v := NewView()
+	v.SetColumns(makeSingleCol("c1", "text"))
+	rows := make([]models.Row, 100)
+	for i := range rows {
+		// Skip raw row 0 from matching so the projected-first row is NOT raw 0.
+		if i != 0 && i%10 == 0 {
+			rows[i] = models.Row{Values: []any{"match-" + rowLabel(i)}}
+		} else {
+			rows[i] = models.Row{Values: []any{rowLabel(i)}}
+		}
+	}
+	v.AppendRows(rows)
+	require.NoError(t, v.SetFilter("^match", false))
+	require.Equal(t, 10, projectIndices(v)[0], "precondition: projected-first record is raw row 10")
+	v.SetViewMode(ViewModeExpanded)
+
+	v.JumpFirst() // land on the projected-first matching record == raw 10
+
+	target := newTallTestView("expandfilter", 10)
+	v.Render(target)
+	buf := target.Buffer()
+
+	require.Contains(t, buf, "match-"+rowLabel(10),
+		"expanded mode must show the projected-first record after JumpFirst under a filter")
+}
+
 func TestRenderExpanded_RendersRecordWithGutterAndValue(t *testing.T) {
 	cols := []models.ColumnMeta{
 		{Name: "id", TypeName: "int4"},

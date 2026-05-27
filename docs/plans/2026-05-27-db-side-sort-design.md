@@ -50,15 +50,23 @@ ORDER BY <ordinal> ASC|DESC
 ```
 
 By **ordinal**, not name: with a join, two tables can expose the same column name
-(`users.id` / `posts.id` both shown as `id`); ordering by name is ambiguous or
-errors, while ordinal targets the exact displayed column. The subquery wrapper
-also makes joins, CTEs, and any pre-existing `ORDER BY` irrelevant. Clearing the
-sort (3rd cycle) re-runs `orig` unchanged.
+(`users.id` / `posts.id` both shown as `id`); ordering by *name* is ambiguous
+(`ORDER BY id` → PG 42P10 "ORDER BY \"id\" is ambiguous"), while an *ordinal*
+targets the exact displayed column with no name resolution. (Note: a derived
+table that merely *exposes* duplicate output names is NOT itself an error in
+Postgres — verified on PG17 that `SELECT * FROM (SELECT u.id, p.id …) x ORDER BY
+1` executes fine; the ambiguity only fires on a name *reference*. So no column
+aliasing is needed in the wrapper.) The subquery wrapper also makes joins, CTEs,
+and any pre-existing `ORDER BY` irrelevant. Clearing the sort (3rd cycle) re-runs
+`orig` unchanged.
 
 ### Sort action flow (shared by `<leader>s` picker and header double-click)
 
-1. Guard — tab must be a single result-returning statement (reuse
-   `query.DetectFromQuery`); else toast, no-op.
+1. Guard — the active tab must hold a result grid with ≥1 column
+   (`tab.Grid() != nil && grid.ColumnCount() >= 1`); else toast, no-op.
+   **Do NOT use `query.DetectFromQuery`** for this gate — it rejects
+   joins/aggregates/CTEs (the very results we must be able to sort).
+   `DetectFromQuery` is for editability/row-identity only.
 2. Guard — no unsaved staged edits; else toast
    "commit or discard edits before sorting" (re-run discards the buffer).
 3. Cycle dir for the chosen column (asc → desc → clear).
@@ -105,3 +113,30 @@ falling back). Delete `applySort`, `comparatorFor`, `compareInt/Float/Time/Strin
 - Unit: grid `project()` no longer reorders; display indicator still renders.
 - Integration (live PG): join query, sort by ordinal, assert order matches the DB.
 - tmux: original repro — sort id↑ ⇒ id=1 at top.
+
+## Amendments (review-plan, 2026-05-27 — bd epic dbsavvy-72k)
+
+A `/review-plan` pass (5 critics + live PG17 checks) found blockers in the
+re-run mechanism; the following supersede the body above where they conflict:
+
+- **Re-run via `QueryRunner.RunQuery`, not a hand-rolled `Stream`+`startStreaming`.**
+  Step 5's "`startStreaming(tab)` re-uses the existing stream path" is wrong:
+  `startStreaming` reuses taskKey `result_tab_<id>`, which `NewQueryTask` dedupes
+  to a **no-op** while the prior task is running (`result_buffer_manager.go:225`)
+  — so a mid-stream sort would silently do nothing. Hand-rolling `Stream` also
+  bypasses `preemptInFlight`, risking the known `streamMu` deadlock. Route through
+  `QueryRunner.RunQuery` (preempts the in-flight stream, binds Args + DefaultSchema).
+- **Retain SQL + Args + `DefaultSchema`** on the Tab (not just SQL): `RunHandle.stmt`
+  has no Args, and the normal run path drops Args; `DefaultSchema` (search_path)
+  affects unqualified-name resolution on re-run.
+- **Mid-stream sort stops & discards** the prior stream, then re-runs from the top.
+- **Read-only while sorted:** recompute `ResultIdentity` from the SQL actually run
+  (wrapped → `HasRowIdentity=false`; orig → editable) and re-attach it on every
+  re-run; clearing restores editability.
+- **Hide-cols persist** against the *original* identity (re-seed after the re-run's
+  `SetColumns`), since the wrapped identity has no `BaseTable`.
+- **`sorting…` affordance** during re-run latency (a DB round-trip replaces the
+  instant in-memory reorder).
+- **`wrapSorted` must inject a newline** after `<orig>` before the `)` (else a
+  trailing line-comment eats the `ORDER BY`), and strip the trailing `;` in a
+  string-literal-safe way.

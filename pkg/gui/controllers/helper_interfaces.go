@@ -175,6 +175,52 @@ type ResultTabErrorSQLAttacher interface {
 	AttachActiveTabErrorSQL(sql string)
 }
 
+// ResultTabOriginAttacher is the optional surface QueryEditorController
+// uses to record the originating (sql, args, defaultSchema) triple on the
+// currently-active result tab right after OpenResultTab, so a later sort
+// re-run can reissue the exact query. The concrete *ui.ResultTabsHelper
+// satisfies it; tests that don't implement it cause the controller to skip
+// the attach. dbsavvy-72k.1.
+type ResultTabOriginAttacher interface {
+	AttachActiveTabOrigin(sql string, args []any, defaultSchema string)
+}
+
+// ResultTabReattacher is the optional surface QueryEditorController uses to
+// re-stream the active result tab from a freshly-launched RunHandle, reusing
+// the same tab + grid (sort/clear re-run, dbsavvy-72k.3). The concrete
+// *ui.ResultTabsHelper satisfies it; tests that don't implement it cause the
+// controller to skip the reattach. runSQL is the SQL actually executed (a
+// wrapped sort or the original SQL on clear); origSQL is the tab's write-once
+// canonical statement used to re-seed hide-cols against the original identity.
+type ResultTabReattacher interface {
+	ActiveTabOrigin() (sql string, args []any, defaultSchema string)
+	ReattachActiveTab(rh *session.RunHandle, runSQL, origSQL string)
+}
+
+// ResultTabSorter is the optional surface QueryEditorController uses to run
+// the database-side sort FLOW against the active result tab (guards + cycle +
+// build) and obtain the SQL to re-run. col is a RAW 0-based grid column index.
+// run reports whether the caller should hand runSQL to the re-run; toast
+// carries a non-empty message the caller must surface (e.g. the pending-edits
+// block). A silent no-op is (run=false, toast==""). The concrete
+// *ui.ResultTabsHelper satisfies it; tests that don't implement it cause the
+// controller to skip the sort. dbsavvy-72k.4.
+type ResultTabSorter interface {
+	SortActiveTab(col int) (runSQL string, run bool, toast string)
+}
+
+// ResultTabSortHooker is the optional surface QueryEditorController uses to
+// register the single sort sink both entry points (the <leader>s picker
+// submit + the grid header double-click) route through. The controller
+// installs q.sortActiveResult, so a RAW 0-based grid column index from
+// either entry point drives the one Tab-level flow (guards + cycle + DB
+// re-run). The concrete *ui.ResultTabsHelper satisfies it; tests that don't
+// implement it cause the controller to skip wiring (sort stays a no-op).
+// dbsavvy-72k.5.
+type ResultTabSortHooker interface {
+	SetOnSortRequest(fn func(col int))
+}
+
 // EditorBufferReader is the narrow surface the QueryEditorController
 // queries to learn what statement to run. It returns the full buffer
 // text, the cursor's byte offset into that buffer, and (post wwd.7)

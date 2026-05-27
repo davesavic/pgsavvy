@@ -2,7 +2,6 @@ package grid
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -15,8 +14,8 @@ func sortableView(t *testing.T, rows [][]any) *View {
 	t.Helper()
 	v := NewView()
 	v.SetColumns([]models.ColumnMeta{
-		{Name: "name", TypeName: "text", TypeOID: pgOIDText},
-		{Name: "age", TypeName: "int4", TypeOID: pgOIDInt4},
+		{Name: "name", TypeName: "text"},
+		{Name: "age", TypeName: "int4"},
 	})
 	for _, r := range rows {
 		v.AppendRows([]models.Row{{Values: r}})
@@ -91,111 +90,25 @@ func TestSetSort_OnEmptyBufferDoesNotCrash(t *testing.T) {
 	require.Empty(t, indices)
 }
 
-// TestApplySort_IntAscending pins the int-OID comparator: column with
-// values [10, 9, 2] sorts as [2, 9, 10] (in raw-row-index space:
-// indices [2, 1, 0]).
-func TestApplySort_IntAscending(t *testing.T) {
+// TestProject_SortIndicatorDoesNotReorder pins the dbsavvy-72k.6 contract:
+// with a display-only sort indicator installed (via SetSortIndicator), the
+// projection returns IDENTITY order — the grid no longer reorders rows
+// (ordering is DB-side) — while the title still carries the " (sort: …)"
+// suffix.
+func TestProject_SortIndicatorDoesNotReorder(t *testing.T) {
 	v := sortableView(t, [][]any{
 		{"a", int64(10)},
 		{"b", int64(9)},
 		{"c", int64(2)},
 	})
-	v.SetSort(1) // asc on age
-	got := projectIndices(v)
-	require.Equal(t, []int{2, 1, 0}, got)
-}
+	v.SetTitle("query 1")
+	v.SetSortIndicator(1, SortAsc) // indicate "age ↑" but do NOT reorder
 
-// TestApplySort_IntDescending pins desc direction on the same int data.
-func TestApplySort_IntDescending(t *testing.T) {
-	v := sortableView(t, [][]any{
-		{"a", int64(10)},
-		{"b", int64(9)},
-		{"c", int64(2)},
-	})
-	v.SetSort(1) // asc
-	v.SetSort(1) // desc
 	got := projectIndices(v)
-	require.Equal(t, []int{0, 1, 2}, got)
-}
-
-// TestApplySort_UnknownOIDFallsBackToString pins the AC edge case:
-// "column with values [10, 9, 2] sorts as [10, 2, 9] for unknown OID
-// (string)". The string compare puts "10" before "2" because '1' < '2'.
-func TestApplySort_UnknownOIDFallsBackToString(t *testing.T) {
-	v := NewView()
-	v.SetColumns([]models.ColumnMeta{
-		{Name: "val", TypeName: "?", TypeOID: 0},
-	})
-	v.AppendRows([]models.Row{{Values: []any{int64(10)}}})
-	v.AppendRows([]models.Row{{Values: []any{int64(9)}}})
-	v.AppendRows([]models.Row{{Values: []any{int64(2)}}})
-	v.SetSort(0)
-	got := projectIndices(v)
-	require.Equal(t, []int{0, 2, 1}, got, "unknown-OID sort = string order: 10, 2, 9")
-}
-
-// TestApplySort_TimeComparator pins the timestamp comparator path.
-func TestApplySort_TimeComparator(t *testing.T) {
-	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	t1 := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
-	t2 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	v := NewView()
-	v.SetColumns([]models.ColumnMeta{
-		{Name: "at", TypeName: "timestamp", TypeOID: pgOIDTimestamp},
-	})
-	v.AppendRows([]models.Row{{Values: []any{t1}}})
-	v.AppendRows([]models.Row{{Values: []any{t2}}})
-	v.AppendRows([]models.Row{{Values: []any{t0}}})
-	v.SetSort(0)
-	got := projectIndices(v)
-	require.Equal(t, []int{2, 0, 1}, got)
-}
-
-// TestApplySort_FloatComparator pins numeric values arriving as strings
-// (pg numerics) parse and sort numerically, not lexically.
-func TestApplySort_FloatComparator(t *testing.T) {
-	v := NewView()
-	v.SetColumns([]models.ColumnMeta{
-		{Name: "n", TypeName: "numeric", TypeOID: pgOIDNumeric},
-	})
-	v.AppendRows([]models.Row{{Values: []any{"10.5"}}})
-	v.AppendRows([]models.Row{{Values: []any{"2.0"}}})
-	v.AppendRows([]models.Row{{Values: []any{"9.99"}}})
-	v.SetSort(0)
-	got := projectIndices(v)
-	// numeric order: 2.0 < 9.99 < 10.5 → indices 1, 2, 0
-	require.Equal(t, []int{1, 2, 0}, got)
-}
-
-// TestApplySort_NullValuesGoLast pins: NULLs sort to the bottom in asc
-// order (matching PostgreSQL's default NULLS LAST semantics) and stay
-// stable among themselves.
-func TestApplySort_NullValuesGoLast(t *testing.T) {
-	v := sortableView(t, [][]any{
-		{"a", int64(5)},
-		{"b", nil},
-		{"c", int64(1)},
-		{"d", nil},
-	})
-	v.SetSort(1)
-	got := projectIndices(v)
-	// non-null asc: idx 2 (1), idx 0 (5), then nulls in original order: idx 1, idx 3
-	require.Equal(t, []int{2, 0, 1, 3}, got)
-}
-
-// TestApplySort_StableForEqualKeys pins the AC: "sort is stable (rows
-// with equal keys retain insertion order)."
-func TestApplySort_StableForEqualKeys(t *testing.T) {
-	v := sortableView(t, [][]any{
-		{"first", int64(5)},
-		{"second", int64(5)},
-		{"third", int64(5)},
-		{"alpha", int64(1)},
-	})
-	v.SetSort(1)
-	got := projectIndices(v)
-	// asc by age: idx 3 (age=1), then 0, 1, 2 in original order.
-	require.Equal(t, []int{3, 0, 1, 2}, got)
+	require.Equal(t, []int{0, 1, 2}, got,
+		"projection must be identity order: the grid does not reorder rows")
+	require.Equal(t, "query 1 (sort: age ↑)", v.Title(),
+		"the display-only indicator must still appear in the title")
 }
 
 // TestSetColumns_ClearsSort pins AD-5: a fresh schema attach resets sort.
@@ -206,7 +119,7 @@ func TestSetColumns_ClearsSort(t *testing.T) {
 	v.SetSort(0)
 	require.True(t, v.SortActive())
 	v.SetColumns([]models.ColumnMeta{
-		{Name: "x", TypeName: "text", TypeOID: pgOIDText},
+		{Name: "x", TypeName: "text"},
 	})
 	require.False(t, v.SortActive(), "SetColumns must clear sort state")
 }

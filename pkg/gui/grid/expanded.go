@@ -70,18 +70,19 @@ func renderExpanded(snap viewSnapshot, innerW, innerH int) string {
 		valueWidth = 4
 	}
 
-	// Determine the record index from the cursor. In expanded mode the
-	// cursorRow IS the active record (record == row in the projected
-	// list). We honor the existing filter projection so j/k stays
-	// consistent with what the user has filtered.
+	// Determine the active record from the cursor. cursorRow is a raw-
+	// buffer index; the displayed record is its position within the
+	// projected (filter -> sort -> hide) order, so translate it through
+	// projectedPos rather than indexing the projection with the raw value
+	// directly — otherwise an active sort double-projects and expanded
+	// mode shows a different record than the one j/k landed on. Falls back
+	// to the first projected record when the cursor's row isn't visible
+	// (e.g. filtered out), matching the grid-mode clamp. dbsavvy-dr6.
 	indices := project(snap)
 	if len(indices) == 0 {
 		return expandedSeparator(0, snap.estimatedRows, innerW)
 	}
-	cursorIdx := snap.cursorRow
-	if cursorIdx >= len(indices) {
-		cursorIdx = len(indices) - 1
-	}
+	cursorIdx := projectedPos(indices, snap.cursorRow)
 	if cursorIdx < 0 {
 		cursorIdx = 0
 	}

@@ -107,6 +107,15 @@ type View struct {
 	// callback once per movement.
 	lastNearTailFireAt int
 
+	// onSortRequest is invoked once each time a header double-click
+	// detects a qualifying sort request. The grid no longer owns the
+	// asc→desc→clear cycle; it just reports the RAW v.cols index and the
+	// Tab-level flow (QueryEditorController.sortActiveResult) decides the
+	// direction and re-runs the query DB-side. A nil callback means
+	// "sort routing not wired" — used in tests and the pre-wiring
+	// orchestrator state. dbsavvy-72k.5.
+	onSortRequest func(col int)
+
 	clipboard ClipboardWriter
 
 	// filterState carries the active /regex filter, if any. See
@@ -518,6 +527,16 @@ func (v *View) SetOnNearTail(fn func(n int)) {
 	v.mu.Unlock()
 }
 
+// SetOnSortRequest wires the header double-click sort hook. The callback
+// receives the RAW v.cols index the user double-clicked; routing it (and
+// the asc→desc→clear cycle) is the Tab-level flow's responsibility. Pass
+// nil to disable. dbsavvy-72k.5.
+func (v *View) SetOnSortRequest(fn func(col int)) {
+	v.mu.Lock()
+	v.onSortRequest = fn
+	v.mu.Unlock()
+}
+
 // SetClipboard installs the writer used by Yank. A nil writer is
 // normalised to the no-op clipboard so Yank can always invoke Write.
 func (v *View) SetClipboard(w ClipboardWriter) {
@@ -576,9 +595,6 @@ func (v *View) snapshot() viewSnapshot {
 		filterRe:           v.filterState.re,
 		filterAllCols:      v.filterState.allCols,
 		filterActive:       v.filterState.re != nil,
-		sortActive:         v.sortState.active(),
-		sortCol:            v.sortState.col,
-		sortDir:            v.sortState.dir,
 		hidden:             v.hiddenColSet,
 		viewMode:           normaliseViewMode(v.viewMode),
 		estimatedRows:      v.loadEstimatedRowsLocked(),
@@ -658,13 +674,6 @@ type viewSnapshot struct {
 	filterRe      *regexp.Regexp
 	filterAllCols bool
 	filterActive  bool
-
-	// Sort projection inputs. Same rationale as the filter trio above:
-	// Render reads the snapshot's sort fields, never v.sortState, so a
-	// concurrent SetSort cannot tear the frame. dbsavvy-uv0.5.
-	sortActive bool
-	sortCol    int
-	sortDir    int
 
 	// hidden is the index-set of columns to skip in visibleColumnOrder.
 	// Captured under the same RLock as the rest of the snapshot so a
@@ -764,21 +773,26 @@ func (v *View) clampOffsetsLocked(snap viewSnapshot, innerW, innerH int) (rowOff
 		dataRows = 1
 	}
 
-	// Cursor row-offset clamp is computed against the projected row
-	// count so the viewport doesn't try to scroll past the visible tail
-	// when a filter is active. NOTE: cursorRow is a raw-buffer index;
-	// when a filter is active and j/k has walked the cursor past the
-	// projected set, the viewport may not visibly contain the cursor
-	// until JumpNextMatch lands it on a matching row. This is the
-	// deliberate T4 simplest-first design — T5/T6 may revisit by
-	// projecting the cursor through the same pipeline.
-	projectedCount := len(project(snap))
-	rowOffset = snap.rowOffset
-	if snap.cursorRow < rowOffset {
-		rowOffset = snap.cursorRow
+	// cursorRow is a raw-buffer index, but the viewport scrolls over the
+	// projected (filter -> sort -> hide) row order. Translate the cursor
+	// to its position within the projection so the visible window follows
+	// the row the cursor actually renders on — without this the viewport
+	// scrolls in raw-index space and the cursor falls off-screen whenever
+	// a sort reorders the buffer. Falls back to position 0 when the
+	// cursor's row isn't in the projection (e.g. filtered out).
+	// dbsavvy-dr6.
+	proj := project(snap)
+	projectedCount := len(proj)
+	cursorPos := projectedPos(proj, snap.cursorRow)
+	if cursorPos < 0 {
+		cursorPos = 0
 	}
-	if snap.cursorRow >= rowOffset+dataRows {
-		rowOffset = snap.cursorRow - dataRows + 1
+	rowOffset = snap.rowOffset
+	if cursorPos < rowOffset {
+		rowOffset = cursorPos
+	}
+	if cursorPos >= rowOffset+dataRows {
+		rowOffset = cursorPos - dataRows + 1
 	}
 	if rowOffset < 0 {
 		rowOffset = 0
@@ -862,9 +876,11 @@ func (v *View) maybeFireNearTail() {
 // using the snapshot's column-width layout (frozen-first-col + colOffset
 // honored). If a prior header click on the SAME column happened within
 // the configured mouseDoubleClickMs window, this click counts as a
-// double-click and SetSort(col) fires. Otherwise the click is recorded
-// so the NEXT click against the same column within the window completes
-// the double-click. The recorded col is reset on any click against a
+// double-click and onSortRequest(col) fires (when wired) with the RAW
+// v.cols index — the grid no longer owns the sort cycle; the Tab-level
+// flow does (dbsavvy-72k.5). Otherwise the click is recorded so the NEXT
+// click against the same column within the window completes the
+// double-click. The recorded col is reset on any click against a
 // different column.
 //
 // The now argument is injected so tests can drive the debounce state
@@ -885,11 +901,18 @@ func (v *View) HandleHeaderClick(x, y int, now time.Time) {
 	window := time.Duration(v.mouseDoubleClickMs) * time.Millisecond
 	prior := v.lastHeaderClick
 	if prior.col == col && !prior.t.IsZero() && now.Sub(prior.t) <= window {
-		// Inside window: this is the second click of the pair → sort cycle.
-		// Reset prior-click so the NEXT click starts a fresh first-click.
+		// Inside window: this is the second click of the pair → sort request.
+		// Reset prior-click so the NEXT click starts a fresh first-click. The
+		// grid only DETECTS the double-click here; the asc→desc→clear cycle
+		// and DB re-run run through the Tab-level onSortRequest sink with the
+		// RAW v.cols index (dbsavvy-72k.5). Read the hook under lock, then
+		// release before invoking it (mirrors maybeFireNearTail).
 		v.lastHeaderClick = headerClickState{col: -1}
+		cb := v.onSortRequest
 		v.mu.Unlock()
-		v.SetSort(col)
+		if cb != nil {
+			cb(col)
+		}
 		return
 	}
 	// Either no prior click, prior on a different column, or window

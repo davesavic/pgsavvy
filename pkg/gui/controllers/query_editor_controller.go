@@ -65,7 +65,15 @@ type QueryEditorController struct {
 // (QueryRunner, ResultTabs, EditorBuffer, Toast) may individually be
 // nil; every handler nil-checks at call time.
 func NewQueryEditorController(c *common.Common, core CoreDeps, nav NavDeps, ui UIDeps, query QueryDeps) *QueryEditorController {
-	return &QueryEditorController{baseController: newBase(c, HelperBag{CoreDeps: core, NavDeps: nav, UIDeps: ui, QueryDeps: query})}
+	q := &QueryEditorController{baseController: newBase(c, HelperBag{CoreDeps: core, NavDeps: nav, UIDeps: ui, QueryDeps: query})}
+	// Wire the single sort sink both entry points (the <leader>s picker +
+	// the grid header double-click) route through. The optional-interface
+	// type-assert lets tests with a bare ResultTabs fake skip the wiring
+	// (sort stays a no-op there). dbsavvy-72k.5.
+	if hooker, ok := q.helpers.ResultTabs.(ResultTabSortHooker); ok {
+		hooker.SetOnSortRequest(q.sortActiveResult)
+	}
+	return q
 }
 
 // GetKeybindings publishes the query-editor bindings under QUERY_EDITOR
@@ -429,6 +437,89 @@ func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) 
 	return attached
 }
 
+// reRunActiveTab re-runs runSQL into the active result tab, reusing the same
+// tab + grid (sort cycle / clear, dbsavvy-72k.3). runSQL is supplied by the
+// caller (dbsavvy-72k.4): a wrapSorted(...) string for a sort, or the tab's
+// original SQL for a clear. The tab's origin (origSQL, origArgs,
+// origDefaultSchema) is the write-once capture from .1 — origArgs +
+// origDefaultSchema rebuild the exact query; origSQL is handed to the helper
+// so it can re-seed hide-cols against the ORIGINAL identity. runSQL must NEVER
+// be written back into the tab's origin (else clear would re-run a wrapped
+// statement).
+//
+// RunQuery preempts the prior in-flight stream for the tab (its first action
+// fires the preempt hook -> ResultTabsHelper.PreemptInFlight -> runner.Stop()),
+// so the new "result_tab_<id>" task is NOT deduped by the ResultBufferManager.
+// Returns true when the re-run was launched; false when no runner/session, no
+// reattacher surface, or RunQuery errored.
+//
+// Contract entry point for the sort-cycle driver (dbsavvy-72k.4); reached via
+// sortActiveResult, which the constructor wires to the sort entry points
+// (dbsavvy-72k.5).
+func (q *QueryEditorController) reRunActiveTab(runSQL string) bool {
+	runner := q.helpers.QueryRunner
+	if runner == nil || !runner.HasSession() {
+		q.toast("no active connection")
+		return false
+	}
+	reattacher, ok := q.helpers.ResultTabs.(ResultTabReattacher)
+	if !ok {
+		return false
+	}
+	origSQL, origArgs, origDefaultSchema := reattacher.ActiveTabOrigin()
+
+	// RunQuery preempts any in-flight stream for the tab before acquiring the
+	// per-session queue lock, so the prior stream is stopped/discarded and the
+	// new task is not deduped (dbsavvy-72k.3 AC#1).
+	rh, err := runner.RunQuery(context.Background(), models.Query{
+		SQL:           runSQL,
+		Args:          origArgs,
+		DefaultSchema: origDefaultSchema,
+		Timeout:       q.defaultStatementTimeout(),
+	})
+	if err != nil {
+		// A failed re-run surfaces as a normal query error on the active tab.
+		// surfaceErr -> ShowError -> SetErrorSQL writes the canonical origSQL
+		// field with runSQL, which on a wrapped sort would clobber the
+		// original needed by a later clear. Pass origSQL (not runSQL) so the
+		// tab's write-once origin survives a failed re-run. dbsavvy-72k.3.
+		q.surfaceErr(origSQL, err)
+		return false
+	}
+	if q.helpers.Notice != nil {
+		q.helpers.Notice.AttachStream(rh)
+	}
+	reattacher.ReattachActiveTab(rh, runSQL, origSQL)
+	return true
+}
+
+// sortActiveResult drives the database-side sort FLOW for the active result
+// tab: it runs the helper's guards + asc→desc→clear cycle (ResultTabSorter),
+// surfaces any toast it returns (e.g. the pending-edits block), and on a
+// runnable result hands the built SQL to reRunActiveTab (dbsavvy-72k.3). col
+// is a RAW 0-based grid column index supplied by the entry points.
+//
+// The single sort sink wired in NewQueryEditorController: both the <leader>s
+// picker submit and the grid header double-click route through it via
+// ResultTabsHelper.SetOnSortRequest (dbsavvy-72k.5). The active client-side
+// filter is dropped as a side effect — the re-run reset in ReattachActiveTab
+// (dbsavvy-72k.3) rebuilds the grid from scratch, so no explicit filter-clear
+// is needed here.
+func (q *QueryEditorController) sortActiveResult(col int) {
+	sorter, ok := q.helpers.ResultTabs.(ResultTabSorter)
+	if !ok {
+		return
+	}
+	runSQL, run, toast := sorter.SortActiveTab(col)
+	if toast != "" {
+		q.toast(toast)
+	}
+	if !run {
+		return
+	}
+	q.reRunActiveTab(runSQL)
+}
+
 // defaultStatementTimeout returns the configured default statement-timeout
 // ceiling (config.query.default_statement_timeout), or 0 (off) when no
 // Common / config is wired (test path) or the key is unset. dbsavvy-fow.7
@@ -552,6 +643,21 @@ func (q *QueryEditorController) openResultTab(stmt string, rh *session.RunHandle
 			connID = q.helpers.ActiveConnection.ActiveConnectionID()
 		}
 		attacher.AttachActiveTabIdentity(connID, query.DetectFromQuery(stmt))
+	}
+	// dbsavvy-72k.1: record the originating statement, its bound args, and
+	// the DefaultSchema (search_path) on the now-active result tab so a
+	// later sort re-run can reissue the exact query. The editor run path
+	// carries no args (runner.Run takes none), so origArgs is nil here;
+	// the accessor still round-trips args when a future caller supplies
+	// them. DefaultSchema mirrors the value the run path passed to
+	// runner.Run via opts.DefaultSchema (Schemas.SelectedSchemaName()).
+	// Optional surface — gated like the identity/error-SQL attachers.
+	if attacher, ok := q.helpers.ResultTabs.(ResultTabOriginAttacher); ok {
+		defaultSchema := ""
+		if q.helpers.Schemas != nil {
+			defaultSchema = q.helpers.Schemas.SelectedSchemaName()
+		}
+		attacher.AttachActiveTabOrigin(stmt, nil, defaultSchema)
 	}
 }
 

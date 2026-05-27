@@ -21,3 +21,12 @@ func (v *View) PendingEdits() *models.PendingEditSet {
 	defer v.mu.RUnlock()
 	return v.pendingEdits
 }
+
+// HasPendingEdits reports whether the View has any staged (uncommitted) edits.
+// Used by the sort flow to block a re-run while edits are pending — sorting
+// re-runs the query, which would discard the staged set (dbsavvy-72k.4).
+func (v *View) HasPendingEdits() bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.pendingEdits != nil && !v.pendingEdits.IsEmpty()
+}

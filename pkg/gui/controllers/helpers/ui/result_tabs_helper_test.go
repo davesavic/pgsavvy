@@ -1670,11 +1670,15 @@ func TestSortPick_OpensPickerWithGridColumns(t *testing.T) {
 	}
 }
 
-// TestSortPick_SubmitFiresSetSort pins: submitting an index from the
-// picker fires SetSort on the active tab's grid.
-func TestSortPick_SubmitFiresSetSort(t *testing.T) {
+// TestSortPick_SubmitFiresOnSortRequest pins (dbsavvy-72k.5): submitting
+// an index from the picker routes the RAW column index into the wired
+// onSortRequest sink (the Tab-level flow) — it no longer calls
+// grid.SetSort directly, so the grid's own sort state stays untouched.
+func TestSortPick_SubmitFiresOnSortRequest(t *testing.T) {
 	chooser := &fakeChooser{}
 	h, _ := newSortTestHelper(t, chooser)
+	var got []int
+	h.SetOnSortRequest(func(col int) { got = append(got, col) })
 	if err := h.openTab("Q", nil); err != nil {
 		t.Fatalf("openTab: %v", err)
 	}
@@ -1688,8 +1692,65 @@ func TestSortPick_SubmitFiresSetSort(t *testing.T) {
 	if err := chooser.submit(1); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if !tab.Grid().SortActive() {
-		t.Error("expected SortActive after submit")
+	if len(got) != 1 || got[0] != 1 {
+		t.Errorf("onSortRequest calls = %v; want [1] (raw col index)", got)
+	}
+	if tab.Grid().SortActive() {
+		t.Error("SortPick must NOT call grid.SetSort directly anymore")
+	}
+}
+
+// TestSortPick_SubmitNoSinkIsNoOp pins: with no onSortRequest wired,
+// submitting the picker is a silent no-op (no panic, no grid SetSort) —
+// matching the no-op-when-unwired behavior of the rest of SortPick.
+func TestSortPick_SubmitNoSinkIsNoOp(t *testing.T) {
+	chooser := &fakeChooser{}
+	h, _ := newSortTestHelper(t, chooser)
+	if err := h.openTab("Q", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	tab.Grid().SetColumns([]models.ColumnMeta{{Name: "name", TypeName: "text"}})
+
+	h.SortPick()
+	if err := chooser.submit(0); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if tab.Grid().SortActive() {
+		t.Error("submit with no sink must not activate sort")
+	}
+}
+
+// TestSortPick_RawIndexUnderHiddenColumns pins AC rule 3: the picker
+// feeds RAW gridColumnNames indices so a hidden column cannot shift the
+// ordinal handed downstream. gridColumnNames walks 0..ColumnCount over
+// raw v.cols, and the header path (headerColumnAt) likewise returns a raw
+// v.cols index — both keep col+1 stable regardless of hide state.
+func TestSortPick_RawIndexUnderHiddenColumns(t *testing.T) {
+	chooser := &fakeChooser{}
+	h, _ := newSortTestHelper(t, chooser)
+	var got []int
+	h.SetOnSortRequest(func(col int) { got = append(got, col) })
+	if err := h.openTab("Q", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	tab.Grid().SetColumns([]models.ColumnMeta{
+		{Name: "a", TypeName: "text"},
+		{Name: "b", TypeName: "text"},
+		{Name: "c", TypeName: "text"},
+	})
+	// Hide the middle column. Even with col 1 hidden, picking the third
+	// column from the picker must surface its RAW index (2), not a
+	// visible-order index (1).
+	tab.Grid().SetHiddenCols(map[int]bool{1: true})
+
+	h.SortPick()
+	if err := chooser.submit(2); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(got) != 1 || got[0] != 2 {
+		t.Errorf("onSortRequest calls = %v; want [2] (raw index unaffected by hidden col)", got)
 	}
 }
 

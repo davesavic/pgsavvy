@@ -19,23 +19,45 @@ import "strings"
 // reset so the new record starts at the top.
 func (v *View) MoveCursorDown() {
 	v.mu.Lock()
-	if len(v.rows) > 0 && v.cursorRow < len(v.rows)-1 {
-		v.cursorRow++
-		v.expandedLineOffset = 0
+	defer v.mu.Unlock()
+	// Walk the projected (visible) order, not the raw buffer, so j moves
+	// to the row rendered just below the cursor even when a sort/filter
+	// has reordered the buffer. cursorRow stays a raw-buffer index.
+	// dbsavvy-dr6.
+	proj := v.projectionLocked()
+	if len(proj) == 0 {
+		return
 	}
-	v.mu.Unlock()
+	switch pos := projectedPos(proj, v.cursorRow); {
+	case pos < 0:
+		v.cursorRow = proj[0] // cursor row not visible (filtered out)
+	case pos < len(proj)-1:
+		v.cursorRow = proj[pos+1]
+	default:
+		return // already on the last projected row
+	}
+	v.expandedLineOffset = 0
 }
 
-// MoveCursorUp moves the cursor up by one row, clamped to row 0. In
-// expanded mode this means "previous record"; wrapped-line offset is
-// reset so the prior record starts at the top.
+// MoveCursorUp moves the cursor up by one row, clamped to the first
+// projected row. In expanded mode this means "previous record"; wrapped-
+// line offset is reset so the prior record starts at the top.
 func (v *View) MoveCursorUp() {
 	v.mu.Lock()
-	if v.cursorRow > 0 {
-		v.cursorRow--
-		v.expandedLineOffset = 0
+	defer v.mu.Unlock()
+	proj := v.projectionLocked()
+	if len(proj) == 0 {
+		return
 	}
-	v.mu.Unlock()
+	switch pos := projectedPos(proj, v.cursorRow); {
+	case pos < 0:
+		v.cursorRow = proj[0] // cursor row not visible (filtered out)
+	case pos > 0:
+		v.cursorRow = proj[pos-1]
+	default:
+		return // already on the first projected row
+	}
+	v.expandedLineOffset = 0
 }
 
 // MoveCursorLeft moves the cursor left by one column. Clamped to
@@ -77,14 +99,21 @@ func (v *View) HalfPageDown() {
 	if step < 1 {
 		step = 1
 	}
-	target := v.cursorRow + step
-	if target > len(v.rows)-1 {
-		target = len(v.rows) - 1
+	// Step half a page through the projected order so the move tracks
+	// what's on screen under an active sort/filter. dbsavvy-dr6.
+	proj := v.projectionLocked()
+	if len(proj) == 0 {
+		return
 	}
-	if target < 0 {
-		target = 0
+	pos := projectedPos(proj, v.cursorRow)
+	if pos < 0 {
+		pos = 0
 	}
-	v.cursorRow = target
+	target := pos + step
+	if target > len(proj)-1 {
+		target = len(proj) - 1
+	}
+	v.cursorRow = proj[target]
 }
 
 // HalfPageUp is the symmetric counterpart of HalfPageDown.
@@ -103,11 +132,19 @@ func (v *View) HalfPageUp() {
 	if step < 1 {
 		step = 1
 	}
-	target := v.cursorRow - step
+	proj := v.projectionLocked()
+	if len(proj) == 0 {
+		return
+	}
+	pos := projectedPos(proj, v.cursorRow)
+	if pos < 0 {
+		pos = 0
+	}
+	target := pos - step
 	if target < 0 {
 		target = 0
 	}
-	v.cursorRow = target
+	v.cursorRow = proj[target]
 }
 
 // expandedHalfPageStep is the half-page distance in wrapped lines used
@@ -174,7 +211,13 @@ func (v *View) HorizScrollRight() {
 // resets the wrapped-line offset so the first record starts at the top.
 func (v *View) JumpFirst() {
 	v.mu.Lock()
-	v.cursorRow = 0
+	// Land on the first projected (visible) row so gg goes to the top of
+	// what's on screen, not raw row 0, under an active sort. dbsavvy-dr6.
+	if proj := v.projectionLocked(); len(proj) > 0 {
+		v.cursorRow = proj[0]
+	} else {
+		v.cursorRow = 0
+	}
 	v.expandedLineOffset = 0
 	v.mu.Unlock()
 }
@@ -185,8 +228,11 @@ func (v *View) JumpFirst() {
 // next Render.
 func (v *View) JumpLast() {
 	v.mu.Lock()
-	if len(v.rows) > 0 {
-		v.cursorRow = len(v.rows) - 1
+	// Land on the last projected (visible) row, not raw row len-1, so G
+	// goes to the bottom of what's on screen under an active sort.
+	// dbsavvy-dr6.
+	if proj := v.projectionLocked(); len(proj) > 0 {
+		v.cursorRow = proj[len(proj)-1]
 	}
 	v.expandedLineOffset = 0
 	v.mu.Unlock()

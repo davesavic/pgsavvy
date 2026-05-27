@@ -52,6 +52,12 @@ const (
 	StateQueued TabState = "queued"
 	// StateRunning — RowStream open; rows actively draining.
 	StateRunning TabState = "running"
+	// StateSorting — a sort/clear re-run is in flight on an existing tab;
+	// the new RowStream is open but no row has arrived yet. Flips to
+	// StateRunning on the first appended batch (or to a terminal state in
+	// markCompleteOnUI when the re-run completes with zero rows). Surfaces
+	// the "sorting…" affordance in Title() until then. dbsavvy-72k.3.
+	StateSorting TabState = "sorting…"
 	// StateComplete — clean EOF.
 	StateComplete TabState = "complete"
 	// StateCancelled — server-side cancel completed.
@@ -322,6 +328,14 @@ type ResultTabsHelper struct {
 	// (e.g. ResultJumpList.PruneByTab) can drop stale references. Default
 	// no-op; wired via SetOnTabRemoved. dbsavvy-bwq.15.
 	onTabRemoved func(tabID string)
+
+	// onSortRequest fires when a sort entry point (the <leader>s picker or
+	// a grid header double-click) requests a sort on the active tab. The
+	// callback receives the RAW 0-based grid column index; the
+	// QueryEditorController wires it to sortActiveResult, which owns the
+	// guards + asc→desc→clear cycle + DB re-run. Default no-op (sort is a
+	// no-op until wired); set via SetOnSortRequest. dbsavvy-72k.5.
+	onSortRequest func(col int)
 }
 
 // NewResultTabsHelper constructs a helper with deps. The returned value
@@ -379,16 +393,25 @@ type Tab struct {
 	// mu protects state, pinned, rowCount, cancelled. Held briefly in
 	// mutators; helpers.mu must NOT be held when waiting on this mu to
 	// avoid the {helper.mu ↔ tab.mu} cycle.
-	mu        sync.Mutex
-	state     TabState
-	pinned    bool
-	rowCount  int64
-	err       error
-	errSQL    string // SQL text behind err, for the QueryError position caret (dbsavvy-fow.3)
-	plan      models.Plan
-	planRaw   string
-	planCtx   *guicontext.PlanContext // non-nil for plan tabs (dbsavvy-uv0.8)
-	cancelled bool
+	mu       sync.Mutex
+	state    TabState
+	pinned   bool
+	rowCount int64
+	err      error
+	// origSQL is the canonical statement text behind this tab. It serves
+	// two readers with disjoint tab lifecycles: the QueryError position
+	// caret on error tabs (dbsavvy-fow.3, set via SetErrorSQL) and the
+	// sort re-run capture on result tabs (dbsavvy-72k.1, set via SetOrigin
+	// alongside origArgs / origDefaultSchema). A tab is either an error
+	// tab or a result tab, so the single field never has conflicting
+	// writers.
+	origSQL           string
+	origArgs          []any  // bound args behind origSQL (dbsavvy-72k.1)
+	origDefaultSchema string // search_path captured at tab-open time (dbsavvy-72k.1)
+	plan              models.Plan
+	planRaw           string
+	planCtx           *guicontext.PlanContext // non-nil for plan tabs (dbsavvy-uv0.8)
+	cancelled         bool
 
 	// complete flips true when the stream has been drained to EOF
 	// (either via clean stream end in onDone, or via the then-callback
@@ -429,6 +452,39 @@ type Tab struct {
 	// dbsavvy-uv0.6.
 	connID         string
 	resultIdentity query.ResultIdentity
+
+	// sortCol + sortDir are the authoritative per-tab sort state driving the
+	// database-side ORDER-BY re-run. They live on the Tab (not the grid, whose
+	// SortAsc/SortDesc encoding is display-only) so the cycle survives a re-run
+	// that rebuilds the grid. sortCol is a 0-based grid column index; sortDir
+	// uses the ui.sortDir encoding (sortClear/sortAsc/sortDesc). Zero value
+	// (sortClear) means "no active sort". Protected by mu. dbsavvy-72k.4.
+	sortCol int
+	sortDir sortDir
+}
+
+// cycleSort advances the tab's authoritative (col, dir) one step and returns
+// the new direction. Selecting a column different from the current one
+// restarts the cycle at sortAsc; re-selecting the same column advances
+// asc → desc → clear → asc. col is a 0-based grid column index. Held under mu.
+// dbsavvy-72k.4.
+func (t *Tab) cycleSort(col int) sortDir {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.sortDir == sortClear || t.sortCol != col {
+		t.sortCol = col
+		t.sortDir = sortAsc
+		return t.sortDir
+	}
+	switch t.sortDir {
+	case sortAsc:
+		t.sortDir = sortDesc
+	case sortDesc:
+		t.sortDir = sortClear
+	default:
+		t.sortDir = sortAsc
+	}
+	return t.sortDir
 }
 
 // ID returns the tab's monotonically-allocated identifier. Stable for
@@ -521,7 +577,7 @@ func (t *Tab) Title() string {
 	}
 
 	rowsSegment := fmt.Sprintf("%d rows", rows)
-	if state == StateRunning || state == StateQueued {
+	if state == StateRunning || state == StateQueued || state == StateSorting {
 		rowsSegment = "~" + rowsSegment
 	}
 	if complete {
@@ -579,19 +635,42 @@ func (t *Tab) Identity() (string, query.ResultIdentity) {
 // SetErrorSQL records the SQL text behind this tab's terminal error so
 // the error-panel renderer can draw the QueryError position caret under
 // the offending token. Empty SQL is valid — the caret is simply omitted.
-// dbsavvy-fow.3.
+// Writes the canonical origSQL field. dbsavvy-fow.3.
 func (t *Tab) SetErrorSQL(sql string) {
 	t.mu.Lock()
-	t.errSQL = sql
+	t.origSQL = sql
 	t.mu.Unlock()
 }
 
-// errSQLSnapshot returns the SQL text recorded via SetErrorSQL, under the
-// tab mutex. dbsavvy-fow.3.
+// errSQLSnapshot returns the SQL text recorded via SetErrorSQL (the
+// canonical origSQL field), under the tab mutex. dbsavvy-fow.3.
 func (t *Tab) errSQLSnapshot() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.errSQL
+	return t.origSQL
+}
+
+// SetOrigin records the originating statement text, its bound args, and
+// the DefaultSchema (search_path) used when the tab was opened, so a
+// later sort re-run can reissue the exact query. args is stored by
+// reference; callers must not mutate the slice afterwards. SQL writes the
+// canonical origSQL field shared with SetErrorSQL. dbsavvy-72k.1.
+func (t *Tab) SetOrigin(sql string, args []any, defaultSchema string) {
+	t.mu.Lock()
+	t.origSQL = sql
+	t.origArgs = args
+	t.origDefaultSchema = defaultSchema
+	t.mu.Unlock()
+}
+
+// Origin returns the originating (sql, args, defaultSchema) triple
+// recorded via SetOrigin, under the tab mutex. The sql component is the
+// canonical origSQL field (also used by the error caret). Returns zero
+// values when SetOrigin was never called. dbsavvy-72k.1.
+func (t *Tab) Origin() (sql string, args []any, defaultSchema string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.origSQL, t.origArgs, t.origDefaultSchema
 }
 
 // --- Public surface (controllers.ResultTabsHelper) -----------------------
@@ -825,6 +904,17 @@ func (h *ResultTabsHelper) Close(t *Tab) error {
 func (h *ResultTabsHelper) SetOnTabRemoved(fn func(tabID string)) {
 	h.mu.Lock()
 	h.onTabRemoved = fn
+	h.mu.Unlock()
+}
+
+// SetOnSortRequest registers the callback both sort entry points route
+// through (<leader>s picker submit + grid header double-click). The
+// callback receives the RAW 0-based grid column index; the
+// QueryEditorController wires it to sortActiveResult (guards + cycle + DB
+// re-run). Passing nil unhooks (sort becomes a no-op). dbsavvy-72k.5.
+func (h *ResultTabsHelper) SetOnSortRequest(fn func(col int)) {
+	h.mu.Lock()
+	h.onSortRequest = fn
 	h.mu.Unlock()
 }
 
@@ -1093,7 +1183,7 @@ func (h *ResultTabsHelper) PreemptInFlight() {
 			if t.queuedCancel != nil {
 				queuedChans = append(queuedChans, t.queuedCancel)
 			}
-		case StateRunning:
+		case StateRunning, StateSorting:
 			t.state = StateCancelled
 			t.cancelled = true
 			if t.runner != nil {
@@ -1145,7 +1235,7 @@ func (h *ResultTabsHelper) cancelTab(t *Tab) error {
 		t.state = StateCancelled
 		t.mu.Unlock()
 		return nil
-	case StateRunning:
+	case StateRunning, StateSorting:
 		t.mu.Lock()
 		t.state = StateCancelled
 		rh := t.rh
@@ -1333,7 +1423,13 @@ func (h *ResultTabsHelper) priorRunningTab(excludeID int64) *Tab {
 // state transition).
 func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 	tab.mu.Lock()
-	tab.state = StateRunning
+	// A re-run (dbsavvy-72k.3) pre-sets StateSorting so the "sorting…"
+	// affordance shows until the first re-streamed row; preserve it here
+	// rather than clobbering to StateRunning. A fresh OpenResultTab leaves
+	// the tab in its zero state, so this normally falls through to Running.
+	if tab.state != StateSorting {
+		tab.state = StateRunning
+	}
 	rh := tab.rh
 	runner := tab.runner
 	// Fresh schema attach: reset the once-per-tab /regex caveat gate so
@@ -1364,6 +1460,16 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		gridView.SetOnNearTail(func(n int) {
 			runner.ReadRows(n)
 		})
+		// Route grid header double-click sorts through the helper-level
+		// sink so both entry points (header dblclick + <leader>s picker)
+		// share the Tab-level flow. The grid View persists across re-runs;
+		// installing alongside SetOnNearTail matches the established
+		// pattern. dbsavvy-72k.5.
+		gridView.SetOnSortRequest(func(col int) {
+			if h.onSortRequest != nil {
+				h.onSortRequest(col)
+			}
+		})
 	}
 	id := tab.id
 	streamFn := func(ctx context.Context) (drivers.RowStream, error) {
@@ -1374,6 +1480,11 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		gridView.AppendRows(rows)
 		tab.mu.Lock()
 		tab.rowCount += int64(len(rows))
+		// Clear the re-run "sorting…" affordance once the first re-streamed
+		// batch lands; a normal (StateRunning) tab is unaffected. dbsavvy-72k.3.
+		if len(rows) > 0 && tab.state == StateSorting {
+			tab.state = StateRunning
+		}
 		tab.mu.Unlock()
 	}
 	taskKey := fmt.Sprintf("result_tab_%d", id)
@@ -1394,7 +1505,11 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab) {
 	flip := func() error {
 		tab.mu.Lock()
-		if tab.state == StateRunning {
+		// StateSorting is treated like StateRunning here: a re-run that
+		// completes before any row arrives (zero-row result) must still
+		// reach a terminal state rather than stay stuck on "sorting…".
+		// dbsavvy-72k.3.
+		if tab.state == StateRunning || tab.state == StateSorting {
 			if tab.cancelled {
 				tab.state = StateCancelled
 			} else {
@@ -1645,7 +1760,7 @@ const (
 // shown after its label in the tab-bar strip.
 func stateGlyph(s TabState) string {
 	switch s {
-	case StateRunning:
+	case StateRunning, StateSorting:
 		return "▸"
 	case StateQueued:
 		return "…"
@@ -1905,7 +2020,7 @@ func (t *Tab) dispose() {
 					close(cancelCh)
 				}
 			}
-		case StateRunning:
+		case StateRunning, StateSorting:
 			if rh != nil {
 				_ = rh.Cancel()
 				// Wait for terminal Done, with a generous cap so a
@@ -2057,10 +2172,14 @@ func (h *ResultTabsHelper) activeGrid() *grid.View {
 
 // --- <leader>s sort picker (dbsavvy-uv0.5) -------------------------------
 
-// SortPick opens the column picker against the active tab. On submit
-// SetSort(idx) fires on the tab's grid, cycling asc → desc → clear per
-// the AC. No-op when no tab is active, no grid is attached, the choice
-// dep is unwired, or the buffer has no columns yet. dbsavvy-uv0.5.
+// SortPick opens the column picker against the active tab. On submit the
+// chosen RAW column index is handed to the onSortRequest sink — the same
+// Tab-level flow the header double-click routes through — which owns the
+// asc → desc → clear cycle + DB re-run (dbsavvy-72k.5). idx is the raw
+// gridColumnNames index, so hiding columns cannot shift the ordinal.
+// No-op when no tab is active, no grid is attached, the choice dep is
+// unwired, the sink is unwired, or the buffer has no columns yet.
+// dbsavvy-uv0.5.
 func (h *ResultTabsHelper) SortPick() {
 	t := h.Active()
 	if t == nil {
@@ -2079,9 +2198,68 @@ func (h *ResultTabsHelper) SortPick() {
 		return
 	}
 	_ = h.deps.Choice.Choose(h.sortPickLabel, cols, func(idx int) error {
-		g.SetSort(idx)
+		// idx is the RAW gridColumnNames index. Route through the shared
+		// sink so the picker and header double-click produce identical
+		// behavior; no-op when the sink is unwired. dbsavvy-72k.5.
+		if h.onSortRequest != nil {
+			h.onSortRequest(idx)
+		}
 		return nil
 	}, func() error { return nil })
+}
+
+// sortPendingEditsToast is the message surfaced when a sort is requested
+// while the active tab's grid has staged (uncommitted) edits. dbsavvy-72k.4.
+const sortPendingEditsToast = "commit or discard edits before sorting"
+
+// SortActiveTab runs the database-side sort FLOW against the active tab and
+// returns the SQL the caller should re-run, whether it should run, and an
+// optional toast. col is a RAW 0-based grid column index. The flow is:
+//
+//  1. Sortability guard — silent no-op (run=false, toast=="") when there is no
+//     active tab, the tab has no grid, or the grid has < 1 column. Joins /
+//     aggregates / CTEs ARE sortable (no DetectFromQuery consultation here).
+//  2. Pending-edits guard — when the grid has staged edits, returns
+//     run=false with sortPendingEditsToast; the caller shows it and does NOT
+//     re-run.
+//  3. Re-entrancy guard — silent no-op when the tab is already StateSorting (a
+//     sort re-run is in flight). A mid-stream sort (StateRunning/StateQueued
+//     from the INITIAL query) is allowed and preempts that stream.
+//  4. Cycle + build — advances the tab's authoritative (col, dir) and builds
+//     the runSQL: wrapSorted(origSQL, col+1, dir) for asc/desc, origSQL
+//     verbatim for clear. Returns it for the caller to hand to the re-run.
+//
+// dbsavvy-72k.4. Wired to the picker / header-dblclick entry points by
+// dbsavvy-72k.5.
+// SortActiveTab must be called on the gocui UI goroutine: the guard, cycle, and
+// origin read below each take tab.mu independently, so their atomicity relies on
+// single-threaded UI dispatch rather than a single held lock.
+func (h *ResultTabsHelper) SortActiveTab(col int) (runSQL string, run bool, toast string) {
+	t := h.Active()
+	if t == nil {
+		return "", false, ""
+	}
+	g := t.Grid()
+	if g == nil || g.ColumnCount() < 1 {
+		// Not sortable (plan / error tab, or a result with no columns).
+		return "", false, ""
+	}
+	if g.HasPendingEdits() {
+		return "", false, sortPendingEditsToast
+	}
+	// Re-entrancy: a sort re-run already in flight (StateSorting) swallows the
+	// request so two triggers launch exactly one re-run. A mid-stream sort over
+	// the INITIAL query (StateRunning/StateQueued) is allowed and preempts it.
+	if t.State() == StateSorting {
+		return "", false, ""
+	}
+
+	dir := t.cycleSort(col)
+	origSQL, _, _ := t.Origin()
+	if dir == sortClear {
+		return origSQL, true, ""
+	}
+	return wrapSorted(origSQL, col+1, dir), true, ""
 }
 
 // --- <leader>gH hide-cols overlay (dbsavvy-uv0.6) ------------------------
@@ -2278,6 +2456,127 @@ func (h *ResultTabsHelper) AttachActiveTabErrorSQL(sql string) {
 	t.SetErrorSQL(sql)
 }
 
+// AttachActiveTabOrigin records the originating (sql, args, defaultSchema)
+// triple on the currently-active result tab so a later sort re-run can
+// reissue the exact query. The caller (QueryEditorController) invokes this
+// right after OpenResultTab. No-op when no tab is active. dbsavvy-72k.1.
+func (h *ResultTabsHelper) AttachActiveTabOrigin(sql string, args []any, defaultSchema string) {
+	t := h.Active()
+	if t == nil {
+		return
+	}
+	t.SetOrigin(sql, args, defaultSchema)
+}
+
+// ActiveTabOrigin returns the (sql, args, defaultSchema) triple recorded on
+// the currently-active result tab via AttachActiveTabOrigin/SetOrigin. The
+// re-run path (dbsavvy-72k.3) reads it to rebuild the exact query: origArgs +
+// origDefaultSchema feed QueryRunner.RunQuery, and origSQL recomputes the
+// original identity for decoupled hide-col seeding. Returns zero values when
+// no tab is active or SetOrigin was never called.
+func (h *ResultTabsHelper) ActiveTabOrigin() (sql string, args []any, defaultSchema string) {
+	t := h.Active()
+	if t == nil {
+		return "", nil, ""
+	}
+	return t.Origin()
+}
+
+// ReattachActiveTab re-streams the active result tab from a freshly-launched
+// RunHandle, reusing the same tab + grid. runSQL is the SQL actually executed
+// by the caller (a wrapSorted(...) string for a sort, or the original SQL for
+// a clear); origSQL is tab.Origin()'s canonical statement (write-once, never
+// the wrapped form). The caller (QueryEditorController) issues
+// QueryRunner.RunQuery FIRST so the prior in-flight stream for this tab is
+// preempted (PreemptInFlight -> runner.Stop()), guaranteeing the new task is
+// NOT deduped by the "result_tab_<id>" taskKey. dbsavvy-72k.3.
+//
+// Flow:
+//  1. Reset tab-level state SetColumns does not cover (rowCount, complete,
+//     err, cancelled) and pre-set StateSorting for the affordance; swap in rh.
+//  2. startStreaming re-installs the schema (which clears the grid's rows,
+//     cursor, offsets, filter, sort, hide-cols, editability) and launches the
+//     new task.
+//  3. Recompute + attach the gating identity from runSQL: a wrapped re-run
+//     yields HasRowIdentity=false (read-only); the original SQL yields the
+//     editable identity. This drives the editability-introspection gate.
+//  4. Re-seed hide-cols against the ORIGINAL identity (DetectFromQuery(origSQL))
+//     — NOT the gating identity — so a wrapped read-only re-run still restores
+//     the user's hidden columns (decoupled via seedHiddenColsForIdentity).
+//
+// Lock discipline: tab.mu is released before startStreaming (which itself
+// preempts nothing — preemption already happened in the caller's RunQuery).
+// No-op when no tab is active.
+func (h *ResultTabsHelper) ReattachActiveTab(rh *session.RunHandle, runSQL, origSQL string) {
+	if rh == nil {
+		h.reattachActiveTab(nil, runSQL, origSQL)
+		return
+	}
+	h.reattachActiveTab(rh, runSQL, origSQL)
+}
+
+// reattachActiveTab is the runHandle-interface entry shared by
+// ReattachActiveTab and tests (mirroring openTab vs OpenResultTab). rh may be
+// any runHandle; production passes a *session.RunHandle.
+func (h *ResultTabsHelper) reattachActiveTab(rh runHandle, runSQL, origSQL string) {
+	t := h.Active()
+	if t == nil {
+		return
+	}
+
+	// Reset the TAB-level fields startStreaming/SetColumns do not touch and
+	// pre-arm the "sorting…" affordance, then swap in the new RunHandle. All
+	// under tab.mu; released before startStreaming. dbsavvy-72k.3 AC#2/#5/#6.
+	t.mu.Lock()
+	t.rowCount = 0
+	t.complete = false
+	t.err = nil
+	t.cancelled = false
+	t.state = StateSorting
+	t.rh = rh
+	t.mu.Unlock()
+
+	// startStreaming calls grid.SetColumns (clears rows/cursor/offsets/filter/
+	// sort/hide-cols/editability) and launches the new task under the same
+	// taskKey. It preserves the pre-set StateSorting.
+	h.startStreaming(t)
+
+	// Recompute the GATING identity from the SQL actually run. A wrapped
+	// re-run -> HasRowIdentity=false -> read-only (introspection skipped); the
+	// original SQL -> editable identity restored.
+	connID, _ := t.Identity()
+	gatingRI := query.DetectFromQuery(runSQL)
+	t.SetIdentity(connID, gatingRI)
+
+	// Re-seed hide-cols against the ORIGINAL identity, decoupled from the
+	// gating identity above. The wrapped identity has no BaseTable, so seeding
+	// against it would no-op; the original maps 1:1 (column order preserved).
+	origRI := query.DetectFromQuery(origSQL)
+	h.seedHiddenColsForIdentity(t, connID, origRI)
+
+	// Mirror the Tab's authoritative sort onto the grid's display-only
+	// indicator (SetColumns cleared it). dbsavvy-72k.6.
+	if g := t.Grid(); g != nil {
+		t.mu.Lock()
+		col, dir := t.sortCol, t.sortDir
+		t.mu.Unlock()
+		g.SetSortIndicator(col, sortDirToGridDir(dir))
+	}
+}
+
+// sortDirToGridDir maps the Tab's authoritative ui.sortDir onto the grid's
+// display-only sort direction. dbsavvy-72k.6.
+func sortDirToGridDir(d sortDir) int {
+	switch d {
+	case sortAsc:
+		return grid.SortAsc
+	case sortDesc:
+		return grid.SortDesc
+	default:
+		return grid.SortNone
+	}
+}
+
 // SeedHiddenColsFromAppState looks up the persisted hidden-col name set
 // for the active tab's (connID, baseTable) pair and re-installs it on
 // the tab's grid as an index set. Called by the controller right after
@@ -2285,6 +2584,23 @@ func (h *ResultTabsHelper) AttachActiveTabErrorSQL(sql string) {
 // called). No-op when persistence is disabled, the store is unwired, or
 // no entry exists. dbsavvy-uv0.6.
 func (h *ResultTabsHelper) SeedHiddenColsFromAppState(t *Tab) {
+	if t == nil {
+		return
+	}
+	connID, ri := t.Identity()
+	h.seedHiddenColsForIdentity(t, connID, ri)
+}
+
+// seedHiddenColsForIdentity re-installs the persisted hidden-col name set
+// for an EXPLICIT (connID, ri) pair onto the tab's grid, rather than reading
+// the tab's currently-attached identity via t.Identity(). This decoupling is
+// required by the sort re-run path (dbsavvy-72k.3): a wrapped re-run attaches
+// a read-only identity (HasRowIdentity=false, no BaseTable) to the tab to gate
+// editability, but hide-cols must still be seeded against the ORIGINAL
+// (editable) identity — the wrapped SELECT * FROM (orig) preserves column
+// order, so the original hide-col set maps 1:1 onto the re-streamed columns.
+// SeedHiddenColsFromAppState delegates here with the tab's own identity.
+func (h *ResultTabsHelper) seedHiddenColsForIdentity(t *Tab, connID string, ri query.ResultIdentity) {
 	if t == nil || h.deps.Store == nil {
 		return
 	}
@@ -2292,7 +2608,6 @@ func (h *ResultTabsHelper) SeedHiddenColsFromAppState(t *Tab) {
 	if g == nil {
 		return
 	}
-	connID, ri := t.Identity()
 	if !ri.HasRowIdentity || connID == "" || ri.BaseTable == "" {
 		return
 	}
