@@ -2,8 +2,17 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+// trailingLimitOffsetRE matches a trailing LIMIT/OFFSET clause (integer
+// literals, either order) at the very end of a statement. Anchored with $ and
+// requiring leading whitespace so it only ever matches the statement's own
+// outermost tail clause — never a LIMIT inside a string literal (which is
+// followed by a closing quote, not end-of-string) or a subquery's LIMIT
+// (followed by a closing paren). Group 1 is the clause text, preserved verbatim.
+var trailingLimitOffsetRE = regexp.MustCompile(`(?i)\s+(LIMIT\s+\d+(?:\s+OFFSET\s+\d+)?|OFFSET\s+\d+(?:\s+LIMIT\s+\d+)?)\s*$`)
 
 // sortDir is the authoritative per-Tab sort direction. It is intentionally
 // local to this package (rather than reusing grid's display-only SortAsc/
@@ -39,5 +48,19 @@ func wrapSorted(orig string, ordinal1Based int, dir sortDir) string {
 
 	stripped := strings.TrimRight(orig, " \t\n\r;")
 
-	return fmt.Sprintf("SELECT * FROM (\n%s\n) _dbsavvy_sort\nORDER BY %d %s", stripped, ordinal1Based, keyword)
+	// Hoist a trailing LIMIT/OFFSET out of the inner query and re-apply it after
+	// the ORDER BY. If left inside the derived table, Postgres applies the LIMIT
+	// to the unordered inner scan first, so the outer ORDER BY would sort only an
+	// arbitrary subset of rows (dbsavvy-af3).
+	var tail string
+	if loc := trailingLimitOffsetRE.FindStringSubmatchIndex(stripped); loc != nil {
+		tail = stripped[loc[2]:loc[3]]
+		stripped = stripped[:loc[0]]
+	}
+
+	wrapped := fmt.Sprintf("SELECT * FROM (\n%s\n) _dbsavvy_sort\nORDER BY %d %s", stripped, ordinal1Based, keyword)
+	if tail != "" {
+		wrapped += "\n" + tail
+	}
+	return wrapped
 }

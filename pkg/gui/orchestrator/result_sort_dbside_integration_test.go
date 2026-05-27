@@ -382,6 +382,34 @@ func TestResultSortDBSide_AC(t *testing.T) {
 		}
 	})
 
+	t.Run("scenario5_inner_limit_hoisted_sorts_full_set", func(t *testing.T) {
+		// Regression for dbsavvy-af3: a browse query carries its own LIMIT. If the
+		// LIMIT stays INSIDE the sort wrapper, Postgres applies it to the unordered
+		// inner scan and the outer ORDER BY sorts only an arbitrary subset — so the
+		// true minimum (here id=5) can be missing entirely. wrapSorted must hoist
+		// the LIMIT out past the ORDER BY so the FULL set is sorted, then limited.
+		// Table a has 5 rows {5,10,20,30,40}; LIMIT 3 must yield the 3 SMALLEST.
+		const q = "SELECT id, label FROM dbsavvy_sort_it.a LIMIT 3"
+		tab := openTabDirect(t, s, helper, q, nil)
+		waitRows(t, tab, 3)
+
+		triggerSort(t, s, 0)
+		waitRows(t, tab, 3)
+		if tab.Err() != nil {
+			t.Fatalf("inner-limit sort errored: %v", tab.Err())
+		}
+		got := gridColumn(t, tab, 0)
+		// The 3 smallest ids in ascending order — proves the LIMIT was applied
+		// AFTER the sort, not to an arbitrary unordered subset.
+		if want := []string{"5", "10", "20"}; !eqStrings(got, want) {
+			t.Fatalf("inner-limit ASC = %v, want %v (LIMIT must apply after ORDER BY)", got, want)
+		}
+
+		if err := helper.CloseActive(); err != nil {
+			t.Fatalf("CloseActive: %v", err)
+		}
+	})
+
 	t.Run("scenario4_trailing_line_comment_sort_no_error", func(t *testing.T) {
 		// Statement ending in a trailing line comment + a trailing ';'. wrapSorted
 		// TrimRight-strips the ';' and emits a newline before the closing paren so
