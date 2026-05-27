@@ -45,18 +45,33 @@ type pgRowStream struct {
 	// can release on its own without dialing back into Session.
 	releaseGuard func()
 
+	// cancel is the context.CancelFunc of the statement-timeout deadline
+	// derived in Session.Stream (context.WithTimeout). It is captured here
+	// so release() can stop the deadline timer EXACTLY ONCE, on the same
+	// CAS-guarded path as rows.Close + releaseGuard — no leaked timer
+	// goroutine or pooled-connection deadline past release. nil when the
+	// stream had no timeout (q.Timeout == 0 and no default ceiling), in
+	// which case release() skips it. dbsavvy-fow.7 (U15).
+	cancel context.CancelFunc
+
 	closed atomic.Bool
 }
 
 // newPgRowStream wraps a freshly-issued pgx.Rows. The caller (Session.Stream)
 // is responsible for having already acquired the parent session's inFlight
 // guard; releaseGuard MUST be the session.releaseInFlight bound method.
-func newPgRowStream(rows pgx.Rows, qid models.QueryID, releaseGuard func()) *pgRowStream {
+//
+// cancel is the statement-timeout deadline's context.CancelFunc (from the
+// context.WithTimeout derived in Session.Stream), or nil when the stream has
+// no timeout. release() invokes it exactly once so the deadline timer is
+// stopped on EOF / terminal-error / explicit Close without leaking.
+func newPgRowStream(rows pgx.Rows, qid models.QueryID, releaseGuard func(), cancel context.CancelFunc) *pgRowStream {
 	return &pgRowStream{
 		rows:         rows,
 		queryID:      qid,
 		columns:      fieldDescriptionsToColumnMetas(rows.FieldDescriptions()),
 		releaseGuard: releaseGuard,
+		cancel:       cancel,
 	}
 }
 
@@ -125,6 +140,13 @@ func (s *pgRowStream) release() {
 		return
 	}
 	s.rows.Close()
+	// Stop the statement-timeout deadline timer (if any) on the same
+	// once-guarded path. Calling cancel after the deadline already fired is
+	// a documented no-op, so this is safe regardless of WHY we released
+	// (EOF, terminal error, timeout, or explicit Close). dbsavvy-fow.7.
+	if s.cancel != nil {
+		s.cancel()
+	}
 	if s.releaseGuard != nil {
 		s.releaseGuard()
 	}
