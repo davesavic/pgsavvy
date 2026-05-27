@@ -3,6 +3,10 @@
 # Install golangci-lint v2: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.7.0
 version: '3'
 
+vars:
+  PG_COMPOSE: docker/postgres/docker-compose.yml
+  PG_DSN: '{{.DBSAVVY_TEST_PG | default "postgres://dbsavvy:dbsavvy@localhost:5432/dbsavvy_test"}}'
+
 tasks:
   default:
     cmds:
@@ -19,11 +23,33 @@ tasks:
     cmds:
       - go test {{.CLI_ARGS | default "./..."}}
 
+  pg:up:
+    desc: Bring up the docker/postgres fixture and wait until it reports healthy.
+    cmds:
+      - docker compose -f {{.PG_COMPOSE}} up -d --wait
+      - 'echo "postgres up. export DBSAVVY_TEST_PG={{.PG_DSN}}"'
+
+  pg:down:
+    desc: Tear down the docker/postgres fixture (removes the container and volume).
+    cmds:
+      - docker compose -f {{.PG_COMPOSE}} down -v
+
   test:integration:
     desc: Run integration tests against a live Postgres (requires DBSAVVY_TEST_PG + docker fixture).
+    preconditions:
+      - sh: '[ -n "$DBSAVVY_TEST_PG" ]'
+        msg: |
+          DBSAVVY_TEST_PG is not set; refusing to run integration tests silently.
+          Bring the fixture up and export the DSN, e.g.:
+            task pg:up
+            export DBSAVVY_TEST_PG=postgres://dbsavvy:dbsavvy@localhost:5432/dbsavvy_test
+            task test:integration
+      - sh: 'go run ./internal/pgprobe "$DBSAVVY_TEST_PG"'
+        msg: |
+          DBSAVVY_TEST_PG is set but the database is unreachable.
+          Start the fixture with `task pg:up`, then retry.
     cmds:
       - env GOFLAGS=-count=1 go test -tags=integration ./...
-      - 'echo "tip: bring postgres up with: docker compose -f docker/postgres/docker-compose.yml up -d"'
 
   test:all:
     desc: Run unit + integration tests.
