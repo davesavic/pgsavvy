@@ -21,6 +21,13 @@ import (
 // drift (dbsavvy-tro.3 wire-up).
 const AppStatusViewName = "status"
 
+// ResultTabBarViewName is the gocui view-name for the result-pane tab-bar
+// strip — a frameless 1-row view carved out of the top of the "secondary"
+// (result) region. It is created/sized directly in RunLayout (not a
+// boxlayout slot) and its content comes from ResultTabsHelper.RenderTabBar.
+// dbsavvy-85f.
+const ResultTabBarViewName = "result_tab_bar"
+
 // ANSI SGR sequences used to give success / error toasts a
 // distinguishable foreground style at the cell-content level. gocui's
 // escape interpreter (escape.go in the vendored lazygit fork) parses

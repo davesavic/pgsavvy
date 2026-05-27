@@ -170,7 +170,34 @@ func (g *Gui) RunLayout(w, h int) error {
 	// list collapses to a no-op so the layout pass works pre-wire.
 	if g.resultTabsH != nil {
 		if d, ok := dims["secondary"]; ok && d.X1 > d.X0 && d.Y1 > d.Y0 {
-			activeTabView := g.resultTabsH.LayoutPaint(g.driver, d.X0, d.Y0, d.X1, d.Y1)
+			// Reserve the top row of the result region for a tab-bar strip
+			// when tabs are open and the pane is tall enough to keep at
+			// least one grid content row below it. The strip makes
+			// inactive tabs discoverable (dbsavvy-85f); without it only the
+			// active tab's framed title shows and the user must gt blindly
+			// to learn what else is open.
+			contentY0 := d.Y0
+			if g.resultTabsH.Count() > 0 && d.Y1-d.Y0 >= 3 {
+				// Frameless 1-row strip, same -1/+1 Y rect trick the status
+				// bar uses below (gocui InnerHeight=1 with the visible row
+				// landing on d.Y0; the virtual border rows are never
+				// written). ErrUnknownView is the create signal, not fatal.
+				bar, err := g.driver.SetView(ResultTabBarViewName, d.X0, d.Y0-1, d.X1, d.Y0+1, 0)
+				if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+					return err
+				}
+				if bar != nil {
+					bar.Frame = false
+				}
+				_ = g.driver.SetContent(ResultTabBarViewName, g.resultTabsH.RenderTabBar(d.X1-d.X0))
+				contentY0 = d.Y0 + 1
+			} else {
+				// No tabs (or pane too short): drop any stale bar so it
+				// never lingers over an empty / single-row result pane.
+				_ = g.driver.DeleteView(ResultTabBarViewName)
+			}
+
+			activeTabView := g.resultTabsH.LayoutPaint(g.driver, d.X0, contentY0, d.X1, d.Y1)
 			// Attach the RESULT_GRID master editor to the active tab's
 			// view every frame so RESULT_GRID-scoped chords (gt/gT, /, n,
 			// G, ]p, [p, <leader>X, <leader>=, <leader>x, <leader>s,

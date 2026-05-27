@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
@@ -1618,6 +1619,132 @@ func (h *ResultTabsHelper) LayoutPaint(driver types.GuiDriver, x0, y0, x1, y1 in
 		_, _ = driver.SetViewOnTop(activeName)
 	}
 	return activeName
+}
+
+// barLabelMax bounds the per-tab label in the tab-bar strip. Shorter
+// than the full-title resultTabLabelMax so several tabs fit on one row.
+const barLabelMax = 14
+
+// barCellSep separates adjacent tab cells in the strip.
+const barCellSep = " │ "
+
+// Tab-bar styling: the active cell is rendered in reverse video so it
+// reads as the selected tab independent of the active theme. gocui's
+// escape interpreter lifts these SGR codes to per-cell attributes (the
+// same path grid selection and the status bar already rely on).
+const (
+	ansiReverseSGR = "\x1b[7m"
+	ansiResetSGR   = "\x1b[0m"
+)
+
+// stateGlyph maps a tab's lifecycle state to a single-width status glyph
+// shown after its label in the tab-bar strip.
+func stateGlyph(s TabState) string {
+	switch s {
+	case StateRunning:
+		return "▸"
+	case StateQueued:
+		return "…"
+	case StateComplete:
+		return "✓"
+	case StateCancelled:
+		return "⊘"
+	case StateDetached:
+		return "⇡"
+	case StatePlan:
+		return "⊞"
+	default: // StateErrored / StateError ("error")
+		return "✗"
+	}
+}
+
+// RenderTabBar builds the one-line tab-bar strip for the result pane:
+// each open tab as "N label glyph" in slot order, the active tab in
+// reverse video. The strip is width-aware (go-runewidth) and windows
+// around the active tab with ‹ › overflow markers when the cells cannot
+// all fit. Returns "" when no tabs are open. dbsavvy-85f.
+func (h *ResultTabsHelper) RenderTabBar(width int) string {
+	tabs := h.Tabs()
+	if len(tabs) == 0 || width <= 0 {
+		return ""
+	}
+	active := h.activeIDSnapshot()
+
+	texts := make([]string, len(tabs))
+	widths := make([]int, len(tabs))
+	activeIdx := 0
+	for i, t := range tabs {
+		label := truncateLabel(t.Label(), barLabelMax)
+		texts[i] = fmt.Sprintf("%d %s %s", t.Slot()+1, label, stateGlyph(t.State()))
+		widths[i] = runewidth.StringWidth(texts[i])
+		if t.ID() == active {
+			activeIdx = i
+		}
+	}
+
+	// The active cell is rendered with a one-space pad on each side (the
+	// reverse-video "button"), so it occupies two more columns than its
+	// raw text; account for that when deciding how many cells fit.
+	eff := make([]int, len(widths))
+	copy(eff, widths)
+	eff[activeIdx] += 2
+	start, end := windowRange(eff, activeIdx, width, runewidth.StringWidth(barCellSep))
+
+	var b strings.Builder
+	if start > 0 {
+		b.WriteString("‹")
+	}
+	for i := start; i <= end; i++ {
+		if i > start {
+			b.WriteString(barCellSep)
+		}
+		if i == activeIdx {
+			// Pad the active cell so the reverse-video block reads as a
+			// button rather than tightly wrapping the text.
+			b.WriteString(ansiReverseSGR + " " + texts[i] + " " + ansiResetSGR)
+		} else {
+			b.WriteString(texts[i])
+		}
+	}
+	if end < len(widths)-1 {
+		b.WriteString("›")
+	}
+	return b.String()
+}
+
+// windowRange returns the inclusive [start,end] index range of tab cells
+// to render so the active cell is always included and the total display
+// width (cells + separators) fits within width. It grows outward from
+// active, rightward then leftward. sepW is the display width of the
+// cell separator; two columns are reserved for the ‹ › overflow markers
+// when more than one tab exists.
+func windowRange(widths []int, active, width, sepW int) (int, int) {
+	avail := width
+	if len(widths) > 1 {
+		avail -= 2 // ‹ and › markers
+	}
+	if avail < widths[active] {
+		avail = widths[active] // always show the active cell, even if it alone overflows
+	}
+	start, end := active, active
+	used := widths[active]
+	for {
+		grew := false
+		if end+1 < len(widths) && used+sepW+widths[end+1] <= avail {
+			used += sepW + widths[end+1]
+			end++
+			grew = true
+		}
+		if start-1 >= 0 && used+sepW+widths[start-1] <= avail {
+			used += sepW + widths[start-1]
+			start--
+			grew = true
+		}
+		if !grew {
+			break
+		}
+	}
+	return start, end
 }
 
 func (h *ResultTabsHelper) activeIDSnapshot() int64 {
