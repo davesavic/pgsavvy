@@ -39,6 +39,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -138,16 +139,29 @@ func runCommand(t *testing.T, g *orchestrator.Gui, id string) {
 	}
 }
 
-// seedEditor primes the QUERY_EDITOR view (so EditorBufferReader can
-// read it) with the supplied SQL. The recorder driver's SetView returns
-// gocui.ErrUnknownView the first time (gocui sentinel for "new view
-// created"); we swallow it.
-func seedEditor(t *testing.T, rec *testfake.RecorderGuiDriver, sql string) {
+// seedEditor primes the canonical QueryEditorContext.Buffer with the
+// supplied SQL, cursor at the start. This is the source of truth the run
+// path reads: statementUnderCursor() -> editorBufferAdapter.BufferText()
+// -> g.Registry().QueryEditor.Buffer().String(). The recorder QUERY_EDITOR
+// view is never consulted by <leader>r/<leader>R, so seeding it (as an
+// earlier version did) left BufferText() == "" and the run short-circuited
+// with "no statement under cursor". Mirrors keybinding_smoke_integration_test.
+func seedEditor(t *testing.T, g *orchestrator.Gui, sql string) {
 	t.Helper()
-	_, _ = rec.SetView(string(types.QUERY_EDITOR), 0, 0, 80, 24, 0)
-	if err := rec.SetContent(string(types.QUERY_EDITOR), sql); err != nil {
-		t.Fatalf("SetContent(query_editor): %v", err)
+	qec := g.Registry().QueryEditor
+	if qec == nil {
+		t.Fatal("registry.QueryEditor is nil after wireWithDriver")
 	}
+	buf := qec.Buffer()
+	if buf == nil {
+		t.Fatal("qec.Buffer() is nil")
+	}
+	lines := strings.Split(sql, "\n")
+	buf.Lines = make([]editor.Line, len(lines))
+	for i, l := range lines {
+		buf.Lines[i] = editor.Line{Runes: []rune(l)}
+	}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
 }
 
 // ensureLogView materialises the MESSAGES view on the recorder so the
@@ -263,7 +277,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		// AC: "<leader>r on a non-empty single statement opens a result
 		// tab and streams rows"
 		stmt := "SELECT * FROM app.users LIMIT 3"
-		seedEditor(t, s.rec, stmt)
+		seedEditor(t, s.g, stmt)
 		before := helper.Count()
 		runCommand(t, s.g, commands.QueryRun)
 
@@ -331,7 +345,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		}
 
 		buf := "SELECT 1; SELECT 2; SELECT 3;"
-		seedEditor(t, s.rec, buf)
+		seedEditor(t, s.g, buf)
 
 		before := helper.Count()
 		func() {
@@ -500,7 +514,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		// AC: "Pane switch mid-query issues pg_cancel_backend via
 		// separate connection; tab title gains '(cancelled, N rows)'"
 		stmt := "SELECT pg_sleep(5)"
-		seedEditor(t, s.rec, stmt)
+		seedEditor(t, s.g, stmt)
 		runCommand(t, s.g, commands.QueryRun)
 		active := helper.Active()
 		if active == nil {
@@ -665,7 +679,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		// AC: "EXPLAIN returns parsed models.Plan plus raw text; raw
 		// text is displayed as a placeholder until E7's tree UI lands"
 		stmt := "SELECT * FROM app.users LIMIT 3"
-		seedEditor(t, s.rec, stmt)
+		seedEditor(t, s.g, stmt)
 		before := helper.Count()
 		runCommand(t, s.g, commands.QueryExplain)
 
@@ -749,7 +763,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 			}
 		}
 
-		seedEditor(t, s.rec, "SELECT 1")
+		seedEditor(t, s.g, "SELECT 1")
 		runCommand(t, s.g, commands.QueryRun)
 		if got := helper.Count(); got != 1 {
 			t.Fatalf("after first <leader>r: tab count = %d, want 1", got)
@@ -771,7 +785,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		// chan loop (StateRunning). Pre-fix this panicked on
 		// pg.Session.acquireInFlight; with the fix it succeeds and
 		// routes through helper.queueBehind.
-		seedEditor(t, s.rec, "SELECT 2")
+		seedEditor(t, s.g, "SELECT 2")
 		func() {
 			defer func() {
 				if r := recover(); r != nil {

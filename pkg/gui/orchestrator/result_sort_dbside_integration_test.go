@@ -30,17 +30,16 @@
 // buffer order IS the display order. tab.Grid().AllRows() returns that buffer
 // verbatim — no new accessor is needed.
 //
-// How the INITIAL result tab is opened: NOT via the editor <leader>r
-// (commands.QueryRun) path. On the current working tree that path is broken
-// independent of the sort feature — seedEditor writes the recorder view buffer
-// via rec.SetContent, but statementUnderCursor reads the canonical
-// *editor.Buffer hung off QueryEditorContext (editorBufferAdapter.BufferText),
-// which seedEditor does NOT populate, so <leader>r toasts "no statement under
-// cursor" and opens no tab. The sibling TestQueryExecutionEpic_AC exhibits the
-// same breakage on this tree (step01 "tab count = 0"). That is orthogonal to
-// dbsavvy-72k. So the initial tab is opened directly through the live runner
+// How the INITIAL result tab is opened: directly through the live runner
 // (bag.QueryRunner.RunQuery + helper.OpenResultTab + AttachActiveTabOrigin) —
-// the same seam the editor run path uses internally (openResultTab). The SORT
+// the same seam the editor run path uses internally (openResultTab) — NOT via
+// the editor <leader>r (commands.QueryRun) path. The reason is scenario3: the
+// editor run path executes the raw statementUnderCursor() text and has no way
+// to bind a $1 parameter, whereas a parameterized initial tab (Args: {20}) is
+// exactly what scenario3 must open before sorting. Routing every scenario's tab
+// through the one openTabDirect seam keeps the harness uniform. (The earlier
+// seedEditor "no statement under cursor" breakage that first forced this is now
+// fixed — dbsavvy-72k.9 — but the Args-binding constraint stands.) The SORT
 // itself — the actual subject of .8 — still runs the full production command
 // path (ResultSortPick -> SortPick -> Submit -> sortActiveResult ->
 // reRunActiveTab -> RunQuery).
@@ -190,7 +189,7 @@ func triggerSort(t *testing.T, s *queryExecutionSmoke, col int) {
 // through the live runner and the production helper seam, then records the
 // origin so the sort re-run can reissue the exact query. This mirrors what the
 // editor run path's openResultTab does internally; it is used here because the
-// editor <leader>r path is broken on this tree (see file doc). The returned tab
+// editor <leader>r path cannot bind $1 Args for scenario3 (see file doc). The returned tab
 // is the active tab. defaultSchema is "" for the scratch tests (schema-qualified
 // SQL needs no search_path).
 func openTabDirect(t *testing.T, s *queryExecutionSmoke, helper *ui.ResultTabsHelper, sql string, args []any) *ui.Tab {
