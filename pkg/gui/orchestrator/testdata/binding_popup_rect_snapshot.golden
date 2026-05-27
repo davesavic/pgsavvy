@@ -1,0 +1,278 @@
+binding	scope=all	key=:	mode=normal
+binding	scope=cell_editor	key=<c-c>	mode=insert
+binding	scope=cell_editor	key=<c-d>	mode=insert
+binding	scope=cell_editor	key=<c-e>	mode=insert
+binding	scope=cell_editor	key=<c-n>	mode=insert
+binding	scope=cell_editor	key=<c-t>	mode=insert
+binding	scope=cell_editor	key=<cr>	mode=insert
+binding	scope=cell_editor	key=<esc>	mode=insert
+binding	scope=cheatsheet	key=<esc>	mode=normal
+binding	scope=cheatsheet	key=<tab>	mode=normal
+binding	scope=cheatsheet	key=[	mode=normal
+binding	scope=cheatsheet	key=]	mode=normal
+binding	scope=cheatsheet	key=q	mode=normal
+binding	scope=command_line	key=<cr>	mode=command
+binding	scope=command_line	key=<esc>	mode=command
+binding	scope=commit_dialog	key=<esc>	mode=normal
+binding	scope=commit_dialog	key=a	mode=normal
+binding	scope=commit_dialog	key=c	mode=normal
+binding	scope=commit_dialog	key=d	mode=normal
+binding	scope=commit_dialog	key=s	mode=normal
+binding	scope=confirmation	key=<cr>	mode=normal
+binding	scope=confirmation	key=<esc>	mode=normal
+binding	scope=confirmation	key=n	mode=normal
+binding	scope=confirmation	key=y	mode=normal
+binding	scope=conflict_dialog	key=<esc>	mode=normal
+binding	scope=conflict_dialog	key=o	mode=normal
+binding	scope=conflict_dialog	key=r	mode=normal
+binding	scope=connections	key=1	mode=normal
+binding	scope=connections	key=2	mode=normal
+binding	scope=connections	key=3	mode=normal
+binding	scope=connections	key=4	mode=normal
+binding	scope=connections	key=<c-j>	mode=normal
+binding	scope=connections	key=<c-k>	mode=normal
+binding	scope=connections	key=<c-l>	mode=normal
+binding	scope=connections	key=<cr>	mode=normal
+binding	scope=connections	key=<tab>	mode=normal
+binding	scope=connections	key=a	mode=normal
+binding	scope=connections	key=j	mode=normal
+binding	scope=connections	key=k	mode=normal
+binding	scope=connections	key=r	mode=normal
+binding	scope=export_menu	key=<cr>	mode=normal
+binding	scope=export_menu	key=<down>	mode=normal
+binding	scope=export_menu	key=<esc>	mode=normal
+binding	scope=export_menu	key=<left>	mode=normal
+binding	scope=export_menu	key=<right>	mode=normal
+binding	scope=export_menu	key=<up>	mode=normal
+binding	scope=export_menu	key=h	mode=normal
+binding	scope=export_menu	key=j	mode=normal
+binding	scope=export_menu	key=k	mode=normal
+binding	scope=export_menu	key=l	mode=normal
+binding	scope=export_menu	key=q	mode=normal
+binding	scope=export_menu	key=y	mode=normal
+binding	scope=fk_reverse_picker	key=<cr>	mode=normal
+binding	scope=fk_reverse_picker	key=<esc>	mode=normal
+binding	scope=fk_reverse_picker	key=<tab>	mode=normal
+binding	scope=fk_reverse_picker	key=[	mode=normal
+binding	scope=fk_reverse_picker	key=]	mode=normal
+binding	scope=fk_reverse_picker	key=q	mode=normal
+binding	scope=global	key=<c-c>	mode=normal
+binding	scope=global	key=<leader>1	mode=normal
+binding	scope=global	key=<leader>2	mode=normal
+binding	scope=global	key=<leader>3	mode=normal
+binding	scope=global	key=<leader>4	mode=normal
+binding	scope=global	key=<leader>5	mode=normal
+binding	scope=global	key=<leader>6	mode=normal
+binding	scope=global	key=<leader>7	mode=normal
+binding	scope=global	key=<leader>8	mode=normal
+binding	scope=global	key=<leader>9	mode=normal
+binding	scope=global	key=?	mode=normal
+binding	scope=hide_overlay	key= 	mode=normal
+binding	scope=hide_overlay	key=<c-n>	mode=normal
+binding	scope=hide_overlay	key=<c-p>	mode=normal
+binding	scope=hide_overlay	key=<down>	mode=normal
+binding	scope=hide_overlay	key=<esc>	mode=normal
+binding	scope=hide_overlay	key=<up>	mode=normal
+binding	scope=hide_overlay	key=j	mode=normal
+binding	scope=hide_overlay	key=k	mode=normal
+binding	scope=hide_overlay	key=q	mode=normal
+binding	scope=menu	key=<cr>	mode=normal
+binding	scope=menu	key=<esc>	mode=normal
+binding	scope=plan	key=<c-a>	mode=normal
+binding	scope=plan	key=<c-x>	mode=normal
+binding	scope=plan	key=<cr>	mode=normal
+binding	scope=plan	key=H	mode=normal
+binding	scope=plan	key=j	mode=normal
+binding	scope=plan	key=k	mode=normal
+binding	scope=plan	key=o	mode=normal
+binding	scope=prompt	key=<cr>	mode=command
+binding	scope=prompt	key=<esc>	mode=command
+binding	scope=query_editor	key=$	mode=mode(0x3c)
+binding	scope=query_editor	key=(	mode=mode(0x3c)
+binding	scope=query_editor	key=)	mode=mode(0x3c)
+binding	scope=query_editor	key=.	mode=normal
+binding	scope=query_editor	key=0	mode=mode(0x3c)
+binding	scope=query_editor	key=1	mode=normal
+binding	scope=query_editor	key=2	mode=normal
+binding	scope=query_editor	key=3	mode=normal
+binding	scope=query_editor	key=4	mode=normal
+binding	scope=query_editor	key=<	mode=mode(0x3c)
+binding	scope=query_editor	key=<c-h>	mode=normal
+binding	scope=query_editor	key=<c-j>	mode=normal
+binding	scope=query_editor	key=<c-r>	mode=normal
+binding	scope=query_editor	key=<c-v>	mode=normal
+binding	scope=query_editor	key=<c-x><c-o>	mode=insert
+binding	scope=query_editor	key=<esc>	mode=mode(0x1c)
+binding	scope=query_editor	key=<esc>	mode=mode(0x22)
+binding	scope=query_editor	key=<leader>!	mode=normal
+binding	scope=query_editor	key=<leader>E	mode=normal
+binding	scope=query_editor	key=<leader>R	mode=normal
+binding	scope=query_editor	key=<leader>e	mode=normal
+binding	scope=query_editor	key=<leader>r	mode=mode(0x1c)
+binding	scope=query_editor	key=<leader>r	mode=normal
+binding	scope=query_editor	key=<leader>x	mode=normal
+binding	scope=query_editor	key=<tab>	mode=normal
+binding	scope=query_editor	key=>	mode=mode(0x3c)
+binding	scope=query_editor	key=A	mode=normal
+binding	scope=query_editor	key=B	mode=mode(0x3c)
+binding	scope=query_editor	key=E	mode=mode(0x3c)
+binding	scope=query_editor	key=G	mode=mode(0x3c)
+binding	scope=query_editor	key=H	mode=mode(0x3c)
+binding	scope=query_editor	key=I	mode=normal
+binding	scope=query_editor	key=L	mode=mode(0x3c)
+binding	scope=query_editor	key=M	mode=mode(0x3c)
+binding	scope=query_editor	key=O	mode=normal
+binding	scope=query_editor	key=V	mode=normal
+binding	scope=query_editor	key=W	mode=mode(0x3c)
+binding	scope=query_editor	key=^	mode=mode(0x3c)
+binding	scope=query_editor	key=a	mode=normal
+binding	scope=query_editor	key=a"	mode=mode(0x2c)
+binding	scope=query_editor	key=a'	mode=mode(0x2c)
+binding	scope=query_editor	key=a(	mode=mode(0x2c)
+binding	scope=query_editor	key=aB	mode=mode(0x2c)
+binding	scope=query_editor	key=a[	mode=mode(0x2c)
+binding	scope=query_editor	key=ap	mode=mode(0x2c)
+binding	scope=query_editor	key=as	mode=mode(0x2c)
+binding	scope=query_editor	key=a{	mode=mode(0x2c)
+binding	scope=query_editor	key=b	mode=mode(0x3c)
+binding	scope=query_editor	key=c	mode=mode(0x3c)
+binding	scope=query_editor	key=d	mode=mode(0x3c)
+binding	scope=query_editor	key=e	mode=mode(0x3c)
+binding	scope=query_editor	key=gU	mode=mode(0x3c)
+binding	scope=query_editor	key=gg	mode=mode(0x3c)
+binding	scope=query_editor	key=gu	mode=mode(0x3c)
+binding	scope=query_editor	key=h	mode=mode(0x3c)
+binding	scope=query_editor	key=i	mode=normal
+binding	scope=query_editor	key=i"	mode=mode(0x2c)
+binding	scope=query_editor	key=i'	mode=mode(0x2c)
+binding	scope=query_editor	key=i(	mode=mode(0x2c)
+binding	scope=query_editor	key=iB	mode=mode(0x2c)
+binding	scope=query_editor	key=i[	mode=mode(0x2c)
+binding	scope=query_editor	key=ip	mode=mode(0x2c)
+binding	scope=query_editor	key=is	mode=mode(0x2c)
+binding	scope=query_editor	key=i{	mode=mode(0x2c)
+binding	scope=query_editor	key=j	mode=mode(0x3c)
+binding	scope=query_editor	key=k	mode=mode(0x3c)
+binding	scope=query_editor	key=l	mode=mode(0x3c)
+binding	scope=query_editor	key=o	mode=normal
+binding	scope=query_editor	key=p	mode=normal
+binding	scope=query_editor	key=u	mode=normal
+binding	scope=query_editor	key=v	mode=normal
+binding	scope=query_editor	key=w	mode=mode(0x3c)
+binding	scope=query_editor	key=y	mode=mode(0x3c)
+binding	scope=query_editor	key={	mode=mode(0x3c)
+binding	scope=query_editor	key=}	mode=mode(0x3c)
+binding	scope=result_grid	key=/	mode=normal
+binding	scope=result_grid	key=1	mode=normal
+binding	scope=result_grid	key=2	mode=normal
+binding	scope=result_grid	key=3	mode=normal
+binding	scope=result_grid	key=4	mode=normal
+binding	scope=result_grid	key=<c-a>	mode=normal
+binding	scope=result_grid	key=<c-d>	mode=normal
+binding	scope=result_grid	key=<c-h>	mode=normal
+binding	scope=result_grid	key=<c-i>	mode=normal
+binding	scope=result_grid	key=<c-k>	mode=normal
+binding	scope=result_grid	key=<c-o>	mode=normal
+binding	scope=result_grid	key=<c-u>	mode=normal
+binding	scope=result_grid	key=<c-v>	mode=normal
+binding	scope=result_grid	key=<esc>	mode=normal
+binding	scope=result_grid	key=<leader>=	mode=normal
+binding	scope=result_grid	key=<leader>X	mode=normal
+binding	scope=result_grid	key=<leader>cU	mode=normal
+binding	scope=result_grid	key=<leader>cu	mode=normal
+binding	scope=result_grid	key=<leader>cw	mode=normal
+binding	scope=result_grid	key=<leader>gH	mode=normal
+binding	scope=result_grid	key=<leader>gx	mode=normal
+binding	scope=result_grid	key=<leader>oe	mode=normal
+binding	scope=result_grid	key=<leader>s	mode=normal
+binding	scope=result_grid	key=<leader>x	mode=normal
+binding	scope=result_grid	key=<tab>	mode=normal
+binding	scope=result_grid	key=G	mode=normal
+binding	scope=result_grid	key=J	mode=normal
+binding	scope=result_grid	key=K	mode=normal
+binding	scope=result_grid	key=N	mode=normal
+binding	scope=result_grid	key=V	mode=normal
+binding	scope=result_grid	key=[p	mode=normal
+binding	scope=result_grid	key=]G	mode=normal
+binding	scope=result_grid	key=]p	mode=normal
+binding	scope=result_grid	key=gD	mode=normal
+binding	scope=result_grid	key=gT	mode=normal
+binding	scope=result_grid	key=gd	mode=normal
+binding	scope=result_grid	key=gg	mode=normal
+binding	scope=result_grid	key=gt	mode=normal
+binding	scope=result_grid	key=h	mode=normal
+binding	scope=result_grid	key=i	mode=normal
+binding	scope=result_grid	key=j	mode=normal
+binding	scope=result_grid	key=k	mode=normal
+binding	scope=result_grid	key=l	mode=normal
+binding	scope=result_grid	key=n	mode=normal
+binding	scope=result_grid	key=y	mode=normal
+binding	scope=result_grid	key=yy	mode=normal
+binding	scope=schemas	key=1	mode=normal
+binding	scope=schemas	key=2	mode=normal
+binding	scope=schemas	key=3	mode=normal
+binding	scope=schemas	key=4	mode=normal
+binding	scope=schemas	key=<c-j>	mode=normal
+binding	scope=schemas	key=<c-k>	mode=normal
+binding	scope=schemas	key=<c-l>	mode=normal
+binding	scope=schemas	key=<cr>	mode=normal
+binding	scope=schemas	key=<leader>H	mode=normal
+binding	scope=schemas	key=<tab>	mode=normal
+binding	scope=schemas	key=H	mode=normal
+binding	scope=schemas	key=U	mode=normal
+binding	scope=schemas	key=j	mode=normal
+binding	scope=schemas	key=k	mode=normal
+binding	scope=schemas	key=r	mode=normal
+binding	scope=selection	key=<cr>	mode=normal
+binding	scope=selection	key=<down>	mode=normal
+binding	scope=selection	key=<esc>	mode=normal
+binding	scope=selection	key=<up>	mode=normal
+binding	scope=selection	key=j	mode=normal
+binding	scope=selection	key=k	mode=normal
+binding	scope=table_inspect	key=<esc>	mode=normal
+binding	scope=table_inspect	key=<tab>	mode=normal
+binding	scope=table_inspect	key=[	mode=normal
+binding	scope=table_inspect	key=]	mode=normal
+binding	scope=table_inspect	key=q	mode=normal
+binding	scope=tables	key=1	mode=normal
+binding	scope=tables	key=2	mode=normal
+binding	scope=tables	key=3	mode=normal
+binding	scope=tables	key=4	mode=normal
+binding	scope=tables	key=<c-j>	mode=normal
+binding	scope=tables	key=<c-k>	mode=normal
+binding	scope=tables	key=<c-l>	mode=normal
+binding	scope=tables	key=<cr>	mode=normal
+binding	scope=tables	key=<tab>	mode=normal
+binding	scope=tables	key=i	mode=normal
+binding	scope=tables	key=j	mode=normal
+binding	scope=tables	key=k	mode=normal
+binding	scope=tables	key=r	mode=normal
+popuprect	key=cell_editor	x0=20	y0=47	x1=80	y1=52
+popuprect	key=cheatsheet	x0=20	y0=35	x1=80	y1=65
+popuprect	key=columns	none
+popuprect	key=command_line	x0=0	y0=99	x1=100	y1=101
+popuprect	key=commit_dialog	x0=15	y0=20	x1=85	y1=80
+popuprect	key=confirmation	x0=25	y0=25	x1=75	y1=75
+popuprect	key=conflict_dialog	x0=20	y0=20	x1=80	y1=80
+popuprect	key=connections	none
+popuprect	key=export_menu	x0=25	y0=25	x1=75	y1=75
+popuprect	key=first_run_tip	none
+popuprect	key=fk_reverse_picker	x0=20	y0=20	x1=80	y1=80
+popuprect	key=global	none
+popuprect	key=hide_overlay	x0=25	y0=25	x1=75	y1=75
+popuprect	key=history	none
+popuprect	key=indexes	none
+popuprect	key=limit	none
+popuprect	key=menu	x0=25	y0=25	x1=75	y1=75
+popuprect	key=messages	none
+popuprect	key=plan	none
+popuprect	key=prompt	x0=10	y0=25	x1=90	y1=75
+popuprect	key=query_editor	none
+popuprect	key=result_grid	none
+popuprect	key=schemas	none
+popuprect	key=selection	x0=25	y0=25	x1=75	y1=75
+popuprect	key=suggestions	x0=25	y0=25	x1=75	y1=75
+popuprect	key=table_data_editor	none
+popuprect	key=table_inspect	x0=20	y0=20	x1=80	y1=80
+popuprect	key=tables	none
+popuprect	key=which_key	none
