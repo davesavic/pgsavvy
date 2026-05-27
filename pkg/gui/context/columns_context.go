@@ -25,6 +25,9 @@ func (c *ColumnsContext) HandleRender() error {
 	deps := c.deps
 	viewName := c.GetViewName()
 	body := c.renderRows()
+	if body == "" {
+		body = railEmptyPlaceholder(deps, c.GetKey())
+	}
 	writeView(deps, func() error {
 		return deps.GuiDriver.SetContent(viewName, body)
 	})

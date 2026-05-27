@@ -73,6 +73,18 @@ type ContextTreeDeps struct {
 	// renderEmpty is true the context writes hint instead of the row list.
 	EmptyStateHook func(common *common.Common) (renderEmpty bool, hint string)
 
+	// RailEmptyText is the rail-aware empty-state hook for the
+	// SCHEMAS/TABLES/COLUMNS/INDEXES side rails (dbsavvy-fow.5 U7). The
+	// CONNECTIONS rail keeps its dedicated EmptyStateHook (above) because
+	// its emptiness is decided by a live profile provider rather than the
+	// rendered item slice. These four rails instead already know they are
+	// empty (len(items) == 0) and only need the contextual placeholder
+	// string, so the hook is keyed by ContextKey and returns the dim
+	// placeholder text for that rail. Nil-safe: when nil (or when the
+	// returned string is empty) the rail falls through to the prior blank
+	// render with no panic.
+	RailEmptyText func(rail ContextKey) (placeholder string)
+
 	// PresentationHook is invoked by ConfirmationContext.HandleRender to
 	// fetch border style and header text for the connection-color popup.
 	PresentationHook func(conn *models.Connection) (borderStyle TextStyle, headerText string)

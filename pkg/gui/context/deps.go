@@ -21,6 +21,17 @@ func writeView(deps depsAlias, fn func() error) {
 	deps.GuiDriver.Update(fn)
 }
 
+// railEmptyPlaceholder returns the contextual dim placeholder for an empty
+// side rail (SCHEMAS/TABLES/COLUMNS/INDEXES) via deps.RailEmptyText. It is
+// nil-safe: when the hook is unset (or returns ""), it returns "" so the
+// caller falls through to the prior blank render. dbsavvy-fow.5 (U7).
+func railEmptyPlaceholder(deps depsAlias, rail types.ContextKey) string {
+	if deps.RailEmptyText == nil {
+		return ""
+	}
+	return deps.RailEmptyText(rail)
+}
+
 // scrollSideRailIntoView pins the gocui view origin (oy) so the row at
 // `cursor` stays inside the visible viewport. Side rails render their
 // full item slice into the buffer via SetContent and use a "> " text

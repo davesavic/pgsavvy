@@ -30,6 +30,9 @@ func (t *TablesContext) HandleRender() error {
 	deps := t.deps
 	viewName := t.GetViewName()
 	body := t.renderRows()
+	if body == "" {
+		body = railEmptyPlaceholder(deps, t.GetKey())
+	}
 	writeView(deps, func() error {
 		return deps.GuiDriver.SetContent(viewName, body)
 	})
