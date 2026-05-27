@@ -78,6 +78,7 @@ func (c *TablesController) GetKeybindings(_ types.KeybindingsOpts) []*types.Chor
 		Scope:       types.TABLES,
 		ActionID:    commands.TableInspectOpen,
 		Description: tr.Actions.TableInspectOpen,
+		ShowInBar:   true,
 	})
 	out = append(out, railSwitchBindings(view, tr)...)
 	return out
