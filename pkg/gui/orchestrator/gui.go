@@ -315,6 +315,10 @@ func (g *Gui) initGocui() error {
 	if err != nil {
 		return fmt.Errorf("gui: gocui.NewGui: %w", err)
 	}
+	// Enable bottom-border footers; result tabs render run metadata
+	// (row count / state) flush-right on the bottom border via view.Footer.
+	// Safe globally: no other view sets a Footer.
+	ng.ShowListFooter = true
 	g.driver = newGocuiDriver(ng)
 	return g.wireWithDriver()
 }

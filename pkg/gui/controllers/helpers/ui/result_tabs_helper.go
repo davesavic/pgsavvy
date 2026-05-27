@@ -42,11 +42,6 @@ const resultTabInitialRows = 200
 // resultTabToastTTL is the lifetime of toasts surfaced by the helper.
 const resultTabToastTTL = 4 * time.Second
 
-// resultTabLabelMax bounds the SQL-prefix portion of the tab title.
-// Mirrors controllers.resultTabLabelMax (kept in sync; both are
-// derived from the dbsavvy-66p §7 spec).
-const resultTabLabelMax = 40
-
 // TabState classifies the lifecycle phase of a result tab. The string
 // values are surfaced directly in the rendered title.
 type TabState string
@@ -504,28 +499,35 @@ func (t *Tab) ViewName() string {
 	return string(types.ResultTabKey(t.slot))
 }
 
-// Title builds the rendered title:
+// Title builds the rendered results-panel frame title. The tab bar
+// already carries the slot number, query text, and a status glyph, so
+// the frame title shows only the non-redundant metadata:
 //
-//	"result N: <label> (<state>, ~M rows)"          (in-flight)
-//	"result N: <label> (<state>, M rows) (complete)" (after EOF)
-//
-// The "~" prefix on the row count marks an approximate (still-streaming)
-// count; it is dropped once the tab has been marked complete. Label is
-// truncated to resultTabLabelMax characters. dbsavvy-uv0.3.
+//	"<state>"            (error / plan tabs — no row count)
+//	"~M rows · <state>"  (queued / running — "~" marks an approximate,
+//	                      still-streaming count)
+//	"M rows · <state>"   (cancelled / detached — final count)
+//	"M rows"             (complete — glyph in the tab bar conveys state)
 func (t *Tab) Title() string {
 	t.mu.Lock()
 	state := t.state
 	rows := t.rowCount
 	complete := t.complete
 	t.mu.Unlock()
-	label := truncateLabel(t.label, resultTabLabelMax)
-	rowsSegment := fmt.Sprintf("~%d rows", rows)
-	suffix := ""
-	if complete {
-		rowsSegment = fmt.Sprintf("%d rows", rows)
-		suffix = " (complete)"
+
+	switch state {
+	case StateErrored, StatePlan:
+		return string(state)
 	}
-	return fmt.Sprintf("result %d: %s (%s, %s)%s", t.slot+1, label, state, rowsSegment, suffix)
+
+	rowsSegment := fmt.Sprintf("%d rows", rows)
+	if state == StateRunning || state == StateQueued {
+		rowsSegment = "~" + rowsSegment
+	}
+	if complete {
+		return rowsSegment
+	}
+	return fmt.Sprintf("%s · %s", rowsSegment, state)
 }
 
 // Complete reports whether the tab's stream has been drained to EOF.
@@ -1580,17 +1582,19 @@ func (h *ResultTabsHelper) LayoutPaint(driver types.GuiDriver, x0, y0, x1, y1 in
 		if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
 			continue
 		}
-		// Refresh title every frame (state / row count may have changed).
+		// Refresh metadata every frame (state / row count may have
+		// changed). Run metadata lives on a bottom-right footer; the top
+		// border is left to the grid's sort indicator (data tabs) and is
+		// otherwise blank.
 		if view != nil {
-			title := t.Title()
-			view.Title = title // stands for plan/error/empty tabs (which skip Grid.Render)
+			view.Footer = t.Title()
+			view.Title = "" // clear any stale title; grid re-sets the sort indicator below
 			// Render grid contents (no-op for plan / error tabs).
 			if g := t.Grid(); g != nil {
-				// Propagate the tab title into the grid so Render's
-				// snapshot (v.title + sortIndicator) carries it; otherwise
-				// Render's `target.Title = snap.title` clobbers the line
-				// above with an empty title. dbsavvy-tzi.4.
-				g.SetTitle(title)
+				// Empty base title so Render's snapshot (v.title +
+				// sortIndicator) leaves only the sort indicator on the top
+				// border. Run metadata is carried by view.Footer above.
+				g.SetTitle("")
 				g.Render(view)
 			} else if t.State() == StatePlan {
 				// dbsavvy-uv0.8: prefer the PlanContext-rendered tree
@@ -1621,8 +1625,8 @@ func (h *ResultTabsHelper) LayoutPaint(driver types.GuiDriver, x0, y0, x1, y1 in
 	return activeName
 }
 
-// barLabelMax bounds the per-tab label in the tab-bar strip. Shorter
-// than the full-title resultTabLabelMax so several tabs fit on one row.
+// barLabelMax bounds the per-tab label in the tab-bar strip, kept short
+// so several tabs fit on one row.
 const barLabelMax = 14
 
 // barCellSep separates adjacent tab cells in the strip.

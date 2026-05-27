@@ -801,21 +801,12 @@ func TestTabTitleFormat(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
 	_ = h.openTab("SELECT * FROM users", nil)
 	active := h.Active()
-	// dbsavvy-uv0.3: in-flight tabs prefix the row count with "~" to
-	// signal an approximate (still-streaming) value.
-	want := "result 1: SELECT * FROM users (running, ~0 rows)"
+	// The frame title carries only metadata (the tab bar shows the
+	// query); in-flight tabs prefix the row count with "~" to signal an
+	// approximate (still-streaming) value.
+	want := "~0 rows · running"
 	if got := active.Title(); got != want {
 		t.Errorf("Title = %q, want %q", got, want)
-	}
-}
-
-func TestTabTitleTruncatesLongLabel(t *testing.T) {
-	h, _ := newTestHelper(t, nil)
-	long := "SELECT a, b, c, d, e, f, g, h, i, j, k FROM very_long_table_name WHERE x = 1"
-	_ = h.openTab(long, nil)
-	title := h.Active().Title()
-	if !contains(title, "…") {
-		t.Errorf("Title = %q, expected ellipsis suffix on long label", title)
 	}
 }
 
@@ -1278,22 +1269,20 @@ func TestReadToEndOnEmptyCompleteIsNoop(t *testing.T) {
 	}
 }
 
-// TestTabCompleteFlagDropsTildeAddsSuffix verifies the AC "Tab.complete
-// flag drops ~, adds (complete) in title". dbsavvy-uv0.3 AC #4.
-func TestTabCompleteFlagDropsTildeAddsSuffix(t *testing.T) {
+// TestTabCompleteFlagDropsTilde verifies that completion drops the "~"
+// approximate-count prefix and the trailing state segment, leaving just
+// the final row count (the tab-bar glyph conveys the completed state).
+func TestTabCompleteFlagDropsTilde(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
 	h, _ := newTestHelper(t, factory)
 	_ = h.openTab("SELECT 1", newFakeRunHandle())
 	tab := h.Active()
 
-	// Before complete: title carries "~N rows".
+	// Before complete: title carries "~N rows · running".
 	pre := tab.Title()
 	if !contains(pre, "~0 rows") {
 		t.Errorf("pre-complete title %q missing ~N rows prefix", pre)
-	}
-	if contains(pre, "(complete)") {
-		t.Errorf("pre-complete title %q already has (complete)", pre)
 	}
 
 	// Fire the registered onDone to mark complete. Since OnUIThread is
@@ -1303,11 +1292,8 @@ func TestTabCompleteFlagDropsTildeAddsSuffix(t *testing.T) {
 		t.Fatal("tab not marked complete after fireOnDone")
 	}
 	post := tab.Title()
-	if contains(post, "~") {
-		t.Errorf("post-complete title %q still has '~' prefix", post)
-	}
-	if !contains(post, "(complete)") {
-		t.Errorf("post-complete title %q missing (complete) suffix", post)
+	if post != "0 rows" {
+		t.Errorf("post-complete title = %q, want %q", post, "0 rows")
 	}
 }
 
@@ -1903,16 +1889,12 @@ func TestActiveContext_PlanTabSurfacesPlanContext(t *testing.T) {
 	}
 }
 
-// --- dbsavvy-tzi.4: LayoutPaint renders the data-tab title ------------------
+// --- LayoutPaint renders the data-tab footer --------------------------------
 
-// TestLayoutPaintRendersDataTabTitle is the clobber regression for
-// dbsavvy-tzi.4. LayoutPaint set view.Title = t.Title() then called
-// grid.Render(view), whose snapshot did target.Title = (grid.title +
-// sortIndicator). Because nothing seeded the grid's title, Render
-// overwrote the freshly-assigned data-tab title with an empty one, so the
-// data tab rendered no title (plan/error tabs were spared because they
-// skip Grid.Render). The fix propagates the tab title into the grid via
-// SetTitle before Render so the snapshot carries it.
+// TestLayoutPaintRendersDataTabTitle verifies a data tab's run metadata
+// lands on view.Footer (the bottom-right footer) after LayoutPaint.
+// Grid.Render owns view.Title (sort indicator only) and must not clobber
+// the footer.
 func TestLayoutPaintRendersDataTabTitle(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
@@ -1932,11 +1914,11 @@ func TestLayoutPaintRendersDataTabTitle(t *testing.T) {
 	g.SetColumns([]models.ColumnMeta{{Name: "id", TypeName: "int"}})
 	g.AppendRows([]models.Row{{Values: []any{1}}, {Values: []any{2}}, {Values: []any{3}}})
 
-	// Mark the tab COMPLETE via the streaming onDone path so Title()
-	// carries the "(complete)" suffix (OnUIThread nil → synchronous).
+	// Mark the tab COMPLETE via the streaming onDone path (OnUIThread
+	// nil → synchronous) so Title() reports the final row count.
 	runner.fireOnDone()
 	if !tab.Complete() {
-		t.Fatal("tab not complete after fireOnDone; title would lack '(complete)'")
+		t.Fatal("tab not complete after fireOnDone")
 	}
 
 	rec := testfake.NewRecorderGuiDriver()
@@ -1949,19 +1931,16 @@ func TestLayoutPaintRendersDataTabTitle(t *testing.T) {
 	if v == nil {
 		t.Fatalf("RealView(%q) = nil; expected a real view after LayoutPaint", name)
 	}
-	if v.Title == "" {
-		t.Fatalf("data-tab view.Title is empty after LayoutPaint (clobbered by Grid.Render); want %q", tab.Title())
+	if v.Footer == "" {
+		t.Fatalf("data-tab view.Footer is empty after LayoutPaint; want %q", tab.Title())
 	}
-	if !strings.Contains(v.Title, "(complete") {
-		t.Errorf("view.Title = %q, want it to contain %q", v.Title, "(complete")
-	}
-	if !strings.Contains(v.Title, "rows") {
-		t.Errorf("view.Title = %q, want it to contain %q", v.Title, "rows")
+	if v.Footer != tab.Title() {
+		t.Errorf("view.Footer = %q, want %q", v.Footer, tab.Title())
 	}
 }
 
-// TestLayoutPaintRendersEmptyDataTabTitle covers the AC edge case: a
-// completed data tab with zero rows must still render a non-empty title
+// TestLayoutPaintRendersEmptyDataTabTitle covers the edge case: a
+// completed data tab with zero rows must still set a non-empty footer
 // (the grid still runs through Grid.Render with an empty result set).
 func TestLayoutPaintRendersEmptyDataTabTitle(t *testing.T) {
 	runner := &fakeStreamRunner{}
@@ -1989,17 +1968,17 @@ func TestLayoutPaintRendersEmptyDataTabTitle(t *testing.T) {
 	if v == nil {
 		t.Fatalf("RealView(%q) = nil after LayoutPaint", name)
 	}
-	if v.Title == "" {
-		t.Fatalf("empty (0-row) completed data-tab view.Title is empty; want %q", tab.Title())
+	if v.Footer == "" {
+		t.Fatalf("empty (0-row) completed data-tab view.Footer is empty; want %q", tab.Title())
 	}
-	if !strings.Contains(v.Title, "(complete") {
-		t.Errorf("view.Title = %q, want it to contain %q", v.Title, "(complete")
+	if v.Footer != tab.Title() {
+		t.Errorf("view.Footer = %q, want %q", v.Footer, tab.Title())
 	}
 }
 
 // TestLayoutPaintRendersPlanAndErrorTabTitles is the non-regression guard
 // for the non-grid branches: plan and error tabs (which skip Grid.Render)
-// must keep rendering their titles after the dbsavvy-tzi.4 fix.
+// must still set their footer metadata.
 func TestLayoutPaintRendersPlanAndErrorTabTitles(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
 
@@ -2024,11 +2003,11 @@ func TestLayoutPaintRendersPlanAndErrorTabTitles(t *testing.T) {
 	h.LayoutPaint(rec, 0, 0, 80, 24)
 
 	pv := rec.RealView(planTab.ViewName())
-	if pv == nil || pv.Title == "" {
-		t.Fatalf("plan-tab view/title empty after LayoutPaint: view=%v", pv)
+	if pv == nil || pv.Footer == "" {
+		t.Fatalf("plan-tab view/footer empty after LayoutPaint: view=%v", pv)
 	}
 	ev := rec.RealView(errTab.ViewName())
-	if ev == nil || ev.Title == "" {
-		t.Fatalf("error-tab view/title empty after LayoutPaint: view=%v", ev)
+	if ev == nil || ev.Footer == "" {
+		t.Fatalf("error-tab view/footer empty after LayoutPaint: view=%v", ev)
 	}
 }
