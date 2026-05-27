@@ -1,9 +1,6 @@
 package controllers
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"reflect"
 	"testing"
 
@@ -12,9 +9,10 @@ import (
 
 // keybindingProvider is the method set every controller that contributes
 // bindings to the trie implements. A Controllers field whose type
-// satisfies this interface MUST be appended in AllDefaultBindings,
-// otherwise its bindings never reach the keybinding service and the keys
-// silently do nothing (dbsavvy-9v1.3 guard 2).
+// satisfies this interface MUST be listed in the per-controller registry
+// (Controllers.entries()), otherwise AllDefaultBindings (which is DERIVED
+// from that registry) never concatenates its GetKeybindings output and the
+// keys silently do nothing (dbsavvy-9v1.3 guard 2 / dbsavvy-fow.11 D3a).
 type keybindingProvider interface {
 	GetKeybindings(types.KeybindingsOpts) []*types.ChordBinding
 }
@@ -22,27 +20,27 @@ type keybindingProvider interface {
 var keybindingProviderType = reflect.TypeOf((*keybindingProvider)(nil)).Elem()
 
 // TestAllDefaultBindingsIncludesEveryProviderController guards the
-// hand-maintained AllDefaultBindings list against omission. It reflects
-// over the Controllers struct to find every field whose type implements
-// the keybinding-provider method, then asserts each such field is
-// referenced (as `c.<Field>`) inside AllDefaultBindings's source body.
+// registry-derived AllDefaultBindings against omission. Now that
+// AllDefaultBindings iterates Controllers.entries() instead of a
+// hand-listed sequence of c.<Field> appends, the omission failure mode
+// moved: a provider controller is dropped from the trie iff its field is
+// missing from entries(). This guard reflects over the Controllers struct
+// to find every field whose type implements the keybinding-provider method,
+// then populates a Controllers value with EVERY such field set to a
+// non-nil instance and asserts each appears in the derived entries() —
+// equivalently, that AllDefaultBindings surfaces it.
 //
-// A controller added to the Controllers struct but forgotten in
-// AllDefaultBindings would publish no bindings to the trie — the exact
-// silent-drop failure mode this guard closes. Deliberate exclusions go
-// in providerAllowlist below, each citing why.
-//
-// Enumeration approach: reflection over struct fields for the provider
-// set (Go gives us the field type's method set directly) + go/ast parse
-// of all_defaults.go for the referenced set. AST-parsing the function
-// body is the only way to observe which fields AllDefaultBindings
-// actually appends, since the appends are imperative statements, not
-// reflectable data. This mirrors the enumerate+assert+allowlist house
-// style of orchestrator/wiring_invariant_test.go.
+// Coverage is equal-or-stronger than the prior AST-of-AllDefaultBindings
+// approach: it still enumerates every provider field via reflection (the
+// same set), but verifies the field is actually carried by the live
+// registry the function consumes, rather than that a textual c.<Field>
+// reference exists in a now-removed imperative body. A new controller field
+// forgotten in entries() still fails. Deliberate exclusions go in
+// providerAllowlist below, each citing why.
 func TestAllDefaultBindingsIncludesEveryProviderController(t *testing.T) {
 	// providerAllowlist: Controllers fields whose type implements the
-	// provider interface but are deliberately NOT appended in
-	// AllDefaultBindings. Empty today; entries cite why.
+	// provider interface but are deliberately NOT carried by entries().
+	// Empty today; entries cite why.
 	providerAllowlist := map[string]string{}
 
 	// 1. Reflect: every Controllers field whose type is a keybinding provider.
@@ -58,73 +56,53 @@ func TestAllDefaultBindingsIncludesEveryProviderController(t *testing.T) {
 		t.Fatal("reflected Controllers struct but found no keybinding-provider fields")
 	}
 
-	// 2. AST: every `c.<Field>` referenced inside AllDefaultBindings.
-	referenced := referencedControllerFields(t, "AllDefaultBindings")
-
-	// 3. Assert every provider field is referenced (or allowlisted).
+	// 2. Build a Controllers value with every provider field set to a
+	//    non-nil instance, so entries() (which skips typed-nil fields)
+	//    surfaces all of them. reflect.New allocates a usable non-nil
+	//    pointer for each *XController field; no controller method is
+	//    invoked here, only struct membership in entries() is exercised.
+	c := &Controllers{}
+	cv := reflect.ValueOf(c).Elem()
 	for name := range providerFields {
-		if referenced[name] {
+		fv := cv.FieldByName(name)
+		if fv.Kind() != reflect.Ptr {
+			t.Fatalf("provider field %s is not a pointer (%s); guard assumes *XController fields", name, fv.Kind())
+		}
+		fv.Set(reflect.New(fv.Type().Elem()))
+	}
+
+	// 3. Collect the field names carried by the derived registry.
+	listed := map[string]bool{}
+	for _, e := range c.entries() {
+		listed[e.name] = true
+	}
+	if len(listed) == 0 {
+		t.Fatal("Controllers.entries() returned no entries for a fully-populated bundle")
+	}
+
+	// 4. Assert every provider field is in the registry (or allowlisted).
+	for name := range providerFields {
+		if listed[name] {
 			continue
 		}
 		if why, ok := providerAllowlist[name]; ok {
 			t.Logf("ALLOWLIST %s: %s", name, why)
 			continue
 		}
-		t.Errorf("Controllers.%s implements GetKeybindings but is not appended in AllDefaultBindings; its keybindings never reach the trie", name)
-	}
-}
-
-// referencedControllerFields parses all_defaults.go and returns the set
-// of receiver-field names referenced as `<recv>.<Field>` inside the named
-// function. The receiver is the function's sole *Controllers parameter.
-func referencedControllerFields(t *testing.T, fnName string) map[string]bool {
-	t.Helper()
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "all_defaults.go", nil, 0)
-	if err != nil {
-		t.Fatalf("parse all_defaults.go: %v", err)
+		t.Errorf("Controllers.%s implements GetKeybindings but is not carried by entries(); AllDefaultBindings (derived from entries()) never surfaces it, so its keybindings never reach the trie", name)
 	}
 
-	var fn *ast.FuncDecl
-	for _, d := range f.Decls {
-		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Name == fnName {
-			fn = fd
-			break
-		}
-	}
-	if fn == nil {
-		t.Fatalf("function %s not found in all_defaults.go", fnName)
-	}
-
-	// Identify the *Controllers parameter name (the receiver-like ident
-	// every `c.Field` selector is rooted at).
-	recvName := ""
-	for _, p := range fn.Type.Params.List {
-		star, ok := p.Type.(*ast.StarExpr)
+	// 5. Cross-check: every entry name is a real Controllers field with a
+	//    provider type — guards against a typo'd or stale entries() name
+	//    that would silently never match a struct field.
+	for name := range listed {
+		f, ok := ctrlType.FieldByName(name)
 		if !ok {
+			t.Errorf("entries() lists %q which is not a Controllers field", name)
 			continue
 		}
-		if id, ok := star.X.(*ast.Ident); ok && id.Name == "Controllers" && len(p.Names) > 0 {
-			recvName = p.Names[0].Name
+		if !f.Type.Implements(keybindingProviderType) {
+			t.Errorf("entries() lists %q whose type %s does not implement GetKeybindings", name, f.Type)
 		}
 	}
-	if recvName == "" {
-		t.Fatalf("%s has no *Controllers parameter", fnName)
-	}
-
-	referenced := map[string]bool{}
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		sel, ok := n.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		if id, ok := sel.X.(*ast.Ident); ok && id.Name == recvName {
-			referenced[sel.Sel.Name] = true
-		}
-		return true
-	})
-	if len(referenced) == 0 {
-		t.Fatalf("parsed %s but found no %s.<Field> references", fnName, recvName)
-	}
-	return referenced
 }

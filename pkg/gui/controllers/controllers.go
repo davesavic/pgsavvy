@@ -1,12 +1,14 @@
 package controllers
 
 import (
+	"reflect"
 	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -87,36 +89,14 @@ func AttachControllers(
 	}
 
 	connections := NewConnectionsController(c, helpers, &tree.Connections.SideListContext, helpers.Connections)
-	connections.AttachToContext(&tree.Connections.BaseContext)
-
 	schemas := NewSchemasController(c, helpers, &tree.Schemas.SideListContext, helpers.Schemas)
-	schemas.AttachToContext(&tree.Schemas.BaseContext)
-
 	tables := NewTablesController(c, helpers, &tree.Tables.SideListContext, helpers.Tables)
-	tables.AttachToContext(&tree.Tables.BaseContext)
-
 	menu := NewMenuController(c, helpers)
-	menu.AttachToContext(&tree.Menu.BaseContext)
-
 	prompt := NewPromptController(c, helpers)
-	prompt.AttachToContext(&tree.Prompt.BaseContext)
-
 	selection := NewSelectionController(c, helpers)
-	selection.AttachToContext(&tree.Selection.BaseContext)
-
 	confirmation := NewConfirmationController(c, helpers)
-	confirmation.AttachToContext(&tree.Confirmation.BaseContext)
-
 	quit := NewQuitController(c, helpers)
-	quit.AttachToContext(&tree.Global.BaseContext)
-
 	queryEditor := NewQueryEditorController(c, helpers)
-	// tree.QueryEditor is a StubContext today (dbsavvy-66p.11);
-	// AddKeybindingsFn is a no-op there. The bindings reach the trie
-	// via AllDefaultBindings until the live QUERY_EDITOR context
-	// ships in a later epic. AttachToContext is still called so the
-	// wiring lights up automatically once the stub is replaced.
-	queryEditor.AttachToContext(tree.QueryEditor)
 
 	// ResultTabsController publishes RESULT_GRID + GLOBAL bindings; it
 	// reaches the trie via AllDefaultBindings. The manager surface is
@@ -130,7 +110,6 @@ func AttachControllers(
 		}
 	}
 	resultTabs := NewResultTabsController(c, helpers, tabsMgr)
-	resultTabs.AttachToContext(tree.ResultGrid)
 
 	// HideOverlayController publishes HIDE_OVERLAY-scope bindings for the
 	// <leader>gH column-visibility overlay (dbsavvy-uv0.6). The manager
@@ -144,7 +123,6 @@ func AttachControllers(
 		}
 	}
 	hideOverlay := NewHideOverlayController(c, helpers, hideMgr)
-	hideOverlay.AttachToContext(&tree.HideOverlay.BaseContext)
 
 	// ExportMenuController publishes EXPORT_MENU-scope bindings for the
 	// <leader>oe export menu (dbsavvy-uv0.9). The manager surface is the
@@ -158,7 +136,6 @@ func AttachControllers(
 		}
 	}
 	exportMenu := NewExportMenuController(c, helpers, exportMgr)
-	exportMenu.AttachToContext(&tree.ExportMenu.BaseContext)
 
 	// VimEditorController owns motion / operator / textobject bindings
 	// under QUERY_EDITOR scope (epic dbsavvy-wwd). It takes the live
@@ -183,24 +160,15 @@ func AttachControllers(
 				toast.Show(msg, 3*time.Second)
 			})
 		}
-		// No AttachToContext: VimEditor bindings reach the trie via
-		// AllDefaultBindings, mirroring ResultTabsController's path
-		// (see controllers.go:98-100). The Matcher routes keystrokes
-		// to the QUERY_EDITOR scope based on the focused context, so
-		// no per-context AddKeybindingsFn call is required.
 	}
 
 	// PlanController publishes PLAN-scoped tree-navigation bindings
 	// (dbsavvy-uv0.8). The plan tab's per-tab *context.PlanContext is
 	// reached through helpers.ActivePlanContextFn (wired by the
-	// orchestrator to ResultTabsHelper.ActivePlanContext). The
-	// controller is attached to tree.Plan even though that's a
-	// StubContext today — AttachToContext on a stub is a no-op, and
-	// the bindings reach the trie via AllDefaultBindings.
+	// orchestrator to ResultTabsHelper.ActivePlanContext).
 	plan := NewPlanController(c, helpers, helpers.ActivePlanContextFn)
-	plan.AttachToContext(tree.Plan)
 
-	return &Controllers{
+	bundle := &Controllers{
 		Connections:  connections,
 		Schemas:      schemas,
 		Tables:       tables,
@@ -216,6 +184,141 @@ func AttachControllers(
 		VimEditor:    vimEditor,
 		Plan:         plan,
 	}
+
+	// Single attach pass driven by the per-controller registry. attachTargets
+	// maps each registry entry name to the context whose AddKeybindingsFn the
+	// controller subscribes to; entries with attach==false (VimEditor) — and
+	// any entry without a target here (the 6 orchestrator-constructed
+	// controllers, still nil at this point) — are skipped. tree.QueryEditor /
+	// tree.ResultGrid / tree.Plan are reached via their IBaseContext handle
+	// (AddKeybindingsFn is a no-op on the stub contexts today; the wiring
+	// lights up automatically once the live contexts ship).
+	attachTargets := map[string]attachable{
+		"Connections":  &tree.Connections.BaseContext,
+		"Schemas":      &tree.Schemas.BaseContext,
+		"Tables":       &tree.Tables.BaseContext,
+		"Menu":         &tree.Menu.BaseContext,
+		"Prompt":       &tree.Prompt.BaseContext,
+		"Selection":    &tree.Selection.BaseContext,
+		"Confirmation": &tree.Confirmation.BaseContext,
+		"Quit":         &tree.Global.BaseContext,
+		"QueryEditor":  tree.QueryEditor,
+		"ResultTabs":   tree.ResultGrid,
+		"HideOverlay":  &tree.HideOverlay.BaseContext,
+		"ExportMenu":   &tree.ExportMenu.BaseContext,
+		"Plan":         tree.Plan,
+	}
+	for _, e := range bundle.entries() {
+		if !e.attach {
+			continue
+		}
+		target, ok := attachTargets[e.name]
+		if !ok {
+			continue
+		}
+		// Every attach==true controller implements AttachToContext; the
+		// assertion always holds. VimEditor (the lone non-implementer) is
+		// already filtered out by attach==false above.
+		if a, ok := e.ctrl.(attachableController); ok {
+			a.AttachToContext(target)
+		}
+	}
+
+	return bundle
+}
+
+// attachableController is the attach-pass method set: a registry-listed
+// controller that also subscribes to a context. Every controller except
+// VimEditor satisfies it.
+type attachableController interface {
+	controllerRegistrant
+	AttachToContext(ctx attachable)
+}
+
+// controllerEntry is one row of the per-controller registry returned by
+// Controllers.entries(): a non-nil controller field, its struct-field name,
+// and whether AttachControllers subscribes it to a context via
+// AttachToContext. The registry is the single source the three derived paths
+// iterate — AttachControllers (attach), AllDefaultBindings (GetKeybindings
+// union), and RegisterActions (action registration) — so a new controller
+// field is picked up by all three at once.
+type controllerEntry struct {
+	// name is the Controllers struct-field name. Used by AttachControllers
+	// to resolve the attach target and asserted by the completeness guard.
+	name string
+	// ctrl is the controller. controllerRegistrant is the method set the
+	// always-derived paths need (GetKeybindings + RegisterActions); attach
+	// entries additionally satisfy attachableController (asserted in the
+	// attach pass).
+	ctrl controllerRegistrant
+	// attach reports whether AttachControllers should call AttachToContext.
+	// VimEditor is the ONLY attach==false entry: its bindings reach the trie
+	// via AllDefaultBindings and the Matcher routes keystrokes to the
+	// QUERY_EDITOR scope, so no per-context AddKeybindingsFn call is needed.
+	attach bool
+}
+
+// controllerRegistrant is the method set EVERY controller satisfies and that
+// the always-derived paths consume: GetKeybindings (AllDefaultBindings union)
+// and RegisterActions (action registration). It intentionally does NOT
+// require AttachToContext — VimEditor is the one controller that lacks it, so
+// the attach pass type-asserts to attachable instead and VimEditor's
+// attach==false entry is skipped before any assertion.
+type controllerRegistrant interface {
+	GetKeybindings(types.KeybindingsOpts) []*types.ChordBinding
+	RegisterActions(reg *commands.Registry)
+}
+
+// entries returns one controllerEntry per NON-NIL controller field in the
+// bundle, in declaration order. It is the single registry the three derived
+// paths iterate. The 6 orchestrator-constructed controllers (TableInspect,
+// CellEditor, CommitDialog, ConflictDialog, FKReversePicker, Cheatsheet) are
+// nil until the orchestrator assigns them; they are skipped here when nil and
+// picked up automatically once non-nil (AllDefaultBindings / RegisterActions
+// run after full construction at gui.go:1289). VimEditor is the only
+// attach==false entry.
+//
+// Every controller satisfies controllerRegistrant (GetKeybindings +
+// RegisterActions). All except VimEditor additionally satisfy
+// attachableController; VimEditor's entry is attach=false so the attach pass
+// never asserts it. Adding a controller field to Controllers without adding
+// it here is caught by TestAllDefaultBindingsIncludesEveryProviderController.
+func (b *Controllers) entries() []controllerEntry {
+	if b == nil {
+		return nil
+	}
+	candidates := []controllerEntry{
+		{name: "Connections", ctrl: b.Connections, attach: true},
+		{name: "Schemas", ctrl: b.Schemas, attach: true},
+		{name: "Tables", ctrl: b.Tables, attach: true},
+		{name: "Menu", ctrl: b.Menu, attach: true},
+		{name: "Prompt", ctrl: b.Prompt, attach: true},
+		{name: "Selection", ctrl: b.Selection, attach: true},
+		{name: "Confirmation", ctrl: b.Confirmation, attach: true},
+		{name: "Quit", ctrl: b.Quit, attach: true},
+		{name: "QueryEditor", ctrl: b.QueryEditor, attach: true},
+		{name: "ResultTabs", ctrl: b.ResultTabs, attach: true},
+		{name: "HideOverlay", ctrl: b.HideOverlay, attach: true},
+		{name: "ExportMenu", ctrl: b.ExportMenu, attach: true},
+		{name: "VimEditor", ctrl: b.VimEditor, attach: false},
+		{name: "Plan", ctrl: b.Plan, attach: true},
+		{name: "TableInspect", ctrl: b.TableInspect, attach: true},
+		{name: "CellEditor", ctrl: b.CellEditor, attach: true},
+		{name: "CommitDialog", ctrl: b.CommitDialog, attach: true},
+		{name: "ConflictDialog", ctrl: b.ConflictDialog, attach: true},
+		{name: "FKReversePicker", ctrl: b.FKReversePicker, attach: true},
+		{name: "Cheatsheet", ctrl: b.Cheatsheet, attach: true},
+	}
+	out := make([]controllerEntry, 0, len(candidates))
+	for _, e := range candidates {
+		// A nil *T stored in the interface is non-nil at the interface level;
+		// reflect distinguishes the typed-nil so nil fields are skipped.
+		if e.ctrl == nil || reflect.ValueOf(e.ctrl).IsNil() {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // RegisterActions registers every controller's action handlers with reg.
@@ -236,6 +339,11 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	if b == nil || reg == nil {
 		return
 	}
+	// Per-rail trait actions (list.down:CONNECTIONS, …) are registered by
+	// the ListControllerTrait embedded in each side-rail controller, which
+	// the controller's own RegisterActions does NOT call. These three calls
+	// stay explicit because the trait is a sub-object, not a Controllers
+	// field, and so is not part of the entries() registry.
 	if b.Connections != nil && b.Connections.ListControllerTrait != nil {
 		b.Connections.ListControllerTrait.RegisterActions(reg)
 	}
@@ -245,65 +353,12 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	if b.Tables != nil && b.Tables.ListControllerTrait != nil {
 		b.Tables.ListControllerTrait.RegisterActions(reg)
 	}
-	if b.Quit != nil {
-		b.Quit.RegisterActions(reg)
-	}
-	if b.Connections != nil {
-		b.Connections.RegisterActions(reg)
-	}
-	if b.Schemas != nil {
-		b.Schemas.RegisterActions(reg)
-	}
-	if b.Tables != nil {
-		b.Tables.RegisterActions(reg)
-	}
-	if b.Menu != nil {
-		b.Menu.RegisterActions(reg)
-	}
-	if b.Prompt != nil {
-		b.Prompt.RegisterActions(reg)
-	}
-	if b.Selection != nil {
-		b.Selection.RegisterActions(reg)
-	}
-	if b.Confirmation != nil {
-		b.Confirmation.RegisterActions(reg)
-	}
-	if b.QueryEditor != nil {
-		b.QueryEditor.RegisterActions(reg)
-	}
-	if b.ResultTabs != nil {
-		b.ResultTabs.RegisterActions(reg)
-	}
-	if b.HideOverlay != nil {
-		b.HideOverlay.RegisterActions(reg)
-	}
-	if b.ExportMenu != nil {
-		b.ExportMenu.RegisterActions(reg)
-	}
-	if b.VimEditor != nil {
-		b.VimEditor.RegisterActions(reg)
-	}
-	if b.Plan != nil {
-		b.Plan.RegisterActions(reg)
-	}
-	if b.TableInspect != nil {
-		b.TableInspect.RegisterActions(reg)
-	}
-	if b.CellEditor != nil {
-		b.CellEditor.RegisterActions(reg)
-	}
-	if b.CommitDialog != nil {
-		b.CommitDialog.RegisterActions(reg)
-	}
-	if b.ConflictDialog != nil {
-		b.ConflictDialog.RegisterActions(reg)
-	}
-	if b.FKReversePicker != nil {
-		b.FKReversePicker.RegisterActions(reg)
-	}
-	if b.Cheatsheet != nil {
-		b.Cheatsheet.RegisterActions(reg)
+	// Per-controller action handlers, derived from the single registry.
+	// Duplicate-ID re-registrations are swallowed by the Registry, so the
+	// declaration-order iteration here is behaviour-equivalent to the prior
+	// hand-listed order.
+	for _, e := range b.entries() {
+		e.ctrl.RegisterActions(reg)
 	}
 }
 

@@ -122,7 +122,24 @@ func TestWiringInvariant(t *testing.T) {
 		types.DISPLAY_CONTEXT:  true,
 	}
 
-	for _, key := range types.AllContextKeys() {
+	// Enumerate from the DERIVED context-spec table (dbsavvy-fow.11 D3a),
+	// observed via the live tree NewContextTree builds from contextSpecs —
+	// not from a hand-listed key slice. The flattened contexts give every
+	// spec row with inFlatten=true; the two named-only fields (Columns /
+	// Indexes, inFlatten=false) are appended so the spec key set is complete.
+	// specKeys is therefore the single source of truth's key column, read
+	// back through the public ContextTree surface.
+	specKeys := contextSpecKeysFromTree(tree)
+
+	// Tie the derived spec key set to the canonical const-derived list so
+	// neither can drift: types.AllContextKeys() must enumerate exactly the
+	// keys the spec table wires (TestAllContextKeysComplete already pins
+	// AllContextKeys to the const block, so this transitively pins the spec
+	// table to the consts). A spec row added without an AllContextKeys entry
+	// — or vice versa — fails here.
+	assertKeySetsEqual(t, specKeys, types.AllContextKeys())
+
+	for _, key := range specKeys {
 		ctx, present := byKey[key]
 
 		// 1. Presence in Flatten().
@@ -162,6 +179,50 @@ func TestWiringInvariant(t *testing.T) {
 				t.Errorf("%s (kind=%d, %s): inherits BaseContext's no-op HandleRender; not wired",
 					key, kind, typeName)
 			}
+		}
+	}
+}
+
+// contextSpecKeysFromTree reconstructs the full key column of the derived
+// context-spec table from the public ContextTree surface: every flattened
+// context's key (inFlatten=true rows) plus the two named-only fields
+// (Columns / Indexes, inFlatten=false) that retain a struct field but are
+// excluded from Flatten(). This reads the single-source-of-truth keys back
+// through derived data rather than re-listing them.
+func contextSpecKeysFromTree(tree *context.ContextTree) []types.ContextKey {
+	out := make([]types.ContextKey, 0)
+	for _, c := range tree.Flatten() {
+		out = append(out, c.GetKey())
+	}
+	// Named-only fields excluded from Flatten() (inFlatten=false).
+	out = append(out, tree.Columns.GetKey(), tree.Indexes.GetKey())
+	return out
+}
+
+// assertKeySetsEqual fails the test if got and want are not the same SET of
+// keys (order-independent, duplicate-detecting). Used to pin the derived
+// spec key set to types.AllContextKeys() so neither drifts.
+func assertKeySetsEqual(t *testing.T, got, want []types.ContextKey) {
+	t.Helper()
+	gotSet := map[types.ContextKey]int{}
+	for _, k := range got {
+		gotSet[k]++
+	}
+	wantSet := map[types.ContextKey]int{}
+	for _, k := range want {
+		wantSet[k]++
+	}
+	for k, n := range gotSet {
+		if n > 1 {
+			t.Errorf("context-spec key %q appears %d times in the spec table (duplicate row)", k, n)
+		}
+		if wantSet[k] == 0 {
+			t.Errorf("context-spec key %q is wired in the spec table but missing from types.AllContextKeys()", k)
+		}
+	}
+	for k := range wantSet {
+		if gotSet[k] == 0 {
+			t.Errorf("types.AllContextKeys() lists %q but the context-spec table has no row for it", k)
 		}
 	}
 }

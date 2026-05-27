@@ -11,9 +11,9 @@ import (
 //
 // Concrete Context fields are exposed by name so the gui bootstrap (T10)
 // and the controller registration shim (T7) can target a specific
-// Context by reference without re-lookup. Flatten() and ByKey() walk all
-// 27 entries (22 live + 4 stub + 1 PERSISTENT_POPUP) for the cases where
-// ordered iteration is preferable.
+// Context by reference without re-lookup. Flatten() and ByKey() walk the
+// flattened slice (built once by NewContextTree from the single
+// contextSpecs table) for the cases where ordered iteration is preferable.
 type ContextTree struct {
 	// Live SIDE_CONTEXT instances.
 	Connections *ConnectionsContext
@@ -73,212 +73,277 @@ type ContextTree struct {
 	ResultGrid      *StubContext
 	Plan            *StubContext
 	History         *StubContext
+
+	// all is the flattened, ordered slice of every Context that
+	// participates in Flatten()/ByKey() iteration. Built once by
+	// NewContextTree from contextSpecs (entries with inFlatten=false —
+	// Columns/Indexes — are assigned to their named field but excluded
+	// here, mirroring the historical Flatten() contract).
+	all []types.IBaseContext
 }
 
-// NewContextTree wires every live Context and every StubContext into a
-// fresh registry. deps is passed by value; individual Contexts retain it
-// for their own hook invocations. Returns a non-nil pointer; safe to
-// call with the zero ContextTreeDeps value (every hook is nil-safe).
-func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
-	return &ContextTree{
+// contextSpec is one row of the single source-of-truth wiring table
+// (contextSpecs). It carries the BaseContextOpts data NewContextTree used
+// to spell out per-context plus two closures: build constructs the
+// concrete Context (capturing deps + any extra per-context deps), and
+// assign stores the result into its named ContextTree field. Iterating
+// this table replaces the hand-listed struct literal in NewContextTree and
+// the hand-listed field walk in Flatten().
+type contextSpec struct {
+	key      types.ContextKey
+	kind     types.ContextKind
+	viewName string
+	title    string
+	// inFlatten marks whether the built Context joins the flattened
+	// iteration slice. False only for COLUMNS/INDEXES, which retain a
+	// named field but are deferred (superseded by TABLE_INSPECT) and were
+	// never part of the historical Flatten() output.
+	inFlatten bool
+	// build constructs the concrete Context from its BaseContext + deps.
+	// Stubs ignore base and call NewStubContext; contexts needing extra
+	// deps (CommandLine/WhichKey/Cheatsheet/QueryEditor) pull them off the
+	// deps bag here.
+	build func(base BaseContext, deps types.ContextTreeDeps) types.IBaseContext
+	// assign stores the built Context into its named ContextTree field by
+	// type-asserting back to the concrete type. Keeps the named fields the
+	// canonical typed handles while construction stays data-driven.
+	assign func(t *ContextTree, c types.IBaseContext)
+}
+
+// contextSpecs is the single source of truth for every Context the tree
+// wires. Order defines Flatten() order: side rail -> temporary popups ->
+// extras/global/display -> persistent popup -> main + stubs. COLUMNS and
+// INDEXES sit beside their side-rail siblings as struct fields but carry
+// inFlatten=false so they stay out of the flattened iteration (deferred,
+// superseded by TABLE_INSPECT).
+func contextSpecs() []contextSpec {
+	return []contextSpec{
 		// Side rail (Kind = SIDE_CONTEXT).
-		Connections: NewConnectionsContext(NewBaseContext(BaseContextOpts{
-			Key:      types.CONNECTIONS,
-			ViewName: string(types.CONNECTIONS),
-			Kind:     types.SIDE_CONTEXT,
-			Title:    "Connections",
-		}), deps),
-		Schemas: NewSchemasContext(NewBaseContext(BaseContextOpts{
-			Key:      types.SCHEMAS,
-			ViewName: string(types.SCHEMAS),
-			Kind:     types.SIDE_CONTEXT,
-			Title:    "Schemas",
-		}), deps),
-		Tables: NewTablesContext(NewBaseContext(BaseContextOpts{
-			Key:      types.TABLES,
-			ViewName: string(types.TABLES),
-			Kind:     types.SIDE_CONTEXT,
-			Title:    "Tables",
-		}), deps),
-		Columns: NewColumnsContext(NewBaseContext(BaseContextOpts{
-			Key:      types.COLUMNS,
-			ViewName: string(types.COLUMNS),
-			Kind:     types.STUB,
-			Title:    "Columns",
-		}), deps),
-		Indexes: NewIndexesContext(NewBaseContext(BaseContextOpts{
-			Key:      types.INDEXES,
-			ViewName: string(types.INDEXES),
-			Kind:     types.STUB,
-			Title:    "Indexes",
-		}), deps),
+		{
+			key: types.CONNECTIONS, kind: types.SIDE_CONTEXT, title: "Connections", inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConnectionsContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Connections = c.(*ConnectionsContext) },
+		},
+		{
+			key: types.SCHEMAS, kind: types.SIDE_CONTEXT, title: "Schemas", inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewSchemasContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Schemas = c.(*SchemasContext) },
+		},
+		{
+			key: types.TABLES, kind: types.SIDE_CONTEXT, title: "Tables", inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewTablesContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Tables = c.(*TablesContext) },
+		},
+		// COLUMNS/INDEXES: named fields retained, Kind=STUB, excluded from
+		// Flatten() (superseded by TABLE_INSPECT popup, epic dbsavvy-3vf).
+		{
+			key: types.COLUMNS, kind: types.STUB, title: "Columns", inFlatten: false,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewColumnsContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Columns = c.(*ColumnsContext) },
+		},
+		{
+			key: types.INDEXES, kind: types.STUB, title: "Indexes", inFlatten: false,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewIndexesContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Indexes = c.(*IndexesContext) },
+		},
 
 		// Popups (Kind = TEMPORARY_POPUP).
-		Menu: NewMenuContext(NewBaseContext(BaseContextOpts{
-			Key:      types.MENU,
-			ViewName: string(types.MENU),
-			Kind:     types.TEMPORARY_POPUP,
-		}), deps),
-		Confirmation: NewConfirmationContext(NewBaseContext(BaseContextOpts{
-			Key:      types.CONFIRMATION,
-			ViewName: string(types.CONFIRMATION),
-			Kind:     types.TEMPORARY_POPUP,
-		}), deps),
-		Prompt: NewPromptContext(NewBaseContext(BaseContextOpts{
-			Key:      types.PROMPT,
-			ViewName: string(types.PROMPT),
-			Kind:     types.TEMPORARY_POPUP,
-		}), deps),
-		Selection: NewSelectionContext(NewBaseContext(BaseContextOpts{
-			Key:      types.SELECTION,
-			ViewName: string(types.SELECTION),
-			Kind:     types.TEMPORARY_POPUP,
-		}), deps),
-		Suggestions: NewSuggestionsContext(NewBaseContext(BaseContextOpts{
-			Key:      types.SUGGESTIONS,
-			ViewName: string(types.SUGGESTIONS),
-			Kind:     types.TEMPORARY_POPUP,
-		}), deps),
-		CommandLine: NewCommandLineContext(NewBaseContext(BaseContextOpts{
-			Key:      types.COMMAND_LINE,
-			ViewName: string(types.COMMAND_LINE),
-			Kind:     types.TEMPORARY_POPUP,
-		}), deps, deps.ModeStore),
-		HideOverlay: NewHideOverlayContext(NewBaseContext(BaseContextOpts{
-			Key:      types.HIDE_OVERLAY,
-			ViewName: string(types.HIDE_OVERLAY),
-			Kind:     types.TEMPORARY_POPUP,
-		}), deps),
-		ExportMenu: NewExportMenuContext(NewBaseContext(BaseContextOpts{
-			Key:      types.EXPORT_MENU,
-			ViewName: string(types.EXPORT_MENU),
-			Kind:     types.TEMPORARY_POPUP,
-		}), deps),
-		TableInspect: NewTableInspectContext(NewBaseContext(BaseContextOpts{
-			Key:      types.TABLE_INSPECT,
-			ViewName: string(types.TABLE_INSPECT),
-			Kind:     types.TEMPORARY_POPUP,
-			Title:    "Table inspect",
-		}), deps),
-		CellEditor: NewCellEditorContext(NewBaseContext(BaseContextOpts{
-			Key:      types.CELL_EDITOR,
-			ViewName: string(types.CELL_EDITOR),
-			Kind:     types.TEMPORARY_POPUP,
-			Title:    "Cell editor",
-		}), deps),
-		CommitDialog: NewCommitDialogContext(NewBaseContext(BaseContextOpts{
-			Key:      types.COMMIT_DIALOG,
-			ViewName: string(types.COMMIT_DIALOG),
-			Kind:     types.TEMPORARY_POPUP,
-			Title:    "Commit",
-		}), deps),
-		ConflictDialog: NewConflictDialogContext(NewBaseContext(BaseContextOpts{
-			Key:      types.CONFLICT_DIALOG,
-			ViewName: string(types.CONFLICT_DIALOG),
-			Kind:     types.TEMPORARY_POPUP,
-			Title:    "Conflicts",
-		}), deps),
-		FKReversePicker: NewFKReversePickerContext(NewBaseContext(BaseContextOpts{
-			Key:      types.FK_REVERSE_PICKER,
-			ViewName: string(types.FK_REVERSE_PICKER),
-			Kind:     types.TEMPORARY_POPUP,
-			Title:    "Reverse FK",
-		}), deps),
+		{
+			key: types.MENU, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewMenuContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Menu = c.(*MenuContext) },
+		},
+		{
+			key: types.CONFIRMATION, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConfirmationContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Confirmation = c.(*ConfirmationContext) },
+		},
+		{
+			key: types.PROMPT, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewPromptContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Prompt = c.(*PromptContext) },
+		},
+		{
+			key: types.SELECTION, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewSelectionContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Selection = c.(*SelectionContext) },
+		},
+		{
+			key: types.SUGGESTIONS, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewSuggestionsContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Suggestions = c.(*SuggestionsContext) },
+		},
+		{
+			key: types.COMMAND_LINE, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewCommandLineContext(b, d, d.ModeStore)
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.CommandLine = c.(*CommandLineContext) },
+		},
+		{
+			key: types.HIDE_OVERLAY, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewHideOverlayContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.HideOverlay = c.(*HideOverlayContext) },
+		},
+		{
+			key: types.EXPORT_MENU, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewExportMenuContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.ExportMenu = c.(*ExportMenuContext) },
+		},
+		{
+			key: types.TABLE_INSPECT, kind: types.TEMPORARY_POPUP, title: "Table inspect", inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewTableInspectContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.TableInspect = c.(*TableInspectContext) },
+		},
+		{
+			key: types.CELL_EDITOR, kind: types.TEMPORARY_POPUP, title: "Cell editor", inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewCellEditorContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.CellEditor = c.(*CellEditorContext) },
+		},
+		{
+			key: types.COMMIT_DIALOG, kind: types.TEMPORARY_POPUP, title: "Commit", inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewCommitDialogContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.CommitDialog = c.(*CommitDialogContext) },
+		},
+		{
+			key: types.CONFLICT_DIALOG, kind: types.TEMPORARY_POPUP, title: "Conflicts", inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConflictDialogContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.ConflictDialog = c.(*ConflictDialogContext) },
+		},
+		{
+			key: types.FK_REVERSE_PICKER, kind: types.TEMPORARY_POPUP, title: "Reverse FK", inFlatten: true,
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewFKReversePickerContext(b, d)
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.FKReversePicker = c.(*FKReversePickerContext) },
+		},
 
 		// EXTRAS / GLOBAL / DISPLAY.
-		Messages: NewMessagesContext(NewBaseContext(BaseContextOpts{
-			Key:      types.MESSAGES,
-			ViewName: string(types.MESSAGES),
-			Kind:     types.EXTRAS_CONTEXT,
-			Title:    "Messages",
-		}), deps),
-		Global: NewGlobalContext(NewBaseContext(BaseContextOpts{
-			Key:      types.GLOBAL,
-			ViewName: "", // GLOBAL_CONTEXT has no view.
-			Kind:     types.GLOBAL_CONTEXT,
-		}), deps),
-		Limit: NewLimitContext(NewBaseContext(BaseContextOpts{
-			Key:      types.LIMIT,
-			ViewName: string(types.LIMIT),
-			Kind:     types.DISPLAY_CONTEXT,
-		}), deps),
-		WhichKey: NewWhichKeyContext(NewBaseContext(BaseContextOpts{
-			Key:      types.WHICH_KEY,
-			ViewName: string(types.WHICH_KEY),
-			Kind:     types.DISPLAY_CONTEXT,
-		}), deps, deps.WhichKey, deps.WhichKeyRows),
-		Cheatsheet: NewCheatsheetContext(NewBaseContext(BaseContextOpts{
-			Key:      types.CHEATSHEET,
-			ViewName: string(types.CHEATSHEET),
-			Kind:     types.DISPLAY_CONTEXT,
-		}), deps, deps.CheatsheetRender),
+		{
+			key: types.MESSAGES, kind: types.EXTRAS_CONTEXT, title: "Messages", inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewMessagesContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Messages = c.(*MessagesContext) },
+		},
+		{
+			// GLOBAL_CONTEXT has no view.
+			key: types.GLOBAL, kind: types.GLOBAL_CONTEXT, viewName: "", inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewGlobalContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Global = c.(*GlobalContext) },
+		},
+		{
+			key: types.LIMIT, kind: types.DISPLAY_CONTEXT, inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewLimitContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Limit = c.(*LimitContext) },
+		},
+		{
+			key: types.WHICH_KEY, kind: types.DISPLAY_CONTEXT, inFlatten: true,
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewWhichKeyContext(b, d, d.WhichKey, d.WhichKeyRows)
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.WhichKey = c.(*WhichKeyContext) },
+		},
+		{
+			key: types.CHEATSHEET, kind: types.DISPLAY_CONTEXT, inFlatten: true,
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewCheatsheetContext(b, d, d.CheatsheetRender)
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Cheatsheet = c.(*CheatsheetContext) },
+		},
 
-		// FirstRunTip is the welcome popup shown above CONNECTIONS on
-		// the user's first launch (dbsavvy-56u.2). PERSISTENT_POPUP so
+		// FirstRunTip is the welcome popup shown above CONNECTIONS on the
+		// user's first launch (dbsavvy-56u.2). PERSISTENT_POPUP so
 		// subsequent popup pushes don't auto-evict it.
-		FirstRunTip: NewFirstRunTipContext(NewBaseContext(BaseContextOpts{
-			Key:      types.FIRST_RUN_TIP,
-			ViewName: string(types.FIRST_RUN_TIP),
-			Kind:     types.PERSISTENT_POPUP,
-		}), deps),
+		{
+			key: types.FIRST_RUN_TIP, kind: types.PERSISTENT_POPUP, inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewFirstRunTipContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.FirstRunTip = c.(*FirstRunTipContext) },
+		},
 
 		// QUERY_EDITOR is the live top-right MAIN_CONTEXT pane (epic
 		// dbsavvy-wwd). wwd.1 promotes it from stub to a real
-		// BaseContext-embedding type; modes + matcher come straight
-		// from the dependency bag so focus/blur can drive the
-		// ModeStore + Matcher.Cancel contract documented on the
-		// type. ViewName matches the layout slot.
-		QueryEditor: NewQueryEditorContext(NewBaseContext(BaseContextOpts{
-			Key:      types.QUERY_EDITOR,
-			ViewName: string(types.QUERY_EDITOR),
-			Kind:     types.MAIN_CONTEXT,
-			Title:    "Query Editor",
-		}), deps, deps.ModeStore, deps.Matcher),
+		// BaseContext-embedding type; modes + matcher come straight from
+		// the dependency bag so focus/blur can drive the ModeStore +
+		// Matcher.Cancel contract documented on the type.
+		{
+			key: types.QUERY_EDITOR, kind: types.MAIN_CONTEXT, title: "Query Editor", inFlatten: true,
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewQueryEditorContext(b, d, d.ModeStore, d.Matcher)
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.QueryEditor = c.(*QueryEditorContext) },
+		},
 
-		// Stubs for the four remaining deferred Contexts. ViewName
-		// matches the eventual layout slot so naming stays
-		// consistent when the real Context lands; Kind == STUB
-		// keeps Layout from creating the view.
-		TableDataEditor: NewStubContext(types.TABLE_DATA_EDITOR, string(types.TABLE_DATA_EDITOR)),
-		ResultGrid:      NewStubContext(types.RESULT_GRID, string(types.RESULT_GRID)),
-		Plan:            NewStubContext(types.PLAN, string(types.PLAN)),
-		History:         NewStubContext(types.HISTORY, string(types.HISTORY)),
+		// Stubs for the four remaining deferred Contexts. ViewName matches
+		// the eventual layout slot so naming stays consistent when the real
+		// Context lands; Kind == STUB keeps Layout from creating the view.
+		{
+			key: types.TABLE_DATA_EDITOR, kind: types.STUB, inFlatten: true,
+			build: func(_ BaseContext, _ types.ContextTreeDeps) types.IBaseContext {
+				return NewStubContext(types.TABLE_DATA_EDITOR, string(types.TABLE_DATA_EDITOR))
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.TableDataEditor = c.(*StubContext) },
+		},
+		{
+			key: types.RESULT_GRID, kind: types.STUB, inFlatten: true,
+			build: func(_ BaseContext, _ types.ContextTreeDeps) types.IBaseContext {
+				return NewStubContext(types.RESULT_GRID, string(types.RESULT_GRID))
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.ResultGrid = c.(*StubContext) },
+		},
+		{
+			key: types.PLAN, kind: types.STUB, inFlatten: true,
+			build: func(_ BaseContext, _ types.ContextTreeDeps) types.IBaseContext {
+				return NewStubContext(types.PLAN, string(types.PLAN))
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Plan = c.(*StubContext) },
+		},
+		{
+			key: types.HISTORY, kind: types.STUB, inFlatten: true,
+			build: func(_ BaseContext, _ types.ContextTreeDeps) types.IBaseContext {
+				return NewStubContext(types.HISTORY, string(types.HISTORY))
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.History = c.(*StubContext) },
+		},
 	}
 }
 
-// Flatten returns every Context (live + stub) in a stable order. Order
-// is: side rail (3) -> temporary popups (13) -> extras/global/display (5)
-// -> persistent popups (1) -> main + stubs (5). Total length is always 27.
-func (t *ContextTree) Flatten() []types.IBaseContext {
-	return []types.IBaseContext{
-		t.Connections,
-		t.Schemas,
-		t.Tables,
-		t.Menu,
-		t.Confirmation,
-		t.Prompt,
-		t.Selection,
-		t.Suggestions,
-		t.CommandLine,
-		t.HideOverlay,
-		t.ExportMenu,
-		t.TableInspect,
-		t.CellEditor,
-		t.CommitDialog,
-		t.ConflictDialog,
-		t.FKReversePicker,
-		t.Messages,
-		t.Global,
-		t.Limit,
-		t.WhichKey,
-		t.Cheatsheet,
-		t.FirstRunTip,
-		t.QueryEditor,
-		t.TableDataEditor,
-		t.ResultGrid,
-		t.Plan,
-		t.History,
+// NewContextTree wires every live Context and every StubContext into a
+// fresh registry by iterating contextSpecs (the single source of truth).
+// deps is passed by value; individual Contexts retain it for their own
+// hook invocations. Returns a non-nil pointer; safe to call with the zero
+// ContextTreeDeps value (every hook is nil-safe).
+func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
+	t := &ContextTree{}
+	for _, spec := range contextSpecs() {
+		viewName := spec.viewName
+		if viewName == "" && spec.key != types.GLOBAL {
+			// GLOBAL has an explicit empty ViewName; every other context's
+			// view name matches its key (the historical default). GLOBAL's
+			// spec.viewName is "" by design and must NOT fall back to the
+			// key, so it is special-cased here.
+			viewName = string(spec.key)
+		}
+		base := NewBaseContext(BaseContextOpts{
+			Key:      spec.key,
+			ViewName: viewName,
+			Kind:     spec.kind,
+			Title:    spec.title,
+		})
+		c := spec.build(base, deps)
+		spec.assign(t, c)
+		if spec.inFlatten {
+			t.all = append(t.all, c)
+		}
 	}
+	return t
+}
+
+// Flatten returns every Context (live + stub) in a stable order. Order is
+// defined by contextSpecs (entries with inFlatten=true): side rail (3) ->
+// temporary popups (13) -> extras/global/display (5) -> persistent popups
+// (1) -> main + stubs (5). Total length is always 27 (COLUMNS/INDEXES are
+// excluded, matching the historical contract).
+func (t *ContextTree) Flatten() []types.IBaseContext {
+	return t.all
 }
 
 // ByKey returns the Context registered under the given key, or nil when
