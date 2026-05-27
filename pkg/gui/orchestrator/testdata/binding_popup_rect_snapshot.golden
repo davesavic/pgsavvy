@@ -110,6 +110,12 @@ binding	scope=query_editor	key=<leader>R	mode=normal
 binding	scope=query_editor	key=<leader>e	mode=normal
 binding	scope=query_editor	key=<leader>r	mode=mode(0x1c)
 binding	scope=query_editor	key=<leader>r	mode=normal
+binding	scope=query_editor	key=<leader>tR	mode=normal
+binding	scope=query_editor	key=<leader>tb	mode=normal
+binding	scope=query_editor	key=<leader>tc	mode=normal
+binding	scope=query_editor	key=<leader>to	mode=normal
+binding	scope=query_editor	key=<leader>tr	mode=normal
+binding	scope=query_editor	key=<leader>ts	mode=normal
 binding	scope=query_editor	key=<leader>x	mode=normal
 binding	scope=query_editor	key=<tab>	mode=normal
 binding	scope=query_editor	key=>	mode=mode(0x3c)

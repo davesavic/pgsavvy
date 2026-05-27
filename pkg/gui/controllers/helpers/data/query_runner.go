@@ -27,7 +27,9 @@ type RunnerSession interface {
 	Execute(ctx context.Context, q models.Query) (models.Result, error)
 	Stream(ctx context.Context, q models.Query) (*session.RunHandle, error)
 	Explain(ctx context.Context, q models.Query, analyze bool) (models.Plan, error)
+	Begin(ctx context.Context, opts models.TxOptions) (drivers.Transaction, error)
 	InTransaction() bool
+	CurrentTransaction() drivers.Transaction
 	Cancel(qid models.QueryID) error
 }
 
@@ -213,6 +215,36 @@ func (r *QueryRunner) HasSession() bool {
 	return b != nil && b.sess != nil
 }
 
+// InTransaction reports whether the underlying session currently has an
+// open transaction. Returns false when no session is wired.
+func (r *QueryRunner) InTransaction() bool {
+	b := r.load()
+	return b != nil && b.sess != nil && b.sess.InTransaction()
+}
+
+// CurrentTransaction returns the in-progress driver Transaction, or nil
+// when no session is wired or no transaction is active.
+func (r *QueryRunner) CurrentTransaction() drivers.Transaction {
+	b := r.load()
+	if b == nil || b.sess == nil {
+		return nil
+	}
+	return b.sess.CurrentTransaction()
+}
+
+// Begin opens a transaction on the underlying session. Calls
+// preemptInFlight first to stop any in-flight stream, mirroring the
+// Run / Explain chokepoint contract (hq5.3). Returns ErrNoSession when
+// no session is wired.
+func (r *QueryRunner) Begin(ctx context.Context, opts models.TxOptions) (drivers.Transaction, error) {
+	r.preemptInFlight()
+	b := r.load()
+	if b == nil || b.sess == nil {
+		return nil, ErrNoSession
+	}
+	return b.sess.Begin(ctx, opts)
+}
+
 // Run streams sql via the SQLSession queue. When opts.NewTx is true a
 // BEGIN is issued via Execute immediately before the Stream; both
 // operations queue on the SQLSession serializer (Begin / Execute share
@@ -228,7 +260,7 @@ func (r *QueryRunner) Run(ctx context.Context, sql string, opts RunOptions) (*se
 		return nil, ErrNoSession
 	}
 	if opts.NewTx {
-		if _, err := b.sess.Execute(session.WithoutLogging(ctx), models.Query{SQL: "BEGIN"}); err != nil {
+		if _, err := b.sess.Begin(ctx, models.TxOptions{}); err != nil {
 			return nil, err
 		}
 	}
@@ -278,14 +310,15 @@ func (r *QueryRunner) Explain(ctx context.Context, sql string, analyze bool, def
 		return b.sess.Explain(ctx, models.Query{SQL: sql, DefaultSchema: defaultSchema}, analyze)
 	}
 
-	if _, err := b.sess.Execute(session.WithoutLogging(ctx), models.Query{SQL: "BEGIN"}); err != nil {
+	tx, err := b.sess.Begin(ctx, models.TxOptions{})
+	if err != nil {
 		return models.Plan{}, err
 	}
 	plan, explainErr := b.sess.Explain(ctx, models.Query{SQL: sql, DefaultSchema: defaultSchema}, analyze)
-	// Always issue ROLLBACK even if Explain errored — the BEGIN would
+	// Always ROLLBACK even if Explain errored — the BEGIN would
 	// otherwise leak. The rollback error is swallowed because the
 	// user-visible failure is the Explain error.
-	_, _ = b.sess.Execute(session.WithoutLogging(ctx), models.Query{SQL: "ROLLBACK"})
+	_ = tx.Rollback(ctx)
 	return plan, explainErr
 }
 

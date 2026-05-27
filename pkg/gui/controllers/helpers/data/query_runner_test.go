@@ -10,6 +10,22 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
+// fakeTransaction is a minimal drivers.Transaction stub for tests.
+type fakeTransaction struct {
+	committed  bool
+	rolledBack bool
+}
+
+func (t *fakeTransaction) Commit(_ context.Context) error   { t.committed = true; return nil }
+func (t *fakeTransaction) Rollback(_ context.Context) error  { t.rolledBack = true; return nil }
+func (t *fakeTransaction) Savepoint(_ context.Context, _ string) error { return nil }
+func (t *fakeTransaction) Release(_ context.Context, _ string) error   { return nil }
+func (t *fakeTransaction) RollbackTo(_ context.Context, _ string) error { return nil }
+func (t *fakeTransaction) Savepoints() []string              { return nil }
+func (t *fakeTransaction) Status() models.TxStatus           { return models.TxActive }
+func (t *fakeTransaction) ObserveError(_ error)              {}
+func (t *fakeTransaction) StatementCount() int               { return 0 }
+
 // fakeRunnerSession records every call and returns canned responses. It does
 // NOT produce a real *session.RunHandle — Run / Stream tests rely on a
 // nil RunHandle being acceptable up to QueryRunner.last.Store.
@@ -18,13 +34,15 @@ type fakeRunnerSession struct {
 	streamCalls  []models.Query
 	explainCalls []explainCall
 	cancelCalls  []models.QueryID
+	beginCalls   int
 
 	streamErr  error
 	explainErr error
 	executeErr error
 	cancelErr  error
 
-	inTx bool
+	inTx   bool
+	lastTx *fakeTransaction
 
 	streamRH *session.RunHandle
 }
@@ -52,7 +70,21 @@ func (f *fakeRunnerSession) Explain(_ context.Context, q models.Query, analyze b
 	return models.Plan{RawText: "fake plan"}, f.explainErr
 }
 
+func (f *fakeRunnerSession) Begin(_ context.Context, _ models.TxOptions) (drivers.Transaction, error) {
+	f.beginCalls++
+	f.inTx = true
+	f.lastTx = &fakeTransaction{}
+	return f.lastTx, nil
+}
+
 func (f *fakeRunnerSession) InTransaction() bool { return f.inTx }
+
+func (f *fakeRunnerSession) CurrentTransaction() drivers.Transaction {
+	if f.lastTx == nil {
+		return nil
+	}
+	return f.lastTx
+}
 
 func (f *fakeRunnerSession) Cancel(qid models.QueryID) error {
 	f.cancelCalls = append(f.cancelCalls, qid)
@@ -96,8 +128,8 @@ func TestQueryRunnerRunWithNewTxPrependsBegin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned err = %v", err)
 	}
-	if len(fs.execCalls) != 1 || fs.execCalls[0].SQL != "BEGIN" {
-		t.Fatalf("Execute calls = %#v, want [BEGIN]", fs.execCalls)
+	if fs.beginCalls != 1 {
+		t.Fatalf("Begin calls = %d, want 1", fs.beginCalls)
 	}
 	if len(fs.streamCalls) != 1 || fs.streamCalls[0].SQL != "SELECT 1" {
 		t.Fatalf("Stream calls = %#v", fs.streamCalls)
@@ -134,8 +166,8 @@ func TestQueryRunnerExplainPlainPath(t *testing.T) {
 	if plan.RawText != "fake plan" {
 		t.Fatalf("plan.RawText = %q, want fake plan", plan.RawText)
 	}
-	if len(fs.execCalls) != 0 {
-		t.Fatalf("plain Explain should not issue BEGIN/ROLLBACK; got %#v", fs.execCalls)
+	if fs.beginCalls != 0 {
+		t.Fatalf("plain Explain should not issue BEGIN; beginCalls = %d", fs.beginCalls)
 	}
 	if len(fs.explainCalls) != 1 || fs.explainCalls[0].Analyze {
 		t.Fatalf("explainCalls = %#v, want one with Analyze=false", fs.explainCalls)
@@ -153,11 +185,11 @@ func TestQueryRunnerExplainAnalyzeWrapsInBeginRollback(t *testing.T) {
 	if plan.RawText != "fake plan" {
 		t.Fatalf("plan.RawText = %q", plan.RawText)
 	}
-	if len(fs.execCalls) != 2 {
-		t.Fatalf("execCalls = %#v, want [BEGIN, ROLLBACK]", fs.execCalls)
+	if fs.beginCalls != 1 {
+		t.Fatalf("beginCalls = %d, want 1", fs.beginCalls)
 	}
-	if fs.execCalls[0].SQL != "BEGIN" || fs.execCalls[1].SQL != "ROLLBACK" {
-		t.Fatalf("execCalls order = %#v, want [BEGIN, ROLLBACK]", fs.execCalls)
+	if fs.lastTx == nil || !fs.lastTx.rolledBack {
+		t.Fatal("Explain ANALYZE must rollback the transaction")
 	}
 	if len(fs.explainCalls) != 1 || !fs.explainCalls[0].Analyze {
 		t.Fatalf("explainCalls = %#v", fs.explainCalls)
@@ -171,8 +203,8 @@ func TestQueryRunnerExplainAnalyzeInsideTxSkipsWrap(t *testing.T) {
 	if _, err := r.Explain(context.Background(), "INSERT INTO t VALUES (1)", true, ""); err != nil {
 		t.Fatalf("Explain err = %v", err)
 	}
-	if len(fs.execCalls) != 0 {
-		t.Fatalf("inside-tx Explain should not wrap; got %#v", fs.execCalls)
+	if fs.beginCalls != 0 {
+		t.Fatalf("inside-tx Explain should not Begin; beginCalls = %d", fs.beginCalls)
 	}
 	if len(fs.explainCalls) != 1 || !fs.explainCalls[0].Analyze {
 		t.Fatalf("explainCalls = %#v", fs.explainCalls)
@@ -189,8 +221,11 @@ func TestQueryRunnerExplainAnalyzeStillRollsBackOnExplainError(t *testing.T) {
 		t.Fatalf("Explain err = %v, want %v", err, boom)
 	}
 	// ROLLBACK must still issue so we don't leak the BEGIN.
-	if len(fs.execCalls) != 2 || fs.execCalls[1].SQL != "ROLLBACK" {
-		t.Fatalf("execCalls on explain-error = %#v, want [BEGIN, ROLLBACK]", fs.execCalls)
+	if fs.beginCalls != 1 {
+		t.Fatalf("beginCalls = %d, want 1", fs.beginCalls)
+	}
+	if fs.lastTx == nil || !fs.lastTx.rolledBack {
+		t.Fatal("Explain ANALYZE must rollback even on explain error")
 	}
 }
 

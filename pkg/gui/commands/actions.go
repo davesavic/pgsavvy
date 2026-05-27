@@ -431,6 +431,15 @@ const (
 	// popup in QUERY_EDITOR insert mode (`<c-space>` default).
 	EditorCompletionTrigger = "editor.completion.trigger"
 
+	// Transaction family — owned by TxController (hq5.3). Default bindings:
+	// <leader>tb, <leader>tc, <leader>tr, <leader>ts, <leader>tR, <leader>to.
+	TxBegin               = "tx.begin"
+	TxCommit              = "tx.commit"
+	TxRollback            = "tx.rollback"
+	TxSavepoint           = "tx.savepoint"
+	TxReleaseSavepoint    = "tx.release_savepoint"
+	TxRollbackToSavepoint = "tx.rollback_to_savepoint"
+
 	// Visual / Selection family — owned by VimEditorController (dbsavvy-wwd.7).
 	// Bindings: `v` / `V` / `<c-v>` enter char/line/block visual from Normal;
 	// `<esc>` exits to Normal. SelectionExtend is the action ID covering
@@ -643,5 +652,11 @@ func AllActionIDs() []string {
 		ResultJumpBack,
 		ResultJumpForward,
 		EditorCompletionTrigger,
+		TxBegin,
+		TxCommit,
+		TxRollback,
+		TxSavepoint,
+		TxReleaseSavepoint,
+		TxRollbackToSavepoint,
 	}
 }

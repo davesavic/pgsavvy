@@ -413,8 +413,25 @@ type recordingRunnerSession struct {
 		Analyze bool
 	}
 	cancelCalls []models.QueryID
+	beginCalls  int
 	inTx        bool
+	lastTx      *recordingTransaction
 }
+
+// recordingTransaction is a minimal drivers.Transaction stub.
+type recordingTransaction struct {
+	rolledBack bool
+}
+
+func (t *recordingTransaction) Commit(_ stdcontext.Context) error             { return nil }
+func (t *recordingTransaction) Rollback(_ stdcontext.Context) error           { t.rolledBack = true; return nil }
+func (t *recordingTransaction) Savepoint(_ stdcontext.Context, _ string) error { return nil }
+func (t *recordingTransaction) Release(_ stdcontext.Context, _ string) error   { return nil }
+func (t *recordingTransaction) RollbackTo(_ stdcontext.Context, _ string) error { return nil }
+func (t *recordingTransaction) Savepoints() []string                          { return nil }
+func (t *recordingTransaction) Status() models.TxStatus                       { return models.TxActive }
+func (t *recordingTransaction) ObserveError(_ error)                          {}
+func (t *recordingTransaction) StatementCount() int                           { return 0 }
 
 func (r *recordingRunnerSession) Execute(_ stdcontext.Context, q models.Query) (models.Result, error) {
 	r.execCalls = append(r.execCalls, q)
@@ -434,7 +451,21 @@ func (r *recordingRunnerSession) Explain(_ stdcontext.Context, q models.Query, a
 	return models.Plan{}, nil
 }
 
+func (r *recordingRunnerSession) Begin(_ stdcontext.Context, _ models.TxOptions) (drivers.Transaction, error) {
+	r.beginCalls++
+	r.inTx = true
+	r.lastTx = &recordingTransaction{}
+	return r.lastTx, nil
+}
+
 func (r *recordingRunnerSession) InTransaction() bool { return r.inTx }
+
+func (r *recordingRunnerSession) CurrentTransaction() drivers.Transaction {
+	if r.lastTx == nil {
+		return nil
+	}
+	return r.lastTx
+}
 
 func (r *recordingRunnerSession) Cancel(qid models.QueryID) error {
 	r.cancelCalls = append(r.cancelCalls, qid)
@@ -722,8 +753,8 @@ func TestQueryEditorRunInNewTxIssuesBeginBeforeStream(t *testing.T) {
 	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
 		t.Fatalf("RunInNewTx handler err = %v", err)
 	}
-	if len(rec.execCalls) != 1 || rec.execCalls[0].SQL != "BEGIN" {
-		t.Fatalf("execCalls = %#v, want one BEGIN", rec.execCalls)
+	if rec.beginCalls != 1 {
+		t.Fatalf("beginCalls = %d, want 1", rec.beginCalls)
 	}
 	if len(rec.streamCalls) != 1 || rec.streamCalls[0].SQL != "SELECT 1" {
 		t.Fatalf("streamCalls = %#v, want one SELECT 1", rec.streamCalls)
@@ -747,13 +778,13 @@ func TestQueryEditorExplainAnalyzeWrapsInBeginRollback(t *testing.T) {
 	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
 		t.Fatalf("ExplainAnalyze handler err = %v", err)
 	}
-	// QueryRunner wraps Explain(analyze=true) in BEGIN/ROLLBACK when
-	// no tx is active. Verify both surfaces in declaration order.
-	if len(rec.execCalls) != 2 {
-		t.Fatalf("execCalls = %#v, want [BEGIN, ROLLBACK]", rec.execCalls)
+	// QueryRunner wraps Explain(analyze=true) in Begin/Rollback when
+	// no tx is active. Verify via the Transaction API.
+	if rec.beginCalls != 1 {
+		t.Fatalf("beginCalls = %d, want 1", rec.beginCalls)
 	}
-	if rec.execCalls[0].SQL != "BEGIN" || rec.execCalls[1].SQL != "ROLLBACK" {
-		t.Fatalf("execCalls = %#v, want BEGIN then ROLLBACK", rec.execCalls)
+	if rec.lastTx == nil || !rec.lastTx.rolledBack {
+		t.Fatal("ExplainAnalyze must rollback the transaction")
 	}
 	if len(rec.explainCalls) != 1 || !rec.explainCalls[0].Analyze {
 		t.Fatalf("explainCalls = %#v, want one analyze", rec.explainCalls)

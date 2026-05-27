@@ -116,6 +116,14 @@ type ActionTranslations struct {
 	QueryExplainAnalyze string
 	QueryRunInNewTx     string
 
+	// Transaction submenu (hq5.3).
+	TxBegin               string
+	TxCommit              string
+	TxRollback            string
+	TxSavepoint           string
+	TxReleaseSavepoint    string
+	TxRollbackToSavepoint string
+
 	// Result-tab family (dbsavvy-66p.12).
 	ResultTabJump   string
 	ResultTabNext   string
@@ -297,6 +305,13 @@ func EnglishTranslationSet() *TranslationSet {
 			QueryExplain:        "Explain",
 			QueryExplainAnalyze: "Explain (analyze)",
 			QueryRunInNewTx:     "Run in new transaction",
+
+			TxBegin:               "Begin transaction",
+			TxCommit:              "Commit transaction",
+			TxRollback:            "Rollback transaction",
+			TxSavepoint:           "Create savepoint",
+			TxReleaseSavepoint:    "Release savepoint",
+			TxRollbackToSavepoint: "Rollback to savepoint",
 
 			ResultTabJump:   "Jump to result tab",
 			ResultTabNext:   "Next result tab",

@@ -25,6 +25,7 @@ type Controllers struct {
 	Confirmation *ConfirmationController
 	Quit         *QuitController
 	QueryEditor  *QueryEditorController
+	Tx           *TxController
 	ResultTabs   *ResultTabsController
 	HideOverlay  *HideOverlayController
 	ExportMenu   *ExportMenuController
@@ -97,6 +98,7 @@ func AttachControllers(
 	confirmation := NewConfirmationController(c, helpers.CoreDeps, helpers.UIDeps)
 	quit := NewQuitController(c, helpers.CoreDeps)
 	queryEditor := NewQueryEditorController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps)
+	tx := NewTxController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps)
 
 	// ResultTabsController publishes RESULT_GRID + GLOBAL bindings; it
 	// reaches the trie via AllDefaultBindings. The manager surface is
@@ -178,6 +180,7 @@ func AttachControllers(
 		Confirmation: confirmation,
 		Quit:         quit,
 		QueryEditor:  queryEditor,
+		Tx:           tx,
 		ResultTabs:   resultTabs,
 		HideOverlay:  hideOverlay,
 		ExportMenu:   exportMenu,
@@ -203,6 +206,7 @@ func AttachControllers(
 		"Confirmation": &tree.Confirmation.BaseContext,
 		"Quit":         &tree.Global.BaseContext,
 		"QueryEditor":  tree.QueryEditor,
+		"Tx":           tree.QueryEditor,
 		"ResultTabs":   tree.ResultGrid,
 		"HideOverlay":  &tree.HideOverlay.BaseContext,
 		"ExportMenu":   &tree.ExportMenu.BaseContext,
@@ -297,6 +301,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "Confirmation", ctrl: b.Confirmation, attach: true},
 		{name: "Quit", ctrl: b.Quit, attach: true},
 		{name: "QueryEditor", ctrl: b.QueryEditor, attach: true},
+		{name: "Tx", ctrl: b.Tx, attach: true},
 		{name: "ResultTabs", ctrl: b.ResultTabs, attach: true},
 		{name: "HideOverlay", ctrl: b.HideOverlay, attach: true},
 		{name: "ExportMenu", ctrl: b.ExportMenu, attach: true},
