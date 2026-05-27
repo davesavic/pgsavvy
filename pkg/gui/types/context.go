@@ -35,6 +35,43 @@ const (
 	STUB
 )
 
+// PopupSizeKind is the size policy a popup context declares for its
+// SetView rectangle. The orchestrator switches on this enum (not on the
+// ContextKey) to derive the actual rect, keeping pixel math in the
+// orchestrator while the per-context declaration lives in the wiring
+// table (pkg/gui/context/setup.go). The zero value PopupSizeNone means
+// the context has no Tier-3 popup rect (non-popup contexts, plus LIMIT
+// and WHICH_KEY which render via dedicated overlay paths).
+type PopupSizeKind int
+
+const (
+	// PopupSizeNone: no popupRectFor rect (zero value / default).
+	PopupSizeNone PopupSizeKind = iota
+	// PopupSizeCentered: a fractional centred rect; WidthFrac/HeightFrac
+	// give the fraction of the popup-overlay canvas to occupy.
+	PopupSizeCentered
+	// PopupSizeCommandLine: full-width single-line strip at the canvas
+	// bottom (vim-style ex command line).
+	PopupSizeCommandLine
+	// PopupSizeCheatsheet: centred, capped to fixed max cols×rows
+	// (orchestrator-owned cheatsheet constants); falls back to the full
+	// terminal canvas when popup-overlay dims are absent.
+	PopupSizeCheatsheet
+	// PopupSizeCellEditor: centred, height-bounded edit popup whose max
+	// width is derived from the live canvas width by the orchestrator.
+	PopupSizeCellEditor
+)
+
+// PopupRectSpec is the per-context popup-rect descriptor carried as data
+// in the wiring table. Kind selects the size policy; WidthFrac/HeightFrac
+// parametrise PopupSizeCentered (ignored by other kinds). Pixel math
+// (the actual SetView rectangle) is computed by the orchestrator.
+type PopupRectSpec struct {
+	Kind       PopupSizeKind
+	WidthFrac  float64
+	HeightFrac float64
+}
+
 // ContextKey is the stable identity of a Context. See DESIGN.md §8 table
 // at lines 576-594; LIMIT is added for the terminal-too-small overlay.
 type ContextKey string

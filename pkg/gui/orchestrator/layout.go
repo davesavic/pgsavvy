@@ -7,6 +7,7 @@ import (
 	"github.com/gdamore/tcell/v3"
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
@@ -507,104 +508,36 @@ func (g *Gui) RunLayout(w, h int) error {
 	return nil
 }
 
-// popupRectFor maps a popup ContextKey to its SetView rectangle. The
-// rectangle is computed against dims["popup-overlay"] (the centred
-// inner canvas inside the side rails / extras).
+// popupRectFor derives a popup context's SetView rectangle from the
+// size-policy descriptor it declares in the wiring table
+// (pkg/gui/context/setup.go, contextSpec.popupRect). The orchestrator
+// owns the pixel math here and switches on the descriptor Kind rather
+// than the ContextKey; the per-context rationale (why each popup gets its
+// size) now lives as data alongside its spec row. Rectangles are computed
+// against dims["popup-overlay"] (the centred inner canvas inside the side
+// rails / extras), with kind-specific fallbacks below.
 func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int) (rect, bool) {
-	switch key {
-	case types.PROMPT:
-		// PROMPT carries validator error messages on its second body
-		// line (e.g. "DSN: Connection string\nDSN contains an inline
-		// password; please remove it"). The 50% × 50% generic popup
-		// rect truncates these at the right edge (dbsavvy-8p5). Widen
-		// to 80% so the wrapped body fits in typical terminal widths;
-		// PromptContext word-wraps the label to popup width as a
-		// belt-and-braces guard for shorter terminals.
+	spec := guicontext.PopupRectSpecFor(key)
+	switch spec.Kind {
+	case types.PopupSizeCentered:
 		canvas, ok := dims["popup-overlay"]
 		if !ok {
 			return rect{}, false
 		}
-		return centeredRect(canvas, 0.8, 0.5), true
-	case types.MENU, types.CONFIRMATION, types.SELECTION, types.SUGGESTIONS, types.HIDE_OVERLAY, types.EXPORT_MENU:
-		canvas, ok := dims["popup-overlay"]
-		if !ok {
-			return rect{}, false
-		}
-		return centeredRect(canvas, 0.5, 0.5), true
-	case types.TABLE_INSPECT:
-		// TABLE_INSPECT replaces the columns/indexes side rails with a
-		// tabbed popup (epic dbsavvy-3vf). Larger than the generic
-		// 50% × 50% rect so column/index tables have room to breathe.
-		canvas, ok := dims["popup-overlay"]
-		if !ok {
-			return rect{}, false
-		}
-		return centeredRect(canvas, 0.6, 0.6), true
-	case types.COMMIT_DIALOG:
-		// COMMIT_DIALOG renders the staged-edit diff, a generated-SQL
-		// preview, and dry-run results (dbsavvy-b0l). Wider than the
-		// generic rect so SQL lines and column-by-column diffs fit
-		// without truncating. COMMIT_DIALOG is ModeNormal / non-editable,
-		// so no SetView/TextArea plumbing is needed — the popup loop's
-		// HandleRender + SetViewOnTop and the Tier-4 SetCurrentView
-		// handle render and input focus once a rect exists.
-		canvas, ok := dims["popup-overlay"]
-		if !ok {
-			return rect{}, false
-		}
-		return centeredRect(canvas, 0.7, 0.6), true
-	case types.CONFLICT_DIALOG:
-		// CONFLICT_DIALOG renders the optimistic-concurrency conflict
-		// list and the refresh/overwrite/cancel legend (dbsavvy-xp2,
-		// same root cause as parent dbsavvy-b0l). Without this case
-		// popupRectFor hit the default (rect{}, false) and the Tier-3
-		// popup loop continue'd past it, so the dialog was pushed onto
-		// the focus stack but rendered blank and never took input focus.
-		// CONFLICT_DIALOG is ModeNormal / non-editable, so no
-		// SetView/TextArea plumbing is needed — the popup loop's
-		// HandleRender + SetViewOnTop and the Tier-4 SetCurrentView
-		// handle render and input focus once a rect exists.
-		canvas, ok := dims["popup-overlay"]
-		if !ok {
-			return rect{}, false
-		}
-		return centeredRect(canvas, 0.6, 0.6), true
-	case types.FK_REVERSE_PICKER:
-		// FK_REVERSE_PICKER is the reverse-FK referencing-table picker
-		// (dbsavvy-q5j, same root cause as parent dbsavvy-b0l). Without
-		// this case popupRectFor hit the default (rect{}, false) and the
-		// Tier-3 popup loop continue'd past it, so the picker was pushed
-		// onto the focus stack but rendered blank and never took input
-		// focus. It is a non-editable TabbedPopup (ModeNormal, no
-		// TextArea/filter — not in ContextKey.IsEditable), so no
-		// SetView/TextArea plumbing is needed: the popup loop's
-		// HandleRender + SetViewOnTop and the Tier-4 SetCurrentView handle
-		// render and input focus once a rect exists. Sized like
-		// TABLE_INSPECT (the other tabbed-list popup) to give the entry
-		// list room.
-		canvas, ok := dims["popup-overlay"]
-		if !ok {
-			return rect{}, false
-		}
-		return centeredRect(canvas, 0.6, 0.6), true
-	case types.COMMAND_LINE:
+		return centeredRect(canvas, spec.WidthFrac, spec.HeightFrac), true
+	case types.PopupSizeCommandLine:
 		r := commandLineRect(dims)
 		if r == (rect{}) {
 			return rect{}, false
 		}
 		return r, true
-	case types.CHEATSHEET:
+	case types.PopupSizeCheatsheet:
 		canvas, ok := dims["popup-overlay"]
 		if !ok {
 			canvas = ui.Dimensions{X0: 0, Y0: 0, X1: w - 1, Y1: h - 1}
 		}
 		return centeredRectMaxSize(canvas, cheatsheetMaxCols, cheatsheetMaxRows), true
-	case types.CELL_EDITOR:
-		// CELL_EDITOR is a small single-line editing popup over the
-		// result grid (dbsavvy-tzi.1). Keep it height-bounded — a 50%
-		// box would occlude the grid the user is editing. Width is ~60%
-		// of the canvas; cellEditorMaxRows caps it at ~3 content rows
-		// (frame top+bottom borders consume 2).
+	case types.PopupSizeCellEditor:
 		canvas, ok := dims["popup-overlay"]
 		if !ok {
 			return rect{}, false
@@ -613,15 +546,12 @@ func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int)
 		maxCols := cw * 3 / 5
 		return centeredRectMaxSize(canvas, maxCols, cellEditorMaxRows), true
 	default:
-		// The silent default is intentional and load-bearing: WHICH_KEY
-		// and LIMIT are DISPLAY_CONTEXT keys that render via dedicated
-		// overlays (the which-key overlay / renderLimitOverlay), not this
-		// Tier-3 loop, so they legitimately have no case here. Enforcement
-		// that every *other* popup-kind ContextKey has a rect lives in
-		// TestWiringInvariant (dbsavvy-9v1.1): a new TEMPORARY_POPUP /
-		// DISPLAY_CONTEXT key wired into the tree without a case here fails
-		// that test instead of silently rendering blank (the
-		// dbsavvy-b0l/xp2/q5j/tzi.1 failure mode).
+		// PopupSizeNone: non-popup contexts plus LIMIT/WHICH_KEY (which
+		// render via renderLimitOverlay / the which-key overlay, not this
+		// Tier-3 loop). The silent default is load-bearing: TestWiringInvariant
+		// fails if a popup-kind key (TEMPORARY_POPUP/DISPLAY_CONTEXT, minus the
+		// allowlisted LIMIT/WHICH_KEY) declares no descriptor, instead of
+		// silently rendering blank.
 		return rect{}, false
 	}
 }

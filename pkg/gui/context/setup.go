@@ -94,6 +94,11 @@ type contextSpec struct {
 	kind     types.ContextKind
 	viewName string
 	title    string
+	// popupRect is the size-policy descriptor the orchestrator reads to
+	// derive this context's Tier-3 popup rectangle. Zero value
+	// (PopupSizeNone) for non-popup contexts and the overlay-rendered
+	// LIMIT/WHICH_KEY. Replaces the hand-maintained popupRectFor switch.
+	popupRect types.PopupRectSpec
 	// inFlatten marks whether the built Context joins the flattened
 	// iteration slice. False only for COLUMNS/INDEXES, which retain a
 	// named field but are deferred (superseded by TABLE_INSPECT) and were
@@ -150,31 +155,39 @@ func contextSpecs() []contextSpec {
 		// Popups (Kind = TEMPORARY_POPUP).
 		{
 			key: types.MENU, kind: types.TEMPORARY_POPUP, inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewMenuContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.Menu = c.(*MenuContext) },
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.5, HeightFrac: 0.5},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewMenuContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.Menu = c.(*MenuContext) },
 		},
 		{
 			key: types.CONFIRMATION, kind: types.TEMPORARY_POPUP, inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConfirmationContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.Confirmation = c.(*ConfirmationContext) },
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.5, HeightFrac: 0.5},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConfirmationContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.Confirmation = c.(*ConfirmationContext) },
 		},
 		{
 			key: types.PROMPT, kind: types.TEMPORARY_POPUP, inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewPromptContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.Prompt = c.(*PromptContext) },
+			// 0.8 (not the generic 0.5) so wrapped validator-error bodies
+			// don't truncate at the right edge (dbsavvy-8p5).
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.8, HeightFrac: 0.5},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewPromptContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.Prompt = c.(*PromptContext) },
 		},
 		{
 			key: types.SELECTION, kind: types.TEMPORARY_POPUP, inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewSelectionContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.Selection = c.(*SelectionContext) },
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.5, HeightFrac: 0.5},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewSelectionContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.Selection = c.(*SelectionContext) },
 		},
 		{
 			key: types.SUGGESTIONS, kind: types.TEMPORARY_POPUP, inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewSuggestionsContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.Suggestions = c.(*SuggestionsContext) },
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.5, HeightFrac: 0.5},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewSuggestionsContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.Suggestions = c.(*SuggestionsContext) },
 		},
 		{
 			key: types.COMMAND_LINE, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCommandLine},
 			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
 				return NewCommandLineContext(b, d, d.ModeStore)
 			},
@@ -182,36 +195,45 @@ func contextSpecs() []contextSpec {
 		},
 		{
 			key: types.HIDE_OVERLAY, kind: types.TEMPORARY_POPUP, inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewHideOverlayContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.HideOverlay = c.(*HideOverlayContext) },
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.5, HeightFrac: 0.5},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewHideOverlayContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.HideOverlay = c.(*HideOverlayContext) },
 		},
 		{
 			key: types.EXPORT_MENU, kind: types.TEMPORARY_POPUP, inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewExportMenuContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.ExportMenu = c.(*ExportMenuContext) },
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.5, HeightFrac: 0.5},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewExportMenuContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.ExportMenu = c.(*ExportMenuContext) },
 		},
 		{
 			key: types.TABLE_INSPECT, kind: types.TEMPORARY_POPUP, title: "Table inspect", inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewTableInspectContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.TableInspect = c.(*TableInspectContext) },
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.6, HeightFrac: 0.6},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewTableInspectContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.TableInspect = c.(*TableInspectContext) },
 		},
 		{
 			key: types.CELL_EDITOR, kind: types.TEMPORARY_POPUP, title: "Cell editor", inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewCellEditorContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.CellEditor = c.(*CellEditorContext) },
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCellEditor},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewCellEditorContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.CellEditor = c.(*CellEditorContext) },
 		},
 		{
 			key: types.COMMIT_DIALOG, kind: types.TEMPORARY_POPUP, title: "Commit", inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewCommitDialogContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.CommitDialog = c.(*CommitDialogContext) },
+			// 0.7 wide so the generated-SQL preview lines fit without
+			// truncating (dbsavvy-b0l).
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.7, HeightFrac: 0.6},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewCommitDialogContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.CommitDialog = c.(*CommitDialogContext) },
 		},
 		{
 			key: types.CONFLICT_DIALOG, kind: types.TEMPORARY_POPUP, title: "Conflicts", inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConflictDialogContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.ConflictDialog = c.(*ConflictDialogContext) },
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.6, HeightFrac: 0.6},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConflictDialogContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.ConflictDialog = c.(*ConflictDialogContext) },
 		},
 		{
 			key: types.FK_REVERSE_PICKER, kind: types.TEMPORARY_POPUP, title: "Reverse FK", inFlatten: true,
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.6, HeightFrac: 0.6},
 			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
 				return NewFKReversePickerContext(b, d)
 			},
@@ -244,6 +266,7 @@ func contextSpecs() []contextSpec {
 		},
 		{
 			key: types.CHEATSHEET, kind: types.DISPLAY_CONTEXT, inFlatten: true,
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCheatsheet},
 			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
 				return NewCheatsheetContext(b, d, d.CheatsheetRender)
 			},
@@ -356,4 +379,24 @@ func (t *ContextTree) ByKey(key types.ContextKey) types.IBaseContext {
 		}
 	}
 	return nil
+}
+
+// popupRectSpecByKey indexes each context's declared popup-rect
+// descriptor by key. Built once from contextSpecs() (the closures are
+// not invoked — only the static descriptor fields are read), so the
+// orchestrator's popupRectFor can resolve a descriptor from a bare
+// ContextKey without a constructed tree (the binding/wiring guard tests
+// iterate keys only).
+var popupRectSpecByKey = func() map[types.ContextKey]types.PopupRectSpec {
+	m := make(map[types.ContextKey]types.PopupRectSpec)
+	for _, s := range contextSpecs() {
+		m[s.key] = s.popupRect
+	}
+	return m
+}()
+
+// PopupRectSpecFor returns the popup-rect descriptor declared for key, or
+// the zero value (PopupSizeNone) when the key declares none.
+func PopupRectSpecFor(key types.ContextKey) types.PopupRectSpec {
+	return popupRectSpecByKey[key]
 }
