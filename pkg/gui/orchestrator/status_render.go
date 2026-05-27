@@ -79,6 +79,10 @@ type StatusRenderDeps struct {
 	// savepoint names. Nil → no transaction indicator rendered (bootstrap
 	// safety / no session connected yet).
 	TxStatus func() (models.TxStatus, []string)
+	// SessionSettings returns the live session settings snapshot
+	// (search_path, role, etc.) for display in the status bar. Nil →
+	// no settings section rendered (bootstrap safety / no session).
+	SessionSettings func() map[string]string
 }
 
 // RenderStatusLine resolves the focused context's mode label, builds the
@@ -172,7 +176,11 @@ func RenderStatusLine(d StatusRenderDeps) {
 	if d.TxStatus != nil {
 		txSt, txSp = d.TxStatus()
 	}
-	line := status.BuildStatusLine(label, conn, options, d.Tr, busy, frame, txSt, txSp)
+	var sessSettings map[string]string
+	if d.SessionSettings != nil {
+		sessSettings = d.SessionSettings()
+	}
+	line := status.BuildStatusLine(label, conn, options, d.Tr, busy, frame, txSt, txSp, sessSettings)
 	_ = d.Driver.SetContent(AppStatusViewName, line)
 }
 

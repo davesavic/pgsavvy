@@ -50,6 +50,14 @@ type Controllers struct {
 	// dialog (hq5.7).
 	Reconnect *ReconnectController
 
+	// SearchPath owns the <leader>p GLOBAL binding for the search_path
+	// quick-set prompt (hq5.10).
+	SearchPath *SearchPathController
+
+	// StatementTimeout owns the <leader>tt QUERY_EDITOR binding for the
+	// statement timeout prompt (hq5.11).
+	StatementTimeout *StatementTimeoutController
+
 	// Cheatsheet is constructed by the orchestrator (it needs a Pop-
 	// capable focus-stack handle outside this package). dbsavvy-bwq.Z1
 	// promoted the help popup to TabbedPopup; the controller owns the
@@ -102,6 +110,8 @@ func AttachControllers(
 	confirmation := NewConfirmationController(c, helpers.CoreDeps, helpers.UIDeps)
 	quit := NewQuitController(c, helpers.CoreDeps, helpers.UIDeps, helpers.QueryDeps, helpers.EditDeps)
 	reconnect := NewReconnectController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps, helpers.ThreadingDeps, helpers.EditDeps)
+	searchPath := NewSearchPathController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps, helpers.ThreadingDeps)
+	stmtTimeout := NewStatementTimeoutController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps, helpers.ThreadingDeps)
 	queryEditor := NewQueryEditorController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps)
 	tx := NewTxController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps)
 
@@ -185,7 +195,9 @@ func AttachControllers(
 		Confirmation: confirmation,
 		Quit:         quit,
 		Reconnect:    reconnect,
-		QueryEditor:  queryEditor,
+		SearchPath:       searchPath,
+		StatementTimeout: stmtTimeout,
+		QueryEditor:      queryEditor,
 		Tx:           tx,
 		ResultTabs:   resultTabs,
 		HideOverlay:  hideOverlay,
@@ -212,7 +224,9 @@ func AttachControllers(
 		"Confirmation": &tree.Confirmation.BaseContext,
 		"Quit":         &tree.Global.BaseContext,
 		"Reconnect":    &tree.Global.BaseContext,
-		"QueryEditor":  tree.QueryEditor,
+		"SearchPath":       &tree.Global.BaseContext,
+		"StatementTimeout": tree.QueryEditor,
+		"QueryEditor":      tree.QueryEditor,
 		"Tx":           tree.QueryEditor,
 		"ResultTabs":   tree.ResultGrid,
 		"HideOverlay":  &tree.HideOverlay.BaseContext,
@@ -308,6 +322,8 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "Confirmation", ctrl: b.Confirmation, attach: true},
 		{name: "Quit", ctrl: b.Quit, attach: true},
 		{name: "Reconnect", ctrl: b.Reconnect, attach: true},
+		{name: "SearchPath", ctrl: b.SearchPath, attach: true},
+		{name: "StatementTimeout", ctrl: b.StatementTimeout, attach: true},
 		{name: "QueryEditor", ctrl: b.QueryEditor, attach: true},
 		{name: "Tx", ctrl: b.Tx, attach: true},
 		{name: "ResultTabs", ctrl: b.ResultTabs, attach: true},

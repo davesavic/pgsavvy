@@ -437,6 +437,18 @@ const (
 	// this binding is GLOBAL-only and masked by the editor scope.)
 	Reconnect = "app.reconnect"
 
+	// SearchPathQuickSet — owned by SearchPathController (hq5.10).
+	// <leader>p in GLOBAL scope opens a prompt pre-filled with
+	// "SET search_path TO "; on submit the full text is fed to the
+	// existing SET handler from hq5.8.
+	SearchPathQuickSet = "session.search_path"
+
+	// StatementTimeoutSet — owned by StatementTimeoutController (hq5.11).
+	// <leader>tt in QUERY_EDITOR scope prompts for a postgres-style duration,
+	// validates via session.CanonicalizeStatementTimeout, executes
+	// SET statement_timeout on the session, and persists to AppState.
+	StatementTimeoutSet = "session.statement_timeout"
+
 	// Transaction family — owned by TxController (hq5.3). Default bindings:
 	// <leader>tb, <leader>tc, <leader>tr, <leader>ts, <leader>tR, <leader>to.
 	TxBegin               = "tx.begin"
@@ -659,6 +671,8 @@ func AllActionIDs() []string {
 		ResultJumpForward,
 		EditorCompletionTrigger,
 		Reconnect,
+		SearchPathQuickSet,
+		StatementTimeoutSet,
 		TxBegin,
 		TxCommit,
 		TxRollback,

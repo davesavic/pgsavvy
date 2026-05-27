@@ -84,6 +84,24 @@ func (g *Gui) txStatusAccessor() func() (models.TxStatus, []string) {
 	}
 }
 
+// sessionSettingsAccessor returns a closure suitable for
+// StatusRenderDeps.SessionSettings. The closure reads the live
+// activeSQLSession's SettingsSnapshot. Returns nil when no session
+// exists (bootstrap safety — no connection yet).
+func (g *Gui) sessionSettingsAccessor() func() map[string]string {
+	sess := g.activeSQLSession
+	if sess == nil {
+		return nil
+	}
+	return func() map[string]string {
+		snap := sess.SettingsSnapshot()
+		if snap == nil {
+			return nil
+		}
+		return snap.All()
+	}
+}
+
 // armSpinner starts the spinner re-render ticker on the busy 0->1
 // transition. Guarded by the DEDICATED spinnerMu (NOT the atomic busy
 // counter) so two workers racing the 0->1 edge cannot double-arm: the

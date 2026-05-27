@@ -67,6 +67,7 @@ binding	scope=global	key=<leader>7	mode=normal
 binding	scope=global	key=<leader>8	mode=normal
 binding	scope=global	key=<leader>9	mode=normal
 binding	scope=global	key=<leader>R	mode=normal
+binding	scope=global	key=<leader>p	mode=normal
 binding	scope=global	key=?	mode=normal
 binding	scope=hide_overlay	key=<c-n>	mode=normal
 binding	scope=hide_overlay	key=<c-p>	mode=normal
@@ -117,6 +118,7 @@ binding	scope=query_editor	key=<leader>tc	mode=normal
 binding	scope=query_editor	key=<leader>to	mode=normal
 binding	scope=query_editor	key=<leader>tr	mode=normal
 binding	scope=query_editor	key=<leader>ts	mode=normal
+binding	scope=query_editor	key=<leader>tt	mode=normal
 binding	scope=query_editor	key=<leader>x	mode=normal
 binding	scope=query_editor	key=<tab>	mode=normal
 binding	scope=query_editor	key=>	mode=mode(0x3c)

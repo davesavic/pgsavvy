@@ -138,7 +138,7 @@ func TestCanonicalizeStatementTimeout_AcceptedForms(t *testing.T) {
 		{"5 min", "5min"}, // whitespace canonicalized away
 	}
 	for _, c := range cases {
-		got, err := canonicalizeStatementTimeout(c.in)
+		got, err := CanonicalizeStatementTimeout(c.in)
 		if err != nil {
 			t.Errorf("canonicalize(%q) error: %v", c.in, err)
 			continue
@@ -177,7 +177,7 @@ func TestStatementTimeoutInjectionResistance(t *testing.T) {
 		"../etc/passwd",
 	}
 	for _, v := range vectors {
-		if _, err := canonicalizeStatementTimeout(v); err == nil {
+		if _, err := CanonicalizeStatementTimeout(v); err == nil {
 			t.Errorf("vector %q was accepted but should have been rejected", v)
 		}
 	}
@@ -194,7 +194,7 @@ func TestStatementTimeoutInjectionResistance(t *testing.T) {
 				buf[j] = byte(r.IntN(256))
 			}
 		}
-		got, err := canonicalizeStatementTimeout(string(buf))
+		got, err := CanonicalizeStatementTimeout(string(buf))
 		if err != nil {
 			continue
 		}
@@ -204,7 +204,7 @@ func TestStatementTimeoutInjectionResistance(t *testing.T) {
 	}
 }
 
-// isSafeCanonicalTimeout encodes canonicalizeStatementTimeout's post-condition:
+// isSafeCanonicalTimeout encodes CanonicalizeStatementTimeout's post-condition:
 // either the literal "0", or digits followed by exactly one allowlisted unit.
 func isSafeCanonicalTimeout(s string) bool {
 	if s == "0" {
@@ -260,7 +260,7 @@ func TestRunAfterConnect_EmptyDefaultsToZero(t *testing.T) {
 	// When profile.StatementTimeout is "", BuildPgxConfig substitutes "0"
 	// and canonicalizes it before installing the hook. We exercise the same
 	// canonicalization path here so the test fails if the default ever drifts.
-	canonical, err := canonicalizeStatementTimeout("0")
+	canonical, err := CanonicalizeStatementTimeout("0")
 	if err != nil {
 		t.Fatalf("canonicalize: %v", err)
 	}

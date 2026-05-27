@@ -9,14 +9,14 @@ import (
 )
 
 func TestBuildStatusLine_NilTranslationSet(t *testing.T) {
-	if got := BuildStatusLine("", nil, nil, nil, 0, 0, "", nil); got != "" {
+	if got := BuildStatusLine("", nil, nil, nil, 0, 0, "", nil, nil); got != "" {
 		t.Fatalf("BuildStatusLine(nil tr) = %q, want empty", got)
 	}
 }
 
 func TestBuildStatusLine_NoConnOmitsHeaderSlot(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
-	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil)
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil, nil)
 
 	if !strings.HasSuffix(got, tr.OptionsBarMore) {
 		t.Fatalf("got %q, want suffix %q", got, tr.OptionsBarMore)
@@ -30,7 +30,7 @@ func TestBuildStatusLine_ReadOnlyTagPresent(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	conn := &models.Connection{Label: "prod", ReadOnly: true}
 
-	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil)
+	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil, nil)
 
 	if !strings.Contains(got, tr.ReadOnlyTag) {
 		t.Fatalf("got %q, want substring %q", got, tr.ReadOnlyTag)
@@ -44,7 +44,7 @@ func TestBuildStatusLine_ReadOnlyTagAbsentWhenNotReadOnly(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	conn := &models.Connection{Label: "stg", ReadOnly: false}
 
-	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil)
+	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil, nil)
 
 	if strings.Contains(got, tr.ReadOnlyTag) {
 		t.Fatalf("got %q must not contain RO tag when ReadOnly=false", got)
@@ -55,7 +55,7 @@ func TestBuildStatusLine_IconAndLabel(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	conn := &models.Connection{Icon: "⚠", Label: "PROD"}
 
-	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil)
+	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil, nil)
 
 	if !strings.Contains(got, "⚠ PROD") {
 		t.Fatalf("got %q, want substring %q", got, "⚠ PROD")
@@ -66,7 +66,7 @@ func TestBuildStatusLine_OptionsRendered(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	opts := []string{"q:quit", "?:help"}
 
-	got := BuildStatusLine("", nil, opts, tr, 0, 0, "", nil)
+	got := BuildStatusLine("", nil, opts, tr, 0, 0, "", nil, nil)
 
 	for _, o := range opts {
 		if !strings.Contains(got, o) {
@@ -89,7 +89,7 @@ func TestBuildStatusLine_AlwaysEndsWithOptionsBarMore(t *testing.T) {
 		{"conn+ro+opts", &models.Connection{Label: "p", ReadOnly: true}, []string{"a", "b"}},
 	}
 	for _, c := range cases {
-		got := BuildStatusLine("", c.conn, c.opts, tr, 0, 0, "", nil)
+		got := BuildStatusLine("", c.conn, c.opts, tr, 0, 0, "", nil, nil)
 		if !strings.HasSuffix(got, tr.OptionsBarMore) {
 			t.Fatalf("%s: got %q, want suffix %q", c.name, got, tr.OptionsBarMore)
 		}
@@ -103,7 +103,7 @@ func TestBuildStatusLine_ModeLabelPrepended(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	conn := &models.Connection{Icon: "⚠", Label: "PROD"}
 
-	got := BuildStatusLine("-- COMMAND --", conn, nil, tr, 0, 0, "", nil)
+	got := BuildStatusLine("-- COMMAND --", conn, nil, tr, 0, 0, "", nil, nil)
 
 	if !strings.HasPrefix(got, "-- COMMAND --") {
 		t.Fatalf("got %q, want prefix %q", got, "-- COMMAND --")
@@ -124,7 +124,7 @@ func TestBuildStatusLine_ModeLabelPrepended(t *testing.T) {
 func TestBuildStatusLine_EmptyModeLabelOmitsSlot(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 
-	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil)
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil, nil)
 
 	if strings.HasPrefix(got, sectionSep) {
 		t.Fatalf("got %q must not start with section separator when modeLabel empty", got)
@@ -140,7 +140,7 @@ func TestBuildStatusLine_ConnColorTintsHeader(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	conn := &models.Connection{Icon: "*", Label: "local-pg", Color: "red"}
 
-	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil)
+	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil, nil)
 
 	if !strings.Contains(got, "\x1b[31m* local-pg\x1b[0m") {
 		t.Fatalf("got %q; want substring %q", got, "\x1b[31m* local-pg\x1b[0m")
@@ -154,7 +154,7 @@ func TestBuildStatusLine_ConnHexColorIsNotTinted(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	conn := &models.Connection{Icon: "*", Label: "stg", Color: "#abcdef"}
 
-	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil)
+	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil, nil)
 
 	if strings.ContainsRune(got, 0x1b) {
 		t.Fatalf("got %q must not contain an ANSI escape for an unrecognised colour token", got)
@@ -169,7 +169,7 @@ func TestBuildStatusLine_ConnHexColorIsNotTinted(t *testing.T) {
 func TestBuildStatusLine_NilConnWithModeLabel(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 
-	got := BuildStatusLine("-- INSERT --", nil, nil, tr, 0, 0, "", nil)
+	got := BuildStatusLine("-- INSERT --", nil, nil, tr, 0, 0, "", nil, nil)
 
 	if !strings.HasPrefix(got, "-- INSERT --") {
 		t.Fatalf("got %q, want prefix %q", got, "-- INSERT --")
@@ -185,7 +185,7 @@ func TestBuildStatusLine_NilConnWithModeLabel(t *testing.T) {
 // WarningFg (yellow ANSI) when tx is active with no savepoints.
 func TestBuildStatusLine_TxActiveNoSavepoints(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
-	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxActive, nil)
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxActive, nil, nil)
 
 	wantTag := "\x1b[33m[TX]\x1b[0m"
 	if !strings.Contains(got, wantTag) {
@@ -197,7 +197,7 @@ func TestBuildStatusLine_TxActiveNoSavepoints(t *testing.T) {
 // empty savepoint slice with active tx renders [TX] not [TX:].
 func TestBuildStatusLine_TxActiveEmptySavepointsRendersTX(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
-	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxActive, []string{})
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxActive, []string{}, nil)
 
 	wantTag := "\x1b[33m[TX]\x1b[0m"
 	if !strings.Contains(got, wantTag) {
@@ -212,7 +212,7 @@ func TestBuildStatusLine_TxActiveEmptySavepointsRendersTX(t *testing.T) {
 // rendered with WarningFg when savepoints are present.
 func TestBuildStatusLine_TxActiveWithSavepoints(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
-	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxActive, []string{"sp1", "sp2"})
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxActive, []string{"sp1", "sp2"}, nil)
 
 	wantTag := "\x1b[33m[TX:sp1,sp2]\x1b[0m"
 	if !strings.Contains(got, wantTag) {
@@ -224,7 +224,7 @@ func TestBuildStatusLine_TxActiveWithSavepoints(t *testing.T) {
 // ErrorFg (red ANSI) when tx is in aborted_in_tx state.
 func TestBuildStatusLine_TxAbortedInTx(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
-	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxAbortedInTx, nil)
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxAbortedInTx, nil, nil)
 
 	wantTag := "\x1b[31m[TX*]\x1b[0m"
 	if !strings.Contains(got, wantTag) {
@@ -236,7 +236,7 @@ func TestBuildStatusLine_TxAbortedInTx(t *testing.T) {
 // appears when txStatus is the zero value (no transaction).
 func TestBuildStatusLine_NoTxIndicatorWhenInactive(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
-	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil)
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil, nil)
 
 	if strings.Contains(got, "[TX") {
 		t.Fatalf("got %q, must not contain TX indicator when inactive", got)
@@ -247,7 +247,7 @@ func TestBuildStatusLine_NoTxIndicatorWhenInactive(t *testing.T) {
 // for committed transactions.
 func TestBuildStatusLine_NoTxIndicatorWhenCommitted(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
-	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxCommitted, nil)
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxCommitted, nil, nil)
 
 	if strings.Contains(got, "[TX") {
 		t.Fatalf("got %q, must not contain TX indicator when committed", got)
@@ -258,9 +258,89 @@ func TestBuildStatusLine_NoTxIndicatorWhenCommitted(t *testing.T) {
 // for rolled-back transactions.
 func TestBuildStatusLine_NoTxIndicatorWhenRolledBack(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
-	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxRolledBack, nil)
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxRolledBack, nil, nil)
 
 	if strings.Contains(got, "[TX") {
 		t.Fatalf("got %q, must not contain TX indicator when rolled back", got)
+	}
+}
+
+// --- Session settings tests (hq5.9) ---
+
+// TestBuildStatusLine_SessionSettings_SearchPath verifies [search_path=…]
+// appears in the status line when the settings map contains search_path.
+func TestBuildStatusLine_SessionSettings_SearchPath(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	settings := map[string]string{"search_path": "app,public"}
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil, settings)
+
+	want := "[search_path=app,public]"
+	if !strings.Contains(got, want) {
+		t.Fatalf("got %q, want substring %q", got, want)
+	}
+}
+
+// TestBuildStatusLine_SessionSettings_Role verifies [role=…] appears in
+// the status line when the settings map contains role.
+func TestBuildStatusLine_SessionSettings_Role(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	settings := map[string]string{"role": "app_readonly"}
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil, settings)
+
+	want := "[role=app_readonly]"
+	if !strings.Contains(got, want) {
+		t.Fatalf("got %q, want substring %q", got, want)
+	}
+}
+
+// TestBuildStatusLine_SessionSettings_EmptyMap verifies no settings
+// section appears when the settings map is empty.
+func TestBuildStatusLine_SessionSettings_EmptyMap(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	settings := map[string]string{}
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil, settings)
+
+	if strings.Contains(got, "[search_path=") || strings.Contains(got, "[role=") {
+		t.Fatalf("got %q, must not contain settings tags for empty map", got)
+	}
+}
+
+// TestBuildStatusLine_SessionSettings_Nil verifies no crash and no
+// settings section when the settings map is nil.
+func TestBuildStatusLine_SessionSettings_Nil(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil, nil)
+
+	if strings.Contains(got, "[search_path=") || strings.Contains(got, "[role=") {
+		t.Fatalf("got %q, must not contain settings tags for nil map", got)
+	}
+}
+
+// TestBuildStatusLine_SessionSettings_EmptyValue verifies empty-string
+// values are not displayed in the settings section.
+func TestBuildStatusLine_SessionSettings_EmptyValue(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	settings := map[string]string{"search_path": "", "role": "", "time_zone": ""}
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil, settings)
+
+	if strings.Contains(got, "[search_path=") || strings.Contains(got, "[role=") || strings.Contains(got, "[time_zone=") {
+		t.Fatalf("got %q, must not contain settings tags for empty values", got)
+	}
+}
+
+// TestBuildStatusLine_SessionSettings_LongSearchPath verifies truncation
+// of search_path values exceeding settingsSearchPathMaxLen.
+func TestBuildStatusLine_SessionSettings_LongSearchPath(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	longPath := strings.Repeat("schema_name,", 5) // 60 chars, exceeds 40
+	settings := map[string]string{"search_path": longPath}
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil, settings)
+
+	if !strings.Contains(got, "...") {
+		t.Fatalf("got %q, want truncated search_path with '...'", got)
+	}
+	// Full value must NOT appear.
+	if strings.Contains(got, longPath) {
+		t.Fatalf("got %q, must not contain full untruncated search_path", got)
 	}
 }

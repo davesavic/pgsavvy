@@ -20,7 +20,7 @@ import (
 )
 
 // statementTimeoutRe is the permissive grammar for Connection.StatementTimeout.
-// It is the SOLE regex gate, but not the sole defense: canonicalizeStatementTimeout
+// It is the SOLE regex gate, but not the sole defense: CanonicalizeStatementTimeout
 // also rejects forbidden bytes and rebuilds the literal from a hard-coded unit
 // table before it is interpolated into the SET command. See epic dbsavvy-921 §D7
 // and dbsavvy-921.5's review-plan resolutions.
@@ -45,7 +45,7 @@ var validStatementTimeoutUnits = map[string]struct{}{
 const statementTimeoutForbiddenBytes = "';\"\\\x00\r\n\t"
 
 // ErrStatementTimeoutInvalid is returned by BuildPgxConfig (via
-// canonicalizeStatementTimeout) when the profile's statement_timeout cannot
+// CanonicalizeStatementTimeout) when the profile's statement_timeout cannot
 // be canonicalized to a known-safe literal.
 var ErrStatementTimeoutInvalid = errors.New("session: invalid statement_timeout (want \"0\" or \"<n>{ms|s|min|h|d}\")")
 
@@ -95,7 +95,7 @@ func BuildPgxConfig(_ context.Context, profile models.Connection, password strin
 	if rawTimeout == "" {
 		rawTimeout = "0"
 	}
-	canonicalTimeout, err := canonicalizeStatementTimeout(rawTimeout)
+	canonicalTimeout, err := CanonicalizeStatementTimeout(rawTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,7 @@ type pgConnExecer interface {
 }
 
 // runAfterConnect applies the per-session SET commands required by the profile.
-// canonicalTimeout MUST already have been validated by canonicalizeStatementTimeout.
+// canonicalTimeout MUST already have been validated by CanonicalizeStatementTimeout.
 func runAfterConnect(ctx context.Context, conn pgConnExecer, readOnly bool, canonicalTimeout string) error {
 	if readOnly {
 		if _, err := conn.Exec(ctx, "SET default_transaction_read_only = on"); err != nil {
@@ -146,11 +146,11 @@ func runAfterConnect(ctx context.Context, conn pgConnExecer, readOnly bool, cano
 	return nil
 }
 
-// canonicalizeStatementTimeout validates raw and rebuilds the literal from the
+// CanonicalizeStatementTimeout validates raw and rebuilds the literal from the
 // hard-coded unit table. The returned string is safe to interpolate into a SET
 // statement_timeout = '<>' command: only digits and one allowlisted unit suffix
 // can ever appear.
-func canonicalizeStatementTimeout(raw string) (string, error) {
+func CanonicalizeStatementTimeout(raw string) (string, error) {
 	if strings.ContainsAny(raw, statementTimeoutForbiddenBytes) {
 		return "", fmt.Errorf("%w: forbidden byte in %q", ErrStatementTimeoutInvalid, raw)
 	}

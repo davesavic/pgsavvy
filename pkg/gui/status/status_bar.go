@@ -2,6 +2,7 @@ package status
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/presentation"
@@ -61,7 +62,7 @@ const (
 //
 // A nil tr yields the empty string; the rendering layer treats that as
 // "skip the status slot entirely".
-func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []string, tr *i18n.TranslationSet, busyCount, spinnerFrame int64, txStatus models.TxStatus, savepoints []string) string {
+func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []string, tr *i18n.TranslationSet, busyCount, spinnerFrame int64, txStatus models.TxStatus, savepoints []string, sessionSettings map[string]string) string {
 	if tr == nil {
 		return ""
 	}
@@ -89,6 +90,10 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 
 	if tag := txIndicator(txStatus, savepoints); tag != "" {
 		sections = append(sections, tag)
+	}
+
+	if tags := sessionSettingsTags(sessionSettings); len(tags) > 0 {
+		sections = append(sections, tags...)
 	}
 
 	var mid []string
@@ -123,6 +128,52 @@ func txIndicator(st models.TxStatus, savepoints []string) string {
 	default:
 		return ""
 	}
+}
+
+// settingsSearchPathMaxLen is the maximum length of a search_path value
+// before truncation. Values longer than this are clipped and suffixed
+// with "..." to prevent status bar overflow.
+const settingsSearchPathMaxLen = 40
+
+// sessionSettingsTags renders bracketed [key=value] tags for the non-empty
+// entries in the session settings map. search_path and role are emitted
+// first (in that order); remaining keys follow in sorted order. Empty
+// values are skipped. search_path values longer than
+// settingsSearchPathMaxLen are truncated with "...".
+func sessionSettingsTags(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+
+	var tags []string
+	// Priority keys first, in display order.
+	for _, k := range []string{"search_path", "role"} {
+		v, ok := m[k]
+		if !ok || v == "" {
+			continue
+		}
+		if k == "search_path" && len(v) > settingsSearchPathMaxLen {
+			v = v[:settingsSearchPathMaxLen] + "..."
+		}
+		tags = append(tags, fmt.Sprintf("[%s=%s]", k, v))
+	}
+	// Remaining keys in sorted order.
+	var rest []string
+	for k := range m {
+		if k == "search_path" || k == "role" {
+			continue
+		}
+		rest = append(rest, k)
+	}
+	sort.Strings(rest)
+	for _, k := range rest {
+		v := m[k]
+		if v == "" {
+			continue
+		}
+		tags = append(tags, fmt.Sprintf("[%s=%s]", k, v))
+	}
+	return tags
 }
 
 // tintHeaderForConn wraps the header text with an ANSI SGR foreground

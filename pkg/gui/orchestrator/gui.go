@@ -1477,6 +1477,36 @@ func (g *Gui) wireWithDriver() error {
 	}
 	_ = g.exRegistry.Register(keys.ExCommand{Name: "set", Description: "Execute SET on session", Handler: setExHandler})
 
+	// hq5.10: wire the search_path quick-set prompt to the SET handler.
+	if g.controllers != nil && g.controllers.SearchPath != nil {
+		g.controllers.SearchPath.SetRunner = setExHandler
+	}
+
+	// hq5.11: wire the statement timeout prompt to the SET handler + AppState.
+	if g.controllers != nil && g.controllers.StatementTimeout != nil {
+		g.controllers.StatementTimeout.SetRunner = setExHandler
+		g.controllers.StatementTimeout.ActiveConnID = func() string {
+			return g.activeConnID
+		}
+		g.controllers.StatementTimeout.PersistTimeout = func(connID, timeout string) {
+			if g.deps.Store == nil {
+				return
+			}
+			g.deps.Store.MutateAndSave(func(a *common.AppState) {
+				if timeout == "" {
+					if a.StatementTimeoutOverride != nil {
+						delete(a.StatementTimeoutOverride, connID)
+					}
+					return
+				}
+				if a.StatementTimeoutOverride == nil {
+					a.StatementTimeoutOverride = make(map[string]string)
+				}
+				a.StatementTimeoutOverride[connID] = timeout
+			})
+		}
+	}
+
 	resetExHandler := func(args []string, _ commands.ExecCtx) error {
 		if len(args) == 0 {
 			toaster("RESET requires a setting name")

@@ -196,6 +196,12 @@ type ActionTranslations struct {
 	// Reconnect (hq5.7).
 	Reconnect string
 
+	// SearchPathQuickSet (hq5.10).
+	SearchPathQuickSet string
+
+	// StatementTimeoutSet (hq5.11).
+	StatementTimeoutSet string
+
 	// Global app commands.
 	QuitApp  string
 	ShowMenu string
@@ -375,7 +381,9 @@ func EnglishTranslationSet() *TranslationSet {
 			UnhideSchema:     "Unhide Schema",
 			ToggleShowHidden: "Toggle Show Hidden",
 
-			Reconnect: "Reconnect",
+			Reconnect:          "Reconnect",
+			SearchPathQuickSet:  "Set search_path",
+			StatementTimeoutSet: "Set statement timeout",
 
 			QuitApp:  "Quit",
 			ShowMenu: "Show Menu",
