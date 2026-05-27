@@ -232,11 +232,8 @@ type Gui struct {
 	//     OnWorker, read by BusyCount for the bottom spinner).
 	//   - workersWG joins live OnWorker goroutines on shutdown so the
 	//     goleak smoke tests have a deterministic quiescence point.
-	//   - mutexes is the named-mutex bag (RefreshingMutex / PopupMutex /
-	//     FetchMutex). Downstream tasks (66p.5/9/12/13/14) plug into it.
 	busy      int64
 	workersWG sync.WaitGroup
-	mutexes   types.Mutexes
 
 	// onWorkerSampleCounter implements the AD-20 quiescence-preserving
 	// sampling for cat=state worker_start / worker_end emits. Every

@@ -7,7 +7,6 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/logs"
 )
 
@@ -116,13 +115,6 @@ func (g *Gui) stopSpinner() {
 	close(g.spinnerStop)
 	g.spinnerTicker = nil
 	g.spinnerStop = nil
-}
-
-// MutexBag returns the named-mutex bag (DESIGN.md §17). Pointer so
-// callers can take the address of individual fields without copying the
-// embedded sync.Mutex values.
-func (g *Gui) MutexBag() *types.Mutexes {
-	return &g.mutexes
 }
 
 // OnUIThread schedules fn for execution on the gocui MainLoop with a
@@ -282,6 +274,5 @@ var _ = func() error {
 	var g Gui
 	_ = &g.busy
 	_ = &g.workersWG
-	_ = &g.mutexes
 	return fmt.Errorf("compile-time guard only")
 }

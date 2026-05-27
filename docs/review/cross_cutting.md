@@ -297,7 +297,6 @@ YAML user config at `$XDG_CONFIG_HOME/dbsavvy/config.yml` overlaying `GetDefault
 None directly. Indirect: streaming results may eventually be written via the export run pipeline.
 
 ### Gaps / TODOs / dead-looking code
-- `Mutexes` bag is a named-mutex grab-bag (`MutexBag()` returns it) — usage is sparse and the bag's purpose isn't fully exercised today.
 - `BusyCount` is exposed but no production caller other than the status renderer; smoke tests are the primary consumer.
 - `pkg/tasks/doc.go` has the placeholder body `// Package tasks ...` — the package's design isn't documented.
 - `OnWorker` panic logging swallows the recovered error after logging; no toast or visible signal that a worker died.

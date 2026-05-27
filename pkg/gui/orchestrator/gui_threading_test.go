@@ -226,29 +226,6 @@ func TestOnUIThread_ReentrantNoDeadlock(t *testing.T) {
 	}
 }
 
-// TestMutexBag_ExposesTypedFields verifies the Mutexes accessor returns
-// a struct with all three named fields (RefreshingMutex/PopupMutex/
-// FetchMutex) and that the underlying mutexes are usable (Lock/Unlock
-// round-trip).
-func TestMutexBag_ExposesTypedFields(t *testing.T) {
-	g, _ := buildTestGui(t)
-	defer func() { _ = g.Close() }()
-
-	m := g.MutexBag()
-	if m == nil {
-		t.Fatal("MutexBag returned nil")
-	}
-
-	// TryLock+Unlock each to assert they're real sync.Mutex values
-	// (TryLock-then-Unlock avoids staticcheck SA2001 "empty critical section").
-	for _, mu := range []*sync.Mutex{&m.RefreshingMutex, &m.PopupMutex, &m.FetchMutex} {
-		if !mu.TryLock() {
-			t.Fatal("mutex already locked")
-		}
-		mu.Unlock()
-	}
-}
-
 // TestHelperBag_ThreadingClosures_NonNilInProduction verifies the
 // production wireWithDriver path populates HelperBag.OnUIThread /
 // OnUIThreadContentOnly / OnWorker (AC: "HelperBag delegates to Gui —

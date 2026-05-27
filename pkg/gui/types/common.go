@@ -1,37 +1,9 @@
 package types
 
 import (
-	"sync"
-
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
-
-// Mutexes is the named-mutex bag described in DESIGN.md §17 (Threading
-// Model). Each field guards one named concern; controllers and helpers
-// take a pointer to the relevant field instead of carrying anonymous
-// sync.Mutex values inline. This keeps lock ordering reviewable and
-// rules out the "two unrelated paths happen to share a Mutex" footgun.
-//
-// Downstream tasks (dbsavvy-66p.5, 66p.9, 66p.12, 66p.13, 66p.14) plug
-// concrete callers into these fields; this struct is intentionally a
-// stub today.
-type Mutexes struct {
-	// RefreshingMutex serialises refresh passes that mutate cached
-	// snapshots (schemas/tables/columns). Held for the duration of a
-	// refresh helper invocation.
-	RefreshingMutex sync.Mutex
-
-	// PopupMutex serialises popup push/pop transitions to keep the focus
-	// stack from racing with the layout pass when several controllers
-	// schedule popups concurrently.
-	PopupMutex sync.Mutex
-
-	// FetchMutex serialises in-flight fetch workers (history search,
-	// row-stream prefetch) so concurrent users of a shared cursor don't
-	// interleave reads.
-	FetchMutex sync.Mutex
-}
 
 // IGuiCommon is the minimum aggregator surface every gui-layer collaborator
 // receives. It exposes the shared cross-cutting bag declared in
