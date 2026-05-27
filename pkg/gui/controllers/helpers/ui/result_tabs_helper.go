@@ -1249,6 +1249,10 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 			Title:    label,
 		}),
 	}
+	// Wire the system clipboard so `y` / `yy` yank publishes to the host
+	// clipboard (OSC-52 with multiplexer passthrough + wl-copy/xclip/pbcopy
+	// fallback). dbsavvy U4.
+	t.grid.SetClipboard(grid.NewSystemClipboard())
 	// Propagate the configured /regex byte cap into the grid view so a
 	// hot-reloaded config value takes effect on the next tab's filter.
 	// dbsavvy-uv0.4.

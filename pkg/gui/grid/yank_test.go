@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
 // recordingClipboard captures the most recent Write payload for assertion.
@@ -71,4 +73,81 @@ func TestYank_InvokesClipboardWriter(t *testing.T) {
 	require.Equal(t, "a\tb\tc", got)
 	require.Equal(t, got, rc.lastWrite(),
 		"clipboard writer should receive the same string Yank returns")
+}
+
+// TestYankCell_FocusedCell: `y` yanks only the cell under the cursor and
+// pushes it to the clipboard writer.
+func TestYankCell_FocusedCell(t *testing.T) {
+	v := makeCanonical3x3(t)
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.MoveCursorDown()  // row 1
+	v.MoveCursorRight() // col 1 → (1,1) → "e"
+
+	val, ok, err := v.YankCell()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "e", val)
+	require.Equal(t, "e", rc.lastWrite())
+}
+
+// TestYankRow_FocusedRowTSV: `yy` yanks the focused row as TSV across all
+// columns regardless of selection state.
+func TestYankRow_FocusedRowTSV(t *testing.T) {
+	v := makeCanonical3x3(t)
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.MoveCursorDown() // row 1
+
+	val, ok, err := v.YankRow()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "d\te\tf", val)
+	require.Equal(t, "d\te\tf", rc.lastWrite())
+}
+
+// TestYankCell_SanitizesControlBytes: a cell carrying ANSI/control bytes is
+// yanked as its sanitized display value (no raw escapes reach the clipboard).
+func TestYankCell_SanitizesControlBytes(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{{Name: "c0", TypeName: "text"}})
+	v.AppendRows([]models.Row{{Values: []any{"x\x1b[31mRED\x07y"}}})
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+
+	val, ok, _ := v.YankCell()
+	require.True(t, ok)
+	require.Equal(t, "xREDy", val, "ANSI CSI + BEL must be stripped")
+	require.Equal(t, "xREDy", rc.lastWrite())
+}
+
+// TestYankCell_EmptyGridNoOp: `y` on an empty grid is a no-op (ok=false, no
+// clipboard write, no panic).
+func TestYankCell_EmptyGridNoOp(t *testing.T) {
+	v := NewView()
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+
+	val, ok, err := v.YankCell()
+	require.False(t, ok)
+	require.NoError(t, err)
+	require.Empty(t, val)
+	require.Empty(t, rc.lastWrite(), "no clipboard write on empty grid")
+
+	rowVal, rowOK, rowErr := v.YankRow()
+	require.False(t, rowOK)
+	require.NoError(t, rowErr)
+	require.Empty(t, rowVal)
+}
+
+// TestYankCell_PropagatesClipboardError: a clipboard write error surfaces
+// from YankCell so the controller can toast.
+func TestYankCell_PropagatesClipboardError(t *testing.T) {
+	v := makeCanonical3x3(t)
+	rc := &recordingClipboard{err: ErrClipboardTooLarge}
+	v.SetClipboard(rc)
+
+	_, ok, err := v.YankCell()
+	require.True(t, ok)
+	require.ErrorIs(t, err, ErrClipboardTooLarge)
 }

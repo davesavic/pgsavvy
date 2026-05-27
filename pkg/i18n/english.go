@@ -166,6 +166,8 @@ type ActionTranslations struct {
 	ResultWrappedLineUp   string
 	ResultSelectRow       string
 	ResultSelectBlock     string
+	ResultYankCell        string
+	ResultYankRow         string
 
 	// Connection lifecycle.
 	AddConnection  string
@@ -333,6 +335,8 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultWrappedLineUp:   "Previous wrapped line",
 			ResultSelectRow:       "Visual row selection",
 			ResultSelectBlock:     "Visual block selection",
+			ResultYankCell:        "Yank focused cell",
+			ResultYankRow:         "Yank focused row (TSV)",
 
 			AddConnection:  "Add Connection",
 			OpenConnection: "Open Connection",

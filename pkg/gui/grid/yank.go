@@ -43,6 +43,75 @@ func (v *View) Yank() string {
 	return out
 }
 
+// YankCell copies the sanitized display value of the focused cell to the
+// configured ClipboardWriter and returns it. ok is false when the grid has
+// no focused cell (empty result set) so the caller can no-op without a
+// panic; in that case no clipboard write is attempted. The returned error
+// is the ClipboardWriter's (e.g. ErrClipboardTooLarge / ErrClipboardUnavailable)
+// so the caller can surface it as a toast. The value is the same string the
+// grid renders (renderCellPlain → SanitizeCellEscapes), never raw server
+// bytes.
+func (v *View) YankCell() (value string, ok bool, err error) {
+	snap := v.snapshot()
+	if len(snap.cols) == 0 || len(snap.rows) == 0 {
+		return "", false, nil
+	}
+	r := snap.cursorRow
+	c := snap.cursorCol
+	if r < 0 || r >= len(snap.rows) || c < 0 || c >= len(snap.cols) {
+		return "", false, nil
+	}
+	var cellVal any
+	if c < len(snap.rows[r].Values) {
+		cellVal = snap.rows[r].Values[c]
+	}
+	value = renderCellPlain(cellVal, snap.cols[c])
+	return value, true, v.writeClipboard(value)
+}
+
+// YankRow copies the focused row as TSV (all columns, in column order) to the
+// configured ClipboardWriter and returns it. ok is false when the grid has no
+// focused row (empty result set). Cells are sanitized display values
+// (renderCellPlain → SanitizeCellEscapes) joined by '\t'. The returned error
+// is the ClipboardWriter's so the caller can toast on failure.
+func (v *View) YankRow() (value string, ok bool, err error) {
+	snap := v.snapshot()
+	if len(snap.cols) == 0 || len(snap.rows) == 0 {
+		return "", false, nil
+	}
+	r := snap.cursorRow
+	if r < 0 || r >= len(snap.rows) {
+		return "", false, nil
+	}
+	row := snap.rows[r]
+	var sb strings.Builder
+	for c := range snap.cols {
+		if c > 0 {
+			sb.WriteByte('\t')
+		}
+		var cellVal any
+		if c < len(row.Values) {
+			cellVal = row.Values[c]
+		}
+		sb.WriteString(renderCellPlain(cellVal, snap.cols[c]))
+	}
+	value = sb.String()
+	return value, true, v.writeClipboard(value)
+}
+
+// writeClipboard pushes value through the configured ClipboardWriter under
+// the read lock, returning the writer's error. A nil writer (never the case
+// after NewView normalises to noopClipboard, but defensive) is a no-op.
+func (v *View) writeClipboard(value string) error {
+	v.mu.RLock()
+	cw := v.clipboard
+	v.mu.RUnlock()
+	if cw == nil {
+		return nil
+	}
+	return cw.Write(value)
+}
+
 // buildExpandedYank serialises the selected records as `col\tvalue\n`
 // lines per record, with a blank line between records. Hidden columns
 // are skipped (same projection as renderExpanded). Cell values pass

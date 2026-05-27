@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/dbsavvy/pkg/gui/grid"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
@@ -177,6 +179,9 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"K", commands.ResultWrappedLineUp, tr.Actions.ResultWrappedLineUp, types.RESULT_GRID},
 		{"V", commands.ResultSelectRow, tr.Actions.ResultSelectRow, types.RESULT_GRID},
 		{"<c-v>", commands.ResultSelectBlock, tr.Actions.ResultSelectBlock, types.RESULT_GRID},
+		// dbsavvy U4: clipboard yank. `y` cell, `yy` row (TSV).
+		{"y", commands.ResultYankCell, tr.Actions.ResultYankCell, types.RESULT_GRID},
+		{"yy", commands.ResultYankRow, tr.Actions.ResultYankRow, types.RESULT_GRID},
 	}
 	out := make([]*types.ChordBinding, 0, len(specs))
 	for _, s := range specs {
@@ -465,6 +470,20 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 	r.registerMotionHandler(reg, commands.ResultWrappedLineUp, tr.Actions.ResultWrappedLineUp, func() { r.mgr.WrappedLineUp() })
 	r.registerMotionHandler(reg, commands.ResultSelectRow, tr.Actions.ResultSelectRow, func() { r.mgr.SelectRow() })
 	r.registerMotionHandler(reg, commands.ResultSelectBlock, tr.Actions.ResultSelectBlock, func() { r.mgr.SelectBlock() })
+
+	// dbsavvy U4: clipboard yank handlers (`y` cell / `yy` row).
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ResultYankCell,
+		Description: tr.Actions.ResultYankCell,
+		Tag:         "Result",
+		Handler:     r.yankHandler(false),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ResultYankRow,
+		Description: tr.Actions.ResultYankRow,
+		Tag:         "Result",
+		Handler:     r.yankHandler(true),
+	})
 
 	// dbsavvy-bwq.Z1: inline-edit + jump-list action handlers. Several of
 	// these are stub-toasts today because the underlying helper wiring
@@ -813,6 +832,54 @@ func (r *ResultTabsController) pendingDiscardAllHandler(_ commands.ExecCtx) erro
 		return nil
 	}
 	return h.DiscardAll()
+}
+
+// yankHandler returns the dispatch handler for `y` (row=false → focused
+// cell) / `yy` (row=true → focused row TSV). It resolves the active tab's
+// grid, copies the sanitized display value via the grid's ClipboardWriter,
+// and maps the typed clipboard errors to specific toasts. An empty grid is a
+// silent no-op (no panic) per the AC.
+func (r *ResultTabsController) yankHandler(row bool) commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		if r.mgr == nil {
+			return nil
+		}
+		tab := r.mgr.Active()
+		if tab == nil {
+			return nil
+		}
+		g := tab.Grid()
+		if g == nil {
+			return nil
+		}
+		var (
+			value string
+			ok    bool
+			err   error
+			what  string
+		)
+		if row {
+			value, ok, err = g.YankRow()
+			what = "row"
+		} else {
+			value, ok, err = g.YankCell()
+			what = "cell"
+		}
+		if !ok {
+			return nil
+		}
+		switch {
+		case errors.Is(err, grid.ErrClipboardTooLarge):
+			r.toast("clipboard: value too large")
+		case errors.Is(err, grid.ErrClipboardUnavailable):
+			r.toast("clipboard unavailable")
+		case err != nil:
+			r.toast("clipboard: " + err.Error())
+		default:
+			r.toast(fmt.Sprintf("yanked %s (%d bytes)", what, len(value)))
+		}
+		return nil
+	}
 }
 
 // toast surfaces msg via the helper bag's ToastHelper. No-op when the

@@ -205,6 +205,12 @@ const (
 	ResultSelectRow       = "result.select.row"
 	ResultSelectBlock     = "result.select.block"
 
+	// Clipboard yank (dbsavvy U4). RESULT_GRID-scoped.
+	//   ResultYankCell - `y` copies the focused cell's display value.
+	//   ResultYankRow  - `yy` copies the focused row as TSV.
+	ResultYankCell = "result.yank.cell"
+	ResultYankRow  = "result.yank.row"
+
 	// HideOverlay-scope handlers (dbsavvy-uv0.6) — owned by
 	// HideOverlayController. j/k cursor moves, <space> toggle, <esc> /
 	// q apply-and-close.
@@ -520,6 +526,8 @@ func AllActionIDs() []string {
 		ResultWrappedLineUp,
 		ResultSelectRow,
 		ResultSelectBlock,
+		ResultYankCell,
+		ResultYankRow,
 		HideOverlayUp,
 		HideOverlayDown,
 		HideOverlayToggle,
