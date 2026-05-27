@@ -449,13 +449,14 @@ func (g *Gui) RunLayout(w, h int) error {
 			tr = g.deps.Common.Tr
 		}
 		RenderStatusLine(StatusRenderDeps{
-			Driver:     g.driver,
-			Tree:       g.tree,
-			KbRuntime:  g.kbRuntime,
-			ActiveConn: activeConn,
-			Tr:         tr,
-			Toast:      g.toastHelp,
-			BusyCount:  g.BusyCount,
+			Driver:       g.driver,
+			Tree:         g.tree,
+			KbRuntime:    g.kbRuntime,
+			ActiveConn:   activeConn,
+			Tr:           tr,
+			Toast:        g.toastHelp,
+			BusyCount:    g.BusyCount,
+			SpinnerFrame: g.SpinnerFrame,
 		})
 	}
 

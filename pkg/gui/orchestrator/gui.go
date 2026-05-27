@@ -114,6 +114,17 @@ func WithKeyDelays(timeoutLen, ttimeoutLen, whichKeyDelay time.Duration) Option 
 	}
 }
 
+// WithClock injects the wall-clock seam used by the busy-spinner
+// animation (U8). Nil is ignored (production keeps realClock); tests pass
+// a fake to drive Now() and ticks deterministically.
+func WithClock(clk Clock) Option {
+	return func(g *Gui) {
+		if clk != nil {
+			g.clock = clk
+		}
+	}
+}
+
 // Gui is the dbsavvy TUI orchestrator. NewGui builds the driver-free
 // pieces (focus stack, data helpers). The driver-dependent pieces
 // (context registry, ui helpers, controllers, bindings) are built
@@ -244,6 +255,28 @@ type Gui struct {
 	// clobber a more recent connection. Atomic so concurrent worker-
 	// goroutine Connects don't race the bump.
 	connectGen atomic.Uint64
+
+	// Busy-spinner animation state (U8). The spinner glyph advances off a
+	// wall-clock frame counter ticked by a periodic content-only
+	// re-render while busy>0, so a single long-running worker still
+	// animates.
+	//
+	//   - clock is the injectable wall-clock + ticker-factory seam (see
+	//     clock.go). Defaults to realClock; WithClock overrides for tests.
+	//   - spinnerMu is a DEDICATED mutex guarding arm/stop of the ticker.
+	//     It is NOT the atomic busy counter: armed on the busy 0->1
+	//     transition and stopped on ->0, two concurrent workers could
+	//     otherwise double-arm or lose a stop. spinnerMu makes the
+	//     exactly-one-ticker invariant hold.
+	//   - spinnerTicker is the live Ticker while busy>0 (nil otherwise).
+	//   - spinnerStop signals the per-ticker drain goroutine to exit.
+	//   - spinnerStart is the wall-clock instant the ticker was armed; the
+	//     frame counter is elapsed-since-start / spinnerTickInterval.
+	clock         Clock
+	spinnerMu     sync.Mutex
+	spinnerTicker Ticker
+	spinnerStop   chan struct{}
+	spinnerStart  time.Time
 }
 
 // NewGui builds every collaborator that doesn't depend on the live
@@ -252,8 +285,9 @@ type Gui struct {
 // or UseDriverForTest (test).
 func NewGui(deps Deps, opts ...Option) *Gui {
 	g := &Gui{
-		deps: deps,
-		tree: gui.NewContextTree(),
+		deps:  deps,
+		tree:  gui.NewContextTree(),
+		clock: realClock{},
 	}
 	g.connectHelper = data.NewConnectHelper()
 	g.schemasHelper = data.NewSchemasHelper(deps.Common, deps.Store)
@@ -1709,6 +1743,15 @@ func (g *Gui) Close() error {
 	if g.resultTabsH != nil {
 		g.resultTabsH.PreemptInFlight()
 	}
+	// U8: stop the busy-spinner ticker UNCONDITIONALLY here — BEFORE the
+	// workersWG.Wait() below and BEFORE driver.Close(). The ticker drain
+	// goroutine is registered on workersWG and only exits on spinnerStop;
+	// if busy>0 at shutdown the ticker is still armed, so stopping it first
+	// (a) lets workersWG.Wait() complete instead of hanging on the parked
+	// drain goroutine, and (b) guarantees no OnUIThreadContentOnly fires
+	// into a torn-down MainLoop after driver.Close(). stopSpinner is
+	// idempotent (nil ticker → no-op) so the never-armed path is safe.
+	g.stopSpinner()
 	// Drain any in-flight OnWorker goroutines before the store/driver
 	// teardown so the goleak smoke tests see a quiescent goroutine pool
 	// (DESIGN.md §17). Safe to call when no workers were ever spawned —

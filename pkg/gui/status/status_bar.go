@@ -44,7 +44,10 @@ const (
 //     (no leading separator);
 //   - the spinner slot is omitted when busyCount <= 0 (quiescent); when
 //     positive it renders a single braille glyph from a 10-frame cycle
-//     indexed by busyCount % 10 so successive ticks animate;
+//     indexed by spinnerFrame % 10. spinnerFrame is a wall-clock frame
+//     counter (U8) advanced by a periodic re-render while any work is in
+//     flight, so the glyph animates continuously even with a single
+//     worker — busyCount is only the show/hide gate, not the index;
 //   - the connection header slot is omitted when activeConn is nil or the
 //     connection has neither an icon nor a label;
 //   - the [RO] tag is omitted unless activeConn.ReadOnly == true;
@@ -55,7 +58,7 @@ const (
 //
 // A nil tr yields the empty string; the rendering layer treats that as
 // "skip the status slot entirely".
-func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []string, tr *i18n.TranslationSet, busyCount int64) string {
+func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []string, tr *i18n.TranslationSet, busyCount, spinnerFrame int64) string {
 	if tr == nil {
 		return ""
 	}
@@ -67,10 +70,13 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 	}
 
 	if busyCount > 0 {
-		// Index into the precomputed glyph table; allocation-free aside
-		// from the single-rune string conversion the section join
-		// consumes downstream.
-		idx := busyCount % int64(len(spinnerGlyphs))
+		// busyCount gates show/hide; the glyph index comes from the
+		// wall-clock frame counter (U8) so a single long-running worker
+		// still animates. Mod into the precomputed glyph table;
+		// allocation-free aside from the single-rune string conversion the
+		// section join consumes downstream. Mask the sign so a wrapped or
+		// negative frame can't index out of range.
+		idx := (spinnerFrame%int64(len(spinnerGlyphs)) + int64(len(spinnerGlyphs))) % int64(len(spinnerGlyphs))
 		sections = append(sections, string(spinnerGlyphs[idx]))
 	}
 

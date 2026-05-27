@@ -43,6 +43,81 @@ func (g *Gui) BusyCount() int64 {
 	return atomic.LoadInt64(&g.busy)
 }
 
+// SpinnerFrame returns the wall-clock frame index for the busy spinner
+// (U8). It advances one step per spinnerTickInterval of elapsed time
+// since the ticker was armed, so the glyph cycles continuously while any
+// work is in flight — independent of the worker count. When the ticker is
+// not armed (quiescent) it returns 0; the status renderer only reads it
+// while busy>0, so the value is harmless then. Safe to call from any
+// goroutine.
+func (g *Gui) SpinnerFrame() int64 {
+	g.spinnerMu.Lock()
+	armed := g.spinnerTicker != nil
+	start := g.spinnerStart
+	g.spinnerMu.Unlock()
+	if !armed {
+		return 0
+	}
+	if g.clock == nil {
+		return 0
+	}
+	return int64(g.clock.Now().Sub(start) / spinnerTickInterval)
+}
+
+// armSpinner starts the spinner re-render ticker on the busy 0->1
+// transition. Guarded by the DEDICATED spinnerMu (NOT the atomic busy
+// counter) so two workers racing the 0->1 edge cannot double-arm: the
+// nil check + assignment happen in one critical section. A drain
+// goroutine forwards each tick to OnUIThreadContentOnly until stopSpinner
+// closes spinnerStop.
+func (g *Gui) armSpinner() {
+	if g.clock == nil {
+		return
+	}
+	g.spinnerMu.Lock()
+	defer g.spinnerMu.Unlock()
+	if g.spinnerTicker != nil {
+		// Already armed (a concurrent worker won the race). Exactly-one
+		// invariant preserved.
+		return
+	}
+	g.spinnerStart = g.clock.Now()
+	ticker := g.clock.NewTicker(spinnerTickInterval)
+	stop := make(chan struct{})
+	g.spinnerTicker = ticker
+	g.spinnerStop = stop
+	g.workersWG.Add(1)
+	go func() {
+		defer g.workersWG.Done()
+		ch := ticker.Chan()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ch:
+				g.OnUIThreadContentOnly(func() error { return nil })
+			}
+		}
+	}()
+}
+
+// stopSpinner stops the spinner ticker on the busy ->0 transition (and is
+// called unconditionally from Close). Guarded by spinnerMu so a stop
+// cannot be lost against a concurrent arm. Idempotent: a nil ticker means
+// nothing is armed. Stopping the ticker and closing spinnerStop wakes the
+// drain goroutine, which then returns and decrements workersWG.
+func (g *Gui) stopSpinner() {
+	g.spinnerMu.Lock()
+	defer g.spinnerMu.Unlock()
+	if g.spinnerTicker == nil {
+		return
+	}
+	g.spinnerTicker.Stop()
+	close(g.spinnerStop)
+	g.spinnerTicker = nil
+	g.spinnerStop = nil
+}
+
 // MutexBag returns the named-mutex bag (DESIGN.md §17). Pointer so
 // callers can take the address of individual fields without copying the
 // embedded sync.Mutex values.
@@ -122,6 +197,13 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 		)
 	}
 
+	// U8: arm the spinner re-render ticker on the busy 0->1 transition.
+	// armSpinner is guarded by spinnerMu and is a no-op if a concurrent
+	// worker already armed, so the exactly-one-ticker invariant holds.
+	if busyBefore == 0 {
+		g.armSpinner()
+	}
+
 	go func() {
 		defer g.workersWG.Done()
 		defer func() {
@@ -137,6 +219,10 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 					slog.Int64("busy_before", endBusyBefore),
 					slog.Int64("busy_after", endBusyAfter),
 				)
+				// U8: stop the spinner ticker on the busy ->0 transition.
+				// Guarded by spinnerMu so the stop can't race a concurrent
+				// re-arm into a lost stop.
+				g.stopSpinner()
 			}
 		}()
 		defer func() {
