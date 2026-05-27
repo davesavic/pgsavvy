@@ -165,6 +165,12 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 		errs = append(errs, fmt.Errorf("config: editor.fk_forward_limit must be > 0, got %d", cfg.Editor.FKForwardLimit))
 	}
 
+	// Query.DefaultStatementTimeout (dbsavvy-fow.7, U15). 0 = off; any
+	// positive duration is a ceiling. A negative value is invalid.
+	if cfg.Query.DefaultStatementTimeout < 0 {
+		errs = append(errs, fmt.Errorf("config: query.default_statement_timeout must be >= 0 (0 = off), got %v", cfg.Query.DefaultStatementTimeout))
+	}
+
 	// Export bounds (dbsavvy-uv0.9).
 	if cfg.UI.Export.BufferedRowWarnThreshold <= 0 {
 		errs = append(errs, fmt.Errorf("config: ui.export.buffered_row_warn_threshold must be > 0, got %d", cfg.UI.Export.BufferedRowWarnThreshold))

@@ -303,6 +303,146 @@ func TestPgStreamLargeResultDoesNotAccumulate(t *testing.T) {
 	}
 }
 
+// TestPgStreamStatementTimeoutCancelsSlowQuery — dbsavvy-fow.7 (U15)
+// scenario: given a 2s statement-timeout (carried on Query.Timeout), a
+// SELECT pg_sleep(10) is cancelled at ~2s and the surfaced error
+// classifies as a statement timeout (context.DeadlineExceeded), distinct
+// from a user cancel. Asserts cancel < timeout + 1s.
+func TestPgStreamStatementTimeoutCancelsSlowQuery(t *testing.T) {
+	sess := requirePGSession(t)
+
+	const timeout = 2 * time.Second
+	stream, err := sess.Stream(context.Background(), models.Query{
+		SQL:     "SELECT pg_sleep(10)",
+		Timeout: timeout,
+	})
+	if err != nil {
+		// pg_sleep does not return rows until it completes, so the deadline
+		// may surface at Stream() (the conn.Query call) rather than Next().
+		// Either way it must be a statement timeout, not a user cancel.
+		if !pg.IsStatementTimeout(err) {
+			t.Fatalf("Stream err = %v, want a statement-timeout (DeadlineExceeded)", err)
+		}
+		if errors.Is(err, context.Canceled) {
+			t.Fatalf("Stream err classified as user-cancel; want statement timeout")
+		}
+		return
+	}
+	defer func() { _ = stream.Close() }()
+
+	start := time.Now()
+	var seen error
+	for {
+		_, ok, nerr := stream.Next(context.Background())
+		if nerr != nil {
+			seen = nerr
+			break
+		}
+		if !ok {
+			break
+		}
+	}
+	elapsed := time.Since(start)
+
+	if seen == nil {
+		t.Fatal("expected a timeout error draining pg_sleep(10), got nil")
+	}
+	if !pg.IsStatementTimeout(seen) {
+		t.Fatalf("Next err = %v, want statement timeout (DeadlineExceeded); IsStatementTimeout=false", seen)
+	}
+	if errors.Is(seen, context.Canceled) && !errors.Is(seen, context.DeadlineExceeded) {
+		t.Fatalf("Next err classified as user-cancel (Canceled, not DeadlineExceeded); want statement timeout: %v", seen)
+	}
+	if elapsed >= timeout+time.Second {
+		t.Fatalf("query cancelled after %v, want < %v (timeout+1s)", elapsed, timeout+time.Second)
+	}
+}
+
+// TestPgStreamUserCancelIsNotStatementTimeout — dbsavvy-fow.7 (U15)
+// companion: an explicit context cancellation (the user <leader>x /
+// preemption path) surfaces context.Canceled and must NOT classify as a
+// statement timeout, keeping the two distinguishable.
+func TestPgStreamUserCancelIsNotStatementTimeout(t *testing.T) {
+	sess := requirePGSession(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	stream, err := sess.Stream(ctx, models.Query{
+		SQL: "SELECT generate_series(1, 1000000)",
+	})
+	if err != nil {
+		cancel()
+		t.Fatalf("Stream: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, ok, nerr := stream.Next(ctx); nerr != nil || !ok {
+			cancel()
+			t.Fatalf("warm-up Next i=%d: ok=%v err=%v", i, ok, nerr)
+		}
+	}
+	cancel()
+
+	var seen error
+	for {
+		_, ok, nerr := stream.Next(ctx)
+		if nerr != nil {
+			seen = nerr
+			break
+		}
+		if !ok {
+			break
+		}
+	}
+	if seen == nil {
+		t.Fatal("expected an error after user cancel, got nil")
+	}
+	if pg.IsStatementTimeout(seen) {
+		t.Fatalf("user-cancel err = %v classified as statement timeout; the two must be distinguished", seen)
+	}
+	_ = stream.Close()
+}
+
+// TestPgStreamTimeoutLeavesNoGoroutineLeak — dbsavvy-fow.7 (U15) goleak
+// verification: a timing-out stream's derived deadline CancelFunc is
+// invoked in release(), so no leaked timer/goroutine survives after the
+// stream is drained + closed. Mirrors the no-leak harness used by the
+// consume-and-close test.
+func TestPgStreamTimeoutLeavesNoGoroutineLeak(t *testing.T) {
+	defer goleak.VerifyNone(t,
+		goleak.IgnoreCurrent(),
+		goleak.IgnoreTopFunction("github.com/jackc/pgx/v5/pgxpool.(*Pool).backgroundHealthCheck"),
+	)
+
+	sess := requirePGSession(t)
+	stream, err := sess.Stream(context.Background(), models.Query{
+		SQL:     "SELECT pg_sleep(10)",
+		Timeout: 500 * time.Millisecond,
+	})
+	if err != nil {
+		// Timeout surfaced at Stream(); the inFlight guard + cancel were
+		// already released on the error path. Nothing to drain.
+		if !pg.IsStatementTimeout(err) {
+			t.Fatalf("Stream err = %v, want statement timeout", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+		return
+	}
+	for {
+		_, ok, nerr := stream.Next(context.Background())
+		if nerr != nil {
+			break
+		}
+		if !ok {
+			break
+		}
+	}
+	if err := stream.Close(); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+	// Let the timer/cancel settle; goleak's IgnoreCurrent excludes runner
+	// goroutines, so any leaked deadline timer goroutine would surface here.
+	time.Sleep(100 * time.Millisecond)
+}
+
 // TestFieldDescriptionTableOIDPopulated — dbsavvy-bwq.1 F1.
 //
 // Verifies fieldDescriptionsToColumnMetas copies pgconn.FieldDescription's

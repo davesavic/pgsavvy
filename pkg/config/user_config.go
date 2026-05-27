@@ -15,6 +15,19 @@ type UserConfig struct {
 	Keybindings   []KeybindingConfig `yaml:"keybindings"`
 	UI            UIConfig           `yaml:"ui"`
 	Editor        EditorConfig       `yaml:"editor"`
+	Query         QueryConfig        `yaml:"query"`
+}
+
+// QueryConfig groups settings that govern query execution. dbsavvy-fow.7
+// (U15) introduces the default statement-timeout ceiling applied to the
+// streaming run path.
+type QueryConfig struct {
+	// DefaultStatementTimeout is the default ceiling applied to a streamed
+	// query's context when the per-query models.Query.Timeout is zero.
+	// 0 (the default) means OFF — no ceiling, the run path passes the
+	// caller's context through unchanged. A non-zero per-query Timeout
+	// always overrides this default. Must be >= 0. dbsavvy-fow.7 (U15).
+	DefaultStatementTimeout time.Duration `yaml:"default_statement_timeout"`
 }
 
 // EditorConfig groups settings that govern the SQL editor behaviour.

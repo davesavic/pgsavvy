@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync/atomic"
+	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -44,6 +45,14 @@ type RunOptions struct {
 	// against it (pg: SET search_path). Empty leaves resolution unchanged
 	// (dbsavvy-u1n).
 	DefaultSchema string
+
+	// Timeout is the resolved statement-timeout ceiling forwarded onto the
+	// streamed Query. The run path sets it from config.query
+	// .default_statement_timeout (0 = off). The pg driver realises a
+	// non-zero value as a context.WithTimeout deadline whose CancelFunc the
+	// row stream owns; 0 leaves the caller's context untouched (no ceiling).
+	// dbsavvy-fow.7 (U15).
+	Timeout time.Duration
 }
 
 // runnerBinding is the (sess, caps) pair swapped atomically by Bind /
@@ -223,7 +232,7 @@ func (r *QueryRunner) Run(ctx context.Context, sql string, opts RunOptions) (*se
 			return nil, err
 		}
 	}
-	rh, err := b.sess.Stream(ctx, models.Query{SQL: sql, DefaultSchema: opts.DefaultSchema})
+	rh, err := b.sess.Stream(ctx, models.Query{SQL: sql, DefaultSchema: opts.DefaultSchema, Timeout: opts.Timeout})
 	if err != nil {
 		return nil, err
 	}

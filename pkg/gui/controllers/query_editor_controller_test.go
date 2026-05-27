@@ -4,7 +4,9 @@ import (
 	stdcontext "context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
@@ -470,6 +472,95 @@ func TestQueryEditorRunOnSecondLineRoutesCorrectStatement(t *testing.T) {
 	}
 	if rec.streamCalls[0].SQL != "SELECT 2" {
 		t.Fatalf("dispatched SQL = %q, want %q", rec.streamCalls[0].SQL, "SELECT 2")
+	}
+}
+
+// TestQueryEditorRunAppliesConfigDefaultTimeout covers dbsavvy-fow.7
+// (U15): when query.default_statement_timeout is non-zero, the streaming
+// run path must apply it as the streamed Query.Timeout so the pg Stream
+// derives a deadline (context.WithTimeout) and bounds a runaway query.
+func TestQueryEditorRunAppliesConfigDefaultTimeout(t *testing.T) {
+	rec := &recordingRunnerSession{}
+	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+
+	c := common.NewDummyCommon()
+	c.Cfg().Query.DefaultStatementTimeout = 2 * time.Second
+
+	base := newBag()
+	base.HelperBag.QueryRunner = runner
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1;", Off: 3}
+	base.HelperBag.ResultTabs = &fakeResultTabs{}
+
+	ctrl := controllers.NewQueryEditorController(c, base.HelperBag)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+	if len(rec.streamCalls) != 1 {
+		t.Fatalf("streamCalls len = %d, want 1", len(rec.streamCalls))
+	}
+	if rec.streamCalls[0].Timeout != 2*time.Second {
+		t.Fatalf("streamed Query.Timeout = %v, want 2s (config default applied)", rec.streamCalls[0].Timeout)
+	}
+}
+
+// TestQueryEditorRunNoTimeoutWhenConfigOff covers the 0=off sentinel:
+// with query.default_statement_timeout == 0 (the documented default), the
+// streamed Query.Timeout stays 0 — no ceiling.
+func TestQueryEditorRunNoTimeoutWhenConfigOff(t *testing.T) {
+	rec := &recordingRunnerSession{}
+	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+
+	c := common.NewDummyCommon() // GetDefaultConfig → DefaultStatementTimeout == 0
+
+	base := newBag()
+	base.HelperBag.QueryRunner = runner
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1;", Off: 3}
+	base.HelperBag.ResultTabs = &fakeResultTabs{}
+
+	ctrl := controllers.NewQueryEditorController(c, base.HelperBag)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+	if len(rec.streamCalls) != 1 {
+		t.Fatalf("streamCalls len = %d, want 1", len(rec.streamCalls))
+	}
+	if rec.streamCalls[0].Timeout != 0 {
+		t.Fatalf("streamed Query.Timeout = %v, want 0 (off)", rec.streamCalls[0].Timeout)
+	}
+}
+
+// TestQueryEditorRunNilCommonNoTimeout guards the test-path / pre-config
+// case: a nil Common must not panic and yields Query.Timeout == 0 (off).
+func TestQueryEditorRunNilCommonNoTimeout(t *testing.T) {
+	rec := &recordingRunnerSession{}
+	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+
+	base := newBag()
+	base.HelperBag.QueryRunner = runner
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1;", Off: 3}
+	base.HelperBag.ResultTabs = &fakeResultTabs{}
+
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+	if len(rec.streamCalls) != 1 {
+		t.Fatalf("streamCalls len = %d, want 1", len(rec.streamCalls))
+	}
+	if rec.streamCalls[0].Timeout != 0 {
+		t.Fatalf("streamed Query.Timeout = %v, want 0 with nil Common", rec.streamCalls[0].Timeout)
 	}
 }
 

@@ -403,6 +403,14 @@ func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) 
 	if q.helpers.Schemas != nil {
 		opts.DefaultSchema = q.helpers.Schemas.SelectedSchemaName()
 	}
+	// Apply the configurable default statement-timeout ceiling unless the
+	// caller already set a per-run override. 0 = off (no ceiling). The pg
+	// driver realises a non-zero Timeout as a context.WithTimeout deadline
+	// whose CancelFunc the row stream owns, so a runaway query is bounded
+	// without leaking a timer past the stream (dbsavvy-fow.7 U15).
+	if opts.Timeout == 0 {
+		opts.Timeout = q.defaultStatementTimeout()
+	}
 	// Last-wins preemption of any in-flight stream is centralized in the
 	// QueryRunner chokepoint (QueryRunner.Run preempts before acquiring the
 	// per-session queue lock), covering run / RunQuery / Explain uniformly
@@ -419,6 +427,21 @@ func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) 
 	}
 	q.openResultTab(stmt, rh)
 	return attached
+}
+
+// defaultStatementTimeout returns the configured default statement-timeout
+// ceiling (config.query.default_statement_timeout), or 0 (off) when no
+// Common / config is wired (test path) or the key is unset. dbsavvy-fow.7
+// (U15).
+func (q *QueryEditorController) defaultStatementTimeout() time.Duration {
+	if q.c == nil {
+		return 0
+	}
+	cfg := q.c.Cfg()
+	if cfg == nil {
+		return 0
+	}
+	return cfg.Query.DefaultStatementTimeout
 }
 
 func (q *QueryEditorController) handleExplain(ec commands.ExecCtx) error {

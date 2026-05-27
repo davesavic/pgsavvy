@@ -424,21 +424,38 @@ func (s *Session) Execute(ctx context.Context, q models.Query) (models.Result, e
 func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream, error) {
 	s.acquireInFlight()
 
+	// Apply the per-query statement-timeout ceiling, when set, to the SAME
+	// ctx that governs both the search_path SET and the streaming Query.
+	// The derived context.CancelFunc is handed to the returned pgRowStream,
+	// which invokes it exactly once in release() (EOF / terminal error /
+	// explicit Close) so the deadline timer never leaks past the stream.
+	// q.Timeout == 0 leaves ctx untouched (no ceiling) and cancel stays nil
+	// (dbsavvy-fow.7 U15). The non-zero q.Timeout is the override the run
+	// path sets when it wants a different ceiling than the configured
+	// default; the default itself is folded into q.Timeout by the caller.
+	var cancel context.CancelFunc
+	if q.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, q.Timeout)
+	}
+
 	// Resolve unqualified object names against q.DefaultSchema (then public)
 	// for this statement. No-op when empty (dbsavvy-u1n).
 	if stmt := searchPathStmt(q.DefaultSchema); stmt != "" {
 		if _, err := s.conn.Exec(ctx, stmt); err != nil {
+			if cancel != nil {
+				cancel()
+			}
 			s.releaseInFlight()
 			return nil, wrapPgError(err)
 		}
 	}
 
-	// q.Timeout is intentionally NOT applied here in v1: a derived ctx
-	// would require a cancel func captured by the stream so Close can
-	// release it; that plumbing belongs with task 66p.4 (Cancel).
 	started := time.Now()
 	rows, err := s.conn.Query(ctx, q.SQL, q.Args...)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		s.releaseInFlight()
 		return nil, wrapPgError(err)
 	}
@@ -450,7 +467,7 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 		Nonce:      queryNonceCounter.Add(1),
 	}
 
-	return newPgRowStream(rows, qid, s.releaseInFlight), nil
+	return newPgRowStream(rows, qid, s.releaseInFlight, cancel), nil
 }
 
 // searchPathStmt builds the SET search_path statement that makes unqualified
