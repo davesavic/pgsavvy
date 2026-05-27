@@ -195,12 +195,12 @@ type TableInspectController struct {
 // dependency may be nil during unit tests; handlers nil-check on use.
 func NewTableInspectController(
 	c *common.Common,
-	helpers HelperBag,
+	core CoreDeps,
 	inspectCtx *context.TableInspectContext,
 	tree inspectTree,
 ) *TableInspectController {
 	return &TableInspectController{
-		baseController: newBase(c, helpers),
+		baseController: newBase(c, HelperBag{CoreDeps: core}),
 		inspectCtx:     inspectCtx,
 		tree:           tree,
 	}

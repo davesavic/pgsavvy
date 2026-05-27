@@ -37,9 +37,9 @@ type PlanController struct {
 
 // NewPlanController constructs the controller. resolve may be nil in
 // unit tests that exercise GetKeybindings only.
-func NewPlanController(c *common.Common, helpers HelperBag, resolve PlanContextResolver) *PlanController {
+func NewPlanController(c *common.Common, core CoreDeps, resolve PlanContextResolver) *PlanController {
 	return &PlanController{
-		baseController: newBase(c, helpers),
+		baseController: newBase(c, HelperBag{CoreDeps: core}),
 		resolve:        resolve,
 	}
 }

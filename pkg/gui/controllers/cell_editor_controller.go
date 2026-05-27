@@ -137,14 +137,15 @@ type CellEditorController struct {
 // focus-stack tree, grid picker, and PendingEditSet store.
 func NewCellEditorController(
 	c *common.Common,
-	helpers HelperBag,
+	core CoreDeps,
+	ui UIDeps,
 	ctx *guicontext.CellEditorContext,
 	tree FocusPopper,
 	picker GridStatePicker,
 	store PendingEditStore,
 ) *CellEditorController {
 	return &CellEditorController{
-		baseController: newBase(c, helpers),
+		baseController: newBase(c, HelperBag{CoreDeps: core, UIDeps: ui}),
 		ctx:            ctx,
 		tree:           tree,
 		picker:         picker,

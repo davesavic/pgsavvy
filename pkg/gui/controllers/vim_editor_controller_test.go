@@ -414,7 +414,7 @@ func TestVimEditorPublishesVisualBindings(t *testing.T) {
 func TestVimEditorNoCollisionWithQueryEditorBindings(t *testing.T) {
 	qec := newVimQEC(t)
 	vim := controllers.NewVimEditorController(qec, nil)
-	qe := controllers.NewQueryEditorController(nil, controllers.HelperBag{})
+	qe := controllers.NewQueryEditorController(nil, controllers.CoreDeps{}, controllers.NavDeps{}, controllers.UIDeps{}, controllers.QueryDeps{})
 
 	type key struct {
 		seq  string

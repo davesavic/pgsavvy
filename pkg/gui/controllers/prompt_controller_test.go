@@ -42,10 +42,10 @@ func (f *fakePromptHelper) SetResetHandler(fn func(initial string)) {
 	f.reset = fn
 }
 
-// newPromptBag returns a HelperBag wired with a fakePromptHelper.
-func newPromptBag() (*fakePromptHelper, controllers.HelperBag) {
+// newPromptBag returns a UIDeps bundle wired with a fakePromptHelper.
+func newPromptBag() (*fakePromptHelper, controllers.UIDeps) {
 	h := &fakePromptHelper{}
-	return h, controllers.HelperBag{UIDeps: controllers.UIDeps{Prompt: h}}
+	return h, controllers.UIDeps{Prompt: h}
 }
 
 // dispatch resolves the binding for action ID through reg and invokes
@@ -65,7 +65,7 @@ func TestPromptControllerHasRequiredBindings(t *testing.T) {
 	// gocui.DefaultEditor via the master Editor's Passthrough branch.
 	// The controller only owns <cr> (submit) and <esc> (cancel).
 	_, bag := newPromptBag()
-	ctrl := controllers.NewPromptController(nil, bag)
+	ctrl := controllers.NewPromptController(nil, controllers.CoreDeps{}, bag)
 	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
 
 	hasEnter, hasEsc := false, false
@@ -87,7 +87,7 @@ func TestPromptControllerHasRequiredBindings(t *testing.T) {
 
 func TestPromptControllerSubmitDeliversTypedValue(t *testing.T) {
 	h, bag := newPromptBag()
-	ctrl := controllers.NewPromptController(nil, bag)
+	ctrl := controllers.NewPromptController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -110,7 +110,7 @@ func TestPromptControllerSubmitDeliversTypedValue(t *testing.T) {
 
 func TestPromptControllerCancelInvokesHelperOnce(t *testing.T) {
 	h, bag := newPromptBag()
-	ctrl := controllers.NewPromptController(nil, bag)
+	ctrl := controllers.NewPromptController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	_ = h.Prompt("?", "xy", nil, nil)
@@ -128,7 +128,7 @@ func TestPromptControllerCancelInvokesHelperOnce(t *testing.T) {
 
 func TestPromptControllerEmptyBufferSubmitsEmptyString(t *testing.T) {
 	h, bag := newPromptBag()
-	ctrl := controllers.NewPromptController(nil, bag)
+	ctrl := controllers.NewPromptController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	_ = h.Prompt("?", "", nil, nil)
@@ -143,7 +143,7 @@ func TestPromptControllerEmptyBufferSubmitsEmptyString(t *testing.T) {
 
 func TestPromptControllerSequentialPromptsReseedFromInitial(t *testing.T) {
 	h, bag := newPromptBag()
-	ctrl := controllers.NewPromptController(nil, bag)
+	ctrl := controllers.NewPromptController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -170,7 +170,7 @@ func TestPromptControllerSequentialPromptsReseedFromInitial(t *testing.T) {
 func TestPromptControllerSubmitPropagatesHelperError(t *testing.T) {
 	h, bag := newPromptBag()
 	h.submitErr = errors.New("boom")
-	ctrl := controllers.NewPromptController(nil, bag)
+	ctrl := controllers.NewPromptController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -181,7 +181,7 @@ func TestPromptControllerSubmitPropagatesHelperError(t *testing.T) {
 
 func TestPromptControllerNilHelperHandlersAreNoOp(t *testing.T) {
 	// Constructing with a HelperBag that has no Prompt must not panic.
-	ctrl := controllers.NewPromptController(nil, controllers.HelperBag{})
+	ctrl := controllers.NewPromptController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	if err := dispatch(t, reg, commands.PromptSubmit); err != nil {

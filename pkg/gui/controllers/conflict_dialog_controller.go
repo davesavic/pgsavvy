@@ -83,12 +83,12 @@ type ConflictDialogController struct {
 // to assert on a specific render output.
 func NewConflictDialogController(
 	c *common.Common,
-	helpers HelperBag,
+	core CoreDeps,
 	ctx *guicontext.ConflictDialogContext,
 	tree FocusPopper,
 ) *ConflictDialogController {
 	ctrl := &ConflictDialogController{
-		baseController: newBase(c, helpers),
+		baseController: newBase(c, HelperBag{CoreDeps: core}),
 		ctx:            ctx,
 		tree:           tree,
 	}

@@ -10,7 +10,7 @@ import (
 
 func TestMenuControllerEscPopsMenu(t *testing.T) {
 	b := newBag()
-	ctrl := controllers.NewMenuController(nil, b.HelperBag)
+	ctrl := controllers.NewMenuController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -27,7 +27,7 @@ func TestMenuControllerEscPopsMenu(t *testing.T) {
 
 func TestMenuControllerHasEnterAndEsc(t *testing.T) {
 	b := newBag()
-	ctrl := controllers.NewMenuController(nil, b.HelperBag)
+	ctrl := controllers.NewMenuController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps)
 	hasEnter, hasEsc := false, false
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if isSpecial(kb, types.KeyEnter) {

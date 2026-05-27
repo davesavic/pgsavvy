@@ -228,9 +228,9 @@ type FKReversePickerDeps struct {
 // NewFKReversePickerController constructs a controller. Every dep is
 // nil-safe at construction; handlers nil-check on use so unit tests can
 // wire whichever subset they exercise.
-func NewFKReversePickerController(c *common.Common, helpers HelperBag, deps FKReversePickerDeps) *FKReversePickerController {
+func NewFKReversePickerController(c *common.Common, core CoreDeps, deps FKReversePickerDeps) *FKReversePickerController {
 	return &FKReversePickerController{
-		baseController: newBase(c, helpers),
+		baseController: newBase(c, HelperBag{CoreDeps: core}),
 		ctx:            deps.Context,
 		tree:           deps.Tree,
 		runner:         deps.Runner,

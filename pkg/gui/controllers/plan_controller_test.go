@@ -31,7 +31,7 @@ func newPlanControllerFixture(_ *testing.T) *planControllerFixture {
 		context.Deps{},
 		plan,
 	)
-	ctrl := NewPlanController(nil, HelperBag{}, func() *context.PlanContext { return pc })
+	ctrl := NewPlanController(nil, CoreDeps{}, func() *context.PlanContext { return pc })
 	return &planControllerFixture{ctrl: ctrl, pc: pc}
 }
 
@@ -39,7 +39,7 @@ func newPlanControllerFixture(_ *testing.T) *planControllerFixture {
 // PLAN-scoped — AC requirement "<C-a> cannot leak into grid-filter
 // context".
 func TestPlanController_GetKeybindings_Scope(t *testing.T) {
-	ctrl := NewPlanController(nil, HelperBag{}, nil)
+	ctrl := NewPlanController(nil, CoreDeps{}, nil)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 	if len(bindings) == 0 {
 		t.Fatal("GetKeybindings returned no bindings")
@@ -54,7 +54,7 @@ func TestPlanController_GetKeybindings_Scope(t *testing.T) {
 // TestPlanController_GetKeybindings_CoversAllActions confirms we emit
 // bindings for every Plan action ID.
 func TestPlanController_GetKeybindings_CoversAllActions(t *testing.T) {
-	ctrl := NewPlanController(nil, HelperBag{}, nil)
+	ctrl := NewPlanController(nil, CoreDeps{}, nil)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 	want := map[string]bool{
 		commands.PlanToggle:       false,
@@ -156,7 +156,7 @@ func TestPlanController_CursorDown_Up_Delegate(t *testing.T) {
 // TestPlanController_NilResolver_NoOps exercises the no-op path when
 // no plan tab is active.
 func TestPlanController_NilResolver_NoOps(t *testing.T) {
-	ctrl := NewPlanController(nil, HelperBag{}, nil)
+	ctrl := NewPlanController(nil, CoreDeps{}, nil)
 	if err := ctrl.handleToggle(commands.ExecCtx{}); err != nil {
 		t.Errorf("handleToggle on nil resolver returned err: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestPlanController_NilResolver_NoOps(t *testing.T) {
 // TestPlanController_ResolverReturnsNil_NoOps exercises the no-op path
 // when the resolver returns nil (e.g. focused tab isn't a plan tab).
 func TestPlanController_ResolverReturnsNil_NoOps(t *testing.T) {
-	ctrl := NewPlanController(nil, HelperBag{}, func() *context.PlanContext { return nil })
+	ctrl := NewPlanController(nil, CoreDeps{}, func() *context.PlanContext { return nil })
 	if err := ctrl.handleToggle(commands.ExecCtx{}); err != nil {
 		t.Errorf("handleToggle on nil-returning resolver: %v", err)
 	}

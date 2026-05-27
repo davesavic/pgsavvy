@@ -25,9 +25,9 @@ func TestListControllerTrait_PerRailDispatch(t *testing.T) {
 	schemaCur := &fakeCursor{items: []any{1, 2, 3}}
 	tableCur := &fakeCursor{items: []any{1, 2, 3}}
 
-	conn := controllers.NewConnectionsController(nil, b.HelperBag, connCur, b.ConnPicker)
-	schemas := controllers.NewSchemasController(nil, b.HelperBag, schemaCur, b.SchemaPicker)
-	tables := controllers.NewTablesController(nil, b.HelperBag, tableCur, b.TablePicker)
+	conn := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, connCur, b.ConnPicker)
+	schemas := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, schemaCur, b.SchemaPicker)
+	tables := controllers.NewTablesController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, tableCur, b.TablePicker)
 
 	reg := commands.NewRegistry()
 	conn.ListControllerTrait.RegisterActions(reg)

@@ -20,8 +20,8 @@ type SelectionController struct {
 
 // NewSelectionController constructs the controller. Helpers.Choice may
 // be nil; every handler nil-checks.
-func NewSelectionController(c *common.Common, helpers HelperBag) *SelectionController {
-	return &SelectionController{baseController: newBase(c, helpers)}
+func NewSelectionController(c *common.Common, core CoreDeps, ui UIDeps) *SelectionController {
+	return &SelectionController{baseController: newBase(c, HelperBag{CoreDeps: core, UIDeps: ui})}
 }
 
 // helper returns the typed ChoiceHelper, casting the interface for

@@ -44,8 +44,8 @@ type ExportMenuController struct {
 
 // NewExportMenuController constructs the controller. mgr may be nil
 // (test-only); handlers nil-check before dispatching.
-func NewExportMenuController(c *common.Common, helpers HelperBag, mgr ExportMenuManager) *ExportMenuController {
-	return &ExportMenuController{baseController: newBase(c, helpers), mgr: mgr}
+func NewExportMenuController(c *common.Common, core CoreDeps, mgr ExportMenuManager) *ExportMenuController {
+	return &ExportMenuController{baseController: newBase(c, HelperBag{CoreDeps: core}), mgr: mgr}
 }
 
 // Up moves the field cursor up by one.

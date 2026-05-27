@@ -56,15 +56,15 @@ func (f *fakeChoiceHelper) SetCursor(i int) { // mirrors ui.ChoiceHelper.SetCurs
 	f.cursor = i
 }
 
-// newSelectionBag returns a HelperBag wired with a fakeChoiceHelper.
-func newSelectionBag() (*fakeChoiceHelper, controllers.HelperBag) {
+// newSelectionBag returns a UIDeps bundle wired with a fakeChoiceHelper.
+func newSelectionBag() (*fakeChoiceHelper, controllers.UIDeps) {
 	h := &fakeChoiceHelper{}
-	return h, controllers.HelperBag{UIDeps: controllers.UIDeps{Choice: h}}
+	return h, controllers.UIDeps{Choice: h}
 }
 
 func TestSelectionControllerHasRequiredBindings(t *testing.T) {
 	_, bag := newSelectionBag()
-	ctrl := controllers.NewSelectionController(nil, bag)
+	ctrl := controllers.NewSelectionController(nil, controllers.CoreDeps{}, bag)
 	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
 
 	if len(kbs) != 6 {
@@ -102,7 +102,7 @@ func TestSelectionControllerHasRequiredBindings(t *testing.T) {
 
 func TestSelectionControllerDownMovesCursor(t *testing.T) {
 	h, bag := newSelectionBag()
-	ctrl := controllers.NewSelectionController(nil, bag)
+	ctrl := controllers.NewSelectionController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	_ = h.Choose("?", []string{"a", "b", "c"}, nil, nil)
@@ -117,7 +117,7 @@ func TestSelectionControllerDownMovesCursor(t *testing.T) {
 
 func TestSelectionControllerUpMovesCursor(t *testing.T) {
 	h, bag := newSelectionBag()
-	ctrl := controllers.NewSelectionController(nil, bag)
+	ctrl := controllers.NewSelectionController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	_ = h.Choose("?", []string{"a", "b", "c"}, nil, nil)
@@ -133,7 +133,7 @@ func TestSelectionControllerUpMovesCursor(t *testing.T) {
 
 func TestSelectionControllerCursorClampsAtTop(t *testing.T) {
 	h, bag := newSelectionBag()
-	ctrl := controllers.NewSelectionController(nil, bag)
+	ctrl := controllers.NewSelectionController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	_ = h.Choose("?", []string{"a", "b"}, nil, nil)
@@ -149,7 +149,7 @@ func TestSelectionControllerCursorClampsAtTop(t *testing.T) {
 
 func TestSelectionControllerCursorClampsAtBottom(t *testing.T) {
 	h, bag := newSelectionBag()
-	ctrl := controllers.NewSelectionController(nil, bag)
+	ctrl := controllers.NewSelectionController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	_ = h.Choose("?", []string{"a", "b"}, nil, nil)
@@ -165,7 +165,7 @@ func TestSelectionControllerCursorClampsAtBottom(t *testing.T) {
 
 func TestSelectionControllerConfirmSubmitsCursor(t *testing.T) {
 	h, bag := newSelectionBag()
-	ctrl := controllers.NewSelectionController(nil, bag)
+	ctrl := controllers.NewSelectionController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	_ = h.Choose("?", []string{"a", "b", "c"}, nil, nil)
@@ -181,7 +181,7 @@ func TestSelectionControllerConfirmSubmitsCursor(t *testing.T) {
 
 func TestSelectionControllerCancelInvokesHelper(t *testing.T) {
 	h, bag := newSelectionBag()
-	ctrl := controllers.NewSelectionController(nil, bag)
+	ctrl := controllers.NewSelectionController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	_ = h.Choose("?", []string{"a"}, nil, nil)
@@ -196,7 +196,7 @@ func TestSelectionControllerCancelInvokesHelper(t *testing.T) {
 
 func TestSelectionControllerJAliasMovesDown(t *testing.T) {
 	h, bag := newSelectionBag()
-	ctrl := controllers.NewSelectionController(nil, bag)
+	ctrl := controllers.NewSelectionController(nil, controllers.CoreDeps{}, bag)
 	_ = h.Choose("?", []string{"a", "b", "c"}, nil, nil)
 
 	// Find the j binding; it must reference SelectionDown.
@@ -217,7 +217,7 @@ func TestSelectionControllerJAliasMovesDown(t *testing.T) {
 
 func TestSelectionControllerKAliasMovesUp(t *testing.T) {
 	_, bag := newSelectionBag()
-	ctrl := controllers.NewSelectionController(nil, bag)
+	ctrl := controllers.NewSelectionController(nil, controllers.CoreDeps{}, bag)
 
 	var kBinding *types.ChordBinding
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -237,7 +237,7 @@ func TestSelectionControllerKAliasMovesUp(t *testing.T) {
 func TestSelectionControllerConfirmPropagatesHelperError(t *testing.T) {
 	h, bag := newSelectionBag()
 	h.submitErr = errors.New("boom")
-	ctrl := controllers.NewSelectionController(nil, bag)
+	ctrl := controllers.NewSelectionController(nil, controllers.CoreDeps{}, bag)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	_ = h.Choose("?", []string{"a"}, nil, nil)
@@ -248,7 +248,7 @@ func TestSelectionControllerConfirmPropagatesHelperError(t *testing.T) {
 }
 
 func TestSelectionControllerNilHelperHandlersAreNoOp(t *testing.T) {
-	ctrl := controllers.NewSelectionController(nil, controllers.HelperBag{})
+	ctrl := controllers.NewSelectionController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 

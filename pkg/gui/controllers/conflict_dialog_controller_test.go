@@ -78,7 +78,7 @@ func TestConflictDialogController_KeybindingsDefaultConn(t *testing.T) {
 	ctx := newConflictDialogTestCtx()
 	_ = ctx.Open(conflictBatch(1), &models.Connection{Name: "dev"})
 
-	ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, ctx, &fakeFocusTree{})
+	ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, ctx, &fakeFocusTree{})
 
 	scope := guicontext.ConflictDialogKey()
 	have := map[string]bool{}
@@ -104,7 +104,7 @@ func TestConflictDialogController_KeybindingsHidesOverwriteOnConfirmWrites(t *te
 	ctx := newConflictDialogTestCtx()
 	_ = ctx.Open(conflictBatch(1), &models.Connection{Name: "prod", ConfirmWrites: true})
 
-	ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, ctx, &fakeFocusTree{})
+	ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, ctx, &fakeFocusTree{})
 
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if kb.ActionID == controllers.ConflictDialogOverwrite {
@@ -122,7 +122,7 @@ func TestConflictDialogController_RefreshFiresHookAndPops(t *testing.T) {
 
 	tree := &fakeFocusTree{}
 	hook := &fakeRefreshHook{}
-	ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, ctx, tree)
 	ctrl.SetRefreshHook(hook)
 
 	if err := ctrl.Refresh(commands.ExecCtx{}); err != nil {
@@ -153,7 +153,7 @@ func TestConflictDialogController_OverwriteFiresHookAndPops(t *testing.T) {
 
 	tree := &fakeFocusTree{}
 	hook := &fakeOverwriteHook{}
-	ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, ctx, tree)
 	ctrl.SetOverwriteHook(hook)
 
 	if err := ctrl.Overwrite(commands.ExecCtx{}); err != nil {
@@ -178,7 +178,7 @@ func TestConflictDialogController_OverwriteNoOpOnConfirmWrites(t *testing.T) {
 
 	tree := &fakeFocusTree{}
 	hook := &fakeOverwriteHook{}
-	ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, ctx, tree)
 	ctrl.SetOverwriteHook(hook)
 
 	if err := ctrl.Overwrite(commands.ExecCtx{}); err != nil {
@@ -202,7 +202,7 @@ func TestConflictDialogController_RefreshHookErrorKeepsDialogOpen(t *testing.T) 
 
 	tree := &fakeFocusTree{}
 	hook := &fakeRefreshHook{err: errors.New("network")}
-	ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, ctx, tree)
 	ctrl.SetRefreshHook(hook)
 
 	if err := ctrl.Refresh(commands.ExecCtx{}); err == nil {
@@ -222,7 +222,7 @@ func TestConflictDialogController_OverwriteHookErrorKeepsDialogOpen(t *testing.T
 
 	tree := &fakeFocusTree{}
 	hook := &fakeOverwriteHook{err: errors.New("constraint violation")}
-	ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, ctx, tree)
 	ctrl.SetOverwriteHook(hook)
 
 	if err := ctrl.Overwrite(commands.ExecCtx{}); err == nil {
@@ -243,7 +243,7 @@ func TestConflictDialogController_CancelPopsWithoutMutation(t *testing.T) {
 	cancel := &fakeCancelHook{}
 	refresh := &fakeRefreshHook{}
 	overwrite := &fakeOverwriteHook{}
-	ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, ctx, tree)
 	ctrl.SetCancelHook(cancel)
 	ctrl.SetRefreshHook(refresh)
 	ctrl.SetOverwriteHook(overwrite)
@@ -274,7 +274,7 @@ func TestConflictDialogController_InactiveDispatchNoOps(t *testing.T) {
 	refresh := &fakeRefreshHook{}
 	overwrite := &fakeOverwriteHook{}
 	cancel := &fakeCancelHook{}
-	ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, ctx, tree)
 	ctrl.SetRefreshHook(refresh)
 	ctrl.SetOverwriteHook(overwrite)
 	ctrl.SetCancelHook(cancel)
@@ -292,7 +292,7 @@ func TestConflictDialogController_InactiveDispatchNoOps(t *testing.T) {
 
 // AC: nil collaborators don't panic.
 func TestConflictDialogController_NilCollaboratorsAreSafe(t *testing.T) {
-	ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, nil, nil)
+	ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, nil, nil)
 	if err := ctrl.Refresh(commands.ExecCtx{}); err != nil {
 		t.Errorf("Refresh: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestConflictDialogController_NoHookPopsCleanly(t *testing.T) {
 	ctx := newConflictDialogTestCtx()
 	_ = ctx.Open(conflictBatch(1), &models.Connection{Name: "dev"})
 	tree := &fakeFocusTree{}
-	ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, ctx, tree)
 
 	if err := ctrl.Refresh(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Refresh: %v", err)
@@ -347,7 +347,7 @@ func TestConflictDialogController_OverwriteDisabledReasons(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := tc.setup()
-			ctrl := controllers.NewConflictDialogController(nil, controllers.HelperBag{}, ctx, &fakeFocusTree{})
+			ctrl := controllers.NewConflictDialogController(nil, controllers.CoreDeps{}, ctx, &fakeFocusTree{})
 			reg := commands.NewRegistry()
 			ctrl.RegisterActions(reg)
 

@@ -91,12 +91,14 @@ type CommitDialogController struct {
 // to assert on a specific render output.
 func NewCommitDialogController(
 	c *common.Common,
-	helpers HelperBag,
+	core CoreDeps,
+	ui UIDeps,
+	edit EditDeps,
 	ctx *guicontext.CommitDialogContext,
 	tree FocusPopper,
 ) *CommitDialogController {
 	ctrl := &CommitDialogController{
-		baseController: newBase(c, helpers),
+		baseController: newBase(c, HelperBag{CoreDeps: core, UIDeps: ui, EditDeps: edit}),
 		ctx:            ctx,
 		tree:           tree,
 	}

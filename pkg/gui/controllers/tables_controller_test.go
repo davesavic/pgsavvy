@@ -21,7 +21,7 @@ func TestTablesControllerConfirmFiresOnTableActivate(t *testing.T) {
 		return nil
 	}
 	cur := &fakeCursor{}
-	ctrl := controllers.NewTablesController(nil, b.HelperBag, cur, b.TablePicker)
+	ctrl := controllers.NewTablesController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, cur, b.TablePicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -41,7 +41,7 @@ func TestTablesControllerEnterEmptyRailIsNoop(t *testing.T) {
 	fired := 0
 	b.HelperBag.OnTableActivate = func(*models.Table) error { fired++; return nil }
 	cur := &fakeCursor{}
-	ctrl := controllers.NewTablesController(nil, b.HelperBag, cur, b.TablePicker)
+	ctrl := controllers.NewTablesController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, cur, b.TablePicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -60,7 +60,7 @@ func TestTablesControllerEnterNilCallbackIsNoop(t *testing.T) {
 	b.TablePicker.sel = &models.Table{Schema: "public", Name: "users"}
 	// b.HelperBag.OnTableActivate intentionally left nil.
 	cur := &fakeCursor{}
-	ctrl := controllers.NewTablesController(nil, b.HelperBag, cur, b.TablePicker)
+	ctrl := controllers.NewTablesController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, cur, b.TablePicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {

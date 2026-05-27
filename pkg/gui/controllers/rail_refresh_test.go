@@ -18,7 +18,7 @@ func TestSchemasControllerRBindingDispatchesRefresh(t *testing.T) {
 	b.HelperBag.Refresh = refresh
 
 	cur := &fakeCursor{}
-	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, cur, b.SchemaPicker)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -52,7 +52,7 @@ func TestTablesControllerRBindingDispatchesRefreshWithSchema(t *testing.T) {
 	b.SchemaPicker.name = "public"
 
 	cur := &fakeCursor{}
-	ctrl := controllers.NewTablesController(nil, b.HelperBag, cur, b.TablePicker)
+	ctrl := controllers.NewTablesController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, cur, b.TablePicker)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -77,7 +77,7 @@ func TestConnectionsControllerRBindingDispatchesRefresh(t *testing.T) {
 	b.HelperBag.Refresh = refresh
 
 	cur := &fakeCursor{}
-	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, cur, b.ConnPicker)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 

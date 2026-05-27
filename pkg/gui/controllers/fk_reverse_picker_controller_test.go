@@ -196,7 +196,7 @@ func TestBuildFKReverseSQL_MixedCaseIdentifiersRoundTrip(t *testing.T) {
 
 func TestOpen_EmptyEntriesNoStateInstalled(t *testing.T) {
 	ctx := newReversePickerContext()
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{Context: ctx})
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{Context: ctx})
 	if ok := c.Open(nil, nil, 0, 0); ok {
 		t.Fatal("Open returned true with empty entries; want false")
 	}
@@ -207,7 +207,7 @@ func TestOpen_EmptyEntriesNoStateInstalled(t *testing.T) {
 
 func TestOpen_OneTabPerEntry_TitleIncludesReferencingColumn(t *testing.T) {
 	ctx := newReversePickerContext()
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{Context: ctx})
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{Context: ctx})
 	entries := []ReverseEntry{
 		{FK: models.ForeignKey{Schema: "app", Table: "orders", Columns: []string{"user_id"}}, Reltuples: 50, PKValues: []any{int64(1)}},
 		{FK: models.ForeignKey{Schema: "app", Table: "comments", Columns: []string{"author_id"}}, Reltuples: -1, PKValues: []any{int64(1)}},
@@ -235,7 +235,7 @@ func TestOpen_OneTabPerEntry_TitleIncludesReferencingColumn(t *testing.T) {
 
 func TestNextTab_PrevTab_WrapAround(t *testing.T) {
 	ctx := newReversePickerContext()
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{Context: ctx})
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{Context: ctx})
 	entries := []ReverseEntry{
 		{FK: models.ForeignKey{Schema: "s", Table: "a", Columns: []string{"x"}}, PKValues: []any{1}},
 		{FK: models.ForeignKey{Schema: "s", Table: "b", Columns: []string{"x"}}, PKValues: []any{1}},
@@ -260,7 +260,7 @@ func TestNextTab_PrevTab_WrapAround(t *testing.T) {
 
 func TestClose_PopsTree(t *testing.T) {
 	tree := &fakeReverseTree{}
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{Tree: tree})
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{Tree: tree})
 	if err := c.Close(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestClose_PopsTree(t *testing.T) {
 }
 
 func TestClose_NilTreeIsNoop(t *testing.T) {
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{})
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{})
 	if err := c.Close(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Close with nil tree should no-op, got %v", err)
 	}
@@ -285,7 +285,7 @@ func TestSelect_BuildsQuery_PushesJump_OpensTab_PopsPopup(t *testing.T) {
 	tabs := &fakeReverseTabs{}
 	jumps := &fakeReverseJumps{}
 	toast := &fakeReverseToast{}
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{
 		Context: ctx, Tree: tree, Runner: runner, Tabs: tabs, Jumps: jumps, Toast: toast,
 	})
 
@@ -352,7 +352,7 @@ func TestSelect_CompositeFK_BuildsAndedArgs(t *testing.T) {
 	runner := &fakeReverseRunner{}
 	tabs := &fakeReverseTabs{}
 	jumps := &fakeReverseJumps{}
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{
 		Context: ctx, Tree: &fakeReverseTree{}, Runner: runner, Tabs: tabs, Jumps: jumps,
 	})
 	entries := []ReverseEntry{
@@ -388,7 +388,7 @@ func TestSelect_PKMismatch_ToastsAndDoesNotRun(t *testing.T) {
 	tabs := &fakeReverseTabs{}
 	jumps := &fakeReverseJumps{}
 	toast := &fakeReverseToast{}
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{
 		Context: ctx, Tree: &fakeReverseTree{}, Runner: runner, Tabs: tabs, Jumps: jumps, Toast: toast,
 	})
 	entries := []ReverseEntry{
@@ -423,7 +423,7 @@ func TestSelect_RunnerError_ToastsAndDoesNotOpenTabOrPop(t *testing.T) {
 	tabs := &fakeReverseTabs{}
 	jumps := &fakeReverseJumps{}
 	toast := &fakeReverseToast{}
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{
 		Context: ctx, Tree: tree, Runner: runner, Tabs: tabs, Jumps: jumps, Toast: toast,
 	})
 	entries := []ReverseEntry{
@@ -457,7 +457,7 @@ func TestSelect_RunnerError_ToastsAndDoesNotOpenTabOrPop(t *testing.T) {
 
 func TestSelect_SelfReferencingFK_RendersAsSeparateTab(t *testing.T) {
 	ctx := newReversePickerContext()
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{Context: ctx})
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{Context: ctx})
 	// Self-ref: tree.parent_id → tree.id. Schema/Table = RefSchema/RefTable.
 	entries := []ReverseEntry{
 		{
@@ -487,7 +487,7 @@ func TestSelect_SelfReferencingFK_RendersAsSeparateTab(t *testing.T) {
 // --- Keybindings ----------------------------------------------------------
 
 func TestGetKeybindings_FullSet(t *testing.T) {
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{})
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{})
 	got := c.GetKeybindings(types.KeybindingsOpts{})
 	if len(got) != 6 {
 		t.Fatalf("len(bindings) = %d, want 6 (tab,],[,<cr>,<esc>,q)", len(got))
@@ -515,7 +515,7 @@ func TestGetKeybindings_FullSet(t *testing.T) {
 
 func TestRegisterActions_AllHandlersResolveThroughRegistry(t *testing.T) {
 	reg := commands.NewRegistry()
-	c := NewFKReversePickerController(nil, HelperBag{}, FKReversePickerDeps{})
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{})
 	c.RegisterActions(reg)
 	for _, id := range []string{FKReverseNextTab, FKReversePrevTab, FKReverseSelect, FKReverseClose} {
 		if !reg.Has(id) {

@@ -86,7 +86,7 @@ func newCommitDialogTestCtx() *guicontext.CommitDialogContext {
 // AC: keybindings cover [a], [d], [s], [c], [Esc] on COMMIT_DIALOG.
 func TestCommitDialogController_Keybindings(t *testing.T) {
 	ctx := newCommitDialogTestCtx()
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, &fakeFocusTree{})
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
 
 	scope := guicontext.CommitDialogKey()
 	type sigKey struct {
@@ -131,7 +131,7 @@ func TestCommitDialogController_ApplyDefaultConnection(t *testing.T) {
 
 	tree := &fakeFocusTree{}
 	apply := &fakeApplyHook{}
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, tree)
 	ctrl.SetApplyHook(apply)
 
 	if err := ctrl.Apply(commands.ExecCtx{}); err != nil {
@@ -156,7 +156,7 @@ func TestCommitDialogController_ApplyConfirmWritesGate(t *testing.T) {
 
 	tree := &fakeFocusTree{}
 	apply := &fakeApplyHook{}
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, tree)
 	ctrl.SetApplyHook(apply)
 
 	// No typed name → Apply is a no-op.
@@ -235,7 +235,7 @@ func TestCommitDialogController_ApplyDisabledReasons(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := tc.setup()
-			ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, &fakeFocusTree{})
+			ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
 			reg := commands.NewRegistry()
 			ctrl.RegisterActions(reg)
 
@@ -261,7 +261,7 @@ func TestCommitDialogController_ApplyHookErrorKeepsDialogOpen(t *testing.T) {
 
 	tree := &fakeFocusTree{}
 	apply := &fakeApplyHook{err: errors.New("update failed")}
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, tree)
 	ctrl.SetApplyHook(apply)
 
 	if err := ctrl.Apply(commands.ExecCtx{}); err == nil {
@@ -284,7 +284,7 @@ func TestCommitDialogController_DryRun(t *testing.T) {
 		{SQL: "UPDATE x", RowsAffected: 3},
 	}
 	hook := &fakeDryRunHook{report: report}
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, &fakeFocusTree{})
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
 	ctrl.SetDryRunHook(hook)
 
 	if err := ctrl.DryRun(commands.ExecCtx{}); err != nil {
@@ -308,7 +308,7 @@ func TestCommitDialogController_DryRunNoHook(t *testing.T) {
 	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "dev"})
 	ctx.SetDryRunResult([]guicontext.DryRunStmtResult{{SQL: "stale"}})
 
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, &fakeFocusTree{})
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
 	if err := ctrl.DryRun(commands.ExecCtx{}); err != nil {
 		t.Fatalf("DryRun: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestCommitDialogController_DryRunHookErrorRendersErrorRow(t *testing.T) {
 	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "dev"})
 
 	hook := &fakeDryRunHook{err: errors.New("rollback failed")}
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, &fakeFocusTree{})
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
 	ctrl.SetDryRunHook(hook)
 
 	_ = ctrl.DryRun(commands.ExecCtx{})
@@ -344,7 +344,7 @@ func TestCommitDialogController_ShowSqlToggle(t *testing.T) {
 	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "dev"})
 
 	hook := &fakeShowSqlHook{}
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, &fakeFocusTree{})
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
 	ctrl.SetShowSqlHook(hook)
 
 	// First press → SqlPreview, OnShowSQL fires.
@@ -386,7 +386,7 @@ func TestCommitDialogController_CancelDoesNotMutatePendingSet(t *testing.T) {
 
 	tree := &fakeFocusTree{}
 	cancel := &fakeCancelHook{}
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, tree)
 	ctrl.SetCancelHook(cancel)
 
 	if err := ctrl.Cancel(commands.ExecCtx{}); err != nil {
@@ -415,7 +415,7 @@ func TestCommitDialogController_InactiveDispatchNoOps(t *testing.T) {
 	dry := &fakeDryRunHook{}
 	show := &fakeShowSqlHook{}
 	cancel := &fakeCancelHook{}
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, tree)
 	ctrl.SetApplyHook(apply)
 	ctrl.SetDryRunHook(dry)
 	ctrl.SetShowSqlHook(show)
@@ -435,7 +435,7 @@ func TestCommitDialogController_InactiveDispatchNoOps(t *testing.T) {
 
 // AC: nil collaborators don't panic.
 func TestCommitDialogController_NilCollaboratorsAreSafe(t *testing.T) {
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, nil, nil)
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, nil, nil)
 	if err := ctrl.Apply(commands.ExecCtx{}); err != nil {
 		t.Errorf("Apply: %v", err)
 	}
@@ -456,7 +456,7 @@ func TestCommitDialogController_ApplyNoHookPopsCleanly(t *testing.T) {
 	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "dev"})
 
 	tree := &fakeFocusTree{}
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, tree)
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, tree)
 	// No SetApplyHook call.
 
 	if err := ctrl.Apply(commands.ExecCtx{}); err != nil {
@@ -469,7 +469,7 @@ func TestCommitDialogController_ApplyNoHookPopsCleanly(t *testing.T) {
 
 // AC: CommitDialogOpen is registered (so :w / <leader>cw resolve).
 func TestCommitDialogController_OpenActionRegistered(t *testing.T) {
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, newCommitDialogTestCtx(), &fakeFocusTree{})
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, newCommitDialogTestCtx(), &fakeFocusTree{})
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	cmd, ok := reg.Get(controllers.CommitDialogOpen)
@@ -777,7 +777,7 @@ func TestCommitDialogController_ShowSqlPreservesTypedName(t *testing.T) {
 	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "prod", ConfirmWrites: true})
 	ctx.SetTypedName("pro")
 
-	ctrl := controllers.NewCommitDialogController(nil, controllers.HelperBag{}, ctx, &fakeFocusTree{})
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
 	_ = ctrl.ShowSql(commands.ExecCtx{})
 	if ctx.TypedName() != "pro" {
 		t.Errorf("TypedName lost after [s]: %q", ctx.TypedName())

@@ -19,8 +19,8 @@ type ConfirmationController struct {
 }
 
 // NewConfirmationController constructs the controller.
-func NewConfirmationController(c *common.Common, helpers HelperBag) *ConfirmationController {
-	return &ConfirmationController{baseController: newBase(c, helpers)}
+func NewConfirmationController(c *common.Common, core CoreDeps, ui UIDeps) *ConfirmationController {
+	return &ConfirmationController{baseController: newBase(c, HelperBag{CoreDeps: core, UIDeps: ui})}
 }
 
 // Yes dispatches into ConfirmHelper.Yes. nil-safe when no Confirm helper

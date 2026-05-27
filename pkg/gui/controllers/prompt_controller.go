@@ -50,10 +50,10 @@ type PromptBufferReader interface {
 // NewPromptController constructs the controller. If helpers.Prompt is
 // non-nil it registers itself as the reset handler so future
 // helper.Prompt invocations re-seed the view buffer.
-func NewPromptController(c *common.Common, helpers HelperBag) *PromptController {
-	p := &PromptController{baseController: newBase(c, helpers)}
-	if helpers.Prompt != nil {
-		helpers.Prompt.SetResetHandler(p.Reset)
+func NewPromptController(c *common.Common, core CoreDeps, ui UIDeps) *PromptController {
+	p := &PromptController{baseController: newBase(c, HelperBag{CoreDeps: core, UIDeps: ui})}
+	if ui.Prompt != nil {
+		ui.Prompt.SetResetHandler(p.Reset)
 	}
 	return p
 }

@@ -118,8 +118,8 @@ type ResultTabsController struct {
 
 // NewResultTabsController constructs the controller. mgr may be nil
 // (test-only); handlers nil-check before dispatching.
-func NewResultTabsController(c *common.Common, helpers HelperBag, mgr ResultTabsManager) *ResultTabsController {
-	return &ResultTabsController{baseController: newBase(c, helpers), mgr: mgr}
+func NewResultTabsController(c *common.Common, core CoreDeps, ui UIDeps, edit EditDeps, mgr ResultTabsManager) *ResultTabsController {
+	return &ResultTabsController{baseController: newBase(c, HelperBag{CoreDeps: core, UIDeps: ui, EditDeps: edit}), mgr: mgr}
 }
 
 // GetKeybindings returns the 14 result-tab bindings.

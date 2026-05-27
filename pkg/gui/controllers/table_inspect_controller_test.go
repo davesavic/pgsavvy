@@ -41,7 +41,7 @@ func (f *fakeTree) Pop() error {
 }
 
 func TestTableInspectController_GetKeybindings_ExactlyFive(t *testing.T) {
-	ctrl := controllers.NewTableInspectController(nil, controllers.HelperBag{}, nil, nil)
+	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, nil, nil)
 	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
 	if got, want := len(kbs), 5; got != want {
 		t.Fatalf("len(GetKeybindings()) = %d, want %d", got, want)
@@ -60,7 +60,7 @@ func TestTableInspectController_GetKeybindings_ExactlyFive(t *testing.T) {
 // binding maps a Shift+Tab chord. gocui has no Backtab; AMD-5b explicitly
 // dropped the <S-tab> binding for this scope.
 func TestTableInspectController_GetKeybindings_NoShiftTabBinding(t *testing.T) {
-	ctrl := controllers.NewTableInspectController(nil, controllers.HelperBag{}, nil, nil)
+	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, nil, nil)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if len(kb.Sequence) != 1 {
 			continue
@@ -73,7 +73,7 @@ func TestTableInspectController_GetKeybindings_NoShiftTabBinding(t *testing.T) {
 }
 
 func TestTableInspectController_GetKeybindings_ActionIDs(t *testing.T) {
-	ctrl := controllers.NewTableInspectController(nil, controllers.HelperBag{}, nil, nil)
+	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, nil, nil)
 	counts := map[string]int{}
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		counts[kb.ActionID]++
@@ -91,7 +91,7 @@ func TestTableInspectController_GetKeybindings_ActionIDs(t *testing.T) {
 
 func TestTableInspectController_NextTabAction_AdvancesState(t *testing.T) {
 	ic := newInspectContext(t, 2)
-	ctrl := controllers.NewTableInspectController(nil, controllers.HelperBag{}, ic, nil)
+	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, ic, nil)
 	if got := ic.State().Active(); got != 0 {
 		t.Fatalf("pre-NextTab Active() = %d, want 0", got)
 	}
@@ -106,7 +106,7 @@ func TestTableInspectController_NextTabAction_AdvancesState(t *testing.T) {
 func TestTableInspectController_PrevTabAction_RewindsState(t *testing.T) {
 	ic := newInspectContext(t, 2)
 	ic.State().SetActive(1)
-	ctrl := controllers.NewTableInspectController(nil, controllers.HelperBag{}, ic, nil)
+	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, ic, nil)
 	if err := ctrl.PrevTab(commands.ExecCtx{}); err != nil {
 		t.Fatalf("PrevTab: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestTableInspectController_PrevTabAction_RewindsState(t *testing.T) {
 
 func TestTableInspectController_CloseAction_PopsContext(t *testing.T) {
 	tree := &fakeTree{}
-	ctrl := controllers.NewTableInspectController(nil, controllers.HelperBag{}, nil, tree)
+	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, nil, tree)
 	if err := ctrl.Close(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestTableInspectController_CloseAction_PopsContext(t *testing.T) {
 }
 
 func TestTableInspectController_NextPrevAction_NoStateNoPanic(t *testing.T) {
-	ctrl := controllers.NewTableInspectController(nil, controllers.HelperBag{}, nil, nil)
+	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, nil, nil)
 	if err := ctrl.NextTab(commands.ExecCtx{}); err != nil {
 		t.Errorf("NextTab nil ctx: %v", err)
 	}

@@ -64,12 +64,12 @@ type CheatsheetController struct {
 // be nil during unit tests; handlers nil-check before mutating state.
 func NewCheatsheetController(
 	c *common.Common,
-	helpers HelperBag,
+	core CoreDeps,
 	ctx *context.CheatsheetContext,
 	tree cheatsheetTree,
 ) *CheatsheetController {
 	return &CheatsheetController{
-		baseController: newBase(c, helpers),
+		baseController: newBase(c, HelperBag{CoreDeps: core}),
 		ctx:            ctx,
 		tree:           tree,
 	}

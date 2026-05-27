@@ -13,7 +13,7 @@ import (
 // scope.
 func TestConfirmationControllerYesAndNoBindings(t *testing.T) {
 	b := newBag()
-	ctrl := controllers.NewConfirmationController(nil, b.HelperBag)
+	ctrl := controllers.NewConfirmationController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps)
 
 	hasYRune, hasEnter, hasNRune, hasEsc := false, false, false, false
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -43,7 +43,7 @@ func TestConfirmationControllerYesAndNoBindings(t *testing.T) {
 // <cr> invokes ConfirmHelper.Yes exactly once.
 func TestConfirmationControllerYesDispatchesToHelper(t *testing.T) {
 	b := newBag()
-	ctrl := controllers.NewConfirmationController(nil, b.HelperBag)
+	ctrl := controllers.NewConfirmationController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -63,7 +63,7 @@ func TestConfirmationControllerYesDispatchesToHelper(t *testing.T) {
 // <esc> invokes ConfirmHelper.No exactly once.
 func TestConfirmationControllerNoDispatchesToHelper(t *testing.T) {
 	b := newBag()
-	ctrl := controllers.NewConfirmationController(nil, b.HelperBag)
+	ctrl := controllers.NewConfirmationController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -82,8 +82,7 @@ func TestConfirmationControllerNoDispatchesToHelper(t *testing.T) {
 // TestConfirmationControllerNilHelperIsSafe asserts the handlers no-op
 // rather than panic when no ConfirmHelper is wired.
 func TestConfirmationControllerNilHelperIsSafe(t *testing.T) {
-	bag := controllers.HelperBag{} // no Confirm helper
-	ctrl := controllers.NewConfirmationController(nil, bag)
+	ctrl := controllers.NewConfirmationController(nil, controllers.CoreDeps{}, controllers.UIDeps{}) // no Confirm helper
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {

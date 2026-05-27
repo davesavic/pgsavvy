@@ -148,7 +148,7 @@ func newCellEditorWithGate(picker *fakeGridPicker) (
 	ctx := newCellEditorTestCtx()
 	tree := &fakeFocusTree{}
 	store := &fakeEditStore{}
-	ctrl := controllers.NewCellEditorController(nil, controllers.HelperBag{}, ctx, tree, picker, store)
+	ctrl := controllers.NewCellEditorController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, ctx, tree, picker, store)
 	return ctrl, ctx, tree, store
 }
 
@@ -290,7 +290,7 @@ func TestCellEditorControllerEnterDisabledReasons(t *testing.T) {
 // without state, so it defaults to safe-off).
 func TestCellEditorControllerEnterDisabledWithNilPicker(t *testing.T) {
 	ctx := newCellEditorTestCtx()
-	ctrl := controllers.NewCellEditorController(nil, controllers.HelperBag{}, ctx, &fakeFocusTree{}, nil, nil)
+	ctrl := controllers.NewCellEditorController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, ctx, &fakeFocusTree{}, nil, nil)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -433,8 +433,7 @@ func TestCellEditorControllerDiscardDirtyCellRemovesAndToasts(t *testing.T) {
 		},
 	}
 	toast := &fakeToast{}
-	helpers := controllers.HelperBag{UIDeps: controllers.UIDeps{Toast: toast}}
-	ctrl := controllers.NewCellEditorController(nil, helpers, ctx, tree, picker, store)
+	ctrl := controllers.NewCellEditorController(nil, controllers.CoreDeps{}, controllers.UIDeps{Toast: toast}, ctx, tree, picker, store)
 
 	if err := ctrl.Enter(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Enter: %v", err)
@@ -484,7 +483,7 @@ func TestCellEditorControllerCommitOnReeditSubmitsAdd(t *testing.T) {
 			{PrimaryKey: []any{int64(1)}, Column: "name", NewValue: "prior", Kind: models.Literal},
 		},
 	}
-	ctrl := controllers.NewCellEditorController(nil, controllers.HelperBag{}, ctx, tree, picker, store)
+	ctrl := controllers.NewCellEditorController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, ctx, tree, picker, store)
 	if err := ctrl.Enter(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Enter: %v", err)
 	}
@@ -534,7 +533,7 @@ func TestCellEditorControllerCommitCompositePKCarriesAllValues(t *testing.T) {
 // no-ops rather than panics when ctx / tree / store are nil. Production
 // wiring (Z1) sets all three, but partial test setups must not crash.
 func TestCellEditorControllerNilCollaboratorsAreSafe(t *testing.T) {
-	ctrl := controllers.NewCellEditorController(nil, controllers.HelperBag{}, nil, nil, nil, nil)
+	ctrl := controllers.NewCellEditorController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, nil, nil, nil, nil)
 	if err := ctrl.Enter(commands.ExecCtx{}); err != nil {
 		t.Errorf("Enter nil-collaborators: %v", err)
 	}

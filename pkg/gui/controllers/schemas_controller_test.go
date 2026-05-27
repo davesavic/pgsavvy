@@ -14,7 +14,7 @@ func TestSchemasControllerHideCallsSchemasHelper(t *testing.T) {
 	b.SchemaPicker.name = "public"
 	b.Active.id = "local"
 	cur := &fakeCursor{}
-	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, cur, b.SchemaPicker)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -36,7 +36,7 @@ func TestSchemasControllerUnhideOnErrNeedsConfirmationOpensConfirm(t *testing.T)
 	b.Active.id = "local"
 	b.Schemas.unhideErr = data.ErrNeedsConfirmation
 	cur := &fakeCursor{}
-	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, cur, b.SchemaPicker)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -68,7 +68,7 @@ func TestSchemasControllerUnhideOnErrNeedsConfirmationOpensConfirm(t *testing.T)
 func TestSchemasControllerLeaderHIsPublishedAsTwoKeyChord(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
-	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, cur, b.SchemaPicker)
 
 	found := false
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -95,7 +95,7 @@ func TestSchemasControllerEnterFiresOnSchemaActivate(t *testing.T) {
 	var got []string
 	b.HelperBag.OnSchemaActivate = func(s string) { got = append(got, s) }
 	cur := &fakeCursor{}
-	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, cur, b.SchemaPicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -118,7 +118,7 @@ func TestSchemasControllerEnterEmptySelectionNoFire(t *testing.T) {
 	fired := 0
 	b.HelperBag.OnSchemaActivate = func(string) { fired++ }
 	cur := &fakeCursor{}
-	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, cur, b.SchemaPicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -141,7 +141,7 @@ func TestSchemasControllerEnterNilCallbackNoPanic(t *testing.T) {
 	b.SchemaPicker.name = "public"
 	// b.HelperBag.OnSchemaActivate intentionally left nil.
 	cur := &fakeCursor{}
-	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, cur, b.SchemaPicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -157,7 +157,7 @@ func TestSchemasControllerEnterNilCallbackNoPanic(t *testing.T) {
 func TestSchemasControllerToggleShowHiddenHandler(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
-	ctrl := controllers.NewSchemasController(nil, b.HelperBag, cur, b.SchemaPicker)
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, cur, b.SchemaPicker)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	cmd, ok := reg.Get(commands.SchemaToggleShowHidden)

@@ -15,7 +15,7 @@ import (
 func TestConnectionsControllerBindingsShape(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
-	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, cur, b.ConnPicker)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 
 	want := map[string]bool{
@@ -65,7 +65,7 @@ func TestConnectionsControllerConfirmCallsConnect(t *testing.T) {
 	profile := &models.Connection{Name: "local", Driver: "pg"}
 	b.ConnPicker.sel = profile
 
-	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, cur, b.ConnPicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -84,7 +84,7 @@ func TestConnectionsControllerConfirmCallsConnect(t *testing.T) {
 func TestConnectionsControllerConfirmEmptyRailNoop(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
-	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, cur, b.ConnPicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -101,7 +101,7 @@ func TestConnectionsControllerConfirmEmptyRailNoop(t *testing.T) {
 func TestConnectionsControllerAddCallsConnectionForm(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
-	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, cur, b.ConnPicker)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -121,7 +121,7 @@ func TestConnectionsControllerAddAllowedWithSelection(t *testing.T) {
 	b := newBag()
 	b.ConnPicker.sel = &models.Connection{Name: "x"}
 	cur := &fakeCursor{idx: 0, items: []any{b.ConnPicker.sel}}
-	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, cur, b.ConnPicker)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -143,7 +143,7 @@ func TestConnectionsControllerConfirmConvertsConnectErrToToast(t *testing.T) {
 	b.ConnPicker.sel = &models.Connection{Name: "p", Driver: "pg"}
 	b.Connect.err = errors.New("session: interactive password prompt not supported in TUI mode; configure password_command, keyring, or pgpass (hint: password for localhost)")
 
-	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, cur, b.ConnPicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -177,7 +177,7 @@ func TestConnectionsControllerConfirmAlreadyConnectedIsToastNotCrash(t *testing.
 	b.ConnPicker.sel = &models.Connection{Name: "p", Driver: "pg"}
 	b.Connect.err = errors.New("data: already connected (call Disconnect first)")
 
-	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, cur, b.ConnPicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -204,7 +204,7 @@ func TestConnectionsControllerConfirmAlreadyConnectedIsToastNotCrash(t *testing.
 func TestConnectionsControllerDescriptionsSourceFromTrActions(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{}
-	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, cur, b.ConnPicker)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if kb.Description == "" {
 			t.Fatalf("empty Description on binding sequence=%v (M11i: must source from Tr.Actions.*)", kb.Sequence)
@@ -216,7 +216,7 @@ func TestConnectionsControllerDescriptionsSourceFromTrActions(t *testing.T) {
 func confirmConnections(t *testing.T, b *bag) {
 	t.Helper()
 	cur := &fakeCursor{}
-	ctrl := controllers.NewConnectionsController(nil, b.HelperBag, cur, b.ConnPicker)
+	ctrl := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, cur, b.ConnPicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {

@@ -19,11 +19,12 @@ type TablesController struct {
 // NewTablesController constructs the controller.
 func NewTablesController(
 	c *common.Common,
-	helpers HelperBag,
+	core CoreDeps,
+	nav NavDeps,
 	cursor SideListCursor,
 	picker TablePicker,
 ) *TablesController {
-	base := newBase(c, helpers)
+	base := newBase(c, HelperBag{CoreDeps: core, NavDeps: nav})
 	ctrl := &TablesController{}
 	confirm := func(_ commands.ExecCtx) error {
 		if picker == nil || base.helpers.OnTableActivate == nil {

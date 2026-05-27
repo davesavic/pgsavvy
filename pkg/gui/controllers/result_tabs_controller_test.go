@@ -16,7 +16,7 @@ import (
 // nothing while `gg` worked. `]G` keeps the explicit drain-to-end.
 func TestResultTabsControllerGBindingJumpsLast(t *testing.T) {
 	b := newBag()
-	ctrl := controllers.NewResultTabsController(nil, b.HelperBag, nil)
+	ctrl := controllers.NewResultTabsController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps, b.HelperBag.EditDeps, nil)
 
 	found := false
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
@@ -41,7 +41,7 @@ func TestResultTabsControllerGBindingJumpsLast(t *testing.T) {
 // (ResultYankRow), both RESULT_GRID-scoped, Normal mode.
 func TestResultTabsControllerYankBindings(t *testing.T) {
 	b := newBag()
-	ctrl := controllers.NewResultTabsController(nil, b.HelperBag, nil)
+	ctrl := controllers.NewResultTabsController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps, b.HelperBag.EditDeps, nil)
 
 	var foundCell, foundRow bool
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {

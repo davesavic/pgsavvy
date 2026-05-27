@@ -13,7 +13,7 @@ import (
 // j/<down> and k/<up> bindings per AD-9 (dbsavvy-56u.2).
 func TestHideOverlayControllerCtrlNAndCtrlPBindings(t *testing.T) {
 	b := newBag()
-	ctrl := controllers.NewHideOverlayController(nil, b.HelperBag, nil)
+	ctrl := controllers.NewHideOverlayController(nil, b.HelperBag.CoreDeps, nil)
 	hasCtrlN, hasCtrlP := false, false
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
 		if kb.Scope != types.HIDE_OVERLAY {

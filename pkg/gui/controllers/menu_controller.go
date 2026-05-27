@@ -13,8 +13,8 @@ type MenuController struct {
 }
 
 // NewMenuController constructs the controller.
-func NewMenuController(c *common.Common, helpers HelperBag) *MenuController {
-	return &MenuController{baseController: newBase(c, helpers)}
+func NewMenuController(c *common.Common, core CoreDeps, ui UIDeps) *MenuController {
+	return &MenuController{baseController: newBase(c, HelperBag{CoreDeps: core, UIDeps: ui})}
 }
 
 // Select activates the cursor-selected menu entry. The MenuPushHelper

@@ -88,15 +88,15 @@ func AttachControllers(
 		helpers.ActiveConnection = nullActiveConnection{}
 	}
 
-	connections := NewConnectionsController(c, helpers, &tree.Connections.SideListContext, helpers.Connections)
-	schemas := NewSchemasController(c, helpers, &tree.Schemas.SideListContext, helpers.Schemas)
-	tables := NewTablesController(c, helpers, &tree.Tables.SideListContext, helpers.Tables)
-	menu := NewMenuController(c, helpers)
-	prompt := NewPromptController(c, helpers)
-	selection := NewSelectionController(c, helpers)
-	confirmation := NewConfirmationController(c, helpers)
-	quit := NewQuitController(c, helpers)
-	queryEditor := NewQueryEditorController(c, helpers)
+	connections := NewConnectionsController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.ThreadingDeps, &tree.Connections.SideListContext, helpers.Connections)
+	schemas := NewSchemasController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, &tree.Schemas.SideListContext, helpers.Schemas)
+	tables := NewTablesController(c, helpers.CoreDeps, helpers.NavDeps, &tree.Tables.SideListContext, helpers.Tables)
+	menu := NewMenuController(c, helpers.CoreDeps, helpers.UIDeps)
+	prompt := NewPromptController(c, helpers.CoreDeps, helpers.UIDeps)
+	selection := NewSelectionController(c, helpers.CoreDeps, helpers.UIDeps)
+	confirmation := NewConfirmationController(c, helpers.CoreDeps, helpers.UIDeps)
+	quit := NewQuitController(c, helpers.CoreDeps)
+	queryEditor := NewQueryEditorController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps)
 
 	// ResultTabsController publishes RESULT_GRID + GLOBAL bindings; it
 	// reaches the trie via AllDefaultBindings. The manager surface is
@@ -109,7 +109,7 @@ func AttachControllers(
 			tabsMgr = m
 		}
 	}
-	resultTabs := NewResultTabsController(c, helpers, tabsMgr)
+	resultTabs := NewResultTabsController(c, helpers.CoreDeps, helpers.UIDeps, helpers.EditDeps, tabsMgr)
 
 	// HideOverlayController publishes HIDE_OVERLAY-scope bindings for the
 	// <leader>gH column-visibility overlay (dbsavvy-uv0.6). The manager
@@ -122,7 +122,7 @@ func AttachControllers(
 			hideMgr = m
 		}
 	}
-	hideOverlay := NewHideOverlayController(c, helpers, hideMgr)
+	hideOverlay := NewHideOverlayController(c, helpers.CoreDeps, hideMgr)
 
 	// ExportMenuController publishes EXPORT_MENU-scope bindings for the
 	// <leader>oe export menu (dbsavvy-uv0.9). The manager surface is the
@@ -135,7 +135,7 @@ func AttachControllers(
 			exportMgr = m
 		}
 	}
-	exportMenu := NewExportMenuController(c, helpers, exportMgr)
+	exportMenu := NewExportMenuController(c, helpers.CoreDeps, exportMgr)
 
 	// VimEditorController owns motion / operator / textobject bindings
 	// under QUERY_EDITOR scope (epic dbsavvy-wwd). It takes the live
@@ -166,7 +166,7 @@ func AttachControllers(
 	// (dbsavvy-uv0.8). The plan tab's per-tab *context.PlanContext is
 	// reached through helpers.ActivePlanContextFn (wired by the
 	// orchestrator to ResultTabsHelper.ActivePlanContext).
-	plan := NewPlanController(c, helpers, helpers.ActivePlanContextFn)
+	plan := NewPlanController(c, helpers.CoreDeps, helpers.ActivePlanContextFn)
 
 	bundle := &Controllers{
 		Connections:  connections,

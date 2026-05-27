@@ -27,8 +27,8 @@ type QuitController struct {
 }
 
 // NewQuitController constructs the controller.
-func NewQuitController(c *common.Common, helpers HelperBag) *QuitController {
-	return &QuitController{baseController: newBase(c, helpers)}
+func NewQuitController(c *common.Common, core CoreDeps) *QuitController {
+	return &QuitController{baseController: newBase(c, HelperBag{CoreDeps: core})}
 }
 
 // Quit terminates the gocui main loop synchronously by returning

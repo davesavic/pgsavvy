@@ -44,11 +44,14 @@ type ConnectionsController struct {
 // (typically the same context, since ConnectionsContext is both).
 func NewConnectionsController(
 	c *common.Common,
-	helpers HelperBag,
+	core CoreDeps,
+	nav NavDeps,
+	ui UIDeps,
+	threading ThreadingDeps,
 	cursor SideListCursor,
 	picker ConnectionPicker,
 ) *ConnectionsController {
-	base := newBase(c, helpers)
+	base := newBase(c, HelperBag{CoreDeps: core, NavDeps: nav, UIDeps: ui, ThreadingDeps: threading})
 	ctrl := &ConnectionsController{}
 	confirm := func(_ commands.ExecCtx) error {
 		if picker == nil || base.helpers.Connect == nil {
@@ -86,11 +89,11 @@ func NewConnectionsController(
 				base.helpers.Toast.ShowOrUpdate(connectToastKey, "", connectErrToastTTL)
 				return nil
 			}
-			// Log via wrapErr for debug-log breadcrumb, then surface to
+			// Log via logErr for debug-log breadcrumb, then surface to
 			// the user as a sanitized toast and SWALLOW the error. The
 			// worker lane never crashes the MainLoop, but we keep the
 			// swallow + sanitize contract (bugs dbsavvy-a07, dbsavvy-e9i).
-			_ = base.wrapErr("connections.confirm", err)
+			base.logErr("connections.confirm", err)
 			base.helpers.Toast.ShowOrUpdate(connectToastKey,
 				config.SafeText(connectErrMessage(err)), connectErrToastTTL)
 			return nil

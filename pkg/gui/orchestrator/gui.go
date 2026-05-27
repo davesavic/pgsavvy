@@ -983,7 +983,7 @@ func (g *Gui) wireWithDriver() error {
 	if g.registry != nil && g.registry.TableInspect != nil && g.tree != nil {
 		inspectCtx := g.registry.TableInspect
 		inspectCtrl := controllers.NewTableInspectController(
-			g.deps.Common, helperBag, inspectCtx, g.tree,
+			g.deps.Common, helperBag.CoreDeps, inspectCtx, g.tree,
 		)
 		inspectCtrl.AttachToContext(&inspectCtx.BaseContext)
 		g.controllers.TableInspect = inspectCtrl
@@ -995,7 +995,7 @@ func (g *Gui) wireWithDriver() error {
 	// — because it needs a Pop-capable handle on the focus-stack.
 	if g.registry != nil && g.registry.Cheatsheet != nil && g.tree != nil {
 		cheatCtrl := controllers.NewCheatsheetController(
-			g.deps.Common, helperBag, g.registry.Cheatsheet, g.tree,
+			g.deps.Common, helperBag.CoreDeps, g.registry.Cheatsheet, g.tree,
 		)
 		cheatCtrl.AttachToContext(&g.registry.Cheatsheet.BaseContext)
 		g.controllers.Cheatsheet = cheatCtrl
@@ -1019,7 +1019,7 @@ func (g *Gui) wireWithDriver() error {
 			// commit/discard chords bind under ModeInsert. dbsavvy-tzi.3.
 			cellCtx.SetModes(g.modeStore)
 			cellCtrl := controllers.NewCellEditorController(
-				g.deps.Common, helperBag, cellCtx, g.tree, nil, nil,
+				g.deps.Common, helperBag.CoreDeps, helperBag.UIDeps, cellCtx, g.tree, nil, nil,
 			)
 			cellCtrl.AttachToContext(&cellCtx.BaseContext)
 			// dbsavvy-6lq / dbsavvy-8oo #9: picker resolves the active tab's
@@ -1040,7 +1040,7 @@ func (g *Gui) wireWithDriver() error {
 		})
 		if commitCtx := g.registry.CommitDialog; commitCtx != nil {
 			commitCtrl := controllers.NewCommitDialogController(
-				g.deps.Common, helperBag, commitCtx, g.tree,
+				g.deps.Common, helperBag.CoreDeps, helperBag.UIDeps, helperBag.EditDeps, commitCtx, g.tree,
 			)
 			commitCtrl.AttachToContext(&commitCtx.BaseContext)
 			g.controllers.CommitDialog = commitCtrl
@@ -1064,7 +1064,7 @@ func (g *Gui) wireWithDriver() error {
 		}
 		if conflictCtx := g.registry.ConflictDialog; conflictCtx != nil {
 			conflictCtrl := controllers.NewConflictDialogController(
-				g.deps.Common, helperBag, conflictCtx, g.tree,
+				g.deps.Common, helperBag.CoreDeps, conflictCtx, g.tree,
 			)
 			conflictCtrl.AttachToContext(&conflictCtx.BaseContext)
 			g.controllers.ConflictDialog = conflictCtrl
@@ -1083,7 +1083,7 @@ func (g *Gui) wireWithDriver() error {
 		}
 		if pickerCtx := g.registry.FKReversePicker; pickerCtx != nil {
 			pickerCtrl := controllers.NewFKReversePickerController(
-				g.deps.Common, helperBag, controllers.FKReversePickerDeps{
+				g.deps.Common, helperBag.CoreDeps, controllers.FKReversePickerDeps{
 					Context: pickerCtx,
 					Tree:    g.tree,
 					Runner:  g.queryRunner,

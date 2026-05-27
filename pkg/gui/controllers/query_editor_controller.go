@@ -64,8 +64,8 @@ type QueryEditorController struct {
 // (tests inject without a Common). Helpers fields the controller uses
 // (QueryRunner, ResultTabs, EditorBuffer, Toast) may individually be
 // nil; every handler nil-checks at call time.
-func NewQueryEditorController(c *common.Common, helpers HelperBag) *QueryEditorController {
-	return &QueryEditorController{baseController: newBase(c, helpers)}
+func NewQueryEditorController(c *common.Common, core CoreDeps, nav NavDeps, ui UIDeps, query QueryDeps) *QueryEditorController {
+	return &QueryEditorController{baseController: newBase(c, HelperBag{CoreDeps: core, NavDeps: nav, UIDeps: ui, QueryDeps: query})}
 }
 
 // GetKeybindings publishes the query-editor bindings under QUERY_EDITOR

@@ -286,14 +286,24 @@ func newBase(c *common.Common, helpers HelperBag) baseController {
 	return baseController{c: c, helpers: helpers}
 }
 
+// logErr emits the controller's labelled debug-log breadcrumb for err and
+// returns nothing. Use it at sites that swallow the error but still want the
+// breadcrumb, so the call no longer reads as a discarded error.
+func (b *baseController) logErr(label string, err error) {
+	if err == nil {
+		return
+	}
+	if b.helpers.Logger != nil {
+		b.helpers.Logger.Debug(fmt.Sprintf("controller %q: %v", label, err))
+	}
+}
+
 // wrapErr decorates a handler error with the controller's label.
 func (b *baseController) wrapErr(label string, err error) error {
 	if err == nil {
 		return nil
 	}
-	if b.helpers.Logger != nil {
-		b.helpers.Logger.Debug(fmt.Sprintf("controller %q: %v", label, err))
-	}
+	b.logErr(label, err)
 	return fmt.Errorf("controller %s: %w", label, err)
 }
 

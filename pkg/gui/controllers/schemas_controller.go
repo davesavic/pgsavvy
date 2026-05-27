@@ -22,25 +22,27 @@ type SchemasController struct {
 // typically point at the same *context.SchemasContext value.
 func NewSchemasController(
 	c *common.Common,
-	helpers HelperBag,
+	core CoreDeps,
+	nav NavDeps,
+	ui UIDeps,
 	cursor SideListCursor,
 	picker SchemaPicker,
 ) *SchemasController {
-	base := newBase(c, helpers)
+	base := newBase(c, HelperBag{CoreDeps: core, NavDeps: nav, UIDeps: ui})
 	ctrl := &SchemasController{}
 	// <CR> on SCHEMAS fires HelperBag.OnSchemaActivate with the
 	// cursor-selected schema name, which the orchestrator wires to a
 	// worker-goroutine LoadTables that populates the TABLES rail
 	// (dbsavvy-04n). Empty selection or nil callback → no-op.
 	onConfirm := func(_ commands.ExecCtx) error {
-		if picker == nil || helpers.OnSchemaActivate == nil {
+		if picker == nil || nav.OnSchemaActivate == nil {
 			return nil
 		}
 		name := picker.SelectedSchemaName()
 		if name == "" {
 			return nil
 		}
-		helpers.OnSchemaActivate(name)
+		nav.OnSchemaActivate(name)
 		return nil
 	}
 	ctrl.ListControllerTrait = NewListControllerTrait(base, viewName(types.SCHEMAS), cursor, picker, onConfirm)

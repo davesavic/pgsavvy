@@ -37,8 +37,8 @@ type HideOverlayController struct {
 
 // NewHideOverlayController constructs the controller. mgr may be nil
 // (test-only); handlers nil-check before dispatching.
-func NewHideOverlayController(c *common.Common, helpers HelperBag, mgr HideOverlayManager) *HideOverlayController {
-	return &HideOverlayController{baseController: newBase(c, helpers), mgr: mgr}
+func NewHideOverlayController(c *common.Common, core CoreDeps, mgr HideOverlayManager) *HideOverlayController {
+	return &HideOverlayController{baseController: newBase(c, HelperBag{CoreDeps: core}), mgr: mgr}
 }
 
 // Up moves the overlay cursor up by one.
