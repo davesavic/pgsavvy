@@ -3,6 +3,10 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"sort"
+	"strings"
+	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
@@ -196,6 +200,14 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 		})
 	}
 
+	// hq5.12: replay persisted session settings (search_path,
+	// statement_timeout, timezone, application_name) on the fresh session.
+	// Runs on the worker — the toast hint is published in the UI closure.
+	var restoreHint string
+	if profile != nil && rt.sqlSess != nil {
+		restoreHint = c.restoreSessionSettings(ctx, rt.sqlSess, profile.Name)
+	}
+
 	// --- PUBLISH PHASE: a SINGLE OnUIThread closure performs every write
 	// the MainLoop reads (activeConn, SQLSession, QueryRunner.Bind, the
 	// SCHEMAS rail items, the editor buffer, the focus push) so they
@@ -216,6 +228,10 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 		c.publishQueryEditorBuffer(editorBuf, editorOK)
 		c.publishSchemaItems(schemaItems, schemaOK)
 		c.setActiveConn(profile)
+		// hq5.12: show restore toast on the UI thread.
+		if restoreHint != "" && c.g.toastHelp != nil {
+			c.g.toastHelp.Show(restoreHint, 4*time.Second)
+		}
 		if c.g != nil && c.g.registry != nil && c.g.registry.Schemas != nil &&
 			len(c.g.registry.Schemas.Items()) != 0 {
 			// Focus the SCHEMAS rail so the user sees the loaded
@@ -546,6 +562,112 @@ func (c *connectInvoker) publishQueryRuntime(rt queryRuntime) {
 	if c.g != nil {
 		c.g.activeSQLSession = rt.sqlSess
 	}
+}
+
+// restoreSessionSettings reads persisted session settings from AppState and
+// replays allowed SET commands on the freshly opened SQLSession. Returns a
+// human-readable hint listing restored settings (empty when nothing restored).
+// Failures are logged and skipped — a partial restore is better than aborting
+// the connect. Runs on the worker goroutine (I/O phase). hq5.12.
+func (c *connectInvoker) restoreSessionSettings(ctx context.Context, sess *session.SQLSession, connID string) string {
+	if sess == nil || connID == "" || c.g == nil || c.g.deps.Store == nil {
+		return ""
+	}
+	store := c.g.deps.Store
+
+	saved := store.LastSessionSettingsSnapshot(connID)
+	if saved == nil {
+		saved = make(map[string]string)
+	}
+	if to := store.StatementTimeoutOverrideValue(connID); to != "" {
+		saved["statement_timeout"] = to
+	}
+
+	return replaySessionSettings(ctx, saved, func(ctx context.Context, sql string) error {
+		_, err := sess.Execute(ctx, models.Query{SQL: sql})
+		return err
+	}, sess.SettingsSnapshot(), c.g.deps.Common.Logger(), connID)
+}
+
+// gucAllowlist gates which GUC settings are replayed on session restore.
+// Role is excluded for security (defense against tampered persisted state).
+var gucAllowlist = map[string]bool{
+	"search_path":       true,
+	"statement_timeout": true,
+	"timezone":          true,
+	"application_name":  true,
+}
+
+// replaySessionSettings builds safe SET SQL for each allowed setting and
+// executes it. search_path schemas are identifier-quoted; statement_timeout
+// is canonicalized; string settings are single-quote escaped. Returns a
+// toast hint listing restored settings, or "" when nothing was restored.
+func replaySessionSettings(
+	ctx context.Context,
+	saved map[string]string,
+	exec func(ctx context.Context, sql string) error,
+	snap *session.SettingsSnapshot,
+	log *slog.Logger,
+	connID string,
+) string {
+	var keys []string
+	for k := range saved {
+		if gucAllowlist[k] {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys)
+
+	var restored []string
+	for _, key := range keys {
+		val := saved[key]
+		if val == "" {
+			continue
+		}
+
+		var sql string
+		switch key {
+		case "search_path":
+			parts := strings.Split(val, ",")
+			var quoted []string
+			for _, s := range parts {
+				s = strings.TrimSpace(s)
+				s = strings.Trim(s, `"`)
+				if s == "" {
+					continue
+				}
+				quoted = append(quoted, `"`+strings.ReplaceAll(s, `"`, `""`)+`"`)
+			}
+			if len(quoted) == 0 {
+				continue
+			}
+			sql = "SET search_path TO " + strings.Join(quoted, ", ")
+		case "statement_timeout":
+			canon, err := session.CanonicalizeStatementTimeout(val)
+			if err != nil {
+				log.Warn("gui: restore setting: bad statement_timeout", "connection_id", connID, "val", val, "err", err)
+				continue
+			}
+			sql = "SET statement_timeout = '" + canon + "'"
+		default:
+			sql = "SET " + key + " TO '" + strings.ReplaceAll(val, "'", "''") + "'"
+		}
+
+		if err := exec(ctx, sql); err != nil {
+			log.Warn("gui: restore setting failed", "connection_id", connID, "key", key, "sql", sql, "err", err)
+			continue
+		}
+		snap.Set(key, val)
+		restored = append(restored, key+"="+val)
+	}
+
+	if len(restored) == 0 {
+		return ""
+	}
+	return "restored: " + strings.Join(restored, ", ")
 }
 
 // capsForDriver constructs a throwaway driver via the registered Factory

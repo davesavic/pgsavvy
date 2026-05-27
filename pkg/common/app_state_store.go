@@ -3,6 +3,7 @@ package common
 import (
 	"errors"
 	"log/slog"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -320,6 +321,35 @@ func (s *AppStateStore) SetLastResultViewMode(m string) {
 	s.MutateAndSave(func(a *AppState) {
 		a.LastResultViewMode = m
 	})
+}
+
+// LastSessionSettingsSnapshot returns a defensive copy of the persisted
+// session settings map for the given connection ID. Returns nil when no entry
+// exists. Caller may mutate the returned map. hq5.12.
+func (s *AppStateStore) LastSessionSettingsSnapshot(connID string) map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state.LastSessionSettings == nil {
+		return nil
+	}
+	inner, ok := s.state.LastSessionSettings[connID]
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(inner))
+	maps.Copy(out, inner)
+	return out
+}
+
+// StatementTimeoutOverrideValue returns the persisted statement_timeout
+// override for the given connection ID, or "" when none is stored. hq5.12.
+func (s *AppStateStore) StatementTimeoutOverrideValue(connID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state.StatementTimeoutOverride == nil {
+		return ""
+	}
+	return s.state.StatementTimeoutOverride[connID]
 }
 
 // HiddenSchemasSnapshot returns a defensive copy of the hidden-schemas slice
