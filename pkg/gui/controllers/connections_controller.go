@@ -144,6 +144,7 @@ func (c *ConnectionsController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		Scope:       types.CONNECTIONS,
 		ActionID:    commands.ConnectionAdd,
 		Description: tr.Actions.AddConnection,
+		ShowInBar:   true,
 	})
 	// `r` -> refresh rail.
 	out = append(out, &types.ChordBinding{
@@ -152,6 +153,7 @@ func (c *ConnectionsController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		Scope:       types.CONNECTIONS,
 		ActionID:    listActionID(commands.RailRefresh, view),
 		Description: tr.Actions.RefreshRail,
+		ShowInBar:   true,
 	})
 
 	out = append(out, railSwitchBindings(view, tr)...)

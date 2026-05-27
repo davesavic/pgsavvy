@@ -200,6 +200,9 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			Scope:       s.scope,
 			ActionID:    s.actionID,
 			Description: s.description,
+			// dbsavvy-fow.2: flag the y/yy clipboard yank chords for the
+			// status options bar.
+			ShowInBar: s.actionID == commands.ResultYankCell || s.actionID == commands.ResultYankRow,
 		})
 	}
 	// dbsavvy-usj: rail-switch chords (1..6 + <tab>) under RESULT_GRID so

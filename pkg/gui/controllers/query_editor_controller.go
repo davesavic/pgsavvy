@@ -88,6 +88,9 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		// specs (never one OR'd mask) because ModeNormal is a zero
 		// sentinel that vanishes from a multi-bit mask (dbsavvy-8u4).
 		mode types.Mode
+		// showInBar flags this binding for the status options bar
+		// (dbsavvy-fow.2). Only the top run/explain chords are flagged.
+		showInBar bool
 	}
 	defaultMode := types.ModeNormal
 	// <leader>r runs the statement under cursor in Normal mode AND runs
@@ -100,13 +103,13 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 	// (dbsavvy-8u4).
 	visualRunModes := types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 	specs := []bspec{
-		{"<leader>r", commands.QueryRun, tr.Actions.RunQuery, defaultMode},
-		{"<leader>r", commands.QueryRun, tr.Actions.RunQuery, visualRunModes},
-		{"<leader>R", commands.QueryRunAll, tr.Actions.QueryRunAll, 0},
-		{"<leader>e", commands.QueryExplain, tr.Actions.QueryExplain, 0},
-		{"<leader>E", commands.QueryExplainAnalyze, tr.Actions.QueryExplainAnalyze, 0},
-		{"<leader>x", commands.QueryCancel, tr.Actions.CancelQuery, 0},
-		{"<leader>!", commands.QueryRunInNewTx, tr.Actions.QueryRunInNewTx, 0},
+		{"<leader>r", commands.QueryRun, tr.Actions.RunQuery, defaultMode, true},
+		{"<leader>r", commands.QueryRun, tr.Actions.RunQuery, visualRunModes, false},
+		{"<leader>R", commands.QueryRunAll, tr.Actions.QueryRunAll, 0, false},
+		{"<leader>e", commands.QueryExplain, tr.Actions.QueryExplain, 0, true},
+		{"<leader>E", commands.QueryExplainAnalyze, tr.Actions.QueryExplainAnalyze, 0, false},
+		{"<leader>x", commands.QueryCancel, tr.Actions.CancelQuery, 0, false},
+		{"<leader>!", commands.QueryRunInNewTx, tr.Actions.QueryRunInNewTx, 0, false},
 	}
 	out := make([]*types.ChordBinding, 0, len(specs)+6)
 	for _, s := range specs {
@@ -124,6 +127,7 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 			Scope:       types.QUERY_EDITOR,
 			ActionID:    s.actionID,
 			Description: s.description,
+			ShowInBar:   s.showInBar,
 		})
 	}
 	// Rail-switch bindings (digits 1-5 + <tab>) so the user can hop out

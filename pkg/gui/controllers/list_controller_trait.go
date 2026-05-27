@@ -136,6 +136,7 @@ func (l *ListControllerTrait[T]) baseBindings() []*types.ChordBinding {
 			Scope:       scope,
 			ActionID:    listActionID(commands.ListConfirm, l.viewName),
 			Description: tr.Actions.Confirm,
+			ShowInBar:   true,
 		},
 	}
 }

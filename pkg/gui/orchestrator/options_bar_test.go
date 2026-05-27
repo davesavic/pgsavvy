@@ -197,6 +197,22 @@ func TestCollectOptionsForScope_FocusedScopeIsGlobalNoDoubleCount(t *testing.T) 
 	}
 }
 
+func TestCollectOptionsForScope_ConnectionsHasAtLeastThreeHints(t *testing.T) {
+	// dbsavvy-fow.2: the CONNECTIONS rail flags its top bindings
+	// (connect/add/refresh) ShowInBar:true so the status options bar
+	// lights up. Mirror those three production leaves here and assert
+	// CollectOptionsForScope returns a non-empty slice with >=3 entries.
+	ts := buildOptionsBarTrieSet(t, []optionsBarBinding{
+		{seq: "<cr>", mode: types.ModeNormal, scope: types.CONNECTIONS, tag: "Conn", description: "Select", showInBar: true},
+		{seq: "a", mode: types.ModeNormal, scope: types.CONNECTIONS, tag: "Conn", description: "Add connection", showInBar: true},
+		{seq: "r", mode: types.ModeNormal, scope: types.CONNECTIONS, tag: "Conn", description: "Refresh rail", showInBar: true},
+	})
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.CONNECTIONS, nil)
+	if len(got) < 3 {
+		t.Fatalf("CollectOptionsForScope(CONNECTIONS) = %v (len %d), want >=3", got, len(got))
+	}
+}
+
 func TestCollectOptionsForScope_EmptyTrieSetReturnsEmpty(t *testing.T) {
 	ts := keys.NewTrieSet()
 	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
