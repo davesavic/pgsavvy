@@ -25,6 +25,9 @@ func (idx *IndexesContext) HandleRender() error {
 	deps := idx.deps
 	viewName := idx.GetViewName()
 	body := idx.renderRows()
+	if body == "" {
+		body = railEmptyPlaceholder(deps, idx.GetKey())
+	}
 	writeView(deps, func() error {
 		return deps.GuiDriver.SetContent(viewName, body)
 	})

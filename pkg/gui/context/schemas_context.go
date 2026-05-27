@@ -48,6 +48,9 @@ func (s *SchemasContext) HandleRender() error {
 	deps := s.deps
 	viewName := s.GetViewName()
 	body := s.renderRows()
+	if body == "" {
+		body = railEmptyPlaceholder(deps, s.GetKey())
+	}
 	writeView(deps, func() error {
 		return deps.GuiDriver.SetContent(viewName, body)
 	})
