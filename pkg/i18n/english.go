@@ -37,6 +37,13 @@ type TranslationSet struct {
 	// are configured.
 	EmptyConnectionsHint string
 
+	// Empty-state placeholders for the SCHEMAS/TABLES/COLUMNS/INDEXES side
+	// rails when their item list is empty (dbsavvy-fow.5 U7).
+	EmptySchemasHint string
+	EmptyTablesHint  string
+	EmptyColumnsHint string
+	EmptyIndexesHint string
+
 	// Confirmation popup shown when unhiding a previously hidden schema.
 	UnhideConfirmationTitle string
 	UnhideConfirmationBody  string
@@ -235,6 +242,11 @@ func EnglishTranslationSet() *TranslationSet {
 		FirstRunTipBody:  "Press ? at any time to see available keys. Press a to add your first connection.",
 
 		EmptyConnectionsHint: "No connections yet.\nPress a to add",
+
+		EmptySchemasHint: "(no schemas)",
+		EmptyTablesHint:  "(select a schema)",
+		EmptyColumnsHint: "(select a table)",
+		EmptyIndexesHint: "(select a table)",
 
 		UnhideConfirmationTitle: "Unhide schema?",
 		UnhideConfirmationBody:  "⚠ This schema was previously hidden. Unhide and show it again?",

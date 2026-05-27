@@ -39,6 +39,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/popup"
 	"github.com/davesavic/dbsavvy/pkg/gui/presentation"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
@@ -337,6 +338,31 @@ func (g *Gui) UseDriverForTest(d types.GuiDriver) error {
 // ExRegistry), UI helpers, controllers, registers every binding, and
 // pushes the initial CONNECTIONS context.
 //
+// railEmptyText returns the ContextTreeDeps.RailEmptyText hook: the dim
+// empty-state placeholder for the SCHEMAS/TABLES/COLUMNS/INDEXES side rails
+// (dbsavvy-fow.5 U7). Text is sourced from the TranslationSet so it stays
+// localizable, mirroring the CONNECTIONS EmptyConnectionsHint. Returns "" for
+// any other key so an unmapped rail falls through to the prior blank render.
+func railEmptyText(tr *i18n.TranslationSet) func(types.ContextKey) string {
+	return func(rail types.ContextKey) string {
+		if tr == nil {
+			return ""
+		}
+		switch rail {
+		case types.SCHEMAS:
+			return tr.EmptySchemasHint
+		case types.TABLES:
+			return tr.EmptyTablesHint
+		case types.COLUMNS:
+			return tr.EmptyColumnsHint
+		case types.INDEXES:
+			return tr.EmptyIndexesHint
+		default:
+			return ""
+		}
+	}
+}
+
 // SetManager is called FIRST (before any binding registration) because
 // gocui.Gui.SetManager wipes g.keybindings, g.views, and g.currentView
 // in its body — calling it after Register would silently delete every
@@ -458,6 +484,7 @@ func (g *Gui) wireWithDriver() error {
 	ctxDeps := types.ContextTreeDeps{
 		GuiDriver:            g.driver,
 		EmptyStateHook:       data.NewEmptyStateHook(tr, provider),
+		RailEmptyText:        railEmptyText(tr),
 		PresentationHook:     presentation.NewPresentationHook(),
 		PerRowDecorationHook: presentation.NewPerRowDecorationHook(),
 		LimitText:            presentation.NewLimitText(tr),
