@@ -88,11 +88,17 @@ func railDirectionalBindings(scope types.ContextKey, tr *i18n.TranslationSet) []
 	ctrlK := types.ChordKey{Code: 'k', Mod: types.ChordModCtrl}
 	ctrlL := types.ChordKey{Code: 'l', Mod: types.ChordModCtrl}
 	switch scope {
-	case types.CONNECTIONS, types.SCHEMAS, types.TABLES:
+	case types.CONNECTIONS, types.SCHEMAS:
 		return []*types.ChordBinding{
 			{Sequence: []types.ChordKey{ctrlK}, Scope: scope, ActionID: commands.RailSwitchUp, Description: tr.Actions.RailUp},
 			{Sequence: []types.ChordKey{ctrlJ}, Scope: scope, ActionID: commands.RailSwitchDown, Description: tr.Actions.RailDown},
 			{Sequence: []types.ChordKey{ctrlL}, Scope: scope, ActionID: commands.RailSwitchQueryEditor, Description: tr.Actions.RailQueryEditor},
+		}
+	case types.TABLES:
+		return []*types.ChordBinding{
+			{Sequence: []types.ChordKey{ctrlK}, Scope: scope, ActionID: commands.RailSwitchUp, Description: tr.Actions.RailUp},
+			{Sequence: []types.ChordKey{ctrlJ}, Scope: scope, ActionID: commands.RailSwitchDown, Description: tr.Actions.RailDown},
+			{Sequence: []types.ChordKey{ctrlL}, Scope: scope, ActionID: commands.RailSwitchResults, Description: tr.Actions.RailResults},
 		}
 	case types.QUERY_EDITOR:
 		return []*types.ChordBinding{
@@ -101,7 +107,7 @@ func railDirectionalBindings(scope types.ContextKey, tr *i18n.TranslationSet) []
 		}
 	case types.RESULT_GRID:
 		return []*types.ChordBinding{
-			{Sequence: []types.ChordKey{ctrlH}, Scope: scope, ActionID: commands.RailSwitchLastRail, Description: tr.Actions.RailLastRail},
+			{Sequence: []types.ChordKey{ctrlH}, Scope: scope, ActionID: commands.RailSwitchTables, Description: tr.Actions.RailTables},
 			{Sequence: []types.ChordKey{ctrlK}, Scope: scope, ActionID: commands.RailSwitchQueryEditor, Description: tr.Actions.RailQueryEditor},
 		}
 	}

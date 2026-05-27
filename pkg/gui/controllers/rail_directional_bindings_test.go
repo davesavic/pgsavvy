@@ -9,9 +9,10 @@ import (
 )
 
 // dbsavvy-xs0: railDirectionalBindings publishes Ctrl+H/J/K/L on the
-// scope appropriate for each pane. Side rails get Up/Down/Right, the
-// QueryEditor gets Left(=LastRail)/Right(=Results), and the result
-// grid gets Left(=QueryEditor). Anything else gets nothing.
+// scope appropriate for each pane. Connections/Schemas get Up/Down/Right-
+// to-QueryEditor; Tables gets Up/Down/Right-to-Results (physically
+// adjacent); QueryEditor gets Left(=LastRail)/Down(=Results); result
+// grid gets Left(=Tables)/Up(=QueryEditor). Anything else gets nothing.
 func TestRailDirectionalBindings_PerScope(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 
@@ -42,14 +43,14 @@ func TestRailDirectionalBindings_PerScope(t *testing.T) {
 		{"tables", types.TABLES, []want{
 			{ctrlK, commands.RailSwitchUp},
 			{ctrlJ, commands.RailSwitchDown},
-			{ctrlL, commands.RailSwitchQueryEditor},
+			{ctrlL, commands.RailSwitchResults},
 		}},
 		{"query_editor", types.QUERY_EDITOR, []want{
 			{ctrlH, commands.RailSwitchLastRail},
 			{ctrlJ, commands.RailSwitchResults},
 		}},
 		{"result_grid", types.RESULT_GRID, []want{
-			{ctrlH, commands.RailSwitchLastRail},
+			{ctrlH, commands.RailSwitchTables},
 			{ctrlK, commands.RailSwitchQueryEditor},
 		}},
 		{"global (no bindings)", types.GLOBAL, nil},
