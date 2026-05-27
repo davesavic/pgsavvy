@@ -2,6 +2,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync/atomic"
@@ -44,6 +45,7 @@ type Session struct {
 	closed     atomic.Bool
 	inFlight   atomic.Int32
 	openedAt   time.Time // session_open timestamp; used for session_close ms field
+	activeTx   *pgTransaction
 }
 
 // newSession constructs a *Session bound to pgxConn and parent. Session.ID is
@@ -568,21 +570,52 @@ func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (pl
 	return plan, nil
 }
 
-// Begin returns an untyped-nil Transaction and drivers.ErrNotImplemented in
-// v1. Returning untyped nil (not a typed-nil pointer) guarantees that
-// `tx == nil` is true for the caller.
-func (s *Session) Begin(_ context.Context, _ models.TxOptions) (drivers.Transaction, error) {
+// Begin starts a new transaction on this Session. Only one transaction may be
+// active at a time; calling Begin while a transaction is already open returns
+// an error. The returned Transaction wraps the underlying pgx.Tx. TxOptions
+// are mapped to pgx.TxOptions for isolation level, read-only, and deferrable.
+func (s *Session) Begin(ctx context.Context, opts models.TxOptions) (drivers.Transaction, error) {
 	defer s.guard()()
-	return nil, drivers.ErrNotImplemented
+	if s.InTransaction() {
+		return nil, errors.New("session: transaction already in progress")
+	}
+	pgxOpts := pgx.TxOptions{
+		IsoLevel:       pgx.TxIsoLevel(opts.IsoLevel),
+		DeferrableMode: pgx.TxDeferrableMode(boolToDeferrable(opts.Deferrable)),
+	}
+	if opts.ReadOnly {
+		pgxOpts.AccessMode = pgx.ReadOnly
+	}
+	tx, err := s.conn.BeginTx(ctx, pgxOpts)
+	if err != nil {
+		return nil, wrapPgError(err)
+	}
+	t := newPgTransaction(tx)
+	s.activeTx = t
+	return t, nil
 }
 
-// InTransaction reports whether this Session currently has an open
-// transaction. v1 has no transaction support, so this is always false.
-func (s *Session) InTransaction() bool { return false }
+// boolToDeferrable maps a boolean to the pgx deferrable mode string.
+func boolToDeferrable(d bool) string {
+	if d {
+		return string(pgx.Deferrable)
+	}
+	return string(pgx.NotDeferrable)
+}
 
-// CurrentTransaction returns the in-progress Transaction, or nil if none. v1
-// returns nil unconditionally.
-func (s *Session) CurrentTransaction() drivers.Transaction { return nil }
+// InTransaction reports whether this Session currently has an active transaction.
+func (s *Session) InTransaction() bool {
+	return s.activeTx != nil && s.activeTx.status == models.TxActive
+}
+
+// CurrentTransaction returns the in-progress Transaction, or nil if none.
+// Returns nil for terminal transactions (committed/rolled back).
+func (s *Session) CurrentTransaction() drivers.Transaction {
+	if !s.InTransaction() {
+		return nil
+	}
+	return s.activeTx
+}
 
 // Encoder returns the stateless literal encoder for this Postgres session.
 // The same singleton value is returned on every call. See pkg/drivers/pg/encoder.go.

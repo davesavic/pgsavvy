@@ -83,7 +83,12 @@ type Transaction interface {
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context) error
 	Savepoint(ctx context.Context, name string) error
+	Release(ctx context.Context, name string) error
+	RollbackTo(ctx context.Context, name string) error
+	Savepoints() []string
 	Status() models.TxStatus
+	ObserveError(err error)
+	StatementCount() int
 }
 
 // RowStream is a forward-only iterator over a result set. See DESIGN.md §11.1.

@@ -78,14 +78,6 @@ func TestSessionReleaseInFlightIdempotent(t *testing.T) {
 	s.releaseInFlight()
 }
 
-func TestSessionBeginReturnsUntypedNilOnErrNotImplemented(t *testing.T) {
-	s := newStubSession()
-	tx, err := s.Begin(context.Background(), models.TxOptions{})
-	require.Nil(t, tx)
-	require.True(t, tx == nil, "Transaction must be untyped nil, not a typed nil interface")
-	require.ErrorIs(t, err, drivers.ErrNotImplemented)
-}
-
 func TestSessionDescribeFunctionReturnsErrNotImplemented(t *testing.T) {
 	s := newStubSession()
 	fd, err := s.DescribeFunction(context.Background(), "public", "foo")
