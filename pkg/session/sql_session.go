@@ -81,6 +81,8 @@ type SQLSession struct {
 	// task dbsavvy-bwq.13.
 	fkCache     *FKCache
 	fkCacheOnce sync.Once
+
+	settings *SettingsSnapshot
 }
 
 // New constructs a SQLSession over conn + inner. inner MUST be a session
@@ -97,6 +99,7 @@ func New(conn drivers.Connection, inner drivers.Session, opts Options) *SQLSessi
 		history:  opts.HistoryRecorder,
 		logger:   opts.Logger,
 		connPwd:  opts.ConnectionPassword,
+		settings: NewSettingsSnapshot(),
 	}
 	if s.history == nil {
 		s.history = noopHistoryRecorder{}
@@ -147,6 +150,27 @@ func (s *SQLSession) InTransaction() bool { return s.inner.InTransaction() }
 
 // CurrentTransaction returns the in-progress driver Transaction, or nil.
 func (s *SQLSession) CurrentTransaction() drivers.Transaction { return s.inner.CurrentTransaction() }
+
+// SettingsSnapshot returns the session's mutable settings map.
+func (s *SQLSession) SettingsSnapshot() *SettingsSnapshot { return s.settings }
+
+// TxStatementCount returns the number of statements executed in the current
+// transaction, or 0 when no transaction is active.
+func (s *SQLSession) TxStatementCount() int {
+	if tx := s.inner.CurrentTransaction(); tx != nil {
+		return tx.StatementCount()
+	}
+	return 0
+}
+
+// SavepointNames returns the savepoint stack of the current transaction,
+// or nil when no transaction is active.
+func (s *SQLSession) SavepointNames() []string {
+	if tx := s.inner.CurrentTransaction(); tx != nil {
+		return tx.Savepoints()
+	}
+	return nil
+}
 
 // Execute runs q on the inner session, holding the queue mutex for the
 // duration. Fires HistoryRecorder.Record exactly once. The inner driver
@@ -279,6 +303,11 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 		// failure for history purposes (ctx.Canceled, driver errors, ...).
 		if !suppressLog {
 			s.recordHistory(q.SQL, durMs, rh.rowsObserved.Load(), termErr == nil)
+		}
+		if termErr != nil {
+			if tx := s.inner.CurrentTransaction(); tx != nil {
+				tx.ObserveError(termErr)
+			}
 		}
 		s.streamMu.Unlock()
 	}

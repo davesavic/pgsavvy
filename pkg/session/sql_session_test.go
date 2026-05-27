@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -469,4 +470,97 @@ func TestNew_NilLoggerUsesDiscardHandler(t *testing.T) {
 	// Smoke: any future code path that emits through s.logger would not
 	// panic with a nil dereference. We exercise it indirectly via Close,
 	// which is safe to call here.
+}
+
+func TestSQLSession_SettingsSnapshotAccessor(t *testing.T) {
+	s, _, _ := newTestSession(t, nil)
+	snap := s.SettingsSnapshot()
+	if snap == nil {
+		t.Fatal("SettingsSnapshot() returned nil")
+	}
+	snap.Set("search_path", "myschema")
+	v, ok := snap.Get("search_path")
+	if !ok || v != "myschema" {
+		t.Fatalf("Get = (%q, %v), want (\"myschema\", true)", v, ok)
+	}
+}
+
+func TestSQLSession_TxStatementCount_NoTx(t *testing.T) {
+	s, _, _ := newTestSession(t, nil)
+	if got := s.TxStatementCount(); got != 0 {
+		t.Fatalf("TxStatementCount = %d, want 0", got)
+	}
+}
+
+func TestSQLSession_SavepointNames_NoTx(t *testing.T) {
+	s, _, _ := newTestSession(t, nil)
+	if got := s.SavepointNames(); got != nil {
+		t.Fatalf("SavepointNames = %v, want nil", got)
+	}
+}
+
+func TestSQLSession_OnFinishCallsObserveError(t *testing.T) {
+	conn := &fakeConn{}
+	fs := &fakeSess{id: 50}
+	tx := &fakeTx{parent: fs}
+	fs.beginTx = tx
+	s := session.New(conn, fs, session.Options{})
+	t.Cleanup(func() { _ = s.Close() })
+
+	if _, err := s.Begin(context.Background(), models.TxOptions{}); err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+
+	streamErr := errors.New("ERROR: current transaction is aborted (SQLSTATE 25P02)")
+	errStream := &fakeRowStream{
+		qid:   models.QueryID{SessionID: 50, Nonce: 1},
+		total: 0,
+	}
+	fs.streams = []func() drivers.RowStream{func() drivers.RowStream { return errStream }}
+
+	rh, err := s.Stream(context.Background(), models.Query{SQL: "SELECT 1"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	// Drain the stream; it has 0 rows so Next returns (_, false, nil).
+	_, _, _ = rh.Rows().Next(context.Background())
+	<-rh.Done()
+
+	// finish() was called with nil termErr (clean EOF) -- ObserveError should
+	// NOT have been called.
+	tx.observeErrMu.Lock()
+	if len(tx.observeErrs) != 0 {
+		t.Fatalf("ObserveError called %d times on clean EOF, want 0", len(tx.observeErrs))
+	}
+	tx.observeErrMu.Unlock()
+	_ = rh.Rows().Close()
+
+	// Now set up a stream that terminates with an error.
+	errTermStream := &errorTermRowStream{
+		qid:     models.QueryID{SessionID: 50, Nonce: 2},
+		termErr: streamErr,
+	}
+	fs.streams = []func() drivers.RowStream{func() drivers.RowStream { return errTermStream }}
+
+	rh2, err := s.Stream(context.Background(), models.Query{SQL: "SELECT 2"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	// Next returns the error.
+	_, _, nextErr := rh2.Rows().Next(context.Background())
+	if nextErr == nil {
+		t.Fatal("expected error from Next")
+	}
+	<-rh2.Done()
+
+	tx.observeErrMu.Lock()
+	if len(tx.observeErrs) != 1 {
+		t.Fatalf("ObserveError called %d times, want 1", len(tx.observeErrs))
+	}
+	if tx.observeErrs[0] != streamErr {
+		t.Errorf("ObserveError arg = %v, want %v", tx.observeErrs[0], streamErr)
+	}
+	tx.observeErrMu.Unlock()
+	_ = rh2.Rows().Close()
 }

@@ -171,10 +171,12 @@ func (nopEncoder) EncodeLiteral(_ any, _ uint32) string { return "NULL" }
 
 // fakeTx is a minimal drivers.Transaction whose Rollback flips inTx.
 type fakeTx struct {
-	parent    *fakeSess
-	commitErr error
-	rollback  atomic.Int32
-	status    models.TxStatus
+	parent       *fakeSess
+	commitErr    error
+	rollback     atomic.Int32
+	status       models.TxStatus
+	observeErrs  []error
+	observeErrMu sync.Mutex
 }
 
 func (t *fakeTx) Commit(context.Context) error {
@@ -203,7 +205,11 @@ func (t *fakeTx) Release(context.Context, string) error     { return nil }
 func (t *fakeTx) RollbackTo(context.Context, string) error  { return nil }
 func (t *fakeTx) Savepoints() []string                      { return nil }
 func (t *fakeTx) Status() models.TxStatus                   { return t.status }
-func (t *fakeTx) ObserveError(error)                        {}
+func (t *fakeTx) ObserveError(err error) {
+	t.observeErrMu.Lock()
+	t.observeErrs = append(t.observeErrs, err)
+	t.observeErrMu.Unlock()
+}
 func (t *fakeTx) StatementCount() int                       { return 0 }
 
 // recordingHistory captures every HistoryRecorder.Record call.
@@ -238,10 +244,26 @@ func (h *recordingHistory) snapshot() []historyCall {
 	return out
 }
 
+// errorTermRowStream is a RowStream that returns termErr on the first Next
+// call, simulating a stream that terminates with an error.
+type errorTermRowStream struct {
+	qid     models.QueryID
+	termErr error
+	closed  atomic.Bool
+}
+
+func (s *errorTermRowStream) Columns() []models.ColumnMeta     { return nil }
+func (s *errorTermRowStream) QueryID() models.QueryID          { return s.qid }
+func (s *errorTermRowStream) Close() error                     { s.closed.Store(true); return nil }
+func (s *errorTermRowStream) Next(context.Context) (models.Row, bool, error) {
+	return models.Row{}, false, s.termErr
+}
+
 // Compile-time guards.
 var (
 	_ drivers.Connection  = (*fakeConn)(nil)
 	_ drivers.Session     = (*fakeSess)(nil)
 	_ drivers.RowStream   = (*fakeRowStream)(nil)
+	_ drivers.RowStream   = (*errorTermRowStream)(nil)
 	_ drivers.Transaction = (*fakeTx)(nil)
 )
