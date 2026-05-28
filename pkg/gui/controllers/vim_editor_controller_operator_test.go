@@ -383,7 +383,7 @@ func TestOperatorBindingsArePublishedInModeMask(t *testing.T) {
 	ctrl := controllers.NewVimEditorController(qec, matcher)
 	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
 
-	wantMode := types.ModeNormal | types.ModeOperatorPending |
+	wantNonNormal := types.ModeOperatorPending |
 		types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 	wantIDs := map[string]bool{
 		commands.OperatorDelete:      false,
@@ -394,21 +394,35 @@ func TestOperatorBindingsArePublishedInModeMask(t *testing.T) {
 		commands.OperatorIndentRight: false,
 		commands.OperatorIndentLeft:  false,
 	}
+	seenNormal := map[string]bool{}
+	seenNonNormal := map[string]bool{}
 	for _, kb := range kbs {
 		if _, ok := wantIDs[kb.ActionID]; !ok {
 			continue
 		}
 		wantIDs[kb.ActionID] = true
-		if kb.Mode != wantMode {
-			t.Errorf("operator %s mode = %v, want %v", kb.ActionID, kb.Mode, wantMode)
-		}
 		if kb.Scope != types.QUERY_EDITOR {
 			t.Errorf("operator %s scope = %s, want QUERY_EDITOR", kb.ActionID, kb.Scope)
+		}
+		switch kb.Mode {
+		case types.ModeNormal:
+			seenNormal[kb.ActionID] = true
+		case wantNonNormal:
+			seenNonNormal[kb.ActionID] = true
+		default:
+			t.Errorf("operator %s unexpected mode = %v", kb.ActionID, kb.Mode)
 		}
 	}
 	for id, seen := range wantIDs {
 		if !seen {
 			t.Errorf("operator %s not published", id)
+			continue
+		}
+		if !seenNormal[id] {
+			t.Errorf("operator %s missing ModeNormal binding", id)
+		}
+		if !seenNonNormal[id] {
+			t.Errorf("operator %s missing non-Normal mode binding", id)
 		}
 	}
 }

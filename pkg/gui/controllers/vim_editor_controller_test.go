@@ -53,27 +53,40 @@ func TestVimEditorControllerPublishesMotionBindings(t *testing.T) {
 		commands.MotionScreenMiddle:      false,
 		commands.MotionScreenBottom:      false,
 	}
-	// Post-wwd.7 motion bindings carry Normal | OperatorPending plus
-	// every Visual variant so motion keys in Visual mode extend
-	// Selection instead of moving the cursor.
-	wantMode := types.ModeNormal | types.ModeOperatorPending |
+	// Motion bindings produce two ChordBindings per action: one for
+	// ModeNormal (zero sentinel, can't be ORed) and one for the remaining
+	// non-Normal modes (OperatorPending + Visual variants).
+	wantNonNormal := types.ModeOperatorPending |
 		types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
+	seenNormal := map[string]bool{}
+	seenNonNormal := map[string]bool{}
 	for _, kb := range kbs {
 		if _, ok := wantActions[kb.ActionID]; !ok {
-			// Not a motion binding (visual / text-object) — skip mode check.
 			continue
 		}
 		wantActions[kb.ActionID] = true
 		if kb.Scope != types.QUERY_EDITOR {
 			t.Errorf("kb %s scope = %s, want QUERY_EDITOR", kb.ActionID, kb.Scope)
 		}
-		if kb.Mode != wantMode {
-			t.Errorf("kb %s mode = %v, want Normal|OperatorPending|Visual*", kb.ActionID, kb.Mode)
+		switch kb.Mode {
+		case types.ModeNormal:
+			seenNormal[kb.ActionID] = true
+		case wantNonNormal:
+			seenNonNormal[kb.ActionID] = true
+		default:
+			t.Errorf("kb %s unexpected mode = %v", kb.ActionID, kb.Mode)
 		}
 	}
 	for id, seen := range wantActions {
 		if !seen {
 			t.Errorf("action %q not published in VimEditor bindings", id)
+			continue
+		}
+		if !seenNormal[id] {
+			t.Errorf("action %q missing ModeNormal binding", id)
+		}
+		if !seenNonNormal[id] {
+			t.Errorf("action %q missing non-Normal mode binding", id)
 		}
 	}
 }

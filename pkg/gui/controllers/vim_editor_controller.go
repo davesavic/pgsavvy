@@ -194,19 +194,16 @@ func (c *VimEditorController) motionSpecs() []motionSpec {
 	}
 }
 
-// operatorModeMask is the Mode mask under which operator bindings fire.
-// Operators are valid in Normal (initiates op-pending), every Visual
-// variant (consumes Selection directly per Architecture Decision 4),
-// AND OperatorPending (the second key triggers the linewise variant —
-// `dd`/`yy`/`cc`/`>>`/`<<` etc.).
-const operatorModeMask = types.ModeNormal | types.ModeOperatorPending |
+// operatorModeMask is the NON-Normal Mode mask under which operator
+// bindings fire. ModeNormal (zero sentinel) cannot be ORed into a
+// bitmask — it vanishes — so Normal-mode entries are registered
+// separately in GetKeybindings.
+const operatorModeMask = types.ModeOperatorPending |
 	types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 
-// motionModeMask is the Mode mask under which motion bindings fire.
-// Visual / VisualLine / VisualBlock are added in wwd.7 so motion keys
-// (h/j/k/l/w/b/...) extend the live Selection instead of just moving
-// the cursor.
-const motionModeMask = types.ModeNormal | types.ModeOperatorPending |
+// motionModeMask is the NON-Normal Mode mask under which motion
+// bindings fire. ModeNormal is registered separately in GetKeybindings.
+const motionModeMask = types.ModeOperatorPending |
 	types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 
 // textObjectModeMask is the Mode mask under which text-object bindings
@@ -372,20 +369,22 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 	inserts := c.insertEntrySpecs()
 	histories := c.editorHistorySpecs()
 	operators := c.operatorSpecs()
-	out := make([]*types.ChordBinding, 0, len(specs)+len(textObjects)+len(visuals)+len(inserts)+len(histories)+len(operators)+1)
+	out := make([]*types.ChordBinding, 0, 2*len(specs)+len(textObjects)+len(visuals)+len(inserts)+len(histories)+2*len(operators)+2)
 	for _, s := range specs {
 		seq, err := keys.SequenceFromShorthand(s.shorthand)
 		if err != nil {
 			continue
 		}
-		out = append(out, &types.ChordBinding{
-			Sequence:    seq,
-			Mode:        motionModeMask,
-			Scope:       types.QUERY_EDITOR,
-			ActionID:    s.actionID,
-			Description: s.description,
-			Tag:         "Motion",
-		})
+		for _, mode := range []types.Mode{types.ModeNormal, motionModeMask} {
+			out = append(out, &types.ChordBinding{
+				Sequence:    seq,
+				Mode:        mode,
+				Scope:       types.QUERY_EDITOR,
+				ActionID:    s.actionID,
+				Description: s.description,
+				Tag:         "Motion",
+			})
+		}
 	}
 	for _, s := range textObjects {
 		seq, err := keys.SequenceFromShorthand(s.shorthand)
@@ -478,14 +477,16 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 				continue
 			}
 		}
-		out = append(out, &types.ChordBinding{
-			Sequence:    seq,
-			Mode:        operatorModeMask,
-			Scope:       types.QUERY_EDITOR,
-			ActionID:    s.actionID,
-			Description: s.description,
-			Tag:         "Operator",
-		})
+		for _, mode := range []types.Mode{types.ModeNormal, operatorModeMask} {
+			out = append(out, &types.ChordBinding{
+				Sequence:    seq,
+				Mode:        mode,
+				Scope:       types.QUERY_EDITOR,
+				ActionID:    s.actionID,
+				Description: s.description,
+				Tag:         "Operator",
+			})
+		}
 	}
 	// dbsavvy-bwq.Z1: `<c-x><c-o>` triggers the completion engine. Insert-
 	// only mode mask so the chord doesn't shadow Normal-mode bindings.
