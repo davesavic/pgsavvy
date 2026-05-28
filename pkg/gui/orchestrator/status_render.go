@@ -28,6 +28,12 @@ const AppStatusViewName = "status"
 // dbsavvy-85f.
 const ResultTabBarViewName = "result_tab_bar"
 
+// ResultEmptyViewName is the gocui view-name for the always-visible empty
+// state of the result pane. It sits behind any result_tab_<slot> views so
+// tab views occlude it via SetViewOnTop; when no tabs are open the empty
+// view shows through, keeping the layout stable.
+const ResultEmptyViewName = "result_empty"
+
 // ANSI SGR sequences used to give success / error toasts a
 // distinguishable foreground style at the cell-content level. gocui's
 // escape interpreter (escape.go in the vendored lazygit fork) parses

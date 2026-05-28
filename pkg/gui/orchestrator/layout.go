@@ -163,30 +163,25 @@ func (g *Gui) RunLayout(w, h int) error {
 		}
 	}
 
-	// Tier 1.5: result-tab pane (dbsavvy-66p.12). The ResultTabsHelper
-	// owns dynamic views named `result_tab_<slot>`; for each open tab
-	// we SetView at the "secondary" slot rectangle, the active tab is
-	// raised to the top via SetViewOnTop. A nil helper or empty tab
-	// list collapses to a no-op so the layout pass works pre-wire.
-	// activeTabView is the live active result-tab view name (empty when
-	// the result pane is collapsed / has no tabs). Captured here so the
-	// focus-frame swap below can follow the active tab rather than the
-	// stale focus-stack context (resolveFocusedRailName).
+	// Tier 1.5: result-tab pane. The "secondary" slot always shows a
+	// framed view so the layout is stable regardless of whether result
+	// tabs exist. When tabs are open their views paint on top; when no
+	// tabs exist the empty-state view is visible.
 	activeTabView := ""
-	if g.resultTabsH != nil {
-		if d, ok := dims["secondary"]; ok && d.X1 > d.X0 && d.Y1 > d.Y0 {
-			// Reserve the top row of the result region for a tab-bar strip
-			// when tabs are open and the pane is tall enough to keep at
-			// least one grid content row below it. The strip makes
-			// inactive tabs discoverable (dbsavvy-85f); without it only the
-			// active tab's framed title shows and the user must gt blindly
-			// to learn what else is open.
+	if d, ok := dims["secondary"]; ok && d.X1 > d.X0 && d.Y1 > d.Y0 {
+		// Baseline empty-state view — always present behind any tab views.
+		emptyView, emptyErr := g.driver.SetView(ResultEmptyViewName, d.X0, d.Y0, d.X1, d.Y1, 0)
+		if emptyErr != nil && !errors.Is(emptyErr, gocui.ErrUnknownView) {
+			return emptyErr
+		}
+		if emptyView != nil {
+			emptyView.Title = " Results "
+			rails[ResultEmptyViewName] = emptyView
+		}
+
+		if g.resultTabsH != nil {
 			contentY0 := d.Y0
 			if g.resultTabsH.Count() > 0 && d.Y1-d.Y0 >= 3 {
-				// Frameless 1-row strip, same -1/+1 Y rect trick the status
-				// bar uses below (gocui InnerHeight=1 with the visible row
-				// landing on d.Y0; the virtual border rows are never
-				// written). ErrUnknownView is the create signal, not fatal.
 				bar, err := g.driver.SetView(ResultTabBarViewName, d.X0, d.Y0-1, d.X1, d.Y0+1, 0)
 				if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
 					return err
@@ -197,29 +192,14 @@ func (g *Gui) RunLayout(w, h int) error {
 				_ = g.driver.SetContent(ResultTabBarViewName, g.resultTabsH.RenderTabBar(d.X1-d.X0))
 				contentY0 = d.Y0 + 1
 			} else {
-				// No tabs (or pane too short): drop any stale bar so it
-				// never lingers over an empty / single-row result pane.
 				_ = g.driver.DeleteView(ResultTabBarViewName)
 			}
 
 			activeTabView = g.resultTabsH.LayoutPaint(g.driver, d.X0, contentY0, d.X1, d.Y1)
-			// Attach the RESULT_GRID master editor to the active tab's
-			// view every frame so RESULT_GRID-scoped chords (gt/gT, /, n,
-			// G, ]p, [p, <leader>X, <leader>=, <leader>x, <leader>s,
-			// <leader>gH) dispatch when focus lands on a result tab.
-			// SetMasterEditor is idempotent; the editor was built once
-			// in installKeyDispatch (dbsavvy-usj).
 			if activeTabView != "" {
 				if ed, ok := g.masterEditors[types.RESULT_GRID]; ok {
 					_ = g.driver.SetMasterEditor(activeTabView, ed)
 				}
-				// Register the active tab view in the rails map so
-				// applyFocusFrameColors below can paint ActiveBorder
-				// when focus is on result_tab_<slot>; without this the
-				// highlight visibly leaves QUERY_EDITOR but never lands
-				// on the result pane. Inactive tabs are fully occluded
-				// by SetViewOnTop so their FrameColor never shows.
-				// dbsavvy-usj.
 				if v, err := g.driver.ViewByName(activeTabView); err == nil && v != nil {
 					rails[activeTabView] = v
 				}

@@ -256,23 +256,16 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 		},
 	})
 
-	// Digit 6 — push the active result tab onto the focus stack. The
-	// resolver is invoked at fire time so the dispatch always sees the
-	// current active tab. nil resolver / nil active tab silently no-ops
-	// (no toast — keystrokes that produce nothing are common in TUIs and
-	// the user gets immediate visual feedback via the focus border).
 	_ = reg.Register(&commands.Command{
 		ID:          commands.RailSwitchResults,
 		Description: commands.RailSwitchResults,
 		Handler: func(commands.ExecCtx) error {
-			if resolveResults == nil {
-				return nil
+			if resolveResults != nil {
+				if target := resolveResults(); target != nil {
+					return tree.Push(target)
+				}
 			}
-			target := resolveResults()
-			if target == nil {
-				return nil
-			}
-			return tree.Push(target)
+			return tree.Push(ctxTree.QueryEditor)
 		},
 	})
 
