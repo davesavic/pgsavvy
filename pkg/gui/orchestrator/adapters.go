@@ -856,16 +856,17 @@ func (r *reconnectInvoker) Reconnect(ctx context.Context, profile *models.Connec
 	if r.helper == nil || r.inv == nil {
 		return fmt.Errorf("reconnect: not wired")
 	}
-	// Tear down the schema-rail session.
-	r.helper.Disconnect()
-	// Tear down the query session (SQLSession). The runner's Bind/Unbind
-	// is handled inside connectInvoker.Connect's publishQueryRuntime path;
-	// calling Disconnect first clears the ConnectHelper's state so Connect
-	// can proceed without "already connected".
+	// Tear down the query session FIRST. SQLSession.Close releases its
+	// inner pool conn; if we close the pool first (helper.Disconnect) the
+	// pool's Close blocks forever waiting for that outstanding conn to be
+	// released, deadlocking the reconnect. dbsavvy-txb.
 	if r.inv.g != nil && r.inv.g.activeSQLSession != nil {
 		_ = r.inv.g.activeSQLSession.Close()
 		r.inv.g.activeSQLSession = nil
 	}
+	// Tear down the schema-rail session + pool. This also satisfies the
+	// "data: already connected (call Disconnect first)" guard in Connect.
+	r.helper.Disconnect()
 	return r.inv.Connect(ctx, profile)
 }
 

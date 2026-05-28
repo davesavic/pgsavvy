@@ -85,21 +85,27 @@ func (rc *ReconnectController) tryReconnect() error {
 
 func (rc *ReconnectController) doPingAndHandle() error {
 	err := rc.helpers.Reconnector.PingConnection(context.Background())
-	if err == nil {
-		// Connection is alive; clear the flag and reload.
-		rc.clearDisconnected()
-		rc.toast("reconnected")
-		rc.refreshSchemas()
+	if err != nil {
+		// Connection is dead — show the dialog on the UI thread.
+		if rc.helpers.OnUIThread != nil {
+			rc.helpers.OnUIThread(func() error {
+				return rc.showReconnectDialog("")
+			})
+			return nil
+		}
+		return rc.showReconnectDialog("")
+	}
+	// Server is reachable, but the SQLSession's inner pgx conn is still
+	// dead — Ping only verifies the pool can talk to the server, it does
+	// not heal the checked-out conn the session owns. Perform the full
+	// teardown+reopen via Reconnect so subsequent queries land on a live
+	// session. dbsavvy-txb.
+	profile := rc.activeProfile()
+	if profile == nil {
+		rc.toast("no active connection profile")
 		return nil
 	}
-	// Connection is dead — show the dialog on the UI thread.
-	if rc.helpers.OnUIThread != nil {
-		rc.helpers.OnUIThread(func() error {
-			return rc.showReconnectDialog("")
-		})
-		return nil
-	}
-	return rc.showReconnectDialog("")
+	return rc.doReconnect(profile)
 }
 
 // showReconnectDialog pushes the 3-choice reconnect dialog. errorPrefix
