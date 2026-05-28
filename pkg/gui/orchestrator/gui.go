@@ -829,6 +829,21 @@ func (g *Gui) wireWithDriver() error {
 			g.deps.Store.SetLastSchemaName(g.activeConnID, schema)
 		}
 		g.OnWorker(func(_ gocui.Task) error {
+			// dbsavvy-1bb: make the selected schema the live search_path so
+			// unqualified queries resolve against it and the status bar
+			// reflects the active schema. On failure (e.g. schema dropped
+			// out from under us) keep loading its tables regardless.
+			if sess := g.activeSQLSession; sess != nil {
+				sql, value := schemaSearchPathSQL(schema)
+				if _, err := sess.Execute(context.Background(), models.Query{SQL: sql}); err != nil {
+					logs.Event(g.deps.Common.Logger(), "gui", "schema_search_path_failed",
+						slog.String("schema", schema),
+						slog.String("err", err.Error()))
+				} else {
+					g.persistTrackedSetting(context.Background(), "search_path", value)
+				}
+			}
+
 			connectInv.populateTablesRail(context.Background(), schema)
 
 			// Push the refreshed TABLES context onto the focus stack so the
@@ -1452,26 +1467,7 @@ func (g *Gui) wireWithDriver() error {
 			}
 
 			if isRecognised {
-				sess.SettingsSnapshot().Set(settingKey, settingValue)
-
-				connID := g.activeConnID
-				if connID != "" && g.deps.Store != nil {
-					g.deps.Store.MutateAndSave(func(a *common.AppState) {
-						if a.LastSessionSettings == nil {
-							a.LastSessionSettings = make(map[string]map[string]string)
-						}
-						if a.LastSessionSettings[connID] == nil {
-							a.LastSessionSettings[connID] = make(map[string]string)
-						}
-						a.LastSessionSettings[connID][settingKey] = settingValue
-					})
-				}
-
-				// search_path change: refresh the schema rail.
-				// Already on a worker goroutine — call directly.
-				if settingKey == "search_path" && g.refreshHelper != nil {
-					_ = g.refreshHelper.RefreshSchemas(context.Background())
-				}
+				g.persistTrackedSetting(context.Background(), settingKey, settingValue)
 			}
 
 			toaster(fmt.Sprintf("OK: %s", fullSQL))
@@ -1654,6 +1650,48 @@ func (g *Gui) wireWithDriver() error {
 //     one for columns, one for indexes. Whichever finishes second flips
 //     loading=false on the UI thread.
 //
+// schemaSearchPathSQL builds the SET statement and the human-readable
+// snapshot value for making schema the active search_path, keeping public as
+// a fallback so unqualified references to objects in public (extension
+// functions, helpers) still resolve. The public fallback is omitted when the
+// selected schema is already public, avoiding a redundant "public, public".
+// The schema identifier is double-quote escaped to prevent SQL injection
+// (mirrors replaySessionSettings quoting). dbsavvy-1bb.
+func schemaSearchPathSQL(schema string) (sql, displayValue string) {
+	quoted := `"` + strings.ReplaceAll(schema, `"`, `""`) + `"`
+	if schema == "public" {
+		return "SET search_path TO " + quoted, schema
+	}
+	return "SET search_path TO " + quoted + ", public", schema + ", public"
+}
+
+// persistTrackedSetting records a successfully-applied session setting in the
+// snapshot and AppState so it survives reconnects and shows in the status bar,
+// and refreshes the schema rail when search_path changed. Must be called on a
+// worker goroutine. Shared by the :set handler and schema-rail selection
+// (dbsavvy-1bb).
+func (g *Gui) persistTrackedSetting(ctx context.Context, settingKey, settingValue string) {
+	if g.activeSQLSession != nil {
+		g.activeSQLSession.SettingsSnapshot().Set(settingKey, settingValue)
+	}
+
+	if connID := g.activeConnID; connID != "" && g.deps.Store != nil {
+		g.deps.Store.MutateAndSave(func(a *common.AppState) {
+			if a.LastSessionSettings == nil {
+				a.LastSessionSettings = make(map[string]map[string]string)
+			}
+			if a.LastSessionSettings[connID] == nil {
+				a.LastSessionSettings[connID] = make(map[string]string)
+			}
+			a.LastSessionSettings[connID][settingKey] = settingValue
+		})
+	}
+
+	if settingKey == "search_path" && g.refreshHelper != nil {
+		_ = g.refreshHelper.RefreshSchemas(ctx)
+	}
+}
+
 // dbsavvy-3vf.9.
 func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 	inspectCtx := g.registry.TableInspect
@@ -2028,6 +2066,10 @@ func (g *Gui) Close() error {
 		return nil
 	}
 	g.closed = true
+	// Flush the query editor buffer to disk synchronously. The MainLoop
+	// has already exited so HandleFocusLost was never fired — save the
+	// buffer directly rather than dispatching via OnWorker.
+	g.flushQueryEditorBuffer()
 	// Stop in-flight result-tab streams BEFORE draining workers. A
 	// ResultBufferManager task that has reached EOF parks forever in its
 	// post-EOF chan loop (result_buffer_manager.go) and only exits when
@@ -2137,6 +2179,36 @@ func (g *Gui) saveQueryEditorBuffer(connID, uuid, content string) {
 		}
 		return nil
 	})
+}
+
+// flushQueryEditorBuffer saves the query editor buffer to disk
+// synchronously. Called from Close() where the MainLoop has already
+// exited — HandleFocusLost never fired so saveBufferIfDirty never ran.
+// A synchronous write is safe (and desirable) here because there is no
+// UI thread to block.
+func (g *Gui) flushQueryEditorBuffer() {
+	if g.registry == nil || g.registry.QueryEditor == nil {
+		return
+	}
+	buf := g.registry.QueryEditor.Buffer()
+	if buf == nil || !buf.Dirty {
+		return
+	}
+	if g.deps.Common == nil {
+		return
+	}
+	fs := g.deps.Common.Fs
+	stateDir := g.deps.Common.StateDir
+	connID := buf.ConnectionID
+	uuid := buf.UUID
+	if fs == nil || stateDir == "" || connID == "" || uuid == "" {
+		return
+	}
+	content := buf.String()
+	if err := editor.SaveBufferContent(fs, stateDir, connID, uuid, content); err != nil {
+		g.deps.Common.Logger().Warn("gui: flush query-editor buffer on close", "err", err)
+	}
+	buf.Dirty = false
 }
 
 // hiddenSchemasForActiveConn returns the hidden-schemas list for the active
