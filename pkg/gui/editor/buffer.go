@@ -258,6 +258,16 @@ func (b *Buffer) CursorPos() Position {
 	return b.Cursor
 }
 
+func (b *Buffer) SelectionSnapshot() *Range {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.Selection == nil {
+		return nil
+	}
+	cp := *b.Selection
+	return &cp
+}
+
 // LinesCopy returns a deep copy of Lines safe to hand off to a
 // worker goroutine. Mutating the returned slice (or any Line.Runes
 // within it) does not affect the Buffer's internal state.

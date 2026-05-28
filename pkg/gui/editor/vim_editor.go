@@ -255,7 +255,11 @@ func syncViewToBuffer(v *gocui.View, buf *Buffer) {
 	if v == nil {
 		return
 	}
-	v.SetContent(highlight.Highlight(buf.String()))
+	content := highlight.Highlight(buf.String())
+	if sel := buf.SelectionSnapshot(); sel != nil {
+		content = ApplySelectionOverlay(content, *sel)
+	}
+	v.SetContent(content)
 	cur := buf.CursorPos()
 	v.SetCursor(cur.Col, cur.Line)
 }
