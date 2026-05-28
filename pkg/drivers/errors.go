@@ -72,14 +72,22 @@ func (e *QueryError) Unwrap() error {
 	return e.Raw
 }
 
-// IsConnectionDead classifies whether err indicates the underlying TCP
-// connection is dead and cannot be reused. Only transport-layer errors
-// qualify: net.OpError, io.EOF, io.ErrUnexpectedEOF. Server-returned errors
-// (pgconn.PgError, QueryError) and context errors are NOT connection-dead —
-// the connection is still usable after those.
+// IsConnectionDead classifies whether err indicates the underlying
+// connection is dead and cannot be reused.
 //
-// Moved from pkg/drivers/pg to pkg/drivers so both the session layer and
-// the controller layer can reference it without an import cycle. hq5.6.
+// Transport-layer errors (net.OpError, io.EOF, io.ErrUnexpectedEOF) are
+// the obvious cases. Three additional classes are recognised:
+//
+//   - pgx's unexported connLockError with message "conn closed" — returned
+//     after pgx has torn down the connection (e.g. post-FATAL).
+//   - A FATAL-severity QueryError — in PostgreSQL the server always closes
+//     the connection after sending FATAL (e.g. 57P01 admin_shutdown).
+//   - A raw pgconn.PgError with FATAL severity — the stream termination
+//     path passes unstructured errors; detected by the "FATAL: " prefix
+//     that pgconn.PgError.Error() always emits.
+//
+// Context errors (context.Canceled, context.DeadlineExceeded) are NOT
+// connection-dead — the wire is still usable after those.
 func IsConnectionDead(err error) bool {
 	if err == nil {
 		return false
@@ -89,6 +97,17 @@ func IsConnectionDead(err error) bool {
 		return true
 	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	msg := err.Error()
+	if msg == "conn closed" || msg == "conn uninitialized" {
+		return true
+	}
+	var qe *QueryError
+	if errors.As(err, &qe) && strings.EqualFold(qe.Severity, "FATAL") {
+		return true
+	}
+	if strings.HasPrefix(msg, "FATAL: ") {
 		return true
 	}
 	return false

@@ -293,6 +293,9 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 		if !suppressLog {
 			s.recordHistory(q.SQL, 0, 0, false)
 		}
+		if drivers.IsConnectionDead(err) {
+			s.disconnected.Store(true)
+		}
 		return nil, err
 	}
 

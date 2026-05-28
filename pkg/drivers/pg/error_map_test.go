@@ -10,6 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/davesavic/dbsavvy/pkg/drivers"
 )
 
 // TestIsStatementTimeout_DeadlineExceeded confirms a context.DeadlineExceeded
@@ -77,7 +79,13 @@ func TestIsConnectionDead(t *testing.T) {
 		{"wrapped io.EOF", fmt.Errorf("pgx: %w", io.EOF), true},
 		{"io.ErrUnexpectedEOF", io.ErrUnexpectedEOF, true},
 		{"wrapped io.ErrUnexpectedEOF", fmt.Errorf("pgx: %w", io.ErrUnexpectedEOF), true},
-		{"pgconn.PgError", &pgconn.PgError{Code: "42P01"}, false},
+		{"pgconn.PgError non-fatal", &pgconn.PgError{Code: "42P01", Severity: "ERROR"}, false},
+		{"pgconn.PgError FATAL raw", &pgconn.PgError{Code: "57P01", Severity: "FATAL", Message: "admin shutdown"}, true},
+		{"QueryError FATAL 57P01", wrapPgError(&pgconn.PgError{Code: "57P01", Severity: "FATAL"}), true},
+		{"QueryError FATAL wrapped", fmt.Errorf("outer: %w", wrapPgError(&pgconn.PgError{Code: "57P01", Severity: "FATAL"})), true},
+		{"QueryError non-FATAL", &drivers.QueryError{Raw: errors.New("x"), Severity: "ERROR"}, false},
+		{"conn closed", errors.New("conn closed"), true},
+		{"conn uninitialized", errors.New("conn uninitialized"), true},
 		{"context.DeadlineExceeded", context.DeadlineExceeded, false},
 		{"context.Canceled", context.Canceled, false},
 		{"plain error", errors.New("something"), false},
