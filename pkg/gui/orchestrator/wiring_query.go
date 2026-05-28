@@ -13,6 +13,7 @@ package orchestrator
 
 import (
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 )
 
 // editorBufferAdapter satisfies controllers.EditorBufferReader by
@@ -71,4 +72,71 @@ func (a *editorBufferAdapter) SelectionText() (string, bool) {
 		return "", false
 	}
 	return buf.SelectionText()
+}
+
+// ReplaceAll replaces the entire buffer content with text. The edit is
+// recorded in the UndoTree so `u` reverts the replacement.
+// dbsavvy-4y5.4.2.
+func (a *editorBufferAdapter) ReplaceAll(text string) error {
+	if a == nil || a.qec == nil {
+		return nil
+	}
+	buf := a.qec.Buffer()
+	if buf == nil {
+		return nil
+	}
+	lines := buf.LinesCopy()
+	if len(lines) == 0 {
+		return buf.Apply(editor.Edit{
+			Kind:  editor.EditKindInsert,
+			Range: editor.Range{Start: editor.Position{}, End: editor.Position{}},
+			Text:  text,
+		})
+	}
+	lastLine := len(lines) - 1
+	lastCol := len(lines[lastLine].Runes)
+	if err := buf.Apply(editor.Edit{
+		Kind: editor.EditKindReplace,
+		Range: editor.Range{
+			Start: editor.Position{Line: 0, Col: 0},
+			End:   editor.Position{Line: lastLine, Col: lastCol},
+		},
+		Text: text,
+	}); err != nil {
+		return err
+	}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	return nil
+}
+
+// ReplaceSelection replaces the visual selection with text. Exits
+// visual mode after the replacement. dbsavvy-4y5.4.2.
+func (a *editorBufferAdapter) ReplaceSelection(text string) error {
+	if a == nil || a.qec == nil {
+		return nil
+	}
+	buf := a.qec.Buffer()
+	if buf == nil {
+		return nil
+	}
+	sel := buf.SelectionSnapshot()
+	if sel == nil {
+		return nil
+	}
+	r := *sel
+	// Normalize: ensure Start <= End.
+	if r.End.Line < r.Start.Line || (r.End.Line == r.Start.Line && r.End.Col < r.Start.Col) {
+		r.Start, r.End = r.End, r.Start
+	}
+	start := r.Start
+	if err := buf.Apply(editor.Edit{
+		Kind:  editor.EditKindReplace,
+		Range: r,
+		Text:  text,
+	}); err != nil {
+		return err
+	}
+	buf.SetCursor(start)
+	editor.ExitVisual(buf)
+	return nil
 }

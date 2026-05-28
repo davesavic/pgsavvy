@@ -115,6 +115,8 @@ binding	scope=query_editor	key=<leader>!	mode=normal
 binding	scope=query_editor	key=<leader>E	mode=normal
 binding	scope=query_editor	key=<leader>R	mode=normal
 binding	scope=query_editor	key=<leader>e	mode=normal
+binding	scope=query_editor	key=<leader>f	mode=mode(0x1c)
+binding	scope=query_editor	key=<leader>f	mode=normal
 binding	scope=query_editor	key=<leader>r	mode=mode(0x1c)
 binding	scope=query_editor	key=<leader>r	mode=normal
 binding	scope=query_editor	key=<leader>tR	mode=normal

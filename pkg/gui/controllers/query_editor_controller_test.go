@@ -32,6 +32,8 @@ type fakeEditorBuffer struct {
 func (f *fakeEditorBuffer) BufferText() string            { return f.Text }
 func (f *fakeEditorBuffer) CursorOffset() int             { return f.Off }
 func (f *fakeEditorBuffer) SelectionText() (string, bool) { return f.Sel, f.HasSel }
+func (f *fakeEditorBuffer) ReplaceAll(_ string) error      { return nil }
+func (f *fakeEditorBuffer) ReplaceSelection(_ string) error { return nil }
 
 type fakeResultTabs struct {
 	resultCalls []resultCall

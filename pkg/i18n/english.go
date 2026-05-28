@@ -115,6 +115,7 @@ type ActionTranslations struct {
 	QueryExplain        string
 	QueryExplainAnalyze string
 	QueryRunInNewTx     string
+	QueryFormat         string
 
 	// Transaction submenu (hq5.3).
 	TxBegin               string
@@ -314,6 +315,7 @@ func EnglishTranslationSet() *TranslationSet {
 			QueryExplain:        "Explain",
 			QueryExplainAnalyze: "Explain (analyze)",
 			QueryRunInNewTx:     "Run in new transaction",
+			QueryFormat:         "Format SQL",
 
 			TxBegin:               "Begin transaction",
 			TxCommit:              "Commit transaction",

@@ -250,6 +250,8 @@ type EditorBufferReader interface {
 	BufferText() string
 	CursorOffset() int
 	SelectionText() (string, bool)
+	ReplaceAll(text string) error
+	ReplaceSelection(text string) error
 }
 
 // NoticeReporter routes server NOTICE / WARNING messages from

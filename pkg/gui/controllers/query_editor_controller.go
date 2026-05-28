@@ -11,6 +11,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor/format"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -119,6 +120,8 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		{"<leader>E", commands.QueryExplainAnalyze, tr.Actions.QueryExplainAnalyze, 0, false},
 		{"<leader>x", commands.QueryCancel, tr.Actions.CancelQuery, 0, false},
 		{"<leader>!", commands.QueryRunInNewTx, tr.Actions.QueryRunInNewTx, 0, false},
+		{"<leader>f", commands.QueryFormat, tr.Actions.QueryFormat, defaultMode, false},
+		{"<leader>f", commands.QueryFormat, tr.Actions.QueryFormat, visualRunModes, false},
 	}
 	out := make([]*types.ChordBinding, 0, len(specs)+6)
 	for _, s := range specs {
@@ -207,6 +210,13 @@ func (q *QueryEditorController) RegisterActions(reg *commands.Registry) {
 		Description: "Run statement in a new transaction",
 		Tag:         "Query",
 		Handler:     q.handleRunInNewTx,
+	})
+
+	_ = reg.Register(&commands.Command{
+		ID:          commands.QueryFormat,
+		Description: "Format SQL",
+		Tag:         "Query",
+		Handler:     q.handleFormat,
 	})
 }
 
@@ -584,6 +594,45 @@ func (q *QueryEditorController) handleCancel(_ commands.ExecCtx) error {
 	}
 	_ = runner.Cancel()
 	return nil
+}
+
+// --- Format handlers (dbsavvy-4y5.4.2) ---
+
+func (q *QueryEditorController) handleFormat(ec commands.ExecCtx) error {
+	if q.helpers.EditorBuffer == nil {
+		return nil
+	}
+	if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
+		return q.formatSelection()
+	}
+	return q.formatAll()
+}
+
+func (q *QueryEditorController) formatAll() error {
+	text := q.helpers.EditorBuffer.BufferText()
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	formatted, err := format.Format(text)
+	if err != nil {
+		q.toast("format: " + err.Error())
+		return nil
+	}
+	return q.helpers.EditorBuffer.ReplaceAll(formatted)
+}
+
+func (q *QueryEditorController) formatSelection() error {
+	text, ok := q.helpers.EditorBuffer.SelectionText()
+	if !ok || strings.TrimSpace(text) == "" {
+		q.toast("no selection")
+		return nil
+	}
+	formatted, err := format.Format(text)
+	if err != nil {
+		q.toast("format: " + err.Error())
+		return nil
+	}
+	return q.helpers.EditorBuffer.ReplaceSelection(formatted)
 }
 
 // --- Internal helpers ---

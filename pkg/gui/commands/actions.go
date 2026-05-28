@@ -135,6 +135,7 @@ const (
 	QueryExplainAnalyze = "query.explain_analyze"
 	QueryCancel         = "query.cancel"
 	QueryRunInNewTx     = "query.run_in_new_tx"
+	QueryFormat         = "query.format"
 
 	// Result-tab family — owned by ResultTabsController (dbsavvy-66p.12).
 	// Jump bindings are GLOBAL-scoped so <leader>1..9 work from any
@@ -515,6 +516,7 @@ func AllActionIDs() []string {
 		QueryExplainAnalyze,
 		QueryCancel,
 		QueryRunInNewTx,
+		QueryFormat,
 		ResultTabJump1,
 		ResultTabJump2,
 		ResultTabJump3,
