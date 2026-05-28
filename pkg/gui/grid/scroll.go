@@ -404,8 +404,8 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 			value = row.Values[c]
 		}
 		// Dirty-cell substitution: if this (rowPK, column) carries a staged
-		// edit, render the staged NewValue (decorated with the ● marker +
-		// tint) instead of the stale DB value so an unsaved edit is visible
+		// edit, render the staged NewValue (with the DirtyCellBg tint)
+		// instead of the stale DB value so an unsaved edit is visible
 		// (dbsavvy-cyh). renderCellPadded pads the plain visible string
 		// before wrapping, so a digit in the SGR prefix can never collide
 		// with a padded value.

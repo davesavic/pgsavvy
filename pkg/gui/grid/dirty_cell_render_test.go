@@ -21,27 +21,77 @@ func TestDecorateDirtyCell_NotDirtyReturnsValueUnchanged(t *testing.T) {
 	}
 }
 
-// TestDecorateDirtyCell_DirtyAppendsMarker proves the dirty path appends
-// `●` to the value. The zero Style yields no ANSI escapes so the
-// returned string is just `value●`.
-func TestDecorateDirtyCell_DirtyAppendsMarker(t *testing.T) {
+// TestDecorateDirtyCell_DirtyZeroStyleUnchanged proves the dirty path with
+// the zero Style yields no ANSI escapes and no glyph — the value is returned
+// untouched (the edit is signalled by background colour alone). dbsavvy-kvk.
+func TestDecorateDirtyCell_DirtyZeroStyleUnchanged(t *testing.T) {
 	got := DecorateDirtyCell("hello", true, theme.Style{})
-	if !strings.HasSuffix(got, dirtyCellMarker) {
-		t.Fatalf("got %q, want suffix %q", got, dirtyCellMarker)
-	}
-	if !strings.Contains(got, "hello") {
-		t.Fatalf("got %q, want substring %q", got, "hello")
+	if got != "hello" {
+		t.Fatalf("got %q, want %q (no glyph, no escape for zero style)", got, "hello")
 	}
 }
 
 // TestDecorateDirtyCell_StyleAppliesAnsiEscape proves a non-zero style
-// produces an ANSI SGR wrapper around the value+glyph. Uses the same
-// recognised colour name path as the cell renderer.
+// produces an ANSI SGR wrapper around the value, with no per-cell glyph.
+// Uses the same recognised colour name path as the cell renderer.
 func TestDecorateDirtyCell_StyleAppliesAnsiEscape(t *testing.T) {
 	got := DecorateDirtyCell("v", true, theme.Style{Fg: "red"})
-	want := "\x1b[31mv" + dirtyCellMarker + "\x1b[0m"
+	want := "\x1b[31mv\x1b[0m"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// TestAnsiBgCode maps named background colours to their basic SGR codes and
+// `#RRGGBB` hex to truecolor (48;2;R;G;B); malformed/unknown tokens collapse
+// to "" — the same fallback policy as ansiFgCode. dbsavvy-kvk.
+func TestAnsiBgCode(t *testing.T) {
+	cases := map[string]string{
+		"black":       "\x1b[40m",
+		"yellow":      "\x1b[43m",
+		"white":       "\x1b[47m",
+		"brightblack": "\x1b[100m",
+		"#5a4410":     "\x1b[48;2;90;68;16m", // muted amber dirty tint
+		"#FFFFFF":     "\x1b[48;2;255;255;255m",
+		"#abc":        "", // wrong length
+		"#gggggg":     "", // not hex
+		"":            "",
+		"bogus":       "",
+	}
+	for in, want := range cases {
+		if got := ansiBgCode(in); got != want {
+			t.Errorf("ansiBgCode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestSgrPrefixEmitsBackground proves sgrPrefixForStyle now honors the Bg
+// field (previously ignored), so a dirty-cell tint can actually render.
+// dbsavvy-kvk.
+func TestSgrPrefixEmitsBackground(t *testing.T) {
+	if got := sgrPrefixForStyle(theme.Style{Bg: "brightblack"}); got != "\x1b[100m" {
+		t.Fatalf("Bg-only style: got %q, want %q", got, "\x1b[100m")
+	}
+}
+
+// TestDirtyCellRendersBackgroundTint is the regression for dbsavvy-kvk: an
+// edited cell under the real default theme must carry a background SGR that
+// a clean cell does not, so the whole cell reads as dirty even when the
+// trailing marker is truncated by an overflowing value.
+func TestDirtyCellRendersBackgroundTint(t *testing.T) {
+	col := models.ColumnMeta{Name: "c", TypeName: "text"}
+	clean := renderCellPadded("hello", col, 10, false)
+	dirty := renderCellPadded("hello", col, 10, true)
+
+	bg := sgrPrefixForStyle(theme.Style{Bg: theme.Current().DirtyCellBg.Bg})
+	if bg == "" {
+		t.Fatalf("default theme DirtyCellBg.Bg=%q produced no SGR — theme misconfigured for 8-colour mode", theme.Current().DirtyCellBg.Bg)
+	}
+	if !strings.Contains(dirty, bg) {
+		t.Errorf("dirty cell %q missing background tint %q", dirty, bg)
+	}
+	if strings.Contains(clean, bg) {
+		t.Errorf("clean cell %q must not carry the dirty tint", clean)
 	}
 }
 
@@ -177,16 +227,18 @@ func TestRenderCellWithDirty_NotDirtyMatchesRenderCell(t *testing.T) {
 	}
 }
 
-// TestRenderCellWithDirty_DirtyAppendsMarker proves the dirty path
-// appends the marker to BOTH the visible and decorated strings so the
-// width budgeter and the SGR wrapper stay in sync.
-func TestRenderCellWithDirty_DirtyAppendsMarker(t *testing.T) {
+// TestRenderCellWithDirty_DirtyTintsDecoratedOnly proves the dirty path
+// leaves the visible string unchanged (no glyph) while layering the
+// DirtyCellBg background tint onto the decorated string. dbsavvy-kvk.
+func TestRenderCellWithDirty_DirtyTintsDecoratedOnly(t *testing.T) {
 	col := models.ColumnMeta{Name: "name", TypeName: "text"}
+	visClean, _ := renderCell("hello", col)
 	vis, dec := renderCellWithDirty("hello", col, true)
-	if !strings.HasSuffix(vis, dirtyCellMarker) {
-		t.Fatalf("visible %q must end with %q", vis, dirtyCellMarker)
+	if vis != visClean {
+		t.Fatalf("visible %q must match clean %q (no glyph)", vis, visClean)
 	}
-	if !strings.Contains(dec, dirtyCellMarker) {
-		t.Fatalf("decorated %q must contain %q", dec, dirtyCellMarker)
+	bg := ansiBgCode(theme.Current().DirtyCellBg.Bg)
+	if bg == "" || !strings.Contains(dec, bg) {
+		t.Fatalf("decorated %q must carry the dirty tint %q", dec, bg)
 	}
 }

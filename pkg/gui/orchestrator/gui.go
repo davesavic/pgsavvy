@@ -310,7 +310,10 @@ func (g *Gui) initGocui() error {
 	_ = mouseEnabled // mouse mode is configured per-binding via SetViewClickBinding; gocui has no global toggle here.
 
 	ng, err := gocui.NewGui(gocui.NewGuiOpts{
-		OutputMode:      gocui.OutputNormal,
+		// OutputTrue enables 24-bit truecolor SGR (48;2;R;G;B) so themed
+		// hex backgrounds — e.g. the muted-amber dirty-cell tint — render;
+		// tcell downsamples on terminals without truecolor. dbsavvy-kvk.
+		OutputMode:      gocui.OutputTrue,
 		SupportOverlaps: false,
 	})
 	if err != nil {

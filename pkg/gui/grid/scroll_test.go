@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
 // TestMoveCursorClampsAtEdges verifies the cursor verbs do not move past
@@ -303,9 +304,9 @@ func TestRenderDataLine_DigitInSGRPrefixDoesNotCorruptEscape(t *testing.T) {
 // TestRenderDataLine_DirtyCellShowsStagedValue verifies that once a result
 // grid is wired to a PendingEditSet (SetPendingEdits) and has a row
 // identity, renderDataLine renders a staged edit's NewValue — not the
-// stale DB value — with the dirty marker. This is the integration the A3
-// feature was missing (dbsavvy-cyh): the staged set must reach the render
-// snapshot and be looked up per cell by PK + column.
+// stale DB value — with the DirtyCellBg background tint. This is the
+// integration the A3 feature was missing (dbsavvy-cyh): the staged set must
+// reach the render snapshot and be looked up per cell by PK + column.
 func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
 	v := NewView()
 	v.SetColumns([]models.ColumnMeta{
@@ -335,20 +336,24 @@ func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
 	if !strings.Contains(line0, "bob") {
 		t.Errorf("dirty cell must render staged NewValue 'bob'; line=%q", line0)
 	}
-	if !strings.Contains(line0, "●") {
-		t.Errorf("dirty cell must carry the ● marker; line=%q", line0)
+	tint := ansiBgCode(theme.Current().DirtyCellBg.Bg)
+	if tint == "" {
+		t.Fatalf("default theme DirtyCellBg.Bg=%q produced no SGR", theme.Current().DirtyCellBg.Bg)
+	}
+	if !strings.Contains(line0, tint) {
+		t.Errorf("dirty cell must carry the DirtyCellBg tint %q; line=%q", tint, line0)
 	}
 	if strings.Contains(line0, "alice") {
 		t.Errorf("dirty cell must NOT render the stale value 'alice'; line=%q", line0)
 	}
 
-	// Row 1 (id=2): no staged edit — original value, no marker.
+	// Row 1 (id=2): no staged edit — original value, no tint.
 	line1 := renderDataLine(snap, 1, 80)
 	if !strings.Contains(line1, "carol") {
 		t.Errorf("clean row must render original value 'carol'; line=%q", line1)
 	}
-	if strings.Contains(line1, "●") {
-		t.Errorf("clean row must not carry a dirty marker; line=%q", line1)
+	if strings.Contains(line1, tint) {
+		t.Errorf("clean row must not carry the dirty tint; line=%q", line1)
 	}
 }
 

@@ -51,7 +51,7 @@ func DefaultDark() *config.ThemeConfig {
 		DiffRemovedFg:   "red",
 		DiffChangedFg:   "yellow",
 		PromptFg:        "yellow",
-		DirtyCellBg:     "#4a3818",
+		DirtyCellBg:     "on #5a4410",
 		WarnBorder:      "#d97757",
 	}
 }

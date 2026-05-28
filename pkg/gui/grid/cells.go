@@ -74,33 +74,29 @@ func renderCell(value any, col models.ColumnMeta) (visible, decorated string) {
 
 // renderCellWithDirty wraps renderCell with the dirty-cell decorator.
 // When isDirty is true the decorated string is layered with the
-// DirtyCellBg style and gains a trailing `●` glyph; visible carries the
-// glyph as well so width budgeting downstream keeps decoration in sync
-// with layout. When isDirty is false the result is identical to
-// renderCell. dbsavvy-bwq.6 (A3).
+// DirtyCellBg tint; the visible string is unchanged because the edit is
+// signalled by background colour, not a glyph. When isDirty is false the
+// result is identical to renderCell. dbsavvy-bwq.6 (A3).
 func renderCellWithDirty(value any, col models.ColumnMeta, isDirty bool) (visible, decorated string) {
 	visible, decorated = renderCell(value, col)
 	if !isDirty {
 		return visible, decorated
 	}
 	dirtyStyle := dereferenceStyle(theme.Current().DirtyCellBg)
-	visible = visible + dirtyCellMarker
 	decorated = DecorateDirtyCell(decorated, true, dirtyStyle)
 	return visible, decorated
 }
 
 // renderCellPadded renders value for col, padded to display width w, with
-// the type-aware cell style. When isDirty is true the dirty marker (`●`) is
-// appended inside the width budget and the DirtyCellBg tint is layered over
-// the cell so a staged (unsaved) edit reads as dirty. Padding the plain
+// the type-aware cell style. When isDirty is true the DirtyCellBg tint is
+// layered over the whole padded cell so a staged (unsaved) edit reads as
+// dirty — the background covers the full column width, including any
+// truncation ellipsis, so no per-cell glyph is needed. Padding the plain
 // visible string before wrapping mirrors renderDataLine's clean path so a
 // digit in the SGR prefix can never collide with a padded value.
 // dbsavvy-cyh (A3 wiring).
 func renderCellPadded(value any, col models.ColumnMeta, w int, isDirty bool) string {
 	visible := renderCellPlain(value, col)
-	if isDirty {
-		visible += dirtyCellMarker
-	}
 	padded := padRight(visible, w)
 	styled := wrapWithStyle(padded, styleForCell(value, col))
 	if isDirty {
@@ -250,6 +246,9 @@ func sgrPrefixForStyle(s theme.Style) string {
 	if s.Underline {
 		sb.WriteString(ansiUnderline)
 	}
+	if code := ansiBgCode(s.Bg); code != "" {
+		sb.WriteString(code)
+	}
 	return sb.String()
 }
 
@@ -277,6 +276,53 @@ func ansiFgCode(fg string) string {
 	default:
 		return ""
 	}
+}
+
+// ansiBgCode maps a colour token to its ANSI background SGR escape.
+// A `#RRGGBB` hex value becomes a truecolor sequence (48;2;R;G;B) —
+// honored by gocui because the TUI runs in OutputTrue (see gui.go).
+// W3C colour names fall back to the basic 40-47 / bright 100-107 codes.
+// Empty/unknown tokens collapse to "" — same fallback policy as
+// ansiFgCode. dbsavvy-kvk.
+func ansiBgCode(bg string) string {
+	if code := ansiTrueColorBg(bg); code != "" {
+		return code
+	}
+	switch strings.ToLower(bg) {
+	case "black":
+		return "\x1b[40m"
+	case "red":
+		return "\x1b[41m"
+	case "green":
+		return "\x1b[42m"
+	case "yellow":
+		return "\x1b[43m"
+	case "blue":
+		return "\x1b[44m"
+	case "magenta":
+		return "\x1b[45m"
+	case "cyan":
+		return "\x1b[46m"
+	case "white":
+		return "\x1b[47m"
+	case "brightblack":
+		return "\x1b[100m"
+	default:
+		return ""
+	}
+}
+
+// ansiTrueColorBg returns the 48;2;R;G;B background escape for a
+// `#RRGGBB` token, or "" when bg isn't a well-formed 6-digit hex colour.
+func ansiTrueColorBg(bg string) string {
+	if len(bg) != 7 || bg[0] != '#' {
+		return ""
+	}
+	rgb, err := hex.DecodeString(bg[1:])
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", rgb[0], rgb[1], rgb[2])
 }
 
 // SanitizeCellEscapes strips ANSI escape introducers and C0 control

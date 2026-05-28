@@ -7,33 +7,27 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
-// dirtyCellMarker is the single-character glyph appended to a cell that
-// carries a staged edit. The bullet sits flush against the value with no
-// separator so it stays visually attached. dbsavvy-bwq.6 (A3).
-const dirtyCellMarker = "●"
-
 // gutterModifiedMarker is the single-character glyph rendered in the row
 // gutter for any row that has at least one staged edit. Mirrors the vim
 // `:set list`-style modified marker. dbsavvy-bwq.6 (A3).
 const gutterModifiedMarker = "M"
 
-// DecorateDirtyCell returns the cell's display string with a trailing dirty
-// marker (`●`) appended and wrapped in the DirtyCellBg theme style when
-// isDirty is true. When isDirty is false the value is returned unchanged
-// — callers do not need to branch.
+// DecorateDirtyCell returns the cell's display string wrapped in the
+// DirtyCellBg theme style when isDirty is true. When isDirty is false the
+// value is returned unchanged — callers do not need to branch.
 //
 // The style argument is the dereferenced *theme.Style for DirtyCellBg
 // (typically theme.Current().DirtyCellBg). The zero Style yields no ANSI
-// escapes, so a theme that hasn't wired DirtyCellBg yet still produces the
-// `value●` marker without colour decoration. The cell-style stack already
-// applies type-aware foreground colouring upstream; this decorator only
-// adds the dirty-state tint + glyph so callers can layer it on top of the
-// already-styled value. dbsavvy-bwq.6 (A3).
+// escapes, so a theme that hasn't wired DirtyCellBg yet returns the value
+// untouched. The cell-style stack already applies type-aware foreground
+// colouring upstream; this decorator only layers the dirty-state
+// background tint on top of the already-styled value. The edit is signalled
+// by background colour alone — no per-cell glyph. dbsavvy-bwq.6 (A3).
 func DecorateDirtyCell(value string, isDirty bool, style theme.Style) string {
 	if !isDirty {
 		return value
 	}
-	return wrapWithStyle(value+dirtyCellMarker, style)
+	return wrapWithStyle(value, style)
 }
 
 // RowHasPendingEdit reports whether any edit in set matches the supplied
