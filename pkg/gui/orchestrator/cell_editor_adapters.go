@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/grid"
@@ -92,6 +93,9 @@ func (p cellEditorPicker) FormatForEdit(v any) string {
 	}
 	if s, ok := v.(string); ok {
 		return s
+	}
+	if t, ok := v.(time.Time); ok {
+		return t.Format("2006-01-02 15:04:05.999999-07:00")
 	}
 	// Array columns (text[] etc.) decode to a Go slice; seed the editor
 	// with Postgres array syntax {a,b,c} — the same string the grid

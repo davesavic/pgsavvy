@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/theme"
@@ -117,6 +118,9 @@ func renderCellPadded(value any, col models.ColumnMeta, w int, isDirty bool) str
 func renderCellPlain(value any, col models.ColumnMeta) string {
 	if value == nil {
 		return "NULL"
+	}
+	if t, ok := value.(time.Time); ok {
+		return t.Format("2006-01-02 15:04:05.999999-07:00")
 	}
 	switch classifyColumn(col) {
 	case kindBytes:
