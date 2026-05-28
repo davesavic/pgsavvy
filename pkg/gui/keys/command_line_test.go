@@ -18,16 +18,28 @@ type fakeStack struct {
 	popped  int
 	pushErr error
 	popErr  error
+	stack   []types.IBaseContext
 }
 
 func (f *fakeStack) Push(c types.IBaseContext) error {
 	f.pushed = append(f.pushed, c)
+	f.stack = append(f.stack, c)
 	return f.pushErr
 }
 
 func (f *fakeStack) Pop() error {
 	f.popped++
+	if len(f.stack) > 0 {
+		f.stack = f.stack[:len(f.stack)-1]
+	}
 	return f.popErr
+}
+
+func (f *fakeStack) PopIfTop(key types.ContextKey) error {
+	if len(f.stack) > 0 && f.stack[len(f.stack)-1].GetKey() == key {
+		return f.Pop()
+	}
+	return nil
 }
 
 // fakeHolder satisfies CommandLineHolder. Only ReadAndClearBuffer is
@@ -60,6 +72,30 @@ func (f *fakeHolder) GetKeybindings(types.KeybindingsOpts) []*types.ChordBinding
 }
 
 func (f *fakeHolder) GetMouseKeybindings(types.KeybindingsOpts) []types.MouseBinding {
+	return nil
+}
+
+type fakeContext struct {
+	key types.ContextKey
+}
+
+func (f *fakeContext) GetKey() types.ContextKey                    { return f.key }
+func (f *fakeContext) GetViewName() string                         { return string(f.key) }
+func (f *fakeContext) GetWindowName() string                       { return string(f.key) }
+func (f *fakeContext) GetKind() types.ContextKind                  { return types.TEMPORARY_POPUP }
+func (f *fakeContext) GetTitle() string                            { return "" }
+func (f *fakeContext) HandleFocus(types.OnFocusOpts) error         { return nil }
+func (f *fakeContext) HandleFocusLost(types.OnFocusLostOpts) error { return nil }
+func (f *fakeContext) HandleRender() error                         { return nil }
+func (f *fakeContext) HandleRenderToMain() error                   { return nil }
+func (f *fakeContext) HandleQuit() error                           { return nil }
+func (f *fakeContext) NeedsRerenderOnHeightChange() bool           { return false }
+func (f *fakeContext) NeedsRerenderOnWidthChange() bool            { return false }
+func (f *fakeContext) AddKeybindingsFn(types.KeybindingsFn)        {}
+func (f *fakeContext) GetKeybindings(types.KeybindingsOpts) []*types.ChordBinding {
+	return nil
+}
+func (f *fakeContext) GetMouseKeybindings(types.KeybindingsOpts) []types.MouseBinding {
 	return nil
 }
 
@@ -116,11 +152,18 @@ func TestCommandCancelCommand_NilStackNoOp(t *testing.T) {
 	}
 }
 
+// submitStack returns a fakeStack pre-seeded with holder so PopIfTop
+// finds the command_line context on top (matching real runtime state
+// where command.open pushes before command.submit fires).
+func submitStack(holder *fakeHolder) *fakeStack {
+	return &fakeStack{stack: []types.IBaseContext{holder}}
+}
+
 // --- CommandSubmitCommand ----------------------------------------------
 
 func TestCommandSubmitCommand_EmptyBufferPopsSilently(t *testing.T) {
-	stack := &fakeStack{}
 	holder := &fakeHolder{buf: ""}
+	stack := submitStack(holder)
 	toaster := &cmdLineToaster{}
 	cmd := CommandSubmitCommand(CommandLineCommandDeps{
 		Stack: stack, Context: holder, ExRegistry: NewExRegistry(), Toaster: toaster.toast,
@@ -137,8 +180,8 @@ func TestCommandSubmitCommand_EmptyBufferPopsSilently(t *testing.T) {
 }
 
 func TestCommandSubmitCommand_WhitespaceBufferPopsSilently(t *testing.T) {
-	stack := &fakeStack{}
 	holder := &fakeHolder{buf: "   \t  "}
+	stack := submitStack(holder)
 	toaster := &cmdLineToaster{}
 	cmd := CommandSubmitCommand(CommandLineCommandDeps{
 		Stack: stack, Context: holder, ExRegistry: NewExRegistry(), Toaster: toaster.toast,
@@ -155,8 +198,8 @@ func TestCommandSubmitCommand_WhitespaceBufferPopsSilently(t *testing.T) {
 }
 
 func TestCommandSubmitCommand_KnownCommandNoArgs(t *testing.T) {
-	stack := &fakeStack{}
 	holder := &fakeHolder{buf: "reload"}
+	stack := submitStack(holder)
 	reg := NewExRegistry()
 	var receivedArgs []string
 	receivedCtx := commands.ExecCtx{}
@@ -190,8 +233,8 @@ func TestCommandSubmitCommand_KnownCommandNoArgs(t *testing.T) {
 }
 
 func TestCommandSubmitCommand_KnownCommandWithArgs(t *testing.T) {
-	stack := &fakeStack{}
 	holder := &fakeHolder{buf: "reload foo bar"}
+	stack := submitStack(holder)
 	reg := NewExRegistry()
 	var receivedArgs []string
 	_ = reg.Register(ExCommand{
@@ -216,8 +259,8 @@ func TestCommandSubmitCommand_KnownCommandWithArgs(t *testing.T) {
 }
 
 func TestCommandSubmitCommand_UnknownCommandToasts(t *testing.T) {
-	stack := &fakeStack{}
 	holder := &fakeHolder{buf: "bogus arg"}
+	stack := submitStack(holder)
 	toaster := &cmdLineToaster{}
 	cmd := CommandSubmitCommand(CommandLineCommandDeps{
 		Stack: stack, Context: holder, ExRegistry: NewExRegistry(), Toaster: toaster.toast,
@@ -234,8 +277,8 @@ func TestCommandSubmitCommand_UnknownCommandToasts(t *testing.T) {
 }
 
 func TestCommandSubmitCommand_HandlerErrorToasts(t *testing.T) {
-	stack := &fakeStack{}
 	holder := &fakeHolder{buf: "reload"}
+	stack := submitStack(holder)
 	reg := NewExRegistry()
 	_ = reg.Register(ExCommand{
 		Name: "reload",
@@ -259,8 +302,8 @@ func TestCommandSubmitCommand_HandlerErrorToasts(t *testing.T) {
 }
 
 func TestCommandSubmitCommand_NilRegistryUnknown(t *testing.T) {
-	stack := &fakeStack{}
 	holder := &fakeHolder{buf: "anything"}
+	stack := submitStack(holder)
 	toaster := &cmdLineToaster{}
 	cmd := CommandSubmitCommand(CommandLineCommandDeps{
 		Stack: stack, Context: holder, Toaster: toaster.toast,
@@ -273,6 +316,33 @@ func TestCommandSubmitCommand_NilRegistryUnknown(t *testing.T) {
 	}
 	if len(toaster.messages) != 1 || !strings.Contains(toaster.messages[0], "unknown ex-command") {
 		t.Errorf("toaster messages = %v, want unknown-ex-command entry", toaster.messages)
+	}
+}
+
+func TestCommandSubmitCommand_HandlerPushSkipsPop(t *testing.T) {
+	// When an ex handler pushes a replacement context (e.g. the
+	// quit-with-tx dialog), the deferred PopIfTop must NOT pop it.
+	holder := &fakeHolder{buf: "txquit"}
+	stack := submitStack(holder)
+	dialog := &fakeContext{key: "selection"}
+	reg := NewExRegistry()
+	_ = reg.Register(ExCommand{
+		Name: "txquit",
+		Handler: func(_ []string, _ commands.ExecCtx) error {
+			return stack.Push(dialog)
+		},
+	})
+	cmd := CommandSubmitCommand(CommandLineCommandDeps{
+		Stack: stack, Context: holder, ExRegistry: reg, Toaster: func(string) {},
+	})
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if stack.popped != 0 {
+		t.Errorf("popped = %d, want 0 (dialog should stay)", stack.popped)
+	}
+	if len(stack.stack) != 2 {
+		t.Errorf("stack depth = %d, want 2 (holder + dialog)", len(stack.stack))
 	}
 }
 
@@ -335,8 +405,8 @@ func TestCommandCancelCommand_DisablesCaretAfterPop(t *testing.T) {
 }
 
 func TestCommandSubmitCommand_DisablesCaretAfterPop(t *testing.T) {
-	stack := &fakeStack{}
 	holder := &fakeHolder{buf: ""}
+	stack := submitStack(holder)
 	caret := &caretRecorder{}
 	cmd := CommandSubmitCommand(CommandLineCommandDeps{
 		Stack: stack, Context: holder, ExRegistry: NewExRegistry(), CaretToggler: caret.toggle,
@@ -355,8 +425,8 @@ func TestCommandSubmitCommand_DisablesCaretAfterPop(t *testing.T) {
 func TestCommandSubmitCommand_DisablesCaretEvenOnHandlerError(t *testing.T) {
 	// Submit's defer must run on the error path too: a failing ex-command
 	// handler must not leave the caret enabled.
-	stack := &fakeStack{}
 	holder := &fakeHolder{buf: "broken"}
+	stack := submitStack(holder)
 	reg := NewExRegistry()
 	_ = reg.Register(ExCommand{
 		Name: "broken",

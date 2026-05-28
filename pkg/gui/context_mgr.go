@@ -149,6 +149,18 @@ func (t *ContextTree) Pop() error {
 	return nil
 }
 
+// PopIfTop pops the stack only when the top context's key matches key.
+// If the top is something else (e.g. a dialog pushed by the ex handler),
+// the pop is skipped and nil is returned. This prevents a deferred pop
+// from accidentally dismissing a context pushed during command execution.
+func (t *ContextTree) PopIfTop(key types.ContextKey) error {
+	top := t.peek()
+	if top == nil || top.GetKey() != key {
+		return nil
+	}
+	return t.Pop()
+}
+
 // Replace swaps the top entry with c without firing pop/push lifecycle
 // hooks. Used for tab switches within a single window slot.
 func (t *ContextTree) Replace(c types.IBaseContext) error {

@@ -378,6 +378,7 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 	// shown for the abandoned prefix. Hide MUST be called outside
 	// m.mu, hence the deferred flag instead of an inline call here.
 	hadChordPartial := false
+	var droppedPending []Key
 
 	if scopeTrie != nil {
 		seq := append(append([]Key(nil), m.pending...), k)
@@ -386,17 +387,28 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 			return m.handleLookup(res, seq, scope, mode)
 		}
 		// Not found in scope WITH pending — clear scope pending and try
-		// global with k FRESH (D10 scope→global fall-through). If
-		// pending was non-empty we drop it now.
+		// global with the full sequence, then k FRESH (D10 scope→global
+		// fall-through). If pending was non-empty we save and drop it.
 		if len(m.pending) > 0 {
+			droppedPending = append([]Key(nil), m.pending...)
 			m.cancelPendingLocked()
 			hadChordPartial = true
 		}
 	}
 
-	// Attempt 2: global trie with k FRESH.
+	// Attempt 2: global trie. First try the full accumulated sequence
+	// (pending + k) so that chords like <leader>p resolve even when
+	// <leader> was consumed as a prefix by the scope trie. If that
+	// misses, fall back to k alone (D10 fresh-key fall-through).
 	globalTrie, _ := ts.Get(mode, types.GLOBAL)
 	if globalTrie != nil {
+		if hadChordPartial {
+			full := append(append([]Key(nil), droppedPending...), k)
+			res := globalTrie.Lookup(full)
+			if res.Found {
+				return m.handleLookup(res, full, types.GLOBAL, mode)
+			}
+		}
 		seq := []Key{k}
 		res := globalTrie.Lookup(seq)
 		if res.Found {

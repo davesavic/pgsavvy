@@ -1389,13 +1389,14 @@ func (g *Gui) wireWithDriver() error {
 	// settings pass through to normal SQL execution. hq5.8.
 	//
 	// Recognised settings whose successful SET updates the snapshot:
-	//   search_path, role, time zone / timezone, application_name.
+	//   search_path, role, time zone / timezone, application_name, statement_timeout.
 	recognisedSettings := map[string]bool{
-		"search_path":      true,
-		"role":             true,
-		"time":             true, // SET TIME ZONE — "time" is args[0], "zone" is args[1]
-		"timezone":         true,
-		"application_name": true,
+		"search_path":       true,
+		"role":              true,
+		"time":              true, // SET TIME ZONE — "time" is args[0], "zone" is args[1]
+		"timezone":          true,
+		"application_name":  true,
+		"statement_timeout": true,
 	}
 
 	setExHandler := func(args []string, _ commands.ExecCtx) error {

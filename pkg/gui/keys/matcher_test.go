@@ -314,6 +314,43 @@ func TestMatcher_ScopeToGlobalFallThroughOneKey(t *testing.T) {
 	}
 }
 
+func TestMatcher_ScopeToGlobalFallThroughChord(t *testing.T) {
+	// Regression: <leader>p is a GLOBAL chord, but from query_editor
+	// (which has <leader>t, <leader>e, etc.) the scope trie consumes
+	// <leader> as a prefix. When the second key (p) doesn't match any
+	// scope binding, the fallback must try [<space>,p] against global,
+	// not just [p] alone.
+	var fired []string
+	var mu sync.Mutex
+	scopeCmd := recordingCmd("scope.thing", &fired, &mu, nil)
+	globalChord := recordingCmd("session.search_path", &fired, &mu, nil)
+	ts := buildTrieSet(t, []trieEntry{
+		{types.ModeNormal, types.QUERY_EDITOR, []Key{keyOf(' '), keyOf('t')}, scopeCmd},
+		{types.ModeNormal, types.GLOBAL, []Key{keyOf(' '), keyOf('p')}, globalChord},
+	})
+	m := shortMatcher(t, ts, types.QUERY_EDITOR, types.ModeNormal)
+
+	if _, err := m.Dispatch(types.QUERY_EDITOR, keyOf(' ')); err != nil {
+		t.Fatalf("Dispatch leader: %v", err)
+	}
+	res, err := m.Dispatch(types.QUERY_EDITOR, keyOf('p'))
+	if err != nil {
+		t.Fatalf("Dispatch p: %v", err)
+	}
+	if res != Dispatched {
+		t.Errorf("res = %v, want Dispatched", res)
+	}
+	mu.Lock()
+	got := append([]string(nil), fired...)
+	mu.Unlock()
+	if len(got) != 1 || got[0] != "session.search_path" {
+		t.Errorf("fired = %v, want [session.search_path]", got)
+	}
+	if m.IsPartial() {
+		t.Errorf("IsPartial after global chord = true, want false")
+	}
+}
+
 func TestMatcher_CountCollectedAndPassedToHandler(t *testing.T) {
 	var gotCtx commands.ExecCtx
 	var mu sync.Mutex

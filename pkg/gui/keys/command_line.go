@@ -26,6 +26,7 @@ type CommandLineHolder interface {
 type StackOps interface {
 	Push(c types.IBaseContext) error
 	Pop() error
+	PopIfTop(key types.ContextKey) error
 }
 
 // CaretToggler flips the global terminal caret on/off. Bootstrap wires
@@ -108,11 +109,11 @@ func CommandSubmitCommand(deps CommandLineCommandDeps) *commands.Command {
 				return nil
 			}
 			line := strings.TrimSpace(deps.Context.ReadAndClearBuffer())
-			// Pop always — empty, unknown, success: same exit path.
-			// CaretToggler runs after Pop for the same reason as Cancel:
-			// caret must follow focus off COMMAND_LINE before disabling.
+			// Pop command_line only if it is still on top. An ex
+			// handler (e.g. :q with an open transaction) may push a
+			// replacement context; blind Pop() would dismiss that.
 			defer func() {
-				_ = deps.Stack.Pop()
+				_ = deps.Stack.PopIfTop(deps.Context.GetKey())
 				if deps.CaretToggler != nil {
 					deps.CaretToggler(false)
 				}
