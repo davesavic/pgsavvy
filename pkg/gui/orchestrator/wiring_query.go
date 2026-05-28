@@ -128,6 +128,13 @@ func (a *editorBufferAdapter) ReplaceSelection(text string) error {
 	if r.End.Line < r.Start.Line || (r.End.Line == r.Start.Line && r.End.Col < r.Start.Col) {
 		r.Start, r.End = r.End, r.Start
 	}
+	// LineWise ranges: convert to character-wise spanning full lines.
+	// deleteRangeLocked removes whole lines, leaving insertAtLocked
+	// with a stale Start.Col that panics on the post-delete buffer.
+	if r.LineWise {
+		r = editor.LineWiseFromVisualLine(buf, r)
+		r.LineWise = false
+	}
 	start := r.Start
 	if err := buf.Apply(editor.Edit{
 		Kind:  editor.EditKindReplace,
