@@ -5,6 +5,7 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
@@ -254,7 +255,7 @@ func syncViewToBuffer(v *gocui.View, buf *Buffer) {
 	if v == nil {
 		return
 	}
-	v.SetContent(buf.String())
+	v.SetContent(highlight.Highlight(buf.String()))
 	cur := buf.CursorPos()
 	v.SetCursor(cur.Col, cur.Line)
 }

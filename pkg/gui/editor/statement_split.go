@@ -1,105 +1,137 @@
 package editor
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
 
-// DebugLog is the package-level diagnostic hook. The orchestrator
-// wires it to common.Log.Debugf when constructing the editor surface;
-// tests may swap it for capture. Nil means no logging.
-//
-// Reason: editor functions are pure and shouldn't take a logger
-// argument, but the naive ;-splitter has a documented limitation
-// (';' inside a string literal mis-splits) that's worth surfacing
-// without UI noise.
-var DebugLog func(format string, args ...any)
+	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
+)
 
-func debugf(format string, args ...any) {
-	if DebugLog != nil {
-		DebugLog(format, args...)
-	}
-}
-
-// SplitStatements splits buf on ';' and returns the non-empty segments
-// without trimming surrounding whitespace beyond the semicolon itself.
-// The split is intentionally naive — it has no awareness of string
-// literals, line comments, dollar-quoted blocks, or escaped
-// semicolons. The SQL-aware splitter ships with the vim editor in
-// epic dbsavvy-wwd (E9).
-//
-// Documented limitation: a SQL string literal containing ';' is split
-// at the ';' inside the literal. Until E9 ships, users typing
-// statements like `SELECT ';'` will see two segments rather than one;
-// the QueryEditorController surfaces this caveat in <leader>r's help
-// text.
+// SplitStatements splits buf on SQL-aware semicolons and returns the
+// non-empty segments. Semicolons inside string literals, dollar-quoted
+// blocks, and comments are NOT treated as statement boundaries.
 //
 // An empty input or an input consisting entirely of whitespace and
-// semicolons returns a nil slice. A trailing empty segment after the
-// final ';' is dropped; intermediate empty segments are preserved
-// (callers may treat them as no-ops, but SplitStatements does not
-// pre-filter them).
+// semicolons returns a nil slice.
 func SplitStatements(buf string) []string {
 	if strings.TrimSpace(buf) == "" {
 		return nil
 	}
-	detectStringLiteralMisplit(buf)
-	parts := strings.Split(buf, ";")
-	// Drop a single trailing empty segment from a buffer that ended in
-	// ';' (the common case). The non-empty-only filter below would
-	// also drop it, but keeping that filter narrow lets us preserve
-	// genuinely-empty intermediate segments for callers that want to
-	// flag them.
-	if len(parts) > 0 && parts[len(parts)-1] == "" {
-		parts = parts[:len(parts)-1]
+
+	tokens := highlight.Tokenize(buf)
+	semis := semicolonRuneOffsets(tokens)
+
+	// No real semicolons: the whole buffer is one statement.
+	if len(semis) == 0 {
+		return []string{buf}
 	}
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if strings.TrimSpace(p) == "" {
-			continue
+
+	runes := []rune(buf)
+	var out []string
+	start := 0
+	for _, semiOff := range semis {
+		seg := string(runes[start:semiOff])
+		if strings.TrimSpace(seg) != "" {
+			out = append(out, seg)
 		}
-		out = append(out, p)
+		start = semiOff + 1
 	}
+	// Trailing segment after the last semicolon.
+	if start < len(runes) {
+		seg := string(runes[start:])
+		if strings.TrimSpace(seg) != "" {
+			out = append(out, seg)
+		}
+	}
+
 	if len(out) == 0 {
 		return nil
 	}
 	return out
 }
 
-// detectStringLiteralMisplit walks buf line-by-line and emits a
-// debug log when a line contains an unbalanced single-quote run AND
-// a `;` — which is a strong indicator that SplitStatements is about
-// to mis-split a string literal. This is purely a diagnostic; the
-// split result is unchanged. The SQL-aware splitter
-// ([[dbsavvy-wwd-highlighter]]) replaces this heuristic.
-func detectStringLiteralMisplit(buf string) {
-	if DebugLog == nil {
-		return
+// StatementRangeAt returns the [start, end) rune-offset boundaries of
+// the statement containing runeOff. Semicolons inside strings, comments,
+// and dollar-quoted blocks are ignored. runeOff is clamped into
+// [0, runeCount].
+//
+// When runeOff lands on a semicolon, the preceding statement is returned
+// (matching vim's "cursor on ;" convention).
+func StatementRangeAt(buf string, runeOff int) (start, end int) {
+	runeCount := utf8.RuneCountInString(buf)
+	if runeOff < 0 {
+		runeOff = 0
 	}
-	for lineNum, line := range strings.Split(buf, "\n") {
-		if !strings.ContainsRune(line, ';') {
-			continue
+	if runeOff > runeCount {
+		runeOff = runeCount
+	}
+
+	tokens := highlight.Tokenize(buf)
+	semis := semicolonRuneOffsets(tokens)
+
+	if len(semis) == 0 {
+		return 0, runeCount
+	}
+
+	// If runeOff lands exactly on a semicolon, treat it as belonging
+	// to the preceding statement (adjust to look left).
+	onSemi := false
+	for _, s := range semis {
+		if s == runeOff {
+			onSemi = true
+			break
 		}
-		inside := false
-		for _, r := range line {
-			switch r {
-			case '\'':
-				inside = !inside
-			case ';':
-				if inside {
-					debugf("editor.SplitStatements: line %d has ';' inside a single-quoted string; possible mis-split", lineNum+1)
-					return
-				}
+	}
+
+	if onSemi {
+		// Statement is from the previous semicolon (exclusive) to this one (exclusive).
+		start = 0
+		for _, s := range semis {
+			if s < runeOff {
+				start = s + 1
 			}
 		}
+		return start, runeOff
 	}
+
+	// Normal case: find the semicolons bracketing runeOff.
+	start = 0
+	end = runeCount
+	for _, s := range semis {
+		if s < runeOff {
+			start = s + 1
+		}
+	}
+	for _, s := range semis {
+		if s >= runeOff {
+			end = s
+			break
+		}
+	}
+
+	// When the resolved segment is empty (cursor sits just past a
+	// trailing ';'), fall back to the preceding statement — matching
+	// the original "SELECT 1;|" => "SELECT 1" behaviour.
+	if start >= end {
+		prevEnd := start - 1 // the ';' we just passed
+		prevStart := 0
+		for _, s := range semis {
+			if s < prevEnd {
+				prevStart = s + 1
+			}
+		}
+		return prevStart, prevEnd
+	}
+
+	return start, end
 }
 
 // StatementAt returns the statement under the byte offset off inside
-// buf. The result is the substring between the nearest ';' on the
-// left of off (exclusive) and the nearest ';' on the right (also
-// exclusive). off is clamped into [0, len(buf)].
+// buf. The result is the substring between the nearest SQL-aware
+// semicolons. off is clamped into [0, len(buf)].
 //
-// Returns "" when buf is empty or when the byte under off is itself a
-// ';' AND there is no non-empty preceding segment — callers should
-// treat "" as "no statement under cursor".
+// Returns "" when buf is empty or when the resolved segment is
+// whitespace-only.
 func StatementAt(buf string, off int) string {
 	if buf == "" {
 		return ""
@@ -110,30 +142,32 @@ func StatementAt(buf string, off int) string {
 	if off > len(buf) {
 		off = len(buf)
 	}
-	left := strings.LastIndexByte(buf[:off], ';')
-	right := strings.IndexByte(buf[off:], ';')
 
-	start := 0
-	if left >= 0 {
-		start = left + 1
-	}
-	end := len(buf)
-	if right >= 0 {
-		end = off + right
-	}
-	if start >= end {
-		// Cursor sits on a ';' with no content immediately preceding.
-		// Try the segment ending at the ';' on the left (if any) so
-		// "SELECT 1;|" reports "SELECT 1".
-		if left >= 0 {
-			prevStart := strings.LastIndexByte(buf[:left], ';') + 1
-			candidate := strings.TrimSpace(buf[prevStart:left])
-			if candidate != "" {
-				return candidate
+	// Convert byte offset to rune offset.
+	runeOff := utf8.RuneCountInString(buf[:off])
+
+	start, end := StatementRangeAt(buf, runeOff)
+	runes := []rune(buf)
+	seg := strings.TrimSpace(string(runes[start:end]))
+	return seg
+}
+
+// semicolonRuneOffsets walks the token stream and returns the rune
+// offsets of all semicolons that are NOT inside strings, comments, or
+// dollar-quoted blocks. Only Punctuation tokens are inspected; Chroma
+// may coalesce adjacent punctuation (e.g., ");" as one token), so we
+// scan within each Punctuation token for ';' characters.
+func semicolonRuneOffsets(tokens []highlight.Token) []int {
+	var offsets []int
+	for _, tok := range tokens {
+		if tok.Type != highlight.Punctuation {
+			continue
+		}
+		for i, r := range []rune(tok.Value) {
+			if r == ';' {
+				offsets = append(offsets, tok.RuneOffset+i)
 			}
 		}
-		return ""
 	}
-	out := strings.TrimSpace(buf[start:end])
-	return out
+	return offsets
 }

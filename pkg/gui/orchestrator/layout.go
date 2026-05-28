@@ -9,6 +9,7 @@ import (
 
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -146,7 +147,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				// screen with the origin stuck at 0 (mirrors the side-rail
 				// scrollSideRailIntoView fix from dbsavvy-f50).
 				if buf := qec.Buffer(); buf != nil {
-					v.SetContent(buf.String())
+					v.SetContent(highlight.Highlight(buf.String()))
 					cur := buf.CursorPos()
 					v.FocusPoint(cur.Col, cur.Line, true)
 				}

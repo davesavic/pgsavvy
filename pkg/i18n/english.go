@@ -381,7 +381,7 @@ func EnglishTranslationSet() *TranslationSet {
 			UnhideSchema:     "Unhide Schema",
 			ToggleShowHidden: "Toggle Show Hidden",
 
-			Reconnect:          "Reconnect",
+			Reconnect:           "Reconnect",
 			SearchPathQuickSet:  "Set search_path",
 			StatementTimeoutSet: "Set statement timeout",
 

@@ -235,52 +235,34 @@ func TestAroundStatementNoSemicolonReturnsWhole(t *testing.T) {
 	}
 }
 
-// TestAroundStatementStringLiteralMisplit pins the known limitation
-// from the naive splitter: a ';' inside a string literal splits into
-// two segments. The SQL-aware splitter (highlighter epic) fixes this.
-func TestAroundStatementStringLiteralMisplit(t *testing.T) {
+// TestAroundStatementStringLiteral verifies that a ';' inside a
+// string literal is NOT treated as a statement boundary. The
+// Chroma-token-aware splitter correctly returns the whole statement.
+func TestAroundStatementStringLiteral(t *testing.T) {
 	b := bufFromLines(`SELECT ';';`)
-	// Cursor at the start; the naive splitter sees ';' at col 8 as a
-	// statement boundary, so the FIRST around-statement is "SELECT '"
-	// plus the ';' at col 8 — range [0, 9).
 	got, ok := AroundStatement(b, Position{Line: 0, Col: 3})
 	if !ok {
 		t.Fatalf("AroundStatement string-lit ok=false")
 	}
-	want := Range{Start: Position{Line: 0, Col: 0}, End: Position{Line: 0, Col: 9}}
+	// The whole "SELECT ';'" plus trailing ';' — range [0, 11).
+	want := Range{Start: Position{Line: 0, Col: 0}, End: Position{Line: 0, Col: 11}}
 	if got != want {
-		t.Fatalf("AroundStatement string-lit = %+v, want %+v (known limitation)", got, want)
+		t.Fatalf("AroundStatement string-lit = %+v, want %+v", got, want)
 	}
 }
 
-// TestSplitStatementsDebugLogStringLiteralMisplit asserts that the
-// package-level debug hook fires when SplitStatements observes a ';'
-// inside an unterminated single-quote pair on a line.
-func TestSplitStatementsDebugLogStringLiteralMisplit(t *testing.T) {
-	var captured []string
-	prev := DebugLog
-	DebugLog = func(format string, args ...any) {
-		captured = append(captured, format)
+// TestInnerStatementStringLiteral verifies inner-statement with a
+// semicolon inside a string literal.
+func TestInnerStatementStringLiteral(t *testing.T) {
+	b := bufFromLines(`SELECT ';';`)
+	got, ok := InnerStatement(b, Position{Line: 0, Col: 3})
+	if !ok {
+		t.Fatalf("InnerStatement string-lit ok=false")
 	}
-	t.Cleanup(func() { DebugLog = prev; captured = nil })
-
-	_ = SplitStatements("SELECT ';';")
-	if len(captured) == 0 {
-		t.Fatalf("DebugLog not invoked for string-literal mis-split")
-	}
-}
-
-func TestSplitStatementsDebugLogQuietWhenBalanced(t *testing.T) {
-	var captured []string
-	prev := DebugLog
-	DebugLog = func(format string, args ...any) {
-		captured = append(captured, format)
-	}
-	t.Cleanup(func() { DebugLog = prev; captured = nil })
-
-	_ = SplitStatements("SELECT 1; SELECT 2;")
-	if len(captured) != 0 {
-		t.Fatalf("DebugLog fired on clean input: %v", captured)
+	// The inner statement is "SELECT ';'" — range [0, 10).
+	want := Range{Start: Position{Line: 0, Col: 0}, End: Position{Line: 0, Col: 10}}
+	if got != want {
+		t.Fatalf("InnerStatement string-lit = %+v, want %+v", got, want)
 	}
 }
 

@@ -95,6 +95,7 @@ func (f *fakeContext) AddKeybindingsFn(types.KeybindingsFn)        {}
 func (f *fakeContext) GetKeybindings(types.KeybindingsOpts) []*types.ChordBinding {
 	return nil
 }
+
 func (f *fakeContext) GetMouseKeybindings(types.KeybindingsOpts) []types.MouseBinding {
 	return nil
 }

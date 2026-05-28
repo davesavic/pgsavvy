@@ -7,7 +7,7 @@
 // scope and, on Insert-mode Passthrough, mutates the *Buffer directly
 // instead of delegating to gocui.DefaultEditor.
 //
-// Statement splitting (SplitStatements / StatementAt) is a naive
-// ;-split with a documented limitation around string literals — the
-// SQL-aware splitter lands later in epic dbsavvy-wwd.
+// Statement splitting (SplitStatements / StatementAt / StatementRangeAt)
+// uses Chroma-token-aware splitting: semicolons inside string literals,
+// dollar-quoted blocks, and comments are correctly ignored.
 package editor

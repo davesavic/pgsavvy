@@ -8,6 +8,7 @@ require (
 	github.com/99designs/keyring v1.2.2
 	github.com/Xuanwo/go-locale v1.1.3
 	github.com/adrg/xdg v0.5.3
+	github.com/alecthomas/chroma/v2 v2.24.1
 	github.com/gdamore/tcell/v3 v3.3.0
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/jesseduffield/lazycore v0.0.0-20221012050358-03d2e40243c5
@@ -29,6 +30,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/danieljoos/wincred v1.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/dvsekhvalnov/jose2go v1.5.0 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect

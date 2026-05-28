@@ -15,9 +15,9 @@ import (
 // Quote text-objects are line-local per vim semantics. Bracket
 // text-objects span lines and respect nesting. Paragraph follows
 // vim's blank-line definition (NOT SQL-statement). Statement is the
-// SQL ;-delimited segment via the naive splitter (documented
-// limitation: a `;` inside a string literal mis-splits — see the
-// debug log in SplitStatements).
+// SQL ;-delimited segment via Chroma-token-aware splitting (semicolons
+// inside string literals, dollar-quoted blocks, and comments are
+// correctly ignored).
 
 // InnerQuote returns the range inside the q-delimited pair surrounding
 // pos on the current line. Quotes are paired left-to-right (1st with
@@ -260,11 +260,10 @@ func AroundParagraph(b *Buffer, pos Position) (Range, bool) {
 }
 
 // InnerStatement returns the range of the SQL statement under pos,
-// excluding the trailing `;`. Boundaries are the nearest `;` to the
-// left (exclusive of leading whitespace? NO — vim `is` is mechanical:
-// statement = text between `;` delimiters as-is) and the nearest `;`
-// to the right. When pos sits ON a `;`, the preceding statement is
-// returned.
+// excluding the trailing `;`. Boundaries are SQL-aware semicolons
+// (semicolons inside string literals, dollar-quoted blocks, and
+// comments are ignored). When pos sits ON a `;`, the preceding
+// statement is returned.
 func InnerStatement(b *Buffer, pos Position) (Range, bool) {
 	return statementRange(b, pos, false)
 }
@@ -279,6 +278,40 @@ func statementRange(b *Buffer, pos Position, around bool) (Range, bool) {
 	if empty(b) {
 		return Range{}, false
 	}
+
+	// Convert Position to flat rune offset in the buffer string.
+	buf := b.String()
+	runeOff := posToRuneOffset(b, pos)
+
+	start, end := StatementRangeAt(buf, runeOff)
+	runes := []rune(buf)
+
+	startPos := runeOffsetToPos(b, start)
+	endPos := runeOffsetToPos(b, end)
+
+	if !around {
+		if !posLess(startPos, endPos) && startPos != endPos {
+			return Range{}, false
+		}
+		return Range{Start: startPos, End: endPos}, true
+	}
+
+	// Around: include the trailing ';' and expand leading whitespace.
+	hasSemi := end < len(runes) && runes[end] == ';'
+	if hasSemi {
+		endPos = runeOffsetToPos(b, end+1)
+	}
+	startPos = expandLeadingWhitespace(b, startPos)
+
+	if !posLess(startPos, endPos) && startPos != endPos {
+		return Range{}, false
+	}
+	return Range{Start: startPos, End: endPos}, true
+}
+
+// posToRuneOffset converts a buffer Position to a flat rune offset
+// within the newline-joined buffer string.
+func posToRuneOffset(b *Buffer, pos Position) int {
 	line := pos.Line
 	col := pos.Col
 	if line < 0 {
@@ -289,112 +322,32 @@ func statementRange(b *Buffer, pos Position, around bool) (Range, bool) {
 		line = len(b.Lines) - 1
 		col = len(b.Lines[line].Runes)
 	}
-	onSemicolon := col < len(b.Lines[line].Runes) && b.Lines[line].Runes[col] == ';'
-	var (
-		left, right           Position
-		leftFound, rightFound bool
-	)
-	if onSemicolon {
-		// The ';' under the cursor is the right boundary of the
-		// preceding statement; scan for the previous ';' (if any) as
-		// the left boundary.
-		right = Position{Line: line, Col: col}
-		rightFound = true
-		left, leftFound = scanCharBackward(b, line, col, ';')
-	} else {
-		left, leftFound = scanCharBackward(b, line, col, ';')
-		right, rightFound = scanCharForward(b, line, col, ';')
+	off := 0
+	for i := 0; i < line; i++ {
+		off += len(b.Lines[i].Runes) + 1 // +1 for '\n'
 	}
-	var start Position
-	if leftFound {
-		start = stepAfter(b, left)
-	} else {
-		start = Position{Line: 0, Col: 0}
+	if col > len(b.Lines[line].Runes) {
+		col = len(b.Lines[line].Runes)
 	}
-	var end Position
-	if rightFound {
-		end = right
-	} else {
-		last := len(b.Lines) - 1
-		end = Position{Line: last, Col: len(b.Lines[last].Runes)}
-	}
-	if !around {
-		if !posLess(start, end) && start != end {
-			return Range{}, false
-		}
-		return Range{Start: start, End: end}, true
-	}
-	if leftFound {
-		start = expandLeadingWhitespace(b, start)
-	}
-	if rightFound {
-		end = stepAfter(b, end)
-	}
-	if !posLess(start, end) && start != end {
-		return Range{}, false
-	}
-	return Range{Start: start, End: end}, true
+	off += col
+	return off
 }
 
-// scanCharForward scans from (line, col) inclusive for the first
-// occurrence of c. Returns the matching Position and true; false when
-// not found.
-func scanCharForward(b *Buffer, line, col int, c rune) (Position, bool) {
-	for l := line; l < len(b.Lines); l++ {
-		runes := b.Lines[l].Runes
-		start := 0
-		if l == line {
-			start = col
-			if start < 0 {
-				start = 0
-			}
+// runeOffsetToPos converts a flat rune offset back to a buffer Position.
+func runeOffsetToPos(b *Buffer, off int) Position {
+	if off <= 0 {
+		return Position{Line: 0, Col: 0}
+	}
+	remaining := off
+	for i, l := range b.Lines {
+		lineLen := len(l.Runes)
+		if remaining <= lineLen {
+			return Position{Line: i, Col: remaining}
 		}
-		for i := start; i < len(runes); i++ {
-			if runes[i] == c {
-				return Position{Line: l, Col: i}, true
-			}
-		}
+		remaining -= lineLen + 1 // +1 for '\n'
 	}
-	return Position{}, false
-}
-
-// scanCharBackward scans backward from (line, col) (exclusive of the
-// rune AT (line, col)) for the first occurrence of c. Returns the
-// matching Position and true; false when not found.
-func scanCharBackward(b *Buffer, line, col int, c rune) (Position, bool) {
-	for l := line; l >= 0; l-- {
-		runes := b.Lines[l].Runes
-		end := len(runes)
-		if l == line {
-			end = col
-			if end > len(runes) {
-				end = len(runes)
-			}
-		}
-		for i := end - 1; i >= 0; i-- {
-			if runes[i] == c {
-				return Position{Line: l, Col: i}, true
-			}
-		}
-	}
-	return Position{}, false
-}
-
-// stepAfter returns the position immediately after p — one rune to
-// the right, wrapping to the next line's column 0 at end-of-line.
-// Used to convert a delimiter position into the position just past
-// it.
-func stepAfter(b *Buffer, p Position) Position {
-	if p.Line < 0 || p.Line >= len(b.Lines) {
-		return p
-	}
-	if p.Col < len(b.Lines[p.Line].Runes) {
-		return Position{Line: p.Line, Col: p.Col + 1}
-	}
-	if p.Line+1 < len(b.Lines) {
-		return Position{Line: p.Line + 1, Col: 0}
-	}
-	return p
+	last := len(b.Lines) - 1
+	return Position{Line: last, Col: len(b.Lines[last].Runes)}
 }
 
 // expandLeadingWhitespace walks p leftward across same-line whitespace
