@@ -197,6 +197,8 @@ const (
 	ResultCursorUp        = "result.cursor.up"
 	ResultCursorLeft      = "result.cursor.left"
 	ResultCursorRight     = "result.cursor.right"
+	ResultColFirst        = "result.col.first"
+	ResultColLast         = "result.col.last"
 	ResultJumpFirst       = "result.jump.first"
 	ResultJumpLast        = "result.jump.last"
 	ResultHalfPageDown    = "result.half_page.down"
@@ -547,6 +549,8 @@ func AllActionIDs() []string {
 		ResultCursorUp,
 		ResultCursorLeft,
 		ResultCursorRight,
+		ResultColFirst,
+		ResultColLast,
 		ResultJumpFirst,
 		ResultJumpLast,
 		ResultHalfPageDown,

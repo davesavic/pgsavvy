@@ -3117,6 +3117,8 @@ func (h *ResultTabsHelper) CursorLeft() { h.withActiveGrid(func(g *grid.View) { 
 func (h *ResultTabsHelper) CursorRight() {
 	h.withActiveGrid(func(g *grid.View) { g.HorizScrollRight() })
 }
+func (h *ResultTabsHelper) ColFirst()     { h.withActiveGrid(func(g *grid.View) { g.JumpColFirst() }) }
+func (h *ResultTabsHelper) ColLast()      { h.withActiveGrid(func(g *grid.View) { g.JumpColLast() }) }
 func (h *ResultTabsHelper) JumpFirst()    { h.withActiveGrid(func(g *grid.View) { g.JumpFirst() }) }
 func (h *ResultTabsHelper) JumpLast()     { h.withActiveGrid(func(g *grid.View) { g.JumpLast() }) }
 func (h *ResultTabsHelper) HalfPageDown() { h.withActiveGrid(func(g *grid.View) { g.HalfPageDown() }) }

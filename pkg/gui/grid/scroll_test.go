@@ -52,6 +52,28 @@ func TestMoveCursorClampsAtEdges(t *testing.T) {
 	require.Equal(t, 1, c, "cursor col must clamp to len(cols)-1")
 }
 
+// TestJumpColFirstLast moves the cursor to the first / last column in
+// grid mode (the 0 / $ chords). dbsavvy-2fq.
+func TestJumpColFirstLast(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{
+		{Name: "c0", TypeName: "text"},
+		{Name: "c1", TypeName: "text"},
+		{Name: "c2", TypeName: "text"},
+	})
+	v.AppendRows([]models.Row{{Values: []any{"a", "b", "c"}}})
+
+	// $ from col 0 lands on the last column.
+	v.JumpColLast()
+	_, c := v.CursorPosition()
+	require.Equal(t, 2, c, "JumpColLast must land on len(cols)-1")
+
+	// 0 from the last column lands back on col 0.
+	v.JumpColFirst()
+	_, c = v.CursorPosition()
+	require.Equal(t, 0, c, "JumpColFirst must land on col 0")
+}
+
 // TestHalfPageDown_Step verifies HalfPageDown advances by ResultPageSize/2
 // when there's enough room, and clamps to the last row otherwise.
 func TestHalfPageDown_Step(t *testing.T) {

@@ -207,6 +207,34 @@ func (v *View) HorizScrollRight() {
 	v.mu.Unlock()
 }
 
+// JumpColFirst moves the cursor to the first column (0). In expanded
+// mode it resets the 1-D horizontal scroll, mirroring HorizScrollLeft.
+// dbsavvy-2fq.
+func (v *View) JumpColFirst() {
+	if v.ViewMode() != ViewModeGrid {
+		v.mu.Lock()
+		v.colOffset = 0
+		v.mu.Unlock()
+		return
+	}
+	v.mu.Lock()
+	v.cursorCol = 0
+	v.mu.Unlock()
+}
+
+// JumpColLast moves the cursor to the last configured column ($). It is
+// a no-op in expanded mode, which has a single logical column. dbsavvy-2fq.
+func (v *View) JumpColLast() {
+	if v.ViewMode() != ViewModeGrid {
+		return
+	}
+	v.mu.Lock()
+	if len(v.cols) > 0 {
+		v.cursorCol = len(v.cols) - 1
+	}
+	v.mu.Unlock()
+}
+
 // JumpFirst moves the cursor to row 0 (gg). In expanded mode this also
 // resets the wrapped-line offset so the first record starts at the top.
 func (v *View) JumpFirst() {

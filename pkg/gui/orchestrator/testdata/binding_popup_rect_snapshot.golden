@@ -202,7 +202,9 @@ binding	scope=query_editor	key={	mode=mode(0x3c)
 binding	scope=query_editor	key={	mode=normal
 binding	scope=query_editor	key=}	mode=mode(0x3c)
 binding	scope=query_editor	key=}	mode=normal
+binding	scope=result_grid	key=$	mode=normal
 binding	scope=result_grid	key=/	mode=normal
+binding	scope=result_grid	key=0	mode=normal
 binding	scope=result_grid	key=1	mode=normal
 binding	scope=result_grid	key=2	mode=normal
 binding	scope=result_grid	key=3	mode=normal
@@ -235,6 +237,7 @@ binding	scope=result_grid	key=V	mode=normal
 binding	scope=result_grid	key=[p	mode=normal
 binding	scope=result_grid	key=]G	mode=normal
 binding	scope=result_grid	key=]p	mode=normal
+binding	scope=result_grid	key=b	mode=normal
 binding	scope=result_grid	key=gD	mode=normal
 binding	scope=result_grid	key=gT	mode=normal
 binding	scope=result_grid	key=gd	mode=normal
@@ -246,6 +249,7 @@ binding	scope=result_grid	key=j	mode=normal
 binding	scope=result_grid	key=k	mode=normal
 binding	scope=result_grid	key=l	mode=normal
 binding	scope=result_grid	key=n	mode=normal
+binding	scope=result_grid	key=w	mode=normal
 binding	scope=result_grid	key=y	mode=normal
 binding	scope=result_grid	key=yy	mode=normal
 binding	scope=schemas	key=1	mode=normal

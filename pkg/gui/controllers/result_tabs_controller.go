@@ -79,6 +79,8 @@ type ResultTabsManager interface {
 	CursorUp()
 	CursorLeft()
 	CursorRight()
+	ColFirst()
+	ColLast()
 	JumpFirst()
 	JumpLast()
 	HalfPageDown()
@@ -172,6 +174,12 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"k", commands.ResultCursorUp, tr.Actions.ResultCursorUp, types.RESULT_GRID},
 		{"h", commands.ResultCursorLeft, tr.Actions.ResultCursorLeft, types.RESULT_GRID},
 		{"l", commands.ResultCursorRight, tr.Actions.ResultCursorRight, types.RESULT_GRID},
+		// dbsavvy-2fq: vim column motions. 0/$ jump to the first/last
+		// column; w/b are single-column aliases of l/h.
+		{"0", commands.ResultColFirst, tr.Actions.ResultColFirst, types.RESULT_GRID},
+		{"$", commands.ResultColLast, tr.Actions.ResultColLast, types.RESULT_GRID},
+		{"w", commands.ResultCursorRight, tr.Actions.ResultCursorRight, types.RESULT_GRID},
+		{"b", commands.ResultCursorLeft, tr.Actions.ResultCursorLeft, types.RESULT_GRID},
 		{"gg", commands.ResultJumpFirst, tr.Actions.ResultJumpFirst, types.RESULT_GRID},
 		{"<c-d>", commands.ResultHalfPageDown, tr.Actions.ResultHalfPageDown, types.RESULT_GRID},
 		{"<c-u>", commands.ResultHalfPageUp, tr.Actions.ResultHalfPageUp, types.RESULT_GRID},
@@ -465,6 +473,8 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 	r.registerMotionHandler(reg, commands.ResultCursorUp, tr.Actions.ResultCursorUp, func() { r.mgr.CursorUp() })
 	r.registerMotionHandler(reg, commands.ResultCursorLeft, tr.Actions.ResultCursorLeft, func() { r.mgr.CursorLeft() })
 	r.registerMotionHandler(reg, commands.ResultCursorRight, tr.Actions.ResultCursorRight, func() { r.mgr.CursorRight() })
+	r.registerMotionHandler(reg, commands.ResultColFirst, tr.Actions.ResultColFirst, func() { r.mgr.ColFirst() })
+	r.registerMotionHandler(reg, commands.ResultColLast, tr.Actions.ResultColLast, func() { r.mgr.ColLast() })
 	r.registerMotionHandler(reg, commands.ResultJumpFirst, tr.Actions.ResultJumpFirst, func() { r.mgr.JumpFirst() })
 	r.registerMotionHandler(reg, commands.ResultJumpLast, tr.Actions.ResultJumpLast, func() { r.mgr.JumpLast() })
 	r.registerMotionHandler(reg, commands.ResultHalfPageDown, tr.Actions.ResultHalfPageDown, func() { r.mgr.HalfPageDown() })

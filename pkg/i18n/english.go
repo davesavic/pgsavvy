@@ -174,6 +174,8 @@ type ActionTranslations struct {
 	ResultCursorUp        string
 	ResultCursorLeft      string
 	ResultCursorRight     string
+	ResultColFirst        string
+	ResultColLast         string
 	ResultJumpFirst       string
 	ResultJumpLast        string
 	ResultHalfPageDown    string
@@ -365,6 +367,8 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultCursorUp:        "Cursor up",
 			ResultCursorLeft:      "Cursor left",
 			ResultCursorRight:     "Cursor right",
+			ResultColFirst:        "Jump to first column",
+			ResultColLast:         "Jump to last column",
 			ResultJumpFirst:       "Jump to first row",
 			ResultJumpLast:        "Jump to last row",
 			ResultHalfPageDown:    "Half page down",
