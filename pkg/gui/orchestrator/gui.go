@@ -825,6 +825,9 @@ func (g *Gui) wireWithDriver() error {
 			}
 			return
 		}
+		if g.deps.Store != nil && g.activeConnID != "" {
+			g.deps.Store.SetLastSchemaName(g.activeConnID, schema)
+		}
 		g.OnWorker(func(_ gocui.Task) error {
 			connectInv.populateTablesRail(context.Background(), schema)
 
@@ -1620,6 +1623,9 @@ func (g *Gui) wireWithDriver() error {
 		return err
 	}
 
+	// dbsavvy-dl7.5: auto-connect to persisted last profile (async).
+	g.autoConnectLastProfile(connectInv)
+
 	// dbsavvy-56u.2: push the first-run welcome tip on top of CONNECTIONS
 	// when the user has never dismissed it AND has no profiles. The
 	// FIRST_RUN_TIP context is a PERSISTENT_POPUP so subsequent popup
@@ -1718,6 +1724,8 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 // the preview cheap on large tables.
 const defaultTablePreviewLimit = 100
 
+const autoConnectTimeout = 10 * time.Second
+
 // buildOnTableActivate wires the TABLES <CR> handler: run a bounded
 // "SELECT * FROM <qualified table>" through the QueryEditorController's
 // run path and push the active result tab onto the focus stack so the
@@ -1728,6 +1736,9 @@ func (g *Gui) buildOnTableActivate(_ *connectInvoker) func(*models.Table) error 
 	fn := func(table *models.Table) error {
 		if table == nil || g.controllers == nil || g.controllers.QueryEditor == nil {
 			return nil
+		}
+		if g.deps.Store != nil && g.activeConnID != "" {
+			g.deps.Store.SetLastTableName(g.activeConnID, table.Name)
 		}
 		sql := fmt.Sprintf("SELECT * FROM %s LIMIT %d",
 			pg.QuoteQualified(table.Schema, table.Name), defaultTablePreviewLimit)
@@ -1747,17 +1758,17 @@ func (g *Gui) buildOnTableActivate(_ *connectInvoker) func(*models.Table) error 
 }
 
 // restoreConnectionsCursor positions the CONNECTIONS rail cursor on the
-// profile whose Name matches AppState.LastConnectionID. No-op when the
-// registry is unwired, the AppState is missing, LastConnectionID is
-// empty, or no matching profile lives in the rail. dbsavvy-56u.1.
+// profile whose Name matches the persisted LastConnectionID. No-op when the
+// registry is unwired, the Store is nil, LastConnectionID is empty, or no
+// matching profile lives in the rail. dbsavvy-56u.1, dbsavvy-dl7.1.
 func (g *Gui) restoreConnectionsCursor() {
 	if g == nil || g.registry == nil || g.registry.Connections == nil {
 		return
 	}
-	if g.deps.Common == nil || g.deps.Common.AppState == nil {
+	if g.deps.Store == nil {
 		return
 	}
-	last := g.deps.Common.AppState.LastConnectionID
+	last := g.deps.Store.LastConnectionIDSnapshot()
 	if last == "" {
 		return
 	}
@@ -1771,6 +1782,54 @@ func (g *Gui) restoreConnectionsCursor() {
 			return
 		}
 	}
+}
+
+// autoConnectLastProfile triggers an async Connect to the persisted
+// LastConnectionID profile on app startup. Suppressed when the first-run
+// tip should show, or when restoreConnectionsCursor didn't match a saved
+// profile. Failed connects surface as error toasts. dbsavvy-dl7.5.
+func (g *Gui) autoConnectLastProfile(connectInv *connectInvoker) {
+	if g.deps.Store == nil {
+		return
+	}
+	if data.ShouldShowFirstRunTip(g.deps.Store, g.deps.ConnectionsProvider) {
+		return
+	}
+	if g.registry == nil || g.registry.Connections == nil {
+		return
+	}
+	last := g.deps.Store.LastConnectionIDSnapshot()
+	if last == "" {
+		return
+	}
+	item := g.registry.Connections.SelectedItem()
+	if item == nil {
+		return
+	}
+	profile, ok := item.(*models.Connection)
+	if !ok || profile == nil || profile.Name != last {
+		if g.deps.Common != nil {
+			logs.Event(g.deps.Common.Logger(), "gui", "auto_connect_skip",
+				slog.String("reason", "profile_not_found"),
+				slog.String("saved_id", last))
+		}
+		return
+	}
+	if g.deps.Common != nil {
+		logs.Event(g.deps.Common.Logger(), "gui", "auto_connect_start",
+			slog.String("profile", profile.Name))
+	}
+	connectFn := func(_ gocui.Task) error {
+		ctx, cancel := context.WithTimeout(context.Background(), autoConnectTimeout)
+		defer cancel()
+		err := connectInv.Connect(ctx, profile)
+		if err != nil && g.toastHelp != nil {
+			g.toastHelp.ShowOrUpdate("auto_connect",
+				config.SafeText(err.Error()), matcherToastTTL)
+		}
+		return nil
+	}
+	g.OnWorker(connectFn)
 }
 
 // refreshConnectionsRail re-loads the connection profiles from
@@ -2080,23 +2139,19 @@ func (g *Gui) saveQueryEditorBuffer(connID, uuid, content string) {
 	})
 }
 
-// hiddenSchemasForActiveConn returns AppState.HiddenSchemas[activeConnID]
-// for SchemasContext.renderRows (dbsavvy-56u.4). Nil / empty Common,
-// AppState, or active connection ID collapse to a nil slice so the
-// context applies no runtime filter — matching the test-wiring contract.
+// hiddenSchemasForActiveConn returns the hidden-schemas list for the active
+// connection via the Store snapshot accessor (dbsavvy-56u.4, dbsavvy-dl7.1).
+// Nil Store or empty activeConnID collapse to nil so the context applies no
+// runtime filter — matching the test-wiring contract.
 func (g *Gui) hiddenSchemasForActiveConn() []string {
-	if g == nil || g.deps.Common == nil {
-		return nil
-	}
-	state := g.deps.Common.AppState
-	if state == nil {
+	if g == nil || g.deps.Store == nil {
 		return nil
 	}
 	connID := g.activeConnID
 	if connID == "" {
 		return nil
 	}
-	return state.HiddenSchemas[connID]
+	return g.deps.Store.HiddenSchemasSnapshot(connID)
 }
 
 // HelperBagForTest returns the HelperBag the most recent wireWithDriver

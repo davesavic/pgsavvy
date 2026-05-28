@@ -54,6 +54,8 @@ func TestFoundationSmoke(t *testing.T) {
 	c.AppState.HiddenColumns = map[string]map[string][]string{"conn-1": {"users": {"password"}}}
 	c.AppState.StatementTimeoutOverride = map[string]string{"conn-1": "30s"}
 	c.AppState.LastSessionSettings = map[string]map[string]string{"conn-1": {"search_path": "public"}}
+	c.AppState.LastSchemaName = map[string]string{"conn-1": "public"}
+	c.AppState.LastTableName = map[string]string{"conn-1": "users"}
 	// dbsavvy-uv0.7: populate the remaining scalar fields so the round-
 	// trip exercises every AppState entry instead of only the maps.
 	c.AppState.LastTheme = "default-dark"

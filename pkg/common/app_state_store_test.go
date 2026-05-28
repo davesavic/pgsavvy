@@ -254,6 +254,121 @@ func TestIsStartupTipsSeenAndStamp(t *testing.T) {
 	require.False(t, b.StartupTipsSeenAt.IsZero(), "persisted timestamp non-zero")
 }
 
+// TestStoreGetOrCreateBufferUUID_PersistsAcrossLoad is the regression test
+// for dbsavvy-lrh: the editor buffer UUID must round-trip through disk so
+// the same .sql file is reused on the next run. Before the fix the UUID was
+// minted into Common.AppState (an unwired phantom) and never reached
+// last_buffer_uuids on disk, so each startup generated a fresh UUID and
+// orphaned the previous buffer file.
+func TestStoreGetOrCreateBufferUUID_PersistsAcrossLoad(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	clk := newFakeClock()
+	const connID = "localhost"
+
+	s := NewAppStateStore(fs, "/state.yml", clk)
+	first := s.GetOrCreateBufferUUID(connID)
+	require.NotEmpty(t, first, "first call must generate a UUID")
+
+	// Idempotent within the same store instance.
+	require.Equal(t, first, s.GetOrCreateBufferUUID(connID), "same connID returns same UUID")
+
+	// Flush the debounced save and tear down the store, simulating app exit.
+	clk.Advance(DebounceWindow + time.Millisecond)
+	require.NoError(t, s.Flush())
+	require.NoError(t, s.Close())
+
+	// Fresh store + Load() — simulates the next app start. The previously
+	// minted UUID must come back so LoadBuffer reads the persisted .sql file
+	// rather than orphaning it.
+	s2 := NewAppStateStore(fs, "/state.yml", clk)
+	defer func() { _ = s2.Close() }()
+	require.NoError(t, s2.Load())
+	require.Equal(t, first, s2.GetOrCreateBufferUUID(connID),
+		"UUID must persist across store reload (dbsavvy-lrh)")
+}
+
+func TestStoreGetOrCreateBufferUUID_EmptyConnID(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	clk := newFakeClock()
+	s := NewAppStateStore(fs, "/state.yml", clk)
+	defer func() { _ = s.Close() }()
+
+	require.Empty(t, s.GetOrCreateBufferUUID(""), "empty connID returns empty UUID")
+}
+
+func TestLastConnectionIDSnapshot(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	clk := newFakeClock()
+	s := NewAppStateStore(fs, "/state.yml", clk)
+	defer func() { _ = s.Close() }()
+
+	require.Empty(t, s.LastConnectionIDSnapshot(), "fresh store returns empty")
+
+	s.MutateAndSave(func(a *AppState) { a.LastConnectionID = "my-db" })
+	require.Equal(t, "my-db", s.LastConnectionIDSnapshot())
+}
+
+func TestLastSchemaNameSnapshot(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	clk := newFakeClock()
+	s := NewAppStateStore(fs, "/state.yml", clk)
+	defer func() { _ = s.Close() }()
+
+	require.Empty(t, s.LastSchemaNameSnapshot("conn1"), "fresh store returns empty")
+
+	s.SetLastSchemaName("conn1", "public")
+	require.Equal(t, "public", s.LastSchemaNameSnapshot("conn1"))
+	require.Empty(t, s.LastSchemaNameSnapshot("conn2"), "different connID returns empty")
+	require.Empty(t, s.LastSchemaNameSnapshot(""), "empty connID returns empty")
+}
+
+func TestLastTableNameSnapshot(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	clk := newFakeClock()
+	s := NewAppStateStore(fs, "/state.yml", clk)
+	defer func() { _ = s.Close() }()
+
+	require.Empty(t, s.LastTableNameSnapshot("conn1"), "fresh store returns empty")
+
+	s.SetLastTableName("conn1", "users")
+	require.Equal(t, "users", s.LastTableNameSnapshot("conn1"))
+	require.Empty(t, s.LastTableNameSnapshot("conn2"), "different connID returns empty")
+}
+
+func TestDeepCopyIsolatesNewMapFields(t *testing.T) {
+	orig := &AppState{
+		LastSchemaName: map[string]string{"c1": "public"},
+		LastTableName:  map[string]string{"c1": "users"},
+	}
+	cp := deepCopyAppState(orig)
+
+	cp.LastSchemaName["c1"] = "modified"
+	cp.LastTableName["c1"] = "modified"
+
+	require.Equal(t, "public", orig.LastSchemaName["c1"], "deep copy must isolate LastSchemaName")
+	require.Equal(t, "users", orig.LastTableName["c1"], "deep copy must isolate LastTableName")
+}
+
+func TestSchemaTableNameRoundTrip(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	clk := newFakeClock()
+	s := NewAppStateStore(fs, "/state.yml", clk)
+
+	s.SetLastSchemaName("conn1", "public")
+	s.SetLastTableName("conn1", "users")
+
+	clk.Advance(DebounceWindow + time.Millisecond)
+	require.NoError(t, s.Flush())
+	require.NoError(t, s.Close())
+
+	s2 := NewAppStateStore(fs, "/state.yml", clk)
+	defer func() { _ = s2.Close() }()
+	require.NoError(t, s2.Load())
+
+	require.Equal(t, "public", s2.LastSchemaNameSnapshot("conn1"))
+	require.Equal(t, "users", s2.LastTableNameSnapshot("conn1"))
+}
+
 func TestMutateAfterCloseReturnsErr(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	clk := newFakeClock()

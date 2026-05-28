@@ -186,6 +186,10 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	schemaItems, schemaOK := c.loadSchemaItems(ctx)
 	editorBuf, editorOK := c.loadQueryEditorBuffer(profile)
 
+	// dbsavvy-dl7.4: direct-load saved schema/table state on worker.
+	savedSchemaIdx, tableItems, savedTableIdx := c.loadSavedSchemaTableState(
+		ctx, profile, schemaItems, schemaOK)
+
 	// dbsavvy-56u.1: stamp LastConnectionID and prepend the profile to
 	// the LIFO RecentConnectionIDs ring (deduped, capped at 10). Persisted
 	// AFTER wireQueryRuntimeIO succeeds so a wiring rollback does not leave
@@ -228,14 +232,25 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 		c.publishQueryEditorBuffer(editorBuf, editorOK)
 		c.publishSchemaItems(schemaItems, schemaOK)
 		c.setActiveConn(profile)
+		// dbsavvy-dl7.4: restore schema cursor + publish tables.
+		if savedSchemaIdx >= 0 && c.g.registry != nil && c.g.registry.Schemas != nil {
+			c.g.registry.Schemas.SetCursor(savedSchemaIdx)
+		}
+		if tableItems != nil && c.g.registry != nil && c.g.registry.Tables != nil {
+			c.g.registry.Tables.SetItems(tableItems)
+			if savedTableIdx >= 0 {
+				c.g.registry.Tables.SetCursor(savedTableIdx)
+			}
+		}
 		// hq5.12: show restore toast on the UI thread.
 		if restoreHint != "" && c.g.toastHelp != nil {
 			c.g.toastHelp.Show(restoreHint, 4*time.Second)
 		}
+		if tableItems != nil && c.g != nil && c.g.registry != nil && c.g.registry.Tables != nil {
+			return c.g.tree.Push(c.g.registry.Tables)
+		}
 		if c.g != nil && c.g.registry != nil && c.g.registry.Schemas != nil &&
 			len(c.g.registry.Schemas.Items()) != 0 {
-			// Focus the SCHEMAS rail so the user sees the loaded
-			// schemas immediately and can j/k to navigate them.
 			return c.g.tree.Push(c.g.registry.Schemas)
 		}
 		return nil
@@ -342,6 +357,65 @@ func (c *connectInvoker) loadSchemaItems(ctx context.Context) ([]any, bool) {
 		items[i] = s
 	}
 	return items, true
+}
+
+// loadSavedSchemaTableState finds the saved schema in schemaItems and, if
+// found, loads its tables via LoadTables (direct-load pattern). Returns the
+// schema cursor index (-1 if not found), table items (nil if not loaded), and
+// table cursor index (-1 if not found). All failures are no-ops. dbsavvy-dl7.4.
+func (c *connectInvoker) loadSavedSchemaTableState(
+	ctx context.Context, profile *models.Connection, schemaItems []any, schemaOK bool,
+) (schemaIdx int, tableItems []any, tableIdx int) {
+	schemaIdx, tableIdx = -1, -1
+	if !schemaOK || len(schemaItems) == 0 || profile == nil {
+		return
+	}
+	if c.g == nil || c.g.deps.Store == nil {
+		return
+	}
+	connID := profile.Name
+	savedSchema := c.g.deps.Store.LastSchemaNameSnapshot(connID)
+	if savedSchema == "" {
+		return
+	}
+	for i, it := range schemaItems {
+		s, ok := it.(models.Schema)
+		if !ok {
+			continue
+		}
+		if s.Name == savedSchema {
+			schemaIdx = i
+			break
+		}
+	}
+	if schemaIdx < 0 {
+		return
+	}
+	tables, err := c.helper.LoadTables(ctx, savedSchema)
+	if err != nil {
+		c.g.deps.Common.Logger().Warn("gui: direct-load tables for saved schema",
+			"schema", savedSchema, "err", err)
+		return
+	}
+	tableItems = make([]any, len(tables))
+	for i := range tables {
+		tableItems[i] = tables[i]
+	}
+	savedTable := c.g.deps.Store.LastTableNameSnapshot(connID)
+	if savedTable == "" {
+		return
+	}
+	for i, it := range tableItems {
+		t, ok := it.(*models.Table)
+		if !ok || t == nil {
+			continue
+		}
+		if t.Name == savedTable {
+			tableIdx = i
+			break
+		}
+	}
+	return
 }
 
 // publishSchemaItems is the UI-thread publish phase paired with
@@ -452,30 +526,30 @@ func (c *connectInvoker) populateIndexesRail(ctx context.Context, schema, table 
 
 // loadQueryEditorBuffer is the I/O phase of the dbsavvy-wwd.9 post-Connect
 // hook. It resolves (or generates) the persistent buffer UUID for the
-// active connection via AppState.LastBufferUUIDs and loads the on-disk
-// buffer (or a fresh empty Buffer when missing). It performs NO context
-// write (SetBuffer) so it is safe to run on the worker goroutine; the
-// disk read does not block the MainLoop. publishQueryEditorBuffer does the
-// write on the UI thread (dbsavvy-fow.1). Missing Common / registry /
-// profile are silent no-ops (false ok) so test wiring without persistence
-// still passes through.
+// active connection via AppStateStore.GetOrCreateBufferUUID and loads the
+// on-disk buffer (or a fresh empty Buffer when missing). The UUID lookup
+// MUST go through the store (not Common.AppState, which is an unwired
+// empty literal that never reaches disk — dbsavvy-lrh) so the same UUID
+// is reused across runs and previously-persisted .sql files are picked up
+// instead of orphaned. It performs NO context write (SetBuffer) so it is
+// safe to run on the worker goroutine; the disk read does not block the
+// MainLoop. publishQueryEditorBuffer does the write on the UI thread
+// (dbsavvy-fow.1). Missing Common / Store / registry / profile are silent
+// no-ops (false ok) so test wiring without persistence still passes
+// through.
 func (c *connectInvoker) loadQueryEditorBuffer(profile *models.Connection) (*editor.Buffer, bool) {
 	if c == nil || c.g == nil || profile == nil {
 		return nil, false
 	}
-	if c.g.deps.Common == nil {
+	if c.g.deps.Common == nil || c.g.deps.Store == nil {
 		return nil, false
 	}
 	common := c.g.deps.Common
 	if c.g.registry == nil || c.g.registry.QueryEditor == nil {
 		return nil, false
 	}
-	appState := common.AppState
-	if appState == nil {
-		return nil, false
-	}
 	connID := profile.Name
-	uuid := appState.GetOrCreateBufferUUID(connID)
+	uuid := c.g.deps.Store.GetOrCreateBufferUUID(connID)
 	if uuid == "" {
 		return nil, false
 	}

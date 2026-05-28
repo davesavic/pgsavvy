@@ -30,6 +30,8 @@ type AppState struct {
 	HiddenSchemas            map[string][]string            `yaml:"hidden_schemas"`
 	HiddenColumns            map[string]map[string][]string `yaml:"hidden_columns"`
 	LastSessionSettings      map[string]map[string]string   `yaml:"last_session_settings"`
+	LastSchemaName           map[string]string              `yaml:"last_schema_name"`
+	LastTableName            map[string]string              `yaml:"last_table_name"`
 }
 
 // Save serializes the receiver to YAML and atomically replaces 'path' on POSIX

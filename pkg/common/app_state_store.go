@@ -352,6 +352,65 @@ func (s *AppStateStore) StatementTimeoutOverrideValue(connID string) string {
 	return s.state.StatementTimeoutOverride[connID]
 }
 
+// GetOrCreateBufferUUID returns the persistent buffer UUID for connID,
+// generating and persisting a fresh v4 UUID on first call. Routing through
+// the store (rather than mutating an AppState pointer directly) is what
+// keeps the UUID alive across runs: the mutation lands in the wrapped state
+// and a debounced Save writes last_buffer_uuids to disk. Empty connID
+// returns "".
+func (s *AppStateStore) GetOrCreateBufferUUID(connID string) string {
+	if connID == "" {
+		return ""
+	}
+	var uuid string
+	s.MutateAndSave(func(a *AppState) {
+		uuid = a.GetOrCreateBufferUUID(connID)
+	})
+	return uuid
+}
+
+func (s *AppStateStore) LastConnectionIDSnapshot() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.LastConnectionID
+}
+
+func (s *AppStateStore) LastSchemaNameSnapshot(connID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state.LastSchemaName == nil {
+		return ""
+	}
+	return s.state.LastSchemaName[connID]
+}
+
+func (s *AppStateStore) LastTableNameSnapshot(connID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state.LastTableName == nil {
+		return ""
+	}
+	return s.state.LastTableName[connID]
+}
+
+func (s *AppStateStore) SetLastSchemaName(connID, name string) {
+	s.MutateAndSave(func(a *AppState) {
+		if a.LastSchemaName == nil {
+			a.LastSchemaName = make(map[string]string)
+		}
+		a.LastSchemaName[connID] = name
+	})
+}
+
+func (s *AppStateStore) SetLastTableName(connID, name string) {
+	s.MutateAndSave(func(a *AppState) {
+		if a.LastTableName == nil {
+			a.LastTableName = make(map[string]string)
+		}
+		a.LastTableName[connID] = name
+	})
+}
+
 // HiddenSchemasSnapshot returns a defensive copy of the hidden-schemas slice
 // for the given connection ID. Callers may mutate the returned slice without
 // affecting store state. Returns nil if no entry exists.
@@ -430,6 +489,18 @@ func deepCopyAppState(a *AppState) *AppState {
 				cpInner[ik] = iv
 			}
 			cp.LastSessionSettings[k] = cpInner
+		}
+	}
+	if a.LastSchemaName != nil {
+		cp.LastSchemaName = make(map[string]string, len(a.LastSchemaName))
+		for k, v := range a.LastSchemaName {
+			cp.LastSchemaName[k] = v
+		}
+	}
+	if a.LastTableName != nil {
+		cp.LastTableName = make(map[string]string, len(a.LastTableName))
+		for k, v := range a.LastTableName {
+			cp.LastTableName[k] = v
 		}
 	}
 	return cp
