@@ -378,6 +378,102 @@ func TestCompletionTabNextWrapsThenAccept(t *testing.T) {
 	}
 }
 
+// TestAutoTriggerOpensInFromContext pins the dbsavvy-etp.4 gate: with the
+// popup hidden, AutoTrigger opens it only when the cursor sits at an
+// AutoTriggerFromContext position (here `FROM us`).
+func TestAutoTriggerOpensInFromContext(t *testing.T) {
+	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT * FROM us", 16, []string{"users"})
+	if sugg.IsVisible() {
+		t.Fatal("popup unexpectedly visible before auto-trigger")
+	}
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if !sugg.IsVisible() {
+		t.Fatal("AutoTrigger did not open popup in FROM context")
+	}
+}
+
+// TestAutoTriggerNoPopupOutsideGate pins that AutoTrigger does NOT open
+// the popup mid-SELECT-list (not a FROM/JOIN/UPDATE/INTO or `<ident>.`
+// context) even though candidates exist — it is gated, not
+// prefix-everywhere.
+func TestAutoTriggerNoPopupOutsideGate(t *testing.T) {
+	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT us", 9, []string{"users"})
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if sugg.IsVisible() {
+		t.Error("AutoTrigger opened popup outside the context gate; want hidden")
+	}
+}
+
+// TestAutoTriggerRefiltersWhileVisible pins the in-place refilter: once
+// the popup is visible, AutoTrigger refilters at the new cursor even when
+// the line no longer satisfies AutoTriggerFromContext on its own (the
+// visible-popup branch bypasses the open-gate). Simulates typing `e`
+// after `us` to narrow `us` -> `use`.
+func TestAutoTriggerRefiltersWhileVisible(t *testing.T) {
+	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT * FROM us", 16, []string{"users", "usage"})
+	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
+	if len(sugg.Suggestions()) != 2 {
+		t.Fatalf("initial candidate count = %d; want 2", len(sugg.Suggestions()))
+	}
+	// Type 'e' -> "use" narrows to "users" only (usage drops).
+	buf.Lines = []editor.Line{{Runes: []rune("SELECT * FROM use")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 17})
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if !sugg.IsVisible() {
+		t.Fatal("popup dismissed during refilter; want still visible")
+	}
+	if len(sugg.Suggestions()) != 1 {
+		t.Fatalf("candidate count after refilter = %d; want 1 (narrowed to users)", len(sugg.Suggestions()))
+	}
+}
+
+// TestAutoTriggerBackspaceRefiltersToEmptyDismisses pins the edge path:
+// backspacing the partial identifier down to a non-matching prefix (here
+// to a candidate set of zero) dismisses the popup cleanly rather than
+// leaving it stale. dbsavvy-etp.4.
+func TestAutoTriggerBackspaceRefiltersToEmptyDismisses(t *testing.T) {
+	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT * FROM usz", 17, []string{"users"})
+	// Open with a matching prefix first.
+	buf.Lines = []editor.Line{{Runes: []rune("SELECT * FROM us")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 16})
+	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
+	if !sugg.IsVisible() {
+		t.Fatal("popup not visible before backspace refilter")
+	}
+	// Now the live buffer holds a non-matching prefix "usz"; AutoTrigger
+	// (as fired by the Backspace hook) refilters -> empty -> Hide.
+	buf.Lines = []editor.Line{{Runes: []rune("SELECT * FROM usz")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 17})
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if sugg.IsVisible() {
+		t.Error("popup left stale after refilter to empty set; want dismissed")
+	}
+}
+
+// TestAutoTriggerNoRePopupAfterAccept pins the re-popup-after-accept
+// guard: after accepting a candidate the popup is hidden, and the accept
+// itself does not fire AutoTrigger (accept routes through CompletionKey /
+// <c-y>, never the printable/backspace seam). A subsequent AutoTrigger
+// from the just-inserted full identifier — which no longer ends in a
+// trigger boundary — must NOT re-open the popup. dbsavvy-etp.4.
+func TestAutoTriggerNoRePopupAfterAccept(t *testing.T) {
+	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT * FROM us", 16, []string{"users"})
+	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
+	if !ctrl.CompletionKey(keys.Key{Special: keys.KeyEnter}) {
+		t.Fatal("accept via Enter not consumed")
+	}
+	if sugg.IsVisible() {
+		t.Fatal("popup still visible immediately after accept")
+	}
+	// Re-evaluate at the post-accept cursor (end of "users"): hidden popup
+	// + line ends in a complete identifier, not a trigger boundary -> no
+	// re-open.
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if sugg.IsVisible() {
+		t.Error("AutoTrigger re-opened popup after accept; want suppressed")
+	}
+}
+
 func TestCompletionTabAndEnterFallThroughWhenHidden(t *testing.T) {
 	ctrl, _, _, sugg, _ := newCompletionRig(t, "SELECT", 6, []string{"users"})
 	// Popup never triggered -> hidden.

@@ -1943,9 +1943,17 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 					ve := editor.NewVimEditor(g.registry.QueryEditor, g.matcher, key, editor.WithSessionLog(g.deps.Common.Logger()))
 					// dbsavvy-etp.1: wire the Tab/Enter popup-navigation seam
 					// to the controller so the insert path can drive the
-					// completion popup. (Auto-trigger wiring is etp.4.)
+					// completion popup.
 					if g.controllers != nil && g.controllers.VimEditor != nil {
 						ve.SetCompletionKey(g.controllers.VimEditor.CompletionKey)
+						// dbsavvy-etp.4: as-you-type auto-trigger, gated at boot
+						// by editor.autocomplete (default true). When false we do
+						// NOT install the callback, so typing never opens the
+						// popup — manual <c-x><c-o> stays available regardless
+						// (it routes through RefilterOrTrigger, not this seam).
+						if cfg := g.deps.Common.Cfg(); cfg != nil && cfg.Editor.Autocomplete {
+							ve.SetAutoCompleter(g.controllers.VimEditor.AutoTrigger)
+						}
 					}
 					g.masterEditors[key] = ve
 				}
@@ -2386,6 +2394,17 @@ func (g *Gui) ToastHelper() *ui.ToastHelper { return g.toastHelp }
 // wireWithDriver runs. Test accessor — dbsavvy-66p.12 smoke walks
 // through Open/Pin/eviction via this surface.
 func (g *Gui) ResultTabsHelper() *ui.ResultTabsHelper { return g.resultTabsH }
+
+// MasterEditorForTest returns the gocui.Editor installed for key by the
+// most recent installKeyDispatch pass, or nil. Test accessor —
+// dbsavvy-etp.4 asserts the QUERY_EDITOR VimEditor has (or has not) the
+// as-you-type auto-completer wired per editor.autocomplete.
+func (g *Gui) MasterEditorForTest(key types.ContextKey) gocui.Editor {
+	if g.masterEditors == nil {
+		return nil
+	}
+	return g.masterEditors[key]
+}
 
 // leaderRunesFromCfg extracts the leader / localleader runes from cfg,
 // using the same fallbacks as keys.KeybindingService.Build.

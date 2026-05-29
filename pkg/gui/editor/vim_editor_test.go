@@ -209,10 +209,10 @@ func TestVimEditor_AutoCompleterFiresOnPrintableInsert(t *testing.T) {
 	}
 }
 
-// TestVimEditor_AutoCompleterNotFiredOnEnter pins the rule that only
-// printable runes trigger auto-completion. Enter / Backspace splitting
-// or joining lines are not auto-trigger candidates (Enter ending a
-// statement is not a SQL completion context).
+// TestVimEditor_AutoCompleterNotFiredOnEnter pins the rule that Enter is
+// never an auto-trigger candidate (Enter ending a statement is not a SQL
+// completion context). dbsavvy-etp.4 carved Backspace out of this rule —
+// see TestVimEditor_AutoCompleterFiresOnBackspace.
 func TestVimEditor_AutoCompleterNotFiredOnEnter(t *testing.T) {
 	rig := newVimRig(t, types.ModeInsert)
 	v := newViewForVimTest()
@@ -221,9 +221,52 @@ func TestVimEditor_AutoCompleterNotFiredOnEnter(t *testing.T) {
 		calls++
 	})
 	rig.ve.Edit(v, gocui.NewKeyName(gocui.KeyEnter))
+	if calls != 0 {
+		t.Errorf("autoCompleter calls = %d; want 0 (Enter must not trigger)", calls)
+	}
+}
+
+// TestVimEditor_AutoCompleterFiresOnBackspace pins the dbsavvy-etp.4
+// Backspace refilter hook: deleting a rune fires the callback with the
+// post-delete buffer + cursor so a backspace within an active completion
+// re-narrows the popup. The callback (controller.AutoTrigger) owns the
+// popup-visible gate; VimEditor fires unconditionally on a successful
+// delete. A Backspace at start-of-buffer is a no-op and must NOT fire.
+func TestVimEditor_AutoCompleterFiresOnBackspace(t *testing.T) {
+	rig := newVimRig(t, types.ModeInsert)
+	v := newViewForVimTest()
+	var calls int
+	var lastCol int
+	rig.ve.SetAutoCompleter(func(_ *editor.Buffer, pos editor.Position) {
+		calls++
+		lastCol = pos.Col
+	})
+	// Type "ab" (2 fires), then Backspace once (1 fire, post-delete col 1).
+	rig.ve.Edit(v, gocui.NewKeyRune('a'))
+	rig.ve.Edit(v, gocui.NewKeyRune('b'))
+	rig.ve.Edit(v, gocui.NewKeyName(gocui.KeyBackspace))
+	if calls != 3 {
+		t.Fatalf("autoCompleter calls = %d; want 3 (2 runes + 1 backspace)", calls)
+	}
+	if lastCol != 1 {
+		t.Errorf("post-backspace cursor col = %d; want 1", lastCol)
+	}
+}
+
+// TestVimEditor_AutoCompleterNotFiredOnNoOpBackspace pins the edge case:
+// Backspace at start-of-buffer deletes nothing, so the callback must not
+// fire (otherwise an empty-buffer backspace would spuriously re-evaluate
+// the trigger gate). dbsavvy-etp.4.
+func TestVimEditor_AutoCompleterNotFiredOnNoOpBackspace(t *testing.T) {
+	rig := newVimRig(t, types.ModeInsert)
+	v := newViewForVimTest()
+	var calls int
+	rig.ve.SetAutoCompleter(func(_ *editor.Buffer, _ editor.Position) {
+		calls++
+	})
 	rig.ve.Edit(v, gocui.NewKeyName(gocui.KeyBackspace))
 	if calls != 0 {
-		t.Errorf("autoCompleter calls = %d; want 0 (Enter + Backspace must not trigger)", calls)
+		t.Errorf("autoCompleter calls = %d; want 0 (no-op backspace must not fire)", calls)
 	}
 }
 

@@ -167,6 +167,11 @@ func (e *VimEditor) SetAutoCompleter(fn func(buf *Buffer, pos Position)) {
 	e.autoCompleter = fn
 }
 
+// HasAutoCompleter reports whether an auto-completer callback is wired.
+// Test accessor — dbsavvy-etp.4 asserts boot wiring is gated by
+// editor.autocomplete (installed when true, absent when false).
+func (e *VimEditor) HasAutoCompleter() bool { return e.autoCompleter != nil }
+
 // SetCompletionKey wires the popup-navigation seam invoked at the top
 // of insertKey for Tab / Enter while the completion popup is visible.
 // The callback returns true when it consumed the key (popup visible);
@@ -259,8 +264,8 @@ func (e *VimEditor) insertKey(v *gocui.View, k keys.Key) bool {
 		buf.SetCursor(advancePos(cur, string(k.Code)))
 		// Auto-trigger completion (dbsavvy-bwq.22 / C5). The callback
 		// is responsible for the config gate, popup-visible guard, and
-		// AutoTriggerFromContext check. Only fired on printable runes —
-		// Enter / Backspace do not auto-trigger.
+		// AutoTriggerFromContext check. Fired on printable runes and (for
+		// in-place refilter) on Backspace; Enter never auto-triggers.
 		if e.autoCompleter != nil {
 			e.autoCompleter(buf, buf.CursorPos())
 		}
@@ -289,6 +294,14 @@ func (e *VimEditor) insertKey(v *gocui.View, k keys.Key) bool {
 			return true
 		}
 		buf.SetCursor(prev)
+		// Backspace refilter (dbsavvy-etp.4). Fire the callback so a
+		// backspace WITHIN the partial identifier re-narrows the popup.
+		// The callback (controller.AutoTrigger) only acts while the popup
+		// is already visible (or at an AutoTriggerFromContext position),
+		// so deleting outside an active completion does NOT pop it open.
+		if e.autoCompleter != nil {
+			e.autoCompleter(buf, buf.CursorPos())
+		}
 	default:
 		return false
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -163,6 +164,68 @@ func TestNewGuiContextRegistryHasSelection(t *testing.T) {
 	}
 	if reg.Selection == nil {
 		t.Fatal("Registry().Selection is nil — m47.2 SelectionContext not wired")
+	}
+}
+
+// buildTestGuiWithAutocomplete builds a wired Gui whose
+// editor.autocomplete flag is set to want. dbsavvy-etp.4.
+func buildTestGuiWithAutocomplete(t *testing.T, want bool) *orchestrator.Gui {
+	t.Helper()
+	fs := afero.NewMemMapFs()
+	cfg := config.GetDefaultConfig()
+	cfg.Editor.Autocomplete = want
+	c := common.NewCommon(slog.New(slog.DiscardHandler), i18n.EnglishTranslationSet(), cfg, &common.AppState{}, fs)
+	store := common.NewAppStateStore(fs, "/tmp/state.yml", common.DefaultClock())
+
+	g := orchestrator.NewGui(orchestrator.Deps{
+		Common:              c,
+		Store:               store,
+		ConnectionsPath:     "/tmp/connections.yml",
+		ConnectionsProvider: func() []models.Connection { return nil },
+		DriverNamesFn:       func() []string { return []string{"postgres"} },
+	})
+	rec := testfake.NewRecorderGuiDriver()
+	if err := g.UseDriverForTest(rec); err != nil {
+		t.Fatalf("UseDriverForTest: %v", err)
+	}
+	return g
+}
+
+// queryEditorVimEditor extracts the QUERY_EDITOR VimEditor wired by
+// installKeyDispatch, failing the test if it is missing or not a
+// *editor.VimEditor. dbsavvy-etp.4.
+func queryEditorVimEditor(t *testing.T, g *orchestrator.Gui) *editor.VimEditor {
+	t.Helper()
+	ed := g.MasterEditorForTest(types.QUERY_EDITOR)
+	if ed == nil {
+		t.Fatal("no master editor wired for QUERY_EDITOR")
+	}
+	ve, ok := ed.(*editor.VimEditor)
+	if !ok {
+		t.Fatalf("QUERY_EDITOR master editor is %T; want *editor.VimEditor", ed)
+	}
+	return ve
+}
+
+// TestAutoCompleterInstalledWhenFlagTrue pins the dbsavvy-etp.4 boot gate:
+// with editor.autocomplete true (the default), the QUERY_EDITOR VimEditor
+// has the as-you-type auto-completer wired.
+func TestAutoCompleterInstalledWhenFlagTrue(t *testing.T) {
+	g := buildTestGuiWithAutocomplete(t, true)
+	if !queryEditorVimEditor(t, g).HasAutoCompleter() {
+		t.Error("auto-completer not installed with editor.autocomplete=true")
+	}
+}
+
+// TestAutoCompleterNotInstalledWhenFlagFalse pins that
+// editor.autocomplete=false leaves the auto-completer uninstalled (no
+// as-you-type popup). The manual <c-x><c-o> path is unaffected — it
+// routes through the action registry / RefilterOrTrigger, not this seam
+// (covered by the controller-level completion tests). dbsavvy-etp.4.
+func TestAutoCompleterNotInstalledWhenFlagFalse(t *testing.T) {
+	g := buildTestGuiWithAutocomplete(t, false)
+	if queryEditorVimEditor(t, g).HasAutoCompleter() {
+		t.Error("auto-completer installed with editor.autocomplete=false; want absent")
 	}
 }
 

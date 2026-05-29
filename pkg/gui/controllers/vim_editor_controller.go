@@ -51,6 +51,15 @@ type VimEditorController struct {
 	// pushes completion results into. Wired post-construction via
 	// SetSuggestionsContext. Nil = TriggerCompletion is a silent no-op.
 	suggestions *context.SuggestionsContext
+
+	// suppressNextAutoTrigger guards against re-popup-after-accept: an
+	// accept inserts a full identifier whose tail still satisfies the
+	// AutoTriggerFromContext gate (e.g. `FROM users`), so the very next
+	// as-you-type AutoTrigger would spuriously re-open the popup over the
+	// just-accepted text. acceptSuggestion sets this one-shot flag;
+	// AutoTrigger consumes and clears it, then requires a fresh keystroke.
+	// dbsavvy-etp.4.
+	suppressNextAutoTrigger bool
 }
 
 // NewVimEditorController constructs the controller. Either argument
@@ -128,6 +137,34 @@ func (c *VimEditorController) RefilterOrTrigger(buf *editor.Buffer, pos editor.P
 	// Show with an empty set is a Hide (SuggestionsContext.Show contract),
 	// so the empty-candidate dismiss is handled here without a branch.
 	c.suggestions.Show(got, pos)
+}
+
+// AutoTrigger is the as-you-type callback installed via
+// VimEditor.SetAutoCompleter at boot (only when editor.autocomplete is
+// true — gui.go applies the config gate). Unlike the manual `<c-x><c-o>`
+// path (RefilterOrTrigger, ungated), this is gated:
+//
+//   - popup already visible -> refilter in place at the new cursor
+//     (so backspace-within-identifier and continued typing narrow it).
+//   - popup hidden -> open ONLY when the cursor sits at an
+//     AutoTriggerFromContext position (FROM/JOIN/UPDATE/INTO or
+//     `<ident>.`); NOT prefix-everywhere.
+//
+// Manual `<c-x><c-o>` never routes through here, so the flag and the
+// context gate never restrict it. No-op when the popup context is
+// unwired. dbsavvy-etp.4.
+func (c *VimEditorController) AutoTrigger(buf *editor.Buffer, pos editor.Position) {
+	if c.suggestions == nil {
+		return
+	}
+	if c.suppressNextAutoTrigger {
+		c.suppressNextAutoTrigger = false
+		return
+	}
+	if !c.suggestions.IsVisible() && !editor.AutoTriggerFromContext(buf, pos) {
+		return
+	}
+	c.RefilterOrTrigger(buf, pos)
 }
 
 // isClipboardRegister reports whether reg maps to the OS clipboard under
@@ -1670,6 +1707,10 @@ func (c *VimEditorController) acceptSuggestion() {
 		return
 	}
 	buf.SetCursor(editor.Position{Line: cur.Line, Col: identStart + len([]rune(s.Text))})
+	// Re-popup-after-accept guard (dbsavvy-etp.4): the inserted identifier
+	// can still satisfy the AutoTriggerFromContext gate, so suppress the
+	// next as-you-type trigger and require a fresh keystroke.
+	c.suppressNextAutoTrigger = true
 }
 
 // identifierStartCol returns the column of the first identifier rune of
