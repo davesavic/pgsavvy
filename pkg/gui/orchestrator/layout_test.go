@@ -256,6 +256,53 @@ func TestRunLayoutSuggestionsFallsBackToCenteredWithoutEditorView(t *testing.T) 
 	}
 }
 
+// TestRunLayoutRendersVisibleSuggestionsOffStack regresses the
+// dbsavvy-2fo integration gap. The frozen design (dbsavvy-etp Scope IN
+// #1) keeps the QUERY_EDITOR focused and NEVER pushes SUGGESTIONS onto
+// the focus stack, yet the only popup-render path was the focus-stack
+// Tier-3 loop. Result: in the real TUI the completion popup never
+// appeared (Show() flipped an internal visible bool the orchestrator
+// never consulted). RunLayout must SetView the SUGGESTIONS popup
+// whenever the context IsVisible(), independent of focus-stack
+// membership — exactly as it does for WHICH_KEY.
+func TestRunLayoutRendersVisibleSuggestionsOffStack(t *testing.T) {
+	g, rec := buildTestGui(t)
+	// Real editor view so the anchored rect resolves off the live origin.
+	ev := gocui.NewView(string(types.QUERY_EDITOR), 5, 3, 105, 33, gocui.OutputNormal)
+	ev.SetOrigin(0, 4)
+	rec.SetRealView(string(types.QUERY_EDITOR), ev)
+
+	sugg := g.Registry().Suggestions
+	if sugg == nil {
+		t.Fatal("registry.Suggestions is nil")
+	}
+	sugg.Show([]editor.Suggestion{{Display: "users"}, {Display: "user_roles"}}, editor.Position{Line: 9, Col: 7})
+	// Deliberately NOT pushed onto the focus stack — the editor keeps
+	// focus per the frozen "no focus-stack push" decision. This is the
+	// production state the .2 test masked by pushing.
+
+	if err := g.RunLayout(200, 60); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if _, ok := lastSetView(rec, string(types.SUGGESTIONS)); !ok {
+		t.Fatal("SUGGESTIONS SetView not invoked while visible off-stack; the popup is invisible in the real TUI")
+	}
+}
+
+// TestRunLayoutOmitsInvisibleSuggestionsOffStack locks the inverse: an
+// off-stack SUGGESTIONS context that is NOT visible must not be laid out
+// (no empty popup rect punching a hole under SupportOverlaps=false).
+func TestRunLayoutOmitsInvisibleSuggestionsOffStack(t *testing.T) {
+	g, rec := buildTestGui(t)
+	// Suggestions context exists but Show() was never called → invisible.
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if rec.HasSetView(string(types.SUGGESTIONS)) {
+		t.Error("SUGGESTIONS must not be laid out when invisible and off-stack")
+	}
+}
+
 // TestRunLayoutCheatsheetFocusedAfterPush is the lc2 / Bug C regression
 // probe. Pushing the CHEATSHEET context onto the focus stack and
 // running a Layout pass must yield a SetCurrentView("cheatsheet") call

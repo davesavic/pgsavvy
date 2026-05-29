@@ -391,9 +391,12 @@ func (g *Gui) RunLayout(w, h int) error {
 	}
 
 	// Tear down any TEMPORARY_POPUP / DISPLAY_CONTEXT views that aren't
-	// currently on the focus stack. WHICH_KEY and LIMIT are managed by
-	// their dedicated overlay paths (notifier-driven / tiny-terminal
-	// branch respectively) and excluded here.
+	// currently on the focus stack. WHICH_KEY, LIMIT and SUGGESTIONS are
+	// managed by their dedicated overlay paths (notifier-driven /
+	// tiny-terminal branch / IsVisible-driven respectively) and excluded
+	// here — SUGGESTIONS in particular is never pushed onto the focus
+	// stack (frozen dbsavvy-etp design) so the teardown must not delete
+	// its view out from under renderSuggestionsOverlay (dbsavvy-2fo).
 	for _, ctx := range g.registry.Flatten() {
 		if ctx == nil {
 			continue
@@ -403,7 +406,7 @@ func (g *Gui) RunLayout(w, h int) error {
 			continue
 		}
 		key := ctx.GetKey()
-		if key == types.WHICH_KEY || key == types.LIMIT {
+		if key == types.WHICH_KEY || key == types.LIMIT || key == types.SUGGESTIONS {
 			continue
 		}
 		if _, ok := onStack[key]; ok {
@@ -485,6 +488,12 @@ func (g *Gui) RunLayout(w, h int) error {
 	// membership). LIMIT is handled in the early-return tiny-terminal
 	// branch and never needs touching here.
 	if err := g.renderWhichKeyOverlay(w, h, dims); err != nil {
+		return err
+	}
+	// SUGGESTIONS is a shy overlay driven by IsVisible(), never by stack
+	// membership (the editor keeps focus per the frozen dbsavvy-etp
+	// design). dbsavvy-2fo.
+	if err := g.renderSuggestionsOverlay(dims, w, h); err != nil {
 		return err
 	}
 
@@ -753,6 +762,38 @@ func (g *Gui) renderWhichKeyOverlay(w, h int, dims map[string]ui.Dimensions) err
 	}
 	_ = g.registry.WhichKey.HandleRender()
 	_, _ = g.driver.SetViewOnTop(string(types.WHICH_KEY))
+	return nil
+}
+
+// renderSuggestionsOverlay positions the cursor-anchored completion
+// popup whenever the SuggestionsContext reports IsVisible() — driven by
+// the popup's own visibility, NOT by focus-stack membership. The frozen
+// dbsavvy-etp design keeps the QUERY_EDITOR focused (the controller
+// intercepts nav keys while the popup is visible) and never pushes
+// SUGGESTIONS onto the focus stack, so the focus-stack Tier-3 loop never
+// rendered it (dbsavvy-2fo). On invisibility the view is best-effort
+// deleted so it doesn't linger from a prior frame. A missing registry
+// or suggestions context collapses to a no-op.
+func (g *Gui) renderSuggestionsOverlay(dims map[string]ui.Dimensions, w, h int) error {
+	if g.registry == nil || g.registry.Suggestions == nil {
+		return nil
+	}
+	sugg := g.registry.Suggestions
+	name := string(types.SUGGESTIONS)
+	if !sugg.IsVisible() {
+		_ = g.driver.DeleteView(name)
+		return nil
+	}
+	r, ok := g.popupRect(sugg, dims, w, h)
+	if !ok {
+		_ = g.driver.DeleteView(name)
+		return nil
+	}
+	if _, err := g.driver.SetView(name, r.X0, r.Y0, r.X1, r.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		return err
+	}
+	_ = sugg.HandleRender()
+	_, _ = g.driver.SetViewOnTop(name)
 	return nil
 }
 
