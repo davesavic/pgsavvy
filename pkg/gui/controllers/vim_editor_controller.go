@@ -3,6 +3,7 @@ package controllers
 import (
 	stdctx "context"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/clipboard"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
@@ -28,16 +29,17 @@ type VimEditorController struct {
 	qec     *context.QueryEditorContext
 	matcher *keys.Matcher
 
-	// toaster is the optional sink for one-shot user feedback (e.g. the
-	// `"+y` / `"*y` "system clipboard not wired" TODO toast). Wired
-	// post-construction via SetToaster so test wiring can keep the
+	// clipboard is the optional OS-clipboard seam. Nil => internal-only
+	// (named registers + in-memory store), no behavior change. Wired
+	// post-construction via SetClipboard so test wiring can keep the
 	// two-arg NewVimEditorController call shape.
-	toaster func(msg string)
+	clipboard clipboard.Clipboard
 
-	// clipboardToasted records whether the +/* TODO toast already fired
-	// this session — vim's system-clipboard registers (+/*) fall back to
-	// the in-memory store and surface a one-shot notice only.
-	clipboardToasted bool
+	// lastWrite is the last text this controller mirrored to the OS
+	// clipboard (unnormalized). readRegister uses it to detect external
+	// clipboard changes: when the clipboard differs from lastWrite the
+	// external content wins (unnamedplus semantics).
+	lastWrite string
 
 	// completionEngine is the optional completion driver. Wired
 	// post-construction via SetCompletionEngine. Nil = TriggerCompletion
@@ -59,12 +61,12 @@ func NewVimEditorController(qec *context.QueryEditorContext, matcher *keys.Match
 	return &VimEditorController{qec: qec, matcher: matcher}
 }
 
-// SetToaster wires a toast sink for the controller. nil clears any
-// previously-installed sink. The orchestrator calls this in
-// AttachControllers (post-construction) with a closure over the live
-// ToastHelper. Unit tests typically leave the sink unset.
-func (c *VimEditorController) SetToaster(t func(msg string)) {
-	c.toaster = t
+// SetClipboard wires the OS-clipboard seam the controller mirrors yanks
+// to (and reads from) for the clipboard registers ('"' / '+' / '*').
+// Nil leaves the controller internal-only (no behavior change). The
+// orchestrator wires the live SystemClipboard; tests inject a fake.
+func (c *VimEditorController) SetClipboard(cb clipboard.Clipboard) {
+	c.clipboard = cb
 }
 
 // SetCompletionEngine wires the completion engine the controller
@@ -115,13 +117,36 @@ func (c *VimEditorController) TriggerCompletion() error {
 	return nil
 }
 
-// emitToast forwards msg to the wired toaster, or drops it when no
-// sink is installed.
-func (c *VimEditorController) emitToast(msg string) {
-	if c.toaster == nil {
+// isClipboardRegister reports whether reg maps to the OS clipboard under
+// unnamedplus semantics. reg == 0 defaults to '"' (the unnamed register)
+// first, so the unnamed/default register and the '+'/'*' registers all
+// mirror to the clipboard; named registers a–z stay internal-only.
+func isClipboardRegister(reg rune) bool {
+	if reg == 0 {
+		reg = '"'
+	}
+	return reg == '"' || reg == '+' || reg == '*'
+}
+
+// mirrorYankToClipboard pushes yanked text to the OS clipboard under
+// unnamedplus semantics. Fires only for the yank operator targeting a
+// clipboard register; deletes/changes never reach here (they pass a
+// non-yank actionID). Best-effort: a Write error is swallowed because the
+// internal register is already authoritative.
+func (c *VimEditorController) mirrorYankToClipboard(actionID string, reg rune, text string) {
+	if c.clipboard == nil {
 		return
 	}
-	c.toaster(msg)
+	if actionID != commands.OperatorYank {
+		return
+	}
+	if !isClipboardRegister(reg) {
+		return
+	}
+	if err := c.clipboard.Write(text); err != nil {
+		return
+	}
+	c.lastWrite = text
 }
 
 // motionFunc is the shared signature every motion in pkg/gui/editor
@@ -1057,6 +1082,7 @@ func (c *VimEditorController) applyPending(buf *editor.Buffer, r editor.Range, c
 	}
 	if capture != "" {
 		c.writeRegister(ctx.Register, capture)
+		c.mirrorYankToClipboard(spec.actionID, ctx.Register, capture)
 	}
 	// Repeat-store bookkeeping (wwd.9 will consume this for `.`).
 	rep.LastOpID = pendingOpID
@@ -1091,15 +1117,6 @@ func (c *VimEditorController) operatorHandler(spec operatorSpec) commands.Handle
 		buf := c.buffer()
 		if buf == nil {
 			return nil
-		}
-		// System-clipboard registers (+/*): emit one-shot TODO toast on
-		// first use this session, then fall through to the in-memory
-		// store. Subsequent uses are silent.
-		if ec.Register == '+' || ec.Register == '*' {
-			if !c.clipboardToasted {
-				c.emitToast("register + / * not yet wired to system clipboard")
-				c.clipboardToasted = true
-			}
 		}
 		// Visual-mode bypass — consume Selection.
 		if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
@@ -1149,6 +1166,7 @@ func (c *VimEditorController) operatorVisualApply(buf *editor.Buffer, spec opera
 	}
 	if capture != "" {
 		c.writeRegister(ec.Register, capture)
+		c.mirrorYankToClipboard(spec.actionID, ec.Register, capture)
 	}
 	editor.ExitVisual(buf)
 	if rep := c.repeat(); rep != nil {
@@ -1184,6 +1202,7 @@ func (c *VimEditorController) operatorDoubledApply(buf *editor.Buffer, spec oper
 	}
 	if capture != "" {
 		c.writeRegister(ec.Register, capture)
+		c.mirrorYankToClipboard(spec.actionID, ec.Register, capture)
 	}
 	if rep := c.repeat(); rep != nil {
 		rep.LastOpID = spec.actionID
@@ -1231,6 +1250,18 @@ func (c *VimEditorController) repeat() *editor.RepeatStore {
 // readRegister returns the contents of the effective register (defaulting
 // to '"' when reg == 0). Empty string when no matcher / no register
 // store / register unset.
+//
+// For clipboard registers ('"' / '+' / '*'), an external clipboard change
+// wins (unnamedplus): when the OS clipboard reads cleanly, is non-empty,
+// and differs from the text we last mirrored, that content is returned
+// char-wise. Otherwise (no clipboard wired, read error, empty clipboard,
+// or clipboard == our own lastWrite) the in-memory register is used.
+//
+// ACCEPTED line-wise regression (decision 4): some backends strip a
+// trailing newline on read (macOS pbpaste, some Wayland), so cb !=
+// lastWrite even for our own line-wise yank — there yyp/ddp degrade to a
+// char-wise mid-line paste. Verified faithful on Linux/xclip; documented,
+// not tested.
 func (c *VimEditorController) readRegister(reg rune) string {
 	if c.matcher == nil {
 		return ""
@@ -1241,6 +1272,11 @@ func (c *VimEditorController) readRegister(reg rune) string {
 	}
 	if reg == 0 {
 		reg = '"'
+	}
+	if c.clipboard != nil && isClipboardRegister(reg) {
+		if cb, err := c.clipboard.Read(); err == nil && cb != "" && cb != c.lastWrite {
+			return cb // external change wins; char-wise
+		}
 	}
 	return store.Get(reg)
 }
@@ -1253,20 +1289,13 @@ func (c *VimEditorController) readRegister(reg rune) string {
 //   - Line-wise register (text ends in '\n', set by dd/yy doubled-form):
 //     inserted on a new line below the cursor.
 //
-// Empty register is a no-op. System-clipboard registers (+/*) surface
-// the same one-shot TODO toast as the yank operator before falling
-// through to the in-memory store.
+// Empty register is a no-op. For clipboard registers ('"' / '+' / '*')
+// readRegister consults the OS clipboard first (unnamedplus); see its doc.
 func (c *VimEditorController) pasteHandler() commands.Handler {
 	return func(ec commands.ExecCtx) error {
 		buf := c.buffer()
 		if buf == nil {
 			return nil
-		}
-		if ec.Register == '+' || ec.Register == '*' {
-			if !c.clipboardToasted {
-				c.emitToast("register + / * not yet wired to system clipboard")
-				c.clipboardToasted = true
-			}
 		}
 		text := c.readRegister(ec.Register)
 		if text == "" {

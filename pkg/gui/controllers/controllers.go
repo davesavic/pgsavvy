@@ -2,9 +2,9 @@ package controllers
 
 import (
 	"reflect"
-	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/gui/clipboard"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
@@ -168,15 +168,9 @@ func AttachControllers(
 			matcher = helpers.KbRuntime.Matcher
 		}
 		vimEditor = NewVimEditorController(tree.QueryEditor, matcher)
-		// wwd.8 — wire the toast sink for the +/* clipboard one-shot
-		// TODO toast. Falls back silently when no Toast helper is
-		// injected (unit tests).
-		if helpers.Toast != nil {
-			toast := helpers.Toast
-			vimEditor.SetToaster(func(msg string) {
-				toast.Show(msg, 3*time.Second)
-			})
-		}
+		// T2 — mirror yanks to / read from the OS clipboard for the
+		// clipboard registers ('"' / '+' / '*') under unnamedplus.
+		vimEditor.SetClipboard(clipboard.NewSystemClipboard())
 	}
 
 	// PlanController publishes PLAN-scoped tree-navigation bindings

@@ -1,6 +1,7 @@
 package controllers_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
@@ -427,40 +428,377 @@ func TestOperatorBindingsArePublishedInModeMask(t *testing.T) {
 	}
 }
 
-// --- +/* clipboard one-shot toast ---
+// --- clipboard mirror (unnamedplus, yank-only) ---
 
-func TestClipboardOneShotToastOnYank(t *testing.T) {
+// fakeClipboard records Write calls and lets tests stub Read's
+// return/error. It satisfies clipboard.Clipboard.
+type fakeClipboard struct {
+	writes    []string // every value passed to Write
+	writeErr  error    // returned from Write when non-nil
+	readVal   string   // returned from Read
+	readErr   error    // returned from Read when non-nil
+	readCalls int
+}
+
+func (f *fakeClipboard) Write(text string) error {
+	f.writes = append(f.writes, text)
+	return f.writeErr
+}
+
+func (f *fakeClipboard) Read() (string, error) {
+	f.readCalls++
+	return f.readVal, f.readErr
+}
+
+// doubledYank performs `yy` on the current line via the normal -> op-pending
+// doubled-shortcut path.
+func doubledYank(t *testing.T, reg *commands.Registry, register rune) {
+	t.Helper()
+	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeNormal, Register: register})
+	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeOperatorPending, Register: register})
+}
+
+// doubledDelete performs `dd` on the current line.
+func doubledDelete(t *testing.T, reg *commands.Registry, register rune) {
+	t.Helper()
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeNormal, Register: register})
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeOperatorPending, Register: register})
+}
+
+// TestClipboardYankMirrors: a yank to a clipboard register mirrors the
+// yanked text to the clipboard (Write called with the text).
+func TestClipboardYankMirrors(t *testing.T) {
 	qec, matcher, _ := newOperatorQEC(t)
 	ctrl := controllers.NewVimEditorController(qec, matcher)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
-
-	var toasts []string
-	ctrl.SetToaster(func(msg string) { toasts = append(toasts, msg) })
+	fake := &fakeClipboard{}
+	ctrl.SetClipboard(fake)
 
 	buf := qec.Buffer()
 	buf.Lines = []editor.Line{{Runes: []rune("aaa")}}
 	buf.SetCursor(editor.Position{Line: 0, Col: 0})
 
-	// First "+y on a doubled-y → emits one toast.
-	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeNormal, Register: '+'})
-	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeOperatorPending, Register: '+'})
+	doubledYank(t, reg, '+')
 
-	if len(toasts) != 1 {
-		t.Fatalf("toast count after first +y = %d, want 1", len(toasts))
+	if len(fake.writes) != 1 || fake.writes[0] != "aaa\n" {
+		t.Fatalf("clipboard writes = %q, want one write of %q", fake.writes, "aaa\n")
 	}
-
-	// Second use: silent fallthrough.
-	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeNormal, Register: '*'})
-	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeOperatorPending, Register: '*'})
-
-	if len(toasts) != 1 {
-		t.Errorf("toast count after second use = %d, want 1 (one-shot)", len(toasts))
-	}
-
-	// In-memory fallback still records the text.
+	// Internal register also receives the text.
 	if got := matcher.Registers().Get('+'); got != "aaa\n" {
 		t.Errorf("register + = %q, want %q", got, "aaa\n")
+	}
+}
+
+// TestClipboardVisualYankMirrors: a yank from Visual mode (operatorVisualApply
+// path) mirrors the selected text to the clipboard.
+func TestClipboardVisualYankMirrors(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	fake := &fakeClipboard{}
+	ctrl.SetClipboard(fake)
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisual)
+	editor.ExtendSelection(buf, editor.Position{Line: 0, Col: 5})
+
+	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeVisual, Register: '+'})
+
+	if len(fake.writes) != 1 || fake.writes[0] != "hello" {
+		t.Fatalf("clipboard writes = %q, want one write of %q", fake.writes, "hello")
+	}
+	if got := matcher.Registers().Get('+'); got != "hello" {
+		t.Errorf("register + = %q, want %q", got, "hello")
+	}
+}
+
+// TestClipboardVisualDeleteDoesNotMirror: a delete from Visual mode never
+// mirrors to the clipboard, but the internal register still receives the text.
+func TestClipboardVisualDeleteDoesNotMirror(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	fake := &fakeClipboard{}
+	ctrl.SetClipboard(fake)
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisual)
+	editor.ExtendSelection(buf, editor.Position{Line: 0, Col: 5})
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeVisual, Register: 0})
+
+	if len(fake.writes) != 0 {
+		t.Fatalf("visual delete mirrored to clipboard: writes = %q, want none", fake.writes)
+	}
+	if got := matcher.Registers().Get('"'); got != "hello" {
+		t.Errorf("register \" after Visual+d = %q, want %q", got, "hello")
+	}
+}
+
+// TestClipboardUnnamedYankMirrors: a yank to the unnamed register (reg==0,
+// i.e. plain `yy`) mirrors to the clipboard under unnamedplus.
+func TestClipboardUnnamedYankMirrors(t *testing.T) {
+	qec, _, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, nil) // nil matcher: register store is a no-op
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	fake := &fakeClipboard{}
+	ctrl.SetClipboard(fake)
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("aaa")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	doubledYank(t, reg, 0) // unnamed register
+
+	if len(fake.writes) != 1 || fake.writes[0] != "aaa\n" {
+		t.Fatalf("clipboard writes = %q, want one write of %q", fake.writes, "aaa\n")
+	}
+}
+
+// TestClipboardDeleteDoesNotMirror: deletes (dd and a single-line x-style
+// delete) never call Write, but the internal register still receives the
+// text so ddp works internally.
+func TestClipboardDeleteDoesNotMirror(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	fake := &fakeClipboard{}
+	ctrl.SetClipboard(fake)
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("aaa")}, {Runes: []rune("bbb")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	// dd to the unnamed register.
+	doubledDelete(t, reg, 0)
+
+	if len(fake.writes) != 0 {
+		t.Fatalf("delete mirrored to clipboard: writes = %q, want none", fake.writes)
+	}
+	// Internal register still holds the deleted line (ddp works internally).
+	if got := matcher.Registers().Get('"'); got != "aaa\n" {
+		t.Errorf("register \" after dd = %q, want %q", got, "aaa\n")
+	}
+}
+
+// TestClipboardDeleteCharStyleDoesNotMirror: a char-wise delete over a
+// motion (a delete operator, not yank) does not mirror.
+func TestClipboardDeleteCharStyleDoesNotMirror(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	fake := &fakeClipboard{}
+	ctrl.SetClipboard(fake)
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	// dw to the unnamed register.
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeNormal, Register: 0})
+	runHandler(t, reg, commands.MotionWordNext, commands.ExecCtx{Mode: types.ModeOperatorPending, Register: 0})
+
+	if len(fake.writes) != 0 {
+		t.Fatalf("delete mirrored to clipboard: writes = %q, want none", fake.writes)
+	}
+	if got := matcher.Registers().Get('"'); got == "" {
+		t.Errorf("register \" after dw = %q, want non-empty", got)
+	}
+}
+
+// TestClipboardNamedRegisterNeverTouchesClipboard: "ayy then "ap never
+// invokes the clipboard; paste uses the internal register.
+func TestClipboardNamedRegisterNeverTouchesClipboard(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	fake := &fakeClipboard{readVal: "EXTERNAL"}
+	ctrl.SetClipboard(fake)
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("aaa")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	// "ayy
+	doubledYank(t, reg, 'a')
+	if len(fake.writes) != 0 {
+		t.Fatalf("named-register yank mirrored: writes = %q, want none", fake.writes)
+	}
+
+	// "ap — paste from internal 'a', clipboard Read must not be consulted.
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeNormal, Register: 'a'})
+	if fake.readCalls != 0 {
+		t.Fatalf("named-register paste read clipboard: readCalls = %d, want 0", fake.readCalls)
+	}
+	// The internal 'a' line-wise yank pasted below: line 1 == "aaa".
+	if len(buf.Lines) < 2 || string(buf.Lines[1].Runes) != "aaa" {
+		t.Errorf("after \"ap lines = %v, want second line %q", buf.Lines, "aaa")
+	}
+}
+
+// TestClipboardReadExternalWins: an external clipboard change (Read err==nil,
+// non-empty, != lastWrite) is what paste inserts.
+func TestClipboardReadExternalWins(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	fake := &fakeClipboard{readVal: "EXTERNAL"}
+	ctrl.SetClipboard(fake)
+
+	matcher.Registers().Set('"', "internal")
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("x")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	// p from unnamed register → clipboard "EXTERNAL" wins (char-wise after cursor).
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeNormal, Register: 0})
+	if got := string(buf.Lines[0].Runes); got != "xEXTERNAL" {
+		t.Errorf("after p = %q, want %q", got, "xEXTERNAL")
+	}
+}
+
+// TestClipboardReadEmptyFallsBack: empty clipboard read falls back to the
+// internal register.
+func TestClipboardReadEmptyFallsBack(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	fake := &fakeClipboard{readVal: ""}
+	ctrl.SetClipboard(fake)
+
+	matcher.Registers().Set('"', "internal")
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("x")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeNormal, Register: 0})
+	if got := string(buf.Lines[0].Runes); got != "xinternal" {
+		t.Errorf("after p (empty clipboard) = %q, want %q", got, "xinternal")
+	}
+}
+
+// TestClipboardReadEqualsLastWriteUsesInternal: when the clipboard equals
+// what we last mirrored, the internal (line-wise) register is used so yyp
+// stays line-wise.
+func TestClipboardReadEqualsLastWriteUsesInternal(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	fake := &fakeClipboard{}
+	ctrl.SetClipboard(fake)
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("aaa")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	// yy mirrors "aaa\n" to the fake (and sets lastWrite).
+	doubledYank(t, reg, 0)
+	// Echo the mirrored value back as the clipboard contents.
+	fake.readVal = "aaa\n"
+
+	// p: clipboard == lastWrite → use internal line-wise register → pastes below.
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeNormal, Register: 0})
+	if len(buf.Lines) != 2 || string(buf.Lines[1].Runes) != "aaa" {
+		t.Errorf("after yyp lines = %v, want line-wise paste below (second line %q)", buf.Lines, "aaa")
+	}
+}
+
+// TestClipboardReadErrorFallsBack: a clipboard Read error falls back to the
+// internal register (in-editor yank->p still works).
+func TestClipboardReadErrorFallsBack(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	fake := &fakeClipboard{readVal: "EXTERNAL", readErr: errors.New("backend down")}
+	ctrl.SetClipboard(fake)
+
+	matcher.Registers().Set('"', "internal")
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("x")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeNormal, Register: 0})
+	if got := string(buf.Lines[0].Runes); got != "xinternal" {
+		t.Errorf("after p (read error) = %q, want %q", got, "xinternal")
+	}
+}
+
+// TestClipboardWriteErrorSwallowed: a clipboard Write error is swallowed —
+// no panic, internal store still set, lastWrite NOT updated.
+func TestClipboardWriteErrorSwallowed(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	fake := &fakeClipboard{writeErr: errors.New("write failed")}
+	ctrl.SetClipboard(fake)
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("aaa")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	doubledYank(t, reg, '+')
+
+	// Internal store still set despite the Write error.
+	if got := matcher.Registers().Get('+'); got != "aaa\n" {
+		t.Errorf("register + after failed Write = %q, want %q", got, "aaa\n")
+	}
+	// lastWrite was not updated, so a clean external read (== the value)
+	// would still be treated as external. Verify by reading: clipboard
+	// reports "aaa\n" but lastWrite is "" so external wins (char-wise).
+	fake.readVal = "aaa\n"
+	fake.writeErr = nil
+	buf.Lines = []editor.Line{{Runes: []rune("z")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeNormal, Register: '+'})
+	// External "aaa\n" is line-wise (trailing \n) so it pastes below as a line.
+	if len(buf.Lines) != 2 || string(buf.Lines[1].Runes) != "aaa" {
+		t.Errorf("after p (external wins post failed write) lines = %v, want line-wise below", buf.Lines)
+	}
+}
+
+// TestClipboardNilDefaultUnchanged: with no clipboard wired (default),
+// behavior is unchanged — yank writes only the internal register and paste
+// reads only the internal register.
+func TestClipboardNilDefaultUnchanged(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	// No SetClipboard call.
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("aaa")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	doubledYank(t, reg, '+')
+	if got := matcher.Registers().Get('+'); got != "aaa\n" {
+		t.Errorf("register + = %q, want %q", got, "aaa\n")
+	}
+
+	// Paste from + uses internal register (line-wise below).
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeNormal, Register: '+'})
+	if len(buf.Lines) < 2 || string(buf.Lines[1].Runes) != "aaa" {
+		t.Errorf("after +p lines = %v, want line-wise paste below", buf.Lines)
 	}
 }
 

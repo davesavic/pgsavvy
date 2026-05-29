@@ -17,6 +17,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/env"
+	"github.com/davesavic/dbsavvy/pkg/gui/clipboard"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/exporter"
 	"github.com/davesavic/dbsavvy/pkg/gui/grid"
@@ -1366,10 +1367,9 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 			Title:    label,
 		}),
 	}
-	// Wire the system clipboard so `y` / `yy` yank publishes to the host
-	// clipboard (OSC-52 with multiplexer passthrough + wl-copy/xclip/pbcopy
-	// fallback). dbsavvy U4.
-	t.grid.SetClipboard(grid.NewSystemClipboard())
+	// Wire the shared system clipboard so `y` / `yy` yank publishes to the
+	// host clipboard through the common pkg/gui/clipboard transport. dbsavvy U4.
+	t.grid.SetClipboard(clipboard.NewSystemClipboard())
 	// Propagate the configured /regex byte cap into the grid view so a
 	// hot-reloaded config value takes effect on the next tab's filter.
 	// dbsavvy-uv0.4.

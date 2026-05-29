@@ -9,11 +9,14 @@ require (
 	github.com/Xuanwo/go-locale v1.1.3
 	github.com/adrg/xdg v0.5.3
 	github.com/alecthomas/chroma/v2 v2.24.1
+	github.com/atotto/clipboard v0.1.4
+	github.com/cockroachdb/cockroachdb-parser v0.0.0-20221207165326-ea0ac1a4778b
 	github.com/gdamore/tcell/v3 v3.3.0
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/jesseduffield/lazycore v0.0.0-20221012050358-03d2e40243c5
 	github.com/jesseduffield/lazygit v0.61.2-0.20260511142836-c49350362005
 	github.com/mattn/go-runewidth v0.0.23
+	github.com/mjibson/sqlfmt v0.5.0
 	github.com/spf13/afero v1.15.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/goleak v1.3.0
@@ -30,7 +33,6 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cockroachdb/apd/v3 v3.1.0 // indirect
-	github.com/cockroachdb/cockroachdb-parser v0.0.0-20221207165326-ea0ac1a4778b // indirect
 	github.com/cockroachdb/errors v1.9.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
@@ -59,7 +61,6 @@ require (
 	github.com/lib/pq v1.10.6 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mjibson/sqlfmt v0.5.0 // indirect
 	github.com/mtibben/percent v0.2.1 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/petermattis/goid v0.0.0-20250813065127-a731cc31b4fe // indirect
