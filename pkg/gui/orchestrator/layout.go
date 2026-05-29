@@ -244,7 +244,7 @@ func (g *Gui) RunLayout(w, h int) error {
 			if name == "" {
 				continue
 			}
-			r, ok := popupRectFor(ctx.GetKey(), dims, w, h)
+			r, ok := g.popupRect(ctx, dims, w, h)
 			if !ok {
 				continue
 			}
@@ -576,6 +576,94 @@ func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int)
 	}
 }
 
+// suggestionsAnchorProvider is the duck-typed surface RunLayout reads to
+// place the cursor-anchored SUGGESTIONS popup: the buffer Position the
+// popup hangs off plus the current suggestion list (for height/width
+// sizing). SuggestionsContext satisfies it; defined locally to avoid
+// widening the IBaseContext surface (same pattern as commandLineViewSetter).
+type suggestionsAnchorProvider interface {
+	Anchor() editor.Position
+	Suggestions() []editor.Suggestion
+}
+
+// suggestionsRowsMax / suggestionsColsMax bound the anchored dropdown so a
+// long suggestion list / wide identifier can't blow past a sane popup size
+// before the editor-view clamp runs. suggestionsRowsMax mirrors the
+// context-side visible window (suggestionsVisibleMax).
+const (
+	suggestionsRowsMax = 8
+	suggestionsColsMax = 60
+)
+
+// popupRect derives a popup context's SetView rectangle. Anchored-kind
+// popups (the completion dropdown) are placed at the call site here —
+// where the live editor view handle and the context anchor are in scope —
+// because popupRectFor lacks access to either. All other kinds delegate to
+// popupRectFor's pure pixel math.
+func (g *Gui) popupRect(ctx types.IBaseContext, dims map[string]ui.Dimensions, w, h int) (rect, bool) {
+	if guicontext.PopupRectSpecFor(ctx.GetKey()).Kind == types.PopupSizeAnchored {
+		return g.anchoredPopupRect(ctx, dims, w, h)
+	}
+	return popupRectFor(ctx.GetKey(), dims, w, h)
+}
+
+// anchoredPopupRect places the cursor-anchored completion dropdown below
+// the editor cursor using the live QUERY_EDITOR view geometry
+// (Dimensions + Origin) and the context's buffer anchor. When the editor
+// view handle is unavailable (e.g. before first paint, or under a fake
+// driver that returns nil from ViewByName) it falls back to the centred
+// rect declared in the spec so the popup is never lost at (0,0).
+func (g *Gui) anchoredPopupRect(ctx types.IBaseContext, dims map[string]ui.Dimensions, w, h int) (rect, bool) {
+	prov, ok := ctx.(suggestionsAnchorProvider)
+	if !ok {
+		return popupRectFallbackCentered(ctx.GetKey(), dims, w, h)
+	}
+	view, err := g.driver.ViewByName(string(types.QUERY_EDITOR))
+	if err != nil || view == nil {
+		return popupRectFallbackCentered(ctx.GetKey(), dims, w, h)
+	}
+	vx0, vy0, vx1, vy1 := view.Dimensions()
+	ox, oy := view.Origin()
+
+	suggestions := prov.Suggestions()
+	rows := len(suggestions)
+	if rows > suggestionsRowsMax {
+		rows = suggestionsRowsMax
+	}
+	contentW := longestDisplayWidth(suggestions)
+	if contentW > suggestionsColsMax {
+		contentW = suggestionsColsMax
+	}
+	return anchoredRect(vx0, vy0, vx1, vy1, ox, oy, prov.Anchor(), contentW, rows), true
+}
+
+// popupRectFallbackCentered returns the spec's centred rect (used when the
+// anchored placement can't read the editor view). Reuses popupRectFor's
+// PopupSizeCentered math by reading the spec's fractions directly.
+func popupRectFallbackCentered(key types.ContextKey, dims map[string]ui.Dimensions, w, h int) (rect, bool) {
+	canvas, ok := dims["popup-overlay"]
+	if !ok {
+		canvas = ui.Dimensions{X0: 0, Y0: 0, X1: w - 1, Y1: h - 1}
+	}
+	spec := guicontext.PopupRectSpecFor(key)
+	return centeredRect(canvas, spec.WidthFrac, spec.HeightFrac), true
+}
+
+// longestDisplayWidth returns the widest suggestion Display in runes,
+// including the 2-cell "> " selection marker the renderer prefixes to
+// every row. Rune count is a best-effort cell width (wide-char correction
+// is out of scope for v1).
+func longestDisplayWidth(suggestions []editor.Suggestion) int {
+	const markerCols = 2
+	max := 0
+	for _, s := range suggestions {
+		if n := len([]rune(s.Display)); n > max {
+			max = n
+		}
+	}
+	return max + markerCols
+}
+
 // renderLimitOverlay sizes a single LIMIT view to the full canvas and
 // invokes the LimitContext's HandleRender to fill in the message.
 func (g *Gui) renderLimitOverlay(w, h int) error {
@@ -866,4 +954,85 @@ func centeredRect(canvas ui.Dimensions, fracW, fracH float64) rect {
 	x0 := canvas.X0 + (w-pw)/2
 	y0 := canvas.Y0 + (h-ph)/2
 	return rect{X0: x0, Y0: y0, X1: x0 + pw, Y1: y0 + ph}
+}
+
+// suggestionsFrame is the per-side frame cost (gocui draws a 1-cell
+// border on each edge of a framed popup, so content width/height each
+// need +2 to fit the rendered rows / longest line).
+const suggestionsFrame = 2
+
+// anchoredRect computes the outer SetView rectangle for a cursor-anchored
+// dropdown (the completion SUGGESTIONS popup). The editor view occupies
+// the screen rectangle (vx0,vy0)-(vx1,vy1); (ox,oy) is its scroll origin;
+// anchor is the rune-indexed buffer Position the popup hangs off.
+//
+// The cursor's on-screen cell is (vx0+anchor.Col-ox, vy0+anchor.Line-oy).
+// The dropdown renders on the row BELOW the cursor; when that would push
+// its bottom past the editor's bottom edge (vy1) it flips ABOVE, ending at
+// the cursor row. contentW is the longest suggestion Display width and
+// rows is the visible suggestion count; both gain a 1-cell frame per side.
+// The final rect is clamped within the editor view bounds.
+//
+// Wide-char (CJK/emoji) rune→cell width is best-effort v1: ASCII
+// identifiers position correctly (epic dbsavvy-etp out-of-scope note).
+func anchoredRect(vx0, vy0, vx1, vy1, ox, oy int, anchor editor.Position, contentW, rows int) rect {
+	cursorX := vx0 + (anchor.Col - ox)
+	cursorY := vy0 + (anchor.Line - oy)
+
+	pw := contentW + suggestionsFrame
+	if maxW := vx1 - vx0; pw > maxW {
+		pw = maxW
+	}
+	if pw < 1 {
+		pw = 1
+	}
+	ph := rows + suggestionsFrame
+	if maxH := vy1 - vy0; ph > maxH {
+		ph = maxH
+	}
+	if ph < 1 {
+		ph = 1
+	}
+
+	y0 := cursorY + 1
+	y1 := y0 + ph
+	if y1 > vy1 {
+		// Flip above: the popup ends at the cursor row (y1 = cursorY) so
+		// it never overlaps the cursor line, and grows upward.
+		y1 = cursorY
+		y0 = y1 - ph
+	}
+
+	x0 := cursorX
+	x1 := x0 + pw
+	return clampRect(rect{X0: x0, Y0: y0, X1: x1, Y1: y1}, vx0, vy0, vx1, vy1)
+}
+
+// clampRect slides r so it fits within (bx0,by0)-(bx1,by1), preserving its
+// width/height where possible and shrinking only when the bounds are
+// smaller than the rect.
+func clampRect(r rect, bx0, by0, bx1, by1 int) rect {
+	w := r.X1 - r.X0
+	h := r.Y1 - r.Y0
+	if r.X1 > bx1 {
+		r.X0 = bx1 - w
+		r.X1 = bx1
+	}
+	if r.X0 < bx0 {
+		r.X0 = bx0
+		if r.X1 > bx1 {
+			r.X1 = bx1
+		}
+	}
+	if r.Y1 > by1 {
+		r.Y0 = by1 - h
+		r.Y1 = by1
+	}
+	if r.Y0 < by0 {
+		r.Y0 = by0
+		if r.Y1 > by1 {
+			r.Y1 = by1
+		}
+	}
+	return r
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
@@ -134,5 +135,98 @@ func TestPopupRectFor_FKReversePicker(t *testing.T) {
 	// the default branch.
 	if r2, ok2 := popupRectFor(types.FK_REVERSE_PICKER, map[string]ui.Dimensions{}, 100, 100); ok2 || r2 != (rect{}) {
 		t.Errorf("missing popup-overlay: got (%v, %v), want (rect{}, false)", r2, ok2)
+	}
+}
+
+// TestPopupRectAnchoredBelowCursor (dbsavvy-etp.2): the SUGGESTIONS popup
+// is cursor-anchored. anchoredRect derives the screen cell directly below
+// the cursor from the editor view origin (vx0,vy0), the scroll offset
+// (ox,oy) and the rune-indexed anchor (Line,Col): screen_x = vx0 +
+// (Col-ox), screen_y = vy0 + (Line-oy) + 1. With no scroll, the top-left
+// sits one row below the cursor, not screen-center.
+func TestPopupRectAnchoredBelowCursor(t *testing.T) {
+	// Editor view occupies (5,3)-(105,33). Cursor mid-view at Line 10,
+	// Col 8, no scroll. 3 suggestions, content width 12.
+	r := anchoredRect(5, 3, 105, 33, 0, 0, editor.Position{Line: 10, Col: 8}, 12, 3)
+
+	wantX0 := 5 + 8      // vx0 + (Col - ox)
+	wantY0 := 3 + 10 + 1 // vy0 + (Line - oy) + 1
+	if r.X0 != wantX0 {
+		t.Errorf("X0 = %d, want %d (below-cursor column)", r.X0, wantX0)
+	}
+	if r.Y0 != wantY0 {
+		t.Errorf("Y0 = %d, want %d (row below cursor)", r.Y0, wantY0)
+	}
+	// Not screen-centered: center of a 100-wide view would be ~55.
+	if r.X0 > 40 {
+		t.Errorf("X0 = %d looks screen-centered, want anchored", r.X0)
+	}
+}
+
+// TestPopupRectAnchoredScrollOffset (dbsavvy-etp.2, edge): when the editor
+// is scrolled (oy>0), screen_y subtracts the scroll origin so the popup
+// tracks the on-screen cursor, not the buffer line.
+func TestPopupRectAnchoredScrollOffset(t *testing.T) {
+	// oy=6: buffer Line 10 is screen row 4 inside the view.
+	r := anchoredRect(5, 3, 105, 33, 0, 6, editor.Position{Line: 10, Col: 8}, 12, 3)
+	wantY0 := 3 + (10 - 6) + 1
+	if r.Y0 != wantY0 {
+		t.Errorf("Y0 = %d, want %d (scroll-adjusted row below cursor)", r.Y0, wantY0)
+	}
+	// ox=2: buffer Col 8 is screen col 6.
+	r2 := anchoredRect(5, 3, 105, 33, 2, 0, editor.Position{Line: 10, Col: 8}, 12, 3)
+	wantX0 := 5 + (8 - 2)
+	if r2.X0 != wantX0 {
+		t.Errorf("X0 = %d, want %d (scroll-adjusted column)", r2.X0, wantX0)
+	}
+}
+
+// TestPopupRectAnchoredFlipsAboveAtBottom (dbsavvy-etp.2, boundary): when
+// placing the dropdown below the cursor would push its bottom past the
+// editor's bottom edge (vy1), it flips to render ABOVE the cursor line —
+// ending at screen_y-1 (the cursor row) — and stays fully within view.
+func TestPopupRectAnchoredFlipsAboveAtBottom(t *testing.T) {
+	// Editor view (5,3)-(105,33): last usable row is 33. Cursor on Line
+	// 28 (no scroll) -> below would be 32..36, exceeding 33. Flip above.
+	r := anchoredRect(5, 3, 105, 33, 0, 0, editor.Position{Line: 28, Col: 8}, 12, 6)
+
+	cursorScreenY := 3 + 28 // vy0 + (Line - oy)
+	if r.Y1 > cursorScreenY {
+		t.Errorf("Y1 = %d should end at or above cursor row %d when flipped", r.Y1, cursorScreenY)
+	}
+	if r.Y0 < 3 {
+		t.Errorf("Y0 = %d escaped the top of the editor view (3)", r.Y0)
+	}
+	if r.Y1 > 33 {
+		t.Errorf("Y1 = %d escaped the bottom of the editor view (33)", r.Y1)
+	}
+}
+
+// TestPopupRectAnchoredLastVisibleRowFlips (dbsavvy-etp.2, boundary):
+// cursor on the very last visible editor row must flip above (there is no
+// room for even one row below).
+func TestPopupRectAnchoredLastVisibleRowFlips(t *testing.T) {
+	// Cursor screen row = vy0 + (Line-oy) = 3 + 29 = 32; one below = 33 =
+	// vy1 (the frame row). Flip above.
+	r := anchoredRect(5, 3, 105, 33, 0, 0, editor.Position{Line: 29, Col: 8}, 12, 4)
+	if r.Y1 > 3+29 {
+		t.Errorf("Y1 = %d should be above cursor row %d", r.Y1, 3+29)
+	}
+	if r.Y0 < 3 || r.Y1 > 33 {
+		t.Errorf("rect (Y0=%d,Y1=%d) escaped editor bounds [3,33]", r.Y0, r.Y1)
+	}
+}
+
+// TestPopupRectAnchoredClampsWithinView (dbsavvy-etp.2): the rect never
+// exceeds the editor view rectangle on any edge, even for a wide popup
+// near the right edge.
+func TestPopupRectAnchoredClampsWithinView(t *testing.T) {
+	// Cursor near the right edge with a wide content width.
+	r := anchoredRect(5, 3, 105, 33, 0, 0, editor.Position{Line: 10, Col: 95}, 40, 3)
+	if r.X0 < 5 || r.X1 > 105 {
+		t.Errorf("rect X span (%d,%d) escaped editor bounds [5,105]", r.X0, r.X1)
+	}
+	if r.Y0 < 3 || r.Y1 > 33 {
+		t.Errorf("rect Y span (%d,%d) escaped editor bounds [3,33]", r.Y0, r.Y1)
 	}
 }

@@ -89,6 +89,12 @@ func TestWiringInvariant(t *testing.T) {
 		// WHICH_KEY renders bottom-right via its dedicated which-key overlay
 		// path, not popupRectFor.
 		types.WHICH_KEY: "renders via dedicated which-key overlay path, not popupRectFor",
+		// SUGGESTIONS is the cursor-anchored completion dropdown
+		// (dbsavvy-etp.2): its rect is computed at the orchestrator call
+		// site from the live editor view geometry + the context anchor,
+		// because popupRectFor lacks access to the view handle / anchor.
+		// popupRectFor returns no rect for the PopupSizeAnchored kind.
+		types.SUGGESTIONS: "cursor-anchored; rect computed at call site from editor view geometry, not popupRectFor",
 	}
 
 	// renderAllowlist: renderable-kind keys that deliberately inherit

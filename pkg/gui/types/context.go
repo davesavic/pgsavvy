@@ -60,6 +60,16 @@ const (
 	// PopupSizeCellEditor: centred, height-bounded edit popup whose max
 	// width is derived from the live canvas width by the orchestrator.
 	PopupSizeCellEditor
+	// PopupSizeAnchored: a cursor-anchored dropdown (the completion
+	// SUGGESTIONS popup). The geometry is NOT computed by popupRectFor —
+	// it needs the live editor view handle (Dimensions/Origin) and the
+	// context's anchor Position, both of which are only in scope at the
+	// orchestrator call site. popupRectFor returns no rect for this kind;
+	// the call site reads the editor view and the SuggestionsContext
+	// anchor to place the popup below the cursor (flipping above near the
+	// editor's bottom edge), falling back to a centred rect when the
+	// editor view handle is unavailable.
+	PopupSizeAnchored
 )
 
 // PopupRectSpec is the per-context popup-rect descriptor carried as data

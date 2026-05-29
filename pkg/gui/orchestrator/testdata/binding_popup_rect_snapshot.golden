@@ -319,7 +319,7 @@ popuprect	key=query_editor	none
 popuprect	key=result_grid	none
 popuprect	key=schemas	none
 popuprect	key=selection	x0=25	y0=25	x1=75	y1=75
-popuprect	key=suggestions	x0=25	y0=25	x1=75	y1=75
+popuprect	key=suggestions	none
 popuprect	key=table_data_editor	none
 popuprect	key=table_inspect	x0=20	y0=20	x1=80	y1=80
 popuprect	key=tables	none

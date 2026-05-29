@@ -181,7 +181,11 @@ func contextSpecs() []contextSpec {
 		},
 		{
 			key: types.SUGGESTIONS, kind: types.TEMPORARY_POPUP, inFlatten: true,
-			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.5, HeightFrac: 0.5},
+			// Cursor-anchored dropdown (dbsavvy-etp.2): the orchestrator
+			// places this below the editor cursor (flipping above near the
+			// bottom edge), not screen-centred. WidthFrac/HeightFrac are
+			// the centred fallback used when the editor view is absent.
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeAnchored, WidthFrac: 0.5, HeightFrac: 0.5},
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewSuggestionsContext(b, d) },
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.Suggestions = c.(*SuggestionsContext) },
 		},

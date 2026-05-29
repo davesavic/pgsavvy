@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
@@ -169,6 +172,87 @@ func TestRunLayoutOmitsOffStackPopups(t *testing.T) {
 		if rec.HasSetView(name) {
 			t.Errorf("popup %q must not be laid out when off the focus stack", name)
 		}
+	}
+}
+
+// lastSetView returns the most recent SetView call for name (dbsavvy-etp.2
+// helper). The Tier-3 popup loop SetViews each frame, so the last call
+// reflects the rect actually applied.
+func lastSetView(rec *testfake.RecorderGuiDriver, name string) (testfake.SetViewCall, bool) {
+	var got testfake.SetViewCall
+	found := false
+	for _, c := range rec.AllSetViewCalls() {
+		if c.Name == name {
+			got, found = c, true
+		}
+	}
+	return got, found
+}
+
+// TestRunLayoutSuggestionsAnchoredBelowCursor (dbsavvy-etp.2): when the
+// SUGGESTIONS popup is on the focus stack and visible, RunLayout sizes its
+// view to the cell directly below the cursor — derived from the live
+// QUERY_EDITOR view Dimensions()+Origin() and the SuggestionsContext
+// anchor — not screen-center.
+func TestRunLayoutSuggestionsAnchoredBelowCursor(t *testing.T) {
+	g, rec := buildTestGui(t)
+	// Install a real editor view so ViewByName returns a handle with a
+	// known origin (5,3)-(105,33), scrolled oy=4.
+	ev := gocui.NewView(string(types.QUERY_EDITOR), 5, 3, 105, 33, gocui.OutputNormal)
+	ev.SetOrigin(0, 4)
+	rec.SetRealView(string(types.QUERY_EDITOR), ev)
+
+	sugg := g.Registry().Suggestions
+	if sugg == nil {
+		t.Fatal("registry.Suggestions is nil")
+	}
+	sugg.Show([]editor.Suggestion{{Display: "users"}, {Display: "user_roles"}}, editor.Position{Line: 9, Col: 7})
+	if err := g.ContextTree().Push(sugg); err != nil {
+		t.Fatalf("Push(suggestions): %v", err)
+	}
+
+	if err := g.RunLayout(200, 60); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	call, ok := lastSetView(rec, string(types.SUGGESTIONS))
+	if !ok {
+		t.Fatal("SUGGESTIONS SetView not invoked while visible on stack")
+	}
+	wantY0 := 3 + (9 - 4) + 1 // vy0 + (Line-oy) + 1
+	wantX0 := 5 + (7 - 0)     // vx0 + (Col-ox)
+	if call.Y0 != wantY0 {
+		t.Errorf("SUGGESTIONS Y0 = %d, want %d (row below cursor)", call.Y0, wantY0)
+	}
+	if call.X0 != wantX0 {
+		t.Errorf("SUGGESTIONS X0 = %d, want %d (below-cursor column)", call.X0, wantX0)
+	}
+	// Not screen-centered (center of a 200-wide canvas would be ~100).
+	if call.X0 > 60 {
+		t.Errorf("SUGGESTIONS X0 = %d looks screen-centered, want anchored", call.X0)
+	}
+}
+
+// TestRunLayoutSuggestionsFallsBackToCenteredWithoutEditorView
+// (dbsavvy-etp.2): when the QUERY_EDITOR view handle is unavailable
+// (ViewByName -> nil, the default recorder behavior), the SUGGESTIONS
+// popup degrades to a centered rect rather than landing at (0,0).
+func TestRunLayoutSuggestionsFallsBackToCenteredWithoutEditorView(t *testing.T) {
+	g, rec := buildTestGui(t)
+	sugg := g.Registry().Suggestions
+	sugg.Show([]editor.Suggestion{{Display: "users"}}, editor.Position{Line: 2, Col: 3})
+	if err := g.ContextTree().Push(sugg); err != nil {
+		t.Fatalf("Push(suggestions): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	call, ok := lastSetView(rec, string(types.SUGGESTIONS))
+	if !ok {
+		t.Fatal("SUGGESTIONS SetView not invoked")
+	}
+	// Centered fallback: not pinned to the top-left origin.
+	if call.X0 < 5 || call.Y0 < 5 {
+		t.Errorf("SUGGESTIONS fallback rect (X0=%d,Y0=%d) not centered", call.X0, call.Y0)
 	}
 }
 
