@@ -1474,6 +1474,16 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		if rs := rh.Rows(); rs != nil {
 			cols = rs.Columns()
 			gridView.SetColumns(cols)
+			// Introspect editability as soon as the result columns are
+			// known — it is column-driven (not row-driven) and runs on an
+			// isolated session, so it need not wait for the stream to
+			// finish. This lets Editable() flip true during StateRunning,
+			// so inline edits work on buffered rows while a no-LIMIT query
+			// is still streaming (dbsavvy-1po). Re-runs call startStreaming
+			// again, so this re-introspects on each fresh schema attach.
+			if len(cols) > 0 {
+				h.scheduleEditabilityIntrospect(tab, cols)
+			}
 		}
 	}
 
@@ -1517,8 +1527,11 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		// complete flip is marshalled onto the UI thread so the next
 		// Render reads a consistent snapshot. Idempotent — dispose()
 		// may have already set Cancelled / etc.
+		//
+		// Editability is introspected at stream start (above), not here:
+		// it is column-driven and the columns are known before the first
+		// row, so Editable() flips true during StateRunning. dbsavvy-1po.
 		h.markCompleteOnUI(tab)
-		h.scheduleEditabilityIntrospect(tab, cols)
 	}
 	_ = runner.NewQueryTask(taskKey, streamFn, appendRows, resultTabInitialRows, onDone)
 }

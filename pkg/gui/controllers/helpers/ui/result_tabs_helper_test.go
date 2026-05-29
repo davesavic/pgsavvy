@@ -1856,10 +1856,13 @@ func TestOpenTab_InstallsStreamColumnsOnGrid(t *testing.T) {
 	}
 }
 
-// TestEditabilityIntrospectedOnComplete — when a tab completes and an
-// IntrospectEditability hook is wired, the grid is marked editable.
-// dbsavvy-2b6.
-func TestEditabilityIntrospectedOnComplete(t *testing.T) {
+// TestEditabilityIntrospectedAtStreamStart — editability is introspected
+// as soon as the result columns are known (at stream start), NOT only at
+// completion. Introspection is column-driven and runs on an isolated
+// session, so the grid is marked editable while the tab is still
+// StateRunning — letting inline edits work on buffered rows while a
+// no-LIMIT query keeps streaming. dbsavvy-2b6, dbsavvy-1po.
+func TestEditabilityIntrospectedAtStreamStart(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
 	h, _ := newTestHelper(t, factory)
@@ -1868,16 +1871,20 @@ func TestEditabilityIntrospectedOnComplete(t *testing.T) {
 		return true, []int{0}, "", "myschema"
 	}
 
-	_ = h.openTab("SELECT id FROM t", newFakeRunHandle())
+	// The run handle must expose a RowStream with columns: introspection
+	// keys off the streamed schema, installed before the first row.
+	rh := newFakeRunHandle()
+	rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "id", TypeName: "int8"}}}
+
+	_ = h.openTab("SELECT id FROM t", rh)
 	tab := h.Active()
-	if tab.grid.Editable() {
-		t.Fatal("grid editable before completion; want false")
+
+	// Editable BEFORE any onDone fires — i.e. while still StateRunning.
+	if tab.State() != StateRunning {
+		t.Fatalf("tab state = %q, want StateRunning (not yet complete)", tab.State())
 	}
-
-	runner.fireOnDone() // OnUIThread + OnWorker nil → synchronous
-
 	if !tab.grid.Editable() {
-		t.Fatal("grid not editable after completion (Gap 2a)")
+		t.Fatal("grid not editable at stream start; want editable during StateRunning (dbsavvy-1po)")
 	}
 	ri := tab.grid.RowIdentity()
 	if len(ri) != 1 || ri[0] != 0 {
@@ -1887,6 +1894,12 @@ func TestEditabilityIntrospectedOnComplete(t *testing.T) {
 	// apply path can schema-qualify the UPDATE (dbsavvy-8q6).
 	if got := tab.grid.IdentitySchema(); got != "myschema" {
 		t.Fatalf("grid IdentitySchema = %q, want %q", got, "myschema")
+	}
+
+	// Completion must not regress editability.
+	runner.fireOnDone()
+	if !tab.grid.Editable() {
+		t.Fatal("grid not editable after completion")
 	}
 }
 

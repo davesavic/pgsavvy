@@ -42,11 +42,15 @@ type GridStatePicker interface {
 	// with DisabledReason() as the user-facing reason.
 	Editable() bool
 
-	// IsStreaming reports whether the active grid still has rows
-	// arriving from the backend. ADR-18 forbids inline edits while a
-	// stream is in flight; A1 surfaces "wait for current stream to
-	// finish" when this is true.
-	IsStreaming() bool
+	// StreamBlocksEdit reports whether the active tab's lifecycle phase
+	// has no stable buffer to edit against. ADR-18 (revised) forbids
+	// inline edits only while no usable buffer exists — StateQueued (no
+	// rows opened) and StateSorting (re-run cleared the buffer). Edits
+	// ARE permitted during StateRunning: rows are buffered, appends are
+	// append-only, and pending edits are PK-keyed, so editing a buffered
+	// row is safe while more rows still stream in. A1 surfaces "wait for
+	// current stream to finish" when this is true.
+	StreamBlocksEdit() bool
 
 	// SupportsInlineEdit reports the active driver's capability
 	// (drivers.Capabilities.SupportsInlineEdit). False is a hard
@@ -321,7 +325,7 @@ func (e *CellEditorController) enterDisabled() (string, bool) {
 	if !e.picker.SupportsInlineEdit() {
 		return "driver does not support inline edit", true
 	}
-	if e.picker.IsStreaming() {
+	if e.picker.StreamBlocksEdit() {
 		return "wait for current stream to finish", true
 	}
 	if !e.picker.Editable() {

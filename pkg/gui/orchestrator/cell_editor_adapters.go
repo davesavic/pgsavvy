@@ -18,8 +18,8 @@ import (
 // into grid.View by F2's introspection pass (drivers/pg/editability.go
 // ApplyConnectionGate), so IsReadOnly and SupportsInlineEdit return
 // neutral values here — the !Editable / DisabledReason gate surfaces
-// the canonical reason. IsStreaming is reported live from TabState
-// because rows can still be arriving after wire time.
+// the canonical reason. StreamBlocksEdit is reported live from TabState
+// because the tab's lifecycle phase can still change after wire time.
 type cellEditorPicker struct{ tabs *ui.ResultTabsHelper }
 
 func (p cellEditorPicker) Editable() bool {
@@ -30,13 +30,25 @@ func (p cellEditorPicker) Editable() bool {
 	return g.Editable()
 }
 
-func (p cellEditorPicker) IsStreaming() bool {
+func (p cellEditorPicker) StreamBlocksEdit() bool {
 	tab := p.activeTab()
 	if tab == nil {
 		return false
 	}
-	switch tab.State() {
-	case ui.StateQueued, ui.StateRunning, ui.StateSorting:
+	return streamBlocksEdit(tab.State())
+}
+
+// streamBlocksEdit reports whether a tab's lifecycle phase has no stable
+// buffer to edit against. StateRunning is editable: rows are buffered,
+// appends are append-only on the UI thread, and pending edits are
+// PK-keyed (not row-index keyed), so editing a buffered row is safe
+// while more rows still stream in. Only the phases with no usable buffer
+// block edits — StateQueued (no rows opened yet) and StateSorting (a
+// re-run cleared the buffer and reset the cursor; it flips to
+// StateRunning on the first appended batch).
+func streamBlocksEdit(state ui.TabState) bool {
+	switch state {
+	case ui.StateQueued, ui.StateSorting:
 		return true
 	default:
 		return false

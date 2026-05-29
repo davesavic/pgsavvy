@@ -17,7 +17,7 @@ import (
 // twiddle them directly to drive the precondition-disabled paths.
 type fakeGridPicker struct {
 	editable           bool
-	streaming          bool
+	streamBlocksEdit   bool
 	supportsInlineEdit bool
 	readOnly           bool
 	disabledReason     string
@@ -30,7 +30,7 @@ type fakeGridPicker struct {
 }
 
 func (f *fakeGridPicker) Editable() bool           { return f.editable }
-func (f *fakeGridPicker) IsStreaming() bool        { return f.streaming }
+func (f *fakeGridPicker) StreamBlocksEdit() bool   { return f.streamBlocksEdit }
 func (f *fakeGridPicker) SupportsInlineEdit() bool { return f.supportsInlineEdit }
 func (f *fakeGridPicker) IsReadOnly() bool         { return f.readOnly }
 func (f *fakeGridPicker) DisabledReason() string   { return f.disabledReason }
@@ -249,8 +249,8 @@ func TestCellEditorControllerEnterDisabledReasons(t *testing.T) {
 			reason: "driver does not support inline edit",
 		},
 		{
-			name:   "streaming",
-			picker: &fakeGridPicker{supportsInlineEdit: true, streaming: true, editable: true},
+			name:   "stream blocks edit (no stable buffer)",
+			picker: &fakeGridPicker{supportsInlineEdit: true, streamBlocksEdit: true, editable: true},
 			reason: "wait for current stream to finish",
 		},
 		{
