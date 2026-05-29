@@ -24,14 +24,19 @@ type fakeSession struct {
 
 	gotListTablesSchema string
 	gotListColumnsArgs  [2]string
+
+	listTablesCalls  int
+	listColumnsCalls int
 }
 
 func (f *fakeSession) ListTables(_ context.Context, schema string) ([]*models.Table, error) {
+	f.listTablesCalls++
 	f.gotListTablesSchema = schema
 	return f.tables, f.tablesErr
 }
 
 func (f *fakeSession) ListColumns(_ context.Context, schema, table string) ([]models.Column, error) {
+	f.listColumnsCalls++
 	f.gotListColumnsArgs = [2]string{schema, table}
 	return f.cols, f.colsErr
 }
@@ -362,4 +367,197 @@ func TestStripNoise_BasicCases(t *testing.T) {
 			}
 		})
 	}
+}
+
+func texts(sugs []Suggestion) []string {
+	out := make([]string, 0, len(sugs))
+	for _, s := range sugs {
+		out = append(out, s.Text)
+	}
+	return out
+}
+
+// TestSchemaSource_TablePrefixFilter covers prefix-narrowing of the
+// table list: empty partial → all, partial → case-insensitive prefix
+// filter, no-match → empty.
+func TestSchemaSource_TablePrefixFilter(t *testing.T) {
+	tables := []*models.Table{{Name: "users"}, {Name: "usage"}, {Name: "orders"}}
+	tests := []struct {
+		name string
+		line string
+		want []string
+	}{
+		{"empty partial returns all", "SELECT * FROM ", []string{"users", "usage", "orders"}},
+		{"partial us narrows", "SELECT * FROM us", []string{"users", "usage"}},
+		{"case-insensitive partial US", "SELECT * FROM US", []string{"users", "usage"}},
+		{"no-match partial zz empty", "SELECT * FROM zz", nil},
+		{"full name then space does not re-offer", "SELECT * FROM users ", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sess := &fakeSession{tables: tables}
+			src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+			b, p := bufWithCursor(tc.line)
+			got := texts(src.Suggest(context.Background(), b, p))
+			if len(got) != len(tc.want) {
+				t.Fatalf("Suggest(%q) = %v; want %v", tc.line, got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("Suggest(%q) = %v; want %v", tc.line, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestSchemaSource_ColumnPrefixFilter covers prefix-narrowing of the
+// column list after `<ident>.`.
+func TestSchemaSource_ColumnPrefixFilter(t *testing.T) {
+	cols := []models.Column{
+		{Name: "created_at", DataType: "timestamp"},
+		{Name: "credit", DataType: "int"},
+		{Name: "id", DataType: "int"},
+	}
+	tests := []struct {
+		name string
+		line string
+		want []string
+	}{
+		{"empty partial returns all", "SELECT users.", []string{"created_at", "credit", "id"}},
+		{"partial cr narrows", "SELECT users.cr", []string{"created_at", "credit"}},
+		{"case-insensitive CR", "SELECT users.CR", []string{"created_at", "credit"}},
+		{"no-match partial zz empty", "SELECT users.zz", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sess := &fakeSession{cols: cols}
+			src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+			b, p := bufWithCursor(tc.line)
+			got := texts(src.Suggest(context.Background(), b, p))
+			if len(got) != len(tc.want) {
+				t.Fatalf("Suggest(%q) = %v; want %v", tc.line, got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("Suggest(%q) = %v; want %v", tc.line, got, tc.want)
+				}
+			}
+			if sess.gotListColumnsArgs[1] != "users" {
+				t.Errorf("ListColumns table = %q; want users", sess.gotListColumnsArgs[1])
+			}
+		})
+	}
+}
+
+// TestSchemaSource_TableCache verifies the table list is fetched at
+// most once per session identity across repeated/refiltering Suggests.
+func TestSchemaSource_TableCache(t *testing.T) {
+	sess := &fakeSession{tables: []*models.Table{{Name: "users"}, {Name: "usage"}}}
+	src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+
+	for _, line := range []string{"SELECT * FROM ", "SELECT * FROM u", "SELECT * FROM us"} {
+		b, p := bufWithCursor(line)
+		src.Suggest(context.Background(), b, p)
+	}
+	if sess.listTablesCalls != 1 {
+		t.Fatalf("listTablesCalls = %d; want 1 (cached)", sess.listTablesCalls)
+	}
+}
+
+// TestSchemaSource_ColumnCachePerTable verifies columns are cached
+// keyed by table so `users.` and `orders.` don't collide, and a
+// repeated lookup on the same table does not re-query.
+func TestSchemaSource_ColumnCachePerTable(t *testing.T) {
+	sess := &perTableSession{
+		colsByTable: map[string][]models.Column{
+			"users":  {{Name: "uid"}},
+			"orders": {{Name: "oid"}},
+		},
+	}
+	src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+
+	first := texts(suggestLine(src, "SELECT users."))
+	if len(first) != 1 || first[0] != "uid" {
+		t.Fatalf("users. = %v; want [uid]", first)
+	}
+	second := texts(suggestLine(src, "SELECT orders."))
+	if len(second) != 1 || second[0] != "oid" {
+		t.Fatalf("orders. = %v; want [oid] (per-table cache, no collision)", second)
+	}
+	// Re-query users. — must hit cache, not re-call.
+	again := texts(suggestLine(src, "SELECT users."))
+	if len(again) != 1 || again[0] != "uid" {
+		t.Fatalf("users. (again) = %v; want [uid]", again)
+	}
+	if sess.callsByTable["users"] != 1 {
+		t.Errorf("ListColumns(users) calls = %d; want 1", sess.callsByTable["users"])
+	}
+	if sess.callsByTable["orders"] != 1 {
+		t.Errorf("ListColumns(orders) calls = %d; want 1", sess.callsByTable["orders"])
+	}
+}
+
+// TestSchemaSource_SessionSwapInvalidatesCache verifies a different
+// Session pointer triggers a refetch.
+func TestSchemaSource_SessionSwapInvalidatesCache(t *testing.T) {
+	sessA := &fakeSession{tables: []*models.Table{{Name: "alpha"}}}
+	sessB := &fakeSession{tables: []*models.Table{{Name: "beta"}}}
+	current := drivers.Session(sessA)
+	src := NewSchemaSource(func() drivers.Session { return current }, schemaProv("public"))
+
+	got := texts(suggestLine(src, "SELECT * FROM "))
+	if len(got) != 1 || got[0] != "alpha" {
+		t.Fatalf("got %v; want [alpha]", got)
+	}
+	current = sessB
+	got = texts(suggestLine(src, "SELECT * FROM "))
+	if len(got) != 1 || got[0] != "beta" {
+		t.Fatalf("after swap got %v; want [beta]", got)
+	}
+	if sessB.listTablesCalls != 1 {
+		t.Errorf("sessB listTablesCalls = %d; want 1 (refetch on swap)", sessB.listTablesCalls)
+	}
+}
+
+// TestSchemaSource_TableErrorNotCached verifies a failed ListTables is
+// not cached and the next Suggest retries.
+func TestSchemaSource_TableErrorNotCached(t *testing.T) {
+	sess := &fakeSession{tablesErr: errors.New("boom")}
+	src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+
+	if got := suggestLine(src, "SELECT * FROM "); len(got) != 0 {
+		t.Fatalf("got %v; want empty on error", got)
+	}
+	// Recover and retry — must re-query (error wasn't cached).
+	sess.tablesErr = nil
+	sess.tables = []*models.Table{{Name: "users"}}
+	if got := texts(suggestLine(src, "SELECT * FROM ")); len(got) != 1 || got[0] != "users" {
+		t.Fatalf("after recovery got %v; want [users]", got)
+	}
+	if sess.listTablesCalls != 2 {
+		t.Errorf("listTablesCalls = %d; want 2 (retry after uncached error)", sess.listTablesCalls)
+	}
+}
+
+func suggestLine(src *SchemaSource, line string) []Suggestion {
+	b, p := bufWithCursor(line)
+	return src.Suggest(context.Background(), b, p)
+}
+
+// perTableSession returns columns keyed by table name and records the
+// per-table call count to prove the per-(schema,table) cache shape.
+type perTableSession struct {
+	drivers.Session
+
+	colsByTable  map[string][]models.Column
+	callsByTable map[string]int
+}
+
+func (f *perTableSession) ListColumns(_ context.Context, _, table string) ([]models.Column, error) {
+	if f.callsByTable == nil {
+		f.callsByTable = map[string]int{}
+	}
+	f.callsByTable[table]++
+	return f.colsByTable[table], nil
 }

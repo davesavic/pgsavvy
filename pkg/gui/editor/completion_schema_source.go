@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -69,6 +70,14 @@ type SchemaSource struct {
 	priority int
 	session  SessionProvider
 	schema   SchemaProvider
+
+	mu         sync.Mutex
+	cachedSess drivers.Session // identity the caches were built against
+
+	tablesCache    []Suggestion // full (unfiltered) table list, per (session,schema)
+	tablesCacheKey string       // schema the table cache was built for
+	hasTables      bool
+	columnsCache   map[string][]Suggestion // full column lists keyed by schema\x00table
 }
 
 // NewSchemaSource constructs a SchemaSource. Either provider may be
@@ -91,14 +100,20 @@ func (s *SchemaSource) Name() string { return SchemaSourceName }
 func (s *SchemaSource) Priority() int { return s.priority }
 
 // reKeywordTable matches a trailing keyword that means "next token
-// is a table name". Case-insensitive; requires terminal whitespace.
-// Word boundary at the start prevents `XFROM ` from matching.
-var reKeywordTable = regexp.MustCompile(`(?i)(?:^|\s|[(,;])(?:FROM|JOIN|INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|CROSS\s+JOIN|UPDATE|INTO)\s+$`)
+// is a table name", optionally followed by a partial identifier the
+// user has begun typing. Case-insensitive; requires terminal
+// whitespace after the keyword. Word boundary at the start prevents
+// `XFROM ` from matching. The trailing capture is the partial (empty
+// when the user has only typed the keyword + space); a COMPLETE table
+// name followed by a space (`FROM users `) does NOT match because the
+// keyword no longer abuts the cursor token.
+var reKeywordTable = regexp.MustCompile(`(?i)(?:^|\s|[(,;])(?:FROM|JOIN|INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|CROSS\s+JOIN|UPDATE|INTO)\s+([A-Za-z_][A-Za-z0-9_]*)?$`)
 
 // reIdentDot matches a trailing `<ident>.` with no whitespace
-// between the identifier and the dot. Captures the identifier so
-// ListColumns can resolve it.
-var reIdentDot = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\.$`)
+// between the identifier and the dot, optionally followed by a partial
+// column identifier. Captures the identifier (group 1) and the partial
+// column prefix (group 2, possibly empty).
+var reIdentDot = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)?$`)
 
 // Suggest returns table or column suggestions based on the cursor
 // context. Returns an empty slice for any failure (no providers, no
@@ -119,17 +134,19 @@ func (s *SchemaSource) Suggest(ctx context.Context, buf *Buffer, pos Position) [
 	// as a column lookup on `users` (which will likely return empty
 	// — `FROM table.` is not valid SQL anyway).
 	if m := reIdentDot.FindStringSubmatch(stripped); m != nil {
-		return s.suggestColumns(ctx, m[1])
+		return s.suggestColumns(ctx, m[1], m[2])
 	}
-	if reKeywordTable.MatchString(stripped) {
-		return s.suggestTables(ctx)
+	if m := reKeywordTable.FindStringSubmatch(stripped); m != nil {
+		return s.suggestTables(ctx, m[1])
 	}
 	return []Suggestion{}
 }
 
-// suggestTables fetches the current schema's tables. Returns empty
-// when no session, no schema, or the driver call fails.
-func (s *SchemaSource) suggestTables(ctx context.Context) []Suggestion {
+// suggestTables returns the current schema's tables whose name starts
+// with prefix (case-insensitive; empty prefix → all). The full list is
+// cached per (session,schema); only the prefix filter runs per call.
+// Returns empty when no session, no schema, or the driver call fails.
+func (s *SchemaSource) suggestTables(ctx context.Context, prefix string) []Suggestion {
 	sess := s.activeSession()
 	if sess == nil {
 		return []Suggestion{}
@@ -138,50 +155,117 @@ func (s *SchemaSource) suggestTables(ctx context.Context) []Suggestion {
 	if schema == "" {
 		return []Suggestion{}
 	}
+	full, ok := s.cachedTables(ctx, sess, schema)
+	if !ok {
+		return []Suggestion{}
+	}
+	return filterByPrefix(full, prefix)
+}
+
+// suggestColumns returns columns of the named table in the current
+// schema whose name starts with prefix (case-insensitive; empty →
+// all). The full column list is cached per (schema,table). The table
+// identifier is passed verbatim to the driver — Postgres case-folding
+// semantics apply.
+func (s *SchemaSource) suggestColumns(ctx context.Context, table, prefix string) []Suggestion {
+	sess := s.activeSession()
+	if sess == nil {
+		return []Suggestion{}
+	}
+	schema := s.activeSchema()
+	if schema == "" {
+		return []Suggestion{}
+	}
+	full, ok := s.cachedColumns(ctx, sess, schema, table)
+	if !ok {
+		return []Suggestion{}
+	}
+	return filterByPrefix(full, prefix)
+}
+
+// cachedTables returns the full table-suggestion list for (sess,schema),
+// fetching and caching it on a miss. The bool is false on driver error
+// or empty result (neither is cached, so the next call retries).
+func (s *SchemaSource) cachedTables(ctx context.Context, sess drivers.Session, schema string) ([]Suggestion, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.invalidateIfStale(sess)
+	if s.hasTables && s.tablesCacheKey == schema {
+		return s.tablesCache, true
+	}
 	tables, err := sess.ListTables(ctx, schema)
 	if err != nil || len(tables) == 0 {
-		return []Suggestion{}
+		return nil, false
 	}
 	out := make([]Suggestion, 0, len(tables))
 	for _, t := range tables {
 		if t == nil || t.Name == "" {
 			continue
 		}
-		out = append(out, Suggestion{
-			Text:    t.Name,
-			Display: t.Name,
-			Source:  SchemaSourceName,
-		})
+		out = append(out, Suggestion{Text: t.Name, Display: t.Name, Source: SchemaSourceName})
 	}
-	return out
+	s.tablesCache = out
+	s.tablesCacheKey = schema
+	s.hasTables = true
+	return out, true
 }
 
-// suggestColumns fetches columns of the named table in the current
-// schema. The identifier is passed verbatim to the driver — Postgres
-// case-folding semantics apply.
-func (s *SchemaSource) suggestColumns(ctx context.Context, table string) []Suggestion {
-	sess := s.activeSession()
-	if sess == nil {
-		return []Suggestion{}
-	}
-	schema := s.activeSchema()
-	if schema == "" {
-		return []Suggestion{}
+// cachedColumns returns the full column-suggestion list for
+// (schema,table), fetching and caching it on a miss. The bool is false
+// on driver error or empty result (neither is cached).
+func (s *SchemaSource) cachedColumns(ctx context.Context, sess drivers.Session, schema, table string) ([]Suggestion, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.invalidateIfStale(sess)
+	key := schema + "\x00" + table
+	if cached, ok := s.columnsCache[key]; ok {
+		return cached, true
 	}
 	cols, err := sess.ListColumns(ctx, schema, table)
 	if err != nil || len(cols) == 0 {
-		return []Suggestion{}
+		return nil, false
 	}
 	out := make([]Suggestion, 0, len(cols))
 	for _, c := range cols {
 		if c.Name == "" {
 			continue
 		}
-		out = append(out, Suggestion{
-			Text:    c.Name,
-			Display: formatColumnDisplay(c),
-			Source:  SchemaSourceName,
-		})
+		out = append(out, Suggestion{Text: c.Name, Display: formatColumnDisplay(c), Source: SchemaSourceName})
+	}
+	if s.columnsCache == nil {
+		s.columnsCache = map[string][]Suggestion{}
+	}
+	s.columnsCache[key] = out
+	return out, true
+}
+
+// invalidateIfStale drops all caches when the active session pointer
+// differs from the one the caches were built against (reconnect).
+// Caller must hold s.mu.
+func (s *SchemaSource) invalidateIfStale(sess drivers.Session) {
+	if s.cachedSess == sess {
+		return
+	}
+	s.cachedSess = sess
+	s.tablesCache = nil
+	s.tablesCacheKey = ""
+	s.hasTables = false
+	s.columnsCache = nil
+}
+
+// filterByPrefix returns the subset of sugs whose Text starts with
+// prefix (case-insensitive). Empty prefix returns the input unchanged.
+// Order is preserved.
+func filterByPrefix(sugs []Suggestion, prefix string) []Suggestion {
+	if prefix == "" {
+		return sugs
+	}
+	up := strings.ToUpper(prefix)
+	out := make([]Suggestion, 0, len(sugs))
+	for _, sg := range sugs {
+		if strings.HasPrefix(strings.ToUpper(sg.Text), up) {
+			out = append(out, sg)
+		}
 	}
 	return out
 }
