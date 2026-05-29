@@ -130,13 +130,22 @@ func (c *SuggestionsContext) Accept() (editor.Suggestion, bool) {
 }
 
 // OnCursorMoved is the integration hook the vim editor controller
-// calls on any motion / insert handler that should dismiss the popup
-// (vim's omni-complete behaviour: any cursor move outside the
-// active completion word closes the menu). Z1 wires this into the
-// motion + insert mode handlers; for C1 the method exists as a
-// no-op-safe sink the controller can call.
-func (c *SuggestionsContext) OnCursorMoved() {
+// calls on any motion / insert handler after the cursor moved. It
+// distinguishes a typing-advance within the active identifier (the
+// cursor stays on the anchor line at or after the anchor column —
+// keep the popup so the controller can refilter it in place) from
+// navigation that leaves the identifier (different line, or the
+// cursor retreated before the anchor column — dismiss, vim's omni-
+// complete behaviour). No-op when hidden.
+//
+// Thread-safety: the single gocui main loop drives every cursor move
+// and Trigger synchronously, so visible / anchor are never read here
+// concurrently with a Show/Hide on another goroutine.
+func (c *SuggestionsContext) OnCursorMoved(pos editor.Position) {
 	if !c.visible {
+		return
+	}
+	if pos.Line == c.anchor.Line && pos.Col >= c.anchor.Col {
 		return
 	}
 	c.Hide()

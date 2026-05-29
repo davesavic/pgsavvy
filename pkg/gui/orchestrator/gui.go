@@ -1940,7 +1940,14 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 			switch key {
 			case types.QUERY_EDITOR:
 				if g.registry.QueryEditor != nil {
-					g.masterEditors[key] = editor.NewVimEditor(g.registry.QueryEditor, g.matcher, key, editor.WithSessionLog(g.deps.Common.Logger()))
+					ve := editor.NewVimEditor(g.registry.QueryEditor, g.matcher, key, editor.WithSessionLog(g.deps.Common.Logger()))
+					// dbsavvy-etp.1: wire the Tab/Enter popup-navigation seam
+					// to the controller so the insert path can drive the
+					// completion popup. (Auto-trigger wiring is etp.4.)
+					if g.controllers != nil && g.controllers.VimEditor != nil {
+						ve.SetCompletionKey(g.controllers.VimEditor.CompletionKey)
+					}
+					g.masterEditors[key] = ve
 				}
 			default:
 				g.masterEditors[key] = NewMasterEditor(ngocui, g.matcher, key, WithSessionLog(g.deps.Common.Logger()))

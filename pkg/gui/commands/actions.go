@@ -434,6 +434,14 @@ const (
 	// popup in QUERY_EDITOR insert mode (`<c-space>` default).
 	EditorCompletionTrigger = "editor.completion.trigger"
 
+	// Editor completion popup navigation (dbsavvy-etp.1). Insert-mode
+	// bindings that drive the popup while it is visible; each handler
+	// no-ops (leaving the key's normal Insert meaning) when hidden.
+	EditorCompletionNext    = "editor.completion.next"
+	EditorCompletionPrev    = "editor.completion.prev"
+	EditorCompletionAccept  = "editor.completion.accept"
+	EditorCompletionDismiss = "editor.completion.dismiss"
+
 	// Reconnect — owned by ReconnectController (hq5.7). <leader>R in
 	// GLOBAL scope triggers a Ping → reconnect dialog when the session
 	// is disconnected. (QUERY_EDITOR uses <leader>R for QueryRunAll, so
@@ -676,6 +684,10 @@ func AllActionIDs() []string {
 		ResultJumpBack,
 		ResultJumpForward,
 		EditorCompletionTrigger,
+		EditorCompletionNext,
+		EditorCompletionPrev,
+		EditorCompletionAccept,
+		EditorCompletionDismiss,
 		Reconnect,
 		SearchPathQuickSet,
 		StatementTimeoutSet,

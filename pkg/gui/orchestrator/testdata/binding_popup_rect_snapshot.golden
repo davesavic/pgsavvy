@@ -104,11 +104,15 @@ binding	scope=query_editor	key=3	mode=normal
 binding	scope=query_editor	key=4	mode=normal
 binding	scope=query_editor	key=<	mode=mode(0x3c)
 binding	scope=query_editor	key=<	mode=normal
+binding	scope=query_editor	key=<c-e>	mode=insert
 binding	scope=query_editor	key=<c-h>	mode=normal
 binding	scope=query_editor	key=<c-j>	mode=normal
+binding	scope=query_editor	key=<c-n>	mode=insert
+binding	scope=query_editor	key=<c-p>	mode=insert
 binding	scope=query_editor	key=<c-r>	mode=normal
 binding	scope=query_editor	key=<c-v>	mode=normal
 binding	scope=query_editor	key=<c-x><c-o>	mode=insert
+binding	scope=query_editor	key=<c-y>	mode=insert
 binding	scope=query_editor	key=<esc>	mode=mode(0x1c)
 binding	scope=query_editor	key=<esc>	mode=mode(0x22)
 binding	scope=query_editor	key=<leader>!	mode=normal

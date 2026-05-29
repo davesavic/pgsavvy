@@ -136,12 +136,40 @@ func TestSuggestionsContext_Accept_SanitizesText(t *testing.T) {
 	}
 }
 
-func TestSuggestionsContext_OnCursorMoved_Hides(t *testing.T) {
+func TestSuggestionsContext_OnCursorMoved_NavigationDismisses(t *testing.T) {
 	c := newTestSuggestions(nil)
-	c.Show([]editor.Suggestion{{Text: "a", Display: "a"}}, editor.Position{})
-	c.OnCursorMoved()
+	c.Show([]editor.Suggestion{{Text: "a", Display: "a"}}, editor.Position{Line: 0, Col: 5})
+
+	// Cursor retreats before the anchor column => navigation away.
+	c.OnCursorMoved(editor.Position{Line: 0, Col: 4})
 	if c.IsVisible() {
-		t.Error("OnCursorMoved did not hide popup")
+		t.Error("OnCursorMoved with retreating cursor did not dismiss popup")
+	}
+
+	// Cursor jumps to another line => navigation away.
+	c.Show([]editor.Suggestion{{Text: "a", Display: "a"}}, editor.Position{Line: 0, Col: 5})
+	c.OnCursorMoved(editor.Position{Line: 1, Col: 5})
+	if c.IsVisible() {
+		t.Error("OnCursorMoved to a different line did not dismiss popup")
+	}
+}
+
+func TestSuggestionsContext_OnCursorMoved_TypingAdvanceKeepsPopup(t *testing.T) {
+	c := newTestSuggestions(nil)
+	c.Show([]editor.Suggestion{{Text: "a", Display: "a"}}, editor.Position{Line: 0, Col: 5})
+
+	// Cursor advances on the anchor line (typing into the identifier).
+	c.OnCursorMoved(editor.Position{Line: 0, Col: 6})
+	if !c.IsVisible() {
+		t.Error("OnCursorMoved with typing-advance dismissed popup; want kept")
+	}
+}
+
+func TestSuggestionsContext_OnCursorMoved_HiddenNoop(t *testing.T) {
+	c := newTestSuggestions(nil)
+	c.OnCursorMoved(editor.Position{Line: 0, Col: 0})
+	if c.IsVisible() {
+		t.Error("OnCursorMoved on hidden popup flipped visible")
 	}
 }
 

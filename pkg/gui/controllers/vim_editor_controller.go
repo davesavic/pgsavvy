@@ -2,6 +2,7 @@ package controllers
 
 import (
 	stdctx "context"
+	"unicode"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/clipboard"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
@@ -108,13 +109,25 @@ func (c *VimEditorController) TriggerCompletion() error {
 	if buf == nil {
 		return nil
 	}
-	pos := buf.CursorPos()
-	got := c.completionEngine.Trigger(stdctx.Background(), buf, pos)
-	if len(got) == 0 {
-		return nil
-	}
-	c.suggestions.Show(got, pos)
+	c.RefilterOrTrigger(buf, buf.CursorPos())
 	return nil
+}
+
+// RefilterOrTrigger re-runs the completion engine at pos and refreshes
+// the popup in place: it Shows the candidates (popup visible, selection
+// reset to the top match) or Hides when the engine returns nothing.
+// This is the single place the refilter/trigger logic lives so the
+// manual `<c-x><c-o>` action and dbsavvy-etp.4's as-you-type
+// SetAutoCompleter callback share one code path. No-op when the engine
+// or suggestions context is unwired. dbsavvy-etp.1.
+func (c *VimEditorController) RefilterOrTrigger(buf *editor.Buffer, pos editor.Position) {
+	if buf == nil || c.completionEngine == nil || c.suggestions == nil {
+		return
+	}
+	got := c.completionEngine.Trigger(stdctx.Background(), buf, pos)
+	// Show with an empty set is a Hide (SuggestionsContext.Show contract),
+	// so the empty-candidate dismiss is handled here without a branch.
+	c.suggestions.Show(got, pos)
 }
 
 // isClipboardRegister reports whether reg maps to the OS clipboard under
@@ -525,6 +538,22 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			Tag:         "Insert",
 		})
 	}
+	// dbsavvy-etp.1: Insert-mode popup-navigation aliases. These keys are
+	// otherwise dropped by the insert seam, so each handler guards on
+	// suggestions.IsVisible() and no-ops when the popup is hidden —
+	// preserving the keys' (currently inert) Insert behaviour.
+	for _, s := range c.completionNavSpecs() {
+		if seq, err := keys.SequenceFromShorthand(s.shorthand); err == nil {
+			out = append(out, &types.ChordBinding{
+				Sequence:    seq,
+				Mode:        types.ModeInsert,
+				Scope:       types.QUERY_EDITOR,
+				ActionID:    s.actionID,
+				Description: s.description,
+				Tag:         "Insert",
+			})
+		}
+	}
 	// (op-pending cancel: the existing `<esc>` → mode.normal binding from
 	// the insert-entry specs covers OperatorPending too — its mode mask
 	// was widened in wwd.8 via insertExitModeMask.)
@@ -575,6 +604,21 @@ func (c *VimEditorController) insertEntrySpecs() []editorActionSpec {
 		{"I", commands.InsertFirstNonblank, "insert at first non-blank", "Insert", insertEntryModeMask},
 		{"A", commands.InsertAppendEnd, "append at line end", "Insert", insertEntryModeMask},
 		{"<esc>", commands.ModeNormal, "exit insert", "Insert", insertExitModeMask},
+	}
+}
+
+// completionNavSpecs returns the etp.1 Insert-mode popup-navigation
+// aliases. Tab/Enter are handled in the VimEditor insert seam (they
+// keep their normal Insert meaning when the popup is hidden); the Vim
+// control aliases below are registered as Insert bindings because the
+// insert seam otherwise drops them. Each handler guards on
+// suggestions.IsVisible().
+func (c *VimEditorController) completionNavSpecs() []editorActionSpec {
+	return []editorActionSpec{
+		{"<c-n>", commands.EditorCompletionNext, "next suggestion", "Insert", types.ModeInsert},
+		{"<c-p>", commands.EditorCompletionPrev, "prev suggestion", "Insert", types.ModeInsert},
+		{"<c-y>", commands.EditorCompletionAccept, "accept suggestion", "Insert", types.ModeInsert},
+		{"<c-e>", commands.EditorCompletionDismiss, "dismiss suggestions", "Insert", types.ModeInsert},
 	}
 }
 
@@ -755,6 +799,32 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 		Handler: func(_ commands.ExecCtx) error {
 			return c.TriggerCompletion()
 		},
+	})
+	// dbsavvy-etp.1: popup-navigation handlers. Each guards on
+	// suggestions.IsVisible() and is a no-op when the popup is hidden.
+	_ = reg.Register(&commands.Command{
+		ID:          commands.EditorCompletionNext,
+		Description: "Next suggestion",
+		Tag:         "Insert",
+		Handler:     c.completionNextHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.EditorCompletionPrev,
+		Description: "Previous suggestion",
+		Tag:         "Insert",
+		Handler:     c.completionPrevHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.EditorCompletionAccept,
+		Description: "Accept suggestion",
+		Tag:         "Insert",
+		Handler:     c.completionAcceptHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.EditorCompletionDismiss,
+		Description: "Dismiss suggestions",
+		Tag:         "Insert",
+		Handler:     c.completionDismissHandler(),
 	})
 }
 
@@ -1480,6 +1550,156 @@ func (c *VimEditorController) insertAppendEndHandler() commands.Handler {
 	}
 }
 
+// completionNextHandler returns the `<c-n>` handler: advance the popup
+// selection when visible, otherwise a no-op (the key is otherwise
+// dropped by the insert seam). etp.1.
+func (c *VimEditorController) completionNextHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		if c.suggestions != nil && c.suggestions.IsVisible() {
+			c.suggestions.Next()
+		}
+		return nil
+	}
+}
+
+// completionPrevHandler returns the `<c-p>` handler: retreat the popup
+// selection when visible, otherwise a no-op. etp.1.
+func (c *VimEditorController) completionPrevHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		if c.suggestions != nil && c.suggestions.IsVisible() {
+			c.suggestions.Prev()
+		}
+		return nil
+	}
+}
+
+// completionAcceptHandler returns the `<c-y>` handler: accept the
+// selected suggestion (replace the typed partial identifier) when
+// visible, otherwise a no-op. etp.1.
+func (c *VimEditorController) completionAcceptHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		c.acceptSuggestion()
+		return nil
+	}
+}
+
+// completionDismissHandler returns the `<c-e>` handler: hide the popup
+// when visible (staying in Insert mode), otherwise a no-op. etp.1.
+func (c *VimEditorController) completionDismissHandler() commands.Handler {
+	return func(_ commands.ExecCtx) error {
+		if c.suggestions != nil && c.suggestions.IsVisible() {
+			c.suggestions.Hide()
+		}
+		return nil
+	}
+}
+
+// CompletionKey is the seam VimEditor.SetCompletionKey consults at the
+// top of the insert path for Tab / Enter. It returns true only when the
+// popup is visible (i.e. it consumed the key): Tab advances the
+// selection, Enter accepts. When the popup is hidden it returns false so
+// the key keeps its normal Insert meaning (Tab dropped, Enter newline).
+// etp.1.
+func (c *VimEditorController) CompletionKey(k keys.Key) bool {
+	if c.suggestions == nil || !c.suggestions.IsVisible() {
+		return false
+	}
+	switch k.Special {
+	case keys.KeyTab:
+		c.suggestions.Next()
+		return true
+	case keys.KeyEnter:
+		c.acceptSuggestion()
+		return true
+	}
+	return false
+}
+
+// acceptSuggestion replaces the partial identifier under the cursor with
+// the selected candidate (delete the typed prefix, insert the full
+// suggestion). The identifier range is recomputed from the LIVE buffer
+// line (scan back over identifier runes from the cursor); the stored
+// anchor is used only to detect staleness: if the cursor has left the
+// identifier the popup tracked (different line, or before the
+// identifier start), the buffer mutation is aborted and the popup is
+// dismissed instead of corrupting text. No-op when the popup is hidden.
+// etp.1.
+func (c *VimEditorController) acceptSuggestion() {
+	if c.suggestions == nil || !c.suggestions.IsVisible() {
+		return
+	}
+	buf := c.buffer()
+	if buf == nil {
+		c.suggestions.Hide()
+		return
+	}
+	anchor := c.suggestions.Anchor()
+	cur := buf.CursorPos()
+	identStart := identifierStartCol(buf, cur)
+	// Stale-anchor guard. anchor marks the cursor at trigger time (the
+	// end of the typed prefix). A valid accept requires the cursor still
+	// sit on the anchor line, at or past the trigger column (the cursor
+	// only ever advances by typing — retreating means the prefix was
+	// deleted out from under the popup), and the live identifier run must
+	// still extend back through the trigger point (identStart <=
+	// anchor.Col). Otherwise the replace would corrupt unrelated text —
+	// abort + dismiss.
+	if cur.Line != anchor.Line || cur.Col < anchor.Col || identStart > anchor.Col {
+		c.suggestions.Hide()
+		return
+	}
+	s, ok := c.suggestions.Accept()
+	if !ok {
+		return
+	}
+	// Delete [identStart, cur) then insert the candidate at identStart.
+	if identStart < cur.Col {
+		if err := buf.Apply(editor.Edit{
+			Kind:  editor.EditKindDelete,
+			Range: editor.Range{Start: editor.Position{Line: cur.Line, Col: identStart}, End: cur},
+		}); err != nil {
+			return
+		}
+	}
+	at := editor.Position{Line: cur.Line, Col: identStart}
+	if err := buf.Apply(editor.Edit{
+		Kind:  editor.EditKindInsert,
+		Range: editor.Range{Start: at, End: at},
+		Text:  s.Text,
+	}); err != nil {
+		return
+	}
+	buf.SetCursor(editor.Position{Line: cur.Line, Col: identStart + len([]rune(s.Text))})
+}
+
+// identifierStartCol returns the column of the first identifier rune of
+// the run immediately left of pos on pos.Line, or pos.Col when no
+// identifier precedes the cursor. Mirrors editor.identifierPrefixAt's
+// scan (letters / digits / underscore). etp.1.
+func identifierStartCol(buf *editor.Buffer, pos editor.Position) int {
+	lines := buf.LinesCopy()
+	if pos.Line < 0 || pos.Line >= len(lines) {
+		return pos.Col
+	}
+	runes := lines[pos.Line].Runes
+	end := pos.Col
+	if end > len(runes) {
+		end = len(runes)
+	}
+	start := end
+	for start > 0 && isIdentRune(runes[start-1]) {
+		start--
+	}
+	return start
+}
+
+// isIdentRune reports whether r is part of a SQL identifier (letters,
+// digits, underscore). Mirrors editor.isIdentRune, duplicated here
+// because that helper is unexported in pkg/gui/editor. etp.1.
+func isIdentRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
 // modeNormalHandler returns the `<esc>` handler used in both Insert
 // and OperatorPending modes. Flips QUERY_EDITOR mode back to ModeNormal
 // and (for OperatorPending) clears RepeatStore.PendingOpID so a
@@ -1487,6 +1707,16 @@ func (c *VimEditorController) insertAppendEndHandler() commands.Handler {
 func (c *VimEditorController) modeNormalHandler() commands.Handler {
 	return func(_ commands.ExecCtx) error {
 		if c.buffer() == nil {
+			return nil
+		}
+		// dbsavvy-etp.1: when the completion popup is visible, <esc>
+		// dismisses it and STAYS in Insert mode (vim omni-complete). Only
+		// a second <esc> (popup hidden) exits Insert. This must not
+		// reintroduce the stuck-in-insert regression (commit f8a6452):
+		// when the popup is hidden the handler falls through to the
+		// normal exit below.
+		if c.suggestions != nil && c.suggestions.IsVisible() {
+			c.suggestions.Hide()
 			return nil
 		}
 		if rep := c.repeat(); rep != nil {
