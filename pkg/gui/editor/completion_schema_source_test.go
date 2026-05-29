@@ -561,3 +561,45 @@ func (f *perTableSession) ListColumns(_ context.Context, _, table string) ([]mod
 	f.callsByTable[table]++
 	return f.colsByTable[table], nil
 }
+
+// TestEngine_SchemaTablesOutrankKeywords regresses dbsavvy-ybi: schema
+// tables are the most relevant completion in a FROM context, yet they
+// were emitted with Score=0 while KeywordsSource emits Score=1. Engine
+// sorts Score-descending, so every keyword buried the tables below the
+// visible window. The documented intent (static_sources.go: "keywords
+// lose to richer sources") requires schema suggestions to outrank
+// keywords. The first result for "SELECT * FROM " must be the schema
+// table, not a keyword.
+func TestEngine_SchemaTablesOutrankKeywords(t *testing.T) {
+	sess := &fakeSession{tables: []*models.Table{{Name: "users"}}}
+	schema := NewSchemaSource(sessProv(sess), schemaProv("app"))
+	eng := NewEngine([]Source{KeywordsSource{PriorityVal: 20}, schema})
+
+	b, p := bufWithCursor("SELECT * FROM ")
+	got := eng.Trigger(context.Background(), b, p)
+	if len(got) == 0 {
+		t.Fatal("Trigger returned no suggestions")
+	}
+	if got[0].Source != SchemaSourceName {
+		t.Fatalf("top suggestion Source = %q (text %q); want schema table to outrank keywords",
+			got[0].Source, got[0].Text)
+	}
+}
+
+// TestEngine_SchemaColumnsOutrankKeywords is the column-context analogue
+// of dbsavvy-ybi: after "users." the column list must outrank keywords.
+func TestEngine_SchemaColumnsOutrankKeywords(t *testing.T) {
+	sess := &fakeSession{cols: []models.Column{{Name: "email"}}}
+	schema := NewSchemaSource(sessProv(sess), schemaProv("app"))
+	eng := NewEngine([]Source{KeywordsSource{PriorityVal: 20}, schema})
+
+	b, p := bufWithCursor("users.")
+	got := eng.Trigger(context.Background(), b, p)
+	if len(got) == 0 {
+		t.Fatal("Trigger returned no suggestions")
+	}
+	if got[0].Source != SchemaSourceName {
+		t.Fatalf("top suggestion Source = %q (text %q); want schema column to outrank keywords",
+			got[0].Source, got[0].Text)
+	}
+}

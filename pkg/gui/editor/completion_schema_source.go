@@ -21,6 +21,14 @@ const SchemaSourceName = "schema"
 // not load-bearing for C2 — Z1 may rewire from a central registry.
 const SchemaSourcePriority = 80
 
+// SchemaSourceScore is the Score every schema table/column suggestion
+// carries. Engine.Trigger sorts by Score DESCENDING (priority is only a
+// within-equal-score tiebreak), so this must sit ABOVE the keyword /
+// history fixed Score of 1 — otherwise schema hits, the most relevant
+// completion in a FROM / `<ident>.` context, sort below every keyword
+// and fall outside the visible window. dbsavvy-ybi.
+const SchemaSourceScore = 3
+
 // SessionProvider returns the live drivers.Session backing the
 // active query editor. Returns nil when there is no live session —
 // SchemaSource then returns an empty slice (epic ADR for "active-
@@ -202,7 +210,7 @@ func (s *SchemaSource) cachedTables(ctx context.Context, sess drivers.Session, s
 		if t == nil || t.Name == "" {
 			continue
 		}
-		out = append(out, Suggestion{Text: t.Name, Display: t.Name, Source: SchemaSourceName})
+		out = append(out, Suggestion{Text: t.Name, Display: t.Name, Source: SchemaSourceName, Score: SchemaSourceScore})
 	}
 	s.tablesCache = out
 	s.tablesCacheKey = schema
@@ -230,7 +238,7 @@ func (s *SchemaSource) cachedColumns(ctx context.Context, sess drivers.Session, 
 		if c.Name == "" {
 			continue
 		}
-		out = append(out, Suggestion{Text: c.Name, Display: formatColumnDisplay(c), Source: SchemaSourceName})
+		out = append(out, Suggestion{Text: c.Name, Display: formatColumnDisplay(c), Source: SchemaSourceName, Score: SchemaSourceScore})
 	}
 	if s.columnsCache == nil {
 		s.columnsCache = map[string][]Suggestion{}
