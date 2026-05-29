@@ -95,6 +95,7 @@ func (b *Buffer) applyRecordLocked(e Edit) error {
 	}
 	rev := b.buildReverseLocked(e)
 	b.mutateLocked(e)
+	b.clampCursorLocked()
 	e.reverse = &rev
 	if b.History == nil {
 		b.History = NewUndoTree(undoCap)
@@ -103,6 +104,34 @@ func (b *Buffer) applyRecordLocked(e Edit) error {
 	b.Dirty = true
 	b.cancelSelectionIfOverlap(e.Range)
 	return nil
+}
+
+// clampCursorLocked repositions b.Cursor to the nearest valid Position
+// after a mutation may have shrunk Lines or the cursor's line — a delete
+// that removes the cursor's line (e.g. `dd` on the last line) otherwise
+// leaves Cursor.Line dangling past the buffer end, which makes every
+// subsequent Insert fail editInRangeLocked with ErrEditOutOfRange (the
+// "stuck in insert mode, can't type" bug). An empty buffer collapses the
+// cursor to the origin. Idempotent for an already-valid cursor, so
+// callers that SetCursor explicitly after Apply are unaffected. Caller
+// must hold b.mu.
+func (b *Buffer) clampCursorLocked() {
+	if len(b.Lines) == 0 {
+		b.Cursor = Position{}
+		return
+	}
+	if b.Cursor.Line < 0 {
+		b.Cursor.Line = 0
+	}
+	if b.Cursor.Line >= len(b.Lines) {
+		b.Cursor.Line = len(b.Lines) - 1
+	}
+	if b.Cursor.Col < 0 {
+		b.Cursor.Col = 0
+	}
+	if max := len(b.Lines[b.Cursor.Line].Runes); b.Cursor.Col > max {
+		b.Cursor.Col = max
+	}
 }
 
 // Undo applies the inverse of the most recent recorded Edit and
@@ -121,6 +150,7 @@ func (b *Buffer) Undo() error {
 		return nil
 	}
 	b.mutateLocked(rev)
+	b.clampCursorLocked()
 	b.Dirty = true
 	b.cancelSelectionIfOverlap(rev.Range)
 	return nil
@@ -141,6 +171,7 @@ func (b *Buffer) Redo() error {
 		return nil
 	}
 	b.mutateLocked(fwd)
+	b.clampCursorLocked()
 	b.Dirty = true
 	b.cancelSelectionIfOverlap(fwd.Range)
 	return nil

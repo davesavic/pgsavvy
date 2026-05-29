@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"log/slog"
 	"unicode"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
@@ -8,6 +9,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 )
 
 // BufferProvider is the minimal surface VimEditor needs from the
@@ -44,6 +46,25 @@ type VimEditor struct {
 	// VimEditor only owns the seam; the closure is wired post-
 	// construction by Z1 (dbsavvy-bwq.22 / .23). Nil = no auto-trigger.
 	autoCompleter func(buf *Buffer, pos Position)
+
+	// sessionLog is the optional per-session logger. When non-nil,
+	// insert-mode Buffer.Apply failures are emitted via logs.Event
+	// instead of being swallowed silently. Nil = no logging (the seam
+	// no-ops, matching the masterEditor convention). Wired via
+	// WithSessionLog.
+	sessionLog *slog.Logger
+}
+
+// VimEditorOption mutates a *VimEditor before NewVimEditor returns,
+// mirroring the orchestrator's MasterEditorOption pattern.
+type VimEditorOption func(*VimEditor)
+
+// WithSessionLog injects the per-session logger VimEditor uses to report
+// insert-mode Buffer.Apply failures. Without it, those failures are
+// swallowed silently (the historical behavior that hid the
+// stuck-in-insert bug).
+func WithSessionLog(l *slog.Logger) VimEditorOption {
+	return func(e *VimEditor) { e.sessionLog = l }
 }
 
 // NewVimEditor builds a VimEditor bound to qec / matcher / scope. Any
@@ -67,8 +88,11 @@ type VimEditor struct {
 // so Pending never fires for QUERY_EDITOR. The registration here is
 // preemptive; a multi-callback registry can wait for an actual
 // consumer.
-func NewVimEditor(qec BufferProvider, matcher *keys.Matcher, scope types.ContextKey) *VimEditor {
+func NewVimEditor(qec BufferProvider, matcher *keys.Matcher, scope types.ContextKey, opts ...VimEditorOption) *VimEditor {
 	e := &VimEditor{qec: qec, matcher: matcher, scope: scope}
+	for _, opt := range opts {
+		opt(e)
+	}
 	if matcher != nil {
 		matcher.OnInsertPendingFlush(func(s types.ContextKey, runes []rune) {
 			if s != scope {
@@ -101,9 +125,25 @@ func (e *VimEditor) flushPendingRunes(runes []rune) {
 		Range: Range{Start: cur, End: cur},
 		Text:  text,
 	}); err != nil {
+		e.logApplyErr("flush_pending", cur, err)
 		return
 	}
 	buf.SetCursor(advancePos(cur, text))
+}
+
+// logApplyErr emits a structured record when an insert-mode Buffer.Apply
+// fails. Without it these failures are invisible: typing does nothing
+// while the mode indicator still reads INSERT (the stuck-in-insert bug).
+// kind names the originating path; cur is the cursor the failed Apply
+// targeted. No-ops when sessionLog is nil.
+func (e *VimEditor) logApplyErr(kind string, cur Position, err error) {
+	logs.Event(e.sessionLog, "input", "insert_apply_err",
+		slog.String("scope", string(e.scope)),
+		slog.String("kind", kind),
+		slog.Int("line", cur.Line),
+		slog.Int("col", cur.Col),
+		slog.String("err", err.Error()),
+	)
 }
 
 // SetAutoCompleter wires the optional callback VimEditor invokes after
@@ -185,6 +225,7 @@ func (e *VimEditor) insertKey(v *gocui.View, k keys.Key) bool {
 			Range: Range{Start: cur, End: cur},
 			Text:  string(k.Code),
 		}); err != nil {
+			e.logApplyErr("insert_rune", cur, err)
 			return true
 		}
 		buf.SetCursor(advancePos(cur, string(k.Code)))
@@ -202,6 +243,7 @@ func (e *VimEditor) insertKey(v *gocui.View, k keys.Key) bool {
 			Range: Range{Start: cur, End: cur},
 			Text:  "\n",
 		}); err != nil {
+			e.logApplyErr("insert_newline", cur, err)
 			return true
 		}
 		buf.SetCursor(advancePos(cur, "\n"))
@@ -215,6 +257,7 @@ func (e *VimEditor) insertKey(v *gocui.View, k keys.Key) bool {
 			Kind:  EditKindDelete,
 			Range: Range{Start: prev, End: cur},
 		}); err != nil {
+			e.logApplyErr("backspace", prev, err)
 			return true
 		}
 		buf.SetCursor(prev)

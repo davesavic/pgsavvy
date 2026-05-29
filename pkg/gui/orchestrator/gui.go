@@ -1940,7 +1940,7 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 			switch key {
 			case types.QUERY_EDITOR:
 				if g.registry.QueryEditor != nil {
-					g.masterEditors[key] = editor.NewVimEditor(g.registry.QueryEditor, g.matcher, key)
+					g.masterEditors[key] = editor.NewVimEditor(g.registry.QueryEditor, g.matcher, key, editor.WithSessionLog(g.deps.Common.Logger()))
 				}
 			default:
 				g.masterEditors[key] = NewMasterEditor(ngocui, g.matcher, key, WithSessionLog(g.deps.Common.Logger()))
