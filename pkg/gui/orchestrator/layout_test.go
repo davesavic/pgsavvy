@@ -70,6 +70,35 @@ func TestRunLayoutCreatesQueryEditorMainPane(t *testing.T) {
 	}
 }
 
+// TestRunLayoutConnectingOwnsMainPane (dbsavvy-e53.2): when the CONNECTING
+// MAIN_CONTEXT is top of the focus stack it owns the dims["main"] slot —
+// it must be SetView'd there and the QUERY_EDITOR paint must be suppressed
+// for that frame (otherwise the connection screen is occluded by the
+// editor view).
+func TestRunLayoutConnectingOwnsMainPane(t *testing.T) {
+	g, rec := buildTestGui(t)
+	cc := g.Registry().Connecting
+	if cc == nil {
+		t.Fatal("registry.Connecting is nil")
+	}
+	cc.SetConnecting("local-pg")
+	if err := g.ContextTree().Push(cc); err != nil {
+		t.Fatalf("Push(connecting): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if !rec.HasSetView(string(types.CONNECTING)) {
+		t.Fatal("CONNECTING SetView not invoked; connection screen would be invisible")
+	}
+	if rec.HasSetView(string(types.QUERY_EDITOR)) {
+		t.Fatal("QUERY_EDITOR painted while CONNECTING owns the main pane; must be suppressed")
+	}
+	if got := rec.GetViewBuffer(string(types.CONNECTING)); !strings.Contains(got, "Connecting to local-pg") {
+		t.Fatalf("CONNECTING view content = %q, want it to contain %q", got, "Connecting to local-pg")
+	}
+}
+
 // TestRunLayoutEnablesCaretOnQueryEditorFocus regresses the "cursor
 // invisible in query panel" bug. gocui's flush only calls
 // Screen.ShowCursor when g.Cursor (toggled via SetCaretEnabled) is true,

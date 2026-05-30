@@ -23,6 +23,7 @@ type Controllers struct {
 	Prompt       *PromptController
 	Selection    *SelectionController
 	Confirmation *ConfirmationController
+	Connecting   *ConnectingController
 	Quit         *QuitController
 	QueryEditor  *QueryEditorController
 	Tx           *TxController
@@ -108,6 +109,9 @@ func AttachControllers(
 	prompt := NewPromptController(c, helpers.CoreDeps, helpers.UIDeps)
 	selection := NewSelectionController(c, helpers.CoreDeps, helpers.UIDeps)
 	confirmation := NewConfirmationController(c, helpers.CoreDeps, helpers.UIDeps)
+	// Connecting retry / cancel callbacks are wired by the orchestrator in
+	// T5 (dbsavvy-e53.5); nil here means the handlers no-op until then.
+	connecting := NewConnectingController(c, helpers.CoreDeps, helpers.UIDeps, nil, nil)
 	quit := NewQuitController(c, helpers.CoreDeps, helpers.UIDeps, helpers.QueryDeps, helpers.EditDeps)
 	reconnect := NewReconnectController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps, helpers.ThreadingDeps, helpers.EditDeps)
 	searchPath := NewSearchPathController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps, helpers.ThreadingDeps)
@@ -187,6 +191,7 @@ func AttachControllers(
 		Prompt:           prompt,
 		Selection:        selection,
 		Confirmation:     confirmation,
+		Connecting:       connecting,
 		Quit:             quit,
 		Reconnect:        reconnect,
 		SearchPath:       searchPath,
@@ -216,6 +221,7 @@ func AttachControllers(
 		"Prompt":           &tree.Prompt.BaseContext,
 		"Selection":        &tree.Selection.BaseContext,
 		"Confirmation":     &tree.Confirmation.BaseContext,
+		"Connecting":       &tree.Connecting.BaseContext,
 		"Quit":             &tree.Global.BaseContext,
 		"Reconnect":        &tree.Global.BaseContext,
 		"SearchPath":       &tree.Global.BaseContext,
@@ -314,6 +320,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "Prompt", ctrl: b.Prompt, attach: true},
 		{name: "Selection", ctrl: b.Selection, attach: true},
 		{name: "Confirmation", ctrl: b.Confirmation, attach: true},
+		{name: "Connecting", ctrl: b.Connecting, attach: true},
 		{name: "Quit", ctrl: b.Quit, attach: true},
 		{name: "Reconnect", ctrl: b.Reconnect, attach: true},
 		{name: "SearchPath", ctrl: b.SearchPath, attach: true},

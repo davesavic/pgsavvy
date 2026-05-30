@@ -25,6 +25,8 @@ binding	scope=confirmation	key=y	mode=normal
 binding	scope=conflict_dialog	key=<esc>	mode=normal
 binding	scope=conflict_dialog	key=o	mode=normal
 binding	scope=conflict_dialog	key=r	mode=normal
+binding	scope=connecting	key=<esc>	mode=normal
+binding	scope=connecting	key=r	mode=normal
 binding	scope=connections	key=1	mode=normal
 binding	scope=connections	key=2	mode=normal
 binding	scope=connections	key=3	mode=normal
@@ -302,6 +304,7 @@ popuprect	key=command_line	x0=0	y0=99	x1=100	y1=101
 popuprect	key=commit_dialog	x0=15	y0=20	x1=85	y1=80
 popuprect	key=confirmation	x0=25	y0=25	x1=75	y1=75
 popuprect	key=conflict_dialog	x0=20	y0=20	x1=80	y1=80
+popuprect	key=connecting	none
 popuprect	key=connections	none
 popuprect	key=export_menu	x0=25	y0=25	x1=75	y1=75
 popuprect	key=first_run_tip	none

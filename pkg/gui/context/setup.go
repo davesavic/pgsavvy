@@ -67,6 +67,12 @@ type ContextTree struct {
 	// the *editor.Buffer / *editor.RepeatStore behind it.
 	QueryEditor *QueryEditorContext
 
+	// Connecting is the full-pane MAIN_CONTEXT connection-progress
+	// screen pushed while a connection attempt is in flight (epic
+	// dbsavvy-e53). When top of the focus stack it suppresses the
+	// QueryEditor paint and occupies dims["main"].
+	Connecting *ConnectingContext
+
 	// Stub instances for the remaining deferred Contexts; Layout
 	// filters these by Kind == STUB so they never reach SetView.
 	TableDataEditor *StubContext
@@ -299,6 +305,17 @@ func contextSpecs() []contextSpec {
 			assign: func(t *ContextTree, c types.IBaseContext) { t.QueryEditor = c.(*QueryEditorContext) },
 		},
 
+		// CONNECTING is the full-pane connection-progress MAIN_CONTEXT
+		// (epic dbsavvy-e53). Modelled on QUERY_EDITOR: MAIN_CONTEXT kind,
+		// inFlatten=true, view name "connecting". The layout pass paints it
+		// into dims["main"] (suppressing QUERY_EDITOR) for the frame it is
+		// top of the focus stack.
+		{
+			key: types.CONNECTING, kind: types.MAIN_CONTEXT, title: "Connecting", inFlatten: true,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConnectingContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Connecting = c.(*ConnectingContext) },
+		},
+
 		// Stubs for the four remaining deferred Contexts. ViewName matches
 		// the eventual layout slot so naming stays consistent when the real
 		// Context lands; Kind == STUB keeps Layout from creating the view.
@@ -367,7 +384,7 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 // Flatten returns every Context (live + stub) in a stable order. Order is
 // defined by contextSpecs (entries with inFlatten=true): side rail (3) ->
 // temporary popups (13) -> extras/global/display (5) -> persistent popups
-// (1) -> main + stubs (5). Total length is always 27 (COLUMNS/INDEXES are
+// (1) -> main + stubs (6). Total length is always 28 (COLUMNS/INDEXES are
 // excluded, matching the historical contract).
 func (t *ContextTree) Flatten() []types.IBaseContext {
 	return t.all

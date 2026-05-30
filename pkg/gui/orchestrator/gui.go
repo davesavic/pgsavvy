@@ -1622,9 +1622,6 @@ func (g *Gui) wireWithDriver() error {
 		return err
 	}
 
-	// dbsavvy-dl7.5: auto-connect to persisted last profile (async).
-	g.autoConnectLastProfile(connectInv)
-
 	// dbsavvy-56u.2: push the first-run welcome tip on top of CONNECTIONS
 	// when the user has never dismissed it AND has no profiles. The
 	// FIRST_RUN_TIP context is a PERSISTENT_POPUP so subsequent popup
@@ -1765,8 +1762,6 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 // the preview cheap on large tables.
 const defaultTablePreviewLimit = 100
 
-const autoConnectTimeout = 10 * time.Second
-
 // buildOnTableActivate wires the TABLES <CR> handler: run a bounded
 // "SELECT * FROM <qualified table>" through the QueryEditorController's
 // run path and push the active result tab onto the focus stack so the
@@ -1823,54 +1818,6 @@ func (g *Gui) restoreConnectionsCursor() {
 			return
 		}
 	}
-}
-
-// autoConnectLastProfile triggers an async Connect to the persisted
-// LastConnectionID profile on app startup. Suppressed when the first-run
-// tip should show, or when restoreConnectionsCursor didn't match a saved
-// profile. Failed connects surface as error toasts. dbsavvy-dl7.5.
-func (g *Gui) autoConnectLastProfile(connectInv *connectInvoker) {
-	if g.deps.Store == nil {
-		return
-	}
-	if data.ShouldShowFirstRunTip(g.deps.Store, g.deps.ConnectionsProvider) {
-		return
-	}
-	if g.registry == nil || g.registry.Connections == nil {
-		return
-	}
-	last := g.deps.Store.LastConnectionIDSnapshot()
-	if last == "" {
-		return
-	}
-	item := g.registry.Connections.SelectedItem()
-	if item == nil {
-		return
-	}
-	profile, ok := item.(*models.Connection)
-	if !ok || profile == nil || profile.Name != last {
-		if g.deps.Common != nil {
-			logs.Event(g.deps.Common.Logger(), "gui", "auto_connect_skip",
-				slog.String("reason", "profile_not_found"),
-				slog.String("saved_id", last))
-		}
-		return
-	}
-	if g.deps.Common != nil {
-		logs.Event(g.deps.Common.Logger(), "gui", "auto_connect_start",
-			slog.String("profile", profile.Name))
-	}
-	connectFn := func(_ gocui.Task) error {
-		ctx, cancel := context.WithTimeout(context.Background(), autoConnectTimeout)
-		defer cancel()
-		err := connectInv.Connect(ctx, profile)
-		if err != nil && g.toastHelp != nil {
-			g.toastHelp.ShowOrUpdate("auto_connect",
-				config.SafeText(err.Error()), matcherToastTTL)
-		}
-		return nil
-	}
-	g.OnWorker(connectFn)
 }
 
 // refreshConnectionsRail re-loads the connection profiles from

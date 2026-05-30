@@ -125,7 +125,15 @@ func (g *Gui) RunLayout(w, h int) error {
 	// syncViewToBuffer will refresh the view if the swap happens after
 	// the first paint). The view is added to the `rails` map so it
 	// participates in the focus-frame swap below.
-	if g.registry != nil && g.registry.QueryEditor != nil {
+	//
+	// CONNECTING (epic dbsavvy-e53) is a second MAIN_CONTEXT sharing the
+	// dims["main"] slot. When it is top of the focus stack it owns the
+	// slot: layoutConnectingMain paints its full-pane body there and the
+	// QUERY_EDITOR paint below is suppressed for the frame. Whenever
+	// CONNECTING is not on top, the QUERY_EDITOR path runs unchanged.
+	if g.connectingIsTopMain() {
+		g.layoutConnectingMain(dims, rails)
+	} else if g.registry != nil && g.registry.QueryEditor != nil {
 		qec := g.registry.QueryEditor
 		name := qec.GetViewName()
 		if d, ok := dims["main"]; ok && name != "" && d.X1 > d.X0 && d.Y1 > d.Y0 {
@@ -535,6 +543,47 @@ func (g *Gui) RunLayout(w, h int) error {
 	}
 
 	return nil
+}
+
+// connectingIsTopMain reports whether the CONNECTING MAIN_CONTEXT is top
+// of the focus stack. When true, layoutConnectingMain owns the
+// dims["main"] slot for the frame and the QUERY_EDITOR paint is
+// suppressed. Nil-safe across the registry / tree / context (epic
+// dbsavvy-e53).
+func (g *Gui) connectingIsTopMain() bool {
+	if g.registry == nil || g.registry.Connecting == nil || g.tree == nil {
+		return false
+	}
+	top := g.tree.Current()
+	return top != nil && top.GetKey() == types.CONNECTING
+}
+
+// layoutConnectingMain paints the CONNECTING context's full-pane body
+// into the dims["main"] slot and registers the view in rails so it
+// participates in the focus-frame swap. Called only when
+// connectingIsTopMain reports true, so it always suppresses the
+// QUERY_EDITOR paint for the frame (epic dbsavvy-e53).
+func (g *Gui) layoutConnectingMain(dims map[string]ui.Dimensions, rails map[string]*gocui.View) {
+	cc := g.registry.Connecting
+	name := cc.GetViewName()
+	d, ok := dims["main"]
+	if !ok || name == "" || d.X1 <= d.X0 || d.Y1 <= d.Y0 {
+		return
+	}
+	v, err := g.driver.SetView(name, d.X0, d.Y0, d.X1, d.Y1, 0)
+	if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		return
+	}
+	if v != nil {
+		rails[name] = v
+		v.Title = cc.GetTitle()
+	}
+	_ = cc.HandleRender()
+	// The QUERY_EDITOR view from prior frames still exists in the same
+	// dims["main"] rect (it is never DeleteView'd). Lift CONNECTING above
+	// it so the full-pane connection screen is actually visible while it
+	// owns the slot, instead of being occluded by the stale editor view.
+	_, _ = g.driver.SetViewOnTop(name)
 }
 
 // popupRectFor derives a popup context's SetView rectangle from the

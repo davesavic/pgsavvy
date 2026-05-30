@@ -121,6 +121,13 @@ const (
 	ConfirmYes = "confirm.yes"
 	ConfirmNo  = "confirm.no"
 
+	// ConnectingRetry / ConnectingCancel — owned by ConnectingController
+	// (dbsavvy-e53.3). CONNECTING-scoped. r invokes the injected Retry
+	// callback; <esc> invokes the injected Cancel callback. Defaults are
+	// hardcoded, not user-overridable.
+	ConnectingRetry  = "connecting.retry"
+	ConnectingCancel = "connecting.cancel"
+
 	// TipDismiss — owned by the orchestrator's FirstRunTip wiring
 	// (dbsavvy-56u.2). FIRST_RUN_TIP-scoped. Pops the tip popup and
 	// stamps the seen-at timestamp via AppStateStore.StampStartupTips.
@@ -654,6 +661,8 @@ func AllActionIDs() []string {
 		EditorRepeat,
 		ConfirmYes,
 		ConfirmNo,
+		ConnectingRetry,
+		ConnectingCancel,
 		TipDismiss,
 		CellEditEnter,
 		CellEditCommit,
