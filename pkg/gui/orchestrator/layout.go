@@ -174,6 +174,13 @@ func (g *Gui) RunLayout(w, h int) error {
 				_ = g.driver.SetMasterEditor(name, ed)
 			}
 			_ = qec.HandleRender()
+			// The CONNECTING view (epic dbsavvy-e53) is raised via
+			// SetViewOnTop while it owns the slot and is never DeleteView'd,
+			// so after it is popped (success/failure/cancel) it would stay
+			// above the editor in the same dims["main"] rect and occlude it
+			// permanently. Mirror layoutConnectingMain: lift the editor back
+			// on top once CONNECTING is no longer the top main (dbsavvy-b3l).
+			_, _ = g.driver.SetViewOnTop(name)
 		}
 	}
 

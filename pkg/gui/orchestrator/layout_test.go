@@ -99,6 +99,54 @@ func TestRunLayoutConnectingOwnsMainPane(t *testing.T) {
 	}
 }
 
+// TestRunLayoutLiftsEditorAbovePoppedConnecting (dbsavvy-b3l) regresses the
+// occlusion bug: layoutConnectingMain raises the CONNECTING view via
+// SetViewOnTop while it owns the slot, and that view is never DeleteView'd.
+// After CONNECTING is popped (success/failure/cancel) the QUERY_EDITOR shares
+// the same dims["main"] rect, so unless the editor is re-raised it renders
+// underneath the orphaned CONNECTING view and is permanently occluded. The
+// fix lifts QUERY_EDITOR on top once CONNECTING is no longer the top main.
+// (Real-gocui z-order; recorder/fake drivers don't model occlusion, which is
+// why the original suite missed it — here we assert the SetViewOnTop order.)
+func TestRunLayoutLiftsEditorAbovePoppedConnecting(t *testing.T) {
+	g, rec := buildTestGui(t)
+	cc := g.Registry().Connecting
+	if cc == nil {
+		t.Fatal("registry.Connecting is nil")
+	}
+	cc.SetConnecting("local-pg")
+	if err := g.ContextTree().Push(cc); err != nil {
+		t.Fatalf("Push(connecting): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout (connecting on top): %v", err)
+	}
+	if err := g.ContextTree().Pop(); err != nil {
+		t.Fatalf("Pop(connecting): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout (after pop): %v", err)
+	}
+
+	lastIdx := func(name string) int {
+		idx := -1
+		for i, n := range rec.SetViewOnTopCalls {
+			if n == name {
+				idx = i
+			}
+		}
+		return idx
+	}
+	qe := lastIdx(string(types.QUERY_EDITOR))
+	conn := lastIdx(string(types.CONNECTING))
+	if qe < 0 {
+		t.Fatal("QUERY_EDITOR never SetViewOnTop after CONNECTING popped; editor would stay occluded")
+	}
+	if qe < conn {
+		t.Fatalf("QUERY_EDITOR raised at %d but CONNECTING last raised at %d; editor sits under the stale connecting view", qe, conn)
+	}
+}
+
 // TestRunLayoutEnablesCaretOnQueryEditorFocus regresses the "cursor
 // invisible in query panel" bug. gocui's flush only calls
 // Screen.ShowCursor when g.Cursor (toggled via SetCaretEnabled) is true,
