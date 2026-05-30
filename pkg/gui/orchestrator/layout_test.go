@@ -221,8 +221,8 @@ func TestRunLayoutSuggestionsAnchoredBelowCursor(t *testing.T) {
 	if !ok {
 		t.Fatal("SUGGESTIONS SetView not invoked while visible on stack")
 	}
-	wantY0 := 3 + (9 - 4) + 1 // vy0 + (Line-oy) + 1
-	wantX0 := 5 + (7 - 0)     // vx0 + (Col-ox)
+	wantY0 := 3 + 1 + (9 - 4) + 1 // vy0 + 1 (frame) + (Line-oy) + 1 (below cursor)
+	wantX0 := 5 + 1 + (7 - 0)     // vx0 + 1 (frame) + (Col-ox)
 	if call.Y0 != wantY0 {
 		t.Errorf("SUGGESTIONS Y0 = %d, want %d (row below cursor)", call.Y0, wantY0)
 	}

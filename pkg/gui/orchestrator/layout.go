@@ -1071,7 +1071,9 @@ const suggestionsFrame = 2
 // the screen rectangle (vx0,vy0)-(vx1,vy1); (ox,oy) is its scroll origin;
 // anchor is the rune-indexed buffer Position the popup hangs off.
 //
-// The cursor's on-screen cell is (vx0+anchor.Col-ox, vy0+anchor.Line-oy).
+// The cursor's on-screen cell is (vx0+1+anchor.Col-ox, vy0+1+anchor.Line-oy)
+// where the +1 accounts for the gocui frame border (content starts one cell
+// inside the view).
 // The dropdown renders on the row BELOW the cursor; when that would push
 // its bottom past the editor's bottom edge (vy1) it flips ABOVE, ending at
 // the cursor row. contentW is the longest suggestion Display width and
@@ -1081,8 +1083,8 @@ const suggestionsFrame = 2
 // Wide-char (CJK/emoji) rune→cell width is best-effort v1: ASCII
 // identifiers position correctly (epic dbsavvy-etp out-of-scope note).
 func anchoredRect(vx0, vy0, vx1, vy1, ox, oy int, anchor editor.Position, contentW, rows int) rect {
-	cursorX := vx0 + (anchor.Col - ox)
-	cursorY := vy0 + (anchor.Line - oy)
+	cursorX := vx0 + 1 + (anchor.Col - ox)
+	cursorY := vy0 + 1 + (anchor.Line - oy)
 
 	pw := contentW + suggestionsFrame
 	if maxW := vx1 - vx0; pw > maxW {

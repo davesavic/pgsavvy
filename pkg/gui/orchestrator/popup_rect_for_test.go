@@ -141,16 +141,18 @@ func TestPopupRectFor_FKReversePicker(t *testing.T) {
 // TestPopupRectAnchoredBelowCursor (dbsavvy-etp.2): the SUGGESTIONS popup
 // is cursor-anchored. anchoredRect derives the screen cell directly below
 // the cursor from the editor view origin (vx0,vy0), the scroll offset
-// (ox,oy) and the rune-indexed anchor (Line,Col): screen_x = vx0 +
-// (Col-ox), screen_y = vy0 + (Line-oy) + 1. With no scroll, the top-left
-// sits one row below the cursor, not screen-center.
+// (ox,oy) and the rune-indexed anchor (Line,Col): screen_x = vx0 + 1 +
+// (Col-ox), screen_y = vy0 + 1 + (Line-oy) + 1. The +1 offsets account
+// for the gocui frame border (content starts one cell inside the view).
+// With no scroll, the top-left sits one row below the cursor, not
+// screen-center.
 func TestPopupRectAnchoredBelowCursor(t *testing.T) {
 	// Editor view occupies (5,3)-(105,33). Cursor mid-view at Line 10,
 	// Col 8, no scroll. 3 suggestions, content width 12.
 	r := anchoredRect(5, 3, 105, 33, 0, 0, editor.Position{Line: 10, Col: 8}, 12, 3)
 
-	wantX0 := 5 + 8      // vx0 + (Col - ox)
-	wantY0 := 3 + 10 + 1 // vy0 + (Line - oy) + 1
+	wantX0 := 5 + 1 + 8      // vx0 + 1 (frame) + (Col - ox)
+	wantY0 := 3 + 1 + 10 + 1 // vy0 + 1 (frame) + (Line - oy) + 1 (below cursor)
 	if r.X0 != wantX0 {
 		t.Errorf("X0 = %d, want %d (below-cursor column)", r.X0, wantX0)
 	}
@@ -169,13 +171,13 @@ func TestPopupRectAnchoredBelowCursor(t *testing.T) {
 func TestPopupRectAnchoredScrollOffset(t *testing.T) {
 	// oy=6: buffer Line 10 is screen row 4 inside the view.
 	r := anchoredRect(5, 3, 105, 33, 0, 6, editor.Position{Line: 10, Col: 8}, 12, 3)
-	wantY0 := 3 + (10 - 6) + 1
+	wantY0 := 3 + 1 + (10 - 6) + 1
 	if r.Y0 != wantY0 {
 		t.Errorf("Y0 = %d, want %d (scroll-adjusted row below cursor)", r.Y0, wantY0)
 	}
 	// ox=2: buffer Col 8 is screen col 6.
 	r2 := anchoredRect(5, 3, 105, 33, 2, 0, editor.Position{Line: 10, Col: 8}, 12, 3)
-	wantX0 := 5 + (8 - 2)
+	wantX0 := 5 + 1 + (8 - 2)
 	if r2.X0 != wantX0 {
 		t.Errorf("X0 = %d, want %d (scroll-adjusted column)", r2.X0, wantX0)
 	}
@@ -187,10 +189,10 @@ func TestPopupRectAnchoredScrollOffset(t *testing.T) {
 // ending at screen_y-1 (the cursor row) — and stays fully within view.
 func TestPopupRectAnchoredFlipsAboveAtBottom(t *testing.T) {
 	// Editor view (5,3)-(105,33): last usable row is 33. Cursor on Line
-	// 28 (no scroll) -> below would be 32..36, exceeding 33. Flip above.
+	// 28 (no scroll) -> below would be 33..41, exceeding 33. Flip above.
 	r := anchoredRect(5, 3, 105, 33, 0, 0, editor.Position{Line: 28, Col: 8}, 12, 6)
 
-	cursorScreenY := 3 + 28 // vy0 + (Line - oy)
+	cursorScreenY := 3 + 1 + 28 // vy0 + 1 (frame) + (Line - oy)
 	if r.Y1 > cursorScreenY {
 		t.Errorf("Y1 = %d should end at or above cursor row %d when flipped", r.Y1, cursorScreenY)
 	}
@@ -206,11 +208,11 @@ func TestPopupRectAnchoredFlipsAboveAtBottom(t *testing.T) {
 // cursor on the very last visible editor row must flip above (there is no
 // room for even one row below).
 func TestPopupRectAnchoredLastVisibleRowFlips(t *testing.T) {
-	// Cursor screen row = vy0 + (Line-oy) = 3 + 29 = 32; one below = 33 =
-	// vy1 (the frame row). Flip above.
+	// Cursor screen row = vy0 + 1 + (Line-oy) = 3 + 1 + 29 = 33 = vy1
+	// (the bottom frame row). One below = 34, exceeds vy1. Flip above.
 	r := anchoredRect(5, 3, 105, 33, 0, 0, editor.Position{Line: 29, Col: 8}, 12, 4)
-	if r.Y1 > 3+29 {
-		t.Errorf("Y1 = %d should be above cursor row %d", r.Y1, 3+29)
+	if r.Y1 > 3+1+29 {
+		t.Errorf("Y1 = %d should be above cursor row %d", r.Y1, 3+1+29)
 	}
 	if r.Y0 < 3 || r.Y1 > 33 {
 		t.Errorf("rect (Y0=%d,Y1=%d) escaped editor bounds [3,33]", r.Y0, r.Y1)
