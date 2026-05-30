@@ -87,7 +87,6 @@ type PopupRectSpec struct {
 type ContextKey string
 
 const (
-	CONNECTIONS       ContextKey = "connections"
 	SCHEMAS           ContextKey = "schemas"
 	TABLES            ContextKey = "tables"
 	COLUMNS           ContextKey = "columns"
@@ -134,11 +133,6 @@ const (
 	// FK_REVERSE_PICKER is the reverse-FK referencing-table picker (TEMPORARY_POPUP).
 	// Owned by dbsavvy-bwq B6 / Z1.
 	FK_REVERSE_PICKER ContextKey = "fk_reverse_picker"
-	// CONNECTING is the full-pane connection-progress screen pushed while a
-	// connection attempt is in flight (epic dbsavvy-e53). MAIN_CONTEXT kind:
-	// it occupies the dims["main"] slot, suppressing QUERY_EDITOR for the
-	// frame it is top of the focus stack.
-	CONNECTING ContextKey = "connecting"
 	// CONNECTION_MANAGER is the centered modal connection-manager box
 	// (dbsavvy-ig4). MAIN_CONTEXT kind: when top of the focus stack it
 	// renders a centered bordered box over a blank background, suppressing
@@ -156,7 +150,6 @@ const (
 // it here — and without wiring it — makes that test fail.
 func AllContextKeys() []ContextKey {
 	return []ContextKey{
-		CONNECTIONS,
 		SCHEMAS,
 		TABLES,
 		COLUMNS,
@@ -185,7 +178,6 @@ func AllContextKeys() []ContextKey {
 		COMMIT_DIALOG,
 		CONFLICT_DIALOG,
 		FK_REVERSE_PICKER,
-		CONNECTING,
 		CONNECTION_MANAGER,
 	}
 }

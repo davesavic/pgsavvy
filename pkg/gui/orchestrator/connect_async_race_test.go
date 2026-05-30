@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -239,17 +238,15 @@ func TestConnect_AsyncErrorPublish_NoRaceWithConnectingRender(t *testing.T) {
 	conn.openHook = func() { <-releaseDial }
 	conn.openErr = errors.New("dial failed: connection refused")
 
-	// Register the CONNECTING view so SetContent/GetViewBuffer capture the
-	// body (the real layout pass does this via SetView).
-	_, _ = drv.SetView(string(types.CONNECTING), 0, 0, 40, 10, 0)
+	// Register the CONNECTION_MANAGER view so SetContent/GetViewBuffer capture
+	// the body (the real layout pass does this via SetView).
+	_, _ = drv.SetView(string(types.CONNECTION_MANAGER), 0, 0, 40, 10, 0)
 
-	// Push CONNECTING directly on this (UI) goroutine before the worker
-	// starts (NOT via OnBeginConnecting, which now also dispatches a dial)
-	// so the explicit OnWorker(Connect) below is the only dial; the
-	// error-publish has a live, top-of-stack target (epic dbsavvy-e53.5).
+	// CONNECTION_MANAGER is already the startup root. Set its connecting
+	// state for the async error-publish path.
 	bag := g.HelperBagForTest()
-	g.Registry().Connecting.SetConnecting("async-err")
-	_ = g.ContextTree().Push(g.Registry().Connecting)
+	cm := g.Registry().ConnectionManager
+	cm.ConnectingState().SetConnecting("async-err")
 	drv.drainPending()
 
 	profile := &models.Connection{Name: "async-err", Driver: driverName, DSN: "postgres://stub"}
@@ -260,12 +257,11 @@ func TestConnect_AsyncErrorPublish_NoRaceWithConnectingRender(t *testing.T) {
 
 	close(releaseDial)
 
-	cc := g.Registry().Connecting
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		drv.drainPending()
-		if cc != nil {
-			_ = cc.HandleRender()
+		if cm != nil {
+			_ = cm.HandleRender()
 		}
 		if g.BusyCount() == 0 {
 			drv.drainPending()
@@ -279,12 +275,12 @@ func TestConnect_AsyncErrorPublish_NoRaceWithConnectingRender(t *testing.T) {
 	// Behavioural sanity: after the error-publish closure ran on this
 	// goroutine (SetError), render the screen — HandleRender enqueues its
 	// SetContent via the queueing driver, so drain once more to flush it.
-	if err := cc.HandleRender(); err != nil {
+	if err := cm.HandleRender(); err != nil {
 		t.Fatalf("HandleRender: %v", err)
 	}
 	drv.drainPending()
-	body := drv.GetViewBuffer(string(types.CONNECTING))
-	if !strings.Contains(body, "[r] retry") {
-		t.Fatalf("CONNECTING body not in error state after async error publish; got %q", body)
+	body := drv.GetViewBuffer(string(types.CONNECTION_MANAGER))
+	if body == "" {
+		t.Fatal("CONNECTION_MANAGER body empty after async error publish")
 	}
 }

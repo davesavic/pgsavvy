@@ -26,11 +26,8 @@ func TestConnectionManagerControllerBindings(t *testing.T) {
 			hasClose = true
 		}
 		if isRune(kb, 'q') {
-			if kb.ActionID != commands.AppQuit {
-				t.Errorf("q binding ActionID = %q, want AppQuit", kb.ActionID)
-			}
-			if kb.ActionID == commands.ConnectionManagerClose {
-				t.Errorf("q must not map to the Close action")
+			if kb.ActionID != commands.ConnectionManagerQuitOrClose {
+				t.Errorf("q binding ActionID = %q, want ConnectionManagerQuitOrClose", kb.ActionID)
 			}
 			hasQuit = true
 		}
@@ -72,7 +69,12 @@ func TestConnectionManagerControllerNilCallbackIsSafe(t *testing.T) {
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
-		if err := invokeAction(reg, kb); err != nil {
+		err := invokeAction(reg, kb)
+		// QuitOrClose returns gocui.ErrQuit at startup root (stack depth 1).
+		if kb.ActionID == commands.ConnectionManagerQuitOrClose {
+			continue
+		}
+		if err != nil {
 			t.Fatalf("invoke %q with nil callback: %v", kb.ActionID, err)
 		}
 	}

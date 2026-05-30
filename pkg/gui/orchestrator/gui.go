@@ -799,11 +799,6 @@ func (g *Gui) wireWithDriver() error {
 		connectInv.populateIndexesRail(ctx, schema, table)
 		return nil
 	})
-	g.refreshHelper.SetConnectionsRefresher(func() error {
-		g.refreshConnectionsRail()
-		return nil
-	})
-
 	// CoreDeps — fail-fast: NewCoreDeps panics if driver or logger is
 	// nil. wireWithDriver has already rejected a nil driver above
 	// (gui.go: "nil driver"), and Common.Logger() never returns nil, so
@@ -815,7 +810,6 @@ func (g *Gui) wireWithDriver() error {
 	// NavDeps — Connect is the required (compile-time) parameter; the
 	// optional pickers/closures are set on the returned struct.
 	nav := controllers.NewNavDeps(connectInv)
-	nav.Connections = connectionsPickerAdapter{registry: g.registry.Connections}
 	nav.Schemas = schemasPickerAdapter{registry: g.registry.Schemas}
 	nav.Tables = tablePicker
 	nav.ActiveConnection = &activeConnAdapter{g: g}
@@ -827,43 +821,21 @@ func (g *Gui) wireWithDriver() error {
 	reconnInv := &reconnectInvoker{helper: g.connectHelper, inv: connectInv}
 	nav.Reconnector = reconnInv
 	nav.OnPickConnection = func() error {
-		if g.tree == nil || g.registry == nil || g.registry.Connections == nil {
+		if g.tree == nil || g.registry == nil || g.registry.ConnectionManager == nil {
 			return nil
 		}
-		return g.tree.Push(g.registry.Connections)
+		return g.tree.Push(g.registry.ConnectionManager)
 	}
-	// Push the CONNECTING screen then start the dial on the MainLoop (the
-	// <CR> handler runs there). startAttempt bumps connectGen on the loop —
-	// the anchor that makes Cancel's later bump strictly higher, so an
-	// Esc-cancel reliably supersedes the in-flight attempt (epic
-	// dbsavvy-e53.5). SetConnecting (inside startAttempt) is a plain setter,
-	// MainLoop-safe without OnUIThread.
-	nav.OnBeginConnecting = func(profile *models.Connection) {
-		if g.tree == nil || g.registry == nil || g.registry.Connecting == nil {
+	// dbsavvy-bsh: Esc in list mode pops the modal when mid-session (stack
+	// depth > 1) and is a no-op at startup root (depth <= 1).
+	nav.OnCloseConnectionManager = func() {
+		if g.tree == nil {
 			return
 		}
-		// dbsavvy-1rf: standalone CONNECTING attempts are never modal-origin —
-		// clear the flag (set on the MainLoop, serialised with the gen seams)
-		// so the connecting body / error / pop routes to CONNECTING, not the
-		// modal.
-		connectInv.mu.Lock()
-		connectInv.originModal = false
-		connectInv.mu.Unlock()
-		_ = g.tree.Push(g.registry.Connecting)
-		connectInv.startAttempt(profile)
-	}
-	// Esc on CONNECTING: abort the in-flight dial (connectGen bump + ctx
-	// cancel) then pop back to the picker (epic dbsavvy-e53.5).
-	nav.OnCancelConnecting = func() {
-		connectInv.Cancel()
-		if g.tree != nil {
-			_ = g.tree.PopIfTop(types.CONNECTING)
+		if len(g.tree.Stack()) <= 1 {
+			return // startup root: Esc is a no-op
 		}
-	}
-	// [r] on CONNECTING: re-attempt the most recent profile from the error
-	// state (CONNECTING stays top; no re-push).
-	nav.OnRetryConnecting = func() {
-		connectInv.Retry()
+		_ = g.tree.Pop()
 	}
 	// <CR> on a schema row reloads the TABLES rail via a worker
 	// (dbsavvy-04n). When the session is disconnected the handler
@@ -1044,9 +1016,6 @@ func (g *Gui) wireWithDriver() error {
 			Retry:   connectInv.Retry,
 			CancelConnecting: func() {
 				connectInv.Cancel()
-				connectInv.mu.Lock()
-				connectInv.originModal = false
-				connectInv.mu.Unlock()
 				g.registry.ConnectionManager.SetMode(guicontext.ModeList)
 			},
 			// dbsavvy-dyf: add/edit form wiring. Prompt drives the per-field
@@ -1061,6 +1030,12 @@ func (g *Gui) wireWithDriver() error {
 			DriversFn:          drivers.Names,
 			OnSaveConnection:   g.saveConnectionForm,
 			OnDeleteConnection: g.deleteConnectionFromModal,
+			StackDepth: func() int {
+				if g.tree == nil {
+					return 1
+				}
+				return len(g.tree.Stack())
+			},
 		})
 	}
 
@@ -1308,6 +1283,21 @@ func (g *Gui) wireWithDriver() error {
 				controllers.BuildCheatsheetTabs(scope, cheatsheetRender),
 			)
 			return g.tree.Push(g.registry.Cheatsheet)
+		},
+	})
+
+	// dbsavvy-bsh: <leader>C opens the CONNECTION_MANAGER modal mid-session.
+	// GLOBAL-scoped so it fires from any focused view. The handler pushes
+	// the modal onto the focus stack (OnShow populates + restores cursor).
+	_ = g.cmdRegistry.Register(&commands.Command{
+		ID:          commands.ConnectionManagerOpen,
+		Description: "Open connection manager",
+		Tag:         "Connection",
+		Handler: func(commands.ExecCtx) error {
+			if g.tree == nil || g.registry == nil || g.registry.ConnectionManager == nil {
+				return nil
+			}
+			return g.tree.Push(g.registry.ConnectionManager)
 		},
 	})
 
@@ -1692,24 +1682,17 @@ func (g *Gui) wireWithDriver() error {
 	// Running. dbsavvy-66p.17.
 	installResultTabsSwapHook(g.tree, g.resultTabsH)
 
-	// Seed the CONNECTIONS rail from the on-disk profiles before the
-	// first render frame, so the rail is non-empty when its empty-state
-	// hook reports renderEmpty=false.
-	g.refreshConnectionsRail()
+	// Seed the CONNECTION_MANAGER modal's list from the on-disk profiles
+	// before the first render frame.
+	g.refreshConnectionManagerRail()
+	g.restoreConnectionManagerCursor()
 
-	// dbsavvy-56u.1: restore the CONNECTIONS rail cursor to the
-	// profile recorded in AppState.LastConnectionID so the user lands
-	// on their previous selection on the next boot. Nil-safe — empty
-	// LastConnectionID or a missing match collapses to "leave cursor
-	// at 0".
-	g.restoreConnectionsCursor()
-
-	// Push the initial CONNECTIONS context.
-	if err := g.tree.Push(g.registry.Connections); err != nil {
+	// Push the CONNECTION_MANAGER modal as the startup root context.
+	if err := g.tree.Push(g.registry.ConnectionManager); err != nil {
 		return err
 	}
 
-	// dbsavvy-56u.2: push the first-run welcome tip on top of CONNECTIONS
+	// dbsavvy-56u.2: push the first-run welcome tip on top of the modal
 	// when the user has never dismissed it AND has no profiles. The
 	// FIRST_RUN_TIP context is a PERSISTENT_POPUP so subsequent popup
 	// pushes do not auto-evict it. The dismiss action (TipDismiss) pops
@@ -1878,59 +1861,6 @@ func (g *Gui) buildOnTableActivate(_ *connectInvoker) func(*models.Table) error 
 	}
 	g.onTableActivate = fn
 	return fn
-}
-
-// restoreConnectionsCursor positions the CONNECTIONS rail cursor on the
-// profile whose Name matches the persisted LastConnectionID. No-op when the
-// registry is unwired, the Store is nil, LastConnectionID is empty, or no
-// matching profile lives in the rail. dbsavvy-56u.1, dbsavvy-dl7.1.
-func (g *Gui) restoreConnectionsCursor() {
-	if g == nil || g.registry == nil || g.registry.Connections == nil {
-		return
-	}
-	if g.deps.Store == nil {
-		return
-	}
-	last := g.deps.Store.LastConnectionIDSnapshot()
-	if last == "" {
-		return
-	}
-	for i, it := range g.registry.Connections.Items() {
-		conn, ok := it.(*models.Connection)
-		if !ok || conn == nil {
-			continue
-		}
-		if conn.Name == last {
-			g.registry.Connections.SetCursor(i)
-			return
-		}
-	}
-}
-
-// refreshConnectionsRail re-loads the connection profiles from
-// Deps.ConnectionsProvider and pushes them into ConnectionsContext.items
-// so the next render frame draws the rows. The SetItems write is a plain
-// mutex-free mutation of the in-memory slice; callers that may run on a
-// worker goroutine MUST marshal it onto the UI thread (the WalkAdd
-// onComplete callback already routes through OnUIThread) so it serialises
-// with MainLoop render reads — it is NOT safe to call concurrently with a
-// layout pass from an arbitrary goroutine (dbsavvy-fow.1).
-func (g *Gui) refreshConnectionsRail() {
-	if g.registry == nil || g.registry.Connections == nil {
-		return
-	}
-	provider := g.deps.ConnectionsProvider
-	if provider == nil {
-		g.registry.Connections.SetItems(nil)
-		return
-	}
-	profiles := provider()
-	items := make([]any, len(profiles))
-	for i := range profiles {
-		p := profiles[i]
-		items[i] = &p
-	}
-	g.registry.Connections.SetItems(items)
 }
 
 // refreshConnectionManagerRail reloads the connection profiles from
@@ -2418,23 +2348,6 @@ func (g *Gui) HelperBagForTest() controllers.HelperBag {
 	return controllers.HelperBag{
 		NavDeps: controllers.NavDeps{
 			Connect: connectInv,
-			// Mirror the production OnBeginConnecting seam (gui.go
-			// wireWithDriver): push CONNECTING then start the dial via the
-			// same invoker (epic dbsavvy-e53.5).
-			OnBeginConnecting: func(profile *models.Connection) {
-				if g.tree == nil || g.registry == nil || g.registry.Connecting == nil {
-					return
-				}
-				_ = g.tree.Push(g.registry.Connecting)
-				connectInv.startAttempt(profile)
-			},
-			OnCancelConnecting: func() {
-				connectInv.Cancel()
-				if g.tree != nil {
-					_ = g.tree.PopIfTop(types.CONNECTING)
-				}
-			},
-			OnRetryConnecting: connectInv.Retry,
 		},
 		QueryDeps: controllers.QueryDeps{
 			QueryRunner:  g.queryRunner,

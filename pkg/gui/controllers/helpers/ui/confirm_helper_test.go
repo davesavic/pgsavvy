@@ -25,7 +25,7 @@ func newConfirmationCtx() *guicontext.ConfirmationContext {
 // a side-context root underneath any popup.
 func pushRoot(t *testing.T, tree *gui.ContextTree) {
 	t.Helper()
-	root := &minimalCtx{key: types.CONNECTIONS, kind: types.SIDE_CONTEXT}
+	root := &minimalCtx{key: types.SCHEMAS, kind: types.SIDE_CONTEXT}
 	if err := tree.Push(root); err != nil {
 		t.Fatalf("push root: %v", err)
 	}

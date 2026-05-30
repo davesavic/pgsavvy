@@ -36,7 +36,6 @@ var nonPopupKinds = map[types.ContextKind]struct{}{
 // test will fail loudly if a kindOf-classified non-popup context is
 // missing.
 var allKnownContexts = []types.ContextKey{
-	types.CONNECTIONS,
 	types.SCHEMAS,
 	types.TABLES,
 	types.COLUMNS,

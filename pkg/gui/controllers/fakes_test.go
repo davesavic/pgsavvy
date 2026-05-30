@@ -137,11 +137,10 @@ func (f *fakeTableDouble) DoubleClickStub(t *models.Table) error {
 // fakeRefresh records RefreshXxx calls so per-rail `r` binding tests
 // can assert dispatch. dbsavvy-56u.1.
 type fakeRefresh struct {
-	schemas     int
-	tables      []string
-	columns     []refreshTC
-	indexes     []refreshTC
-	connections int
+	schemas int
+	tables  []string
+	columns []refreshTC
+	indexes []refreshTC
 }
 
 type refreshTC struct{ Schema, Table string }
@@ -166,11 +165,6 @@ func (f *fakeRefresh) RefreshIndexes(_ context.Context, schema, table string) er
 	return nil
 }
 
-func (f *fakeRefresh) RefreshConnections() error {
-	f.connections++
-	return nil
-}
-
 type fakeMenuPush struct {
 	pushed int
 	popped int
@@ -180,9 +174,6 @@ func (f *fakeMenuPush) PushMenu() error { f.pushed++; return nil }
 func (f *fakeMenuPush) PopMenu() error  { f.popped++; return nil }
 
 // Pickers.
-type fakeConnectionPicker struct{ sel *models.Connection }
-
-func (f *fakeConnectionPicker) SelectedConnection() *models.Connection { return f.sel }
 
 type fakeSchemaPicker struct {
 	name        string
@@ -218,7 +209,6 @@ type bag struct {
 	Tip          *fakeTip
 	TableDouble  *fakeTableDouble
 	Menu         *fakeMenuPush
-	ConnPicker   *fakeConnectionPicker
 	SchemaPicker *fakeSchemaPicker
 	TablePicker  *fakeTablePicker
 	Active       *fakeActiveConnection
@@ -228,12 +218,6 @@ type bag struct {
 	// fn inline so the connect path executes synchronously in tests
 	// (dbsavvy-fow.1).
 	WorkerCalls int
-
-	// BeginConnectingNames records the profile names handed to
-	// OnBeginConnecting (the CONNECTING-screen push seam). The CONNECTIONS
-	// <CR> handler must invoke it once per activation before dispatching
-	// the dial (epic dbsavvy-e53).
-	BeginConnectingNames []string
 }
 
 func newBag() *bag {
@@ -246,7 +230,6 @@ func newBag() *bag {
 		Tip:          &fakeTip{},
 		TableDouble:  &fakeTableDouble{},
 		Menu:         &fakeMenuPush{},
-		ConnPicker:   &fakeConnectionPicker{},
 		SchemaPicker: &fakeSchemaPicker{},
 		TablePicker:  &fakeTablePicker{},
 		Active:       &fakeActiveConnection{},
@@ -260,17 +243,10 @@ func newBag() *bag {
 			Connect:          b.Connect,
 			SchemasHelper:    b.Schemas,
 			ConnectionForm:   b.ConnForm,
-			Connections:      b.ConnPicker,
 			Schemas:          b.SchemaPicker,
 			Tables:           b.TablePicker,
 			ActiveConnection: b.Active,
 			HiddenPatterns:   func() ([]string, []string) { return []string{"pg_*"}, []string{"audit"} },
-			OnBeginConnecting: func(profile *models.Connection) {
-				if profile == nil {
-					return
-				}
-				b.BeginConnectingNames = append(b.BeginConnectingNames, profile.Name)
-			},
 		},
 		UIDeps: controllers.UIDeps{
 			Confirm:     b.Confirm,

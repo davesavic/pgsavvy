@@ -128,6 +128,16 @@ const (
 	ConnectingRetry  = "connecting.retry"
 	ConnectingCancel = "connecting.cancel"
 
+	// ConnectionManagerQuitOrClose — owned by ConnectionManagerController
+	// (dbsavvy-bsh). q on the modal: quits when the modal is the startup root
+	// (stack depth == 1), closes the modal back to data when opened mid-session
+	// (stack depth > 1).
+	ConnectionManagerQuitOrClose = "connection_manager.quit_or_close"
+
+	// ConnectionManagerOpen — GLOBAL-scoped action that opens the
+	// CONNECTION_MANAGER modal mid-session (<leader>C). dbsavvy-bsh.
+	ConnectionManagerOpen = "connection_manager.open"
+
 	// ConnectionManagerClose — owned by ConnectionManagerController
 	// (dbsavvy-ig4). CONNECTION_MANAGER-scoped. <esc> pops the modal off
 	// the focus stack, but is a no-op when the modal is the startup root
@@ -696,6 +706,8 @@ func AllActionIDs() []string {
 		ConfirmNo,
 		ConnectingRetry,
 		ConnectingCancel,
+		ConnectionManagerQuitOrClose,
+		ConnectionManagerOpen,
 		ConnectionManagerClose,
 		ConnectionManagerDown,
 		ConnectionManagerUp,

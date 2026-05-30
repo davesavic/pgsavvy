@@ -58,7 +58,7 @@ func TestWhichKey_SecondShowAfterCancelsFirst(t *testing.T) {
 	w := NewWhichKey()
 	w.ShowAfter(wkDelay, types.GLOBAL, []Key{{Code: 'g'}})
 	seqAfter1 := w.seqForTest()
-	w.ShowAfter(wkDelay, types.CONNECTIONS, []Key{{Code: 'd'}})
+	w.ShowAfter(wkDelay, types.SCHEMAS, []Key{{Code: 'd'}})
 	seqAfter2 := w.seqForTest()
 	if seqAfter2 == seqAfter1 {
 		t.Fatalf("seq did not advance on second ShowAfter")
@@ -68,7 +68,7 @@ func TestWhichKey_SecondShowAfterCancelsFirst(t *testing.T) {
 	if !vis {
 		t.Fatalf("Snapshot.vis = false after timer fire")
 	}
-	if scope != types.CONNECTIONS {
+	if scope != types.SCHEMAS {
 		t.Errorf("scope = %q, want CONNECTIONS (second wins)", scope)
 	}
 	if len(prefix) != 1 || prefix[0].Code != 'd' {

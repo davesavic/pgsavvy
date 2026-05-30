@@ -49,7 +49,6 @@ func NewCoreDeps(driver types.GuiDriver, logger DebugLogger) CoreDeps {
 // directly on the returned struct.
 type NavDeps struct {
 	// Pickers expose context cursor state.
-	Connections      ConnectionPicker
 	Schemas          SchemaPicker
 	Tables           TablePicker
 	ActiveConnection ActiveConnection
@@ -73,29 +72,9 @@ type NavDeps struct {
 	// hq5.7.
 	Reconnector ReconnectInvoker
 
-	// OnPickConnection pushes the CONNECTIONS context onto the focus
-	// stack so the user can choose a different profile. Wired by the
-	// orchestrator via tree.Push(registry.Connections). hq5.7.
+	// OnPickConnection pushes the CONNECTION_MANAGER modal so the user
+	// can choose a different profile. Wired by the orchestrator. hq5.7.
 	OnPickConnection func() error
-
-	// OnBeginConnecting pushes the full-pane CONNECTING screen and starts
-	// the dial for the supplied profile. Invoked on the gocui MainLoop from
-	// the CONNECTIONS <CR> handler; the orchestrator wires it to
-	// Push(registry.Connecting) + connectInvoker.startAttempt, so the
-	// connectGen bump that anchors cancel supersession happens on the loop
-	// (epic dbsavvy-e53.5). Nil-safe: the handler no-ops when unwired.
-	OnBeginConnecting func(profile *models.Connection)
-
-	// OnRetryConnecting re-attempts the most recent connect from the
-	// CONNECTING error state. Wired by the orchestrator to
-	// connectInvoker.Retry. Nil-safe (epic dbsavvy-e53.5).
-	OnRetryConnecting func()
-
-	// OnCancelConnecting aborts the in-flight dial and pops the CONNECTING
-	// screen back to the picker. Wired by the orchestrator to
-	// connectInvoker.Cancel + tree.PopIfTop(CONNECTING). Nil-safe (epic
-	// dbsavvy-e53.5).
-	OnCancelConnecting func()
 
 	// OnCloseConnectionManager dismisses the CONNECTION_MANAGER modal on
 	// <esc>. The orchestrator owns the root-exit semantics in the wired

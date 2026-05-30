@@ -13,7 +13,7 @@ import (
 func TestListControllerTraitDownAndUp(t *testing.T) {
 	b := newBag()
 	cur := &fakeCursor{idx: 5, items: []any{1, 2, 3, 4, 5, 6, 7}}
-	ctrl := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, cur, b.ConnPicker)
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, cur, b.SchemaPicker)
 	reg := commands.NewRegistry()
 	ctrl.ListControllerTrait.RegisterActions(reg)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})

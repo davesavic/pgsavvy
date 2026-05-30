@@ -155,8 +155,8 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 		if top == nil {
 			t.Fatal("focus stack is empty after wireWithDriver")
 		}
-		if got := top.GetKey(); got != types.CONNECTIONS {
-			t.Fatalf("initial context = %q, want %q", got, types.CONNECTIONS)
+		if got := top.GetKey(); got != types.SCHEMAS {
+			t.Fatalf("initial context = %q, want %q", got, types.SCHEMAS)
 		}
 		if s.store.IsStartupTipsSeen() {
 			t.Fatal("IsStartupTipsSeen = true on a fresh store; want false")
@@ -582,7 +582,7 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 			t.Fatalf("RunLayout did not fire on SetSize: before=%d after=%d", before, after)
 		}
 		// At normal size the CONNECTIONS view must be (re)created.
-		if !s.rec.HasSetView(string(types.CONNECTIONS)) {
+		if !s.rec.HasSetView(string(types.SCHEMAS)) {
 			t.Fatal("expected SetView(connections) at normal size")
 		}
 	})

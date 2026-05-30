@@ -109,9 +109,6 @@ func TestNewGuiAttachesControllers(t *testing.T) {
 	if g.Controllers() == nil {
 		t.Fatal("Controllers() is nil after wireWithDriver")
 	}
-	if g.Controllers().Connections == nil {
-		t.Fatal("ConnectionsController not attached")
-	}
 	if g.Controllers().Schemas == nil {
 		t.Fatal("SchemasController not attached")
 	}
@@ -123,17 +120,17 @@ func TestNewGuiAttachesControllers(t *testing.T) {
 	}
 }
 
-func TestNewGuiPushesConnectionsContextInitially(t *testing.T) {
+func TestNewGuiPushesConnectionManagerContextInitially(t *testing.T) {
 	g, _ := buildTestGui(t)
+	// dbsavvy-bsh: startup pushes CONNECTION_MANAGER as root.
 	// dbsavvy-56u.2: with a fresh AppStateStore + empty profiles
-	// provider, the first-run tip is pushed on top of CONNECTIONS.
-	// CONNECTIONS must still sit just under the tip on the focus stack.
+	// provider, the first-run tip is pushed on top.
 	stack := g.ContextTree().Stack()
 	if len(stack) < 2 {
-		t.Fatalf("focus stack has %d entries after wireWithDriver, want >=2 (CONNECTIONS + FIRST_RUN_TIP)", len(stack))
+		t.Fatalf("focus stack has %d entries after wireWithDriver, want >=2 (CONNECTION_MANAGER + FIRST_RUN_TIP)", len(stack))
 	}
-	if got := stack[0].GetKey(); got != types.CONNECTIONS {
-		t.Fatalf("focus stack bottom = %q, want %q", got, types.CONNECTIONS)
+	if got := stack[0].GetKey(); got != types.CONNECTION_MANAGER {
+		t.Fatalf("focus stack bottom = %q, want %q", got, types.CONNECTION_MANAGER)
 	}
 	if got := stack[len(stack)-1].GetKey(); got != types.FIRST_RUN_TIP {
 		t.Fatalf("focus stack top = %q, want %q", got, types.FIRST_RUN_TIP)

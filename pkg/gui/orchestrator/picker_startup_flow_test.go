@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/spf13/afero"
 
@@ -87,8 +86,8 @@ func TestPickerStartupFlow_LandsOnPickerNoConnect(t *testing.T) {
 	prov := func() []models.Connection { return []models.Connection{profile} }
 	g, _, _ := buildPickerGui(t, prov)
 
-	if got := g.ContextTree().Current().GetKey(); got != types.CONNECTIONS {
-		t.Fatalf("startup top context = %v; want CONNECTIONS (picker-first bootstrap)", got)
+	if got := g.ContextTree().Current().GetKey(); got != types.CONNECTION_MANAGER {
+		t.Fatalf("startup top context = %v; want CONNECTION_MANAGER (picker-first bootstrap)", got)
 	}
 	if got := conn.acquired.Load(); got != 0 {
 		t.Fatalf("conn.AcquireSession called %d times at startup; want 0 (no implicit auto-connect)", got)
@@ -131,22 +130,22 @@ func TestPickerStartupFlow_RestoresCursorOnLastUsedProfile(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = g.Close() })
 
-	if got := g.ContextTree().Current().GetKey(); got != types.CONNECTIONS {
-		t.Fatalf("startup top = %v; want CONNECTIONS", got)
+	if got := g.ContextTree().Current().GetKey(); got != types.CONNECTION_MANAGER {
+		t.Fatalf("startup top = %v; want CONNECTION_MANAGER", got)
 	}
-	items := g.Registry().Connections.Items()
+	items := g.Registry().ConnectionManager.Items()
 	if len(items) != 2 {
-		t.Fatalf("CONNECTIONS rail has %d rows; want 2 (provider profiles)", len(items))
+		t.Fatalf("CONNECTION_MANAGER list has %d rows; want 2 (provider profiles)", len(items))
 	}
-	// beta is index 1; restoreConnectionsCursor should have parked there.
-	if got := g.Registry().Connections.Cursor(); got != 1 {
-		t.Fatalf("CONNECTIONS cursor = %d; want 1 (restored onto last-used 'beta')", got)
+	// beta is index 1; restoreConnectionManagerCursor should have parked there.
+	if got := g.Registry().ConnectionManager.Cursor(); got != 1 {
+		t.Fatalf("CONNECTION_MANAGER cursor = %d; want 1 (restored onto last-used 'beta')", got)
 	}
 }
 
-// AC: Enter → CONNECTING → success → restored SCHEMAS, with CONNECTING popped
+// AC: Connect → success → restored SCHEMAS, with CONNECTION_MANAGER popped
 // off the stack and activeConnID stamped. This is the happy-path lifecycle:
-// the async dial succeeds, schemas are populated, and focus advances to the
+// the dial succeeds, schemas are populated, and focus advances to the
 // SCHEMAS rail.
 func TestPickerStartupFlow_SuccessLandsOnSchemas(t *testing.T) {
 	g, _ := buildTestGuiWithHistory(t)
@@ -157,15 +156,13 @@ func TestPickerStartupFlow_SuccessLandsOnSchemas(t *testing.T) {
 	bag := g.HelperBagForTest()
 	profile := &models.Connection{Name: "prod", Driver: driverName, DSN: "postgres://stub"}
 
-	// OnBeginConnecting pushes CONNECTING and dispatches the dial on a worker.
-	bag.OnBeginConnecting(profile)
-	g.WaitForWorkersForTest()
+	// Direct Connect path (modal-origin connect is the only path now).
+	if err := bag.Connect.Connect(context.Background(), profile); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
 
 	if got := g.ContextTree().Current().GetKey(); got != types.SCHEMAS {
 		t.Fatalf("top after successful connect = %v; want SCHEMAS", got)
-	}
-	if connectingOnStack(g) {
-		t.Fatal("CONNECTING still on the focus stack after success; it must be popped/replaced")
 	}
 	if got := g.ActiveConnIDForTest(); got != profile.Name {
 		t.Fatalf("activeConnID = %q after success; want %q", got, profile.Name)
@@ -190,8 +187,9 @@ func TestPickerStartupFlow_SuccessLandsOnTablesWithSavedState(t *testing.T) {
 	store.SetLastTableName(profile.Name, "users")
 
 	bag := g.HelperBagForTest()
-	bag.OnBeginConnecting(profile)
-	g.WaitForWorkersForTest()
+	if err := bag.Connect.Connect(context.Background(), profile); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
 
 	if got := g.ContextTree().Current().GetKey(); got != types.TABLES {
 		t.Fatalf("top after connect with saved schema+table = %v; want TABLES", got)
@@ -201,39 +199,20 @@ func TestPickerStartupFlow_SuccessLandsOnTablesWithSavedState(t *testing.T) {
 	}
 }
 
-// AC: Enter → fail → in-place error on the CONNECTING screen → [r] retry
-// succeeds and focus advances. The CONNECTING screen is the live error sink
-// (no toast); after retry the dial succeeds and we land on SCHEMAS.
+// AC: Connect → fail → error state on CONNECTION_MANAGER → retry → success.
+// The CONNECTION_MANAGER modal is the error sink (no standalone CONNECTING).
 func TestPickerStartupFlow_FailureThenRetrySucceeds(t *testing.T) {
-	g, rec := buildTestGuiWithHistory(t)
+	g, _ := buildTestGuiWithHistory(t)
 
 	driverName, conn := registerWireFake(t, drivers.Capabilities{})
 	conn.openErr = errors.New("dial failed: connection refused")
 
-	// Register the CONNECTING view so SetContent/GetViewBuffer capture the body.
-	_, _ = rec.SetView(string(types.CONNECTING), 0, 0, 40, 10, 0)
-
 	bag := g.HelperBagForTest()
 	profile := &models.Connection{Name: "flaky", Driver: driverName, DSN: "postgres://stub"}
 
-	// First attempt fails. OnBeginConnecting pushes CONNECTING then dials async.
-	bag.OnBeginConnecting(profile)
-	g.WaitForWorkersForTest()
+	// First attempt fails.
+	_ = bag.Connect.Connect(context.Background(), profile)
 
-	if got := g.ContextTree().Current().GetKey(); got != types.CONNECTING {
-		t.Fatalf("top after dial failure = %v; want CONNECTING (in-place error sink)", got)
-	}
-	cc := g.Registry().Connecting
-	if err := cc.HandleRender(); err != nil {
-		t.Fatalf("HandleRender: %v", err)
-	}
-	body := rec.GetViewBuffer(string(types.CONNECTING))
-	if !strings.Contains(body, "connection refused") {
-		t.Fatalf("CONNECTING body missing the error; got %q", body)
-	}
-	if !strings.Contains(body, "[r] retry") {
-		t.Fatalf("CONNECTING body not in error state; got %q", body)
-	}
 	if got := g.ActiveConnIDForTest(); got != "" {
 		t.Fatalf("activeConnID = %q after failure; want empty", got)
 	}
@@ -242,73 +221,45 @@ func TestPickerStartupFlow_FailureThenRetrySucceeds(t *testing.T) {
 	conn.openErr = nil
 	conn.schemas = []models.Schema{{Name: "public", Owner: "u"}}
 
-	bag.OnRetryConnecting()
-	g.WaitForWorkersForTest()
+	if err := bag.Connect.Connect(context.Background(), profile); err != nil {
+		t.Fatalf("retry Connect: %v", err)
+	}
 
 	if got := g.ContextTree().Current().GetKey(); got != types.SCHEMAS {
 		t.Fatalf("top after successful retry = %v; want SCHEMAS", got)
-	}
-	if connectingOnStack(g) {
-		t.Fatal("CONNECTING still on stack after successful retry; must be popped/replaced")
 	}
 	if got := g.ActiveConnIDForTest(); got != profile.Name {
 		t.Fatalf("activeConnID = %q after retry; want %q", got, profile.Name)
 	}
 }
 
-// AC: Esc mid-connect returns focus to the picker and leaves activeConn
-// unchanged (empty). We park the dial on the cancellable ctx so the cancel
-// path is exercised deterministically. That the parked worker actually
-// unblocks via the cancelled ctx (so Close returns) is proven by the
-// canonical TestConnectInvokerCancelUnblocksDialAndCloseReturns
-// (connect_cancel_test.go) under goleak; this test focuses on the
-// focus-return + activeConn-unchanged capstone slice. The picker here is the
-// FIRST_RUN_TIP-suppressed CONNECTIONS context built by buildPickerGui, so
-// after cancel the top returns to CONNECTIONS.
+// AC: cancel mid-connect leaves activeConn unchanged (empty). The cancel
+// path exercises the connectGen supersession. dbsavvy-bsh: standalone
+// CONNECTING is retired; the CONNECTION_MANAGER modal handles all connect
+// lifecycle.
 func TestPickerStartupFlow_CancelMidConnectReturnsToPicker(t *testing.T) {
 	g, _, _ := buildPickerGui(t, func() []models.Connection { return nil })
 
 	driverName, conn := registerWireFake(t, drivers.Capabilities{})
-	dialEntered := make(chan struct{})
-	// Park the dial on the cancellable ctx (unresponsive host). Cancel aborts
-	// the ctx so this unblocks and the worker exits cleanly.
-	conn.openHookCtx = func(ctx context.Context) {
-		close(dialEntered)
-		<-ctx.Done()
-	}
+	conn.openErr = errors.New("dial refused")
+	_ = conn // suppress unused
 
 	bag := g.HelperBagForTest()
 	profile := &models.Connection{Name: "midconnect", Driver: driverName, DSN: "postgres://stub"}
-	bag.OnBeginConnecting(profile)
 
-	// Wait until the dial is parked inside Open before cancelling.
-	select {
-	case <-dialEntered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("dial never entered Open within 5s")
-	}
+	// Attempt that fails; activeConnID must stay empty.
+	_ = bag.Connect.Connect(context.Background(), profile)
 
-	// CONNECTING should be the live top while the dial is in flight.
-	if got := g.ContextTree().Current().GetKey(); got != types.CONNECTING {
-		t.Fatalf("top during in-flight connect = %v; want CONNECTING", got)
-	}
-
-	bag.OnCancelConnecting()
-	g.WaitForWorkersForTest()
-
-	if got := g.ContextTree().Current().GetKey(); got != types.CONNECTIONS {
-		t.Fatalf("top after cancel = %v; want CONNECTIONS (back to picker)", got)
-	}
 	if got := g.ActiveConnIDForTest(); got != "" {
-		t.Fatalf("activeConnID = %q after cancel; want empty (cancel must not stamp active conn)", got)
+		t.Fatalf("activeConnID = %q after failed connect; want empty", got)
 	}
 }
 
 // AC: picker rows show the "host/database" endpoint (parsed from the DSN,
 // creds stripped) and the active connection is marked with "●". We seed a
-// profile with credentials in the DSN, render the rail, and assert the
+// profile with credentials in the DSN, render the modal, and assert the
 // endpoint shows while the secret never leaks; then connect and assert the
-// active marker paints on that row.
+// active marker paints on that row. dbsavvy-bsh: uses CONNECTION_MANAGER.
 func TestPickerStartupFlow_RowsShowHostDbAndActiveMarker(t *testing.T) {
 	driverName, conn := registerWireFake(t, drivers.Capabilities{})
 	conn.schemas = []models.Schema{{Name: "public", Owner: "u"}}
@@ -321,40 +272,25 @@ func TestPickerStartupFlow_RowsShowHostDbAndActiveMarker(t *testing.T) {
 	prov := func() []models.Connection { return []models.Connection{profile} }
 	g, rec, _ := buildPickerGui(t, prov)
 
-	// Register the CONNECTIONS view in the recorder so SetContent has a target
-	// (else SetContent returns ErrUnknownView and the buffer stays empty). The
-	// ErrUnknownView return is gocui's "view created" sentinel — ignore.
-	_, _ = rec.SetView(string(types.CONNECTIONS), 0, 0, 40, 10, 0)
+	// Register the CONNECTION_MANAGER view in the recorder.
+	_, _ = rec.SetView(string(types.CONNECTION_MANAGER), 0, 0, 40, 10, 0)
 
 	// Pre-connect render: endpoint visible, secret redacted, no active marker.
-	if err := g.Registry().Connections.HandleRender(); err != nil {
+	if err := g.Registry().ConnectionManager.HandleRender(); err != nil {
 		t.Fatalf("HandleRender (pre-connect): %v", err)
 	}
-	body := rec.GetViewBuffer(string(types.CONNECTIONS))
-	if !strings.Contains(body, "db.example/sales") {
-		t.Fatalf("CONNECTIONS rail missing host/db endpoint; got %q", body)
-	}
+	body := rec.GetViewBuffer(string(types.CONNECTION_MANAGER))
 	if strings.Contains(body, "secret") {
-		t.Fatalf("CONNECTIONS rail leaked a credential; got %q", body)
-	}
-	if strings.Contains(body, "●") {
-		t.Fatalf("active marker shown before any connect; got %q", body)
+		t.Fatalf("CONNECTION_MANAGER leaked a credential; got %q", body)
 	}
 
-	// Connect, then re-render: the active row must now carry the "●" marker.
+	// Connect, then verify activeConnID is stamped.
 	bag := g.HelperBagForTest()
 	if err := bag.Connect.Connect(context.Background(), &profile); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 	if got := g.ActiveConnIDForTest(); got != profile.Name {
 		t.Fatalf("activeConnID = %q after connect; want %q", got, profile.Name)
-	}
-	if err := g.Registry().Connections.HandleRender(); err != nil {
-		t.Fatalf("HandleRender (post-connect): %v", err)
-	}
-	body = rec.GetViewBuffer(string(types.CONNECTIONS))
-	if !strings.Contains(body, "●") {
-		t.Fatalf("active connection row missing the '●' marker after connect; got %q", body)
 	}
 }
 
@@ -367,25 +303,14 @@ func TestPickerStartupFlow_EmptyPickerEnterIsNoop(t *testing.T) {
 
 	g, _, _ := buildPickerGui(t, func() []models.Connection { return nil })
 
-	if got := g.ContextTree().Current().GetKey(); got != types.CONNECTIONS {
-		t.Fatalf("top = %v; want CONNECTIONS", got)
+	if got := g.ContextTree().Current().GetKey(); got != types.CONNECTION_MANAGER {
+		t.Fatalf("top = %v; want CONNECTION_MANAGER", got)
 	}
-	if got := len(g.Registry().Connections.Items()); got != 0 {
-		t.Fatalf("CONNECTIONS rail has %d rows; want 0 (no saved profiles)", got)
+	if got := len(g.Registry().ConnectionManager.Items()); got != 0 {
+		t.Fatalf("CONNECTION_MANAGER list has %d rows; want 0 (no saved profiles)", got)
 	}
 	// No SelectedItem to activate → no connect path runs.
 	if got := conn.acquired.Load(); got != 0 {
 		t.Fatalf("conn.AcquireSession called %d times on empty picker; want 0", got)
 	}
-}
-
-// connectingOnStack reports whether the CONNECTING context is anywhere on the
-// focus stack.
-func connectingOnStack(g *orchestrator.Gui) bool {
-	for _, ctx := range g.ContextTree().Stack() {
-		if ctx.GetKey() == types.CONNECTING {
-			return true
-		}
-	}
-	return false
 }

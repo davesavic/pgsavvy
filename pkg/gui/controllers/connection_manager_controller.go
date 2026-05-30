@@ -3,6 +3,8 @@ package controllers
 import (
 	"fmt"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -81,6 +83,28 @@ type ConnectionManagerDeps struct {
 	// config.DeleteConnection, and refreshes the modal list. A nil callback
 	// makes Delete a no-op.
 	OnDeleteConnection func(connName string) error
+
+	// StackDepth returns the current focus-stack depth. Used by
+	// QuitOrClose to distinguish startup root (depth 1 → quit) from
+	// mid-session open (depth > 1 → close modal). Nil-safe: defaults to
+	// 1 (quit).
+	StackDepth func() int
+}
+
+// QuitOrClose handles q on the CONNECTION_MANAGER modal. At startup root
+// (stack depth == 1) it quits the app; mid-session (stack depth > 1) it
+// closes the modal back to data. dbsavvy-bsh.
+func (cm *ConnectionManagerController) QuitOrClose(ec commands.ExecCtx) error {
+	depth := 1
+	if cm.deps.StackDepth != nil {
+		depth = cm.deps.StackDepth()
+	}
+	if depth <= 1 {
+		// Startup root: dispatch AppQuit.
+		return gocui.ErrQuit
+	}
+	// Mid-session: close the modal.
+	return cm.Close(ec)
 }
 
 // NewConnectionManagerController constructs the controller with an injected
@@ -432,7 +456,7 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Sequence:    []types.ChordKey{{Code: 'q'}},
 			Mode:        types.ModeNormal,
 			Scope:       types.CONNECTION_MANAGER,
-			ActionID:    commands.AppQuit,
+			ActionID:    commands.ConnectionManagerQuitOrClose,
 			Description: tr.Actions.QuitApp,
 		},
 	}
@@ -443,6 +467,11 @@ func (cm *ConnectionManagerController) RegisterActions(reg *commands.Registry) {
 	if reg == nil {
 		return
 	}
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerQuitOrClose,
+		Description: "Quit or close connection manager",
+		Handler:     cm.QuitOrClose,
+	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerClose,
 		Description: "Close connection manager",

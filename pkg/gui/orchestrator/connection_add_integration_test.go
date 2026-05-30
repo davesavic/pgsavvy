@@ -221,6 +221,7 @@ func feedSpecialEditable(t *testing.T, drv *serializedDriver, view string, name 
 // chained-prompt flow via RecorderGuiDriver.FeedKey and asserts the new
 // profile lands in connections.yml verbatim.
 func TestConnectionAdd_HappyPath_AppendsOneRow(t *testing.T) {
+	t.Skip("dbsavvy-bsh: CONNECTIONS rail removed; WalkAdd chained prompt flow retired in favor of inline modal form")
 	g, rec, fs, path := bootstrapAddConnGui(t)
 
 	pre, err := config.LoadConnections(fs, path)
@@ -232,7 +233,7 @@ func TestConnectionAdd_HappyPath_AppendsOneRow(t *testing.T) {
 	}
 
 	// Step 0: trigger AddConnection via `a` on the CONNECTIONS rail.
-	feedRune(t, rec, string(types.CONNECTIONS), 'a')
+	feedRune(t, rec, string(types.CONNECTION_MANAGER), 'a')
 
 	// Step 1: SELECTION popup (driver picker).
 	eventually(t, 2*time.Second, func() bool {
@@ -313,9 +314,10 @@ func TestConnectionAdd_HappyPath_AppendsOneRow(t *testing.T) {
 // at the SELECTION popup unwinds the entire WalkAddConnection sequence
 // cleanly with no file write and no leaked popup state.
 func TestConnectionAdd_EscAtDriverPick_NoWrite(t *testing.T) {
+	t.Skip("dbsavvy-bsh: CONNECTIONS rail removed; WalkAdd chained prompt flow retired in favor of inline modal form")
 	g, rec, fs, path := bootstrapAddConnGui(t)
 
-	feedRune(t, rec, string(types.CONNECTIONS), 'a')
+	feedRune(t, rec, string(types.CONNECTION_MANAGER), 'a')
 	eventually(t, 2*time.Second, func() bool {
 		ch := g.ChoiceHelperForTest()
 		return ch != nil && ch.Active()

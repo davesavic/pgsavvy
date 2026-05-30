@@ -18,7 +18,7 @@ func TestModeStore_Get_EmptyReturnsNormal(t *testing.T) {
 func TestModeStore_Get_DoesNotInsert(t *testing.T) {
 	s := NewModeStore()
 	_ = s.Get(types.QUERY_EDITOR)
-	_ = s.Get(types.CONNECTIONS)
+	_ = s.Get(types.SCHEMAS)
 	all := s.All()
 	if len(all) != 0 {
 		t.Errorf("All() after read-only Get calls = %v, want empty map", all)

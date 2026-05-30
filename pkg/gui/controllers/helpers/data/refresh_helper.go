@@ -18,11 +18,10 @@ import (
 // wiring order (helpers built before the orchestrator finishes wiring
 // closures) never panics the controllers. dbsavvy-56u.1.
 type RefreshHelper struct {
-	refreshSchemas     func(ctx context.Context) error
-	refreshTables      func(ctx context.Context, schema string) error
-	refreshColumns     func(ctx context.Context, schema, table string) error
-	refreshIndexes     func(ctx context.Context, schema, table string) error
-	refreshConnections func() error
+	refreshSchemas func(ctx context.Context) error
+	refreshTables  func(ctx context.Context, schema string) error
+	refreshColumns func(ctx context.Context, schema, table string) error
+	refreshIndexes func(ctx context.Context, schema, table string) error
 }
 
 // NewRefreshHelper builds a helper with nil closures. The orchestrator
@@ -66,17 +65,6 @@ func (h *RefreshHelper) SetIndexesRefresher(fn func(ctx context.Context, schema,
 	h.refreshIndexes = fn
 }
 
-// SetConnectionsRefresher wires the CONNECTIONS-rail reload closure.
-// CONNECTIONS has no context argument — the orchestrator's
-// refreshConnectionsRail re-reads from the on-disk connection
-// provider directly.
-func (h *RefreshHelper) SetConnectionsRefresher(fn func() error) {
-	if h == nil {
-		return
-	}
-	h.refreshConnections = fn
-}
-
 // RefreshSchemas reloads the SCHEMAS rail data and pushes it back into
 // SchemasContext. Returns nil when the closure is unwired.
 func (h *RefreshHelper) RefreshSchemas(ctx context.Context) error {
@@ -114,13 +102,4 @@ func (h *RefreshHelper) RefreshIndexes(ctx context.Context, schema, table string
 		return nil
 	}
 	return h.refreshIndexes(ctx, schema, table)
-}
-
-// RefreshConnections reloads the CONNECTIONS rail from the on-disk
-// connection provider.
-func (h *RefreshHelper) RefreshConnections() error {
-	if h == nil || h.refreshConnections == nil {
-		return nil
-	}
-	return h.refreshConnections()
 }

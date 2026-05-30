@@ -14,7 +14,6 @@ type Dimensions = boxlayout.Dimensions
 // future epics may extend the list (e.g. result-tabs N) but must NOT
 // drop any of these without a coordinated update of every consumer.
 var requiredWindows = []string{
-	"connections",
 	"schemas",
 	"tables",
 	"main",
@@ -40,7 +39,6 @@ var requiredWindows = []string{
 //	├── body ROW (weight 1)
 //	│   ├── upper COLUMN (weight 1)
 //	│   │   ├── left rail ROW size=24
-//	│   │   │   ├── "connections" weight=1
 //	│   │   │   ├── "schemas"     weight=1
 //	│   │   │   └── "tables"      weight=1
 //	│   │   └── right ROW (weight 1)
@@ -71,7 +69,6 @@ func GetWindowDimensions(width, height int) map[string]Dimensions {
 								Direction: boxlayout.ROW,
 								Size:      24,
 								Children: []*boxlayout.Box{
-									{Window: "connections", Weight: 1},
 									{Window: "schemas", Weight: 1},
 									{Window: "tables", Weight: 1},
 								},

@@ -36,9 +36,8 @@ func TestApplyFocusFrameColorsFocusedAndUnfocused(t *testing.T) {
 	inactive := frameAttr(theme.Current().InactiveBorder)
 
 	rails := map[string]*gocui.View{
-		string(types.CONNECTIONS): newFramedView(string(types.CONNECTIONS)),
-		string(types.SCHEMAS):     newFramedView(string(types.SCHEMAS)),
-		string(types.TABLES):      newFramedView(string(types.TABLES)),
+		string(types.SCHEMAS): newFramedView(string(types.SCHEMAS)),
+		string(types.TABLES):  newFramedView(string(types.TABLES)),
 	}
 	focused := string(types.SCHEMAS)
 
@@ -122,9 +121,9 @@ func TestApplyFocusFrameColorsLeavesPopupsUntouched(t *testing.T) {
 	popup.FrameColor = popupSentinel
 
 	rails := map[string]*gocui.View{
-		string(types.CONNECTIONS): newFramedView(string(types.CONNECTIONS)),
+		string(types.SCHEMAS): newFramedView(string(types.SCHEMAS)),
 	}
-	applyFocusFrameColors(rails, string(types.CONNECTIONS), active, inactive)
+	applyFocusFrameColors(rails, string(types.SCHEMAS), active, inactive)
 
 	if popup.FrameColor != popupSentinel {
 		t.Errorf("popup FrameColor = %v, want sentinel %v (helper must not touch views absent from rails map)", popup.FrameColor, popupSentinel)

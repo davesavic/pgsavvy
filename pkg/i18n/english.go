@@ -218,8 +218,9 @@ type ActionTranslations struct {
 	StatementTimeoutSet string
 
 	// Global app commands.
-	QuitApp  string
-	ShowMenu string
+	QuitApp               string
+	ShowMenu              string
+	OpenConnectionManager string
 
 	// Side rail navigation.
 	RailSchemas     string
@@ -411,8 +412,9 @@ func EnglishTranslationSet() *TranslationSet {
 			SearchPathQuickSet:  "Set search_path",
 			StatementTimeoutSet: "Set statement timeout",
 
-			QuitApp:  "Quit",
-			ShowMenu: "Show Menu",
+			QuitApp:               "Quit",
+			ShowMenu:              "Show Menu",
+			OpenConnectionManager: "Open Connection Manager",
 
 			RailSchemas:     "Schemas",
 			RailTables:      "Tables",

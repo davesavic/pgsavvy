@@ -49,7 +49,7 @@ func (m *minimalRootCtx) GetMouseKeybindings(_ types.KeybindingsOpts) []types.Mo
 // does not hit ErrPopAtBottom.
 func pushRootCh(t *testing.T, tree *gui.ContextTree) {
 	t.Helper()
-	root := &minimalRootCtx{key: types.CONNECTIONS, kind: types.SIDE_CONTEXT}
+	root := &minimalRootCtx{key: types.SCHEMAS, kind: types.SIDE_CONTEXT}
 	if err := tree.Push(root); err != nil {
 		t.Fatalf("push root: %v", err)
 	}

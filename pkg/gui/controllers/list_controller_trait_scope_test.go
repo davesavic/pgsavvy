@@ -21,16 +21,13 @@ import (
 // advanced.
 func TestListControllerTrait_PerRailDispatch(t *testing.T) {
 	b := newBag()
-	connCur := &fakeCursor{items: []any{1, 2, 3}}
 	schemaCur := &fakeCursor{items: []any{1, 2, 3}}
 	tableCur := &fakeCursor{items: []any{1, 2, 3}}
 
-	conn := controllers.NewConnectionsController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.ThreadingDeps, connCur, b.ConnPicker)
 	schemas := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, schemaCur, b.SchemaPicker)
 	tables := controllers.NewTablesController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, tableCur, b.TablePicker)
 
 	reg := commands.NewRegistry()
-	conn.ListControllerTrait.RegisterActions(reg)
 	schemas.ListControllerTrait.RegisterActions(reg)
 	tables.ListControllerTrait.RegisterActions(reg)
 
@@ -38,9 +35,6 @@ func TestListControllerTrait_PerRailDispatch(t *testing.T) {
 	fireJOn(t, reg, schemas.GetKeybindings(types.KeybindingsOpts{}), "schemas")
 	if schemaCur.idx != 1 {
 		t.Errorf("schemas cursor after j = %d, want 1", schemaCur.idx)
-	}
-	if connCur.idx != 0 {
-		t.Errorf("connections cursor moved to %d after j on SCHEMAS — should stay 0", connCur.idx)
 	}
 	if tableCur.idx != 0 {
 		t.Errorf("non-target rail moved: tables=%d, want 0", tableCur.idx)
@@ -51,14 +45,8 @@ func TestListControllerTrait_PerRailDispatch(t *testing.T) {
 	if tableCur.idx != 1 {
 		t.Errorf("tables cursor after j = %d, want 1", tableCur.idx)
 	}
-	if connCur.idx != 0 {
-		t.Errorf("connections cursor moved to %d after j on TABLES — should stay 0", connCur.idx)
-	}
-
-	// And CONNECTIONS itself still works.
-	fireJOn(t, reg, conn.GetKeybindings(types.KeybindingsOpts{}), "connections")
-	if connCur.idx != 1 {
-		t.Errorf("connections cursor after j = %d, want 1", connCur.idx)
+	if schemaCur.idx != 1 {
+		t.Errorf("schemas cursor should still be 1 after j on TABLES, got %d", schemaCur.idx)
 	}
 }
 

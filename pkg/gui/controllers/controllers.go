@@ -16,14 +16,12 @@ import (
 // Returned by AttachControllers; T10 (bootstrap) keeps the bundle so
 // individual controllers remain accessible after wiring completes.
 type Controllers struct {
-	Connections  *ConnectionsController
 	Schemas      *SchemasController
 	Tables       *TablesController
 	Menu         *MenuController
 	Prompt       *PromptController
 	Selection    *SelectionController
 	Confirmation *ConfirmationController
-	Connecting   *ConnectingController
 	// ConnectionManager owns the CONNECTION_MANAGER modal's <esc> binding
 	// (epic dbsavvy-ig4).
 	ConnectionManager *ConnectionManagerController
@@ -92,9 +90,6 @@ func AttachControllers(
 
 	// Default to null pickers when the caller leaves them nil so
 	// handlers gracefully no-op.
-	if helpers.Connections == nil {
-		helpers.Connections = nullConnectionPicker{}
-	}
 	if helpers.Schemas == nil {
 		helpers.Schemas = nullSchemaPicker{}
 	}
@@ -105,16 +100,12 @@ func AttachControllers(
 		helpers.ActiveConnection = nullActiveConnection{}
 	}
 
-	connections := NewConnectionsController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.ThreadingDeps, &tree.Connections.SideListContext, helpers.Connections)
 	schemas := NewSchemasController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, &tree.Schemas.SideListContext, helpers.Schemas)
 	tables := NewTablesController(c, helpers.CoreDeps, helpers.NavDeps, &tree.Tables.SideListContext, helpers.Tables)
 	menu := NewMenuController(c, helpers.CoreDeps, helpers.UIDeps)
 	prompt := NewPromptController(c, helpers.CoreDeps, helpers.UIDeps)
 	selection := NewSelectionController(c, helpers.CoreDeps, helpers.UIDeps)
 	confirmation := NewConfirmationController(c, helpers.CoreDeps, helpers.UIDeps)
-	// Connecting retry / cancel callbacks come from the orchestrator's
-	// NavDeps (epic dbsavvy-e53.5); nil values leave the handlers no-op.
-	connecting := NewConnectingController(c, helpers.CoreDeps, helpers.UIDeps, helpers.OnRetryConnecting, helpers.OnCancelConnecting)
 	// ConnectionManager <esc> close callback comes from the orchestrator's
 	// NavDeps (epic dbsavvy-ig4); a nil value leaves the handler no-op.
 	connectionManager := NewConnectionManagerController(c, helpers.CoreDeps, helpers.UIDeps, helpers.OnCloseConnectionManager)
@@ -190,14 +181,12 @@ func AttachControllers(
 	plan := NewPlanController(c, helpers.CoreDeps, helpers.ActivePlanContextFn)
 
 	bundle := &Controllers{
-		Connections:       connections,
 		Schemas:           schemas,
 		Tables:            tables,
 		Menu:              menu,
 		Prompt:            prompt,
 		Selection:         selection,
 		Confirmation:      confirmation,
-		Connecting:        connecting,
 		ConnectionManager: connectionManager,
 		Quit:              quit,
 		Reconnect:         reconnect,
@@ -221,14 +210,12 @@ func AttachControllers(
 	// (AddKeybindingsFn is a no-op on the stub contexts today; the wiring
 	// lights up automatically once the live contexts ship).
 	attachTargets := map[string]attachable{
-		"Connections":       &tree.Connections.BaseContext,
 		"Schemas":           &tree.Schemas.BaseContext,
 		"Tables":            &tree.Tables.BaseContext,
 		"Menu":              &tree.Menu.BaseContext,
 		"Prompt":            &tree.Prompt.BaseContext,
 		"Selection":         &tree.Selection.BaseContext,
 		"Confirmation":      &tree.Confirmation.BaseContext,
-		"Connecting":        &tree.Connecting.BaseContext,
 		"ConnectionManager": &tree.ConnectionManager.BaseContext,
 		"Quit":              &tree.Global.BaseContext,
 		"Reconnect":         &tree.Global.BaseContext,
@@ -321,14 +308,12 @@ func (b *Controllers) entries() []controllerEntry {
 		return nil
 	}
 	candidates := []controllerEntry{
-		{name: "Connections", ctrl: b.Connections, attach: true},
 		{name: "Schemas", ctrl: b.Schemas, attach: true},
 		{name: "Tables", ctrl: b.Tables, attach: true},
 		{name: "Menu", ctrl: b.Menu, attach: true},
 		{name: "Prompt", ctrl: b.Prompt, attach: true},
 		{name: "Selection", ctrl: b.Selection, attach: true},
 		{name: "Confirmation", ctrl: b.Confirmation, attach: true},
-		{name: "Connecting", ctrl: b.Connecting, attach: true},
 		{name: "ConnectionManager", ctrl: b.ConnectionManager, attach: true},
 		{name: "Quit", ctrl: b.Quit, attach: true},
 		{name: "Reconnect", ctrl: b.Reconnect, attach: true},
@@ -383,9 +368,6 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 	// the controller's own RegisterActions does NOT call. These three calls
 	// stay explicit because the trait is a sub-object, not a Controllers
 	// field, and so is not part of the entries() registry.
-	if b.Connections != nil && b.Connections.ListControllerTrait != nil {
-		b.Connections.ListControllerTrait.RegisterActions(reg)
-	}
 	if b.Schemas != nil && b.Schemas.ListControllerTrait != nil {
 		b.Schemas.ListControllerTrait.RegisterActions(reg)
 	}
@@ -403,10 +385,6 @@ func (b *Controllers) RegisterActions(reg *commands.Registry) {
 
 // Null-picker fallbacks. Returning nil/empty from every accessor is the
 // documented no-op sentinel honored by every controller handler.
-
-type nullConnectionPicker struct{}
-
-func (nullConnectionPicker) SelectedConnection() *models.Connection { return nil }
 
 type nullSchemaPicker struct{}
 

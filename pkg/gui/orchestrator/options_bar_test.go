@@ -203,11 +203,11 @@ func TestCollectOptionsForScope_ConnectionsHasAtLeastThreeHints(t *testing.T) {
 	// lights up. Mirror those three production leaves here and assert
 	// CollectOptionsForScope returns a non-empty slice with >=3 entries.
 	ts := buildOptionsBarTrieSet(t, []optionsBarBinding{
-		{seq: "<cr>", mode: types.ModeNormal, scope: types.CONNECTIONS, tag: "Conn", description: "Select", showInBar: true},
-		{seq: "a", mode: types.ModeNormal, scope: types.CONNECTIONS, tag: "Conn", description: "Add connection", showInBar: true},
-		{seq: "r", mode: types.ModeNormal, scope: types.CONNECTIONS, tag: "Conn", description: "Refresh rail", showInBar: true},
+		{seq: "<cr>", mode: types.ModeNormal, scope: types.SCHEMAS, tag: "Conn", description: "Select", showInBar: true},
+		{seq: "a", mode: types.ModeNormal, scope: types.SCHEMAS, tag: "Conn", description: "Add connection", showInBar: true},
+		{seq: "r", mode: types.ModeNormal, scope: types.SCHEMAS, tag: "Conn", description: "Refresh rail", showInBar: true},
 	})
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.CONNECTIONS, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.SCHEMAS, nil)
 	if len(got) < 3 {
 		t.Fatalf("CollectOptionsForScope(CONNECTIONS) = %v (len %d), want >=3", got, len(got))
 	}

@@ -22,17 +22,6 @@ type ExpectedBinding struct {
 // Coverage targets: j, k, <CR>, H, U, leader, digit 1..4, <tab>,
 // ?, <c-c>, :, a — across every relevant view.
 var ExpectedBindings = []ExpectedBinding{
-	// Connections rail.
-	{View: "connections", Key: gocui.NewKeyRune('j'), Mod: gocui.ModNone},
-	{View: "connections", Key: gocui.NewKeyRune('k'), Mod: gocui.ModNone},
-	{View: "connections", Key: gocui.NewKeyName(gocui.KeyEnter), Mod: gocui.ModNone},
-	{View: "connections", Key: gocui.NewKeyRune('a'), Mod: gocui.ModNone},
-	{View: "connections", Key: gocui.NewKeyRune('1'), Mod: gocui.ModNone},
-	{View: "connections", Key: gocui.NewKeyRune('2'), Mod: gocui.ModNone},
-	{View: "connections", Key: gocui.NewKeyRune('3'), Mod: gocui.ModNone},
-	{View: "connections", Key: gocui.NewKeyRune('4'), Mod: gocui.ModNone},
-	{View: "connections", Key: gocui.NewKeyName(gocui.KeyTab), Mod: gocui.ModNone},
-
 	// Schemas rail. <leader>H's first key is space (the configured leader).
 	{View: "schemas", Key: gocui.NewKeyRune('j'), Mod: gocui.ModNone},
 	{View: "schemas", Key: gocui.NewKeyRune('k'), Mod: gocui.ModNone},

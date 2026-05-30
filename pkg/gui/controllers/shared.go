@@ -88,7 +88,7 @@ func railDirectionalBindings(scope types.ContextKey, tr *i18n.TranslationSet) []
 	ctrlK := types.ChordKey{Code: 'k', Mod: types.ChordModCtrl}
 	ctrlL := types.ChordKey{Code: 'l', Mod: types.ChordModCtrl}
 	switch scope {
-	case types.CONNECTIONS, types.SCHEMAS:
+	case types.SCHEMAS:
 		return []*types.ChordBinding{
 			{Sequence: []types.ChordKey{ctrlK}, Scope: scope, ActionID: commands.RailSwitchUp, Description: tr.Actions.RailUp},
 			{Sequence: []types.ChordKey{ctrlJ}, Scope: scope, ActionID: commands.RailSwitchDown, Description: tr.Actions.RailDown},
@@ -170,15 +170,13 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 	// sensible. Rail-switch handlers all run on the gocui dispatch
 	// goroutine, so this needs no mutex.
 	railOrder := []types.IBaseContext{
-		ctxTree.Connections,
 		ctxTree.Schemas,
 		ctxTree.Tables,
 	}
 	lastRailKey := types.SCHEMAS
 	railKeys := map[types.ContextKey]struct{}{
-		types.CONNECTIONS: {},
-		types.SCHEMAS:     {},
-		types.TABLES:      {},
+		types.SCHEMAS: {},
+		types.TABLES:  {},
 	}
 	pushRail := func(target types.IBaseContext) error {
 		if target == nil {
@@ -291,7 +289,6 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 		}
 	}
 	cycle := []cycleEntry{
-		staticEntry(ctxTree.Connections),
 		staticEntry(ctxTree.Schemas),
 		staticEntry(ctxTree.Tables),
 		staticEntry(ctxTree.QueryEditor),

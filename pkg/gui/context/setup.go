@@ -16,11 +16,10 @@ import (
 // contextSpecs table) for the cases where ordered iteration is preferable.
 type ContextTree struct {
 	// Live SIDE_CONTEXT instances.
-	Connections *ConnectionsContext
-	Schemas     *SchemasContext
-	Tables      *TablesContext
-	Columns     *ColumnsContext
-	Indexes     *IndexesContext
+	Schemas *SchemasContext
+	Tables  *TablesContext
+	Columns *ColumnsContext
+	Indexes *IndexesContext
 
 	// Live TEMPORARY_POPUP instances.
 	Menu         *MenuContext
@@ -66,12 +65,6 @@ type ContextTree struct {
 	// StubContext in dbsavvy-wwd.1; subsequent child tasks fill in
 	// the *editor.Buffer / *editor.RepeatStore behind it.
 	QueryEditor *QueryEditorContext
-
-	// Connecting is the full-pane MAIN_CONTEXT connection-progress
-	// screen pushed while a connection attempt is in flight (epic
-	// dbsavvy-e53). When top of the focus stack it suppresses the
-	// QueryEditor paint and occupies dims["main"].
-	Connecting *ConnectingContext
 
 	// ConnectionManager is the centered modal MAIN_CONTEXT connection
 	// manager (dbsavvy-ig4). When top of the focus stack it suppresses both
@@ -136,11 +129,6 @@ type contextSpec struct {
 func contextSpecs() []contextSpec {
 	return []contextSpec{
 		// Side rail (Kind = SIDE_CONTEXT).
-		{
-			key: types.CONNECTIONS, kind: types.SIDE_CONTEXT, title: "Connections", inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConnectionsContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.Connections = c.(*ConnectionsContext) },
-		},
 		{
 			key: types.SCHEMAS, kind: types.SIDE_CONTEXT, title: "Schemas", inFlatten: true,
 			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewSchemasContext(b, d) },
@@ -309,17 +297,6 @@ func contextSpecs() []contextSpec {
 				return NewQueryEditorContext(b, d, d.ModeStore, d.Matcher)
 			},
 			assign: func(t *ContextTree, c types.IBaseContext) { t.QueryEditor = c.(*QueryEditorContext) },
-		},
-
-		// CONNECTING is the full-pane connection-progress MAIN_CONTEXT
-		// (epic dbsavvy-e53). Modelled on QUERY_EDITOR: MAIN_CONTEXT kind,
-		// inFlatten=true, view name "connecting". The layout pass paints it
-		// into dims["main"] (suppressing QUERY_EDITOR) for the frame it is
-		// top of the focus stack.
-		{
-			key: types.CONNECTING, kind: types.MAIN_CONTEXT, title: "Connecting", inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConnectingContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.Connecting = c.(*ConnectingContext) },
 		},
 
 		// CONNECTION_MANAGER is the centered modal MAIN_CONTEXT (dbsavvy-ig4).

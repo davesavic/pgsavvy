@@ -30,11 +30,6 @@ func TestRailDirectionalBindings_PerScope(t *testing.T) {
 		scope types.ContextKey
 		want  []want
 	}{
-		{"connections", types.CONNECTIONS, []want{
-			{ctrlK, commands.RailSwitchUp},
-			{ctrlJ, commands.RailSwitchDown},
-			{ctrlL, commands.RailSwitchQueryEditor},
-		}},
 		{"schemas", types.SCHEMAS, []want{
 			{ctrlK, commands.RailSwitchUp},
 			{ctrlJ, commands.RailSwitchDown},

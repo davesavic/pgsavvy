@@ -81,7 +81,7 @@ func TestIsResultPaneKey(t *testing.T) {
 		{types.RESULT_GRID, true},
 		{types.SCHEMAS, false},
 		{types.TABLES, false},
-		{types.CONNECTIONS, false},
+		{types.SCHEMAS, false},
 		{"", false},
 		{types.ResultTabActiveKey, false}, // sentinel for pair lookup; never on focus stack
 	}
@@ -123,7 +123,7 @@ func TestSwapHookBootstrapNoCancel(t *testing.T) {
 	// First push: this is the bootstrap fire. prev is "" inside the
 	// closure → no cancel even though current=CONNECTIONS is outside
 	// the pane.
-	if err := tree.Push(newSwapHookContext(types.CONNECTIONS, types.SIDE_CONTEXT)); err != nil {
+	if err := tree.Push(newSwapHookContext(types.SCHEMAS, types.SIDE_CONTEXT)); err != nil {
 		t.Fatalf("Push(CONNECTIONS): %v", err)
 	}
 	if tab.State() != ui.StateRunning {

@@ -88,7 +88,6 @@ type RefreshHelper interface {
 	RefreshTables(ctx context.Context, schema string) error
 	RefreshColumns(ctx context.Context, schema, table string) error
 	RefreshIndexes(ctx context.Context, schema, table string) error
-	RefreshConnections() error
 }
 
 // TipHelper handles the first-run tip popup lifecycle.
@@ -106,12 +105,6 @@ type TablesDoubleClickHelper interface {
 type MenuPushHelper interface {
 	PushMenu() error
 	PopMenu() error
-}
-
-// ConnectionPicker exposes the cursor-selected connection from the
-// CONNECTIONS context.
-type ConnectionPicker interface {
-	SelectedConnection() *models.Connection
 }
 
 // SchemaPicker exposes the cursor-selected schema name and the show-

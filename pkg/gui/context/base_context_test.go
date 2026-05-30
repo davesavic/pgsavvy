@@ -8,14 +8,14 @@ import (
 
 func TestBaseContextIdentityAccessors(t *testing.T) {
 	b := NewBaseContext(BaseContextOpts{
-		Key:        types.CONNECTIONS,
+		Key:        types.SCHEMAS,
 		ViewName:   "connections",
 		WindowName: "connections-window",
 		Kind:       types.SIDE_CONTEXT,
 	})
 
-	if got := b.GetKey(); got != types.CONNECTIONS {
-		t.Fatalf("GetKey() = %s, want %s", got, types.CONNECTIONS)
+	if got := b.GetKey(); got != types.SCHEMAS {
+		t.Fatalf("GetKey() = %s, want %s", got, types.SCHEMAS)
 	}
 	if got := b.GetViewName(); got != "connections" {
 		t.Fatalf("GetViewName() = %q, want %q", got, "connections")

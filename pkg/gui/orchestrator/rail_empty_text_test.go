@@ -34,8 +34,8 @@ func TestRailEmptyText_ReturnsContextualPlaceholderPerRail(t *testing.T) {
 
 	// A non-rail key (and a nil TranslationSet) must fall through to "" so the
 	// rail keeps its prior blank render rather than panicking.
-	if got := hook(types.CONNECTIONS); got != "" {
-		t.Errorf("railEmptyText(CONNECTIONS) = %q, want \"\" (handled by EmptyStateHook)", got)
+	if got := hook(types.GLOBAL); got != "" {
+		t.Errorf("railEmptyText(GLOBAL) = %q, want \"\" (non-rail key)", got)
 	}
 	if got := railEmptyText(nil)(types.SCHEMAS); got != "" {
 		t.Errorf("railEmptyText(nil)(SCHEMAS) = %q, want \"\"", got)

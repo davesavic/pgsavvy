@@ -195,6 +195,14 @@ func (q *QuitController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordB
 			ActionID:    commands.HelpCheatsheet,
 			Description: tr.Actions.ShowMenu,
 		},
+		// dbsavvy-bsh: <leader>C opens the connection manager mid-session.
+		{
+			Sequence:    []types.ChordKey{{Special: types.KeyLeader}, {Code: 'C'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.GLOBAL,
+			ActionID:    commands.ConnectionManagerOpen,
+			Description: tr.Actions.OpenConnectionManager,
+		},
 	}
 }
 

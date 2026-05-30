@@ -33,7 +33,7 @@ func TestRunLayoutConnectionManagerOwnsMainPane(t *testing.T) {
 	}
 	// Side rails must not paint behind the modal.
 	for _, name := range []string{
-		string(types.CONNECTIONS),
+		string(types.SCHEMAS),
 		string(types.SCHEMAS),
 		string(types.TABLES),
 	} {

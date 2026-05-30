@@ -128,11 +128,10 @@ func TestShippedDefaultsListBindingsArePerRail(t *testing.T) {
 
 	defaults := controllers.AllDefaultBindings(g.Controllers())
 
-	// The three shipped side rails.
+	// The two shipped side rails (CONNECTIONS removed by dbsavvy-bsh).
 	railScopes := map[types.ContextKey]bool{
-		types.CONNECTIONS: true,
-		types.SCHEMAS:     true,
-		types.TABLES:      true,
+		types.SCHEMAS: true,
+		types.TABLES:  true,
 	}
 
 	// For each list-action prefix, collect (scope -> ActionID) seen on
@@ -169,20 +168,20 @@ func TestShippedDefaultsListBindingsArePerRail(t *testing.T) {
 		// Sanity: the prefix must actually be bound on the rails (so this
 		// guard cannot silently pass on an empty set).
 		if len(perScope) == 0 {
-			t.Errorf("no per-rail %s bindings found on any side rail; expected at least CONNECTIONS/SCHEMAS", prefix)
+			t.Errorf("no per-rail %s bindings found on any side rail; expected at least SCHEMAS/TABLES", prefix)
 		}
 	}
 
-	// Explicit regression assertion: the CONNECTIONS j-binding and the
-	// SCHEMAS j-binding must resolve to DIFFERENT ActionIDs. This is the
-	// exact dbsavvy-6m9 case ("j on SCHEMAS moved the CONNECTIONS cursor").
-	connDown := listActionForRail(defaults, types.CONNECTIONS, commands.ListDown)
+	// Explicit regression assertion: the SCHEMAS j-binding and the
+	// TABLES j-binding must resolve to DIFFERENT ActionIDs. This is the
+	// per-rail dispatch invariant (dbsavvy-6m9).
 	schemaDown := listActionForRail(defaults, types.SCHEMAS, commands.ListDown)
-	if connDown == "" || schemaDown == "" {
-		t.Fatalf("missing per-rail ListDown binding: connections=%q schemas=%q", connDown, schemaDown)
+	tablesDown := listActionForRail(defaults, types.TABLES, commands.ListDown)
+	if schemaDown == "" || tablesDown == "" {
+		t.Fatalf("missing per-rail ListDown binding: schemas=%q tables=%q", schemaDown, tablesDown)
 	}
-	if connDown == schemaDown {
-		t.Fatalf("CONNECTIONS and SCHEMAS share ListDown ActionID %q — j on SCHEMAS would move the CONNECTIONS cursor (dbsavvy-6m9 regression)", connDown)
+	if schemaDown == tablesDown {
+		t.Fatalf("SCHEMAS and TABLES share ListDown ActionID %q — j on one would move the other's cursor (dbsavvy-6m9 regression)", schemaDown)
 	}
 }
 
