@@ -196,11 +196,12 @@ type ActionTranslations struct {
 
 	// Connection-manager form (dbsavvy-dyf). The in-place add/edit form
 	// rendered inside the CONNECTION_MANAGER modal.
-	EditConnection string
-	EditField      string
-	ToggleField    string
-	NextField      string
-	PrevField      string
+	DeleteConnection string
+	EditConnection   string
+	EditField        string
+	ToggleField      string
+	NextField        string
+	PrevField        string
 
 	// Schema visibility.
 	HideSchema       string
@@ -398,8 +399,9 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultYankCell:        "Yank focused cell",
 			ResultYankRow:         "Yank focused row (TSV)",
 
-			AddConnection:  "Add Connection",
-			OpenConnection: "Open Connection",
+			DeleteConnection: "Delete connection",
+			AddConnection:    "Add Connection",
+			OpenConnection:   "Open Connection",
 
 			HideSchema:       "Hide Schema",
 			UnhideSchema:     "Unhide Schema",

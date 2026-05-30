@@ -32,6 +32,7 @@ binding	scope=connection_manager	key=<esc>	mode=normal
 binding	scope=connection_manager	key=<s-tab>	mode=normal
 binding	scope=connection_manager	key=<tab>	mode=normal
 binding	scope=connection_manager	key=a	mode=normal
+binding	scope=connection_manager	key=d	mode=normal
 binding	scope=connection_manager	key=e	mode=normal
 binding	scope=connection_manager	key=i	mode=normal
 binding	scope=connection_manager	key=j	mode=normal

@@ -1056,10 +1056,11 @@ func (g *Gui) wireWithDriver() error {
 			// the modal list from disk. The full conn carries the
 			// form-untouched fields (Password, SSHTunnel, …) so the rewrite
 			// preserves them.
-			Prompt:           g.promptHelp,
-			ExistingNames:    g.connectionNames,
-			DriversFn:        drivers.Names,
-			OnSaveConnection: g.saveConnectionForm,
+			Prompt:             g.promptHelp,
+			ExistingNames:      g.connectionNames,
+			DriversFn:          drivers.Names,
+			OnSaveConnection:   g.saveConnectionForm,
+			OnDeleteConnection: g.deleteConnectionFromModal,
 		})
 	}
 
@@ -1976,6 +1977,39 @@ func (g *Gui) saveConnectionForm(conn models.Connection, isEdit bool, originalNa
 	}
 	if err := write(); err != nil {
 		g.registry.ConnectionManager.FormSetError(g.deps.Common.Tr.SaveConnectionFailed)
+		return err
+	}
+	g.refreshConnectionManagerRail()
+	return nil
+}
+
+// deleteConnectionFromModal is the OnDeleteConnection callback wired from
+// the CONNECTION_MANAGER modal (dbsavvy-6ma). If the deleted connection is the
+// currently active session, it tears down the live session first (preempt
+// in-flight result tabs, close the SQL session, unbind the query runner, clear
+// active-conn state). Then it removes the profile from connections.yml via
+// config.DeleteConnection and refreshes the modal list. Runs on the MainLoop.
+func (g *Gui) deleteConnectionFromModal(connName string) error {
+	if connName == g.activeConnID {
+		if g.resultTabsH != nil {
+			g.resultTabsH.PreemptInFlight()
+		}
+		if g.activeSQLSession != nil {
+			_ = g.activeSQLSession.Close()
+			g.activeSQLSession = nil
+		}
+		if g.queryRunner != nil {
+			g.queryRunner.Unbind()
+		}
+		if g.connectHelper != nil {
+			g.connectHelper.Disconnect()
+		}
+		g.activeConnID = ""
+		g.activeConnProfile = nil
+	}
+
+	fs := fsFromCommon(g.deps.Common)
+	if err := config.DeleteConnection(fs, g.deps.ConnectionsPath, connName); err != nil {
 		return err
 	}
 	g.refreshConnectionManagerRail()

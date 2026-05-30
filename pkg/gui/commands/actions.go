@@ -159,6 +159,7 @@ const (
 	ConnectionManagerFieldPrev = "connection_manager.field_prev"
 	ConnectionManagerFieldEdit = "connection_manager.field_edit"
 	ConnectionManagerToggle    = "connection_manager.toggle"
+	ConnectionManagerDelete    = "connection_manager.delete"
 
 	// TipDismiss — owned by the orchestrator's FirstRunTip wiring
 	// (dbsavvy-56u.2). FIRST_RUN_TIP-scoped. Pops the tip popup and
@@ -706,6 +707,7 @@ func AllActionIDs() []string {
 		ConnectionManagerFieldPrev,
 		ConnectionManagerFieldEdit,
 		ConnectionManagerToggle,
+		ConnectionManagerDelete,
 		TipDismiss,
 		CellEditEnter,
 		CellEditCommit,

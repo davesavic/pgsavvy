@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"fmt"
+
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -72,6 +74,13 @@ type ConnectionManagerDeps struct {
 	// the writer distinguish append vs update + handle renames. A nil
 	// callback (or a non-nil one returning nil) returns the form to ModeList.
 	OnSaveConnection func(conn models.Connection, isEdit bool, originalName string) error
+
+	// OnDeleteConnection is the delete seam (dbsavvy-6ma). Invoked with the
+	// connection name after the user confirms deletion. The orchestrator
+	// callback tears down the active session if needed, calls
+	// config.DeleteConnection, and refreshes the modal list. A nil callback
+	// makes Delete a no-op.
+	OnDeleteConnection func(connName string) error
 }
 
 // NewConnectionManagerController constructs the controller with an injected
@@ -226,6 +235,30 @@ func (cm *ConnectionManagerController) Edit(_ commands.ExecCtx) error {
 	return nil
 }
 
+// Delete opens a confirmation prompt for the selected connection (ModeList
+// only). On confirm: invokes OnDeleteConnection. No-op when unwired, in
+// form/connecting mode, or on an empty list (dbsavvy-6ma).
+func (cm *ConnectionManagerController) Delete(_ commands.ExecCtx) error {
+	if cm.deps.Ctx == nil || cm.inConnectingMode() || cm.inFormMode() {
+		return nil
+	}
+	conn, ok := cm.deps.Ctx.SelectedItem().(*models.Connection)
+	if !ok || conn == nil {
+		return nil
+	}
+	if cm.helpers.Confirm == nil || cm.deps.OnDeleteConnection == nil {
+		return nil
+	}
+	tr := cm.tr()
+	name := conn.Name
+	return cm.helpers.Confirm.Confirm(
+		tr.AreYouSure,
+		fmt.Sprintf("Delete \"%s\"?", name),
+		func() error { return cm.deps.OnDeleteConnection(name) },
+		nil,
+	)
+}
+
 // FieldNext moves field focus forward (Tab). Form mode only.
 func (cm *ConnectionManagerController) FieldNext(_ commands.ExecCtx) error {
 	if !cm.inFormMode() {
@@ -361,6 +394,13 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Description: tr.Actions.EditConnection,
 		},
 		{
+			Sequence:    []types.ChordKey{{Code: 'd'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CONNECTION_MANAGER,
+			ActionID:    commands.ConnectionManagerDelete,
+			Description: tr.Actions.DeleteConnection,
+		},
+		{
 			Sequence:    []types.ChordKey{{Code: 'i'}},
 			Mode:        types.ModeNormal,
 			Scope:       types.CONNECTION_MANAGER,
@@ -457,6 +497,11 @@ func (cm *ConnectionManagerController) RegisterActions(reg *commands.Registry) {
 		ID:          commands.ConnectionManagerToggle,
 		Description: "Toggle / cycle focused form field",
 		Handler:     cm.Toggle,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerDelete,
+		Description: "Delete selected connection",
+		Handler:     cm.Delete,
 	})
 }
 
