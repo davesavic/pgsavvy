@@ -51,6 +51,9 @@ type TranslationSet struct {
 	// Validation errors raised by the connection editor.
 	DuplicateConnectionName string
 	InvalidDSN              string
+	// SaveConnectionFailed is the inline form error stamped when persisting
+	// an add/edit form to connections.yml fails (dbsavvy-zod).
+	SaveConnectionFailed string
 
 	// Inline visual tags.
 	ReadOnlyTag string
@@ -281,6 +284,7 @@ func EnglishTranslationSet() *TranslationSet {
 
 		DuplicateConnectionName: "A connection with that name already exists.",
 		InvalidDSN:              "The DSN is not valid.",
+		SaveConnectionFailed:    "Couldn't save the connection.",
 
 		ReadOnlyTag: "[RO]",
 

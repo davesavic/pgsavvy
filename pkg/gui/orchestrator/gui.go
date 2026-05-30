@@ -1051,15 +1051,15 @@ func (g *Gui) wireWithDriver() error {
 			},
 			// dbsavvy-dyf: add/edit form wiring. Prompt drives the per-field
 			// PROMPT popup; ExistingNames + DriversFn back validation + the
-			// driver selector. OnSaveConnection is the seam zod populates —
-			// here it is a no-op stub (AC4: no persistence in this task), so
-			// Enter validates then returns to the list without writing config.
-			Prompt:        g.promptHelp,
-			ExistingNames: g.connectionNames,
-			DriversFn:     drivers.Names,
-			OnSaveConnection: func(_ models.Connection, _ bool, _ string) error {
-				return nil
-			},
+			// driver selector. dbsavvy-zod: OnSaveConnection persists the
+			// validated profile (append for add, update for edit) and refreshes
+			// the modal list from disk. The full conn carries the
+			// form-untouched fields (Password, SSHTunnel, …) so the rewrite
+			// preserves them.
+			Prompt:           g.promptHelp,
+			ExistingNames:    g.connectionNames,
+			DriversFn:        drivers.Names,
+			OnSaveConnection: g.saveConnectionForm,
 		})
 	}
 
@@ -1953,6 +1953,33 @@ func (g *Gui) refreshConnectionManagerRail() {
 		items[i] = &p
 	}
 	g.registry.ConnectionManager.SetItems(items)
+}
+
+// saveConnectionForm persists the validated connection form (dbsavvy-zod). It
+// is the OnSaveConnection seam: append for an add, UpdateConnection(oldName,
+// conn) for an edit. conn carries the form-untouched fields (Password,
+// SSHTunnel, …) verbatim, so writing it whole preserves them. On success it
+// reloads the modal list from disk and returns nil (the controller flips to
+// ModeList). On failure it stamps the inline form error and returns the err so
+// the controller stays in ModeForm.
+//
+// This runs on the MainLoop (the Confirm keybinding dispatch), so the
+// disk-read in refreshConnectionManagerRail serialises with render reads — no
+// worker-write violation.
+func (g *Gui) saveConnectionForm(conn models.Connection, isEdit bool, originalName string) error {
+	fs := fsFromCommon(g.deps.Common)
+	write := func() error { return config.AppendConnection(fs, g.deps.ConnectionsPath, conn) }
+	if isEdit {
+		write = func() error {
+			return config.UpdateConnection(fs, g.deps.ConnectionsPath, originalName, conn)
+		}
+	}
+	if err := write(); err != nil {
+		g.registry.ConnectionManager.FormSetError(g.deps.Common.Tr.SaveConnectionFailed)
+		return err
+	}
+	g.refreshConnectionManagerRail()
+	return nil
 }
 
 // connectionNames returns the snapshot of all profile names for the
