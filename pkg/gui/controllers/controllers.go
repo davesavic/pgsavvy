@@ -109,9 +109,9 @@ func AttachControllers(
 	prompt := NewPromptController(c, helpers.CoreDeps, helpers.UIDeps)
 	selection := NewSelectionController(c, helpers.CoreDeps, helpers.UIDeps)
 	confirmation := NewConfirmationController(c, helpers.CoreDeps, helpers.UIDeps)
-	// Connecting retry / cancel callbacks are wired by the orchestrator in
-	// T5 (dbsavvy-e53.5); nil here means the handlers no-op until then.
-	connecting := NewConnectingController(c, helpers.CoreDeps, helpers.UIDeps, nil, nil)
+	// Connecting retry / cancel callbacks come from the orchestrator's
+	// NavDeps (epic dbsavvy-e53.5); nil values leave the handlers no-op.
+	connecting := NewConnectingController(c, helpers.CoreDeps, helpers.UIDeps, helpers.OnRetryConnecting, helpers.OnCancelConnecting)
 	quit := NewQuitController(c, helpers.CoreDeps, helpers.UIDeps, helpers.QueryDeps, helpers.EditDeps)
 	reconnect := NewReconnectController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps, helpers.ThreadingDeps, helpers.EditDeps)
 	searchPath := NewSearchPathController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps, helpers.ThreadingDeps)

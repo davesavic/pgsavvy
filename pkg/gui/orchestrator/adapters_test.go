@@ -2,8 +2,10 @@ package orchestrator_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
@@ -176,6 +179,93 @@ func TestConnectInvokerSupersededConnectDoesNotClobberActiveConn(t *testing.T) {
 
 	if got := g.ActiveConnIDForTest(); got != "" {
 		t.Fatalf("activeConnID = %q after a superseded connect; want empty (stale result must not clobber)", got)
+	}
+}
+
+// AC epic dbsavvy-e53 (SECURITY): a dial error whose message embeds both a
+// URL-form DSN (postgres://u:secret@h/db) AND a kv-form password
+// (password=secret) MUST reach the CONNECTING screen with BOTH credential
+// forms redacted — neither "secret" may survive into the rendered body.
+// The CONNECTING screen is the live error sink (no toast).
+func TestConnectInvokerDialErrorRedactsCredsIntoConnectingScreen(t *testing.T) {
+	g, rec := buildTestGuiWithHistory(t)
+
+	caps := drivers.Capabilities{}
+	driverName, conn := registerWireFake(t, caps)
+	conn.openErr = errors.New(
+		"dial failed for postgres://u:secret@h/db (password=secret): connection refused")
+
+	// Register the CONNECTING view in the recorder (the real layout pass
+	// does this via SetView) so SetContent/GetViewBuffer capture the body.
+	// The ErrUnknownView return is gocui's "view created" sentinel — ignore.
+	_, _ = rec.SetView(string(types.CONNECTING), 0, 0, 40, 10, 0)
+
+	// Push the CONNECTING screen directly (NOT via OnBeginConnecting, which
+	// now also dispatches an async dial) so the synchronous Connect below is
+	// the only dial — the worker's error-publish has a live, top-of-stack
+	// target (epic dbsavvy-e53.5).
+	g.Registry().Connecting.SetConnecting("creds")
+	_ = g.ContextTree().Push(g.Registry().Connecting)
+
+	bag := g.HelperBagForTest()
+	profile := &models.Connection{Name: "creds", Driver: driverName, DSN: "postgres://stub"}
+	if err := bag.Connect.Connect(context.Background(), profile); err == nil {
+		t.Fatal("Connect returned nil; want the dial error to propagate")
+	}
+
+	// Render the CONNECTING screen and inspect the captured body.
+	cc := g.Registry().Connecting
+	if cc == nil {
+		t.Fatal("registry.Connecting is nil")
+	}
+	if err := cc.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	body := rec.GetViewBuffer(string(types.CONNECTING))
+	if strings.Contains(body, "secret") {
+		t.Fatalf("CONNECTING body leaked a credential: %q", body)
+	}
+	if !strings.Contains(body, "***") {
+		t.Fatalf("CONNECTING body missing redaction marker; got %q", body)
+	}
+	if !strings.Contains(body, "[r] retry") {
+		t.Fatalf("CONNECTING body not in error state; got %q", body)
+	}
+}
+
+// AC epic dbsavvy-e53: a stale-gen worker (superseded mid-dial by a newer
+// activation) MUST NOT paint the CONNECTING screen — its error result is
+// dropped. We bump connectGen during the dial via openHook so the returning
+// worker finds itself stale; the screen stays in its connecting state.
+func TestConnectInvokerStaleDialErrorDroppedNotRendered(t *testing.T) {
+	g, rec := buildTestGuiWithHistory(t)
+
+	caps := drivers.Capabilities{}
+	driverName, conn := registerWireFake(t, caps)
+	conn.openHook = func() { g.BumpConnectGenForTest() }
+	conn.openErr = errors.New("dial failed: connection refused")
+
+	_, _ = rec.SetView(string(types.CONNECTING), 0, 0, 40, 10, 0)
+
+	// Push CONNECTING directly (not via OnBeginConnecting, which now also
+	// dials) so the synchronous Connect below is the only dial.
+	g.Registry().Connecting.SetConnecting("stale")
+	_ = g.ContextTree().Push(g.Registry().Connecting)
+
+	bag := g.HelperBagForTest()
+	profile := &models.Connection{Name: "stale", Driver: driverName, DSN: "postgres://stub"}
+	_ = bag.Connect.Connect(context.Background(), profile)
+
+	cc := g.Registry().Connecting
+	if err := cc.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	body := rec.GetViewBuffer(string(types.CONNECTING))
+	if strings.Contains(body, "connection refused") {
+		t.Fatalf("stale worker painted the error screen: %q", body)
+	}
+	if !strings.Contains(body, "Connecting to stale") {
+		t.Fatalf("CONNECTING body should still be in connecting state; got %q", body)
 	}
 }
 

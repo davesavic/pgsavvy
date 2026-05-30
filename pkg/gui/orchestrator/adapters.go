@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
+	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/gui"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -18,6 +20,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
@@ -125,22 +128,108 @@ type connectInvoker struct {
 	helper  *data.ConnectHelper
 	runner  *data.QueryRunner
 	history *query.History
+
+	// mu guards cancelFn + current, which the MainLoop-serialised
+	// startAttempt / Cancel / Retry seams read and write (epic
+	// dbsavvy-e53.5).
+	mu sync.Mutex
+	// cancelFn aborts the in-flight UI dial's ctx. Set by startAttempt,
+	// cleared+called by Cancel, released by the worker closure on
+	// completion. Nil when no UI attempt is in flight.
+	cancelFn context.CancelFunc
+	// current is the profile of the most recent UI attempt, so Retry can
+	// re-dial it from the error state.
+	current *models.Connection
 }
+
+// connectTimeout bounds the whole Connect attempt (dial + pool.Ping +
+// SELECT version()). Long enough to ride out a slow handshake, short
+// enough that an unreachable host fails fast instead of wedging the UI
+// (epic dbsavvy-e53.5).
+const connectTimeout = 10 * time.Second
 
 func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection) error {
 	if c == nil || c.helper == nil {
 		return nil
 	}
 	// Supersession token (dbsavvy-fow.1): bump on entry and capture the
-	// new value. A later activation bumps it again; on completion we
-	// compare via isStaleConnect and drop the result if a newer connect
-	// has started, so a slow/timed-out dial can't clobber a more recent
-	// connection. Atomic so concurrent worker-goroutine Connects don't
-	// race the bump.
+	// new value. This is the reconnect / direct-Connect path; UI-initiated
+	// attempts go through startAttempt (which bumps on the MainLoop). A
+	// later activation bumps it again; on completion we compare via
+	// isStaleConnect and drop the result if a newer connect has started,
+	// so a slow/timed-out dial can't clobber a more recent connection.
 	var gen uint64
 	if c.g != nil {
 		gen = c.g.connectGen.Add(1)
 	}
+	return c.connectWithGen(ctx, profile, gen)
+}
+
+// startAttempt is the single shared UI dial path. It MUST be invoked on the
+// gocui MainLoop: the connectGen bump and the Cancel bump both run there, so
+// Cancel's bump is always strictly higher than the attempt's gen and the
+// worker is reliably superseded (epic dbsavvy-e53.5 — the critical cancel
+// race fix; do NOT move the bump onto the worker for UI attempts).
+func (c *connectInvoker) startAttempt(profile *models.Connection) {
+	if c == nil || c.g == nil || profile == nil {
+		return
+	}
+	gen := c.g.connectGen.Add(1)
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	c.mu.Lock()
+	c.cancelFn = cancel
+	c.current = profile
+	c.mu.Unlock()
+	if c.g.registry != nil && c.g.registry.Connecting != nil {
+		// Plain setter, MainLoop-safe; also clears any prior error so a
+		// retry re-enters the connecting state.
+		c.g.registry.Connecting.SetConnecting(profile.Name)
+	}
+	c.g.OnWorker(func(_ gocui.Task) error {
+		// Release the timeout ctx when the attempt finishes. Idempotent
+		// with Cancel (calling a CancelFunc twice is a no-op).
+		defer cancel()
+		// OnWorker logs a returned error, so the worker-lane breadcrumb is
+		// preserved without a separate sink here.
+		return c.connectWithGen(ctx, profile, gen)
+	})
+}
+
+// Cancel supersedes the in-flight UI attempt and aborts its dial. Invoked
+// on the MainLoop via the Esc seam: the connectGen bump here is strictly
+// higher than the bump startAttempt made (both serialised on the loop), so
+// the in-flight worker finds itself stale and publishes nothing (epic
+// dbsavvy-e53.5).
+func (c *connectInvoker) Cancel() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	cf := c.cancelFn
+	c.cancelFn = nil
+	c.mu.Unlock()
+	if c.g != nil {
+		c.g.connectGen.Add(1)
+	}
+	if cf != nil {
+		cf()
+	}
+}
+
+// Retry re-attempts the most recent UI profile from the error state.
+// Invoked on the MainLoop via the [r] seam; CONNECTING is already top so no
+// re-push is needed, and startAttempt's SetConnecting clears the error.
+func (c *connectInvoker) Retry() {
+	c.mu.Lock()
+	p := c.current
+	c.mu.Unlock()
+	if p == nil {
+		return
+	}
+	c.startAttempt(p)
+}
+
+func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Connection, gen uint64) error {
 	// --- WORKER PHASE: all blocking I/O runs here (Connect itself runs on
 	// the worker goroutine — connections_controller.go schedules it via
 	// OnWorker). Nothing in this phase writes GUI state the MainLoop reads;
@@ -148,6 +237,7 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	// OnUIThread closure below (dbsavvy-fow.1).
 	conn, _, err := c.helper.Connect(ctx, profile)
 	if err != nil {
+		c.routeConnectError(gen, err)
 		return err
 	}
 	if c.isStaleConnect(gen) {
@@ -174,6 +264,7 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 					return nil
 				}
 				c.setActiveConn(nil)
+				c.publishConnectError(gen, err)
 				return nil
 			})
 		}
@@ -196,7 +287,9 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	// a debounced write pointing at a profile that failed to connect.
 	// MutateAndSave is independently synchronized and touches no gocui view
 	// state, so it stays on the worker (dbsavvy-fow.1).
-	if profile != nil && c.g != nil && c.g.deps.Store != nil {
+	// Stale-gated (epic dbsavvy-e53.5): a cancel-after-successful-dial bumps
+	// gen, so a superseded attempt must NOT stamp persisted state.
+	if profile != nil && c.g != nil && c.g.deps.Store != nil && !c.isStaleConnect(gen) {
 		name := profile.Name
 		c.g.deps.Store.MutateAndSave(func(a *common.AppState) {
 			a.LastConnectionID = name
@@ -207,8 +300,10 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	// hq5.12: replay persisted session settings (search_path,
 	// statement_timeout, timezone, application_name) on the fresh session.
 	// Runs on the worker — the toast hint is published in the UI closure.
+	// Stale-gated (epic dbsavvy-e53.5): a superseded attempt must NOT replay
+	// SET commands on the doomed session.
 	var restoreHint string
-	if profile != nil && rt.sqlSess != nil {
+	if profile != nil && rt.sqlSess != nil && !c.isStaleConnect(gen) {
 		restoreHint = c.restoreSessionSettings(ctx, rt.sqlSess, profile.Name)
 	}
 
@@ -283,6 +378,63 @@ func (c *connectInvoker) isStaleConnect(gen uint64) bool {
 		return false
 	}
 	return c.g.connectGen.Load() != gen
+}
+
+// routeConnectError marshals the failure onto the UI thread and paints it
+// on the CONNECTING screen via publishConnectError. Used by the dial-error
+// branch (the wiring-rollback branch already owns a UI closure and calls
+// publishConnectError inline). Stale-gen guarded both before scheduling and
+// inside the closure (the gen could be bumped between the two), so a
+// superseded worker never paints the live screen (epic dbsavvy-e53).
+func (c *connectInvoker) routeConnectError(gen uint64, err error) {
+	if c.isStaleConnect(gen) {
+		return
+	}
+	c.runOnUIThread(func() error {
+		c.publishConnectError(gen, err)
+		return nil
+	})
+}
+
+// publishConnectError sets the CONNECTING screen into its error state with
+// the sanitized message. MUST run on the UI thread (SetError is a plain
+// setter the MainLoop reads in HandleRender). No-ops when the worker is
+// stale (superseded by a newer activation) or when CONNECTING is no longer
+// top of the focus stack — a cancel/retry may have popped it, and writing a
+// dead screen would be a leak. Credentials are redacted (URL + kv forms)
+// THEN control bytes stripped before reaching the screen (SECURITY: never
+// surface a raw err). epic dbsavvy-e53.
+func (c *connectInvoker) publishConnectError(gen uint64, err error) {
+	if err == nil || c.isStaleConnect(gen) {
+		return
+	}
+	if c.g == nil || c.g.registry == nil || c.g.registry.Connecting == nil || c.g.tree == nil {
+		return
+	}
+	if top := c.g.tree.Current(); top == nil || top.GetKey() != types.CONNECTING {
+		return
+	}
+	msg := config.SafeText(session.RedactConnectionString(connectErrMessage(err)))
+	c.g.registry.Connecting.SetError(msg)
+}
+
+// connectErrMessage returns the user-facing string for a Connect error.
+// Rewrites the data-layer "already connected" sentinel into a friendlier
+// short phrase (dbsavvy-e9i); every other error is surfaced verbatim. The
+// caller redacts + sanitizes the returned string before it reaches the
+// CONNECTING screen.
+func connectErrMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	// data.ConnectHelper raises "data: already connected (call Disconnect
+	// first)" when <cr> hits a profile that's already open. From the user's
+	// perspective this is a no-op, not an error.
+	if strings.Contains(msg, "already connected") {
+		return "already connected"
+	}
+	return msg
 }
 
 // setActiveConn writes the active-connection state. MUST be called on

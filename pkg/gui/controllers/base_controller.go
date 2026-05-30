@@ -78,6 +78,25 @@ type NavDeps struct {
 	// orchestrator via tree.Push(registry.Connections). hq5.7.
 	OnPickConnection func() error
 
+	// OnBeginConnecting pushes the full-pane CONNECTING screen and starts
+	// the dial for the supplied profile. Invoked on the gocui MainLoop from
+	// the CONNECTIONS <CR> handler; the orchestrator wires it to
+	// Push(registry.Connecting) + connectInvoker.startAttempt, so the
+	// connectGen bump that anchors cancel supersession happens on the loop
+	// (epic dbsavvy-e53.5). Nil-safe: the handler no-ops when unwired.
+	OnBeginConnecting func(profile *models.Connection)
+
+	// OnRetryConnecting re-attempts the most recent connect from the
+	// CONNECTING error state. Wired by the orchestrator to
+	// connectInvoker.Retry. Nil-safe (epic dbsavvy-e53.5).
+	OnRetryConnecting func()
+
+	// OnCancelConnecting aborts the in-flight dial and pops the CONNECTING
+	// screen back to the picker. Wired by the orchestrator to
+	// connectInvoker.Cancel + tree.PopIfTop(CONNECTING). Nil-safe (epic
+	// dbsavvy-e53.5).
+	OnCancelConnecting func()
+
 	// OnSchemaActivate fires when <CR> is pressed in the SCHEMAS rail.
 	// The orchestrator wires this to a closure that reloads the TABLES
 	// rail for the supplied schema name on a worker goroutine

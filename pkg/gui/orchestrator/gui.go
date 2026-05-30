@@ -816,6 +816,32 @@ func (g *Gui) wireWithDriver() error {
 		}
 		return g.tree.Push(g.registry.Connections)
 	}
+	// Push the CONNECTING screen then start the dial on the MainLoop (the
+	// <CR> handler runs there). startAttempt bumps connectGen on the loop —
+	// the anchor that makes Cancel's later bump strictly higher, so an
+	// Esc-cancel reliably supersedes the in-flight attempt (epic
+	// dbsavvy-e53.5). SetConnecting (inside startAttempt) is a plain setter,
+	// MainLoop-safe without OnUIThread.
+	nav.OnBeginConnecting = func(profile *models.Connection) {
+		if g.tree == nil || g.registry == nil || g.registry.Connecting == nil {
+			return
+		}
+		_ = g.tree.Push(g.registry.Connecting)
+		connectInv.startAttempt(profile)
+	}
+	// Esc on CONNECTING: abort the in-flight dial (connectGen bump + ctx
+	// cancel) then pop back to the picker (epic dbsavvy-e53.5).
+	nav.OnCancelConnecting = func() {
+		connectInv.Cancel()
+		if g.tree != nil {
+			_ = g.tree.PopIfTop(types.CONNECTING)
+		}
+	}
+	// [r] on CONNECTING: re-attempt the most recent profile from the error
+	// state (CONNECTING stays top; no re-push).
+	nav.OnRetryConnecting = func() {
+		connectInv.Retry()
+	}
 	// <CR> on a schema row reloads the TABLES rail via a worker
 	// (dbsavvy-04n). When the session is disconnected the handler
 	// short-circuits into the reconnect dialog instead of attempting
@@ -2202,9 +2228,27 @@ func (g *Gui) HelperBagForTest() controllers.HelperBag {
 	if g.registry != nil {
 		qec = g.registry.QueryEditor
 	}
+	connectInv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
 	return controllers.HelperBag{
 		NavDeps: controllers.NavDeps{
-			Connect: &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history},
+			Connect: connectInv,
+			// Mirror the production OnBeginConnecting seam (gui.go
+			// wireWithDriver): push CONNECTING then start the dial via the
+			// same invoker (epic dbsavvy-e53.5).
+			OnBeginConnecting: func(profile *models.Connection) {
+				if g.tree == nil || g.registry == nil || g.registry.Connecting == nil {
+					return
+				}
+				_ = g.tree.Push(g.registry.Connecting)
+				connectInv.startAttempt(profile)
+			},
+			OnCancelConnecting: func() {
+				connectInv.Cancel()
+				if g.tree != nil {
+					_ = g.tree.PopIfTop(types.CONNECTING)
+				}
+			},
+			OnRetryConnecting: connectInv.Retry,
 		},
 		QueryDeps: controllers.QueryDeps{
 			QueryRunner:  g.queryRunner,
@@ -2226,6 +2270,16 @@ func (g *Gui) ActiveConnIDForTest() string { return g.activeConnID }
 // newer activation arriving while a prior connect is still in flight.
 // Test-only (dbsavvy-fow.1).
 func (g *Gui) BumpConnectGenForTest() { g.connectGen.Add(1) }
+
+// LastConnectionIDForTest returns the persisted AppState.LastConnectionID,
+// or "" when the Store is unwired. Test-only — the cancel-supersession test
+// (epic dbsavvy-e53.5) asserts a cancel-after-dial-success does NOT stamp it.
+func (g *Gui) LastConnectionIDForTest() string {
+	if g.deps.Store == nil {
+		return ""
+	}
+	return g.deps.Store.LastConnectionIDSnapshot()
+}
 
 // PopulateIndexesRailForTest invokes the side-effect of <CR>-on-TABLES
 // against the connectInvoker built by wireWithDriver: it loads indexes

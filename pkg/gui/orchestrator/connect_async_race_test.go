@@ -2,8 +2,10 @@ package orchestrator_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
@@ -182,5 +185,106 @@ func TestConnect_AsyncPublish_NoRaceWithLayoutRead(t *testing.T) {
 	}
 	if sch := g.Registry().Schemas; sch == nil || len(sch.Items()) == 0 {
 		t.Fatal("SchemasContext.Items() empty after async Connect; publish phase did not populate the rail")
+	}
+}
+
+// TestConnect_AsyncErrorPublish_NoRaceWithConnectingRender drives a FAILING
+// Connect through the real async worker path while a dedicated UI goroutine
+// concurrently drains the publish queue AND renders the CONNECTING screen
+// (the MainLoop reads ConnectingContext state every render frame). Run under
+// `go test -race`:
+//
+//   - The connect error-publish (connectInvoker.routeConnectError) marshals
+//     CONNECTING.SetError into an OnUIThread closure, which this goroutine
+//     runs via drainPending — so the SetError write and the HandleRender read
+//     share one goroutine and never race.
+//   - A direct worker SetError (the bug this guards against) would collide
+//     with the HandleRender read here under -race.
+//
+// openHook blocks the dial until this goroutine has begun its read/drain
+// loop, guaranteeing the worker's error-publish overlaps the render reads
+// (epic dbsavvy-e53).
+func TestConnect_AsyncErrorPublish_NoRaceWithConnectingRender(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	log := slog.New(slog.DiscardHandler)
+	cfg := config.GetDefaultConfig()
+	c := common.NewCommon(log, i18n.EnglishTranslationSet(), cfg, &common.AppState{}, fs)
+	store := common.NewAppStateStore(fs, "/tmp/state.yml", common.DefaultClock())
+
+	tmp := t.TempDir()
+	g := orchestrator.NewGui(orchestrator.Deps{
+		Common:              c,
+		Store:               store,
+		ConnectionsPath:     filepath.Join(tmp, "connections.yml"),
+		ConnectionsProvider: func() []models.Connection { return nil },
+		DriverNamesFn:       func() []string { return []string{"postgres"} },
+		HistoryProvider: func() (*query.History, error) {
+			return query.New(filepath.Join(tmp, "history.sqlite"))
+		},
+	})
+	drv := newQueueingDriver()
+	if err := g.UseDriverForTest(drv); err != nil {
+		t.Fatalf("UseDriverForTest: %v", err)
+	}
+	drv.drainPending()
+	t.Cleanup(func() {
+		g.WaitForWorkersForTest()
+		drv.drainPending()
+		_ = g.Close()
+	})
+
+	caps := drivers.Capabilities{}
+	driverName, conn := registerWireFake(t, caps)
+	releaseDial := make(chan struct{})
+	conn.openHook = func() { <-releaseDial }
+	conn.openErr = errors.New("dial failed: connection refused")
+
+	// Register the CONNECTING view so SetContent/GetViewBuffer capture the
+	// body (the real layout pass does this via SetView).
+	_, _ = drv.SetView(string(types.CONNECTING), 0, 0, 40, 10, 0)
+
+	// Push CONNECTING directly on this (UI) goroutine before the worker
+	// starts (NOT via OnBeginConnecting, which now also dispatches a dial)
+	// so the explicit OnWorker(Connect) below is the only dial; the
+	// error-publish has a live, top-of-stack target (epic dbsavvy-e53.5).
+	bag := g.HelperBagForTest()
+	g.Registry().Connecting.SetConnecting("async-err")
+	_ = g.ContextTree().Push(g.Registry().Connecting)
+	drv.drainPending()
+
+	profile := &models.Connection{Name: "async-err", Driver: driverName, DSN: "postgres://stub"}
+	g.OnWorker(func(_ gocui.Task) error {
+		_ = bag.Connect.Connect(context.Background(), profile)
+		return nil
+	})
+
+	close(releaseDial)
+
+	cc := g.Registry().Connecting
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		drv.drainPending()
+		if cc != nil {
+			_ = cc.HandleRender()
+		}
+		if g.BusyCount() == 0 {
+			drv.drainPending()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("connect worker did not complete within 5s")
+		}
+	}
+
+	// Behavioural sanity: after the error-publish closure ran on this
+	// goroutine (SetError), render the screen — HandleRender enqueues its
+	// SetContent via the queueing driver, so drain once more to flush it.
+	if err := cc.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	drv.drainPending()
+	body := drv.GetViewBuffer(string(types.CONNECTING))
+	if !strings.Contains(body, "[r] retry") {
+		t.Fatalf("CONNECTING body not in error state after async error publish; got %q", body)
 	}
 }

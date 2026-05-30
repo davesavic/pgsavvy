@@ -228,6 +228,12 @@ type bag struct {
 	// fn inline so the connect path executes synchronously in tests
 	// (dbsavvy-fow.1).
 	WorkerCalls int
+
+	// BeginConnectingNames records the profile names handed to
+	// OnBeginConnecting (the CONNECTING-screen push seam). The CONNECTIONS
+	// <CR> handler must invoke it once per activation before dispatching
+	// the dial (epic dbsavvy-e53).
+	BeginConnectingNames []string
 }
 
 func newBag() *bag {
@@ -259,6 +265,12 @@ func newBag() *bag {
 			Tables:           b.TablePicker,
 			ActiveConnection: b.Active,
 			HiddenPatterns:   func() ([]string, []string) { return []string{"pg_*"}, []string{"audit"} },
+			OnBeginConnecting: func(profile *models.Connection) {
+				if profile == nil {
+					return
+				}
+				b.BeginConnectingNames = append(b.BeginConnectingNames, profile.Name)
+			},
 		},
 		UIDeps: controllers.UIDeps{
 			Confirm:     b.Confirm,

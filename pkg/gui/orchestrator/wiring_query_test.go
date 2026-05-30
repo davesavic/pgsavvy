@@ -113,6 +113,16 @@ type wireFakeConn struct {
 	// to bump the Gui's connectGen mid-dial (simulating a newer activation
 	// arriving while this connect is still in flight).
 	openHook func()
+	// openErr, when non-nil, makes wireFakeDriver.Open return it instead of
+	// the connection — simulating a dial failure so the connect error path
+	// (connectInvoker.routeConnectError → CONNECTING.SetError) is exercised
+	// (epic dbsavvy-e53).
+	openErr error
+	// openHookCtx, when set, receives the Open ctx so a test can block the
+	// dial on <-ctx.Done() and assert the cancellable ctx threads through to
+	// the driver (epic dbsavvy-e53.5 cancel/teardown). Runs instead of
+	// openHook when both are set is avoided — set only one.
+	openHookCtx func(context.Context)
 }
 
 func (c *wireFakeConn) Close() error                                     { return nil }
@@ -136,9 +146,15 @@ type wireFakeDriver struct {
 
 func (d *wireFakeDriver) Name() string                       { return "wire-fake" }
 func (d *wireFakeDriver) Capabilities() drivers.Capabilities { return d.caps }
-func (d *wireFakeDriver) Open(_ context.Context, _ drivers.ConnectionProfile) (drivers.Connection, error) {
+func (d *wireFakeDriver) Open(ctx context.Context, _ drivers.ConnectionProfile) (drivers.Connection, error) {
+	if d.conn != nil && d.conn.openHookCtx != nil {
+		d.conn.openHookCtx(ctx)
+	}
 	if d.conn != nil && d.conn.openHook != nil {
 		d.conn.openHook()
+	}
+	if d.conn != nil && d.conn.openErr != nil {
+		return nil, d.conn.openErr
 	}
 	return d.conn, nil
 }
