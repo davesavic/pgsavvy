@@ -84,13 +84,21 @@ func (g *Gui) RunLayout(w, h int) error {
 	// pass below can swap FrameColor per frame (gocui resets FrameColor
 	// to ColorDefault on each SetView — view.go:498 — so the swap has to
 	// run after SetView, not on focus-change events).
+	// CONNECTION_MANAGER modal (epic dbsavvy-ig4): while it is top of the
+	// focus stack it renders a centered bordered box over a blank
+	// background. Suppress the Tier-1 side-rails + extras loop entirely for
+	// the frame so nothing paints behind the modal.
 	rails := make(map[string]*gocui.View)
+	modalTop := g.modalIsTopMain()
 	for _, ctx := range g.registry.Flatten() {
 		if ctx == nil {
 			continue
 		}
 		kind := ctx.GetKind()
 		if kind != types.SIDE_CONTEXT && kind != types.EXTRAS_CONTEXT {
+			continue
+		}
+		if modalTop {
 			continue
 		}
 		name := ctx.GetViewName()
@@ -131,7 +139,9 @@ func (g *Gui) RunLayout(w, h int) error {
 	// slot: layoutConnectingMain paints its full-pane body there and the
 	// QUERY_EDITOR paint below is suppressed for the frame. Whenever
 	// CONNECTING is not on top, the QUERY_EDITOR path runs unchanged.
-	if g.connectingIsTopMain() {
+	if modalTop {
+		g.layoutConnectionManagerMain(dims, rails)
+	} else if g.connectingIsTopMain() {
 		g.layoutConnectingMain(dims, rails)
 	} else if g.registry != nil && g.registry.QueryEditor != nil {
 		qec := g.registry.QueryEditor
@@ -590,6 +600,54 @@ func (g *Gui) layoutConnectingMain(dims map[string]ui.Dimensions, rails map[stri
 	// dims["main"] rect (it is never DeleteView'd). Lift CONNECTING above
 	// it so the full-pane connection screen is actually visible while it
 	// owns the slot, instead of being occluded by the stale editor view.
+	_, _ = g.driver.SetViewOnTop(name)
+}
+
+// modalIsTopMain reports whether the CONNECTION_MANAGER MAIN_CONTEXT modal
+// is top of the focus stack. When true, layoutConnectionManagerMain owns the
+// dims["main"] slot and BOTH the side rails and the QUERY_EDITOR paint are
+// suppressed so only the centered box renders over a blank background.
+// Nil-safe across the registry / tree / context (epic dbsavvy-ig4).
+func (g *Gui) modalIsTopMain() bool {
+	if g.registry == nil || g.registry.ConnectionManager == nil || g.tree == nil {
+		return false
+	}
+	top := g.tree.Current()
+	return top != nil && top.GetKey() == types.CONNECTION_MANAGER
+}
+
+// connectionManagerWidthFrac / connectionManagerHeightFrac size the centered
+// modal box as a fraction of the dims["main"] slot (epic dbsavvy-ig4).
+const (
+	connectionManagerWidthFrac  = 0.65
+	connectionManagerHeightFrac = 0.65
+)
+
+// layoutConnectionManagerMain paints the CONNECTION_MANAGER modal as a
+// centered bordered box inside the dims["main"] slot and registers the view
+// in rails so it participates in the focus-frame swap. Called only when
+// modalIsTopMain reports true, so the QUERY_EDITOR paint and the side rails
+// are both suppressed for the frame (epic dbsavvy-ig4).
+func (g *Gui) layoutConnectionManagerMain(dims map[string]ui.Dimensions, rails map[string]*gocui.View) {
+	cm := g.registry.ConnectionManager
+	name := cm.GetViewName()
+	d, ok := dims["main"]
+	if !ok || name == "" || d.X1 <= d.X0 || d.Y1 <= d.Y0 {
+		return
+	}
+	box := centeredRect(d, connectionManagerWidthFrac, connectionManagerHeightFrac)
+	v, err := g.driver.SetView(name, box.X0, box.Y0, box.X1, box.Y1, 0)
+	if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		return
+	}
+	if v != nil {
+		rails[name] = v
+		v.Title = cm.GetTitle()
+	}
+	_ = cm.HandleRender()
+	// The QUERY_EDITOR view from prior frames still exists in the dims["main"]
+	// rect (it is never DeleteView'd). Lift the modal above it so the box is
+	// actually visible while it owns the slot. Mirrors layoutConnectingMain.
 	_, _ = g.driver.SetViewOnTop(name)
 }
 

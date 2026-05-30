@@ -97,6 +97,13 @@ type NavDeps struct {
 	// dbsavvy-e53.5).
 	OnCancelConnecting func()
 
+	// OnCloseConnectionManager dismisses the CONNECTION_MANAGER modal on
+	// <esc>. The orchestrator owns the root-exit semantics in the wired
+	// closure: a no-op when the modal is the startup root (never pops at
+	// stack bottom), otherwise pops back to the active session. Nil-safe
+	// (epic dbsavvy-ig4).
+	OnCloseConnectionManager func()
+
 	// OnSchemaActivate fires when <CR> is pressed in the SCHEMAS rail.
 	// The orchestrator wires this to a closure that reloads the TABLES
 	// rail for the supplied schema name on a worker goroutine

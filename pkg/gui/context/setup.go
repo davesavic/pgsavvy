@@ -73,6 +73,12 @@ type ContextTree struct {
 	// QueryEditor paint and occupies dims["main"].
 	Connecting *ConnectingContext
 
+	// ConnectionManager is the centered modal MAIN_CONTEXT connection
+	// manager (dbsavvy-ig4). When top of the focus stack it suppresses both
+	// the side rails and the QueryEditor paint and renders a centered
+	// bordered box over a blank background.
+	ConnectionManager *ConnectionManagerContext
+
 	// Stub instances for the remaining deferred Contexts; Layout
 	// filters these by Kind == STUB so they never reach SetView.
 	TableDataEditor *StubContext
@@ -314,6 +320,19 @@ func contextSpecs() []contextSpec {
 			key: types.CONNECTING, kind: types.MAIN_CONTEXT, title: "Connecting", inFlatten: true,
 			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConnectingContext(b, d) },
 			assign: func(t *ContextTree, c types.IBaseContext) { t.Connecting = c.(*ConnectingContext) },
+		},
+
+		// CONNECTION_MANAGER is the centered modal MAIN_CONTEXT (dbsavvy-ig4).
+		// Modelled on CONNECTING: MAIN_CONTEXT kind, inFlatten=true, view name
+		// "connection_manager". When top of the focus stack the layout pass
+		// paints it as a centered bordered box, suppressing the side rails and
+		// the QUERY_EDITOR for the frame.
+		{
+			key: types.CONNECTION_MANAGER, kind: types.MAIN_CONTEXT, title: "Connection Manager", inFlatten: true,
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewConnectionManagerContext(b, d)
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.ConnectionManager = c.(*ConnectionManagerContext) },
 		},
 
 		// Stubs for the four remaining deferred Contexts. ViewName matches

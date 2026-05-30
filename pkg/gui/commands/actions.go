@@ -128,6 +128,13 @@ const (
 	ConnectingRetry  = "connecting.retry"
 	ConnectingCancel = "connecting.cancel"
 
+	// ConnectionManagerClose — owned by ConnectionManagerController
+	// (dbsavvy-ig4). CONNECTION_MANAGER-scoped. <esc> pops the modal off
+	// the focus stack, but is a no-op when the modal is the startup root
+	// (never pops at stack bottom). q is bound at CONNECTION_MANAGER scope to
+	// AppQuit; Ctrl-C quits via the GLOBAL-scope binding.
+	ConnectionManagerClose = "connection_manager.close"
+
 	// TipDismiss — owned by the orchestrator's FirstRunTip wiring
 	// (dbsavvy-56u.2). FIRST_RUN_TIP-scoped. Pops the tip popup and
 	// stamps the seen-at timestamp via AppStateStore.StampStartupTips.
@@ -663,6 +670,7 @@ func AllActionIDs() []string {
 		ConfirmNo,
 		ConnectingRetry,
 		ConnectingCancel,
+		ConnectionManagerClose,
 		TipDismiss,
 		CellEditEnter,
 		CellEditCommit,

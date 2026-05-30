@@ -24,14 +24,17 @@ type Controllers struct {
 	Selection    *SelectionController
 	Confirmation *ConfirmationController
 	Connecting   *ConnectingController
-	Quit         *QuitController
-	QueryEditor  *QueryEditorController
-	Tx           *TxController
-	ResultTabs   *ResultTabsController
-	HideOverlay  *HideOverlayController
-	ExportMenu   *ExportMenuController
-	VimEditor    *VimEditorController
-	Plan         *PlanController
+	// ConnectionManager owns the CONNECTION_MANAGER modal's <esc> binding
+	// (epic dbsavvy-ig4).
+	ConnectionManager *ConnectionManagerController
+	Quit              *QuitController
+	QueryEditor       *QueryEditorController
+	Tx                *TxController
+	ResultTabs        *ResultTabsController
+	HideOverlay       *HideOverlayController
+	ExportMenu        *ExportMenuController
+	VimEditor         *VimEditorController
+	Plan              *PlanController
 	// TableInspect is constructed by the orchestrator (it needs a
 	// Pop-capable focus-stack handle outside this package). The
 	// orchestrator assigns it after AttachControllers returns so the
@@ -112,6 +115,9 @@ func AttachControllers(
 	// Connecting retry / cancel callbacks come from the orchestrator's
 	// NavDeps (epic dbsavvy-e53.5); nil values leave the handlers no-op.
 	connecting := NewConnectingController(c, helpers.CoreDeps, helpers.UIDeps, helpers.OnRetryConnecting, helpers.OnCancelConnecting)
+	// ConnectionManager <esc> close callback comes from the orchestrator's
+	// NavDeps (epic dbsavvy-ig4); a nil value leaves the handler no-op.
+	connectionManager := NewConnectionManagerController(c, helpers.CoreDeps, helpers.UIDeps, helpers.OnCloseConnectionManager)
 	quit := NewQuitController(c, helpers.CoreDeps, helpers.UIDeps, helpers.QueryDeps, helpers.EditDeps)
 	reconnect := NewReconnectController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps, helpers.ThreadingDeps, helpers.EditDeps)
 	searchPath := NewSearchPathController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps, helpers.ThreadingDeps)
@@ -184,25 +190,26 @@ func AttachControllers(
 	plan := NewPlanController(c, helpers.CoreDeps, helpers.ActivePlanContextFn)
 
 	bundle := &Controllers{
-		Connections:      connections,
-		Schemas:          schemas,
-		Tables:           tables,
-		Menu:             menu,
-		Prompt:           prompt,
-		Selection:        selection,
-		Confirmation:     confirmation,
-		Connecting:       connecting,
-		Quit:             quit,
-		Reconnect:        reconnect,
-		SearchPath:       searchPath,
-		StatementTimeout: stmtTimeout,
-		QueryEditor:      queryEditor,
-		Tx:               tx,
-		ResultTabs:       resultTabs,
-		HideOverlay:      hideOverlay,
-		ExportMenu:       exportMenu,
-		VimEditor:        vimEditor,
-		Plan:             plan,
+		Connections:       connections,
+		Schemas:           schemas,
+		Tables:            tables,
+		Menu:              menu,
+		Prompt:            prompt,
+		Selection:         selection,
+		Confirmation:      confirmation,
+		Connecting:        connecting,
+		ConnectionManager: connectionManager,
+		Quit:              quit,
+		Reconnect:         reconnect,
+		SearchPath:        searchPath,
+		StatementTimeout:  stmtTimeout,
+		QueryEditor:       queryEditor,
+		Tx:                tx,
+		ResultTabs:        resultTabs,
+		HideOverlay:       hideOverlay,
+		ExportMenu:        exportMenu,
+		VimEditor:         vimEditor,
+		Plan:              plan,
 	}
 
 	// Single attach pass driven by the per-controller registry. attachTargets
@@ -214,24 +221,25 @@ func AttachControllers(
 	// (AddKeybindingsFn is a no-op on the stub contexts today; the wiring
 	// lights up automatically once the live contexts ship).
 	attachTargets := map[string]attachable{
-		"Connections":      &tree.Connections.BaseContext,
-		"Schemas":          &tree.Schemas.BaseContext,
-		"Tables":           &tree.Tables.BaseContext,
-		"Menu":             &tree.Menu.BaseContext,
-		"Prompt":           &tree.Prompt.BaseContext,
-		"Selection":        &tree.Selection.BaseContext,
-		"Confirmation":     &tree.Confirmation.BaseContext,
-		"Connecting":       &tree.Connecting.BaseContext,
-		"Quit":             &tree.Global.BaseContext,
-		"Reconnect":        &tree.Global.BaseContext,
-		"SearchPath":       &tree.Global.BaseContext,
-		"StatementTimeout": tree.QueryEditor,
-		"QueryEditor":      tree.QueryEditor,
-		"Tx":               tree.QueryEditor,
-		"ResultTabs":       tree.ResultGrid,
-		"HideOverlay":      &tree.HideOverlay.BaseContext,
-		"ExportMenu":       &tree.ExportMenu.BaseContext,
-		"Plan":             tree.Plan,
+		"Connections":       &tree.Connections.BaseContext,
+		"Schemas":           &tree.Schemas.BaseContext,
+		"Tables":            &tree.Tables.BaseContext,
+		"Menu":              &tree.Menu.BaseContext,
+		"Prompt":            &tree.Prompt.BaseContext,
+		"Selection":         &tree.Selection.BaseContext,
+		"Confirmation":      &tree.Confirmation.BaseContext,
+		"Connecting":        &tree.Connecting.BaseContext,
+		"ConnectionManager": &tree.ConnectionManager.BaseContext,
+		"Quit":              &tree.Global.BaseContext,
+		"Reconnect":         &tree.Global.BaseContext,
+		"SearchPath":        &tree.Global.BaseContext,
+		"StatementTimeout":  tree.QueryEditor,
+		"QueryEditor":       tree.QueryEditor,
+		"Tx":                tree.QueryEditor,
+		"ResultTabs":        tree.ResultGrid,
+		"HideOverlay":       &tree.HideOverlay.BaseContext,
+		"ExportMenu":        &tree.ExportMenu.BaseContext,
+		"Plan":              tree.Plan,
 	}
 	for _, e := range bundle.entries() {
 		if !e.attach {
@@ -321,6 +329,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "Selection", ctrl: b.Selection, attach: true},
 		{name: "Confirmation", ctrl: b.Confirmation, attach: true},
 		{name: "Connecting", ctrl: b.Connecting, attach: true},
+		{name: "ConnectionManager", ctrl: b.ConnectionManager, attach: true},
 		{name: "Quit", ctrl: b.Quit, attach: true},
 		{name: "Reconnect", ctrl: b.Reconnect, attach: true},
 		{name: "SearchPath", ctrl: b.SearchPath, attach: true},

@@ -139,6 +139,11 @@ const (
 	// it occupies the dims["main"] slot, suppressing QUERY_EDITOR for the
 	// frame it is top of the focus stack.
 	CONNECTING ContextKey = "connecting"
+	// CONNECTION_MANAGER is the centered modal connection-manager box
+	// (dbsavvy-ig4). MAIN_CONTEXT kind: when top of the focus stack it
+	// renders a centered bordered box over a blank background, suppressing
+	// both the side rails and the QUERY_EDITOR for the frame.
+	CONNECTION_MANAGER ContextKey = "connection_manager"
 )
 
 // AllContextKeys returns every ContextKey constant declared above.
@@ -181,6 +186,7 @@ func AllContextKeys() []ContextKey {
 		CONFLICT_DIALOG,
 		FK_REVERSE_PICKER,
 		CONNECTING,
+		CONNECTION_MANAGER,
 	}
 }
 

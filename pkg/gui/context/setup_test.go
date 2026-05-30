@@ -12,8 +12,8 @@ func TestNewContextTreeReturnsAllContexts(t *testing.T) {
 		t.Fatal("NewContextTree returned nil")
 	}
 	flat := tree.Flatten()
-	if len(flat) != 28 {
-		t.Fatalf("Flatten() len = %d, want 28 (22 live + 4 stub + 2 main)", len(flat))
+	if len(flat) != 29 {
+		t.Fatalf("Flatten() len = %d, want 29 (22 live + 4 stub + 3 main)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -32,12 +32,12 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 		types.MENU, types.CONFIRMATION, types.PROMPT, types.SELECTION, types.SUGGESTIONS, types.COMMAND_LINE, types.HIDE_OVERLAY, types.EXPORT_MENU, types.TABLE_INSPECT,
 		types.MESSAGES, types.GLOBAL, types.LIMIT, types.WHICH_KEY, types.CHEATSHEET,
 		types.FIRST_RUN_TIP,
-		// Main + stub (6).
-		types.QUERY_EDITOR, types.CONNECTING, types.TABLE_DATA_EDITOR, types.RESULT_GRID,
+		// Main + stub (7 — dbsavvy-ig4 adds CONNECTION_MANAGER).
+		types.QUERY_EDITOR, types.CONNECTING, types.CONNECTION_MANAGER, types.TABLE_DATA_EDITOR, types.RESULT_GRID,
 		types.PLAN, types.HISTORY,
 	}
-	if len(allKeys) != 24 {
-		t.Fatalf("test bug: allKeys len = %d, want 24", len(allKeys))
+	if len(allKeys) != 25 {
+		t.Fatalf("test bug: allKeys len = %d, want 25", len(allKeys))
 	}
 	for _, k := range allKeys {
 		c := tree.ByKey(k)
@@ -80,18 +80,19 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.CHEATSHEET, types.DISPLAY_CONTEXT},
 		// 1 PERSISTENT_POPUP (FIRST_RUN_TIP — dbsavvy-56u.2).
 		{types.FIRST_RUN_TIP, types.PERSISTENT_POPUP},
-		// 2 MAIN_CONTEXT (QUERY_EDITOR promoted by dbsavvy-wwd.1; CONNECTING
-		// added by dbsavvy-e53.2).
+		// 3 MAIN_CONTEXT (QUERY_EDITOR promoted by dbsavvy-wwd.1; CONNECTING
+		// added by dbsavvy-e53.2; CONNECTION_MANAGER added by dbsavvy-ig4).
 		{types.QUERY_EDITOR, types.MAIN_CONTEXT},
 		{types.CONNECTING, types.MAIN_CONTEXT},
+		{types.CONNECTION_MANAGER, types.MAIN_CONTEXT},
 		// 4 STUB (TABLE_DATA_EDITOR + RESULT_GRID + PLAN + HISTORY).
 		{types.TABLE_DATA_EDITOR, types.STUB},
 		{types.RESULT_GRID, types.STUB},
 		{types.PLAN, types.STUB},
 		{types.HISTORY, types.STUB},
 	}
-	if len(cases) != 24 {
-		t.Fatalf("test bug: cases len = %d, want 24", len(cases))
+	if len(cases) != 25 {
+		t.Fatalf("test bug: cases len = %d, want 25", len(cases))
 	}
 	for _, c := range cases {
 		got := tree.ByKey(c.key)
@@ -121,7 +122,8 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		// dbsavvy-wwd.1 promotes QUERY_EDITOR from STUB to a real
 		// MAIN_CONTEXT, so STUB drops 5→4 and MAIN_CONTEXT rises 0→1.
 		// dbsavvy-e53.2 adds CONNECTING (MAIN_CONTEXT), so MAIN_CONTEXT is 2.
-		types.MAIN_CONTEXT: 2,
+		// dbsavvy-ig4 adds CONNECTION_MANAGER (MAIN_CONTEXT), so it is 3.
+		types.MAIN_CONTEXT: 3,
 		types.STUB:         4,
 		// dbsavvy-56u.2 introduces FIRST_RUN_TIP, the first
 		// PERSISTENT_POPUP shipped by the app.
