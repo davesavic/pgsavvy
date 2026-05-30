@@ -65,6 +65,13 @@ type ContextTreeDeps struct {
 	// picker rendering pass to fetch the icon, label, and color string.
 	PerRowDecorationHook func(conn *models.Connection) (icon, label, color string)
 
+	// RowSuffix returns plain trailing text appended to a connection-picker
+	// row after the name (e.g. the parsed "host/database" endpoint). The
+	// orchestrator binds this to a closure that parses the profile DSN into
+	// its discrete host + database fields. Nil-safe: a nil hook (or an empty
+	// return) leaves the row name-only.
+	RowSuffix func(conn *models.Connection) string
+
 	// LimitText returns the text rendered by LimitContext for the
 	// terminal-too-small overlay (typically Tr.TerminalTooSmall).
 	LimitText func() string

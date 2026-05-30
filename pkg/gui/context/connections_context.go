@@ -85,6 +85,7 @@ func (c *ConnectionsContext) renderRows() string {
 			if label == "" {
 				label = conn.Name
 			}
+			label += c.rowSuffix(conn)
 			if icon != "" {
 				fmt.Fprintf(&b, "%s%s %s\n", marker, icon, label)
 			} else {
@@ -92,7 +93,22 @@ func (c *ConnectionsContext) renderRows() string {
 			}
 			continue
 		}
-		fmt.Fprintf(&b, "%s%s\n", marker, conn.Name)
+		fmt.Fprintf(&b, "%s%s%s\n", marker, conn.Name, c.rowSuffix(conn))
 	}
 	return b.String()
+}
+
+// rowSuffix returns the plain trailing text for a row (typically the parsed
+// "host/database" endpoint) prefixed with two spaces so it reads as a
+// separate column. Nil-safe: when deps.RowSuffix is unset or returns the
+// empty string the result is "" and the row stays name-only.
+func (c *ConnectionsContext) rowSuffix(conn *models.Connection) string {
+	if c.deps.RowSuffix == nil {
+		return ""
+	}
+	sfx := c.deps.RowSuffix(conn)
+	if sfx == "" {
+		return ""
+	}
+	return "  " + sfx
 }

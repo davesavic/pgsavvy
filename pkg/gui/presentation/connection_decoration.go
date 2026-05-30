@@ -101,12 +101,26 @@ func NewPresentationHook() func(conn *models.Connection) (types.TextStyle, strin
 // status-bar / title-bar header decoration (see HeaderTextFor). Returning
 // Name here keeps two profiles with the same Label (e.g. both labelled
 // "localhost") visually distinct in the rail. Bug dbsavvy-2ox.
-func NewPerRowDecorationHook() func(conn *models.Connection) (icon, label, color string) {
+//
+// activeID is a LIVE accessor for the currently-active connection's name
+// (g.activeConnID). It is called on every render so the marker tracks
+// connect/disconnect without re-wiring. When activeID returns a non-empty
+// value matching conn.Name the row's icon is overridden with the connected
+// marker "●", regardless of the profile's own Icon, so the user can see at
+// a glance which profile is live. A nil activeID, an empty result, or a
+// non-matching name leaves the profile's own Icon untouched.
+func NewPerRowDecorationHook(activeID func() string) func(conn *models.Connection) (icon, label, color string) {
 	return func(conn *models.Connection) (string, string, string) {
 		if conn == nil {
 			return "", "", ""
 		}
-		return conn.Icon, conn.Name, ResolveColor(conn.Color)
+		icon := conn.Icon
+		if activeID != nil {
+			if id := activeID(); id != "" && id == conn.Name {
+				icon = "●"
+			}
+		}
+		return icon, conn.Name, ResolveColor(conn.Color)
 	}
 }
 

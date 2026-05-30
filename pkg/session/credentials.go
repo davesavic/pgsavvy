@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -232,6 +234,27 @@ func parseDSNFields(dsn string) (host, port, dbname, user string, err error) {
 		user = u.User.Username()
 	}
 	return host, port, dbname, user, nil
+}
+
+// ParseDSNEndpoint extracts the host and database name from a Postgres DSN
+// for display purposes (e.g. enriching a connection-picker row). It accepts
+// both URL-form ("postgres://user:pw@host:port/db") and keyword/value-form
+// ("host=... dbname=... user=... password=...") DSNs via pgconn.ParseConfig.
+//
+// SECURITY: only the discrete Host and Database fields are returned. The
+// password, user, and the raw DSN literal are never surfaced. On parse
+// failure the error is deliberately dropped (its text can embed the DSN /
+// credentials) and ("","") is returned so callers fall back to a name-only
+// render without leaking anything.
+func ParseDSNEndpoint(dsn string) (host, db string) {
+	if dsn == "" {
+		return "", ""
+	}
+	cfg, err := pgconn.ParseConfig(dsn)
+	if err != nil || cfg == nil {
+		return "", ""
+	}
+	return cfg.Host, cfg.Database
 }
 
 // keyringDir returns the path used for the file-backend keyring store. The

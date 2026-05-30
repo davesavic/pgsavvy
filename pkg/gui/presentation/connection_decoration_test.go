@@ -148,7 +148,7 @@ func TestNewPresentationHook_PicksUpConnColor(t *testing.T) {
 }
 
 func TestNewPerRowDecorationHook(t *testing.T) {
-	h := NewPerRowDecorationHook()
+	h := NewPerRowDecorationHook(func() string { return "" })
 
 	icon, label, color := h(nil)
 	if icon != "" || label != "" || color != "" {
@@ -173,7 +173,7 @@ func TestNewPerRowDecorationHook(t *testing.T) {
 // the CONNECTIONS rail. Two profiles sharing a host but differing in
 // name remain visually distinguishable.
 func TestNewPerRowDecorationHook_NameUsedWhenLabelMatchesHost(t *testing.T) {
-	h := NewPerRowDecorationHook()
+	h := NewPerRowDecorationHook(func() string { return "" })
 	conn := &models.Connection{
 		Name:  "local-pg",
 		DSN:   "postgres://dbsavvy:dbsavvy@localhost:5432/dbsavvy_test",
@@ -182,6 +182,29 @@ func TestNewPerRowDecorationHook_NameUsedWhenLabelMatchesHost(t *testing.T) {
 	_, label, _ := h(conn)
 	if label != "local-pg" {
 		t.Fatalf("rail label = %q, want %q (must use Profile.Name, not Profile.Label)", label, "local-pg")
+	}
+}
+
+// TestNewPerRowDecorationHook_ActiveConnectionMarker checks the live
+// active-connection marker (dbsavvy-e53.6): the row whose Name matches
+// activeID() renders the connected marker "●" regardless of its own Icon,
+// while a non-active row keeps its own Icon (here empty).
+func TestNewPerRowDecorationHook_ActiveConnectionMarker(t *testing.T) {
+	h := NewPerRowDecorationHook(func() string { return "prod" })
+
+	active := &models.Connection{Name: "prod"}
+	icon, label, _ := h(active)
+	if icon != "●" {
+		t.Fatalf("active conn icon = %q, want %q", icon, "●")
+	}
+	if label != "prod" {
+		t.Fatalf("active conn label = %q, want %q", label, "prod")
+	}
+
+	inactive := &models.Connection{Name: "staging"}
+	icon, _, _ = h(inactive)
+	if icon != "" {
+		t.Fatalf("inactive conn icon = %q, want empty (its own Icon)", icon)
 	}
 }
 

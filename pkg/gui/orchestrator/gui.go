@@ -487,16 +487,32 @@ func (g *Gui) wireWithDriver() error {
 
 	// Build the context registry with hooks closed over the driver.
 	ctxDeps := types.ContextTreeDeps{
-		GuiDriver:            g.driver,
-		EmptyStateHook:       data.NewEmptyStateHook(tr, provider),
-		RailEmptyText:        railEmptyText(tr),
-		PresentationHook:     presentation.NewPresentationHook(),
-		PerRowDecorationHook: presentation.NewPerRowDecorationHook(),
-		LimitText:            presentation.NewLimitText(tr),
-		ModeStore:            g.modeStore,
-		WhichKey:             g.whichkey,
-		WhichKeyRows:         whichKeyRows,
-		CheatsheetRender:     cheatsheetRender,
+		GuiDriver:        g.driver,
+		EmptyStateHook:   data.NewEmptyStateHook(tr, provider),
+		RailEmptyText:    railEmptyText(tr),
+		PresentationHook: presentation.NewPresentationHook(),
+		// dbsavvy-e53.6: live active-connection marker. The accessor is
+		// read on every render so the "●" marker tracks connect/disconnect.
+		PerRowDecorationHook: presentation.NewPerRowDecorationHook(func() string { return g.activeConnID }),
+		// dbsavvy-e53.6: enrich each picker row with the parsed host/db
+		// endpoint. SECURITY: only the discrete host + database fields are
+		// surfaced (never the raw DSN / password); each leaf is run through
+		// config.SafeText. Malformed/empty DSN → "" → name-only row.
+		RowSuffix: func(c *models.Connection) string {
+			if c == nil {
+				return ""
+			}
+			host, db := session.ParseDSNEndpoint(c.DSN)
+			if host == "" && db == "" {
+				return ""
+			}
+			return config.SafeText(host) + "/" + config.SafeText(db)
+		},
+		LimitText:        presentation.NewLimitText(tr),
+		ModeStore:        g.modeStore,
+		WhichKey:         g.whichkey,
+		WhichKeyRows:     whichKeyRows,
+		CheatsheetRender: cheatsheetRender,
 		// dbsavvy-wwd.1: QueryEditorContext.HandleFocusLost calls
 		// matcher.Cancel via this minimal interface to keep
 		// pkg/gui/context decoupled from pkg/gui/keys.
