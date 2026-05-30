@@ -163,6 +163,29 @@ func TestConnectionManagerContext_HandleFocusRunsOnShowAndResetsMode(t *testing.
 	}
 }
 
+// TestConnectionManagerContext_HandleFocusPreservesFormMode asserts that when a
+// child popup (PROMPT) pops and returns focus to the modal in ModeForm, the
+// mode is preserved and onShow is NOT called (the form is still active).
+func TestConnectionManagerContext_HandleFocusPreservesFormMode(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestConnectionManager(drv, nil, nil)
+	c.OpenAddForm(nil, nil)
+	if c.Mode() != ModeForm {
+		t.Fatalf("precondition: mode = %v, want ModeForm", c.Mode())
+	}
+	shown := 0
+	c.SetOnShow(func() { shown++ })
+	if err := c.HandleFocus(types.OnFocusOpts{}); err != nil {
+		t.Fatalf("HandleFocus: %v", err)
+	}
+	if c.Mode() != ModeForm {
+		t.Errorf("mode after focus = %v, want ModeForm", c.Mode())
+	}
+	if shown != 0 {
+		t.Errorf("onShow fired %d times, want 0 (form mode should skip refresh)", shown)
+	}
+}
+
 // TestConnectionManagerContext_NilGuiDriverNoPanic asserts HandleRender is
 // safe when no driver is wired (test wiring / partial bootstrap).
 func TestConnectionManagerContext_NilGuiDriverNoPanic(t *testing.T) {

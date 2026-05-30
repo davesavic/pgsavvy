@@ -72,11 +72,14 @@ func NewConnectionManagerContext(base BaseContext, deps depsAlias) *ConnectionMa
 // cursor.
 func (c *ConnectionManagerContext) SetOnShow(fn func()) { c.onShow = fn }
 
-// HandleFocus fires when the modal is pushed onto the focus stack. It resets
-// the modal to list mode (a re-open after a prior connecting/error session
-// must land on the list) and runs the populate-on-focus closure so the rows +
-// cursor are fresh. Nil-safe (dbsavvy-1rf).
+// HandleFocus fires when the modal gains focus — either a fresh push onto the
+// stack or when a child popup (PROMPT, CONFIRM) pops and returns focus here.
+// In ModeForm a child popup return must preserve the form; in all other modes
+// it resets to ModeList and refreshes the row data. Nil-safe (dbsavvy-1rf).
 func (c *ConnectionManagerContext) HandleFocus(_ types.OnFocusOpts) error {
+	if c.mode == ModeForm {
+		return nil
+	}
 	c.mode = ModeList
 	if c.onShow != nil {
 		c.onShow()

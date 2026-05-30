@@ -180,45 +180,45 @@ func (g *Gui) RunLayout(w, h int) error {
 		}
 	}
 
-	// Tier 1.5: result-tab pane. The "secondary" slot always shows a
-	// framed view so the layout is stable regardless of whether result
-	// tabs exist. When tabs are open their views paint on top; when no
-	// tabs exist the empty-state view is visible.
+	// Tier 1.5: result-tab pane. Suppressed when the CONNECTION_MANAGER
+	// modal is top so nothing paints behind it (matches Tier 1 suppression).
 	activeTabView := ""
-	if d, ok := dims["secondary"]; ok && d.X1 > d.X0 && d.Y1 > d.Y0 {
-		// Baseline empty-state view — always present behind any tab views.
-		emptyView, emptyErr := g.driver.SetView(ResultEmptyViewName, d.X0, d.Y0, d.X1, d.Y1, 0)
-		if emptyErr != nil && !errors.Is(emptyErr, gocui.ErrUnknownView) {
-			return emptyErr
-		}
-		if emptyView != nil {
-			emptyView.Title = " Results "
-			rails[ResultEmptyViewName] = emptyView
-		}
-
-		if g.resultTabsH != nil {
-			contentY0 := d.Y0
-			if g.resultTabsH.Count() > 0 && d.Y1-d.Y0 >= 3 {
-				bar, err := g.driver.SetView(ResultTabBarViewName, d.X0, d.Y0-1, d.X1, d.Y0+1, 0)
-				if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
-					return err
-				}
-				if bar != nil {
-					bar.Frame = false
-				}
-				_ = g.driver.SetContent(ResultTabBarViewName, g.resultTabsH.RenderTabBar(d.X1-d.X0))
-				contentY0 = d.Y0 + 1
-			} else {
-				_ = g.driver.DeleteView(ResultTabBarViewName)
+	if !modalTop {
+		if d, ok := dims["secondary"]; ok && d.X1 > d.X0 && d.Y1 > d.Y0 {
+			// Baseline empty-state view — always present behind any tab views.
+			emptyView, emptyErr := g.driver.SetView(ResultEmptyViewName, d.X0, d.Y0, d.X1, d.Y1, 0)
+			if emptyErr != nil && !errors.Is(emptyErr, gocui.ErrUnknownView) {
+				return emptyErr
+			}
+			if emptyView != nil {
+				emptyView.Title = " Results "
+				rails[ResultEmptyViewName] = emptyView
 			}
 
-			activeTabView = g.resultTabsH.LayoutPaint(g.driver, d.X0, contentY0, d.X1, d.Y1)
-			if activeTabView != "" {
-				if ed, ok := g.masterEditors[types.RESULT_GRID]; ok {
-					_ = g.driver.SetMasterEditor(activeTabView, ed)
+			if g.resultTabsH != nil {
+				contentY0 := d.Y0
+				if g.resultTabsH.Count() > 0 && d.Y1-d.Y0 >= 3 {
+					bar, err := g.driver.SetView(ResultTabBarViewName, d.X0, d.Y0-1, d.X1, d.Y0+1, 0)
+					if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+						return err
+					}
+					if bar != nil {
+						bar.Frame = false
+					}
+					_ = g.driver.SetContent(ResultTabBarViewName, g.resultTabsH.RenderTabBar(d.X1-d.X0))
+					contentY0 = d.Y0 + 1
+				} else {
+					_ = g.driver.DeleteView(ResultTabBarViewName)
 				}
-				if v, err := g.driver.ViewByName(activeTabView); err == nil && v != nil {
-					rails[activeTabView] = v
+
+				activeTabView = g.resultTabsH.LayoutPaint(g.driver, d.X0, contentY0, d.X1, d.Y1)
+				if activeTabView != "" {
+					if ed, ok := g.masterEditors[types.RESULT_GRID]; ok {
+						_ = g.driver.SetMasterEditor(activeTabView, ed)
+					}
+					if v, err := g.driver.ViewByName(activeTabView); err == nil && v != nil {
+						rails[activeTabView] = v
+					}
 				}
 			}
 		}
@@ -549,16 +549,21 @@ func (g *Gui) RunLayout(w, h int) error {
 }
 
 // modalIsTopMain reports whether the CONNECTION_MANAGER MAIN_CONTEXT modal
-// is top of the focus stack. When true, layoutConnectionManagerMain owns the
-// dims["main"] slot and BOTH the side rails and the QUERY_EDITOR paint are
-// suppressed so only the centered box renders over a blank background.
+// is in the focus stack (possibly with popups stacked above it). When true,
+// layoutConnectionManagerMain owns the dims["main"] slot and BOTH the side
+// rails and the QUERY_EDITOR paint are suppressed so only the centered box
+// (and any popup above it) renders over a blank background.
 // Nil-safe across the registry / tree / context (epic dbsavvy-ig4).
 func (g *Gui) modalIsTopMain() bool {
 	if g.registry == nil || g.registry.ConnectionManager == nil || g.tree == nil {
 		return false
 	}
-	top := g.tree.Current()
-	return top != nil && top.GetKey() == types.CONNECTION_MANAGER
+	for _, ctx := range g.tree.Stack() {
+		if ctx.GetKey() == types.CONNECTION_MANAGER {
+			return true
+		}
+	}
+	return false
 }
 
 // connectionManagerWidthFrac / connectionManagerHeightFrac size the centered
@@ -576,7 +581,7 @@ const (
 func (g *Gui) layoutConnectionManagerMain(dims map[string]ui.Dimensions, rails map[string]*gocui.View) {
 	cm := g.registry.ConnectionManager
 	name := cm.GetViewName()
-	d, ok := dims["main"]
+	d, ok := dims["popup-overlay"]
 	if !ok || name == "" || d.X1 <= d.X0 || d.Y1 <= d.Y0 {
 		return
 	}

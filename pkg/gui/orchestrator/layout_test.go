@@ -59,8 +59,11 @@ func TestRunLayoutSkipsStubContexts(t *testing.T) {
 // is a live MAIN_CONTEXT and must be SetView'd into dims["main"] every
 // frame, regardless of focus-stack membership — focus only governs
 // FrameColor and SetCurrentView, not whether the pane exists.
+// Pop the CONNECTION_MANAGER first to simulate post-connect state;
+// the modal suppresses the query editor while active.
 func TestRunLayoutCreatesQueryEditorMainPane(t *testing.T) {
 	g, rec := buildTestGui(t)
+	_ = g.ContextTree().Push(g.Registry().Schemas)
 	if err := g.RunLayout(120, 40); err != nil {
 		t.Fatalf("RunLayout: %v", err)
 	}
