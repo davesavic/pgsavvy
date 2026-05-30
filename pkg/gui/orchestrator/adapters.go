@@ -140,6 +140,14 @@ type connectInvoker struct {
 	// current is the profile of the most recent UI attempt, so Retry can
 	// re-dial it from the error state.
 	current *models.Connection
+	// originModal reports whether the most recent UI attempt was initiated
+	// from the CONNECTION_MANAGER modal (dbsavvy-1rf). When true the
+	// connecting/error body is rendered INSIDE the modal (the modal's own
+	// ConnectingState sink, not registry.Connecting) and a successful publish
+	// pops the modal. Set on the MainLoop alongside current so the gen seams
+	// stay serialised; persists across Retry (a retry from the modal error
+	// stays modal).
+	originModal bool
 }
 
 // connectTimeout bounds the whole Connect attempt (dial + pool.Ping +
@@ -152,6 +160,12 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	if c == nil || c.helper == nil {
 		return nil
 	}
+	// dbsavvy-1rf: the reconnect / direct-Connect path is never modal-origin;
+	// clear the flag so a connect following a modal attempt does not inherit
+	// the modal pop/sink routing.
+	c.mu.Lock()
+	c.originModal = false
+	c.mu.Unlock()
 	// Supersession token (dbsavvy-fow.1): bump on entry and capture the
 	// new value. This is the reconnect / direct-Connect path; UI-initiated
 	// attempts go through startAttempt (which bumps on the MainLoop). A
@@ -179,11 +193,14 @@ func (c *connectInvoker) startAttempt(profile *models.Connection) {
 	c.mu.Lock()
 	c.cancelFn = cancel
 	c.current = profile
+	modal := c.originModal
 	c.mu.Unlock()
-	if c.g.registry != nil && c.g.registry.Connecting != nil {
-		// Plain setter, MainLoop-safe; also clears any prior error so a
-		// retry re-enters the connecting state.
-		c.g.registry.Connecting.SetConnecting(profile.Name)
+	// Plain setter, MainLoop-safe; also clears any prior error so a retry
+	// re-enters the connecting state. Modal-origin attempts write the modal's
+	// own ConnectingState sink; the standalone CONNECTING path writes
+	// registry.Connecting (dbsavvy-1rf).
+	if sink := c.connectingSink(modal); sink != nil {
+		sink.SetConnecting(profile.Name)
 	}
 	c.g.OnWorker(func(_ gocui.Task) error {
 		// Release the timeout ctx when the attempt finishes. Idempotent
@@ -193,6 +210,51 @@ func (c *connectInvoker) startAttempt(profile *models.Connection) {
 		// preserved without a separate sink here.
 		return c.connectWithGen(ctx, profile, gen)
 	})
+}
+
+// startModalAttempt is the CONNECTION_MANAGER modal's connect entry point
+// (dbsavvy-1rf). It marks the attempt as modal-origin (so the connecting body
+// renders inside the modal and a successful publish pops it), flips the modal
+// into connecting mode, then dials via the SHARED startAttempt path — the
+// gen/supersession/cancel/worker logic is unchanged. MUST run on the MainLoop.
+func (c *connectInvoker) startModalAttempt(profile *models.Connection) {
+	if c == nil || profile == nil {
+		return
+	}
+	c.mu.Lock()
+	c.originModal = true
+	c.mu.Unlock()
+	if c.g != nil && c.g.registry != nil && c.g.registry.ConnectionManager != nil {
+		c.g.registry.ConnectionManager.SetMode(guicontext.ModeConnecting)
+	}
+	c.startAttempt(profile)
+}
+
+// connectingStateSink is the narrow connecting/error write surface shared by
+// the standalone CONNECTING screen and the modal's ConnectingState
+// (dbsavvy-1rf).
+type connectingStateSink interface {
+	SetConnecting(name string)
+	SetError(msg string)
+}
+
+// connectingSink returns the write target for the connecting/error body:
+// the modal's ConnectingState when modal-origin, else registry.Connecting.
+// Nil when the relevant context is unwired (test fixtures).
+func (c *connectInvoker) connectingSink(modal bool) connectingStateSink {
+	if c == nil || c.g == nil || c.g.registry == nil {
+		return nil
+	}
+	if modal {
+		if c.g.registry.ConnectionManager == nil {
+			return nil
+		}
+		return c.g.registry.ConnectionManager.ConnectingState()
+	}
+	if c.g.registry.Connecting == nil {
+		return nil
+	}
+	return c.g.registry.Connecting
 }
 
 // Cancel supersedes the in-flight UI attempt and aborts its dial. Invoked
@@ -327,6 +389,12 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		c.publishQueryEditorBuffer(editorBuf, editorOK)
 		c.publishSchemaItems(schemaItems, schemaOK)
 		c.setActiveConn(profile)
+		// dbsavvy-1rf: a modal-origin connect renders its connecting body
+		// inside the CONNECTION_MANAGER modal. On success pop the modal (and
+		// reset it back to list mode for a later re-open) BEFORE pushing the
+		// schemas/tables rails so the user lands in restored navigation with
+		// the modal gone.
+		c.popModalOnSuccess()
 		// dbsavvy-dl7.4: restore schema cursor + publish tables.
 		if savedSchemaIdx >= 0 && c.g.registry != nil && c.g.registry.Schemas != nil {
 			c.g.registry.Schemas.SetCursor(savedSchemaIdx)
@@ -408,14 +476,48 @@ func (c *connectInvoker) publishConnectError(gen uint64, err error) {
 	if err == nil || c.isStaleConnect(gen) {
 		return
 	}
-	if c.g == nil || c.g.registry == nil || c.g.registry.Connecting == nil || c.g.tree == nil {
+	if c.g == nil || c.g.tree == nil {
 		return
 	}
-	if top := c.g.tree.Current(); top == nil || top.GetKey() != types.CONNECTING {
+	c.mu.Lock()
+	modal := c.originModal
+	c.mu.Unlock()
+	// The error must only paint the screen that is actually top of the focus
+	// stack — a cancel/retry may have popped it, and writing a dead screen
+	// would be a leak (dbsavvy-1rf: modal-origin → CONNECTION_MANAGER;
+	// standalone → CONNECTING).
+	wantTop := types.CONNECTING
+	if modal {
+		wantTop = types.CONNECTION_MANAGER
+	}
+	if top := c.g.tree.Current(); top == nil || top.GetKey() != wantTop {
+		return
+	}
+	sink := c.connectingSink(modal)
+	if sink == nil {
 		return
 	}
 	msg := config.SafeText(session.RedactConnectionString(connectErrMessage(err)))
-	c.g.registry.Connecting.SetError(msg)
+	sink.SetError(msg)
+}
+
+// popModalOnSuccess pops the CONNECTION_MANAGER modal off the focus stack and
+// resets it to list mode after a modal-origin connect succeeds (dbsavvy-1rf).
+// No-op for standalone CONNECTING-origin connects, or when the registry/tree
+// is unwired. MUST run on the UI thread (called from the publish closure).
+func (c *connectInvoker) popModalOnSuccess() {
+	if c == nil || c.g == nil {
+		return
+	}
+	c.mu.Lock()
+	modal := c.originModal
+	c.originModal = false
+	c.mu.Unlock()
+	if !modal || c.g.registry == nil || c.g.registry.ConnectionManager == nil || c.g.tree == nil {
+		return
+	}
+	c.g.registry.ConnectionManager.SetMode(guicontext.ModeList)
+	_ = c.g.tree.PopIfTop(types.CONNECTION_MANAGER)
 }
 
 // connectErrMessage returns the user-facing string for a Connect error.

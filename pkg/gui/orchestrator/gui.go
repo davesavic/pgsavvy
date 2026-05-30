@@ -842,6 +842,13 @@ func (g *Gui) wireWithDriver() error {
 		if g.tree == nil || g.registry == nil || g.registry.Connecting == nil {
 			return
 		}
+		// dbsavvy-1rf: standalone CONNECTING attempts are never modal-origin —
+		// clear the flag (set on the MainLoop, serialised with the gen seams)
+		// so the connecting body / error / pop routes to CONNECTING, not the
+		// modal.
+		connectInv.mu.Lock()
+		connectInv.originModal = false
+		connectInv.mu.Unlock()
 		_ = g.tree.Push(g.registry.Connecting)
 		connectInv.startAttempt(profile)
 	}
@@ -1018,6 +1025,32 @@ func (g *Gui) wireWithDriver() error {
 		EditDeps:      edit,
 	}
 	g.controllers = controllers.AttachControllers(g.registry, g.deps.Common, helperBag)
+
+	// dbsavvy-1rf: wire the CONNECTION_MANAGER modal's list + in-modal-connect
+	// closures now that both the modal context and connectInvoker exist. The
+	// handlers run on the MainLoop (keybinding dispatch), so the connectInvoker
+	// gen seams stay serialised. The connect lifecycle renders INSIDE the modal
+	// (no standalone CONNECTING push); a successful publish pops the modal.
+	if g.controllers != nil && g.controllers.ConnectionManager != nil && g.registry != nil && g.registry.ConnectionManager != nil {
+		// Populate rows + restore the last-used cursor each time the modal
+		// gains focus (dbsavvy-1rf).
+		g.registry.ConnectionManager.SetOnShow(func() {
+			g.refreshConnectionManagerRail()
+			g.restoreConnectionManagerCursor()
+		})
+		g.controllers.ConnectionManager.SetDeps(controllers.ConnectionManagerDeps{
+			Ctx:     g.registry.ConnectionManager,
+			Connect: connectInv.startModalAttempt,
+			Retry:   connectInv.Retry,
+			CancelConnecting: func() {
+				connectInv.Cancel()
+				connectInv.mu.Lock()
+				connectInv.originModal = false
+				connectInv.mu.Unlock()
+				g.registry.ConnectionManager.SetMode(guicontext.ModeList)
+			},
+		})
+	}
 
 	// Wire the popup-body state readers now that both the helpers (which
 	// own label / active / choices / cursor) and the PromptController
@@ -1886,6 +1919,56 @@ func (g *Gui) refreshConnectionsRail() {
 		items[i] = &p
 	}
 	g.registry.Connections.SetItems(items)
+}
+
+// refreshConnectionManagerRail reloads the connection profiles from
+// Deps.ConnectionsProvider into the CONNECTION_MANAGER modal's row slice
+// (dbsavvy-1rf), mirroring refreshConnectionsRail. The SetItems write is a
+// plain in-memory mutation; the only caller (HandleFocus on push) runs on the
+// MainLoop, so it serialises with render reads without an OnUIThread bounce.
+func (g *Gui) refreshConnectionManagerRail() {
+	if g.registry == nil || g.registry.ConnectionManager == nil {
+		return
+	}
+	provider := g.deps.ConnectionsProvider
+	if provider == nil {
+		g.registry.ConnectionManager.SetItems(nil)
+		return
+	}
+	profiles := provider()
+	items := make([]any, len(profiles))
+	for i := range profiles {
+		p := profiles[i]
+		items[i] = &p
+	}
+	g.registry.ConnectionManager.SetItems(items)
+}
+
+// restoreConnectionManagerCursor positions the modal cursor on the profile
+// whose Name matches the persisted LastConnectionID (dbsavvy-1rf), mirroring
+// restoreConnectionsCursor. No-op when the registry/Store is unwired or no
+// match lives in the list.
+func (g *Gui) restoreConnectionManagerCursor() {
+	if g == nil || g.registry == nil || g.registry.ConnectionManager == nil {
+		return
+	}
+	if g.deps.Store == nil {
+		return
+	}
+	last := g.deps.Store.LastConnectionIDSnapshot()
+	if last == "" {
+		return
+	}
+	for i, it := range g.registry.ConnectionManager.Items() {
+		conn, ok := it.(*models.Connection)
+		if !ok || conn == nil {
+			continue
+		}
+		if conn.Name == last {
+			g.registry.ConnectionManager.SetCursor(i)
+			return
+		}
+	}
 }
 
 // installKeyDispatch wires the dispatch path:

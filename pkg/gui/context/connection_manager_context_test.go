@@ -1,0 +1,186 @@
+package context
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/models"
+)
+
+// newTestConnectionManager wires a ConnectionManagerContext to the supplied
+// driver, decoration hook, and row-suffix hook. Nil hooks leave the deps
+// fields empty so the renderer exercises its fallback paths.
+func newTestConnectionManager(
+	drv types.GuiDriver,
+	hook func(*models.Connection) (string, string, string),
+	suffix func(*models.Connection) string,
+) *ConnectionManagerContext {
+	base := NewBaseContext(BaseContextOpts{
+		Key:      types.CONNECTION_MANAGER,
+		ViewName: string(types.CONNECTION_MANAGER),
+		Kind:     types.MAIN_CONTEXT,
+		Title:    "Connection Manager",
+	})
+	deps := types.ContextTreeDeps{GuiDriver: drv}
+	if hook != nil {
+		deps.PerRowDecorationHook = hook
+	}
+	if suffix != nil {
+		deps.RowSuffix = suffix
+	}
+	return NewConnectionManagerContext(base, deps)
+}
+
+// TestConnectionManagerContext_RendersRowsWithHostDbAndMarker asserts the list
+// mode renders one row per connection with the active marker (icon) + the
+// parsed host/db suffix (AC1).
+func TestConnectionManagerContext_RendersRowsWithHostDbAndMarker(t *testing.T) {
+	drv := &captureDriver{}
+	hook := func(c *models.Connection) (string, string, string) {
+		if c.Name == "beta" {
+			return "●", c.Name, ""
+		}
+		return "", c.Name, ""
+	}
+	suffix := func(c *models.Connection) string {
+		if c.Name == "beta" {
+			return "db.example.com/app"
+		}
+		return "localhost/dev"
+	}
+	c := newTestConnectionManager(drv, hook, suffix)
+	c.SetItems([]any{
+		&models.Connection{Name: "alpha"},
+		&models.Connection{Name: "beta"},
+	})
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	body := drv.lastContent
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("rendered %d lines, want 2; body=%q", len(lines), body)
+	}
+	if !strings.HasPrefix(lines[0], "> ") {
+		t.Errorf("cursor row alpha = %q, want '> ' prefix", lines[0])
+	}
+	if !strings.Contains(lines[0], "localhost/dev") {
+		t.Errorf("alpha row missing host/db suffix: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "●") {
+		t.Errorf("active row beta missing marker: %q", lines[1])
+	}
+	if !strings.Contains(lines[1], "db.example.com/app") {
+		t.Errorf("beta row missing host/db suffix: %q", lines[1])
+	}
+}
+
+// TestConnectionManagerContext_EmptyStateShowsAdd asserts zero connections
+// render the '[a] add' empty-state body (AC4).
+func TestConnectionManagerContext_EmptyStateShowsAdd(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestConnectionManager(drv, nil, nil)
+	c.SetItems(nil)
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	if !strings.Contains(drv.lastContent, "[a] add") {
+		t.Errorf("empty-state body = %q, want '[a] add'", drv.lastContent)
+	}
+}
+
+// TestConnectionManagerContext_CursorMovesWithSetCursor asserts the cursor
+// marker tracks SetCursor, backing j/k nav (AC2).
+func TestConnectionManagerContext_CursorMovesWithSetCursor(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestConnectionManager(drv, nil, nil)
+	c.SetItems([]any{
+		&models.Connection{Name: "alpha"},
+		&models.Connection{Name: "beta"},
+		&models.Connection{Name: "gamma"},
+	})
+	c.SetCursor(2)
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(drv.lastContent, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("rendered %d lines, want 3", len(lines))
+	}
+	if !strings.HasPrefix(lines[2], "> ") {
+		t.Errorf("cursor=2: gamma line = %q, want '> ' prefix", lines[2])
+	}
+	if strings.HasPrefix(lines[0], "> ") {
+		t.Errorf("cursor=2: alpha must not carry the marker: %q", lines[0])
+	}
+}
+
+// TestConnectionManagerContext_ConnectingMode renders the connecting / error
+// body from the shared ConnectingState (AC3), mirroring ConnectingContext.
+func TestConnectionManagerContext_ConnectingMode(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestConnectionManager(drv, nil, nil)
+	c.SetItems([]any{&models.Connection{Name: "alpha"}})
+
+	c.ConnectingState().SetConnecting("alpha")
+	c.SetMode(ModeConnecting)
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender connecting: %v", err)
+	}
+	if !strings.Contains(drv.lastContent, "Connecting to alpha") {
+		t.Errorf("connecting body = %q, want connecting message", drv.lastContent)
+	}
+
+	c.ConnectingState().SetError("connection refused")
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender error: %v", err)
+	}
+	for _, want := range []string{"connection refused", "[r] retry", "[Esc] back"} {
+		if !strings.Contains(drv.lastContent, want) {
+			t.Errorf("error body missing %q: %q", want, drv.lastContent)
+		}
+	}
+}
+
+// TestConnectionManagerContext_HandleFocusRunsOnShowAndResetsMode asserts
+// pushing the modal resets it to list mode and runs the populate closure
+// (AC2 cursor-on-show wiring; AC3 re-open lands on the list).
+func TestConnectionManagerContext_HandleFocusRunsOnShowAndResetsMode(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestConnectionManager(drv, nil, nil)
+	c.SetMode(ModeConnecting)
+	shown := 0
+	c.SetOnShow(func() { shown++ })
+	if err := c.HandleFocus(types.OnFocusOpts{}); err != nil {
+		t.Fatalf("HandleFocus: %v", err)
+	}
+	if c.Mode() != ModeList {
+		t.Errorf("mode after focus = %v, want ModeList", c.Mode())
+	}
+	if shown != 1 {
+		t.Errorf("onShow fired %d times, want 1", shown)
+	}
+}
+
+// TestConnectionManagerContext_NilGuiDriverNoPanic asserts HandleRender is
+// safe when no driver is wired (test wiring / partial bootstrap).
+func TestConnectionManagerContext_NilGuiDriverNoPanic(t *testing.T) {
+	c := newTestConnectionManager(nil, nil, nil)
+	c.SetItems([]any{&models.Connection{Name: "alpha"}})
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender nil driver: %v", err)
+	}
+}
+
+// TestConnectionManagerContext_Kind locks the MAIN_CONTEXT kind so the layout
+// pass slots it into dims["main"].
+func TestConnectionManagerContext_Kind(t *testing.T) {
+	c := newTestConnectionManager(&captureDriver{}, nil, nil)
+	if got := c.GetKind(); got != types.MAIN_CONTEXT {
+		t.Fatalf("GetKind() = %v, want MAIN_CONTEXT", got)
+	}
+	if got := c.GetKey(); got != types.CONNECTION_MANAGER {
+		t.Fatalf("GetKey() = %q, want %q", got, types.CONNECTION_MANAGER)
+	}
+}
