@@ -16,6 +16,10 @@ import (
 // detect the condition and prompt the user for a different name.
 var ErrDuplicateConnectionName = errors.New("config: duplicate connection name")
 
+// ErrConnectionNotFound is returned by UpdateConnection and DeleteConnection
+// when no existing profile matches the supplied name.
+var ErrConnectionNotFound = errors.New("config: connection not found")
+
 // SaveConnections atomically writes conns to the YAML file at path using the
 // wrapper form {connections: [...]} that LoadConnections (with KnownFields)
 // expects. The file is written via pkg/utils.AtomicWriteYAML — temp file at
@@ -66,6 +70,60 @@ func AppendConnection(fs afero.Fs, path string, c models.Connection) error {
 	}
 	existing = append(existing, c)
 	return SaveConnections(fs, path, existing)
+}
+
+// UpdateConnection loads the existing connections.yml at path, replaces the
+// single entry whose Name == oldName with newConn, and writes the result via
+// SaveConnections. All other entries round-trip untouched (only the matched
+// index is swapped).
+//
+// Rename collisions are rejected: if newConn.Name differs from oldName and
+// collides with a DIFFERENT existing entry, ErrDuplicateConnectionName is
+// returned. Rename-to-self (newConn.Name == oldName) is permitted. If oldName
+// is not found, ErrConnectionNotFound is returned.
+//
+// On LoadConnections failure the error is returned unwrapped (per M10f).
+func UpdateConnection(fs afero.Fs, path, oldName string, newConn models.Connection) error {
+	existing, err := LoadConnections(fs, path)
+	if err != nil {
+		return err
+	}
+	idx := -1
+	for i := range existing {
+		if existing[i].Name == oldName {
+			idx = i
+			continue
+		}
+		if existing[i].Name == newConn.Name {
+			return ErrDuplicateConnectionName
+		}
+	}
+	if idx == -1 {
+		return ErrConnectionNotFound
+	}
+	existing[idx] = newConn
+	return SaveConnections(fs, path, existing)
+}
+
+// DeleteConnection loads the existing connections.yml at path and removes the
+// single entry whose Name == name, writing the result via SaveConnections. If
+// name is not found, ErrConnectionNotFound is returned. Deleting the last
+// entry yields a valid {connections: []} file.
+//
+// On LoadConnections failure the error is returned unwrapped (per M10f).
+func DeleteConnection(fs afero.Fs, path, name string) error {
+	existing, err := LoadConnections(fs, path)
+	if err != nil {
+		return err
+	}
+	for i := range existing {
+		if existing[i].Name != name {
+			continue
+		}
+		existing = append(existing[:i], existing[i+1:]...)
+		return SaveConnections(fs, path, existing)
+	}
+	return ErrConnectionNotFound
 }
 
 // IsInlinePasswordPresent reports whether any profile in conns carries a
