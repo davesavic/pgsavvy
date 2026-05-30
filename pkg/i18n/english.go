@@ -191,6 +191,14 @@ type ActionTranslations struct {
 	AddConnection  string
 	OpenConnection string
 
+	// Connection-manager form (dbsavvy-dyf). The in-place add/edit form
+	// rendered inside the CONNECTION_MANAGER modal.
+	EditConnection string
+	EditField      string
+	ToggleField    string
+	NextField      string
+	PrevField      string
+
 	// Schema visibility.
 	HideSchema       string
 	UnhideSchema     string
@@ -309,6 +317,12 @@ func EnglishTranslationSet() *TranslationSet {
 		SeverityInfo:          "INFO",
 
 		Actions: ActionTranslations{
+			EditConnection: "Edit connection",
+			EditField:      "Edit field",
+			ToggleField:    "Toggle field",
+			NextField:      "Next field",
+			PrevField:      "Previous field",
+
 			OpenTable:   "Open Table",
 			RunQuery:    "Run Query",
 			CancelQuery: "Cancel Query",

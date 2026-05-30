@@ -29,10 +29,16 @@ binding	scope=connecting	key=<esc>	mode=normal
 binding	scope=connecting	key=r	mode=normal
 binding	scope=connection_manager	key=<cr>	mode=normal
 binding	scope=connection_manager	key=<esc>	mode=normal
+binding	scope=connection_manager	key=<s-tab>	mode=normal
+binding	scope=connection_manager	key=<tab>	mode=normal
+binding	scope=connection_manager	key=a	mode=normal
+binding	scope=connection_manager	key=e	mode=normal
+binding	scope=connection_manager	key=i	mode=normal
 binding	scope=connection_manager	key=j	mode=normal
 binding	scope=connection_manager	key=k	mode=normal
 binding	scope=connection_manager	key=q	mode=normal
 binding	scope=connection_manager	key=r	mode=normal
+binding	scope=connection_manager	key=␣	mode=normal
 binding	scope=connections	key=1	mode=normal
 binding	scope=connections	key=2	mode=normal
 binding	scope=connections	key=3	mode=normal

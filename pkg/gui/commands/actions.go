@@ -146,6 +146,20 @@ const (
 	ConnectionManagerConfirm = "connection_manager.confirm"
 	ConnectionManagerRetry   = "connection_manager.retry"
 
+	// ConnectionManager add/edit form actions (dbsavvy-dyf).
+	// CONNECTION_MANAGER-scoped. In ModeList a opens a blank add form and e
+	// edits the selected row. In ModeForm: Tab / Shift-Tab move field focus,
+	// i edits the focused field (text → PROMPT popup; toggle/driver flip),
+	// space toggles/cycles the focused field. Enter (Confirm) saves and Esc
+	// (Close) cancels back to the list — both mode-gated on the existing
+	// actions.
+	ConnectionManagerAdd       = "connection_manager.add"
+	ConnectionManagerEdit      = "connection_manager.edit"
+	ConnectionManagerFieldNext = "connection_manager.field_next"
+	ConnectionManagerFieldPrev = "connection_manager.field_prev"
+	ConnectionManagerFieldEdit = "connection_manager.field_edit"
+	ConnectionManagerToggle    = "connection_manager.toggle"
+
 	// TipDismiss — owned by the orchestrator's FirstRunTip wiring
 	// (dbsavvy-56u.2). FIRST_RUN_TIP-scoped. Pops the tip popup and
 	// stamps the seen-at timestamp via AppStateStore.StampStartupTips.
@@ -686,6 +700,12 @@ func AllActionIDs() []string {
 		ConnectionManagerUp,
 		ConnectionManagerConfirm,
 		ConnectionManagerRetry,
+		ConnectionManagerAdd,
+		ConnectionManagerEdit,
+		ConnectionManagerFieldNext,
+		ConnectionManagerFieldPrev,
+		ConnectionManagerFieldEdit,
+		ConnectionManagerToggle,
 		TipDismiss,
 		CellEditEnter,
 		CellEditCommit,

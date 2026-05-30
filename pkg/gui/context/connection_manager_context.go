@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -20,6 +21,10 @@ const (
 	ModeList ConnectionManagerMode = iota
 	// ModeConnecting renders the connecting / error body.
 	ModeConnecting
+	// ModeForm renders the add/edit form — all connection fields at once
+	// (dbsavvy-dyf). Editing of text fields routes through the PROMPT popup;
+	// toggles + the driver selector flip in place.
+	ModeForm
 )
 
 // ConnectionManagerContext is the centered modal connection-manager box
@@ -44,6 +49,7 @@ type ConnectionManagerContext struct {
 
 	mode       ConnectionManagerMode
 	connecting ConnectingState
+	form       connForm
 
 	// onShow populates the row slice + restores the last-used cursor when the
 	// modal gains focus (dbsavvy-1rf). The orchestrator owns the connection
@@ -109,10 +115,113 @@ func (c *ConnectionManagerContext) body() string {
 	if c.mode == ModeConnecting {
 		return c.connecting.Body()
 	}
+	if c.mode == ModeForm {
+		return c.form.render()
+	}
 	if len(c.items) == 0 {
 		return "[a] add"
 	}
 	return c.renderRows()
+}
+
+// --- Form drive surface (dbsavvy-dyf) ---------------------------------------
+//
+// The controller drives the in-place form through these exported methods
+// rather than the unexported connForm type. All run on the UI thread.
+
+// FormMoveFocus shifts the field cursor by delta (j/k/Tab nav).
+func (c *ConnectionManagerContext) FormMoveFocus(delta int) { c.form.moveFocus(delta) }
+
+// FormFocusedIsText reports whether the focused field is a text field (edited
+// via the PROMPT popup).
+func (c *ConnectionManagerContext) FormFocusedIsText() bool {
+	return c.form.focusedSpec().kind == fieldText
+}
+
+// FormFocusedLabel returns the focused field's label (used as the prompt
+// title).
+func (c *ConnectionManagerContext) FormFocusedLabel() string {
+	return c.form.focusedSpec().label
+}
+
+// FormFocusedValue returns the focused text field's current value (popup
+// seed). Empty for non-text fields.
+func (c *ConnectionManagerContext) FormFocusedValue() string {
+	s := c.form.focusedSpec()
+	if s.kind != fieldText {
+		return ""
+	}
+	return c.form.textValue(s.id)
+}
+
+// FormFocusedValidator returns the focused text field's validator (nil for
+// free-text fields or non-text rows).
+func (c *ConnectionManagerContext) FormFocusedValidator(tr *i18n.TranslationSet) func(string) error {
+	s := c.form.focusedSpec()
+	if s.kind != fieldText {
+		return nil
+	}
+	return c.form.validatorFor(s.id, tr)
+}
+
+// FormSetFocusedValue stores a (pre-validated) value into the focused text
+// field and clears any inline error.
+func (c *ConnectionManagerContext) FormSetFocusedValue(v string) {
+	c.form.setTextValue(c.form.focusedSpec().id, v)
+	c.form.err = ""
+}
+
+// FormSetError stamps an inline error string rendered under the focused
+// field. Used when a PROMPT-popup submit fails validation.
+func (c *ConnectionManagerContext) FormSetError(msg string) { c.form.err = msg }
+
+// FormToggleFocused flips the focused toggle or cycles the driver selector
+// (space / i on a non-text field).
+func (c *ConnectionManagerContext) FormToggleFocused() { c.form.toggleFocused() }
+
+// FormValidateAll runs save-time validation. On failure it stamps the inline
+// error and moves focus onto the offending field, returning false. On success
+// it returns the edited connection plus the add/edit metadata.
+func (c *ConnectionManagerContext) FormValidateAll(tr *i18n.TranslationSet) (conn models.Connection, isEdit bool, originalName string, ok bool) {
+	msg, idx, valid := c.form.validateAll(tr)
+	if !valid {
+		c.form.err = msg
+		c.form.focus = idx
+		return models.Connection{}, false, "", false
+	}
+	c.form.err = ""
+	return c.form.conn, c.form.isEdit, c.form.originalName, true
+}
+
+// OpenAddForm seeds a blank add form and switches to ModeForm. existingNames
+// is the snapshot used for the name-uniqueness check; driversFn supplies the
+// driver selector list (nil → drivers.Names). The driver defaults to the
+// first registered name so the selector starts on a valid value.
+func (c *ConnectionManagerContext) OpenAddForm(existingNames []string, driversFn func() []string) {
+	f := connForm{
+		isEdit:        false,
+		existingNames: existingNames,
+		driversFn:     driversFn,
+	}
+	if names := f.names(); len(names) > 0 {
+		f.conn.Driver = names[0]
+	}
+	c.form = f
+	c.mode = ModeForm
+}
+
+// OpenEditForm seeds the form from an existing profile (rename support: the
+// originalName is excluded from the uniqueness check) and switches to
+// ModeForm.
+func (c *ConnectionManagerContext) OpenEditForm(conn models.Connection, existingNames []string, driversFn func() []string) {
+	c.form = connForm{
+		conn:          conn,
+		isEdit:        true,
+		originalName:  conn.Name,
+		existingNames: existingNames,
+		driversFn:     driversFn,
+	}
+	c.mode = ModeForm
 }
 
 // renderRows produces the row text for the current Items slice, mirroring

@@ -1049,6 +1049,17 @@ func (g *Gui) wireWithDriver() error {
 				connectInv.mu.Unlock()
 				g.registry.ConnectionManager.SetMode(guicontext.ModeList)
 			},
+			// dbsavvy-dyf: add/edit form wiring. Prompt drives the per-field
+			// PROMPT popup; ExistingNames + DriversFn back validation + the
+			// driver selector. OnSaveConnection is the seam zod populates —
+			// here it is a no-op stub (AC4: no persistence in this task), so
+			// Enter validates then returns to the list without writing config.
+			Prompt:        g.promptHelp,
+			ExistingNames: g.connectionNames,
+			DriversFn:     drivers.Names,
+			OnSaveConnection: func(_ models.Connection, _ bool, _ string) error {
+				return nil
+			},
 		})
 	}
 
@@ -1942,6 +1953,21 @@ func (g *Gui) refreshConnectionManagerRail() {
 		items[i] = &p
 	}
 	g.registry.ConnectionManager.SetItems(items)
+}
+
+// connectionNames returns the snapshot of all profile names for the
+// add/edit form's uniqueness check (dbsavvy-dyf). Empty when no provider is
+// wired.
+func (g *Gui) connectionNames() []string {
+	if g.deps.ConnectionsProvider == nil {
+		return nil
+	}
+	profiles := g.deps.ConnectionsProvider()
+	out := make([]string, 0, len(profiles))
+	for i := range profiles {
+		out = append(out, profiles[i].Name)
+	}
+	return out
 }
 
 // restoreConnectionManagerCursor positions the modal cursor on the profile

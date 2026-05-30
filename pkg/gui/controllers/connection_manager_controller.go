@@ -52,6 +52,26 @@ type ConnectionManagerDeps struct {
 	// CancelConnecting aborts the in-flight dial and returns the modal to list
 	// mode.
 	CancelConnecting func()
+
+	// Prompt pushes the single-line PROMPT popup for editing a text field
+	// (dbsavvy-dyf). It is the same helper the connection add-flow drives;
+	// the popup stacks ON TOP of the modal and returns control to ModeForm on
+	// close. nil leaves text-field editing a no-op.
+	Prompt PromptHelper
+
+	// ExistingNames snapshots all profile names for the form's
+	// uniqueness check. nil → empty snapshot (no duplicates flagged).
+	ExistingNames func() []string
+
+	// DriversFn supplies the driver-selector list. nil → drivers.Names.
+	DriversFn func() []string
+
+	// OnSaveConnection is the save seam zod populates (dbsavvy-dyf AC4: a
+	// no-op stub here — no config write). It is invoked with the validated
+	// connection after Enter passes validate-all. isEdit + originalName let
+	// the writer distinguish append vs update + handle renames. A nil
+	// callback (or a non-nil one returning nil) returns the form to ModeList.
+	OnSaveConnection func(conn models.Connection, isEdit bool, originalName string) error
 }
 
 // NewConnectionManagerController constructs the controller with an injected
@@ -75,14 +95,33 @@ func (cm *ConnectionManagerController) inConnectingMode() bool {
 	return cm.deps.Ctx != nil && cm.deps.Ctx.Mode() == context.ModeConnecting
 }
 
+// inFormMode reports whether the modal is rendering the add/edit form. False
+// when the context is unwired.
+func (cm *ConnectionManagerController) inFormMode() bool {
+	return cm.deps.Ctx != nil && cm.deps.Ctx.Mode() == context.ModeForm
+}
+
+// existingNames returns the profile-name snapshot for the form's uniqueness
+// check. Empty when unwired.
+func (cm *ConnectionManagerController) existingNames() []string {
+	if cm.deps.ExistingNames == nil {
+		return nil
+	}
+	return cm.deps.ExistingNames()
+}
+
 // Close handles <esc>. In connecting mode it cancels the in-flight dial and
-// returns to list mode; in list mode it dispatches the injected close
-// callback. nil-safe throughout.
+// returns to list mode; in form mode it cancels the form back to the list; in
+// list mode it dispatches the injected close callback. nil-safe throughout.
 func (cm *ConnectionManagerController) Close(_ commands.ExecCtx) error {
 	if cm.inConnectingMode() {
 		if cm.deps.CancelConnecting != nil {
 			cm.deps.CancelConnecting()
 		}
+		return nil
+	}
+	if cm.inFormMode() {
+		cm.deps.Ctx.SetMode(context.ModeList)
 		return nil
 	}
 	if cm.close == nil {
@@ -92,25 +131,36 @@ func (cm *ConnectionManagerController) Close(_ commands.ExecCtx) error {
 	return nil
 }
 
-// Down moves the list cursor down. No-op in connecting mode or when unwired.
+// Down moves the list cursor down, or — in form mode — the field focus down.
+// No-op in connecting mode or when unwired.
 func (cm *ConnectionManagerController) Down(_ commands.ExecCtx) error {
 	if cm.deps.Ctx == nil || cm.inConnectingMode() {
+		return nil
+	}
+	if cm.inFormMode() {
+		cm.deps.Ctx.FormMoveFocus(1)
 		return nil
 	}
 	cm.deps.Ctx.SetCursor(cm.deps.Ctx.Cursor() + 1)
 	return nil
 }
 
-// Up moves the list cursor up. No-op in connecting mode or when unwired.
+// Up moves the list cursor up, or — in form mode — the field focus up. No-op
+// in connecting mode or when unwired.
 func (cm *ConnectionManagerController) Up(_ commands.ExecCtx) error {
 	if cm.deps.Ctx == nil || cm.inConnectingMode() {
+		return nil
+	}
+	if cm.inFormMode() {
+		cm.deps.Ctx.FormMoveFocus(-1)
 		return nil
 	}
 	cm.deps.Ctx.SetCursor(cm.deps.Ctx.Cursor() - 1)
 	return nil
 }
 
-// Confirm handles <CR>. In connecting mode it re-attempts (Retry); in list
+// Confirm handles <CR>. In connecting mode it re-attempts (Retry); in form
+// mode it saves the form (validate-all → OnSaveConnection → ModeList); in list
 // mode it flips the modal into connecting mode and starts the connect
 // lifecycle for the selected profile. nil-safe throughout.
 func (cm *ConnectionManagerController) Confirm(_ commands.ExecCtx) error {
@@ -120,6 +170,9 @@ func (cm *ConnectionManagerController) Confirm(_ commands.ExecCtx) error {
 		}
 		return nil
 	}
+	if cm.inFormMode() {
+		return cm.saveForm()
+	}
 	if cm.deps.Ctx == nil || cm.deps.Connect == nil {
 		return nil
 	}
@@ -128,6 +181,116 @@ func (cm *ConnectionManagerController) Confirm(_ commands.ExecCtx) error {
 		return nil
 	}
 	cm.deps.Connect(conn)
+	return nil
+}
+
+// saveForm runs validate-all and, on success, invokes the injected save
+// callback and returns the modal to list mode. On validation failure it stays
+// in the form with the inline error rendered (the context stamps the error +
+// moves focus onto the offending field).
+func (cm *ConnectionManagerController) saveForm() error {
+	conn, isEdit, originalName, ok := cm.deps.Ctx.FormValidateAll(cm.tr())
+	if !ok {
+		return nil
+	}
+	if cm.deps.OnSaveConnection != nil {
+		if err := cm.deps.OnSaveConnection(conn, isEdit, originalName); err != nil {
+			return err
+		}
+	}
+	cm.deps.Ctx.SetMode(context.ModeList)
+	return nil
+}
+
+// Add opens a blank add form (ModeList only). Wires the empty-state "[a] add"
+// hint. No-op when unwired or already in form/connecting mode.
+func (cm *ConnectionManagerController) Add(_ commands.ExecCtx) error {
+	if cm.deps.Ctx == nil || cm.inConnectingMode() || cm.inFormMode() {
+		return nil
+	}
+	cm.deps.Ctx.OpenAddForm(cm.existingNames(), cm.deps.DriversFn)
+	return nil
+}
+
+// Edit opens the form seeded from the selected list row (ModeList only). No-op
+// on an empty list or when unwired.
+func (cm *ConnectionManagerController) Edit(_ commands.ExecCtx) error {
+	if cm.deps.Ctx == nil || cm.inConnectingMode() || cm.inFormMode() {
+		return nil
+	}
+	conn, ok := cm.deps.Ctx.SelectedItem().(*models.Connection)
+	if !ok || conn == nil {
+		return nil
+	}
+	cm.deps.Ctx.OpenEditForm(*conn, cm.existingNames(), cm.deps.DriversFn)
+	return nil
+}
+
+// FieldNext moves field focus forward (Tab). Form mode only.
+func (cm *ConnectionManagerController) FieldNext(_ commands.ExecCtx) error {
+	if !cm.inFormMode() {
+		return nil
+	}
+	cm.deps.Ctx.FormMoveFocus(1)
+	return nil
+}
+
+// FieldPrev moves field focus backward (Shift-Tab). Form mode only.
+func (cm *ConnectionManagerController) FieldPrev(_ commands.ExecCtx) error {
+	if !cm.inFormMode() {
+		return nil
+	}
+	cm.deps.Ctx.FormMoveFocus(-1)
+	return nil
+}
+
+// FieldEdit handles i. On a text field it opens the PROMPT popup seeded with
+// the current value + that field's validator; on submit the validated value
+// is stored back into the form. On a toggle/driver field it flips/cycles in
+// place. Form mode only.
+func (cm *ConnectionManagerController) FieldEdit(_ commands.ExecCtx) error {
+	if !cm.inFormMode() {
+		return nil
+	}
+	if !cm.deps.Ctx.FormFocusedIsText() {
+		cm.deps.Ctx.FormToggleFocused()
+		return nil
+	}
+	if cm.deps.Prompt == nil {
+		return nil
+	}
+	ctx := cm.deps.Ctx
+	label := ctx.FormFocusedLabel()
+	initial := ctx.FormFocusedValue()
+	validate := ctx.FormFocusedValidator(cm.tr())
+	return cm.deps.Prompt.Prompt(label, initial,
+		func(value string) error {
+			// The PROMPT popup pops on submit before this runs, so a
+			// validation failure renders inline in the form (the user
+			// re-opens the field to retry) rather than re-prompting.
+			if validate != nil {
+				if err := validate(value); err != nil {
+					ctx.FormSetError(err.Error())
+					return nil
+				}
+			}
+			ctx.FormSetFocusedValue(value)
+			return nil
+		},
+		func() error { return nil },
+	)
+}
+
+// Toggle handles space → flips the focused toggle / cycles the driver. A
+// no-op on text fields. Form mode only.
+func (cm *ConnectionManagerController) Toggle(_ commands.ExecCtx) error {
+	if !cm.inFormMode() {
+		return nil
+	}
+	if cm.deps.Ctx.FormFocusedIsText() {
+		return nil
+	}
+	cm.deps.Ctx.FormToggleFocused()
 	return nil
 }
 
@@ -184,6 +347,48 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Description: tr.Actions.Cancel,
 		},
 		{
+			Sequence:    []types.ChordKey{{Code: 'a'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CONNECTION_MANAGER,
+			ActionID:    commands.ConnectionManagerAdd,
+			Description: tr.Actions.AddConnection,
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'e'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CONNECTION_MANAGER,
+			ActionID:    commands.ConnectionManagerEdit,
+			Description: tr.Actions.EditConnection,
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'i'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CONNECTION_MANAGER,
+			ActionID:    commands.ConnectionManagerFieldEdit,
+			Description: tr.Actions.EditField,
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: ' '}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CONNECTION_MANAGER,
+			ActionID:    commands.ConnectionManagerToggle,
+			Description: tr.Actions.ToggleField,
+		},
+		{
+			Sequence:    []types.ChordKey{{Special: types.KeyTab}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CONNECTION_MANAGER,
+			ActionID:    commands.ConnectionManagerFieldNext,
+			Description: tr.Actions.NextField,
+		},
+		{
+			Sequence:    []types.ChordKey{{Special: types.KeyTab, Mod: types.ChordModShift}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CONNECTION_MANAGER,
+			ActionID:    commands.ConnectionManagerFieldPrev,
+			Description: tr.Actions.PrevField,
+		},
+		{
 			Sequence:    []types.ChordKey{{Code: 'q'}},
 			Mode:        types.ModeNormal,
 			Scope:       types.CONNECTION_MANAGER,
@@ -222,6 +427,36 @@ func (cm *ConnectionManagerController) RegisterActions(reg *commands.Registry) {
 		ID:          commands.ConnectionManagerRetry,
 		Description: "Retry connection from connection manager",
 		Handler:     cm.Retry,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerAdd,
+		Description: "Open add-connection form",
+		Handler:     cm.Add,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerEdit,
+		Description: "Open edit-connection form",
+		Handler:     cm.Edit,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerFieldNext,
+		Description: "Move form field focus forward",
+		Handler:     cm.FieldNext,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerFieldPrev,
+		Description: "Move form field focus backward",
+		Handler:     cm.FieldPrev,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerFieldEdit,
+		Description: "Edit focused form field",
+		Handler:     cm.FieldEdit,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerToggle,
+		Description: "Toggle / cycle focused form field",
+		Handler:     cm.Toggle,
 	})
 }
 
