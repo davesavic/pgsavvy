@@ -89,6 +89,8 @@ type ResultTabsManager interface {
 	WrappedLineUp()
 	SelectRow()
 	SelectBlock()
+	ClearSelection()
+	SelectionActive() bool
 
 	// Active returns the currently-active result tab, or nil when no
 	// tab exists. Wired by Z1 follow-up (dbsavvy-8oo) so handlers can
@@ -425,7 +427,14 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 		Description: tr.Actions.ResultFilterClear,
 		Tag:         "Result",
 		Handler: func(_ commands.ExecCtx) error {
-			if r.mgr != nil && r.mgr.FilterActive() {
+			if r.mgr == nil {
+				return nil
+			}
+			if r.mgr.SelectionActive() {
+				r.mgr.ClearSelection()
+				return nil
+			}
+			if r.mgr.FilterActive() {
 				r.mgr.FilterClear()
 			}
 			return nil

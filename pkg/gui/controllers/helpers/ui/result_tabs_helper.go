@@ -3146,6 +3146,22 @@ func (h *ResultTabsHelper) WrappedLineUp() {
 func (h *ResultTabsHelper) SelectRow()   { h.withActiveGrid(func(g *grid.View) { g.EnterRowMode() }) }
 func (h *ResultTabsHelper) SelectBlock() { h.withActiveGrid(func(g *grid.View) { g.EnterBlockMode() }) }
 
+func (h *ResultTabsHelper) ClearSelection() {
+	h.withActiveGrid(func(g *grid.View) { g.ClearSelection() })
+}
+
+func (h *ResultTabsHelper) SelectionActive() bool {
+	t := h.Active()
+	if t == nil {
+		return false
+	}
+	g := t.Grid()
+	if g == nil {
+		return false
+	}
+	return g.SelectionMode() != grid.SelectionNone
+}
+
 // withActiveGrid resolves the active tab's grid and invokes fn. No-op
 // when no tab is active or the active tab has no grid. dbsavvy-uv0.7.
 func (h *ResultTabsHelper) withActiveGrid(fn func(*grid.View)) {

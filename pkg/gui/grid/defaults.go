@@ -32,6 +32,13 @@ const (
 	// at which the View fires OnNearTail to request more rows.
 	PrefetchThreshold = 25
 
+	// ColSepWidth is the display-column width of the separator between
+	// columns. renderHeaderLine uses "·│·" (space-pipe-space) and
+	// renderDataLine uses "···" (three spaces) — both 3 display columns.
+	// headerColumnAt must use the same constant so click hit-testing
+	// stays aligned with what the user sees.
+	ColSepWidth = 3
+
 	// MaxCellRenderBytes is the safety cap on per-cell stringification
 	// before truncation kicks in regardless of column width. Guards
 	// against pathological 10 MB JSON cells flowing through fmt.Sprintf.

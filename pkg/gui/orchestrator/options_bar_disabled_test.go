@@ -50,7 +50,7 @@ func TestCollectOptionsForScope_DisabledSuffix(t *testing.T) {
 	}
 	ts := buildDisabledOptionsBarTrieSet(t, cmd, "c", types.ModeNormal, types.QUERY_EDITOR)
 
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.QUERY_EDITOR, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.QUERY_EDITOR, nil, nil)
 	if len(got) != 1 {
 		t.Fatalf("got %d entries (%v), want 1", len(got), got)
 	}
@@ -75,7 +75,7 @@ func TestCollectOptionsForScope_EnabledNoSuffix(t *testing.T) {
 	}
 	ts := buildDisabledOptionsBarTrieSet(t, cmd, "r", types.ModeNormal, types.QUERY_EDITOR)
 
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.QUERY_EDITOR, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.QUERY_EDITOR, nil, nil)
 	if len(got) != 1 {
 		t.Fatalf("got %d entries (%v), want 1", len(got), got)
 	}
@@ -103,7 +103,7 @@ func TestCollectOptionsForScope_DisabledHonorsDynamicPredicate(t *testing.T) {
 	}
 	ts := buildDisabledOptionsBarTrieSet(t, cmd, "x", types.ModeNormal, types.QUERY_EDITOR)
 
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.QUERY_EDITOR, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.QUERY_EDITOR, nil, nil)
 	if len(got) != 1 || !strings.HasSuffix(got[0], "(disabled)") {
 		t.Errorf("got %v, want one entry ending in (disabled)", got)
 	}
@@ -174,7 +174,7 @@ func TestCollectOptionsForScope_DisabledPredicateReceivesModeAndScope(t *testing
 
 	// Probe 1: ModeVisual + QUERY_EDITOR — predicate must observe both
 	// and flag the segment disabled.
-	gotVisual := CollectOptionsForScope(ts, types.ModeVisual, types.QUERY_EDITOR, nil)
+	gotVisual := CollectOptionsForScope(ts, types.ModeVisual, types.QUERY_EDITOR, nil, nil)
 	if len(gotVisual) != 1 {
 		t.Fatalf("ModeVisual/QUERY_EDITOR: got %d entries (%v), want 1", len(gotVisual), gotVisual)
 	}
@@ -184,7 +184,7 @@ func TestCollectOptionsForScope_DisabledPredicateReceivesModeAndScope(t *testing
 
 	// Probe 2: ModeNormal + QUERY_EDITOR — same scope, different mode.
 	// Predicate must observe ModeNormal and leave the segment enabled.
-	gotNormal := CollectOptionsForScope(ts, types.ModeNormal, types.QUERY_EDITOR, nil)
+	gotNormal := CollectOptionsForScope(ts, types.ModeNormal, types.QUERY_EDITOR, nil, nil)
 	if len(gotNormal) != 1 {
 		t.Fatalf("ModeNormal/QUERY_EDITOR: got %d entries (%v), want 1", len(gotNormal), gotNormal)
 	}
@@ -194,7 +194,7 @@ func TestCollectOptionsForScope_DisabledPredicateReceivesModeAndScope(t *testing
 
 	// Probe 3: ModeVisual + TABLES — same mode, different scope.
 	// Predicate must observe Scope=TABLES and leave the segment enabled.
-	gotOtherScope := CollectOptionsForScope(ts, types.ModeVisual, types.TABLES, nil)
+	gotOtherScope := CollectOptionsForScope(ts, types.ModeVisual, types.TABLES, nil, nil)
 	if len(gotOtherScope) != 1 {
 		t.Fatalf("ModeVisual/TABLES: got %d entries (%v), want 1", len(gotOtherScope), gotOtherScope)
 	}

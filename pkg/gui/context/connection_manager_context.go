@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -273,6 +274,28 @@ func (c *ConnectionManagerContext) rowSuffix(conn *models.Connection) string {
 		return ""
 	}
 	return "  " + sfx
+}
+
+// OptionsBarFilter returns a predicate that selects which ShowInBar action IDs
+// are visible for the current internal mode. Nil means show all (ModeList
+// default). The status bar renderer type-asserts to this method each frame.
+func (c *ConnectionManagerContext) OptionsBarFilter() func(string) bool {
+	switch c.mode {
+	case ModeForm:
+		return func(id string) bool {
+			return id == commands.ConnectionManagerFieldEdit ||
+				id == commands.ConnectionManagerClose ||
+				id == commands.ConnectionManagerConfirm
+		}
+	case ModeConnecting:
+		return func(id string) bool {
+			return id == commands.ConnectionManagerRetry ||
+				id == commands.ConnectionManagerClose ||
+				id == commands.ConnectionManagerConfirm
+		}
+	default:
+		return nil
+	}
 }
 
 // GetKind overrides BaseContext.GetKind to publish MAIN_CONTEXT, mirroring

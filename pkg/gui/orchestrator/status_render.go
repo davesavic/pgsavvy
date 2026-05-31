@@ -161,7 +161,16 @@ func RenderStatusLine(d StatusRenderDeps) {
 		if d.KbRuntime.Matcher != nil {
 			trieSet = d.KbRuntime.Matcher.TrieSet()
 		}
-		options = CollectOptionsForScope(trieSet, mode, key, d.Tr)
+
+		type optionsBarFilterer interface {
+			OptionsBarFilter() func(string) bool
+		}
+		var actionFilter func(string) bool
+		if f, ok := focused.(optionsBarFilterer); ok {
+			actionFilter = f.OptionsBarFilter()
+		}
+
+		options = CollectOptionsForScope(trieSet, mode, key, d.Tr, actionFilter)
 	}
 
 	var conn *models.Connection

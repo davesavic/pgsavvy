@@ -109,9 +109,6 @@ func TestWiringInvariant(t *testing.T) {
 		// MENU is a T2 lifecycle skeleton; popup body is populated by the
 		// menu helper in a later epic, not via HandleRender.
 		types.MENU: "deferred skeleton; body populated by menu helper in later epic",
-		// CONFIRMATION is a T2 lifecycle skeleton; its body is written by
-		// the confirm helper, not via HandleRender.
-		types.CONFIRMATION: "deferred skeleton; body populated by confirm helper in later epic",
 		// MESSAGES is a T2 EXTRAS skeleton; panel content (PG NOTICE/audit)
 		// is routed in by later epics, not via HandleRender.
 		types.MESSAGES: "deferred skeleton; panel content routed by later epic, not HandleRender",

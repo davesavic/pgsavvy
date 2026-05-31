@@ -297,6 +297,11 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 	v.rowIdentity = nil
 	v.disabledReason = ""
 	v.identitySchema = ""
+
+	// Seed column widths from headers so an empty result (0 rows) still
+	// renders full-width headings instead of falling back to MinColumnWidth.
+	// widthsLocked stays false, so a later AppendRows re-evaluates.
+	v.autoSizeFromSampleLocked()
 }
 
 // SetEditability installs the post-introspection editability decision.
@@ -935,13 +940,13 @@ func (v *View) headerColumnAt(x int) int {
 	used := 0
 	for _, c := range visibleColumnOrder(snap) {
 		w := effectiveWidth(snap.widths, c)
-		// Column c occupies [used, used+w); the trailing space separator
-		// is NOT part of the clickable region (clicking the gap between
-		// two columns falls into neither).
+		// Column c occupies [used, used+w); the separator region between
+		// columns is NOT part of the clickable region (clicking the gap
+		// falls into neither).
 		if x >= used && x < used+w {
 			return c
 		}
-		used += w + 1
+		used += w + ColSepWidth
 	}
 	return -1
 }

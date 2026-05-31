@@ -402,6 +402,7 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Scope:       types.CONNECTION_MANAGER,
 			ActionID:    commands.ConnectionManagerClose,
 			Description: tr.Actions.Cancel,
+			ShowInBar:   true,
 		},
 		{
 			Sequence:    []types.ChordKey{{Code: 'a'}},
@@ -409,6 +410,7 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Scope:       types.CONNECTION_MANAGER,
 			ActionID:    commands.ConnectionManagerAdd,
 			Description: tr.Actions.AddConnection,
+			ShowInBar:   true,
 		},
 		{
 			Sequence:    []types.ChordKey{{Code: 'e'}},
@@ -416,6 +418,7 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Scope:       types.CONNECTION_MANAGER,
 			ActionID:    commands.ConnectionManagerEdit,
 			Description: tr.Actions.EditConnection,
+			ShowInBar:   true,
 		},
 		{
 			Sequence:    []types.ChordKey{{Code: 'd'}},
@@ -423,6 +426,7 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Scope:       types.CONNECTION_MANAGER,
 			ActionID:    commands.ConnectionManagerDelete,
 			Description: tr.Actions.DeleteConnection,
+			ShowInBar:   true,
 		},
 		{
 			Sequence:    []types.ChordKey{{Code: 'i'}},
@@ -430,6 +434,7 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Scope:       types.CONNECTION_MANAGER,
 			ActionID:    commands.ConnectionManagerFieldEdit,
 			Description: tr.Actions.EditField,
+			ShowInBar:   true,
 		},
 		{
 			Sequence:    []types.ChordKey{{Code: ' '}},

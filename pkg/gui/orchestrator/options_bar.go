@@ -40,6 +40,7 @@ func CollectOptionsForScope(
 	mode types.Mode,
 	scope types.ContextKey,
 	tr *i18n.TranslationSet,
+	actionFilter func(string) bool,
 ) []string {
 	_ = tr
 	if trieSet == nil {
@@ -60,6 +61,9 @@ func CollectOptionsForScope(
 		}
 		trie.Walk(func(seq []keys.Key, leaf keys.LookupResult) {
 			if !leaf.ShowInBar || leaf.Action == nil {
+				return
+			}
+			if actionFilter != nil && !actionFilter(leaf.Action.ID) {
 				return
 			}
 			// Probe Disabled with the focused (mode, scope) populated

@@ -1,6 +1,8 @@
 package context
 
 import (
+	"fmt"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -17,6 +19,9 @@ type ConfirmationContext struct {
 	// popup border styling. Helpers set it before pushing; nil means the
 	// default border style.
 	activeConnection *models.Connection
+
+	title string
+	body  string
 }
 
 // NewConfirmationContext builds a ConfirmationContext bound to CONFIRMATION.
@@ -29,6 +34,26 @@ func NewConfirmationContext(base BaseContext, deps Deps) *ConfirmationContext {
 // before pushing the popup.
 func (c *ConfirmationContext) SetActiveConnection(conn *models.Connection) {
 	c.activeConnection = conn
+}
+
+// SetContent installs the title and body the next HandleRender paints.
+// Called by ConfirmHelper.Confirm before pushing onto the focus stack.
+func (c *ConfirmationContext) SetContent(title, body string) {
+	c.title = title
+	c.body = body
+}
+
+// HandleRender writes the title and body into the gocui view.
+func (c *ConfirmationContext) HandleRender() error {
+	if c.title == "" && c.body == "" {
+		return nil
+	}
+	content := fmt.Sprintf("%s\n\n%s\n\n[y]es / [n]o", c.title, c.body)
+	viewName := c.GetViewName()
+	writeView(c.deps, func() error {
+		return c.deps.GuiDriver.SetContent(viewName, content)
+	})
+	return nil
 }
 
 // Presentation resolves the popup border style and header text via

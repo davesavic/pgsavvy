@@ -86,6 +86,27 @@ func TestPadRight_UnicodeWidthBoundary(t *testing.T) {
 		"unicode truncation must end with the ellipsis rune")
 }
 
+// TestSetColumns_SeedsWidthsFromHeaders verifies that SetColumns sizes
+// column widths from header labels so an empty-table result (no AppendRows)
+// renders full-width headings instead of truncating to MinColumnWidth.
+func TestSetColumns_SeedsWidthsFromHeaders(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{
+		{Name: "id", TypeName: "int4"},
+		{Name: "published_at", TypeName: "timestamptz"},
+	})
+	// No AppendRows — simulates an empty table.
+	snap := v.snapshot()
+	w0 := effectiveWidth(snap.widths, 0)
+	w1 := effectiveWidth(snap.widths, 1)
+	require.GreaterOrEqual(t, w0, MinColumnWidth,
+		"short header should still meet MinColumnWidth")
+	require.Greater(t, w1, MinColumnWidth,
+		"'published_at' (12 runes) should be wider than MinColumnWidth (6)")
+	require.GreaterOrEqual(t, w1, len("published_at"),
+		"width must accommodate the full header label")
+}
+
 // stripANSI removes ANSI SGR escape sequences from s for length-based
 // assertions. Matches \x1b[...m sequences.
 func stripANSI(s string) string {

@@ -399,12 +399,12 @@ func renderHeaderLine(snap viewSnapshot, innerW int) string {
 			break
 		}
 		sb.WriteString(name)
-		sb.WriteByte(' ')
-		used += w + 1
+		sb.WriteString(" │ ")
+		used += w + ColSepWidth
 	}
 	// Apply TableHeader styling around the whole line. We resolve at
 	// render time so a theme hot-reload is picked up on next paint.
-	line := strings.TrimRight(sb.String(), " ")
+	line := strings.TrimRight(sb.String(), " │")
 	// Pad to innerW so the underline / inverted style covers the
 	// full width if the theme sets a background.
 	if displayWidth(line) < innerW {
@@ -449,8 +449,8 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 			styled = applySelectionHighlight(styled)
 		}
 		sb.WriteString(styled)
-		sb.WriteByte(' ')
-		used += w + 1
+		sb.WriteString("   ")
+		used += w + ColSepWidth
 	}
 	return strings.TrimRight(sb.String(), " ")
 }

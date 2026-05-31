@@ -70,7 +70,7 @@ func buildOptionsBarTrieSet(t *testing.T, bindings []optionsBarBinding) *keys.Tr
 }
 
 func TestCollectOptionsForScope_NilTrieSetReturnsEmpty(t *testing.T) {
-	got := CollectOptionsForScope(nil, types.ModeNormal, types.TABLES, nil)
+	got := CollectOptionsForScope(nil, types.ModeNormal, types.TABLES, nil, nil)
 	if got == nil {
 		t.Fatalf("got nil, want non-nil empty slice")
 	}
@@ -84,7 +84,7 @@ func TestCollectOptionsForScope_NoShowInBarReturnsEmpty(t *testing.T) {
 		{seq: "q", mode: types.ModeNormal, scope: types.TABLES, tag: "App", description: "Quit"},
 		{seq: "r", mode: types.ModeNormal, scope: types.TABLES, tag: "Table", description: "Refresh"},
 	})
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil, nil)
 	if len(got) != 0 {
 		t.Errorf("got %v, want empty (no ShowInBar leaves)", got)
 	}
@@ -101,7 +101,7 @@ func TestCollectOptionsForScope_ScopeAndGlobalLeavesIncluded(t *testing.T) {
 		{seq: "q", mode: types.ModeNormal, scope: types.GLOBAL, tag: "App", description: "Quit", showInBar: true},
 		{seq: "?", mode: types.ModeNormal, scope: types.GLOBAL, tag: "Help", description: "Cheatsheet", showInBar: true},
 	})
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil, nil)
 	want := []string{
 		"[q] Quit",       // tag "App"
 		"[?] Cheatsheet", // tag "Help"
@@ -121,7 +121,7 @@ func TestCollectOptionsForScope_DeterministicSortByTagThenKey(t *testing.T) {
 		{seq: "a", mode: types.ModeNormal, scope: types.TABLES, tag: "Same", description: "Alpha", showInBar: true},
 		{seq: "c", mode: types.ModeNormal, scope: types.TABLES, tag: "Aardvark", description: "Cee", showInBar: true},
 	})
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil, nil)
 	want := []string{
 		"[c] Cee",   // tag "Aardvark" wins on tag sort
 		"[a] Alpha", // tag "Same", key "a"
@@ -143,7 +143,7 @@ func TestCollectOptionsForScope_TruncatedToMaxEight(t *testing.T) {
 		})
 	}
 	ts := buildOptionsBarTrieSet(t, bs)
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil, nil)
 	if len(got) != optionsBarMax {
 		t.Fatalf("len(got) = %d, want %d", len(got), optionsBarMax)
 	}
@@ -164,7 +164,7 @@ func TestCollectOptionsForScope_ModeMismatchExcluded(t *testing.T) {
 		{seq: "y", mode: types.ModeVisual, scope: types.TABLES, tag: "Edit", description: "Yank", showInBar: true},
 		{seq: "r", mode: types.ModeNormal, scope: types.TABLES, tag: "Table", description: "Refresh", showInBar: true},
 	})
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil, nil)
 	want := []string{"[r] Refresh"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
@@ -177,7 +177,7 @@ func TestCollectOptionsForScope_NoGlobalTrieForModeStillReturnsScope(t *testing.
 	ts := buildOptionsBarTrieSet(t, []optionsBarBinding{
 		{seq: "r", mode: types.ModeNormal, scope: types.TABLES, tag: "Table", description: "Refresh", showInBar: true},
 	})
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil, nil)
 	want := []string{"[r] Refresh"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
@@ -190,7 +190,7 @@ func TestCollectOptionsForScope_FocusedScopeIsGlobalNoDoubleCount(t *testing.T) 
 	ts := buildOptionsBarTrieSet(t, []optionsBarBinding{
 		{seq: "q", mode: types.ModeNormal, scope: types.GLOBAL, tag: "App", description: "Quit", showInBar: true},
 	})
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.GLOBAL, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.GLOBAL, nil, nil)
 	want := []string{"[q] Quit"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
@@ -207,7 +207,7 @@ func TestCollectOptionsForScope_ConnectionsHasAtLeastThreeHints(t *testing.T) {
 		{seq: "a", mode: types.ModeNormal, scope: types.SCHEMAS, tag: "Conn", description: "Add connection", showInBar: true},
 		{seq: "r", mode: types.ModeNormal, scope: types.SCHEMAS, tag: "Conn", description: "Refresh rail", showInBar: true},
 	})
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.SCHEMAS, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.SCHEMAS, nil, nil)
 	if len(got) < 3 {
 		t.Fatalf("CollectOptionsForScope(CONNECTIONS) = %v (len %d), want >=3", got, len(got))
 	}
@@ -215,7 +215,7 @@ func TestCollectOptionsForScope_ConnectionsHasAtLeastThreeHints(t *testing.T) {
 
 func TestCollectOptionsForScope_EmptyTrieSetReturnsEmpty(t *testing.T) {
 	ts := keys.NewTrieSet()
-	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil)
+	got := CollectOptionsForScope(ts, types.ModeNormal, types.TABLES, nil, nil)
 	if len(got) != 0 {
 		t.Errorf("got %v, want empty", got)
 	}

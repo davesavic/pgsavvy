@@ -59,6 +59,7 @@ func (h *ConfirmHelper) Confirm(title, body string, onYes func() error, onNo fun
 	if h.tree == nil || h.confirmation == nil {
 		return nil
 	}
+	h.confirmation.SetContent(title, body)
 	return h.tree.Push(h.confirmation)
 }
 
