@@ -2068,6 +2068,18 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 		if err := g.installShimsForScope(trieSet, key, view); err != nil {
 			return err
 		}
+		// dbsavvy-xpj: Escape is never a trie-reachable key, so the loop
+		// above installs no shim for it on a non-editable view. Without a
+		// shim gocui drops Escape (a non-editable view has no Editor to
+		// receive it), so the Matcher never sees it and a pending leader
+		// chord — the which-key overlay — can never be aborted from a list
+		// rail. Install an explicit Esc shim that routes into the Matcher;
+		// its existing chord-abort path drops the pending prefix and hides
+		// the overlay. Editable views are unaffected: their Editor already
+		// delivers Escape to the Matcher.
+		if err := g.installEscAbortShim(key, view); err != nil {
+			return err
+		}
 	}
 
 	// GLOBAL trie's root keys: install with empty viewname so they
@@ -2140,6 +2152,32 @@ func (g *Gui) installShimsForScope(trieSet *keys.TrieSet, scope types.ContextKey
 		}
 	})
 	return firstErr
+}
+
+// installEscAbortShim registers a single Escape SetKeybinding on a
+// non-editable view whose handler routes Esc through matcher.Dispatch
+// under that view's scope. Escape is not a trie-reachable key, so
+// installShimsForScope never registers it; without this shim gocui drops
+// Escape on a non-editable view and a pending leader chord (which-key
+// overlay) can never be aborted from a list rail (dbsavvy-xpj).
+//
+// When a chord is pending, Dispatch drops it and hides the which-key
+// overlay; when idle, Esc is an unmatched fall-through (a harmless no-op),
+// matching the prior behaviour where gocui silently dropped it. If the
+// scope's trie already binds Esc (e.g. the menu popup's close action) the
+// duplicate (view, Esc) registration is tolerated and resolves to the same
+// Dispatch(scope, Esc) call.
+func (g *Gui) installEscAbortShim(scope types.ContextKey, view string) error {
+	escKey := keys.Key{Special: keys.KeyEsc}
+	gk, gmod, err := keys.ChordKeyToGocui(escKey)
+	if err != nil {
+		return nil
+	}
+	handler := func() error {
+		_, derr := g.matcher.Dispatch(scope, escKey)
+		return derr
+	}
+	return g.driver.SetKeybinding(view, gk, gmod, handler)
 }
 
 // shimKey deduplicates (view, key, mod) tuples within a single
