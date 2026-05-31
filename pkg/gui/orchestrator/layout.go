@@ -136,6 +136,19 @@ func (g *Gui) RunLayout(w, h int) error {
 	if modalTop {
 		g.layoutConnectionManagerMain(dims, rails)
 	} else if g.registry != nil && g.registry.QueryEditor != nil {
+		// The CONNECTION_MANAGER modal is a MAIN_CONTEXT, so the Tier-3
+		// cleanup loop below (TEMPORARY_POPUP / DISPLAY_CONTEXT only) never
+		// tears its view down. Once the modal leaves the focus stack its
+		// centered box still lives in g.views and gocui's flush() keeps
+		// drawing it every frame — leaving border artifacts over the editor /
+		// results / status region. DeleteView removes it from g.views so it
+		// stops being drawn. Idempotent: ErrUnknownView (already gone) is
+		// the expected steady-state and is ignored (dbsavvy-1du).
+		if g.registry.ConnectionManager != nil {
+			if name := g.registry.ConnectionManager.GetViewName(); name != "" {
+				_ = g.driver.DeleteView(name)
+			}
+		}
 		qec := g.registry.QueryEditor
 		name := qec.GetViewName()
 		if d, ok := dims["main"]; ok && name != "" && d.X1 > d.X0 && d.Y1 > d.Y0 {
@@ -545,7 +558,30 @@ func (g *Gui) RunLayout(w, h int) error {
 		}
 	}
 
+	g.resyncOnViewTeardown()
 	return nil
+}
+
+// resyncOnViewTeardown forces a one-shot full Screen.Sync() on frames where
+// the live gocui view set shrank since the previous frame. A view leaving the
+// set (a closed CONNECTION_MANAGER modal, a dismissed popup/overlay) vacates
+// the cells it occupied, but tcell's incremental Show() only re-emits cells
+// whose content changed against its own model and does not repaint the
+// orphaned region; the per-frame Screen.Clear() at the top of RunLayout blanks
+// the back buffer but cannot force those physical cells to be re-emitted. A
+// Sync() (clear-screen flag + full invalidate) evicts the ghosts. Restricted
+// to teardown frames so steady-state rendering keeps the cheap diff path and
+// the user never sees a full-screen repaint mid-edit (dbsavvy-1du).
+func (g *Gui) resyncOnViewTeardown() {
+	vc, ok := g.driver.(interface{ LiveViewCount() int })
+	if !ok {
+		return
+	}
+	n := vc.LiveViewCount()
+	if n < g.prevLiveViews && gocui.Screen != nil {
+		gocui.Screen.Sync()
+	}
+	g.prevLiveViews = n
 }
 
 // modalIsTopMain reports whether the CONNECTION_MANAGER MAIN_CONTEXT modal

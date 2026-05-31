@@ -136,6 +136,14 @@ type Gui struct {
 	deps   Deps
 	driver types.GuiDriver
 
+	// prevLiveViews is the live gocui view count at the end of the previous
+	// RunLayout frame. When this frame's count is lower a view was torn down
+	// (a closed modal / popup / overlay); tcell's incremental Show() does not
+	// repaint the cells it vacated, so RunLayout forces a one-shot full
+	// Screen.Sync() that frame to evict the orphaned border ghosts
+	// (dbsavvy-1du).
+	prevLiveViews int
+
 	// Focus stack; driver-free.
 	tree *gui.ContextTree
 

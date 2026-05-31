@@ -6,6 +6,14 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
+// LiveViewCount returns the number of live gocui views. RunLayout reads it to
+// detect teardown frames (a shrink in the set) that need a full Screen.Sync()
+// to evict cells orphaned by a closed modal/popup, which the incremental
+// Show() leaves behind (dbsavvy-1du).
+func (d *gocuiDriver) LiveViewCount() int {
+	return len(d.g.Views())
+}
+
 // gocuiDriver wraps *gocui.Gui to satisfy types.GuiDriver. Per
 // architectural decision D4 / G3-D: this is the ONLY place that ever
 // imports and references gocui.Gui; the rest of pkg/gui reaches the
