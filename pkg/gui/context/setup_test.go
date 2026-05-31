@@ -12,8 +12,8 @@ func TestNewContextTreeReturnsAllContexts(t *testing.T) {
 		t.Fatal("NewContextTree returned nil")
 	}
 	flat := tree.Flatten()
-	if len(flat) != 27 {
-		t.Fatalf("Flatten() len = %d, want 27 (20 live + 4 stub + 2 main + 1 persistent)", len(flat))
+	if len(flat) != 26 {
+		t.Fatalf("Flatten() len = %d, want 26 (19 live + 4 stub + 2 main + 1 persistent)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -27,17 +27,17 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 	tree := NewContextTree(types.ContextTreeDeps{})
 
 	allKeys := []types.ContextKey{
-		// Live (16 — 2 side + 9 temp popup + 1 extras + 1 global + 3 display + 1 persistent popup - CONNECTIONS/CONNECTING removed by dbsavvy-bsh).
+		// Live (15 — 2 side + 9 temp popup + 1 global + 3 display + 1 persistent popup; messages panel removed by dbsavvy-fc2.1).
 		types.SCHEMAS, types.TABLES,
 		types.MENU, types.CONFIRMATION, types.PROMPT, types.SELECTION, types.SUGGESTIONS, types.COMMAND_LINE, types.HIDE_OVERLAY, types.EXPORT_MENU, types.TABLE_INSPECT,
-		types.MESSAGES, types.GLOBAL, types.LIMIT, types.WHICH_KEY, types.CHEATSHEET,
+		types.GLOBAL, types.LIMIT, types.WHICH_KEY, types.CHEATSHEET,
 		types.FIRST_RUN_TIP,
 		// Main + stub (6 — CONNECTING removed by dbsavvy-bsh).
 		types.QUERY_EDITOR, types.CONNECTION_MANAGER, types.TABLE_DATA_EDITOR, types.RESULT_GRID,
 		types.PLAN, types.HISTORY,
 	}
-	if len(allKeys) != 23 {
-		t.Fatalf("test bug: allKeys len = %d, want 23", len(allKeys))
+	if len(allKeys) != 22 {
+		t.Fatalf("test bug: allKeys len = %d, want 22", len(allKeys))
 	}
 	for _, k := range allKeys {
 		c := tree.ByKey(k)
@@ -71,8 +71,7 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.HIDE_OVERLAY, types.TEMPORARY_POPUP},
 		{types.EXPORT_MENU, types.TEMPORARY_POPUP},
 		{types.TABLE_INSPECT, types.TEMPORARY_POPUP},
-		// 1 EXTRAS, 1 GLOBAL, 3 DISPLAY.
-		{types.MESSAGES, types.EXTRAS_CONTEXT},
+		// 1 GLOBAL, 3 DISPLAY (messages panel removed by dbsavvy-fc2.1).
 		{types.GLOBAL, types.GLOBAL_CONTEXT},
 		{types.LIMIT, types.DISPLAY_CONTEXT},
 		{types.WHICH_KEY, types.DISPLAY_CONTEXT},
@@ -88,8 +87,8 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.PLAN, types.STUB},
 		{types.HISTORY, types.STUB},
 	}
-	if len(cases) != 23 {
-		t.Fatalf("test bug: cases len = %d, want 23", len(cases))
+	if len(cases) != 22 {
+		t.Fatalf("test bug: cases len = %d, want 22", len(cases))
 	}
 	for _, c := range cases {
 		got := tree.ByKey(c.key)
@@ -113,7 +112,7 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		// dbsavvy-bwq.py4: CellEditor, CommitDialog, ConflictDialog and
 		// FKReversePicker take TEMPORARY_POPUP from 9→13.
 		types.TEMPORARY_POPUP: 13,
-		types.EXTRAS_CONTEXT:  1,
+		types.EXTRAS_CONTEXT:  0,
 		types.GLOBAL_CONTEXT:  1,
 		types.DISPLAY_CONTEXT: 3,
 		// dbsavvy-wwd.1 promotes QUERY_EDITOR from STUB to a real

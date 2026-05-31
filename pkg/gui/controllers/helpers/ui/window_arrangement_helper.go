@@ -18,7 +18,6 @@ var requiredWindows = []string{
 	"tables",
 	"main",
 	"secondary",
-	"extras",
 	"status",
 	"options",
 	"popup-overlay",
@@ -37,15 +36,14 @@ var requiredWindows = []string{
 //	root ROW
 //	├── "options"  size=1            (top bar — "[Connection: prod-pg]")
 //	├── body ROW (weight 1)
-//	│   ├── upper COLUMN (weight 1)
-//	│   │   ├── left rail ROW size=24
-//	│   │   │   ├── "schemas"     weight=1
-//	│   │   │   └── "tables"      weight=1
-//	│   │   └── right ROW (weight 1)
-//	│   │       ├── "main"      weight=1
-//	│   │       └── "secondary" weight=1
-//	│   └── "extras" size=3 (messages overlay strip)
-//	└── "status" size=1              (bottom options/progress bar)
+//	│   └── upper COLUMN (weight 1)
+//	│       ├── left rail ROW size=24
+//	│       │   ├── "schemas"     weight=1
+//	│       │   └── "tables"      weight=1
+//	│       └── right ROW (weight 1)
+//	│           ├── "main"      weight=1
+//	│           └── "secondary" weight=1
+//	└── "status" size=2              (bottom options/progress bar, 2 rows)
 //
 // `popup-overlay` is added to the map AFTER the box arrangement runs:
 // boxlayout has no native overlay support, and the popup contexts
@@ -83,10 +81,9 @@ func GetWindowDimensions(width, height int) map[string]Dimensions {
 							},
 						},
 					},
-					{Window: "extras", Size: 3},
 				},
 			},
-			{Window: "status", Size: 1},
+			{Window: "status", Size: 2},
 		},
 	}
 

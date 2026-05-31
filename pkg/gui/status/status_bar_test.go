@@ -96,6 +96,70 @@ func TestBuildStatusLine_AlwaysEndsWithOptionsBarMore(t *testing.T) {
 	}
 }
 
+// TestBuildStatusLine_TwoLines verifies the populated status content is
+// split into exactly two lines joined by a single "\n": line 1 carries
+// the mode banner + connection header, line 2 carries the options and
+// the trailing more-hint (fc2.2 — status bar grown to 2 rows).
+func TestBuildStatusLine_TwoLines(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	conn := &models.Connection{Icon: "⚠", Label: "PROD"}
+	opts := []string{"q:quit"}
+
+	got := BuildStatusLine("-- INSERT --", conn, opts, tr, 0, 0, "", nil, nil)
+
+	if n := strings.Count(got, "\n"); n != 1 {
+		t.Fatalf("got %q with %d newlines, want exactly 1 (two lines)", got, n)
+	}
+	lines := strings.SplitN(got, "\n", 2)
+	line1, line2 := lines[0], lines[1]
+
+	if !strings.Contains(line1, "-- INSERT --") {
+		t.Errorf("line1 %q missing mode banner", line1)
+	}
+	if !strings.Contains(line1, "⚠ PROD") {
+		t.Errorf("line1 %q missing connection header", line1)
+	}
+	if !strings.Contains(line2, "q:quit") {
+		t.Errorf("line2 %q missing options", line2)
+	}
+	if !strings.HasSuffix(line2, tr.OptionsBarMore) {
+		t.Errorf("line2 %q must end with the more-hint", line2)
+	}
+	// The more-hint lives on line 2, not line 1.
+	if strings.Contains(line1, tr.OptionsBarMore) {
+		t.Errorf("line1 %q must not carry the more-hint", line1)
+	}
+}
+
+// TestBuildStatusLine_NoConnStillTwoLines verifies that with no active
+// connection the output still renders two lines: line 1 is the empty
+// no-conn slot, line 2 carries the more-hint (fc2.2 AC).
+func TestBuildStatusLine_NoConnStillTwoLines(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+
+	got := BuildStatusLine("", nil, nil, tr, 0, 0, "", nil, nil)
+
+	if n := strings.Count(got, "\n"); n != 1 {
+		t.Fatalf("got %q with %d newlines, want exactly 1 (two lines)", got, n)
+	}
+	lines := strings.SplitN(got, "\n", 2)
+	if lines[0] != "" {
+		t.Errorf("line1 = %q, want empty no-conn slot", lines[0])
+	}
+	if !strings.HasSuffix(lines[1], tr.OptionsBarMore) {
+		t.Errorf("line2 %q must end with the more-hint", lines[1])
+	}
+}
+
+// TestBuildStatusLine_NilTrNoSpuriousNewline verifies the empty edge:
+// a nil translation set yields "" with no spurious "\n" (fc2.2 AC).
+func TestBuildStatusLine_NilTrNoSpuriousNewline(t *testing.T) {
+	got := BuildStatusLine("", nil, nil, nil, 0, 0, "", nil, nil)
+	if got != "" {
+		t.Fatalf("got %q, want empty string with no newline", got)
+	}
+}
+
 // TestBuildStatusLine_ModeLabelPrepended verifies modeLabel becomes the
 // FIRST section of the status line, ahead of the connection header. New
 // in dlp.9.

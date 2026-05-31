@@ -18,7 +18,9 @@ const (
 	// TEMPORARY_POPUP is a popup discarded automatically the next time
 	// another popup is pushed on top of it.
 	TEMPORARY_POPUP
-	// EXTRAS_CONTEXT hosts the messages panel.
+	// EXTRAS_CONTEXT is a bottom-rail extras slot. It currently hosts no
+	// context (the messages panel was removed); the kind survives for the
+	// layout window box and future reuse.
 	EXTRAS_CONTEXT
 	// GLOBAL_CONTEXT has no view; it exists only to host global
 	// keybindings (leader prefix, ":" command line, etc.).
@@ -95,7 +97,6 @@ const (
 	TABLE_DATA_EDITOR ContextKey = "table_data_editor"
 	RESULT_GRID       ContextKey = "result_grid"
 	PLAN              ContextKey = "plan"
-	MESSAGES          ContextKey = "messages"
 	MENU              ContextKey = "menu"
 	CONFIRMATION      ContextKey = "confirmation"
 	PROMPT            ContextKey = "prompt"
@@ -158,7 +159,6 @@ func AllContextKeys() []ContextKey {
 		TABLE_DATA_EDITOR,
 		RESULT_GRID,
 		PLAN,
-		MESSAGES,
 		MENU,
 		CONFIRMATION,
 		PROMPT,

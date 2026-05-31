@@ -444,7 +444,7 @@ func (g *Gui) RunLayout(w, h int) error {
 	}
 
 	// Tier 4a: always-on status bar (dbsavvy-tro.3). The boxlayout
-	// reserves a 1-row "status" slot at the canvas bottom; we materialise
+	// reserves a 2-row "status" slot at the canvas bottom; we materialise
 	// a borderless view there each frame and hand it to RenderStatusLine,
 	// which multiplexes the toast helper's Current() over the default
 	// status line for the TTL window. SetView returning ErrUnknownView
@@ -456,20 +456,20 @@ func (g *Gui) RunLayout(w, h int) error {
 	// Rect expansion (dbsavvy-8tj): the lazygit gocui fork computes a
 	// view's writable InnerHeight as Height-2 regardless of Frame
 	// (pkg/gocui/view.go:527-547) and writes cells at screen position
-	// (x0+x+1, y0+y+1). A naked Size:1 slot from boxlayout yields
-	// Y0==Y1 → InnerHeight=0, and the off-by-one cell offset places
-	// content at row H (off-screen) for a bottom strip. We follow the
-	// same trick commandLineRect uses for COMMAND_LINE: extend the
-	// rectangle by -1/+1 in Y so gocui sees Height=3, InnerHeight=1,
-	// with the single visible row landing exactly on the boxlayout
-	// slot's reserved screen row (d.Y0). The "virtual" extra rows are
-	// never written to — gocui clamps cell writes to inner bounds.
+	// (x0+x+1, y0+y+1). The off-by-one cell offset places content at row
+	// H (off-screen) for a bottom strip unless the rect is grown. We
+	// follow the same trick commandLineRect uses for COMMAND_LINE: extend
+	// the rectangle by -1/+1 in Y. For the Size:2 slot (Y1-Y0==1) gocui
+	// then sees Height=4, InnerHeight=2, with the two visible rows landing
+	// exactly on the boxlayout slot's reserved screen rows (d.Y0, d.Y1).
+	// The "virtual" extra rows are never written to — gocui clamps cell
+	// writes to inner bounds.
 	if d, ok := dims[AppStatusViewName]; ok && d.X1 > d.X0 && d.Y1 >= d.Y0 {
 		view, err := g.driver.SetView(AppStatusViewName, d.X0, d.Y0-1, d.X1, d.Y1+1, 0)
 		if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
-		// Borderless 1-row strip — same shape as COMMAND_LINE. Without
+		// Borderless 2-row strip — same shape as COMMAND_LINE. Without
 		// Frame=false gocui would draw a border box around the cell.
 		if view != nil {
 			view.Frame = false
@@ -534,7 +534,7 @@ func (g *Gui) RunLayout(w, h int) error {
 			// so even though Tier 1.4 / syncViewToBuffer position the view
 			// cursor every frame, the user sees no caret unless we enable
 			// it here. QUERY_EDITOR is the only tiled editable context;
-			// every other tile (side rails / messages) must keep the caret
+			// every other tile (side rails) must keep the caret
 			// off so the cursor doesn't bleed onto rail rows. PROMPT and
 			// COMMAND_LINE are TEMPORARY_POPUPs and own their own caret
 			// state via PromptHelper / CommandLineCommandDeps — we leave

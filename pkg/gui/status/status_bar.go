@@ -39,9 +39,11 @@ const (
 	ansiRedFgSGR    = "\x1b[31m" // ErrorFg: aborted transaction
 )
 
-// BuildStatusLine renders the plain text shown in the status slot.
+// BuildStatusLine renders the plain text shown in the 2-row status slot.
+// The returned string carries two lines joined by "\n":
 //
-// Layout: "<modeLabel> | <spinner> | <icon> <label> | [RO] <option1> <option2> … | <Tr.OptionsBarMore>".
+//	line 1: "<modeLabel> | <spinner> | <icon> <label>"
+//	line 2: "<txBadge> | <settings> | [RO] <option1> … | <Tr.OptionsBarMore>"
 //
 // Each section is omitted when empty:
 //   - the mode banner slot is omitted when modeLabel is the empty string
@@ -67,10 +69,11 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 		return ""
 	}
 
-	var sections []string
+	// line1: mode banner / spinner / connection header.
+	var line1 []string
 
 	if modeLabel != "" {
-		sections = append(sections, modeLabel)
+		line1 = append(line1, modeLabel)
 	}
 
 	if busyCount > 0 {
@@ -81,19 +84,22 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 		// section join consumes downstream. Mask the sign so a wrapped or
 		// negative frame can't index out of range.
 		idx := (spinnerFrame%int64(len(spinnerGlyphs)) + int64(len(spinnerGlyphs))) % int64(len(spinnerGlyphs))
-		sections = append(sections, string(spinnerGlyphs[idx]))
+		line1 = append(line1, string(spinnerGlyphs[idx]))
 	}
 
 	if header := presentation.HeaderTextFor(activeConn); header != "" {
-		sections = append(sections, tintHeaderForConn(header, activeConn))
+		line1 = append(line1, tintHeaderForConn(header, activeConn))
 	}
 
+	// line2: transaction badge / session settings / options / more-hint.
+	var line2 []string
+
 	if tag := txIndicator(txStatus, savepoints); tag != "" {
-		sections = append(sections, tag)
+		line2 = append(line2, tag)
 	}
 
 	if tags := sessionSettingsTags(sessionSettings); len(tags) > 0 {
-		sections = append(sections, tags...)
+		line2 = append(line2, tags...)
 	}
 
 	var mid []string
@@ -102,12 +108,19 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 	}
 	mid = append(mid, options...)
 	if len(mid) > 0 {
-		sections = append(sections, strings.Join(mid, optionSep))
+		line2 = append(line2, strings.Join(mid, optionSep))
 	}
 
-	sections = append(sections, tr.OptionsBarMore)
+	// The "more" hint is the only guaranteed section; it stays the final
+	// element of line 2 (tests assert HasSuffix on tr.OptionsBarMore).
+	line2 = append(line2, tr.OptionsBarMore)
 
-	return strings.Join(sections, sectionSep)
+	first := strings.Join(line1, sectionSep)
+	second := strings.Join(line2, sectionSep)
+	if first == "" && second == "" {
+		return ""
+	}
+	return strings.Join([]string{first, second}, "\n")
 }
 
 // txIndicator renders the transaction status badge for the status bar.

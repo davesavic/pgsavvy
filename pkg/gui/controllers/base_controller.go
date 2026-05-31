@@ -142,8 +142,8 @@ type QueryDeps struct {
 	EditorBuffer EditorBufferReader
 
 	// Notice routes server NOTICE/WARNING messages from streaming
-	// queries to the messages panel and a first-of-run toast
-	// (dbsavvy-66p.13). Nil-safe: the controller no-ops when unwired.
+	// queries to a first-of-run toast (dbsavvy-66p.13). Nil-safe:
+	// the controller no-ops when unwired.
 	Notice NoticeReporter
 
 	// ActivePlanContextFn resolves the currently-active plan tab's

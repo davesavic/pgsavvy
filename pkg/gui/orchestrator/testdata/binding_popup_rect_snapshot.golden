@@ -313,7 +313,6 @@ popuprect	key=history	none
 popuprect	key=indexes	none
 popuprect	key=limit	none
 popuprect	key=menu	x0=25	y0=25	x1=75	y1=75
-popuprect	key=messages	none
 popuprect	key=plan	none
 popuprect	key=prompt	x0=10	y0=25	x1=90	y1=75
 popuprect	key=query_editor	none

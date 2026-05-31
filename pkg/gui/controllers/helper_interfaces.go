@@ -248,7 +248,7 @@ type EditorBufferReader interface {
 }
 
 // NoticeReporter routes server NOTICE / WARNING messages from
-// streaming queries to the messages panel and a first-of-run toast.
+// streaming queries to a first-of-run toast.
 // QueryEditorController calls OnRunStart before launching a run,
 // AttachStream for each RunHandle the run produces, and Finish once
 // no more streams will attach; OnRunEnd then fires automatically when

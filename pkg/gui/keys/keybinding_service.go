@@ -44,7 +44,6 @@ var allKnownContexts = []types.ContextKey{
 	types.TABLE_DATA_EDITOR,
 	types.RESULT_GRID,
 	types.PLAN,
-	types.MESSAGES,
 	types.MENU,
 	types.CONFIRMATION,
 	types.PROMPT,

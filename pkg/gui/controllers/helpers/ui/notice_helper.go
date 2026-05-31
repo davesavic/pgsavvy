@@ -28,18 +28,14 @@ type noticeToaster interface {
 }
 
 // NoticeHelperDeps bundles the collaborators required to construct a
-// NoticeHelper. Sink may be nil (logging disabled); Toaster may be nil
-// (toasting disabled); OnWorker may be nil (callers feed OnNotice
-// directly — test-friendly); Tr is required because the severity
-// prefixes and toast format strings live there. IconLabel is optional
-// and may return "" when the active connection has no icon configured.
+// NoticeHelper. Toaster may be nil (toasting disabled); OnWorker may be
+// nil (callers feed OnNotice directly — test-friendly); Tr is required
+// because the toast format strings live there.
 type NoticeHelperDeps struct {
-	Sink      MessagesSink
-	Toaster   noticeToaster
-	OnWorker  func(func(gocui.Task) error)
-	Tr        *i18n.TranslationSet
-	ToastTTL  time.Duration
-	IconLabel func() string
+	Toaster  noticeToaster
+	OnWorker func(func(gocui.Task) error)
+	Tr       *i18n.TranslationSet
+	ToastTTL time.Duration
 }
 
 // NoticeReporter is the controller-facing surface for routing server
@@ -57,20 +53,17 @@ type NoticeReporter interface {
 }
 
 // NoticeHelper routes server NOTICE/WARNING messages from a streaming
-// query into two sinks: the messages panel (every notice) and a
-// first-of-run toast (NOTICE/WARNING only; counter-updates on
-// subsequent emissions in the same run via ToastHelper.ShowOrUpdate).
+// query into a first-of-run toast (NOTICE/WARNING only; counter-updates
+// on subsequent emissions in the same run via ToastHelper.ShowOrUpdate).
 // The helper is run-scoped — OnRunStart establishes a runID,
 // AttachStream spawns a drain worker per RunHandle, and Finish signals
 // "no more streams"; once every attached stream's notice channel
 // closes the helper resets its run state.
 type NoticeHelper struct {
-	sink      MessagesSink
-	toaster   noticeToaster
-	onWorker  func(func(gocui.Task) error)
-	tr        *i18n.TranslationSet
-	toastTTL  time.Duration
-	iconLabel func() string
+	toaster  noticeToaster
+	onWorker func(func(gocui.Task) error)
+	tr       *i18n.TranslationSet
+	toastTTL time.Duration
 
 	mu             sync.Mutex
 	currentRun     string
@@ -91,12 +84,10 @@ func NewNoticeHelper(deps NoticeHelperDeps) *NoticeHelper {
 		ttl = defaultNoticeToastTTL
 	}
 	return &NoticeHelper{
-		sink:      deps.Sink,
-		toaster:   deps.Toaster,
-		onWorker:  deps.OnWorker,
-		tr:        tr,
-		toastTTL:  ttl,
-		iconLabel: deps.IconLabel,
+		toaster:  deps.Toaster,
+		onWorker: deps.OnWorker,
+		tr:       tr,
+		toastTTL: ttl,
 	}
 }
 
@@ -128,9 +119,8 @@ func (h *NoticeHelper) OnRunEnd(runID string) {
 	h.mu.Unlock()
 }
 
-// OnNotice processes a single pgconn.Notice. The notice is logged to
-// the messages sink (every severity) and, when severity is NOTICE or
-// WARNING, raises a first-of-run toast or counter-updates the existing
+// OnNotice processes a single pgconn.Notice. When severity is NOTICE or
+// WARNING it raises a first-of-run toast or counter-updates the existing
 // one. Notices delivered while no run is bound (e.g. a stale drain-
 // worker firing after OnRunEnd) are dropped entirely.
 func (h *NoticeHelper) OnNotice(n pgconn.Notice) {
@@ -149,12 +139,6 @@ func (h *NoticeHelper) OnNotice(n pgconn.Notice) {
 		isFirst = count == 1
 	}
 	h.mu.Unlock()
-
-	// Log first; the sink hops the actual driver.Write onto the UI
-	// thread internally so we can call it from any goroutine.
-	if h.sink != nil {
-		h.sink.Append(h.formatLogLine(n))
-	}
 
 	if !toastable || h.toaster == nil {
 		return
@@ -239,40 +223,8 @@ func (h *NoticeHelper) streamFinished(runID string) {
 	h.mu.Unlock()
 }
 
-// formatLogLine builds the messages-panel entry: "[<SEVERITY>]·<icon>·<msg>"
-// (middle-dot separator). The icon segment is omitted when iconLabel
-// is nil or returns "".
-func (h *NoticeHelper) formatLogLine(n pgconn.Notice) string {
-	sev := h.severityLabel(n.Severity)
-	msg := session.RedactDSN(n.Message)
-	icon := ""
-	if h.iconLabel != nil {
-		icon = h.iconLabel()
-	}
-	if icon == "" {
-		return fmt.Sprintf("[%s]·%s", sev, msg)
-	}
-	return fmt.Sprintf("[%s]·%s·%s", sev, icon, msg)
-}
-
-// severityLabel maps a pgconn severity string to a localized label.
-// Unknown severities pass through upper-cased.
-func (h *NoticeHelper) severityLabel(raw string) string {
-	switch strings.ToUpper(strings.TrimSpace(raw)) {
-	case "NOTICE":
-		return h.tr.SeverityNotice
-	case "WARNING":
-		return h.tr.SeverityWarning
-	case "INFO":
-		return h.tr.SeverityInfo
-	default:
-		return strings.ToUpper(strings.TrimSpace(raw))
-	}
-}
-
 // isToastableSeverity returns true for severities that surface as a
-// toast in addition to the messages line. NOTICE and WARNING toast;
-// INFO and everything else log-only.
+// toast. NOTICE and WARNING toast; INFO and everything else are ignored.
 func isToastableSeverity(raw string) bool {
 	switch strings.ToUpper(strings.TrimSpace(raw)) {
 	case "NOTICE", "WARNING":

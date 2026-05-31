@@ -871,14 +871,14 @@ func TestRunLayoutCommandLineCaretResetOnRePush(t *testing.T) {
 // TestRunLayoutStatusBarRectHasVisibleInnerRow (dbsavvy-8tj) regresses
 // the QA-1.1 "no status bar" bug. The lazygit gocui fork computes a
 // view's writable InnerHeight as Height-2 regardless of Frame and
-// writes cells at screen position (x0+x+1, y0+y+1). boxlayout's Size:1
-// slot yields Y0==Y1 (Height=1 → InnerHeight=0 → invisible), so the
-// Tier-4a SetView call must expand the rect by -1/+1 in Y to land a
-// visible row on the boxlayout-reserved screen row. Asserts (a) the
-// status view IS laid out, and (b) the resulting rectangle has
-// Y1-Y0 >= 2 so the gocui inner area is non-empty. Width is also
-// asserted >= 3 for symmetry, though boxlayout currently always gives
-// status the full canvas width.
+// writes cells at screen position (x0+x+1, y0+y+1). boxlayout's Size:2
+// slot yields Y1-Y0==1 (Height=2 → InnerHeight=0 → invisible), so the
+// Tier-4a SetView call must expand the rect by -1/+1 in Y to land the
+// two visible rows on the boxlayout-reserved screen rows. Asserts (a)
+// the status view IS laid out, and (b) the expanded rectangle has
+// Height==4 (gocui InnerHeight==2) with the two inner rows on the
+// canvas bottom. Width is asserted >= 3 for symmetry, though boxlayout
+// currently always gives status the full canvas width.
 func TestRunLayoutStatusBarRectHasVisibleInnerRow(t *testing.T) {
 	g, rec := buildTestGui(t)
 	if err := g.RunLayout(120, 40); err != nil {
@@ -897,9 +897,12 @@ func TestRunLayoutStatusBarRectHasVisibleInnerRow(t *testing.T) {
 	}
 
 	// gocui (lazygit fork) view.go:540: InnerHeight = max(0, Height-2)
-	// where Height = Y1-Y0+1. We need InnerHeight >= 1, so Y1-Y0 >= 2.
-	if h := found.Y1 - found.Y0 + 1; h < 3 {
-		t.Errorf("status SetView rect Height=%d (Y0=%d Y1=%d); want >= 3 so gocui InnerHeight >= 1 — content would be invisible",
+	// where Height = Y1-Y0+1. The Size:2 boxlayout slot (rows 38-39 on a
+	// 40-row canvas) is expanded -1/+1 in Y to SetView(37,40) → Height=4
+	// → InnerHeight=2. We assert Height==4 so the bar has exactly two
+	// visible inner rows.
+	if h := found.Y1 - found.Y0 + 1; h != 4 {
+		t.Errorf("status SetView rect Height=%d (Y0=%d Y1=%d); want 4 so gocui InnerHeight == 2 (2-row status bar)",
 			h, found.Y0, found.Y1)
 	}
 	if w := found.X1 - found.X0 + 1; w < 3 {
@@ -907,14 +910,18 @@ func TestRunLayoutStatusBarRectHasVisibleInnerRow(t *testing.T) {
 			w, found.X0, found.X1)
 	}
 
-	// The visible inner row (gocui writes at y0+1) must land on the
-	// boxlayout-reserved screen row at the canvas bottom — for a 40-row
-	// terminal that's row 39. If layout's expansion drifts off the
-	// reserved slot, the bar would render over the body or be clipped.
-	const wantInnerRow = 39
-	if got := found.Y0 + 1; got != wantInnerRow {
-		t.Errorf("status visible inner row = %d (Y0=%d), want %d (bottom of 40-row canvas)",
-			got, found.Y0, wantInnerRow)
+	// The two visible inner rows (gocui writes at y0+1 and y0+2) must land
+	// on the boxlayout-reserved screen rows at the canvas bottom — for a
+	// 40-row terminal that's rows 38 and 39. If layout's expansion drifts
+	// off the reserved slot, the bar would render over the body or be
+	// clipped.
+	const wantTopInnerRow, wantBottomInnerRow = 38, 39
+	if got := found.Y0 + 1; got != wantTopInnerRow {
+		t.Errorf("status top visible inner row = %d (Y0=%d), want %d", got, found.Y0, wantTopInnerRow)
+	}
+	if got := found.Y0 + 2; got != wantBottomInnerRow {
+		t.Errorf("status bottom visible inner row = %d (Y0=%d), want %d (bottom of 40-row canvas)",
+			got, found.Y0, wantBottomInnerRow)
 	}
 }
 

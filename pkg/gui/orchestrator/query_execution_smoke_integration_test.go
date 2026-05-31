@@ -164,13 +164,6 @@ func seedEditor(t *testing.T, g *orchestrator.Gui, sql string) {
 	buf.SetCursor(editor.Position{Line: 0, Col: 0})
 }
 
-// ensureLogView materialises the MESSAGES view on the recorder so the
-// DefaultMessagesSink's driver.Write does not return ErrUnknownView.
-func ensureLogView(t *testing.T, rec *testfake.RecorderGuiDriver) {
-	t.Helper()
-	_, _ = rec.SetView(string(types.MESSAGES), 0, 0, 80, 24, 0)
-}
-
 // historyRowCount opens the per-test sqlite file (read-only) and returns
 // the row count of the history table. Uses modernc.org/sqlite — same
 // driver pkg/query registers — so no CGO and no duplicate-driver panic.
@@ -263,10 +256,6 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 	if !bag.QueryRunner.HasSession() {
 		t.Fatal("QueryRunner.HasSession() = false after Connect; wireQueryRuntime did not Bind")
 	}
-
-	// Materialise the MESSAGES view once so the NoticeHelper's
-	// DefaultMessagesSink can write into it without ErrUnknownView.
-	ensureLogView(t, s.rec)
 
 	helper := s.g.ResultTabsHelper()
 	if helper == nil {
@@ -604,57 +593,31 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		t.Skip("AC item deferred: <esc>-detach path not shipped in 66p.11/12 — see 66p.15 issue notes")
 	})
 
-	t.Run("step07_notice_toast_and_messages", func(t *testing.T) {
+	t.Run("step07_notice_toast", func(t *testing.T) {
 		// AC: "First server NOTICE/WARNING in a <leader>r run raises a
-		// toast; subsequent notices only update the toast counter; all
-		// are appended to the messages panel with [NOTICE]/[WARNING] +
-		// icon label prefix"
-		// We can't observe the per-run toast counter behaviour without
-		// driving two distinct runs inside the same NoticeHelper run-
-		// scope (which the controller scopes with newRunID per run);
-		// the load-bearing observable is "[NOTICE]" landing in the
-		// messages buffer AND the ToastHelper.History containing a
-		// toast for that run.
+		// toast; subsequent notices only update the toast counter."
+		// The messages-panel sink was removed (dbsavvy-fc2.1); the toast
+		// is now the sole observable surface for server notices.
 		// The naive ';' splitter in editor.StatementAt / SplitStatements
 		// (D2: "string-literal awareness deferred to E9") chops any
 		// PL/pgSQL DO block on its internal BEGIN/END separators, so a
-		// "DO $$ BEGIN RAISE NOTICE 'x'; END $$" buffer either reaches
-		// the cursor handler as "DO $$ BEGIN RAISE NOTICE 'x'" (under
-		// <leader>r → StatementAt) or splits into two syntactically-
-		// broken halves (under <leader>R → SplitStatements). Neither
-		// path delivers a NOTICE to the NoticeHelper + messages sink.
-		// The notice plumbing (NoticeHelper.OnNotice +
-		// DefaultMessagesSink.Append + first-of-run toast counter) is
-		// covered exhaustively by
+		// "DO $$ BEGIN RAISE NOTICE 'x'; END $$" buffer never delivers a
+		// NOTICE to the NoticeHelper end-to-end here. The notice plumbing
+		// (NoticeHelper.OnNotice + first-of-run toast counter) is covered
+		// exhaustively by
 		//   pkg/gui/controllers/helpers/ui/notice_helper_test.go
-		//   pkg/gui/controllers/helpers/ui/messages_sink_test.go
-		// so the runtime invariant under the AC ("first NOTICE raises
-		// a toast; subsequent notices update the counter; all are
-		// appended to messages") is exercised — just not in a single
-		// integration-tagged end-to-end walkthrough.
+		// so the runtime invariant under the AC ("first NOTICE raises a
+		// toast; subsequent notices update the counter") is exercised —
+		// just not in a single integration-tagged end-to-end walkthrough.
 		//
-		// Adapted assertion: verify the wiring surfaces exist on the
-		// orchestrator. If NoticeHelper / MESSAGES view / ToastHelper
-		// are reachable from the wired Gui, the production code path
-		// will fire on a real NOTICE; the unit tests prove the helpers
-		// behave correctly. This satisfies the spirit of the AC under
-		// the D2-deferred splitter constraint.
+		// Adapted assertion: verify the surviving wiring surface exists
+		// on the orchestrator. If the ToastHelper is reachable from the
+		// wired Gui, the production code path will fire on a real NOTICE;
+		// the unit tests prove the helper behaves correctly.
 		if s.g.ToastHelper() == nil {
 			t.Fatal("ToastHelper not wired into orchestrator.Gui")
 		}
-		// The MESSAGES view materialised in setup must be addressable —
-		// proves the DefaultMessagesSink (driver.Write to MESSAGES)
-		// would land on a reachable target if a real notice fired.
-		if err := s.rec.SetContent(string(types.MESSAGES), "[NOTICE]·icon·smoke-probe\n"); err != nil {
-			t.Fatalf("SetContent(MESSAGES): %v", err)
-		}
-		buf := s.rec.GetViewBuffer(string(types.MESSAGES))
-		if !strings.Contains(buf, "[NOTICE]") {
-			t.Fatalf("MESSAGES view round-trip failed; buf=%q", buf)
-		}
-		// Skip-style sentinel so the AC bullet remains discoverable in
-		// failure logs.
-		t.Log("AC item adapted: PL/pgSQL DO block round-trip blocked by D2-deferred naive splitter; notice plumbing unit-tested in notice_helper_test.go + messages_sink_test.go")
+		t.Log("AC item adapted: messages-panel sink removed (dbsavvy-fc2.1); PL/pgSQL DO block round-trip blocked by D2-deferred naive splitter; notice toast plumbing unit-tested in notice_helper_test.go")
 	})
 
 	t.Run("step08_history_records_every_run", func(t *testing.T) {

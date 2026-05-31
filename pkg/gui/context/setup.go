@@ -50,8 +50,7 @@ type ContextTree struct {
 	// (epic dbsavvy-bwq B6). TEMPORARY_POPUP kind.
 	FKReversePicker *FKReversePickerContext
 
-	// Live EXTRAS / GLOBAL / DISPLAY instances.
-	Messages   *MessagesContext
+	// Live GLOBAL / DISPLAY instances.
 	Global     *GlobalContext
 	Limit      *LimitContext
 	WhichKey   *WhichKeyContext
@@ -244,12 +243,7 @@ func contextSpecs() []contextSpec {
 			assign: func(t *ContextTree, c types.IBaseContext) { t.FKReversePicker = c.(*FKReversePickerContext) },
 		},
 
-		// EXTRAS / GLOBAL / DISPLAY.
-		{
-			key: types.MESSAGES, kind: types.EXTRAS_CONTEXT, title: "Messages", inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewMessagesContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.Messages = c.(*MessagesContext) },
-		},
+		// GLOBAL / DISPLAY.
 		{
 			// GLOBAL_CONTEXT has no view.
 			key: types.GLOBAL, kind: types.GLOBAL_CONTEXT, viewName: "", inFlatten: true,
@@ -378,16 +372,16 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 }
 
 // Flatten returns every Context (live + stub) in a stable order. Order is
-// defined by contextSpecs (entries with inFlatten=true): side rail (3) ->
-// temporary popups (13) -> extras/global/display (5) -> persistent popups
-// (1) -> main + stubs (6). Total length is always 28 (COLUMNS/INDEXES are
+// defined by contextSpecs (entries with inFlatten=true): side rail (2) ->
+// temporary popups (13) -> global/display (4) -> persistent popups
+// (1) -> main + stubs (6). Total length is always 26 (COLUMNS/INDEXES are
 // excluded, matching the historical contract).
 func (t *ContextTree) Flatten() []types.IBaseContext {
 	return t.all
 }
 
 // ByKey returns the Context registered under the given key, or nil when
-// the key is unknown. Lookup is O(n) over Flatten() — 27 entries — which
+// the key is unknown. Lookup is O(n) over Flatten() — 26 entries — which
 // is cheaper than maintaining a separate map for this size.
 func (t *ContextTree) ByKey(key types.ContextKey) types.IBaseContext {
 	for _, c := range t.Flatten() {
