@@ -388,6 +388,10 @@ func (v *View) SetHiddenCols(set map[int]bool) {
 		return
 	}
 	v.hiddenColSet = out
+	// If the column under the cursor was just hidden, move the cursor to
+	// a visible neighbor so it never renders invisibly. dbsavvy hidden-col
+	// navigation fix.
+	v.snapCursorOffHiddenLocked()
 }
 
 // HiddenCols returns a defensive copy of the current hidden-col index

@@ -74,6 +74,101 @@ func TestJumpColFirstLast(t *testing.T) {
 	require.Equal(t, 0, c, "JumpColFirst must land on col 0")
 }
 
+// fourColView is a 4-column, 1-row grid used by the hidden-column
+// navigation tests below.
+func fourColView() *View {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{
+		{Name: "c0", TypeName: "text"},
+		{Name: "c1", TypeName: "text"},
+		{Name: "c2", TypeName: "text"},
+		{Name: "c3", TypeName: "text"},
+	})
+	v.AppendRows([]models.Row{{Values: []any{"a", "b", "c", "d"}}})
+	return v
+}
+
+// TestMoveCursorRight_SkipsHiddenColumns verifies right-motion steps over
+// a run of hidden columns instead of parking the cursor on one (where it
+// would render invisibly). dbsavvy hidden-col navigation fix.
+func TestMoveCursorRight_SkipsHiddenColumns(t *testing.T) {
+	v := fourColView()
+	v.SetHiddenCols(map[int]bool{1: true, 2: true})
+
+	v.MoveCursorRight()
+	_, c := v.CursorPosition()
+	require.Equal(t, 3, c, "right from col 0 must skip hidden 1,2 to land on 3")
+}
+
+// TestMoveCursorLeft_SkipsHiddenColumns is the symmetric counterpart.
+func TestMoveCursorLeft_SkipsHiddenColumns(t *testing.T) {
+	v := fourColView()
+	v.SetHiddenCols(map[int]bool{1: true, 2: true})
+	v.JumpColLast()
+
+	v.MoveCursorLeft()
+	_, c := v.CursorPosition()
+	require.Equal(t, 0, c, "left from col 3 must skip hidden 2,1 to land on 0")
+}
+
+// TestMoveCursorRight_NoVisibleColumnToRightStays verifies the cursor
+// holds position when every column to the right is hidden.
+func TestMoveCursorRight_NoVisibleColumnToRightStays(t *testing.T) {
+	v := fourColView()
+	v.SetHiddenCols(map[int]bool{2: true, 3: true})
+	v.MoveCursorRight() // 0 -> 1
+
+	v.MoveCursorRight() // 1 -> nothing visible to the right
+	_, c := v.CursorPosition()
+	require.Equal(t, 1, c, "right must stay put when only hidden columns remain")
+}
+
+// TestJumpColLast_LandsOnLastVisibleColumn verifies $ lands on the last
+// visible column, not a hidden trailing column.
+func TestJumpColLast_LandsOnLastVisibleColumn(t *testing.T) {
+	v := fourColView()
+	v.SetHiddenCols(map[int]bool{3: true})
+
+	v.JumpColLast()
+	_, c := v.CursorPosition()
+	require.Equal(t, 2, c, "$ must land on last visible column (2), not hidden 3")
+}
+
+// TestJumpColFirst_LandsOnFirstVisibleColumn verifies 0/^ lands on the
+// first visible column, not a hidden leading column.
+func TestJumpColFirst_LandsOnFirstVisibleColumn(t *testing.T) {
+	v := fourColView()
+	v.SetHiddenCols(map[int]bool{0: true})
+	v.JumpColLast()
+
+	v.JumpColFirst()
+	_, c := v.CursorPosition()
+	require.Equal(t, 1, c, "0 must land on first visible column (1), not hidden 0")
+}
+
+// TestSetHiddenCols_SnapsCursorOffNewlyHiddenColumn verifies that hiding
+// the column the cursor sits on moves the cursor to a visible neighbor so
+// it never renders invisibly. dbsavvy hidden-col navigation fix.
+func TestSetHiddenCols_SnapsCursorOffNewlyHiddenColumn(t *testing.T) {
+	v := fourColView()
+	v.SetCursor(0, 2)
+
+	v.SetHiddenCols(map[int]bool{2: true})
+	_, c := v.CursorPosition()
+	require.Equal(t, 3, c, "hiding col 2 under the cursor must snap to visible 3")
+}
+
+// TestSetCursor_SnapsOffHiddenColumn verifies a programmatic SetCursor
+// onto a hidden column lands on the nearest visible column instead.
+func TestSetCursor_SnapsOffHiddenColumn(t *testing.T) {
+	v := fourColView()
+	v.SetHiddenCols(map[int]bool{1: true})
+
+	v.SetCursor(0, 1)
+	_, c := v.CursorPosition()
+	require.Equal(t, 2, c, "SetCursor onto hidden col 1 must snap to visible 2")
+}
+
 // TestHalfPageDown_Step verifies HalfPageDown advances by ResultPageSize/2
 // when there's enough room, and clamps to the last row otherwise.
 func TestHalfPageDown_Step(t *testing.T) {

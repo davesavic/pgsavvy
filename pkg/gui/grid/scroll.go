@@ -60,22 +60,55 @@ func (v *View) MoveCursorUp() {
 	v.expandedLineOffset = 0
 }
 
-// MoveCursorLeft moves the cursor left by one column. Clamped to
-// column 0; does not wrap.
+// nextVisibleColLocked returns the nearest non-hidden column index
+// strictly in direction dir (+1 right, -1 left) from `from`, or -1 when
+// none exists. Cursor motion runs in raw-index space but hidden columns
+// are filtered out of the render (visibleColumnOrder), so stepping by a
+// raw ±1 can park the cursor on a hidden column where it renders
+// invisibly. This skips the hidden run instead. Caller holds v.mu.
+func (v *View) nextVisibleColLocked(from, dir int) int {
+	for c := from + dir; c >= 0 && c < len(v.cols); c += dir {
+		if !v.hiddenColSet[c] {
+			return c
+		}
+	}
+	return -1
+}
+
+// snapCursorOffHiddenLocked moves the cursor to the nearest visible
+// column (preferring the right) when it currently sits on a hidden one.
+// No-op when the cursor is already on a visible column. Caller holds
+// v.mu.
+func (v *View) snapCursorOffHiddenLocked() {
+	if !v.hiddenColSet[v.cursorCol] {
+		return
+	}
+	if c := v.nextVisibleColLocked(v.cursorCol, +1); c >= 0 {
+		v.cursorCol = c
+		return
+	}
+	if c := v.nextVisibleColLocked(v.cursorCol, -1); c >= 0 {
+		v.cursorCol = c
+	}
+}
+
+// MoveCursorLeft moves the cursor to the nearest visible column to the
+// left, skipping hidden columns. Clamped to the first visible column;
+// does not wrap.
 func (v *View) MoveCursorLeft() {
 	v.mu.Lock()
-	if v.cursorCol > 0 {
-		v.cursorCol--
+	if c := v.nextVisibleColLocked(v.cursorCol, -1); c >= 0 {
+		v.cursorCol = c
 	}
 	v.mu.Unlock()
 }
 
-// MoveCursorRight moves the cursor right by one column. Clamped to
-// the last configured column.
+// MoveCursorRight moves the cursor to the nearest visible column to the
+// right, skipping hidden columns. Clamped to the last visible column.
 func (v *View) MoveCursorRight() {
 	v.mu.Lock()
-	if len(v.cols) > 0 && v.cursorCol < len(v.cols)-1 {
-		v.cursorCol++
+	if c := v.nextVisibleColLocked(v.cursorCol, +1); c >= 0 {
+		v.cursorCol = c
 	}
 	v.mu.Unlock()
 }
@@ -218,19 +251,25 @@ func (v *View) JumpColFirst() {
 		return
 	}
 	v.mu.Lock()
-	v.cursorCol = 0
+	// First *visible* column: start before col 0 and step right past any
+	// hidden leading columns so the cursor never lands on a hidden one.
+	if c := v.nextVisibleColLocked(-1, +1); c >= 0 {
+		v.cursorCol = c
+	}
 	v.mu.Unlock()
 }
 
-// JumpColLast moves the cursor to the last configured column ($). It is
+// JumpColLast moves the cursor to the last visible column ($). It is
 // a no-op in expanded mode, which has a single logical column. dbsavvy-2fq.
 func (v *View) JumpColLast() {
 	if v.ViewMode() != ViewModeGrid {
 		return
 	}
 	v.mu.Lock()
-	if len(v.cols) > 0 {
-		v.cursorCol = len(v.cols) - 1
+	// Last *visible* column: start past the end and step left past any
+	// hidden trailing columns.
+	if c := v.nextVisibleColLocked(len(v.cols), -1); c >= 0 {
+		v.cursorCol = c
 	}
 	v.mu.Unlock()
 }
@@ -300,6 +339,9 @@ func (v *View) SetCursor(row, col int) {
 	}
 	v.cursorRow = row
 	v.cursorCol = col
+	// A stale/computed target may land on a hidden column; snap to the
+	// nearest visible one so the cursor never renders invisibly.
+	v.snapCursorOffHiddenLocked()
 }
 
 // renderBody is the pure function that turns a snapshot into the
