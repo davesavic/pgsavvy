@@ -943,3 +943,82 @@ func TestOperatorMotionAtBoundaryAppliesZeroRange(t *testing.T) {
 		t.Errorf("PendingOpID after dgg-at-bof = %q, want empty", got)
 	}
 }
+
+// --- dbsavvy-5fxk: D (delete to end of line, vim `d$`) ---
+
+// TestDeleteToEndOfLine drives the single-keystroke `D` action in Normal
+// mode: it deletes from the cursor to the end of the current line,
+// char-wise, leaving the mode in Normal (delete is not change).
+func TestDeleteToEndOfLine(t *testing.T) {
+	_, reg, qec, _, modes := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 6})
+
+	runHandler(t, reg, commands.OperatorDeleteEndOfLine, commands.ExecCtx{Mode: types.ModeNormal})
+
+	if got := string(buf.Lines[0].Runes); got != "hello " {
+		t.Errorf("after D = %q, want %q", got, "hello ")
+	}
+	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeNormal {
+		t.Errorf("mode after D = %v, want ModeNormal", got)
+	}
+}
+
+// TestDeleteToEndOfLineWritesRegister confirms the deleted span lands in
+// the unnamed register so it can be pasted back (vim parity with d$).
+func TestDeleteToEndOfLineWritesRegister(t *testing.T) {
+	_, reg, qec, matcher, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 6})
+
+	runHandler(t, reg, commands.OperatorDeleteEndOfLine, commands.ExecCtx{Mode: types.ModeNormal})
+
+	if got := matcher.Registers().Get('"'); got != "world" {
+		t.Errorf("register \" after D = %q, want %q", got, "world")
+	}
+}
+
+// TestDeleteToEndOfLineAtLineEndIsNoOp guards the boundary: with the
+// cursor already at end-of-line there is nothing to delete.
+func TestDeleteToEndOfLineAtLineEndIsNoOp(t *testing.T) {
+	_, reg, qec, _, modes := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 5}) // past-end of "hello"
+
+	runHandler(t, reg, commands.OperatorDeleteEndOfLine, commands.ExecCtx{Mode: types.ModeNormal})
+
+	if got := string(buf.Lines[0].Runes); got != "hello" {
+		t.Errorf("after D at line end = %q, want %q (no-op)", got, "hello")
+	}
+	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeNormal {
+		t.Errorf("mode after D no-op = %v, want ModeNormal", got)
+	}
+}
+
+// TestDeleteToEndOfLinePublishedNormalOnly asserts the `D` binding is
+// published under QUERY_EDITOR scope for Normal mode.
+func TestDeleteToEndOfLinePublishedNormalOnly(t *testing.T) {
+	ctrl, _, _, _, _ := opCtrl(t)
+	var found bool
+	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
+		if kb == nil || kb.ActionID != commands.OperatorDeleteEndOfLine {
+			continue
+		}
+		found = true
+		if kb.Scope != types.QUERY_EDITOR {
+			t.Errorf("D scope = %s, want QUERY_EDITOR", kb.Scope)
+		}
+		if len(kb.Sequence) != 1 || kb.Sequence[0].Code != 'D' {
+			t.Errorf("D sequence = %+v, want ['D']", kb.Sequence)
+		}
+		if kb.Mode != types.ModeNormal {
+			t.Errorf("D mode = %v, want ModeNormal", kb.Mode)
+		}
+	}
+	if !found {
+		t.Fatal("VimEditorController did not publish a binding for operator.delete_eol")
+	}
+}

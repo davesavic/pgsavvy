@@ -75,10 +75,7 @@ func NewMasterEditor(g *gocui.Gui, matcher *keys.Matcher, scope types.ContextKey
 		}
 	}
 	if matcher != nil {
-		matcher.OnInsertPendingFlush(func(s types.ContextKey, runes []rune) {
-			if s != scope {
-				return
-			}
+		matcher.OnInsertPendingFlush(scope, func(_ types.ContextKey, runes []rune) {
 			e.flushRunes(runes)
 		})
 	}

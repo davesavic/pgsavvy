@@ -138,6 +138,7 @@ binding	scope=query_editor	key=>	mode=normal
 binding	scope=query_editor	key=A	mode=normal
 binding	scope=query_editor	key=B	mode=mode(0x3c)
 binding	scope=query_editor	key=B	mode=normal
+binding	scope=query_editor	key=D	mode=normal
 binding	scope=query_editor	key=E	mode=mode(0x3c)
 binding	scope=query_editor	key=E	mode=normal
 binding	scope=query_editor	key=G	mode=mode(0x3c)
@@ -191,6 +192,7 @@ binding	scope=query_editor	key=is	mode=mode(0x2c)
 binding	scope=query_editor	key=i{	mode=mode(0x2c)
 binding	scope=query_editor	key=j	mode=mode(0x3c)
 binding	scope=query_editor	key=j	mode=normal
+binding	scope=query_editor	key=jk	mode=insert
 binding	scope=query_editor	key=k	mode=mode(0x3c)
 binding	scope=query_editor	key=k	mode=normal
 binding	scope=query_editor	key=l	mode=mode(0x3c)

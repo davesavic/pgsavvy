@@ -134,13 +134,13 @@ func TestMatcher_RaceInsertPendingFlushRegister(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for n := 0; n < 500; n++ {
-			m.OnInsertPendingFlush(func(types.ContextKey, []rune) {})
+			m.OnInsertPendingFlush(types.QUERY_EDITOR, func(types.ContextKey, []rune) {})
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		for n := 0; n < 500; n++ {
-			m.OnInsertPendingFlush(nil)
+			m.OnInsertPendingFlush(types.QUERY_EDITOR, nil)
 		}
 	}()
 	go func() {

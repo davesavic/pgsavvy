@@ -634,12 +634,53 @@ func TestVimEditorPublishesInsertAndHistoryBindings(t *testing.T) {
 		commands.InsertOpenAbove:     types.ModeNormal,
 		commands.InsertFirstNonblank: types.ModeNormal,
 		commands.InsertAppendEnd:     types.ModeNormal,
-		commands.ModeNormal:          types.ModeInsert | types.ModeOperatorPending,
 		commands.EditorUndo:          types.ModeNormal,
 		commands.EditorRedo:          types.ModeNormal,
 	}
+	// mode.normal is published TWICE: `<esc>` (Insert|OperatorPending) and
+	// the `jk` alias (Insert only). They share an ActionID, so assert by
+	// sequence.
+	jkSeq, err := keys.SequenceFromShorthand("jk")
+	if err != nil {
+		t.Fatalf("SequenceFromShorthand(jk): %v", err)
+	}
+	escSeq, err := keys.SequenceFromShorthand("<esc>")
+	if err != nil {
+		t.Fatalf("SequenceFromShorthand(<esc>): %v", err)
+	}
+	seqEq := func(a, b []keys.Key) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
 	seen := map[string]bool{}
+	var sawJK, sawEsc bool
 	for _, kb := range kbs {
+		if kb.ActionID == commands.ModeNormal {
+			if kb.Scope != types.QUERY_EDITOR {
+				t.Errorf("mode.normal scope = %s, want QUERY_EDITOR", kb.Scope)
+			}
+			switch {
+			case seqEq(kb.Sequence, jkSeq):
+				sawJK = true
+				if kb.Mode != types.ModeInsert {
+					t.Errorf("jk mode = %v, want %v", kb.Mode, types.ModeInsert)
+				}
+			case seqEq(kb.Sequence, escSeq):
+				sawEsc = true
+				if kb.Mode != types.ModeInsert|types.ModeOperatorPending {
+					t.Errorf("<esc> mode = %v, want %v", kb.Mode, types.ModeInsert|types.ModeOperatorPending)
+				}
+			}
+			continue
+		}
 		wantMode, ok := want[kb.ActionID]
 		if !ok {
 			continue
@@ -656,5 +697,11 @@ func TestVimEditorPublishesInsertAndHistoryBindings(t *testing.T) {
 		if !seen[id] {
 			t.Errorf("action %q not published", id)
 		}
+	}
+	if !sawJK {
+		t.Errorf("jk mode.normal binding not published")
+	}
+	if !sawEsc {
+		t.Errorf("<esc> mode.normal binding not published")
 	}
 }

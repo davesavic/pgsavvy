@@ -362,6 +362,10 @@ const (
 	OperatorLower       = "operator.lower"
 	OperatorIndentRight = "operator.indent_right"
 	OperatorIndentLeft  = "operator.indent_left"
+	// OperatorDeleteEndOfLine — vim `D` (single-key alias for `d$`):
+	// deletes from the cursor to the end of the current line, char-wise,
+	// writing the span to the register. Normal-mode only (dbsavvy-5fxk).
+	OperatorDeleteEndOfLine = "operator.delete_eol"
 
 	// EditorPaste — owned by VimEditorController (dbsavvy-wwd.8). Bound
 	// to `p` in Normal mode. The handler reads from the effective
@@ -672,6 +676,7 @@ func AllActionIDs() []string {
 		OperatorLower,
 		OperatorIndentRight,
 		OperatorIndentLeft,
+		OperatorDeleteEndOfLine,
 		EditorPaste,
 		TextObjectInnerQuoteDouble,
 		TextObjectAroundQuoteDouble,

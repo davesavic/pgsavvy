@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"errors"
 	"log/slog"
 	"unicode"
 
@@ -27,9 +28,14 @@ type BufferProvider interface {
 // delegating to gocui.DefaultEditor (the buffer is the canonical state;
 // the view is a mirror — Architecture Decision 2 of epic dbsavvy-wwd).
 //
-// VimEditor intentionally does NOT carry a *gocui.Gui for ErrQuit
-// re-scheduling: the QUERY_EDITOR scope has no :q-style ex-command
-// path. masterEditor handles that for COMMAND_LINE.
+// VimEditor carries an optional types.GuiDriver so that a chord
+// resolving to gocui.ErrQuit — e.g. the GLOBAL-scope `<leader>q` that
+// falls through from the focused QUERY_EDITOR — is rescheduled onto the
+// main loop. gocui.Editor.Edit can only return a bool, so without this
+// the quit would be silently dropped (dbsavvy-dg5). This mirrors
+// masterEditor.Edit; the GuiDriver seam (not a raw *gocui.Gui) keeps the
+// reschedule observable to the recorder driver in tests, matching the
+// orchestrator's own driver.Update(ErrQuit) quit path.
 //
 // VimEditor implements Dispatcher (the same shape as masterEditor) so
 // testfake.RecorderGuiDriver.FeedChord can drive chord sequences.
@@ -37,6 +43,7 @@ type VimEditor struct {
 	qec     BufferProvider
 	matcher *keys.Matcher
 	scope   types.ContextKey
+	driver  types.GuiDriver
 
 	// autoCompleter is an optional callback invoked after every
 	// printable insert-mode keystroke (Buffer.Apply already ran; the
@@ -78,6 +85,15 @@ func WithSessionLog(l *slog.Logger) VimEditorOption {
 	return func(e *VimEditor) { e.sessionLog = l }
 }
 
+// WithGuiDriver injects the GuiDriver VimEditor.Edit uses to reschedule a
+// chord that resolved to gocui.ErrQuit (e.g. GLOBAL `<leader>q` reached
+// from the focused query editor) onto the main loop. Without it the quit
+// is dropped, since gocui.Editor.Edit returns only a bool. nil disables
+// the reschedule (the testfake-with-nil-driver path).
+func WithGuiDriver(d types.GuiDriver) VimEditorOption {
+	return func(e *VimEditor) { e.driver = d }
+}
+
 // NewVimEditor builds a VimEditor bound to qec / matcher / scope. Any
 // of qec / matcher may be nil — Edit nil-checks before dereferencing
 // so partially-wired test rigs do not panic.
@@ -92,23 +108,20 @@ func WithSessionLog(l *slog.Logger) VimEditorOption {
 // QUERY_EDITOR. The view re-syncs on the next user keystroke via the
 // existing syncViewToBuffer path.
 //
-// Caveat: keys.Matcher holds a single InsertPendingFlush callback
-// globally — every scope's editor constructor races to register one,
-// and the last writer wins. In MVP this is benign: VimEditor has no
-// multi-key Insert-mode bindings today (`<esc>` is a single-key leaf),
-// so Pending never fires for QUERY_EDITOR. The registration here is
-// preemptive; a multi-callback registry can wait for an actual
-// consumer.
+// keys.Matcher keys flush callbacks by scope, so this QUERY_EDITOR
+// registration coexists with the master Editor registrations for other
+// scopes. The `jk` Insert-mode chord is the first multi-key Insert
+// binding, so the Pending path now fires for QUERY_EDITOR: a lone `j`
+// flushes here on the chord timeout, and a `j` broken by a non-`k` key
+// flushes synchronously from Matcher.Dispatch before the breaking key
+// is inserted.
 func NewVimEditor(qec BufferProvider, matcher *keys.Matcher, scope types.ContextKey, opts ...VimEditorOption) *VimEditor {
 	e := &VimEditor{qec: qec, matcher: matcher, scope: scope}
 	for _, opt := range opts {
 		opt(e)
 	}
 	if matcher != nil {
-		matcher.OnInsertPendingFlush(func(s types.ContextKey, runes []rune) {
-			if s != scope {
-				return
-			}
+		matcher.OnInsertPendingFlush(scope, func(_ types.ContextKey, runes []rune) {
 			e.flushPendingRunes(runes)
 		})
 	}
@@ -186,7 +199,15 @@ func (e *VimEditor) Edit(v *gocui.View, key gocui.Key) bool {
 		return false
 	}
 	k := keys.KeyFromGocui(key)
-	result, _ := e.matcher.Dispatch(e.scope, k)
+	result, err := e.matcher.Dispatch(e.scope, k)
+	// gocui.Editor.Edit returns only a bool, so a handler returning
+	// gocui.ErrQuit (the GLOBAL `<leader>q` that falls through from this
+	// focused editor) would otherwise be silently dropped. Reschedule the
+	// quit on the main loop via the GuiDriver so the run loop unwinds
+	// (dbsavvy-dg5; mirrors masterEditor.Edit).
+	if errors.Is(err, gocui.ErrQuit) && e.driver != nil {
+		e.driver.Update(func() error { return gocui.ErrQuit })
+	}
 	return e.applyResult(v, k, result)
 }
 

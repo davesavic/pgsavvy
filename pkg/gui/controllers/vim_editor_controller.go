@@ -539,6 +539,18 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			Tag:         "Edit history",
 		})
 	}
+	// `D` — delete to end of line (vim `d$` alias). Normal-only single
+	// keystroke (dbsavvy-5fxk).
+	if seq, err := keys.SequenceFromShorthand("D"); err == nil {
+		out = append(out, &types.ChordBinding{
+			Sequence:    seq,
+			Mode:        types.ModeNormal,
+			Scope:       types.QUERY_EDITOR,
+			ActionID:    commands.OperatorDeleteEndOfLine,
+			Description: "delete to end of line",
+			Tag:         "Operator",
+		})
+	}
 	for _, s := range operators {
 		var (
 			seq []keys.Key
@@ -641,6 +653,10 @@ func (c *VimEditorController) insertEntrySpecs() []editorActionSpec {
 		{"I", commands.InsertFirstNonblank, "insert at first non-blank", "Insert", insertEntryModeMask},
 		{"A", commands.InsertAppendEnd, "append at line end", "Insert", insertEntryModeMask},
 		{"<esc>", commands.ModeNormal, "exit insert", "Insert", insertExitModeMask},
+		// `jk` exits Insert like <esc> (Insert-only: in OperatorPending j/k
+		// stay motions). A lone `j` flushes as literal text on the chord
+		// timeout / when broken by a non-`k` key — see keys.Matcher.
+		{"jk", commands.ModeNormal, "exit insert (jk)", "Insert", types.ModeInsert},
 	}
 }
 
@@ -819,6 +835,12 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 		Description: "Paste after cursor",
 		Tag:         "Edit",
 		Handler:     c.pasteHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.OperatorDeleteEndOfLine,
+		Description: "Delete to end of line",
+		Tag:         "Operator",
+		Handler:     c.deleteEndOfLineHandler(),
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.EditorRepeat,
@@ -1205,6 +1227,33 @@ func (c *VimEditorController) applyPending(buf *editor.Buffer, r editor.Range, c
 		c.setMode(types.ModeNormal)
 	}
 	return nil
+}
+
+// deleteEndOfLineHandler returns the `D` action handler — vim's single-
+// key alias for `d$`. It stashes the delete operator and completes it
+// through applyPending with a cursor→line-end range, reusing the
+// register-write + `.`-repeat bookkeeping the motion-driven `d$` path
+// already owns. Normal-mode only; a cursor already at end-of-line yields
+// a zero-length range, so applyPending runs the delete as a silent no-op
+// and returns to Normal cleanly.
+func (c *VimEditorController) deleteEndOfLineHandler() commands.Handler {
+	return func(ec commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil || c.qec == nil {
+			return nil
+		}
+		rep := c.qec.Repeat()
+		if rep == nil {
+			return nil
+		}
+		from := buf.CursorPos()
+		end, ok := editor.LineEnd(buf, from, 1)
+		if !ok {
+			end = from
+		}
+		rep.PendingOpID = commands.OperatorDelete
+		return c.applyPending(buf, editor.Range{Start: from, End: end}, commands.MotionLineEnd, "", ec)
+	}
 }
 
 // operatorHandler returns the Handler closure for one operatorSpec.

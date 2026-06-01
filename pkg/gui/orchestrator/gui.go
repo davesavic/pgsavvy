@@ -2073,7 +2073,7 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 			switch key {
 			case types.QUERY_EDITOR:
 				if g.registry.QueryEditor != nil {
-					ve := editor.NewVimEditor(g.registry.QueryEditor, g.matcher, key, editor.WithSessionLog(g.deps.Common.Logger()))
+					ve := editor.NewVimEditor(g.registry.QueryEditor, g.matcher, key, editor.WithSessionLog(g.deps.Common.Logger()), editor.WithGuiDriver(g.driver))
 					// dbsavvy-etp.1: wire the Tab/Enter popup-navigation seam
 					// to the controller so the insert path can drive the
 					// completion popup.

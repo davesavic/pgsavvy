@@ -174,10 +174,7 @@ func TestMasterEditor_FlushOnInsertTimeout(t *testing.T) {
 	// its own callback; overriding it here is fine for the test since
 	// we are observing the matcher's signal, not the editor's write.
 	flushed := make(chan []rune, 1)
-	rig.matcher.OnInsertPendingFlush(func(scope types.ContextKey, runes []rune) {
-		if scope != types.QUERY_EDITOR {
-			return
-		}
+	rig.matcher.OnInsertPendingFlush(types.QUERY_EDITOR, func(scope types.ContextKey, runes []rune) {
 		cp := append([]rune(nil), runes...)
 		select {
 		case flushed <- cp:

@@ -578,7 +578,7 @@ func TestMatcher_InsertPendingFlushOnTimeout(t *testing.T) {
 		runes []rune
 	}
 	flushes := make(chan flush, 4)
-	m.OnInsertPendingFlush(func(scope types.ContextKey, runes []rune) {
+	m.OnInsertPendingFlush(types.QUERY_EDITOR, func(scope types.ContextKey, runes []rune) {
 		flushes <- flush{scope: scope, runes: append([]rune(nil), runes...)}
 	})
 
@@ -619,7 +619,7 @@ func TestMatcher_InsertPendingFlushNotInvokedOnLeafMatch(t *testing.T) {
 	}
 
 	var flushCalled atomic.Int32
-	m.OnInsertPendingFlush(func(scope types.ContextKey, runes []rune) {
+	m.OnInsertPendingFlush(types.QUERY_EDITOR, func(scope types.ContextKey, runes []rune) {
 		flushCalled.Add(1)
 	})
 
@@ -632,6 +632,90 @@ func TestMatcher_InsertPendingFlushNotInvokedOnLeafMatch(t *testing.T) {
 	time.Sleep(60 * time.Millisecond) // past the tlen
 	if got := flushCalled.Load(); got != 0 {
 		t.Errorf("flush called %d times after leaf match; want 0", got)
+	}
+}
+
+// TestMatcher_InsertPendingFlushOnBrokenSequence covers the `jk` case
+// where `j` is buffered (prefix of jk) and the NEXT key is not `k`: the
+// `j` must flush synchronously from Dispatch (before the breaking key is
+// passed through), NOT wait for the chord timeout. Otherwise typing
+// "join" would drop the leading `j`.
+func TestMatcher_InsertPendingFlushOnBrokenSequence(t *testing.T) {
+	jk := fixtureCmd("mode.normal_from_insert")
+	ts := buildTrieSet(t, []trieEntry{
+		{types.ModeInsert, types.QUERY_EDITOR, []Key{keyOf('j'), keyOf('k')}, jk},
+	})
+	store := NewModeStore()
+	store.Set(types.QUERY_EDITOR, types.ModeInsert)
+	m, err := NewMatcher(ts, MatcherConfig{
+		Modes: store,
+		// Long timeout: the flush under test must come from the broken
+		// sequence, not the timer.
+		TimeoutLen: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("NewMatcher: %v", err)
+	}
+
+	var flushed [][]rune
+	m.OnInsertPendingFlush(types.QUERY_EDITOR, func(_ types.ContextKey, runes []rune) {
+		flushed = append(flushed, append([]rune(nil), runes...))
+	})
+
+	if res, _ := m.Dispatch(types.QUERY_EDITOR, keyOf('j')); res != Pending {
+		t.Fatalf("Dispatch j = %v, want Pending", res)
+	}
+	res, _ := m.Dispatch(types.QUERY_EDITOR, keyOf('o'))
+	if res != Passthrough {
+		t.Fatalf("Dispatch o = %v, want Passthrough", res)
+	}
+	if len(flushed) != 1 || len(flushed[0]) != 1 || flushed[0][0] != 'j' {
+		t.Fatalf("flushed = %v, want [[j]]", flushed)
+	}
+	if m.IsPartial() {
+		t.Errorf("IsPartial after broken sequence = true, want false")
+	}
+}
+
+// TestMatcher_InsertPendingFlushPerScope proves the flush registry is
+// keyed by scope: a callback registered for an unrelated scope LAST must
+// not shadow QUERY_EDITOR's flush (the old single-slot design did).
+func TestMatcher_InsertPendingFlushPerScope(t *testing.T) {
+	jk := fixtureCmd("mode.normal_from_insert")
+	ts := buildTrieSet(t, []trieEntry{
+		{types.ModeInsert, types.QUERY_EDITOR, []Key{keyOf('j'), keyOf('k')}, jk},
+	})
+	store := NewModeStore()
+	store.Set(types.QUERY_EDITOR, types.ModeInsert)
+	m, err := NewMatcher(ts, MatcherConfig{Modes: store, TimeoutLen: 15 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("NewMatcher: %v", err)
+	}
+
+	qe := make(chan []rune, 1)
+	other := make(chan struct{}, 1)
+	m.OnInsertPendingFlush(types.QUERY_EDITOR, func(_ types.ContextKey, r []rune) {
+		qe <- append([]rune(nil), r...)
+	})
+	// Registered last: under the old last-writer-wins slot this would have
+	// captured the only callback and the QUERY_EDITOR flush below would be
+	// dropped.
+	m.OnInsertPendingFlush(types.COMMAND_LINE, func(types.ContextKey, []rune) {
+		other <- struct{}{}
+	})
+
+	if _, err := m.Dispatch(types.QUERY_EDITOR, keyOf('j')); err != nil {
+		t.Fatalf("Dispatch j: %v", err)
+	}
+	select {
+	case r := <-qe:
+		if len(r) != 1 || r[0] != 'j' {
+			t.Fatalf("QUERY_EDITOR flush = %v, want [j]", r)
+		}
+	case <-other:
+		t.Fatal("COMMAND_LINE callback fired for a QUERY_EDITOR pending")
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("QUERY_EDITOR flush not invoked")
 	}
 }
 

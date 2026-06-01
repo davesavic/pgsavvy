@@ -123,7 +123,7 @@ type Matcher struct {
 	seq      uint64 // monotonic; stale timer/AfterFunc fires compare against this
 
 	flushMu      sync.RWMutex
-	insertFlush  InsertPendingFlush
+	insertFlush  map[types.ContextKey]InsertPendingFlush
 	timerScope   types.ContextKey
 	timerMode    types.Mode
 	timerPending []Key
@@ -168,15 +168,16 @@ func NewMatcher(initial *TrieSet, cfg MatcherConfig) (*Matcher, error) {
 		regs = NewRegisterStore()
 	}
 	m := &Matcher{
-		modes:     modes,
-		leader:    cfg.Leader,
-		tlen:      cfg.TimeoutLen,
-		ttlen:     cfg.TtimeoutLen,
-		wdelay:    cfg.WhichKeyDelay,
-		registers: regs,
-		whichkey:  cfg.WhichKey,
-		log:       cfg.Log,
-		toaster:   cfg.Toaster,
+		modes:       modes,
+		leader:      cfg.Leader,
+		tlen:        cfg.TimeoutLen,
+		ttlen:       cfg.TtimeoutLen,
+		wdelay:      cfg.WhichKeyDelay,
+		registers:   regs,
+		whichkey:    cfg.WhichKey,
+		log:         cfg.Log,
+		toaster:     cfg.Toaster,
+		insertFlush: map[types.ContextKey]InsertPendingFlush{},
 	}
 	m.trieSet.Store(initial)
 	return m, nil
@@ -223,13 +224,46 @@ func (m *Matcher) TrieSet() *TrieSet {
 	return m.trieSet.Load()
 }
 
-// OnInsertPendingFlush registers the master Editor's pending-buffer
-// flush callback. fn may be nil to clear a previous registration.
-// Concurrency-safe.
-func (m *Matcher) OnInsertPendingFlush(fn InsertPendingFlush) {
+// OnInsertPendingFlush registers an editor's pending-buffer flush
+// callback for scope. Each editable scope (QUERY_EDITOR, the master
+// Editor scopes) registers its own callback; the Matcher delivers a
+// flush only to the callback whose scope matches the timed-out (or
+// broken) pending sequence. fn may be nil to clear scope's
+// registration. Concurrency-safe.
+func (m *Matcher) OnInsertPendingFlush(scope types.ContextKey, fn InsertPendingFlush) {
 	m.flushMu.Lock()
-	m.insertFlush = fn
-	m.flushMu.Unlock()
+	defer m.flushMu.Unlock()
+	if fn == nil {
+		delete(m.insertFlush, scope)
+		return
+	}
+	m.insertFlush[scope] = fn
+}
+
+// flushInsertPending delivers the printable runes buffered in pending
+// to scope's registered flush callback. No-op when pending carries no
+// printable runes or scope has no callback. Called from the timer
+// goroutine (timeout) and synchronously from Dispatch (a pending insert
+// chord broken by the next key).
+func (m *Matcher) flushInsertPending(scope types.ContextKey, pending []Key) {
+	if len(pending) == 0 {
+		return
+	}
+	runes := make([]rune, 0, len(pending))
+	for _, k := range pending {
+		if k.Special == KeyNone && k.Mod == 0 && k.Code != 0 {
+			runes = append(runes, k.Code)
+		}
+	}
+	if len(runes) == 0 {
+		return
+	}
+	m.flushMu.RLock()
+	fn := m.insertFlush[scope]
+	m.flushMu.RUnlock()
+	if fn != nil {
+		fn(scope, runes)
+	}
 }
 
 // CurrentMode returns the Mode currently recorded for scope. The master
@@ -425,6 +459,13 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 	if (mode == types.ModeInsert || mode == types.ModeCommand) &&
 		(isPrintableRune(k) || isEditorSafeSpecial(k)) {
 		m.mu.Unlock()
+		// A pending insert chord (e.g. `j` of `jk`) just got broken by a
+		// key that doesn't extend it. Flush the abandoned printable runes
+		// into the buffer NOW, synchronously, before k is inserted via the
+		// Passthrough path — otherwise typing "join" would drop the `j`.
+		if hadChordPartial {
+			m.flushInsertPending(scope, droppedPending)
+		}
 		return Passthrough, nil
 	}
 
@@ -435,6 +476,11 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 		m.cancelLocked()
 	}
 	m.mu.Unlock()
+	// Same broken-chord flush as the Passthrough path, for the case where
+	// k is neither printable nor editor-safe (the FellThrough exit).
+	if hadChordPartial && (mode == types.ModeInsert || mode == types.ModeCommand) {
+		m.flushInsertPending(scope, droppedPending)
+	}
 	// dbsavvy-tro.5: if a CHORD prefix was pending (scope-trie pending
 	// was just dropped above) AND dispatch is falling through (no
 	// global match found either), pull down the which-key popup that
@@ -709,24 +755,11 @@ func (m *Matcher) onTimerFire(id uint64) {
 		return
 	}
 
-	// No leaf: in ModeInsert, deliver buffered runes to the master
-	// Editor via the flush callback (per D16). In other modes the
+	// No leaf: in ModeInsert, deliver buffered runes to the scope's
+	// editor via its flush callback (per D16). In other modes the
 	// pending is silently dropped.
-	if mode == types.ModeInsert && len(pendingCopy) > 0 {
-		m.flushMu.RLock()
-		fn := m.insertFlush
-		m.flushMu.RUnlock()
-		if fn != nil {
-			runes := make([]rune, 0, len(pendingCopy))
-			for _, k := range pendingCopy {
-				if k.Special == KeyNone && k.Mod == 0 && k.Code != 0 {
-					runes = append(runes, k.Code)
-				}
-			}
-			if len(runes) > 0 {
-				fn(scope, runes)
-			}
-		}
+	if mode == types.ModeInsert {
+		m.flushInsertPending(scope, pendingCopy)
 	}
 }
 
