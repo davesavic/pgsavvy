@@ -1,6 +1,7 @@
 package grid
 
 import (
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,78 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/theme"
 )
+
+// TestCursorColumnVisibleAfterHorizontalScroll proves the horizontal
+// clamp keeps the cursor column on-screen. The clamp (clampOffsetsLocked)
+// and the renderer (renderDataLine) must agree on how much width each
+// column consumes; if the clamp under-counts the inter-column separator
+// it leaves colOffset too small and the renderer truncates the cursor
+// cell off the right edge. dbsavvy column-scroll fix.
+func TestCursorColumnVisibleAfterHorizontalScroll(t *testing.T) {
+	v := NewView()
+	cols := make([]models.ColumnMeta, 0, 6)
+	vals := make([]any, 0, 6)
+	for i := 0; i < 6; i++ {
+		cols = append(cols, models.ColumnMeta{Name: fmt.Sprintf("c%d", i), TypeName: "text"})
+		// "valN_" + 9 'x' == 14 visible columns each.
+		vals = append(vals, fmt.Sprintf("val%d_%s", i, strings.Repeat("x", 9)))
+	}
+	v.SetColumns(cols)
+	v.AppendRows([]models.Row{{Values: vals}})
+	// Pin uniform widths so the arithmetic is deterministic regardless of
+	// auto-size sampling.
+	v.widths = []int{14, 14, 14, 14, 14, 14}
+
+	// Cursor on the last column; the viewport must scroll right to show it.
+	v.JumpColLast()
+
+	const innerW, innerH = 80, 24
+	snap := v.snapshot()
+	snap.rowOffset, snap.colOffset = v.clampOffsetsLocked(snap, innerW, innerH)
+
+	line := renderDataLine(snap, 0, innerW)
+	require.Contains(t, line, "val5",
+		"cursor column (col 5) must be visible after scroll; clamp chose colOffset=%d but renderer truncated the cursor cell",
+		snap.colOffset)
+}
+
+// TestColumnScrollHints verifies the ‹ / › header arrows appear exactly
+// when non-hidden columns sit beyond the viewport edges. dbsavvy
+// column-scroll indicator.
+func TestColumnScrollHints(t *testing.T) {
+	v := NewView()
+	cols := make([]models.ColumnMeta, 0, 6)
+	vals := make([]any, 0, 6)
+	for i := 0; i < 6; i++ {
+		cols = append(cols, models.ColumnMeta{Name: fmt.Sprintf("c%d", i), TypeName: "text"})
+		vals = append(vals, fmt.Sprintf("val%d_%s", i, strings.Repeat("x", 9)))
+	}
+	v.SetColumns(cols)
+	v.AppendRows([]models.Row{{Values: vals}})
+	v.widths = []int{14, 14, 14, 14, 14, 14}
+
+	const innerW = 80
+
+	// At col 0: columns overflow to the right, none hidden on the left.
+	snap := v.snapshot()
+	left, right := columnScrollHints(snap, innerW)
+	require.False(t, left, "no left arrow at the start")
+	require.True(t, right, "right arrow when columns overflow")
+	require.Contains(t, renderHeaderLine(snap, innerW, left, right), "►",
+		"header must carry the ► arrow")
+	require.NotContains(t, renderHeaderLine(snap, innerW, left, right), "◄",
+		"no ◄ arrow at the start")
+
+	// Scrolled fully right: cursor on last column, nothing hidden right.
+	v.JumpColLast()
+	snap = v.snapshot()
+	snap.rowOffset, snap.colOffset = v.clampOffsetsLocked(snap, innerW, 24)
+	left, right = columnScrollHints(snap, innerW)
+	require.True(t, left, "left arrow once scrolled right")
+	require.False(t, right, "no right arrow when the last column is visible")
+	require.Contains(t, renderHeaderLine(snap, innerW, left, right), "◄",
+		"header must carry the ◄ arrow when scrolled right")
+}
 
 // TestMoveCursorClampsAtEdges verifies the cursor verbs do not move past
 // the row 0 / col 0 floors or past the last loaded row/col ceilings.

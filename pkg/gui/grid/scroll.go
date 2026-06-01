@@ -368,7 +368,8 @@ func renderBody(snap viewSnapshot, innerW, innerH int) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(renderHeaderLine(snap, innerW))
+	moreLeft, moreRight := columnScrollHints(snap, innerW)
+	sb.WriteString(renderHeaderLine(snap, innerW, moreLeft, moreRight))
 	sb.WriteByte('\n')
 
 	// Iterate over the projected row-index list (filter → sort → hide
@@ -427,7 +428,7 @@ func hideFooterLine(snap viewSnapshot) string {
 // renderHeaderLine assembles the column-name header. Headers use the
 // TableHeaderFg style — wrapped in a single SGR pair around the whole
 // line so column separators inherit the style too.
-func renderHeaderLine(snap viewSnapshot, innerW int) string {
+func renderHeaderLine(snap viewSnapshot, innerW int, moreLeft, moreRight bool) string {
 	var sb strings.Builder
 	visibleCols := visibleColumnOrder(snap)
 	used := 0
@@ -452,7 +453,74 @@ func renderHeaderLine(snap viewSnapshot, innerW int) string {
 	if displayWidth(line) < innerW {
 		line = padRight(line, innerW)
 	}
-	return line
+	// Overlay the ‹ / › scroll arrows on the header's edge cells so the
+	// user can see columns continue past the viewport. Header text carries
+	// no per-cell ANSI, so a plain rune overlay is safe here.
+	return overlayColumnArrows(line, moreLeft, moreRight)
+}
+
+// overlayColumnArrows draws the ◄ / ► horizontal-scroll arrows one cell in
+// from each edge of a plain (un-styled) line, leaving the edge-most cell as
+// padding so the arrow doesn't sit flush against the view border. ◄ / ► are
+// single-cell glyphs (unlike ◀ / ▶, which some terminals widen), so the
+// rune overlay keeps the column grid aligned. Safe only for the header line,
+// which carries no ANSI styling. dbsavvy column-scroll indicator.
+func overlayColumnArrows(line string, left, right bool) string {
+	if !left && !right {
+		return line
+	}
+	r := []rune(line)
+	if len(r) < 2 {
+		return line
+	}
+	if left {
+		r[0] = ' '
+		r[1] = '◄'
+	}
+	if right {
+		r[len(r)-1] = ' '
+		r[len(r)-2] = '►'
+	}
+	return string(r)
+}
+
+// columnScrollHints reports whether non-hidden columns exist beyond the
+// rendered window to the left / right of the current horizontal scroll
+// position. Drives the header edge arrows. dbsavvy column-scroll indicator.
+func columnScrollHints(snap viewSnapshot, innerW int) (left, right bool) {
+	order := visibleColumnOrder(snap)
+	right = fitColumns(order, snap.widths, innerW) < len(order)
+
+	// Columns scrolled off the left are the non-hidden ones before
+	// colOffset. Column 0 is pinned when frozenFirstCol is on, so it is
+	// never counted as hidden-left.
+	lo := 0
+	if snap.frozenFirstCol {
+		lo = 1
+	}
+	for c := lo; c < snap.colOffset && c < len(snap.cols); c++ {
+		if !snap.hidden[c] {
+			left = true
+			break
+		}
+	}
+	return left, right
+}
+
+// fitColumns returns how many leading entries of order fit within innerW,
+// using the same per-column accounting (effectiveWidth + ColSepWidth) as
+// the renderHeaderLine / renderDataLine layout loops. Kept in lock-step
+// with those loops so the scroll hints never disagree with what renders.
+func fitColumns(order, widths []int, innerW int) int {
+	used := 0
+	for i, c := range order {
+		w := effectiveWidth(widths, c)
+		if used+w > innerW {
+			return i
+		}
+		used += w + ColSepWidth
+	}
+	return len(order)
 }
 
 // renderDataLine renders row r in the snapshot, applying selection

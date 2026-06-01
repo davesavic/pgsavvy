@@ -193,7 +193,7 @@ func TestHeaderRendersFKGlyph(t *testing.T) {
 	v.AppendRows([]models.Row{{Values: []any{1, 2}}})
 
 	snap := v.snapshot()
-	line := renderHeaderLine(snap, 80)
+	line := renderHeaderLine(snap, 80, false, false)
 
 	require.Contains(t, line, fkHeaderPrefix+"team_id",
 		"FK column header must carry the → prefix")
@@ -227,7 +227,7 @@ func TestHeaderWidth_AccommodatesGlyph(t *testing.T) {
 	require.GreaterOrEqualf(t, w, wantMin,
 		"locked width %d must accommodate `→ ` + name (%d runes)", w, wantMin)
 
-	line := renderHeaderLine(snap, w+4)
+	line := renderHeaderLine(snap, w+4, false, false)
 	require.Contains(t, line, fkHeaderPrefix+longName,
 		"full header label must render untruncated when width permits")
 }
@@ -244,7 +244,7 @@ func TestHeaderRender_NoFKColumns_NoGlyphsLeak(t *testing.T) {
 	v.AppendRows([]models.Row{{Values: []any{1, "a"}}})
 
 	snap := v.snapshot()
-	line := renderHeaderLine(snap, 80)
+	line := renderHeaderLine(snap, 80, false, false)
 	require.False(t, strings.Contains(line, fkHeaderPrefix),
 		"no FK column ⇒ no `→ ` glyph in header")
 }

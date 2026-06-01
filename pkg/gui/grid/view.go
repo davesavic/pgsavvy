@@ -828,7 +828,7 @@ func (v *View) clampOffsetsLocked(snap viewSnapshot, innerW, innerH int) (rowOff
 		used := 0
 		for c := colOffset; c <= snap.cursorCol && c < len(snap.widths); c++ {
 			used += effectiveWidth(snap.widths, c)
-			used++ // column separator
+			used += ColSepWidth // separator; must match renderHeaderLine/renderDataLine
 		}
 		if used <= innerW {
 			break
