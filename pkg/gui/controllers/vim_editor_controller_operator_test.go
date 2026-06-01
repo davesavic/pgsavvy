@@ -1022,3 +1022,63 @@ func TestDeleteToEndOfLinePublishedNormalOnly(t *testing.T) {
 		t.Fatal("VimEditorController did not publish a binding for operator.delete_eol")
 	}
 }
+
+// --- TextObject word objects: operator-agnostic + repeat state ---
+
+func TestOperatorDeleteInnerWord(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("foo bar baz")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 5}) // inside "bar"
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.TextObjectInnerWord, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := string(buf.Lines[0].Runes); got != "foo  baz" {
+		t.Errorf("after diw = %q, want %q", got, "foo  baz")
+	}
+}
+
+func TestOperatorDeleteAroundWord(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("foo bar baz")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 5}) // inside "bar"
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.TextObjectAroundWord, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := string(buf.Lines[0].Runes); got != "foo baz" {
+		t.Errorf("after daw = %q, want %q", got, "foo baz")
+	}
+}
+
+func TestOperatorYankInnerWORDSpansPunctuation(t *testing.T) {
+	_, reg, qec, matcher, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("foo.bar baz")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 1})
+
+	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.TextObjectInnerWORD, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := matcher.Registers().Get('"'); got != "foo.bar" {
+		t.Errorf("register after yiW = %q, want %q", got, "foo.bar")
+	}
+}
+
+func TestChangeInnerWordSetsRepeatState(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("foo bar baz")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 5})
+
+	runHandler(t, reg, commands.OperatorChange, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.TextObjectInnerWord, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	rep := qec.Repeat()
+	if rep.LastOpID != commands.OperatorChange || rep.LastTextObjectID != commands.TextObjectInnerWord {
+		t.Fatalf("repeat state = {op:%q to:%q}, want {op:%q to:%q}",
+			rep.LastOpID, rep.LastTextObjectID, commands.OperatorChange, commands.TextObjectInnerWord)
+	}
+}

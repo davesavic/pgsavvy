@@ -380,6 +380,10 @@ const (
 	// ip/ap (paragraph — blank-line delimited per vim), is/as (SQL
 	// statement — naive ';' split). Bindings live under OperatorPending
 	// in wwd.6; the Visual / VisualLine mode mask is added in wwd.7.
+	TextObjectInnerWord         = "textobject.inner_word"
+	TextObjectAroundWord        = "textobject.around_word"
+	TextObjectInnerWORD         = "textobject.inner_word_big"
+	TextObjectAroundWORD        = "textobject.around_word_big"
 	TextObjectInnerQuoteDouble  = "textobject.inner_quote_double"
 	TextObjectAroundQuoteDouble = "textobject.around_quote_double"
 	TextObjectInnerQuoteSingle  = "textobject.inner_quote_single"
@@ -678,6 +682,10 @@ func AllActionIDs() []string {
 		OperatorIndentLeft,
 		OperatorDeleteEndOfLine,
 		EditorPaste,
+		TextObjectInnerWord,
+		TextObjectAroundWord,
+		TextObjectInnerWORD,
+		TextObjectAroundWORD,
 		TextObjectInnerQuoteDouble,
 		TextObjectAroundQuoteDouble,
 		TextObjectInnerQuoteSingle,

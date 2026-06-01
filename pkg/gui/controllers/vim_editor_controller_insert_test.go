@@ -488,7 +488,7 @@ func TestCompletionTabAndEnterFallThroughWhenHidden(t *testing.T) {
 	}
 }
 
-func TestEscDismissesPopupAndStaysInsert(t *testing.T) {
+func TestEscDismissesPopupAndExitsToNormal(t *testing.T) {
 	ctrl, reg, buf, sugg, modes := newCompletionRig(t, "SELECT * FROM us", 16, []string{"users"})
 	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
 	if !sugg.IsVisible() {
@@ -496,10 +496,10 @@ func TestEscDismissesPopupAndStaysInsert(t *testing.T) {
 	}
 	dispatchAction(t, reg, commands.ModeNormal, commands.ExecCtx{Mode: types.ModeInsert})
 	if sugg.IsVisible() {
-		t.Error("Esc did not dismiss popup")
+		t.Error("exit action did not dismiss popup")
 	}
-	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeInsert {
-		t.Errorf("Esc with popup visible left Insert; mode = %v want ModeInsert", got)
+	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeNormal {
+		t.Errorf("exit action with popup visible did not exit Insert; mode = %v want ModeNormal", got)
 	}
 }
 

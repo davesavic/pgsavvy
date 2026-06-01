@@ -207,6 +207,102 @@ func findMatchingClose(b *Buffer, openLine, openCol int, open, close rune) (int,
 	return 0, 0, false
 }
 
+// InnerWord returns the range of the contiguous run of same-class
+// runes (word / punctuation / whitespace) under pos, on the current
+// line. Mirrors vim `iw`: cursor on a word selects the word, on a
+// punctuation run selects the punctuation, on whitespace selects the
+// whitespace run.
+func InnerWord(b *Buffer, pos Position) (Range, bool) {
+	return innerWord(b, pos, classifyWord)
+}
+
+// AroundWord extends InnerWord per vim `aw`: a word/punct object adds
+// the trailing whitespace run, or the leading whitespace run when
+// there is no trailing one; a whitespace object adds the trailing
+// word run.
+func AroundWord(b *Buffer, pos Position) (Range, bool) {
+	return aroundWord(b, pos, classifyWord)
+}
+
+// InnerWORD is the WORD variant of InnerWord (vim `iW`): punctuation
+// is treated as part of the word; only whitespace delimits.
+func InnerWORD(b *Buffer, pos Position) (Range, bool) {
+	return innerWord(b, pos, classifyWORD)
+}
+
+// AroundWORD is the WORD variant of AroundWord (vim `aW`).
+func AroundWORD(b *Buffer, pos Position) (Range, bool) {
+	return aroundWord(b, pos, classifyWORD)
+}
+
+// innerWord resolves the same-class run under pos using classify. The
+// returned Range is line-local with an exclusive End column. Returns
+// false on an empty buffer or out-of-range line.
+func innerWord(b *Buffer, pos Position, classify func(rune) runeClass) (Range, bool) {
+	if empty(b) || pos.Line < 0 || pos.Line >= len(b.Lines) {
+		return Range{}, false
+	}
+	runes := b.Lines[pos.Line].Runes
+	if len(runes) == 0 {
+		return Range{}, false
+	}
+	col := max(pos.Col, 0)
+	if col >= len(runes) {
+		col = len(runes) - 1
+	}
+	cls := classify(runes[col])
+	start := col
+	for start > 0 && classify(runes[start-1]) == cls {
+		start--
+	}
+	end := col
+	for end+1 < len(runes) && classify(runes[end+1]) == cls {
+		end++
+	}
+	return Range{
+		Start: Position{Line: pos.Line, Col: start},
+		End:   Position{Line: pos.Line, Col: end + 1},
+	}, true
+}
+
+// aroundWord extends innerWord with the adjacent run per vim `aw`/`aW`
+// semantics. A whitespace object grows over the trailing word run; a
+// word/punct object grows over the trailing whitespace run, falling
+// back to the leading whitespace run when no trailing one exists.
+func aroundWord(b *Buffer, pos Position, classify func(rune) runeClass) (Range, bool) {
+	inner, ok := innerWord(b, pos, classify)
+	if !ok {
+		return Range{}, false
+	}
+	runes := b.Lines[inner.Start.Line].Runes
+	objIsSpace := classify(runes[inner.Start.Col]) == classSpace
+
+	if objIsSpace {
+		end := inner.End.Col
+		for end < len(runes) && classify(runes[end]) != classSpace {
+			end++
+		}
+		inner.End.Col = end
+		return inner, true
+	}
+
+	if inner.End.Col < len(runes) && classify(runes[inner.End.Col]) == classSpace {
+		end := inner.End.Col
+		for end < len(runes) && classify(runes[end]) == classSpace {
+			end++
+		}
+		inner.End.Col = end
+		return inner, true
+	}
+
+	start := inner.Start.Col
+	for start > 0 && classify(runes[start-1]) == classSpace {
+		start--
+	}
+	inner.Start.Col = start
+	return inner, true
+}
+
 // InnerParagraph returns the range of contiguous non-blank lines
 // around pos (vim's blank-line-delimited paragraph). On a blank line
 // the range is empty (Start==End). The range is character-wise: it

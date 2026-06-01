@@ -273,3 +273,55 @@ func TestRangeShapes(t *testing.T) {
 		t.Fatal("zero Range != Range{}")
 	}
 }
+
+func TestInnerAroundWord(t *testing.T) {
+	tests := []struct {
+		name  string
+		line  string
+		col   int
+		fn    func(*Buffer, Position) (Range, bool)
+		want  Range
+		notOk bool
+	}{
+		{"iw mid-word", "foo bar baz", 5, InnerWord, rng(0, 4, 0, 7), false},
+		{"aw word trailing space", "foo bar baz", 5, AroundWord, rng(0, 4, 0, 8), false},
+		{"aw word at line end uses leading space", "foo bar", 5, AroundWord, rng(0, 3, 0, 7), false},
+		{"iw on whitespace", "foo bar", 3, InnerWord, rng(0, 3, 0, 4), false},
+		{"aw on whitespace grows to next word", "foo bar", 3, AroundWord, rng(0, 3, 0, 7), false},
+		{"iw on punctuation run", "a+b", 1, InnerWord, rng(0, 1, 0, 2), false},
+		{"iw stops at punctuation", "foo.bar", 1, InnerWord, rng(0, 0, 0, 3), false},
+		{"iW spans punctuation", "foo.bar baz", 5, InnerWORD, rng(0, 0, 0, 7), false},
+		{"aW word trailing space", "foo.bar baz", 1, AroundWORD, rng(0, 0, 0, 8), false},
+		{"append slot clamps to last rune", "foo", 3, InnerWord, rng(0, 0, 0, 3), false},
+		{"single-char word at start", "a bc", 0, InnerWord, rng(0, 0, 0, 1), false},
+		{"empty line returns false", "", 0, InnerWord, Range{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := bufFromLines(tt.line)
+			got, ok := tt.fn(b, Position{Line: 0, Col: tt.col})
+			if tt.notOk {
+				if ok {
+					t.Fatalf("ok=true; want false")
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("ok=false; want true")
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("= %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInnerWordEmptyBuffer(t *testing.T) {
+	if _, ok := InnerWord(&Buffer{}, Position{Line: 0, Col: 0}); ok {
+		t.Fatalf("InnerWord on empty buffer ok=true; want false")
+	}
+}
+
+func rng(sl, sc, el, ec int) Range {
+	return Range{Start: Position{Line: sl, Col: sc}, End: Position{Line: el, Col: ec}}
+}

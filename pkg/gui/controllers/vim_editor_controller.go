@@ -1061,6 +1061,10 @@ func (c *VimEditorController) textObjectSpecs() []textObjectSpec {
 		}
 	}
 	return []textObjectSpec{
+		{"iw", commands.TextObjectInnerWord, "inside word", editor.InnerWord},
+		{"aw", commands.TextObjectAroundWord, "around word", editor.AroundWord},
+		{"iW", commands.TextObjectInnerWORD, "inside WORD", editor.InnerWORD},
+		{"aW", commands.TextObjectAroundWORD, "around WORD", editor.AroundWORD},
 		{"i\"", commands.TextObjectInnerQuoteDouble, "inside \"", innerQuote('"')},
 		{"a\"", commands.TextObjectAroundQuoteDouble, "around \"", aroundQuote('"')},
 		{"i'", commands.TextObjectInnerQuoteSingle, "inside '", innerQuote('\'')},
@@ -1799,15 +1803,13 @@ func (c *VimEditorController) modeNormalHandler() commands.Handler {
 		if c.buffer() == nil {
 			return nil
 		}
-		// dbsavvy-etp.1: when the completion popup is visible, <esc>
-		// dismisses it and STAYS in Insert mode (vim omni-complete). Only
-		// a second <esc> (popup hidden) exits Insert. This must not
-		// reintroduce the stuck-in-insert regression (commit f8a6452):
-		// when the popup is hidden the handler falls through to the
-		// normal exit below.
+		// The exit-insert action (any key bound to it: <esc>, jk, …) closes
+		// the completion popup AND drops to Normal in a single press. We
+		// dismiss the popup first, then fall through to the normal exit so
+		// it never strands the user in Insert (cf. stuck-in-insert
+		// regression, commit f8a6452).
 		if c.suggestions != nil && c.suggestions.IsVisible() {
 			c.suggestions.Hide()
-			return nil
 		}
 		if rep := c.repeat(); rep != nil {
 			rep.PendingOpID = ""
