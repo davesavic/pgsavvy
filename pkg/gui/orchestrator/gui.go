@@ -665,6 +665,30 @@ func (g *Gui) wireWithDriver() error {
 		// `SELECT ... FROM tbl` (dbsavvy-8q6).
 		return editable, rowID, reason, baseRelation.Schema
 	}
+	// Lazy OID->relname resolution for the hide-cols overlay. Mirrors the
+	// editability closure: resolve the live connection at call time, acquire
+	// a fresh session, run the pg catalog lookup. Non-pg drivers / no
+	// connection yield a nil map, leaving the overlay labels bare.
+	resultTabsDeps.ResolveTableNames = func(ctx context.Context, oids []uint32) (map[uint32]string, error) {
+		if g.connectHelper == nil {
+			return nil, nil
+		}
+		conn := g.connectHelper.Connection()
+		if conn == nil {
+			return nil, nil
+		}
+		sess, err := conn.AcquireSession(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = sess.Close() }()
+
+		pgSess, ok := sess.(*pg.Session)
+		if !ok {
+			return nil, nil // non-pg driver: no resolution yet
+		}
+		return pg.TableNamesFromOIDs(ctx, pgSess, oids)
+	}
 	if tr != nil {
 		resultTabsDeps.SortPickLabel = tr.Actions.ResultSortPickLabel
 	}

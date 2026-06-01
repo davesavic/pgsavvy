@@ -133,6 +133,16 @@ func TestEmbeddedSQL_ContainsExpectedIdentifiers(t *testing.T) {
 				"indisunique",
 			},
 		},
+		{
+			name:  "table_names_by_oid",
+			query: sqlTableNamesByOID,
+			contains: []string{
+				"pg_class",
+				"relname",
+				"$1",
+				"oid[]",
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -153,7 +163,7 @@ func TestEmbeddedSQL_ContainsExpectedIdentifiers(t *testing.T) {
 	}
 }
 
-func TestEmbeddedSQL_FilesystemHasExactlyElevenSQLFiles(t *testing.T) {
+func TestEmbeddedSQL_FilesystemHasExactlyTwelveSQLFiles(t *testing.T) {
 	entries, err := sqlFS.ReadDir("sql")
 	require.NoError(t, err)
 
@@ -170,8 +180,8 @@ func TestEmbeddedSQL_FilesystemHasExactlyElevenSQLFiles(t *testing.T) {
 	require.Len(
 		t,
 		sqlFiles,
-		11,
-		"expected exactly 11 embedded .sql files (got %v); add the new file's //go:embed directive in embed.go",
+		12,
+		"expected exactly 12 embedded .sql files (got %v); add the new file's //go:embed directive in embed.go",
 		sqlFiles,
 	)
 }

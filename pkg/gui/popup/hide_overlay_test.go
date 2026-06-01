@@ -6,6 +6,23 @@ import (
 	"testing"
 )
 
+func TestHideOverlay_SetNamesUpdatesRenderedLabels(t *testing.T) {
+	ov := NewHideOverlay([]string{"id", "id"}, nil, false)
+	ov.SetNames([]string{"posts.id", "posts_summary.id"})
+	body := ov.Body()
+	if !strings.Contains(body, "posts.id") || !strings.Contains(body, "posts_summary.id") {
+		t.Fatalf("body should show qualified names, got:\n%s", body)
+	}
+}
+
+func TestHideOverlay_SetNamesLengthMismatchIsIgnored(t *testing.T) {
+	ov := NewHideOverlay([]string{"a", "b"}, nil, false)
+	ov.SetNames([]string{"only-one"})
+	if got := ov.Names(); got[0] != "a" || got[1] != "b" {
+		t.Fatalf("mismatched length must not mutate names, got %v", got)
+	}
+}
+
 func TestHideOverlay_ToggleHidesAndUnhides(t *testing.T) {
 	ov := NewHideOverlay([]string{"a", "b", "c"}, nil, true)
 	if err := ov.Toggle(); err != nil {

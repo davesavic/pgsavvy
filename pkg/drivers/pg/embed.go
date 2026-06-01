@@ -44,3 +44,6 @@ var sqlListFunctions string
 
 //go:embed sql/editability_introspect.sql
 var sqlEditabilityIntrospect string
+
+//go:embed sql/table_names_by_oid.sql
+var sqlTableNamesByOID string

@@ -292,6 +292,14 @@ type ResultTabsHelperDeps struct {
 	// SELECT was unqualified (dbsavvy-8q6). nil keeps editability off
 	// (unit-test default). dbsavvy-2b6.
 	IntrospectEditability func(ctx context.Context, cols []models.ColumnMeta) (bool, []int, string, string)
+
+	// ResolveTableNames maps the distinct source-table OIDs of a result's
+	// columns to their relation names. Wired by the orchestrator to a
+	// closure that acquires a session and runs the driver-specific catalog
+	// lookup (pg.TableNamesFromOIDs). Used by the <leader>gH hide-cols
+	// overlay to qualify column labels ("table.column") when a join makes
+	// bare names ambiguous. nil keeps labels bare (unit-test default).
+	ResolveTableNames func(ctx context.Context, oids []uint32) (map[uint32]string, error)
 }
 
 // defaultReadToEndWarnThreshold is the shipped ceiling above which G
@@ -2355,10 +2363,14 @@ func (h *ResultTabsHelper) HideOverlay() {
 	if g == nil {
 		return
 	}
-	names := h.gridColumnNames(g)
-	if len(names) == 0 {
+	cols := g.Columns()
+	if len(cols) == 0 {
 		return
 	}
+	// Render bare names immediately; a join's qualified labels arrive
+	// asynchronously via scheduleHideColumnQualify so the overlay never
+	// blocks the UI thread on a catalog round-trip.
+	names := qualifyHideColumnNames(cols, nil)
 	hidden := g.HiddenCols()
 	connID, ri := t.Identity()
 	persistEnabled := ri.HasRowIdentity && connID != "" && ri.BaseTable != "" && h.deps.Store != nil
@@ -2370,6 +2382,57 @@ func (h *ResultTabsHelper) HideOverlay() {
 	if h.deps.PushHideOverlay != nil {
 		_ = h.deps.PushHideOverlay()
 	}
+	h.scheduleHideColumnQualify(ov, cols)
+}
+
+// scheduleHideColumnQualify resolves the result's source-table OIDs to
+// relation names off the UI thread, then marshals a label upgrade back
+// onto the UI thread so a join's bare column names become qualified
+// ("table.column"). No-op unless the result spans more than one table
+// and a resolver is wired. dbsavvy hide-cols join qualification.
+func (h *ResultTabsHelper) scheduleHideColumnQualify(ov *popup.HideOverlay, cols []models.ColumnMeta) {
+	if h.deps.ResolveTableNames == nil || ov == nil {
+		return
+	}
+	if !spansMultipleTables(cols) {
+		return
+	}
+	oids := distinctTableOIDs(cols)
+	run := func() {
+		oidNames, err := h.deps.ResolveTableNames(context.Background(), oids)
+		if err != nil || len(oidNames) == 0 {
+			return
+		}
+		flip := func() error {
+			h.applyHideColumnNames(ov, cols, oidNames)
+			return nil
+		}
+		if h.deps.OnUIThread != nil {
+			h.deps.OnUIThread(flip)
+			return
+		}
+		_ = flip()
+	}
+	if h.deps.OnWorker != nil {
+		h.deps.OnWorker(func(gocui.Task) error { run(); return nil })
+		return
+	}
+	run() // test path: synchronous
+}
+
+// applyHideColumnNames upgrades the overlay's labels to the qualified
+// form, but only while ov is still the active overlay — the user may
+// have closed it before the async resolution returned. Runs on the UI
+// thread (via the flip closure), so the unlocked SetNames does not race
+// the renderer.
+func (h *ResultTabsHelper) applyHideColumnNames(ov *popup.HideOverlay, cols []models.ColumnMeta, oidNames map[uint32]string) {
+	h.mu.Lock()
+	active := h.hideOverlay != nil && h.hideOverlay.ov == ov
+	h.mu.Unlock()
+	if !active {
+		return
+	}
+	ov.SetNames(qualifyHideColumnNames(cols, oidNames))
 }
 
 // HideOverlayBody returns the current overlay body for rendering, or

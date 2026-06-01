@@ -57,6 +57,18 @@ func NewHideOverlay(names []string, initialHidden map[int]bool, persistEnabled b
 // against. Caller must not mutate the returned slice.
 func (o *HideOverlay) Names() []string { return o.names }
 
+// SetNames replaces the rendered column labels. The hide/visible state
+// is index-keyed and untouched, so this only changes how rows are
+// displayed — used to upgrade bare labels to table-qualified ones once
+// the lazy OID->relname resolution completes. A length mismatch is
+// ignored to keep the index mapping consistent.
+func (o *HideOverlay) SetNames(names []string) {
+	if len(names) != len(o.names) {
+		return
+	}
+	o.names = append([]string(nil), names...)
+}
+
 // Cursor returns the current cursor row (0-based).
 func (o *HideOverlay) Cursor() int { return o.cursor }
 
