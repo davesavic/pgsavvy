@@ -308,6 +308,57 @@ func TestCloseActiveOnEmptyToasts(t *testing.T) {
 	}
 }
 
+// TestCloseActiveFiresOnActiveClosed: a user-initiated close of the
+// focused tab must fire onActiveClosed so the orchestrator can reconcile
+// the focus stack (dbsavvy-aqw). The closed tab's MAIN_CONTEXT is on top
+// of the stack; without this hook it would dangle on a deleted view.
+func TestCloseActiveFiresOnActiveClosed(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	var fired int
+	h.SetOnActiveClosed(func() { fired++ })
+	_ = h.openTab("a", nil)
+	if err := h.CloseActive(); err != nil {
+		t.Fatalf("CloseActive: %v", err)
+	}
+	if fired != 1 {
+		t.Fatalf("onActiveClosed fired %d times, want 1", fired)
+	}
+}
+
+// TestCloseActiveOnEmptyDoesNotFireOnActiveClosed: no tab closed -> no
+// focus reconciliation needed.
+func TestCloseActiveOnEmptyDoesNotFireOnActiveClosed(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	var fired int
+	h.SetOnActiveClosed(func() { fired++ })
+	_ = h.CloseActive()
+	if fired != 0 {
+		t.Fatalf("onActiveClosed fired %d times on empty, want 0", fired)
+	}
+}
+
+// TestEvictionDoesNotFireOnActiveClosed: opening past the cap evicts the
+// oldest tab through the Close path, but that is NOT a user-initiated
+// close of the focused tab. Reconciling focus there would steal it into
+// results while the user is typing in the editor, so onActiveClosed must
+// stay silent on eviction (dbsavvy-aqw).
+func TestEvictionDoesNotFireOnActiveClosed(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	var activeClosed, removed int
+	h.SetOnActiveClosed(func() { activeClosed++ })
+	h.SetOnTabRemoved(func(string) { removed++ })
+	// Cap is DefaultMaxResultTabs (8); the 9th open evicts the oldest.
+	for i := range DefaultMaxResultTabs + 1 {
+		_ = h.openTab(fmt.Sprintf("q%d", i), nil)
+	}
+	if removed != 1 {
+		t.Fatalf("onTabRemoved fired %d times, want 1 (eviction)", removed)
+	}
+	if activeClosed != 0 {
+		t.Fatalf("onActiveClosed fired %d times on eviction, want 0", activeClosed)
+	}
+}
+
 // --- Pin ------------------------------------------------------------------
 
 func TestPinTogglesAndProtectsFromEviction(t *testing.T) {

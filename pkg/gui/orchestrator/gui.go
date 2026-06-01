@@ -144,6 +144,18 @@ type Gui struct {
 	// (dbsavvy-1du).
 	prevLiveViews int
 
+	// prevModalBody is the CONNECTION_MANAGER modal's rendered buffer at the
+	// end of the previous frame while it was in ModeConnecting. The connect /
+	// retry lifecycle churns the body in place (list row -> "Connecting…" ->
+	// "already connected" + retry hints) and some transitions draw it one row
+	// shifted for a frame; tcell's incremental Show() never re-emits the cells
+	// the shifted frame vacated, so the bodies otherwise stack as ghosts that
+	// "move up" on every retry. RunLayout forces a one-shot Screen.Sync() on
+	// frames where this changes. Empty while the modal is not open in
+	// ModeConnecting — the view-count-shrink (close) case is covered by
+	// prevLiveViews instead (dbsavvy-emu).
+	prevModalBody string
+
 	// Focus stack; driver-free.
 	tree *gui.ContextTree
 
@@ -733,6 +745,25 @@ func (g *Gui) wireWithDriver() error {
 		g.resultTabsH.SetOnTabRemoved(func(tabID string) {
 			g.jumpListH.PruneByTab(tabID)
 		})
+		// dbsavvy-aqw: when the user closes the focused result tab
+		// (<leader>X), its MAIN_CONTEXT is still on top of the focus
+		// stack pointing at a now-deleted view, so no panel renders as
+		// focused. Reconcile by shifting focus to the new active tab, or
+		// to the query editor when no tabs remain. Both are MAIN_CONTEXTs,
+		// so Push replaces the stale top via removeMain. Runs on the main
+		// loop (CloseActive is dispatched from the keybinding handler).
+		g.resultTabsH.SetOnActiveClosed(func() {
+			if g.tree == nil {
+				return
+			}
+			if next := g.resultTabsH.ActiveContext(); next != nil {
+				_ = g.tree.Push(next)
+				return
+			}
+			if g.registry != nil && g.registry.QueryEditor != nil {
+				_ = g.tree.Push(g.registry.QueryEditor)
+			}
+		})
 	}
 	// FKForwardHelper drives `gd` forward FK navigation. Cache routes
 	// each Get through activeSessionFKCacheAdapter so per-Connect
@@ -838,7 +869,17 @@ func (g *Gui) wireWithDriver() error {
 		if len(g.tree.Stack()) <= 1 {
 			return // startup root: Esc is a no-op
 		}
-		_ = g.tree.Pop()
+		// dbsavvy-yea: the modal (MAIN_CONTEXT) covered whatever main pane
+		// was active when it opened. Restore it on close so focus returns
+		// where the user was — the query editor (or a result tab). nil when
+		// the user was on a side rail, leaving focus there.
+		prevMain := g.tree.TakeEvictedMain()
+		if err := g.tree.Pop(); err != nil {
+			return
+		}
+		if prevMain != nil {
+			_ = g.tree.Push(prevMain)
+		}
 	}
 	// <CR> on a schema row reloads the TABLES rail via a worker
 	// (dbsavvy-04n). When the session is disconnected the handler

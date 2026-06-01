@@ -368,12 +368,22 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		if restoreHint != "" && c.g.toastHelp != nil {
 			c.g.toastHelp.Show(restoreHint, 4*time.Second)
 		}
+		// dbsavvy-yea: land focus in the query editor on connection open,
+		// not the side rail. Push the rail first (SIDE_CONTEXT) so it is
+		// populated and rendered, then push the query editor (MAIN_CONTEXT)
+		// on top so it holds focus and the cursor starts there.
 		if tableItems != nil && c.g != nil && c.g.registry != nil && c.g.registry.Tables != nil {
-			return c.g.tree.Push(c.g.registry.Tables)
-		}
-		if c.g != nil && c.g.registry != nil && c.g.registry.Schemas != nil &&
+			if err := c.g.tree.Push(c.g.registry.Tables); err != nil {
+				return err
+			}
+		} else if c.g != nil && c.g.registry != nil && c.g.registry.Schemas != nil &&
 			len(c.g.registry.Schemas.Items()) != 0 {
-			return c.g.tree.Push(c.g.registry.Schemas)
+			if err := c.g.tree.Push(c.g.registry.Schemas); err != nil {
+				return err
+			}
+		}
+		if c.g != nil && c.g.registry != nil && c.g.registry.QueryEditor != nil {
+			return c.g.tree.Push(c.g.registry.QueryEditor)
 		}
 		return nil
 	})

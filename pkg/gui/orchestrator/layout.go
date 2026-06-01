@@ -559,6 +559,7 @@ func (g *Gui) RunLayout(w, h int) error {
 	}
 
 	g.resyncOnViewTeardown()
+	g.resyncOnModalContentChange()
 	return nil
 }
 
@@ -582,6 +583,38 @@ func (g *Gui) resyncOnViewTeardown() {
 		gocui.Screen.Sync()
 	}
 	g.prevLiveViews = n
+}
+
+// resyncOnModalContentChange forces a one-shot full Screen.Sync() on frames
+// where the CONNECTION_MANAGER modal is open in ModeConnecting and its rendered
+// body changed since the previous frame. The connect lifecycle churns the body
+// in place (list row -> "Connecting…" -> "already connected" + retry hints);
+// some of those transitions draw the body one row shifted for a frame, and
+// tcell's incremental Show() never re-emits the cells the shifted frame
+// vacated, so the bodies otherwise stack as ghosts that "move up" on every
+// retry. The view buffer is always correct, so a Sync() (full re-emit from the
+// correct back buffer) evicts the ghosts. Gated on an actual body change so
+// steady-state connecting/error frames keep the cheap diff path, and scoped to
+// ModeConnecting so benign list/form navigation never triggers a full repaint.
+// Sibling of resyncOnViewTeardown, which covers only the view-count-shrink
+// (modal close) case (dbsavvy-emu).
+func (g *Gui) resyncOnModalContentChange() {
+	if !g.modalIsTopMain() || g.registry.ConnectionManager.Mode() != guicontext.ModeConnecting {
+		g.prevModalBody = ""
+		return
+	}
+	name := g.registry.ConnectionManager.GetViewName()
+	if name == "" {
+		return
+	}
+	body := g.driver.GetViewBuffer(name)
+	if body == g.prevModalBody {
+		return
+	}
+	g.prevModalBody = body
+	if gocui.Screen != nil {
+		gocui.Screen.Sync()
+	}
 }
 
 // modalIsTopMain reports whether the CONNECTION_MANAGER MAIN_CONTEXT modal

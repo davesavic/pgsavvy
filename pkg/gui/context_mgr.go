@@ -42,6 +42,11 @@ type ContextTree struct {
 	stack      []types.IBaseContext
 	swapHooks  []func()
 	sessionLog *slog.Logger
+	// evictedMain holds the MAIN_CONTEXT most recently displaced by
+	// removeMain (nil when the displacing push found no main to evict).
+	// The connection-manager close path consumes it via TakeEvictedMain to
+	// restore the pane the modal covered (dbsavvy-yea).
+	evictedMain types.IBaseContext
 }
 
 // NewContextTree returns an empty ContextTree. Callers are expected to
@@ -258,13 +263,17 @@ func (t *ContextTree) wipeStack() {
 }
 
 // removeMain drops the first MAIN_CONTEXT found in the stack (there is
-// at most one), firing HandleFocusLost on it.
+// at most one), firing HandleFocusLost on it. The removed context is
+// recorded in evictedMain (cleared to nil when no main is present) so
+// the connection-manager close path can restore the covered pane.
 func (t *ContextTree) removeMain() {
+	t.evictedMain = nil
 	for i, c := range t.stack {
 		if c.GetKind() == types.MAIN_CONTEXT {
 			depthBefore := len(t.stack)
 			_ = c.HandleFocusLost(types.OnFocusLostOpts{})
 			t.stack = append(t.stack[:i], t.stack[i+1:]...)
+			t.evictedMain = c
 			logs.Event(t.sessionLog, "input", "ctx_remove_main",
 				slog.String("key", string(c.GetKey())),
 				slog.String("kind", kindLabel(c.GetKind())),
@@ -274,6 +283,16 @@ func (t *ContextTree) removeMain() {
 			return
 		}
 	}
+}
+
+// TakeEvictedMain returns and clears the MAIN_CONTEXT most recently
+// displaced by removeMain (nil when none). The connection-manager close
+// path uses it to re-push the pane the modal covered so focus returns
+// where the user was (dbsavvy-yea).
+func (t *ContextTree) TakeEvictedMain() types.IBaseContext {
+	c := t.evictedMain
+	t.evictedMain = nil
+	return c
 }
 
 // popOne removes the top entry, firing HandleFocusLost on it.

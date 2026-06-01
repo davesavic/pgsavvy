@@ -334,6 +334,15 @@ type ResultTabsHelper struct {
 	// no-op; wired via SetOnTabRemoved. dbsavvy-bwq.15.
 	onTabRemoved func(tabID string)
 
+	// onActiveClosed fires after CloseActive closes the focused tab —
+	// the user-initiated close path ONLY, never eviction. The
+	// orchestrator wires it to reconcile the focus stack: the closed
+	// tab's MAIN_CONTEXT sits on top of the stack pointing at a now-
+	// deleted view, so focus must shift to the new active tab (or the
+	// query editor when none remain). Default no-op; set via
+	// SetOnActiveClosed. dbsavvy-aqw.
+	onActiveClosed func()
+
 	// onSortRequest fires when a sort entry point (the <leader>s picker or
 	// a grid header double-click) requests a sort on the active tab. The
 	// callback receives the RAW 0-based grid column index; the
@@ -839,7 +848,16 @@ func (h *ResultTabsHelper) CloseActive() error {
 		h.toast("no result tabs")
 		return nil
 	}
-	return h.Close(t)
+	if err := h.Close(t); err != nil {
+		return err
+	}
+	h.mu.Lock()
+	cb := h.onActiveClosed
+	h.mu.Unlock()
+	if cb != nil {
+		cb()
+	}
+	return nil
 }
 
 // Close disposes t and removes it from the list. Active selection
@@ -912,6 +930,17 @@ func (h *ResultTabsHelper) Close(t *Tab) error {
 func (h *ResultTabsHelper) SetOnTabRemoved(fn func(tabID string)) {
 	h.mu.Lock()
 	h.onTabRemoved = fn
+	h.mu.Unlock()
+}
+
+// SetOnActiveClosed registers a callback fired after CloseActive closes
+// the focused tab (the user-initiated <leader>X path only — eviction
+// goes through Close directly and does NOT fire this). The orchestrator
+// uses it to reconcile the focus stack off the now-deleted view.
+// Passing nil unhooks. dbsavvy-aqw.
+func (h *ResultTabsHelper) SetOnActiveClosed(fn func()) {
+	h.mu.Lock()
+	h.onActiveClosed = fn
 	h.mu.Unlock()
 }
 

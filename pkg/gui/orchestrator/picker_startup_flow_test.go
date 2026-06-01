@@ -36,6 +36,23 @@ import (
 // remaining capstone slice: focus returns to the picker and activeConn stays
 // empty when the user aborts via Esc.
 
+// assertEditorOverRail verifies the post-connect focus stack: the
+// QUERY_EDITOR is the focused top, with the expected side rail populated
+// directly beneath it (dbsavvy-yea).
+func assertEditorOverRail(t *testing.T, g *orchestrator.Gui, rail types.ContextKey) {
+	t.Helper()
+	if got := g.ContextTree().Current().GetKey(); got != types.QUERY_EDITOR {
+		t.Fatalf("top after connect = %v; want QUERY_EDITOR", got)
+	}
+	stack := g.ContextTree().Stack()
+	if len(stack) < 2 {
+		t.Fatalf("stack depth = %d after connect; want >= 2 (rail + editor)", len(stack))
+	}
+	if got := stack[len(stack)-2].GetKey(); got != rail {
+		t.Fatalf("context below editor = %v; want %v", got, rail)
+	}
+}
+
 // buildPickerGui mirrors buildTestGuiWithHistory (wiring_query_test.go) but
 // lets the caller inject a ConnectionsProvider and pre-seed the Store. The
 // startup first-run tip is marked seen so the picker (CONNECTIONS), not the
@@ -147,7 +164,9 @@ func TestPickerStartupFlow_RestoresCursorOnLastUsedProfile(t *testing.T) {
 // off the stack and activeConnID stamped. This is the happy-path lifecycle:
 // the dial succeeds, schemas are populated, and focus advances to the
 // SCHEMAS rail.
-func TestPickerStartupFlow_SuccessLandsOnSchemas(t *testing.T) {
+// AC: on connection open the cursor lands in the QUERY_EDITOR, with the
+// SCHEMAS rail populated directly beneath it (dbsavvy-yea).
+func TestPickerStartupFlow_SuccessLandsInQueryEditorOverSchemas(t *testing.T) {
 	g, _ := buildTestGuiWithHistory(t)
 
 	driverName, conn := registerWireFake(t, drivers.Capabilities{})
@@ -161,19 +180,18 @@ func TestPickerStartupFlow_SuccessLandsOnSchemas(t *testing.T) {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	if got := g.ContextTree().Current().GetKey(); got != types.SCHEMAS {
-		t.Fatalf("top after successful connect = %v; want SCHEMAS", got)
-	}
+	assertEditorOverRail(t, g, types.SCHEMAS)
 	if got := g.ActiveConnIDForTest(); got != profile.Name {
 		t.Fatalf("activeConnID = %q after success; want %q", got, profile.Name)
 	}
 }
 
-// AC: success restore lands on TABLES when saved schema+table state is
-// present for the profile (dbsavvy-dl7.4). We seed LastSchemaName /
+// AC: success restore populates the TABLES rail when saved schema+table
+// state is present for the profile (dbsavvy-dl7.4), with the cursor landing
+// in the QUERY_EDITOR above it (dbsavvy-yea). We seed LastSchemaName /
 // LastTableName for the profile, with the saved schema matching one the
 // driver returns, so connectWithGen direct-loads tables and pushes TABLES.
-func TestPickerStartupFlow_SuccessLandsOnTablesWithSavedState(t *testing.T) {
+func TestPickerStartupFlow_SuccessLandsInQueryEditorOverTablesWithSavedState(t *testing.T) {
 	g, _, store := buildPickerGui(t, func() []models.Connection { return nil })
 
 	driverName, conn := registerWireFake(t, drivers.Capabilities{})
@@ -191,9 +209,7 @@ func TestPickerStartupFlow_SuccessLandsOnTablesWithSavedState(t *testing.T) {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	if got := g.ContextTree().Current().GetKey(); got != types.TABLES {
-		t.Fatalf("top after connect with saved schema+table = %v; want TABLES", got)
-	}
+	assertEditorOverRail(t, g, types.TABLES)
 	if got := g.ActiveConnIDForTest(); got != profile.Name {
 		t.Fatalf("activeConnID = %q; want %q", got, profile.Name)
 	}
@@ -225,9 +241,7 @@ func TestPickerStartupFlow_FailureThenRetrySucceeds(t *testing.T) {
 		t.Fatalf("retry Connect: %v", err)
 	}
 
-	if got := g.ContextTree().Current().GetKey(); got != types.SCHEMAS {
-		t.Fatalf("top after successful retry = %v; want SCHEMAS", got)
-	}
+	assertEditorOverRail(t, g, types.SCHEMAS)
 	if got := g.ActiveConnIDForTest(); got != profile.Name {
 		t.Fatalf("activeConnID = %q after retry; want %q", got, profile.Name)
 	}
