@@ -336,7 +336,7 @@ func isCompletionNavKey(k keys.Key) bool {
 	if k.Mod != 0 {
 		return false
 	}
-	return k.Special == keys.KeyTab || k.Special == keys.KeyEnter
+	return k.Special == keys.KeyTab || k.Special == keys.KeyBacktab || k.Special == keys.KeyEnter
 }
 
 // backspacePos returns the Position one rune before p (joining onto

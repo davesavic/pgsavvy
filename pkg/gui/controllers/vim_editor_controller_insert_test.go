@@ -378,6 +378,43 @@ func TestCompletionTabNextWrapsThenAccept(t *testing.T) {
 	}
 }
 
+// TestCompletionShiftTabPrevWraps pins that Shift+Tab (Backtab) via the
+// insert seam moves the selection backward, wrapping from the first
+// candidate to the last — the mirror of Tab -> Next.
+func TestCompletionShiftTabPrevWraps(t *testing.T) {
+	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT * FROM u", 15, []string{"users", "usage"})
+	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
+	if sugg.Selected() != 0 {
+		t.Fatalf("initial selection = %d; want 0", sugg.Selected())
+	}
+	// Shift+Tab from the first entry wraps to the last.
+	if !ctrl.CompletionKey(keys.Key{Special: keys.KeyBacktab}) {
+		t.Fatal("CompletionKey(Backtab) returned false; want consumed")
+	}
+	if sugg.Selected() != 1 {
+		t.Fatalf("selection after Shift+Tab = %d; want 1 (wrapped to last)", sugg.Selected())
+	}
+	// And forward again returns to the first.
+	if !ctrl.CompletionKey(keys.Key{Special: keys.KeyBacktab}) {
+		t.Fatal("CompletionKey(Backtab) returned false; want consumed")
+	}
+	if sugg.Selected() != 0 {
+		t.Fatalf("selection after second Shift+Tab = %d; want 0", sugg.Selected())
+	}
+}
+
+// TestCompletionShiftTabFallsThroughWhenHidden pins that Backtab is not
+// consumed while the popup is hidden (keeps its normal Insert meaning).
+func TestCompletionShiftTabFallsThroughWhenHidden(t *testing.T) {
+	ctrl, _, _, sugg, _ := newCompletionRig(t, "SELECT * FROM u", 15, []string{"users", "usage"})
+	if sugg.IsVisible() {
+		t.Fatal("popup unexpectedly visible before refilter")
+	}
+	if ctrl.CompletionKey(keys.Key{Special: keys.KeyBacktab}) {
+		t.Error("CompletionKey(Backtab) consumed key while popup hidden; want fall-through")
+	}
+}
+
 // TestAutoTriggerOpensInFromContext pins the dbsavvy-etp.4 gate: with the
 // popup hidden, AutoTrigger opens it only when the cursor sits at an
 // AutoTriggerFromContext position (here `FROM us`).
@@ -393,11 +430,12 @@ func TestAutoTriggerOpensInFromContext(t *testing.T) {
 }
 
 // TestAutoTriggerNoPopupOutsideGate pins that AutoTrigger does NOT open
-// the popup mid-SELECT-list (not a FROM/JOIN/UPDATE/INTO or `<ident>.`
-// context) even though candidates exist — it is gated, not
-// prefix-everywhere.
+// the popup for a bare identifier with no governing clause keyword,
+// operator, or `<ident>.` context — even though candidates exist — so it
+// stays gated rather than prefix-everywhere. (A clause position such as
+// `SELECT us` or `WHERE us` IS in-gate; see the column-context cases.)
 func TestAutoTriggerNoPopupOutsideGate(t *testing.T) {
-	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT us", 9, []string{"users"})
+	ctrl, _, buf, sugg, _ := newCompletionRig(t, "us", 2, []string{"users"})
 	ctrl.AutoTrigger(buf, buf.CursorPos())
 	if sugg.IsVisible() {
 		t.Error("AutoTrigger opened popup outside the context gate; want hidden")
@@ -471,6 +509,32 @@ func TestAutoTriggerNoRePopupAfterAccept(t *testing.T) {
 	ctrl.AutoTrigger(buf, buf.CursorPos())
 	if sugg.IsVisible() {
 		t.Error("AutoTrigger re-opened popup after accept; want suppressed")
+	}
+}
+
+// TestAutoTriggerDotAfterAcceptOpensColumns pins the dot-after-accept fix:
+// accepting a table name arms the post-accept suppression (so the inserted
+// identifier does not immediately re-pop the table list), but typing `.`
+// right after is an explicit `<ident>.` column trigger that MUST still open
+// the popup. Typing the table name out by hand never arms the flag, so the
+// dot always worked there — this pins parity between the two paths.
+// Regression for the "accept posts_summary then `.` shows nothing" bug.
+func TestAutoTriggerDotAfterAcceptOpensColumns(t *testing.T) {
+	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT * FROM posts_summar", 26, []string{"posts_summary"})
+	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
+	if !ctrl.CompletionKey(keys.Key{Special: keys.KeyEnter}) {
+		t.Fatal("accept via Enter not consumed")
+	}
+	if sugg.IsVisible() {
+		t.Fatal("popup still visible immediately after accept")
+	}
+	// Simulate typing `.` immediately after the accepted identifier; the
+	// suppression flag is armed and the `.` is the next keystroke.
+	buf.Lines = []editor.Line{{Runes: []rune("SELECT * FROM posts_summary.")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 28})
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if !sugg.IsVisible() {
+		t.Fatal("`.` after accept did not open the column popup; suppression swallowed the dot trigger")
 	}
 }
 

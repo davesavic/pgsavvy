@@ -48,6 +48,7 @@ const (
 	KeyEsc         = types.KeyEsc
 	KeyEnter       = types.KeyEnter
 	KeyTab         = types.KeyTab
+	KeyBacktab     = types.KeyBacktab
 	KeyBs          = types.KeyBs
 	KeySpace       = types.KeySpace
 	KeyUp          = types.KeyUp

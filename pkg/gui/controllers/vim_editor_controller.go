@@ -159,7 +159,13 @@ func (c *VimEditorController) AutoTrigger(buf *editor.Buffer, pos editor.Positio
 	}
 	if c.suppressNextAutoTrigger {
 		c.suppressNextAutoTrigger = false
-		return
+		// An explicit `<ident>.` column trigger overrides the post-accept
+		// suppression: accepting a table then typing `.` must still open the
+		// column popup. Non-dot keystrokes stay suppressed so the just-
+		// inserted identifier doesn't re-pop the table list.
+		if !editor.IsIdentDotContext(buf, pos) {
+			return
+		}
 	}
 	if !c.suggestions.IsVisible() && !editor.AutoTriggerFromContext(buf, pos) {
 		return
@@ -1685,11 +1691,11 @@ func (c *VimEditorController) completionDismissHandler() commands.Handler {
 }
 
 // CompletionKey is the seam VimEditor.SetCompletionKey consults at the
-// top of the insert path for Tab / Enter. It returns true only when the
-// popup is visible (i.e. it consumed the key): Tab advances the
-// selection, Enter accepts. When the popup is hidden it returns false so
-// the key keeps its normal Insert meaning (Tab dropped, Enter newline).
-// etp.1.
+// top of the insert path for Tab / Shift+Tab / Enter. It returns true
+// only when the popup is visible (i.e. it consumed the key): Tab advances
+// the selection, Shift+Tab (Backtab) moves it backward, Enter accepts.
+// When the popup is hidden it returns false so the key keeps its normal
+// Insert meaning (Tab dropped, Enter newline). etp.1.
 func (c *VimEditorController) CompletionKey(k keys.Key) bool {
 	if c.suggestions == nil || !c.suggestions.IsVisible() {
 		return false
@@ -1697,6 +1703,9 @@ func (c *VimEditorController) CompletionKey(k keys.Key) bool {
 	switch k.Special {
 	case keys.KeyTab:
 		c.suggestions.Next()
+		return true
+	case keys.KeyBacktab:
+		c.suggestions.Prev()
 		return true
 	case keys.KeyEnter:
 		c.acceptSuggestion()

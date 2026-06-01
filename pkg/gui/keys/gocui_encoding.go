@@ -118,6 +118,8 @@ func specialKeyFromGocui(n gocui.KeyName) SpecialKey {
 		return KeyEnter
 	case gocui.KeyTab:
 		return KeyTab
+	case gocui.KeyBacktab:
+		return KeyBacktab
 	case gocui.KeyBackspace:
 		return KeyBs
 	case gocui.KeyArrowUp:
@@ -183,6 +185,8 @@ func specialKeyToGocui(s types.SpecialKey) (types.KeyName, error) {
 		return gocui.KeyEnter, nil
 	case types.KeyTab:
 		return gocui.KeyTab, nil
+	case types.KeyBacktab:
+		return gocui.KeyBacktab, nil
 	case types.KeyBs:
 		return gocui.KeyBackspace, nil
 	case types.KeySpace:

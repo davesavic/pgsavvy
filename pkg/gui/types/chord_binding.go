@@ -56,6 +56,7 @@ const (
 	KeyEsc
 	KeyEnter
 	KeyTab
+	KeyBacktab // Shift+Tab; tcell folds it to a standalone Backtab key (ModNone)
 	KeyBs
 	KeySpace
 	KeyUp
@@ -138,6 +139,8 @@ func (k ChordKey) String() string {
 		b.WriteString("cr")
 	case KeyTab:
 		b.WriteString("tab")
+	case KeyBacktab:
+		b.WriteString("backtab")
 	case KeyBs:
 		b.WriteString("bs")
 	case KeySpace:
