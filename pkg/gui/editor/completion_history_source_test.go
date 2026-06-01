@@ -132,6 +132,44 @@ func TestHistorySource_ShortStatementNotTruncated(t *testing.T) {
 	}
 }
 
+// TestHistorySource_SuppressedInStructuredContext pins that history does
+// NOT fire when the cursor sits in a schema-completable position (FROM /
+// JOIN / ON / <ident>. / column context). Whole-statement history is only
+// useful where schema completion has nothing to offer; in a structured
+// position it would bury the relevant table/column hits.
+func TestHistorySource_SuppressedInStructuredContext(t *testing.T) {
+	lines := []string{
+		"select * from posts join posts_summary on posts",
+		"select * from ",
+		"select * from posts join posts_summary on ",
+		"select id from posts where ",
+	}
+	for _, line := range lines {
+		store := &fakeHistoryStore{rows: []string{"SELECT * FROM posts"}}
+		src := HistorySource{Store: store}
+		buf, pos := bufferFromLines(t, line)
+		got := src.Suggest(context.Background(), buf, pos)
+		if len(got) != 0 {
+			t.Errorf("history fired in structured context %q; got %d suggestions", line, len(got))
+		}
+		if store.gotPrefix != "" {
+			t.Errorf("history queried store in structured context %q (prefix %q)", line, store.gotPrefix)
+		}
+	}
+}
+
+// TestHistorySource_FiresOutsideStructuredContext keeps history working at
+// statement start, where re-running a past query is the point.
+func TestHistorySource_FiresOutsideStructuredContext(t *testing.T) {
+	store := &fakeHistoryStore{rows: []string{"SELECT * FROM posts"}}
+	src := HistorySource{Store: store}
+	buf, pos := bufferFromLines(t, "sel")
+	got := src.Suggest(context.Background(), buf, pos)
+	if len(got) != 1 {
+		t.Fatalf("history suppressed at statement start; got %d, want 1", len(got))
+	}
+}
+
 func TestHistorySource_NameAndPriority(t *testing.T) {
 	s := HistorySource{PriorityVal: 2}
 	if s.Name() != HistorySourceName {

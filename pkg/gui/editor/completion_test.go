@@ -174,11 +174,16 @@ func TestAutoTriggerFromContext_Cases(t *testing.T) {
 		{"qualified dot mid-expr", "WHERE u.id = users.", true},
 		// Case-insensitivity sanity.
 		{"lowercase from", "select * from ", true},
+		// Positive — unqualified column contexts.
+		{"after WHERE", "SELECT * FROM t WHERE ", true},
+		{"after comparison operator", "SELECT * FROM t WHERE id = ", true},
+		{"after AND", "SELECT * FROM t WHERE id = 1 AND ", true},
+		{"column partial after SELECT", "SELECT user", true},
 		// Negative — no trigger context.
-		{"bare identifier", "SELECT user", false},
 		{"trailing comma", "SELECT a, ", false},
 		// Negative — inside string literal (stripNoise drops it).
 		{"FROM inside string", "SELECT 'FROM ", false},
+		{"column ctx inside string", "SELECT * FROM t WHERE 'x", false},
 		// Negative — inside line comment.
 		{"FROM inside line comment", "SELECT 1 -- FROM ", false},
 		// Negative — empty / nil-equivalent line.

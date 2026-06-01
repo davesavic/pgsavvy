@@ -123,6 +123,32 @@ var reKeywordTable = regexp.MustCompile(`(?i)(?:^|\s|[(,;])(?:FROM|JOIN|INNER\s+
 // column prefix (group 2, possibly empty).
 var reIdentDot = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)?$`)
 
+// reColumnContext matches a trailing position where an UNQUALIFIED
+// column is expected: right after SELECT / WHERE / AND / OR (each
+// requiring a following space and a word boundary before it), or right
+// after a comparison operator (=, <>, !=, <=, >=, <, >). The single
+// capture group is the partial column identifier the user has begun
+// typing (empty when only the keyword/operator + space was typed). A
+// completed token followed by a space does NOT match, mirroring
+// reKeywordTable.
+var reColumnContext = regexp.MustCompile(`(?i)(?:(?:^|[\s(,])(?:SELECT|WHERE|AND|OR)\s+|(?:<>|!=|<=|>=|=|<|>)\s*)([A-Za-z_][A-Za-z0-9_]*)?$`)
+
+// reJoinCondition matches a trailing join-condition position: right
+// after `ON` or `USING` (case-insensitive, requiring following
+// whitespace and a word boundary before). The single capture is the
+// partial identifier the user has begun typing (empty when only the
+// keyword + space was typed). This is where a join predicate like
+// `posts.id = posts_summary.post_id` goes, so the source offers the
+// in-scope tables (to qualify a column via `posts.`) plus their columns.
+var reJoinCondition = regexp.MustCompile(`(?i)(?:^|\s|[(,])(?:ON|USING)\s+([A-Za-z_][A-Za-z0-9_]*)?$`)
+
+// reFromJoinTables matches every `FROM <table>` / `JOIN <table>` in a
+// statement (global), capturing the table identifier. Word boundary at
+// the start prevents matching inside larger identifiers. Schema-qualified
+// names and aliases are not resolved (v1) — the first identifier after
+// the keyword is captured verbatim.
+var reFromJoinTables = regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)`)
+
 // Suggest returns table or column suggestions based on the cursor
 // context. Returns an empty slice for any failure (no providers, no
 // session, no match, driver error). Never returns nil — callers
@@ -135,7 +161,13 @@ func (s *SchemaSource) Suggest(ctx context.Context, buf *Buffer, pos Position) [
 	if line == "" {
 		return []Suggestion{}
 	}
-	stripped := stripNoise(line)
+	stripped, open := stripNoiseEx(line)
+	if open {
+		// Cursor sits inside an unterminated string / comment — no
+		// completion (the trailing keyword/operator the regexes would
+		// match is blanked content, not a real clause position).
+		return []Suggestion{}
+	}
 
 	// Column context wins over keyword context: `users.` matches the
 	// dot rule and is unambiguous; a `FROM users.` line is treated
@@ -147,7 +179,96 @@ func (s *SchemaSource) Suggest(ctx context.Context, buf *Buffer, pos Position) [
 	if m := reKeywordTable.FindStringSubmatch(stripped); m != nil {
 		return s.suggestTables(ctx, m[1])
 	}
+	if m := reJoinCondition.FindStringSubmatch(stripped); m != nil {
+		return s.suggestJoinCondition(ctx, buf, m[1])
+	}
+	if m := reColumnContext.FindStringSubmatch(stripped); m != nil {
+		tables := s.scopeTables(buf)
+		if len(tables) == 0 {
+			return []Suggestion{}
+		}
+		return s.suggestColumnsMulti(ctx, tables, m[1])
+	}
 	return []Suggestion{}
+}
+
+// scopeTables returns the distinct table names referenced by FROM /
+// JOIN clauses anywhere in the buffer, in first-seen order. The whole
+// buffer is scanned (not just text up to the cursor) so a column
+// position before the FROM clause — e.g. inside the SELECT list — still
+// resolves its tables. Each line is noise-stripped independently before
+// matching. Multi-statement buffers may over-collect (v1 limitation).
+func (s *SchemaSource) scopeTables(buf *Buffer) []string {
+	var sb strings.Builder
+	for _, ln := range buf.LinesCopy() {
+		clean, _ := stripNoiseEx(string(ln.Runes))
+		sb.WriteString(clean)
+		sb.WriteByte(' ')
+	}
+	matches := reFromJoinTables.FindAllStringSubmatch(sb.String(), -1)
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		name := m[1]
+		if name == "" {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+// suggestJoinCondition serves the JOIN ... ON / USING position. It offers
+// the tables already referenced by FROM/JOIN (so the user can qualify a
+// column via `posts.`) followed by those tables' columns, all filtered by
+// the typed prefix. Returns empty when no tables are in scope. Duplicate
+// Text across the table and column sets is left for Engine dedupe.
+func (s *SchemaSource) suggestJoinCondition(ctx context.Context, buf *Buffer, prefix string) []Suggestion {
+	tables := s.scopeTables(buf)
+	if len(tables) == 0 {
+		return []Suggestion{}
+	}
+	out := make([]Suggestion, 0, len(tables))
+	for _, t := range tables {
+		out = append(out, Suggestion{Text: t, Display: t, Source: SchemaSourceName, Score: SchemaSourceScore})
+	}
+	out = filterByPrefix(out, prefix)
+	return append(out, s.suggestColumnsMulti(ctx, tables, prefix)...)
+}
+
+// suggestColumnsMulti returns the union of the named tables' columns,
+// deduplicated by column name in scope order (a column shared by two
+// tables appears once, attributed to the first), then filtered by
+// prefix. Returns empty when there is no session or schema.
+func (s *SchemaSource) suggestColumnsMulti(ctx context.Context, tables []string, prefix string) []Suggestion {
+	sess := s.activeSession()
+	if sess == nil {
+		return []Suggestion{}
+	}
+	schema := s.activeSchema()
+	if schema == "" {
+		return []Suggestion{}
+	}
+	seen := map[string]struct{}{}
+	out := []Suggestion{}
+	for _, t := range tables {
+		full, ok := s.cachedColumns(ctx, sess, schema, t)
+		if !ok {
+			continue
+		}
+		for _, sg := range full {
+			if _, dup := seen[sg.Text]; dup {
+				continue
+			}
+			seen[sg.Text] = struct{}{}
+			out = append(out, sg)
+		}
+	}
+	return filterByPrefix(out, prefix)
 }
 
 // suggestTables returns the current schema's tables whose name starts
@@ -331,18 +452,31 @@ func lineUpToCursor(buf *Buffer, pos Position) string {
 // Multi-line constructs are NOT supported — a string or block comment
 // that opens on a previous line is not detected; v1 limitation.
 func stripNoise(s string) string {
+	out, _ := stripNoiseEx(s)
+	return out
+}
+
+// stripNoiseEx is stripNoise plus a flag reporting whether the scan
+// ended INSIDE an unterminated construct (open string, dollar-quote,
+// block comment, or a line comment running to the end). Callers use the
+// flag to suppress completion when the cursor sits inside a literal or
+// comment: blanking alone cannot distinguish `SELECT <space>` (a real
+// column position) from `SELECT '<blanked string>` (inside a literal).
+func stripNoiseEx(s string) (string, bool) {
 	if s == "" {
-		return s
+		return s, false
 	}
 	out := []byte(s)
 	n := len(out)
 	i := 0
+	open := false
 	for i < n {
 		c := out[i]
 		switch {
 		case c == '\'':
 			// Single-quoted string with '' escape.
 			j := i + 1
+			closed := false
 			for j < n {
 				if out[j] == '\'' {
 					if j+1 < n && out[j+1] == '\'' {
@@ -350,15 +484,20 @@ func stripNoise(s string) string {
 						continue
 					}
 					j++
+					closed = true
 					break
 				}
 				j++
 			}
 			fillSpaces(out, i, j)
+			if !closed {
+				open = true
+			}
 			i = j
 		case c == '-' && i+1 < n && out[i+1] == '-':
 			// Line comment to end of string.
 			fillSpaces(out, i, n)
+			open = true
 			i = n
 		case c == '/' && i+1 < n && out[i+1] == '*':
 			// Block comment; close at first */ (single-line only).
@@ -368,10 +507,12 @@ func stripNoise(s string) string {
 			}
 			if j+1 < n {
 				j += 2 // include the closing */
+				fillSpaces(out, i, j)
 			} else {
 				j = n
+				fillSpaces(out, i, j)
+				open = true
 			}
-			fillSpaces(out, i, j)
 			i = j
 		case c == '$':
 			// Dollar-quoted string: $tag$ ... $tag$ (tag may be empty
@@ -389,6 +530,7 @@ func stripNoise(s string) string {
 			closeIdx := indexOf(out, j, tag)
 			if closeIdx < 0 {
 				fillSpaces(out, i, n)
+				open = true
 				i = n
 			} else {
 				j = closeIdx + len(tag)
@@ -399,7 +541,7 @@ func stripNoise(s string) string {
 			i++
 		}
 	}
-	return string(out)
+	return string(out), open
 }
 
 // fillSpaces replaces out[start:end] with spaces in place.

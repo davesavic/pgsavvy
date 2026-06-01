@@ -138,9 +138,41 @@ func AutoTriggerFromContext(buf *Buffer, pos Position) bool {
 	if line == "" {
 		return false
 	}
-	stripped := stripNoise(line)
+	stripped, open := stripNoiseEx(line)
+	if open {
+		return false
+	}
 	if reIdentDot.MatchString(stripped) {
 		return true
 	}
-	return reKeywordTable.MatchString(stripped)
+	if reKeywordTable.MatchString(stripped) {
+		return true
+	}
+	if reJoinCondition.MatchString(stripped) {
+		return true
+	}
+	return reColumnContext.MatchString(stripped)
+}
+
+// IsIdentDotContext reports whether the cursor sits immediately after an
+// `<ident>.` (optionally followed by a partial column name) — the column
+// completion trigger. Unlike AutoTriggerFromContext it matches ONLY the
+// dot form, not the FROM/JOIN/SELECT keyword gates. It lets an explicit
+// `.` keystroke re-open the popup even when the post-accept suppression is
+// armed: typing `.` right after accepting a table must still show columns.
+//
+// Nil buf is treated as "no context"; returns false.
+func IsIdentDotContext(buf *Buffer, pos Position) bool {
+	if buf == nil {
+		return false
+	}
+	line := lineUpToCursor(buf, pos)
+	if line == "" {
+		return false
+	}
+	stripped, open := stripNoiseEx(line)
+	if open {
+		return false
+	}
+	return reIdentDot.MatchString(stripped)
 }

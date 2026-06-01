@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
@@ -369,6 +370,39 @@ func TestStripNoise_BasicCases(t *testing.T) {
 	}
 }
 
+// TestSchemaSource_JoinOnContext covers the JOIN ... ON ... condition
+// position: the source should offer the tables already in scope (so the
+// user can qualify a column via `posts.`) plus those tables' columns.
+func TestSchemaSource_JoinOnContext(t *testing.T) {
+	sess := &fakeSession{
+		tables: []*models.Table{{Name: "posts"}, {Name: "posts_summary"}},
+		cols:   []models.Column{{Name: "id"}, {Name: "post_id"}},
+	}
+	src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+
+	// Empty partial right after `ON `: every scoped table plus columns.
+	b, p := bufWithCursor("select * from posts join posts_summary on ")
+	got := texts(src.Suggest(context.Background(), b, p))
+	for _, want := range []string{"posts", "posts_summary", "id", "post_id"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("ON-context (empty partial) missing %q; got %v", want, got)
+		}
+	}
+
+	// Partial `posts` (the screenshot): scoped tables matching the prefix.
+	b2, p2 := bufWithCursor("select * from posts join posts_summary on posts")
+	got2 := texts(src.Suggest(context.Background(), b2, p2))
+	if !slices.Contains(got2, "posts") || !slices.Contains(got2, "posts_summary") {
+		t.Errorf("ON-context prefix `posts` should offer posts/posts_summary; got %v", got2)
+	}
+
+	// USING is also a join-condition keyword.
+	b3, p3 := bufWithCursor("select * from posts join posts_summary using ")
+	if len(src.Suggest(context.Background(), b3, p3)) == 0 {
+		t.Error("USING context returned no suggestions")
+	}
+}
+
 func texts(sugs []Suggestion) []string {
 	out := make([]string, 0, len(sugs))
 	for _, s := range sugs {
@@ -543,6 +577,118 @@ func TestSchemaSource_TableErrorNotCached(t *testing.T) {
 func suggestLine(src *SchemaSource, line string) []Suggestion {
 	b, p := bufWithCursor(line)
 	return src.Suggest(context.Background(), b, p)
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestSchemaSource_UnqualifiedColumns_AfterWhere covers the headline
+// case: after `WHERE ` the columns of the FROM table are suggested even
+// though no `<table>.` qualifier was typed.
+func TestSchemaSource_UnqualifiedColumns_AfterWhere(t *testing.T) {
+	sess := &fakeSession{cols: []models.Column{{Name: "id", DataType: "int"}, {Name: "title", DataType: "text"}}}
+	src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+	got := texts(suggestLine(src, "SELECT * FROM posts WHERE "))
+	if !equalStrings(got, []string{"id", "title"}) {
+		t.Fatalf("got %v; want [id title]", got)
+	}
+	if sess.gotListColumnsArgs[1] != "posts" {
+		t.Errorf("ListColumns table = %q; want posts", sess.gotListColumnsArgs[1])
+	}
+}
+
+// TestSchemaSource_UnqualifiedColumns_AfterSelectWithLaterFrom proves
+// scope resolution scans the whole statement, not just text up to the
+// cursor: the cursor sits after `SELECT ` but the FROM clause that names
+// the table appears later in the buffer.
+func TestSchemaSource_UnqualifiedColumns_AfterSelectWithLaterFrom(t *testing.T) {
+	sess := &fakeSession{cols: []models.Column{{Name: "id"}, {Name: "name"}}}
+	src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+	full := "SELECT  FROM users"
+	b := bufFromLines(full)
+	p := Position{Line: 0, Col: len([]rune("SELECT "))}
+	got := texts(src.Suggest(context.Background(), b, p))
+	if !equalStrings(got, []string{"id", "name"}) {
+		t.Fatalf("got %v; want [id name]", got)
+	}
+}
+
+// TestSchemaSource_UnqualifiedColumns_OperatorAndKeywordContexts covers
+// every trigger position in scope: after WHERE, after a comparison
+// operator, and after AND.
+func TestSchemaSource_UnqualifiedColumns_OperatorAndKeywordContexts(t *testing.T) {
+	for _, line := range []string{
+		"SELECT * FROM posts WHERE ",
+		"SELECT * FROM posts WHERE id = ",
+		"SELECT * FROM posts WHERE id = 1 AND ",
+		"SELECT * FROM posts WHERE id = 1 OR ",
+	} {
+		sess := &fakeSession{cols: []models.Column{{Name: "id"}}}
+		src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+		got := texts(suggestLine(src, line))
+		if len(got) != 1 || got[0] != "id" {
+			t.Fatalf("line %q -> %v; want [id]", line, got)
+		}
+	}
+}
+
+// TestSchemaSource_UnqualifiedColumns_PrefixFilter narrows the column
+// list by the partial identifier the user has begun typing.
+func TestSchemaSource_UnqualifiedColumns_PrefixFilter(t *testing.T) {
+	sess := &fakeSession{cols: []models.Column{{Name: "id"}, {Name: "email"}, {Name: "events"}}}
+	src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+	got := texts(suggestLine(src, "SELECT * FROM users WHERE e"))
+	if !equalStrings(got, []string{"email", "events"}) {
+		t.Fatalf("got %v; want [email events]", got)
+	}
+}
+
+// TestSchemaSource_UnqualifiedColumns_MultiTableUnionDedupe verifies the
+// FROM table and every JOIN table contribute columns, unioned in scope
+// order and deduplicated by name (a column shared by two tables appears
+// once).
+func TestSchemaSource_UnqualifiedColumns_MultiTableUnionDedupe(t *testing.T) {
+	sess := &perTableSession{colsByTable: map[string][]models.Column{
+		"users":  {{Name: "id"}, {Name: "email"}},
+		"orders": {{Name: "id"}, {Name: "total"}},
+	}}
+	src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+	got := texts(suggestLine(src, "SELECT * FROM users u JOIN orders o ON u.id = o.user_id WHERE "))
+	if !equalStrings(got, []string{"id", "email", "total"}) {
+		t.Fatalf("got %v; want [id email total] (union, deduped)", got)
+	}
+}
+
+// TestSchemaSource_UnqualifiedColumns_NoTableInScope_Empty guards the
+// no-FROM case: a column position with no resolvable table yields no
+// suggestions (rather than every column of every table).
+func TestSchemaSource_UnqualifiedColumns_NoTableInScope_Empty(t *testing.T) {
+	sess := &fakeSession{cols: []models.Column{{Name: "id"}}}
+	src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+	if got := suggestLine(src, "SELECT "); len(got) != 0 {
+		t.Fatalf("got %v; want empty (no FROM table in scope)", got)
+	}
+}
+
+// TestSchemaSource_ColumnContext_InsideStringSuppressed verifies the
+// cursor sitting inside an unterminated string literal suppresses
+// column suggestions even though the stripped line looks like a WHERE
+// column position.
+func TestSchemaSource_ColumnContext_InsideStringSuppressed(t *testing.T) {
+	sess := &fakeSession{cols: []models.Column{{Name: "id"}}}
+	src := NewSchemaSource(sessProv(sess), schemaProv("public"))
+	if got := suggestLine(src, "SELECT * FROM users WHERE 'abc"); len(got) != 0 {
+		t.Fatalf("got %v; want empty (cursor inside string literal)", got)
+	}
 }
 
 // perTableSession returns columns keyed by table name and records the

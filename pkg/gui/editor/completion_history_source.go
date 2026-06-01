@@ -57,6 +57,13 @@ func (h HistorySource) Suggest(ctx context.Context, buf *Buffer, pos Position) [
 	if h.Store == nil {
 		return []Suggestion{}
 	}
+	// History offers whole past statements — useful at a statement start,
+	// noise in a schema-completable position (FROM / JOIN / ON / <ident>. /
+	// column context) where the relevant tables/columns should lead. Defer
+	// to the schema source there and stay quiet.
+	if AutoTriggerFromContext(buf, pos) {
+		return []Suggestion{}
+	}
 	prefix := identifierPrefixAt(buf, pos)
 	if prefix == "" {
 		return []Suggestion{}
