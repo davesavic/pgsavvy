@@ -662,6 +662,11 @@ func (g *Gui) layoutConnectionManagerMain(dims map[string]ui.Dimensions, rails m
 	if v != nil {
 		rails[name] = v
 		v.Title = cm.GetTitle()
+		// Word-wrap long bodies (e.g. multi-line connection errors) at the
+		// box's inner width instead of clipping them at the right border.
+		// gocui's Wrap is whitespace-aware, so no manual wrapLabel plumbing
+		// is needed here (unlike PROMPT, which wraps an editable buffer).
+		v.Wrap = true
 	}
 	_ = cm.HandleRender()
 	// The QUERY_EDITOR view from prior frames still exists in the dims["main"]
