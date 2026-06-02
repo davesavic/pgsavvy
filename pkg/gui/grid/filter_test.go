@@ -80,7 +80,10 @@ func TestSetFilter_EmptyIsNoOp(t *testing.T) {
 	require.True(t, v.FilterActive(), "empty src must not alter filter state")
 }
 
-func TestProjection_FilteredRowsExcluded(t *testing.T) {
+// TestProjection_FilterNoLongerExcludes pins dbsavvy-2ttm (T1): applyFilter
+// is now identity, so an active filter no longer drops rows from the
+// projection. (SetFilter still compiles; its row-hiding effect is gone.)
+func TestProjection_FilterNoLongerExcludes(t *testing.T) {
 	v := twoColView(t, [][]any{
 		{"alice", "ny"},
 		{"bob", "sf"},
@@ -89,25 +92,23 @@ func TestProjection_FilteredRowsExcluded(t *testing.T) {
 	require.NoError(t, v.SetFilter("charlotte", false))
 	snap := v.snapshot()
 	indices := project(snap)
-	require.Equal(t, []int{2}, indices, "only the 'charlotte' row should remain")
+	require.Equal(t, []int{0, 1, 2}, indices, "applyFilter is identity: every row survives")
 }
 
-// TestProjection_AllCols verifies the allCols flag: when off, only the
-// cursor-column is matched (so a non-matching cursor col misses); when
-// on, any column may match.
-func TestProjection_AllCols(t *testing.T) {
+// TestProjection_AllColsNoLongerAffectsProjection pins that the allCols
+// flag no longer changes the projection now that applyFilter is identity.
+func TestProjection_AllColsNoLongerAffectsProjection(t *testing.T) {
 	v := twoColView(t, [][]any{
 		{"alice", "ny"},
 		{"bob", "sfsf"},
 	})
-	// Cursor column 0; "sfsf" lives in column 1.
 	require.NoError(t, v.SetFilter("sfsf", false))
 	snap := v.snapshot()
-	require.Empty(t, project(snap), "cursor-col only must miss when match is in other col")
+	require.Equal(t, []int{0, 1}, project(snap), "identity projection: all rows present")
 
 	v.ToggleFilterAllCols()
 	snap = v.snapshot()
-	require.Equal(t, []int{1}, project(snap), "allCols=true should include the cross-col match")
+	require.Equal(t, []int{0, 1}, project(snap), "allCols no longer affects the projection")
 }
 
 func TestSetColumns_ClearsFilter(t *testing.T) {

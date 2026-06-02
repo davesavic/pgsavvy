@@ -128,6 +128,13 @@ type View struct {
 	// means "use defaultFilterMaxRegexBytes".
 	filterMaxRegexBytes int
 
+	// searchState carries the active plain-substring SEARCH, if any. See
+	// search.go for the type definition and the SetSearch / ClearSearch /
+	// NextMatch / PrevMatch / SearchStatus surface. Unlike filterState the
+	// search never hides rows; it drives cell-major n/N cursor navigation.
+	// dbsavvy-2ttm.
+	searchState searchState
+
 	// sortState carries the active column sort, if any. See sort.go for
 	// the SetSort / SortActive / SortIndicator surface. dbsavvy-uv0.5.
 	sortState sortState
@@ -281,6 +288,10 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 	// Clear any active /regex filter — a new schema attach is the reset
 	// signal per dbsavvy-uv0 §Architecture Decisions item 5.
 	v.filterState = filterState{}
+	// Clear any active search — a new schema attach invalidates the
+	// cell-major match list (row/col indices are not stable across a
+	// schema reset). Mirrors the filterState reset. dbsavvy-2ttm.
+	v.searchState = searchState{}
 	// Clear any active sort: a fresh schema attach resets sort/hide/filter
 	// (dbsavvy-uv0 AD-5). T6 will reseed hide-cols from AppState after this
 	// point in its own SetColumns extension.
@@ -604,6 +615,10 @@ func (v *View) snapshot() viewSnapshot {
 		filterRe:           v.filterState.re,
 		filterAllCols:      v.filterState.allCols,
 		filterActive:       v.filterState.re != nil,
+		searchMatches:      copyMatches(v.searchState.matches),
+		searchCurrentIdx:   v.searchState.current,
+		searchActive:       v.searchState.query != "",
+		searchQuery:        v.searchState.query,
 		hidden:             v.hiddenColSet,
 		viewMode:           normaliseViewMode(v.viewMode),
 		estimatedRows:      v.loadEstimatedRowsLocked(),
@@ -683,6 +698,15 @@ type viewSnapshot struct {
 	filterRe      *regexp.Regexp
 	filterAllCols bool
 	filterActive  bool
+
+	// Search projection inputs. The highlight pass (T2) reads these
+	// (never v.searchState directly) so a concurrent SetSearch / Next /
+	// Prev cannot tear the draw between snapshot capture and render.
+	// searchMatches is a DEFENSIVE COPY of the live slice. dbsavvy-2ttm.
+	searchMatches    []cellMatch
+	searchCurrentIdx int
+	searchActive     bool
+	searchQuery      string
 
 	// hidden is the index-set of columns to skip in visibleColumnOrder.
 	// Captured under the same RLock as the rest of the snapshot so a

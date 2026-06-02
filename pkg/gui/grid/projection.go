@@ -44,21 +44,18 @@ func projectedPos(proj []int, rawRow int) int {
 	return -1
 }
 
-// applyFilter returns the row indices that match the snapshot's filter
-// state. When no filter is active the identity index slice is returned.
+// applyFilter returns the identity row-index slice (one entry per row,
+// in order), regardless of filter state.
+//
+// dbsavvy-2ttm (T1): the in-grid regex row-filter is being replaced by a
+// plain-substring SEARCH that never hides rows. The filter no longer
+// excludes rows from the projection — that path is now an identity map.
+// The old filterState struct and SetFilter / ClearFilter / JumpNextMatch
+// etc. remain present and compiling but inert until T4 removes them.
 func applyFilter(snap viewSnapshot) []int {
-	if !snap.filterActive || snap.filterRe == nil {
-		out := make([]int, len(snap.rows))
-		for i := range out {
-			out[i] = i
-		}
-		return out
-	}
-	out := make([]int, 0, len(snap.rows))
-	for i, row := range snap.rows {
-		if rowMatchesLocked(row, snap.cols, snap.filterRe, snap.filterAllCols, snap.cursorCol) {
-			out = append(out, i)
-		}
+	out := make([]int, len(snap.rows))
+	for i := range out {
+		out[i] = i
 	}
 	return out
 }

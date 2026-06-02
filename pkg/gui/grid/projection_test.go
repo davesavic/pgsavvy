@@ -9,34 +9,34 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// TestProjection_FilterSubsetsPreservingOrder pins the projection: filter
-// drops non-matching rows and the surviving matches keep their original
-// (raw) order. The grid no longer reorders for sort (dbsavvy-72k.6), so
-// even with a sort indicator installed the matches must stay in raw order.
-func TestProjection_FilterSubsetsPreservingOrder(t *testing.T) {
+// TestProjection_FilterIsIdentityEvenWhenActive pins the dbsavvy-2ttm (T1)
+// amendment: applyFilter no longer hides rows — even with a filter
+// installed the projection returns every row in raw order. (The regex
+// filter is being superseded by the never-hiding plain-substring SEARCH;
+// the old SetFilter surface still compiles but no longer excludes rows.)
+func TestProjection_FilterIsIdentityEvenWhenActive(t *testing.T) {
 	v := NewView()
 	v.SetColumns([]models.ColumnMeta{
 		{Name: "name", TypeName: "text"},
 		{Name: "age", TypeName: "int4"},
 	})
-	// Mix of names; filter on "name" matching "^a".
-	v.AppendRows([]models.Row{{Values: []any{"alice", int64(30)}}})  // 0 — match
-	v.AppendRows([]models.Row{{Values: []any{"bob", int64(25)}}})    // 1 — no match
-	v.AppendRows([]models.Row{{Values: []any{"alex", int64(28)}}})   // 2 — match
-	v.AppendRows([]models.Row{{Values: []any{"charlie", int64(5)}}}) // 3 — no match
-	v.AppendRows([]models.Row{{Values: []any{"alan", int64(40)}}})   // 4 — match
+	v.AppendRows([]models.Row{{Values: []any{"alice", int64(30)}}})  // 0
+	v.AppendRows([]models.Row{{Values: []any{"bob", int64(25)}}})    // 1
+	v.AppendRows([]models.Row{{Values: []any{"alex", int64(28)}}})   // 2
+	v.AppendRows([]models.Row{{Values: []any{"charlie", int64(5)}}}) // 3
+	v.AppendRows([]models.Row{{Values: []any{"alan", int64(40)}}})   // 4
 
 	require.NoError(t, v.SetFilter("^a", false))
 	v.SetSortIndicator(1, SortAsc) // display-only; must not reorder
 
 	got := projectIndices(v)
-	// Filter keeps {0, 2, 4} in raw order; the indicator does NOT reorder.
-	require.Equal(t, []int{0, 2, 4}, got)
+	// applyFilter is now identity: every row, raw order, no exclusion.
+	require.Equal(t, []int{0, 1, 2, 3, 4}, got)
 }
 
-// TestProjection_NonMatchingStayHidden pins: rows excluded by the filter
-// remain hidden, and the survivors keep their raw order (no reorder).
-func TestProjection_NonMatchingStayHidden(t *testing.T) {
+// TestProjection_FilterActiveStillIdentity pins that even non-matching
+// rows survive the projection now that applyFilter is identity.
+func TestProjection_FilterActiveStillIdentity(t *testing.T) {
 	v := NewView()
 	v.SetColumns([]models.ColumnMeta{
 		{Name: "name", TypeName: "text"},
@@ -49,7 +49,7 @@ func TestProjection_NonMatchingStayHidden(t *testing.T) {
 	v.SetSortIndicator(0, SortAsc) // display-only; must not reorder
 
 	got := projectIndices(v)
-	require.Equal(t, []int{0, 2}, got, "bravo (idx 1) hidden; alpha/alfa keep raw order")
+	require.Equal(t, []int{0, 1, 2}, got, "applyFilter is identity: bravo (idx 1) no longer hidden")
 }
 
 // TestProjection_SortAloneNoFilterIsIdentity pins: with no filter, the
