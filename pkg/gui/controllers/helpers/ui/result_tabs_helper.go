@@ -618,6 +618,31 @@ func (t *Tab) Title() string {
 	return fmt.Sprintf("%s · %s", rowsSegment, state)
 }
 
+// BarCount returns the compact row-count segment shown after the label in
+// the tab-bar strip: "" for plan/error tabs or before any rows arrive,
+// "~N" while streaming, "N" once complete (or the affected-row count for a
+// RETURNING-less DML). It mirrors Title's counting rules but omits the
+// " rows" word so several tabs still fit on one row. dbsavvy-y6rc.
+func (t *Tab) BarCount() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	switch t.state {
+	case StateErrored, StatePlan, StateConnectionLost:
+		return ""
+	}
+	if t.complete && t.rowCount == 0 && t.rowsAffected > 0 {
+		return fmt.Sprintf("%d", t.rowsAffected)
+	}
+	if t.rowCount == 0 && !t.complete {
+		return ""
+	}
+	if t.complete {
+		return fmt.Sprintf("%d", t.rowCount)
+	}
+	return fmt.Sprintf("~%d", t.rowCount)
+}
+
 // Complete reports whether the tab's stream has been drained to EOF.
 // dbsavvy-uv0.3.
 func (t *Tab) Complete() bool {
@@ -1886,10 +1911,30 @@ func (h *ResultTabsHelper) RenderTabBar(width int) string {
 	widths := make([]int, len(tabs))
 	activeIdx := 0
 	for i, t := range tabs {
-		label := truncateLabel(t.Label(), barLabelMax)
-		texts[i] = fmt.Sprintf("%d %s %s", t.Slot()+1, label, stateGlyph(t.State()))
+		glyph := stateGlyph(t.State())
+		countSuffix := ""
+		if c := t.BarCount(); c != "" {
+			countSuffix = " · " + c
+		}
+		isActive := t.ID() == active
+
+		// Inactive cells stay compact (barLabelMax) so several fit; the
+		// active cell gets the rest of the row so a short statement shows
+		// whole and a long one shows its identifying tail. The active budget
+		// is bounded by width (less the reverse-video pad and the ‹ ›
+		// overflow reserve) so the active cell alone never overruns the bar.
+		cap := barLabelMax
+		if isActive {
+			fixed := runewidth.StringWidth(fmt.Sprintf("%d %s %s", t.Slot()+1, countSuffix, glyph))
+			if budget := width - fixed - 4; budget > cap {
+				cap = budget
+			}
+		}
+
+		label := truncateTail(t.Label(), cap)
+		texts[i] = fmt.Sprintf("%d %s%s %s", t.Slot()+1, label, countSuffix, glyph)
 		widths[i] = runewidth.StringWidth(texts[i])
-		if t.ID() == active {
+		if isActive {
 			activeIdx = i
 		}
 	}
@@ -3280,15 +3325,19 @@ func (h *ResultTabsHelper) gridColumnNames(g *grid.View) []string {
 	return names
 }
 
-// truncateLabel cleans whitespace and truncates to cap with an
-// ellipsis. Mirrors controllers.tabLabel; redeclared here so the
-// helper can be tested without importing controllers (cycle).
-func truncateLabel(s string, cap int) string {
+// truncateTail collapses whitespace and, when the text exceeds cap runes,
+// keeps the trailing cap runes behind a leading ellipsis. Unlike
+// truncateLabel it preserves the END of a statement — the FROM table (the
+// token that distinguishes otherwise-identical SELECTs) lives there, so a
+// head truncation drops exactly the part that identifies the tab.
+// Rune-based so multi-byte SQL is never split mid-rune. dbsavvy-y6rc.
+func truncateTail(s string, cap int) string {
 	clean := strings.Join(strings.Fields(s), " ")
-	if len(clean) <= cap {
+	r := []rune(clean)
+	if len(r) <= cap {
 		return clean
 	}
-	return clean[:cap] + "…"
+	return "…" + string(r[len(r)-cap:])
 }
 
 // NewRBMStreamFactory builds the production StreamRunnerFactory by

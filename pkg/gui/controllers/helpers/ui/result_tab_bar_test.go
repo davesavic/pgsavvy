@@ -73,6 +73,89 @@ func TestRenderTabBar_WindowsAroundActiveWhenNarrow(t *testing.T) {
 	}
 }
 
+// setBarRows forces a tab's streaming counters so tab-bar rendering of the
+// row-count segment can be exercised without a live stream.
+func setBarRows(tab *Tab, rows int64, complete bool) {
+	tab.mu.Lock()
+	tab.rowCount = rows
+	tab.complete = complete
+	if complete {
+		tab.state = StateComplete
+	}
+	tab.mu.Unlock()
+}
+
+func TestRenderTabBar_TailTruncationKeepsTableToken(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	// The FROM table — the only token distinguishing two SELECTs — lives at
+	// the END of the statement, so an over-cap inactive cell must keep its
+	// tail, not its head.
+	_ = h.openTab("select id, name, email, status from accounts", nil)
+	_ = h.openTab("short", nil) // make the first tab inactive
+
+	out := stripBarStyle(h.RenderTabBar(200))
+	if !strings.Contains(out, "accounts") {
+		t.Errorf("tail-truncated cell dropped the table token: %q", out)
+	}
+	if strings.Contains(out, "select id, name") {
+		t.Errorf("inactive cell should be tail-truncated (kept its head): %q", out)
+	}
+}
+
+func TestRenderTabBar_ActiveShowsWholeStatementWhenWide(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	_ = h.openTab("select * from accounts", nil) // active (most recent)
+
+	out := stripBarStyle(h.RenderTabBar(200))
+	if !strings.Contains(out, "select * from accounts") {
+		t.Errorf("active cell should show the whole short statement on a wide pane: %q", out)
+	}
+	if strings.Contains(out, "…") {
+		t.Errorf("no ellipsis expected for a statement that fits: %q", out)
+	}
+}
+
+func TestRenderTabBar_ActiveTailTruncatedWhenNarrow(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	_ = h.openTab("select a, b, c, d, e, f, g, h from accounts", nil)
+
+	const width = 30
+	out := h.RenderTabBar(width)
+	plain := stripBarStyle(out)
+
+	if !strings.Contains(plain, "accounts") {
+		t.Errorf("narrow active cell should keep the table tail: %q", plain)
+	}
+	if !strings.Contains(plain, "…") {
+		t.Errorf("expected a leading ellipsis when the active statement is truncated: %q", plain)
+	}
+	if w := runewidth.StringWidth(plain); w > width {
+		t.Errorf("active cell width = %d, want <= %d (%q)", w, width, plain)
+	}
+}
+
+func TestRenderTabBar_ShowsRowCount(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	_ = h.openTab("select * from accounts", nil)
+	setBarRows(h.Active(), 45, true)
+
+	out := stripBarStyle(h.RenderTabBar(200))
+	if !strings.Contains(out, "· 45") {
+		t.Errorf("expected completed row-count segment '· 45' in %q", out)
+	}
+}
+
+func TestRenderTabBar_StreamingRowCountTilde(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	_ = h.openTab("select * from accounts", nil)
+	setBarRows(h.Active(), 1200, false) // still streaming
+
+	out := stripBarStyle(h.RenderTabBar(200))
+	if !strings.Contains(out, "· ~1200") {
+		t.Errorf("expected streaming row-count segment '· ~1200' in %q", out)
+	}
+}
+
 func TestStateGlyph(t *testing.T) {
 	cases := []struct {
 		state TabState
