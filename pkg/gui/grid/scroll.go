@@ -559,10 +559,16 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 		// carries match spans, re-render it with the matched substrings
 		// highlighted. Cells without spans (and the no-search state) keep
 		// the byte-identical clean path above.
+		//
+		// dbsavvy-537j: a match-bearing cell paints its highlight with
+		// explicit colors (CurSearch is black-on-yellow). The selection
+		// highlight is reverse-video, which would swap those into
+		// yellow-on-black — and n/N always parks the cursor on the current
+		// match, so that cell is always selected. The match highlight wins:
+		// skip the reverse-video wrap so the highlight stays visible.
 		if spans := cellHighlightSpans(snap, r, c); len(spans) > 0 {
 			styled = renderCellPaddedHighlighted(value, snap.cols[c], w, isDirty, spans)
-		}
-		if inSelection(snap, r, c) {
+		} else if inSelection(snap, r, c) {
 			styled = applySelectionHighlight(styled)
 		}
 		sb.WriteString(styled)

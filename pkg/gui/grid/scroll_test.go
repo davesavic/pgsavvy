@@ -491,6 +491,35 @@ func TestRenderDataLine_DigitInSGRPrefixDoesNotCorruptEscape(t *testing.T) {
 	}
 }
 
+// TestRenderDataLine_CurrentMatchNotInvertedBySelection proves the n/N
+// current match keeps its explicit CurSearch colors instead of being
+// inverted by the reverse-video selection highlight. SetSearch/NextMatch
+// always move the cursor onto the current match, so that cell is "in
+// selection"; wrapping it in reverse-video swaps the black-on-yellow into
+// yellow-on-black — the "black background" the highlight is supposed to
+// avoid (dbsavvy-537j). The fix skips the reverse-video wrap on cells that
+// carry search-match spans so the explicit highlight survives.
+func TestRenderDataLine_CurrentMatchNotInvertedBySelection(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{{Name: "name", TypeName: "text"}})
+	v.AppendRows([]models.Row{{Values: []any{"alpha"}}})
+	v.SetSearch("alpha") // current match; cursor moves onto its cell
+
+	snap := v.snapshot()
+	line := renderDataLine(snap, 0, 80)
+
+	// The current match must carry the explicit CurSearch SGR (black on
+	// yellow) — the intended high-contrast highlight.
+	if !strings.Contains(line, curSearchSGR) {
+		t.Fatalf("current match missing CurSearch SGR %q; line=%q", curSearchSGR, line)
+	}
+	// It must NOT be wrapped in reverse-video, which would swap the colors
+	// into yellow-on-black (the dark-blob bug).
+	if strings.Contains(line, ansiReverseVid) {
+		t.Fatalf("current match cell wrapped in reverse-video inverts the highlight; line=%q", line)
+	}
+}
+
 // TestRenderDataLine_DirtyCellShowsStagedValue verifies that once a result
 // grid is wired to a PendingEditSet (SetPendingEdits) and has a row
 // identity, renderDataLine renders a staged edit's NewValue — not the
