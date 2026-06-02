@@ -47,6 +47,7 @@ func DefaultDark() *config.ThemeConfig {
 		CursorFg:        "black",
 		MatchHighlight:  "yellow",
 		SearchHighlight: "yellow",
+		CurSearch:       "black on yellow",
 		DiffAddedFg:     "green",
 		DiffRemovedFg:   "red",
 		DiffChangedFg:   "yellow",

@@ -184,6 +184,10 @@ type ThemeConfig struct {
 	CursorFg        string `yaml:"cursor_fg"`
 	MatchHighlight  string `yaml:"match_highlight"`
 	SearchHighlight string `yaml:"search_highlight"`
+	// CurSearch is the style for the CURRENT in-grid search match (the cell
+	// the cursor sits on). Stronger than SearchHighlight so the active match
+	// stands out from the others. dbsavvy-2ttm.2.
+	CurSearch string `yaml:"cur_search"`
 	DiffAddedFg     string `yaml:"diff_added_fg"`
 	DiffRemovedFg   string `yaml:"diff_removed_fg"`
 	DiffChangedFg   string `yaml:"diff_changed_fg"`

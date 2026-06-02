@@ -555,6 +555,13 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 			}
 		}
 		styled := renderCellPadded(value, snap.cols[c], w, isDirty)
+		// dbsavvy-2ttm.2: when an in-grid search is active and this cell
+		// carries match spans, re-render it with the matched substrings
+		// highlighted. Cells without spans (and the no-search state) keep
+		// the byte-identical clean path above.
+		if spans := cellHighlightSpans(snap, r, c); len(spans) > 0 {
+			styled = renderCellPaddedHighlighted(value, snap.cols[c], w, isDirty, spans)
+		}
 		if inSelection(snap, r, c) {
 			styled = applySelectionHighlight(styled)
 		}

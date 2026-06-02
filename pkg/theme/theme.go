@@ -65,6 +65,7 @@ type themeState struct {
 	CursorFg        *Style
 	MatchHighlight  *Style
 	SearchHighlight *Style
+	CurSearch       *Style // dbsavvy-2ttm.2 — current in-grid search match (stronger than SearchHighlight)
 	DiffAddedFg     *Style
 	DiffRemovedFg   *Style
 	DiffChangedFg   *Style
@@ -140,6 +141,7 @@ func Apply(cfg *config.ThemeConfig) error {
 		CursorFg:        parseStyle(cfg.CursorFg),
 		MatchHighlight:  parseStyle(cfg.MatchHighlight),
 		SearchHighlight: parseStyle(cfg.SearchHighlight),
+		CurSearch:       parseStyle(cfg.CurSearch),
 		DiffAddedFg:     parseStyle(cfg.DiffAddedFg),
 		DiffRemovedFg:   parseStyle(cfg.DiffRemovedFg),
 		DiffChangedFg:   parseStyle(cfg.DiffChangedFg),
