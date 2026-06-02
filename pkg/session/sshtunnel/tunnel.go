@@ -57,7 +57,7 @@ type Tunnel struct {
 // requiring auth (encrypted key without passphrase_command, or interactive
 // password) is unavailable; use OpenWithPrompter to supply a SecretPrompter.
 func Open(ctx context.Context, cfg models.SSHTunnelConfig) (*Tunnel, error) {
-	return OpenWithPrompter(ctx, cfg, nil)
+	return OpenWithPrompter(ctx, ctx, cfg, nil)
 }
 
 // OpenWithPrompter is Open with an optional SecretPrompter used to resolve
@@ -65,13 +65,23 @@ func Open(ctx context.Context, cfg models.SSHTunnelConfig) (*Tunnel, error) {
 // is set, or an SSH password when no ssh_password_command is set). A nil
 // prompter disables all interactive prompting and behaves exactly as the
 // headless Open: command/agent/key paths are unchanged.
-func OpenWithPrompter(ctx context.Context, cfg models.SSHTunnelConfig, prompter session.SecretPrompter) (*Tunnel, error) {
+//
+// Two contexts are taken so the caller can bound them independently:
+//   - promptCtx governs interactive secret resolution (authMethods). It should
+//     NOT carry the network connect deadline — a human typing a passphrase must
+//     not be charged against the dial budget (epic dbsavvy-t60w).
+//   - dialCtx governs the network: the TCP dial to the bastion and the SSH
+//     handshake. Cancelling it unblocks a stalled handshake and preserves
+//     fast-fail when the bastion is unreachable.
+//
+// Headless and test callers pass the same ctx for both.
+func OpenWithPrompter(promptCtx, dialCtx context.Context, cfg models.SSHTunnelConfig, prompter session.SecretPrompter) (*Tunnel, error) {
 	if err := session.ValidateSSHTunnel(&cfg); err != nil {
 		return nil, err
 	}
 	port := session.SSHTunnelPort(&cfg)
 
-	methods, selected, err := authMethods(ctx, cfg, prompter)
+	methods, selected, err := authMethods(promptCtx, cfg, prompter)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +105,7 @@ func OpenWithPrompter(ctx context.Context, cfg models.SSHTunnelConfig, prompter 
 		slog.Any("auth", selected),
 	)
 
-	client, err := dialSSH(ctx, addr, clientConfig)
+	client, err := dialSSH(dialCtx, addr, clientConfig)
 	if err != nil {
 		logs.Event(pkgLogger(), logCat, "open_error", slog.String("addr", addr))
 		return nil, err

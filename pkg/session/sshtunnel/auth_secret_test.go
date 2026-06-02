@@ -53,7 +53,7 @@ func TestEncryptedKeyInteractivePassphrase(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	tun, err := OpenWithPrompter(ctx, cfg, prompter)
+	tun, err := OpenWithPrompter(ctx, ctx, cfg, prompter)
 	if err != nil {
 		t.Fatalf("OpenWithPrompter: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestEncryptedKeyInteractiveWrongPassphrase(t *testing.T) {
 	const secret = "wrongpass-supersecret"
 	prompter := &fakeSecretPrompter{value: secret}
 
-	_, err := OpenWithPrompter(context.Background(), cfg, prompter)
+	_, err := OpenWithPrompter(context.Background(), context.Background(), cfg, prompter)
 	if err == nil {
 		t.Fatal("expected decrypt failure with wrong passphrase")
 	}
@@ -113,7 +113,7 @@ func TestEncryptedKeyEmptyInteractivePassphrase(t *testing.T) {
 
 	prompter := &fakeSecretPrompter{value: ""}
 
-	_, err := OpenWithPrompter(context.Background(), cfg, prompter)
+	_, err := OpenWithPrompter(context.Background(), context.Background(), cfg, prompter)
 	if err == nil {
 		t.Fatal("expected auth failure with empty passphrase")
 	}
@@ -134,7 +134,7 @@ func TestEncryptedKeyNilPrompterNoCommand(t *testing.T) {
 		KnownHosts:   freshKnownHosts(t),
 	}
 
-	_, err := OpenWithPrompter(context.Background(), cfg, nil)
+	_, err := OpenWithPrompter(context.Background(), context.Background(), cfg, nil)
 	if err == nil {
 		t.Fatal("expected error for encrypted key, nil prompter, no command")
 	}
@@ -163,7 +163,7 @@ func TestPasswordAuthInteractive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	tun, err := OpenWithPrompter(ctx, cfg, prompter)
+	tun, err := OpenWithPrompter(ctx, ctx, cfg, prompter)
 	if err != nil {
 		t.Fatalf("OpenWithPrompter: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestPasswordAuthInteractiveWrong(t *testing.T) {
 	const secret = "wrongpw-supersecret"
 	prompter := &fakeSecretPrompter{value: secret}
 
-	_, err := OpenWithPrompter(context.Background(), cfg, prompter)
+	_, err := OpenWithPrompter(context.Background(), context.Background(), cfg, prompter)
 	if err == nil {
 		t.Fatal("expected auth failure with wrong password")
 	}
@@ -218,7 +218,7 @@ func TestPasswordAuthCommand(t *testing.T) {
 	defer cancel()
 
 	// Command path must work even with a nil prompter.
-	tun, err := OpenWithPrompter(ctx, cfg, nil)
+	tun, err := OpenWithPrompter(ctx, ctx, cfg, nil)
 	if err != nil {
 		t.Fatalf("OpenWithPrompter: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestPasswordAuthCommandFails(t *testing.T) {
 		KnownHosts:         freshKnownHosts(t),
 	}
 
-	_, err := OpenWithPrompter(context.Background(), cfg, nil)
+	_, err := OpenWithPrompter(context.Background(), context.Background(), cfg, nil)
 	if err == nil {
 		t.Fatal("expected error when ssh_password_command exits non-zero")
 	}
@@ -270,7 +270,7 @@ func TestPasswordAuthCancelled(t *testing.T) {
 
 	prompter := &fakeSecretPrompter{err: session.NewSecretPromptCancelled(nil)}
 
-	_, err := OpenWithPrompter(context.Background(), cfg, prompter)
+	_, err := OpenWithPrompter(context.Background(), context.Background(), cfg, prompter)
 	if err == nil {
 		t.Fatal("expected error when prompter cancelled")
 	}

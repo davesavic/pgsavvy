@@ -29,11 +29,25 @@ type sshTunnel interface {
 }
 
 // openTunnel is the package-private seam for establishing an SSH tunnel. It
-// defaults to sshtunnel.Open; tests reassign it to inject a recording fake.
-// Keep this the SMALLEST possible seam — do not grow it into a strategy object.
-var openTunnel = func(ctx context.Context, cfg models.SSHTunnelConfig) (sshTunnel, error) {
-	return sshtunnel.OpenWithPrompter(ctx, cfg, secretPrompter())
+// defaults to sshtunnel.OpenWithPrompter; tests reassign it to inject a
+// recording fake. Keep this the SMALLEST possible seam — do not grow it into a
+// strategy object.
+//
+// promptCtx bounds interactive secret resolution (no network deadline — see
+// connectTimeout); dialCtx bounds the bastion dial + handshake.
+var openTunnel = func(promptCtx, dialCtx context.Context, cfg models.SSHTunnelConfig) (sshTunnel, error) {
+	return sshtunnel.OpenWithPrompter(promptCtx, dialCtx, cfg, secretPrompter())
 }
+
+// connectTimeout bounds the NETWORK phase of Open (bastion dial + SSH
+// handshake + pool dial + pool.Ping + SELECT version()). It deliberately
+// excludes interactive credential prompts, which Open resolves before deriving
+// the dialCtx. Long enough to ride out a slow tunneled handshake, short enough
+// that an unreachable host fails fast instead of wedging the UI. Raised from
+// the former 10s adapters-layer budget (epic dbsavvy-t60w): a tunneled connect
+// must fit an SSH handshake plus AfterConnect SET round-trips through the
+// bastion, which 10s could not cover once the prompt was excluded.
+const connectTimeout = 30 * time.Second
 
 // globalLogger is the package-level *slog.Logger used by Driver / Connection
 // / Session instrumentation emits. It is set ONCE by SetGlobalLogger from the
@@ -183,6 +197,15 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 	router := NewNoticeRouter()
 	cfg.ConnConfig.OnNotice = router.route
 
+	// connectTimeout bounds only the NETWORK phase (bastion dial + SSH
+	// handshake + pool dial + ping + SELECT version()) — it is derived HERE,
+	// after credential and interactive-secret resolution, so a human typing a
+	// passphrase is never charged against the dial budget (epic dbsavvy-t60w).
+	// The parent ctx (untimed by the connect path) still governs the prompt and
+	// remains cancellable for supersession.
+	dialCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+
 	// SSH tunnel (epic ssh-tunnel T5): when the profile carries an
 	// SSHTunnelConfig the tunnel MUST be established before the pool is
 	// created so every DB dial routes through it. On success we mutate cfg
@@ -190,7 +213,10 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 	// pgconn's DialFunc, and an identity LookupFunc so pgconn does NOT resolve
 	// the bastion-only DSN host client-side — the raw hostname must reach
 	// DialContext for the SSH server to resolve it bastion-side (F1).
-	tunnel, err := openSSHTunnel(ctx, profile.SSHTunnel)
+	//
+	// The prompt phase runs under ctx (untimed); the bastion dial + handshake
+	// run under dialCtx (the connect budget).
+	tunnel, err := openSSHTunnel(ctx, dialCtx, profile.SSHTunnel)
 	if err != nil {
 		emitDone(err)
 		return nil, err
@@ -200,7 +226,7 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 		cfg.ConnConfig.LookupFunc = identityLookup
 	}
 
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	pool, err := pgxpool.NewWithConfig(dialCtx, cfg)
 	if err != nil {
 		closeTunnel(tunnel)
 		wrapped := fmt.Errorf("pg: open: %s", session.RedactDSN(err.Error()))
@@ -208,7 +234,7 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 		return nil, wrapped
 	}
 
-	if err := pool.Ping(ctx); err != nil {
+	if err := pool.Ping(dialCtx); err != nil {
 		pool.Close()
 		closeTunnel(tunnel)
 		wrapped := fmt.Errorf("pg: ping: %s", session.RedactDSN(err.Error()))
@@ -217,7 +243,7 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 	}
 
 	var version string
-	if err := pool.QueryRow(ctx, "SELECT version()").Scan(&version); err != nil {
+	if err := pool.QueryRow(dialCtx, "SELECT version()").Scan(&version); err != nil {
 		pool.Close()
 		closeTunnel(tunnel)
 		wrapped := fmt.Errorf("pg: server version: %w", err)
@@ -239,11 +265,11 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 // nil (no tunnel configured). A non-nil error is the typed SSH error from the
 // tunnel layer (sshtunnel.IsDialError reports true); the pool is never created
 // in that case.
-func openSSHTunnel(ctx context.Context, cfg *models.SSHTunnelConfig) (sshTunnel, error) {
+func openSSHTunnel(promptCtx, dialCtx context.Context, cfg *models.SSHTunnelConfig) (sshTunnel, error) {
 	if cfg == nil {
 		return nil, nil
 	}
-	return openTunnel(ctx, *cfg)
+	return openTunnel(promptCtx, dialCtx, *cfg)
 }
 
 // closeTunnel closes t when non-nil. Used on Open failure paths after the

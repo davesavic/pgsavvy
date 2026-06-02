@@ -50,7 +50,7 @@ func (f *fakeTunnel) Close() error {
 
 // withOpenTunnel swaps the package openTunnel seam for the duration of the test
 // and restores it afterwards.
-func withOpenTunnel(t *testing.T, fn func(ctx context.Context, cfg models.SSHTunnelConfig) (sshTunnel, error)) {
+func withOpenTunnel(t *testing.T, fn func(promptCtx, dialCtx context.Context, cfg models.SSHTunnelConfig) (sshTunnel, error)) {
 	t.Helper()
 	prev := openTunnel
 	openTunnel = fn
@@ -75,7 +75,7 @@ func tunnelProfile() models.Connection {
 // SSHTunnel, Open opens no tunnel and leaves DialFunc/LookupFunc unset. The
 // seam is overridden to FAIL if called, proving the nil branch never opens one.
 func TestDriverOpenNilTunnelLeavesConfigUnchanged(t *testing.T) {
-	withOpenTunnel(t, func(context.Context, models.SSHTunnelConfig) (sshTunnel, error) {
+	withOpenTunnel(t, func(context.Context, context.Context, models.SSHTunnelConfig) (sshTunnel, error) {
 		t.Fatal("openTunnel must not be called when SSHTunnel is nil")
 		return nil, nil
 	})
@@ -83,7 +83,7 @@ func TestDriverOpenNilTunnelLeavesConfigUnchanged(t *testing.T) {
 	// We can't reach a real server, but the cfg mutation happens BEFORE pool
 	// creation, so we assert the wiring at the cfg level by reusing the exact
 	// helpers Open uses. With nil cfg, openSSHTunnel returns (nil,nil).
-	tun, err := openSSHTunnel(context.Background(), nil)
+	tun, err := openSSHTunnel(context.Background(), context.Background(), nil)
 	require.NoError(t, err)
 	require.Nil(t, tun, "nil SSHTunnel must yield a nil tunnel")
 }
@@ -93,7 +93,7 @@ func TestDriverOpenNilTunnelLeavesConfigUnchanged(t *testing.T) {
 // sets DialFunc + an identity LookupFunc, and the dial actually fires.
 func TestDriverOpenTunnelRoutesDialThroughFake(t *testing.T) {
 	fake := &fakeTunnel{dialErr: errors.New("boom: dial refused")}
-	withOpenTunnel(t, func(context.Context, models.SSHTunnelConfig) (sshTunnel, error) {
+	withOpenTunnel(t, func(context.Context, context.Context, models.SSHTunnelConfig) (sshTunnel, error) {
 		return fake, nil
 	})
 
@@ -109,6 +109,37 @@ func TestDriverOpenTunnelRoutesDialThroughFake(t *testing.T) {
 	require.Nil(t, conn)
 	require.GreaterOrEqual(t, fake.dialCalls.Load(), int32(1),
 		"the DB dial must route through the fake tunnel's DialContext")
+}
+
+// TestDriverOpenExcludesPromptFromConnectDeadline confirms epic dbsavvy-t60w:
+// Open derives the network deadline (connectTimeout) AFTER credential/prompt
+// resolution, so the prompt context carries NO deadline while the dial context
+// does. Regression guard for the bug where a ~4s interactive SSH prompt ate the
+// 10s budget and tunnelled connects timed out at pool.Ping.
+func TestDriverOpenExcludesPromptFromConnectDeadline(t *testing.T) {
+	var promptHasDeadline, dialHasDeadline bool
+	var dialBudget time.Duration
+	withOpenTunnel(t, func(promptCtx, dialCtx context.Context, _ models.SSHTunnelConfig) (sshTunnel, error) {
+		_, promptHasDeadline = promptCtx.Deadline()
+		dl, ok := dialCtx.Deadline()
+		dialHasDeadline = ok
+		if ok {
+			dialBudget = time.Until(dl)
+		}
+		// Bail before pool dial — only the handed-in contexts matter here.
+		return nil, errors.New("stop: contexts captured")
+	})
+
+	d := &Driver{prompter: stubPrompter{}}
+	_, err := d.Open(context.Background(), tunnelProfile())
+	require.Error(t, err)
+
+	require.False(t, promptHasDeadline,
+		"prompt context must NOT carry the connect deadline (human typing time is untimed)")
+	require.True(t, dialHasDeadline, "dial context must carry the connect deadline")
+	require.Greater(t, dialBudget, 25*time.Second,
+		"dial budget should be ~connectTimeout, not eaten by the prompt")
+	require.LessOrEqual(t, dialBudget, connectTimeout)
 }
 
 // TestIdentityLookupReturnsHostUnresolved confirms F1: the LookupFunc installed

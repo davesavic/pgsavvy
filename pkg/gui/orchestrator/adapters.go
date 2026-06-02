@@ -124,12 +124,6 @@ type connectInvoker struct {
 	current *models.Connection
 }
 
-// connectTimeout bounds the whole Connect attempt (dial + pool.Ping +
-// SELECT version()). Long enough to ride out a slow handshake, short
-// enough that an unreachable host fails fast instead of wedging the UI
-// (epic dbsavvy-e53.5).
-const connectTimeout = 10 * time.Second
-
 func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection) error {
 	if c == nil || c.helper == nil {
 		return nil
@@ -157,7 +151,11 @@ func (c *connectInvoker) startAttempt(profile *models.Connection) {
 		return
 	}
 	gen := c.g.connectGen.Add(1)
-	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	// Cancel-only, no deadline: the network connect budget lives in the pg
+	// driver (connectTimeout), applied AFTER interactive credential prompts so
+	// a human typing a passphrase is not charged against the dial budget (epic
+	// dbsavvy-t60w). cancel still drives Cancel/supersession.
+	ctx, cancel := context.WithCancel(context.Background())
 	c.mu.Lock()
 	c.cancelFn = cancel
 	c.current = profile
