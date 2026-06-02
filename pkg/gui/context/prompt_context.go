@@ -42,28 +42,26 @@ type PromptContext struct {
 }
 
 // secretMaskRune is rendered in place of every typed character while the
-// prompt is in masked (secret) mode. Both the content buffer and the live
-// gocui View.Mask use it so the real value never reaches the screen.
+// prompt is in masked (secret) mode. renderBuffer substitutes it for every
+// grapheme of the real buffer in the content body so the real value never
+// reaches the screen.
 const secretMaskRune = "•"
 
 // SetMasked toggles masked (secret) rendering. While masked, HandleRender
-// substitutes secretMaskRune for every buffer character so the typed value
-// never enters the view's content buffer, and the live View.Mask is set so
-// gocui's tcell draw masks too. Clearing it (on submit/cancel) restores
-// plaintext rendering and clears View.Mask so the next normal prompt is not
-// masked. The real typed value always stays in the TextArea, read verbatim by
+// substitutes secretMaskRune for every buffer character (see renderBuffer) so
+// the typed value never enters the view's content buffer and is never drawn.
+// The real typed value always stays in the TextArea, read verbatim by
 // ReadAndClearBuffer.
-func (p *PromptContext) SetMasked(on bool) {
-	p.masked = on
-	if p.view == nil {
-		return
-	}
-	if on {
-		p.view.Mask = secretMaskRune
-		return
-	}
-	p.view.Mask = ""
-}
+//
+// We deliberately do NOT set the live gocui View.Mask: it masks EVERY cell of
+// the view at draw time (gocui view.go setCharacter), which would also mask the
+// prompt label that HandleRender writes into the same view content — rendering
+// the whole popup as bullets (dbsavvy-3ye.8). Content-level masking in
+// renderBuffer is sufficient because SetContent is the last writer to the
+// view's line buffer before every draw (the layout pass runs HandleRender ->
+// SetContent before gocui's draw, overwriting any plaintext the live TextArea
+// editor echoed into the buffer).
+func (p *PromptContext) SetMasked(on bool) { p.masked = on }
 
 // NewPromptContext builds a PromptContext bound to PROMPT. The state
 // reader is wired post-construction via SetState. modes may be nil
@@ -113,21 +111,10 @@ func (p *PromptContext) SetState(s PromptState) { p.state = s }
 
 // SetView is called by the orchestrator's Layout Tier-3 popup pass each
 // frame the PROMPT is on the focus stack. ReadAndClearBuffer reads
-// typed text from the supplied view's TextArea.
-func (p *PromptContext) SetView(v types.View) {
-	p.view = v
-	// Re-apply the mask each frame: the orchestrator DeleteView's the PROMPT
-	// view on pop and recreates it, so a freshly-plumbed view must inherit the
-	// active masked state.
-	if v == nil {
-		return
-	}
-	if p.masked {
-		v.Mask = secretMaskRune
-		return
-	}
-	v.Mask = ""
-}
+// typed text from the supplied view's TextArea. Masking is handled entirely
+// at the content level by renderBuffer (see SetMasked), so SetView does not
+// touch the live View.Mask.
+func (p *PromptContext) SetView(v types.View) { p.view = v }
 
 // SetBuffer replaces the test-mode typed buffer. Real runtime uses
 // v.TextArea via SetView. Retained so existing unit tests (which don't

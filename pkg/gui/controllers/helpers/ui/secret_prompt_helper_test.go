@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -250,8 +251,10 @@ func TestSecretPromptHelper_CtxCancel_ReturnsCancelledNoLeak(t *testing.T) {
 
 // TestSecretPromptHelper_MaskedRender_RealView proves the masked-mode render
 // path on the concrete PromptContext: with masking on, the rendered content
-// buffer shows mask runes, NOT the typed secret, and the live gocui View.Mask
-// is set. The real secret remains readable from the TextArea.
+// buffer shows mask runes, NOT the typed secret. Masking is content-level
+// (renderBuffer), so the live gocui View.Mask is deliberately NOT set — setting
+// it would mask the label too (dbsavvy-3ye.8). The real secret remains readable
+// from the TextArea.
 func TestSecretPromptHelper_MaskedRender_RealView(t *testing.T) {
 	const secret = "topsecretvalue"
 
@@ -266,8 +269,10 @@ func TestSecretPromptHelper_MaskedRender_RealView(t *testing.T) {
 	pc.SetView(view)
 	pc.SetMasked(true)
 
-	if view.Mask == "" {
-		t.Error("View.Mask not set while masked")
+	// View.Mask must stay unset: it masks EVERY cell (including the label) at
+	// gocui draw time. Masking lives in the content body instead.
+	if view.Mask != "" {
+		t.Errorf("View.Mask = %q; want unset (it would mask the label too)", view.Mask)
 	}
 
 	if err := pc.HandleRender(); err != nil {
@@ -286,11 +291,132 @@ func TestSecretPromptHelper_MaskedRender_RealView(t *testing.T) {
 		t.Errorf("TextArea content = %q, want %q", got, secret)
 	}
 
-	// Clearing the mask restores plaintext + clears View.Mask.
+	// Clearing the mask leaves View.Mask unset (never set in the first place).
 	pc.SetMasked(false)
 	if view.Mask != "" {
-		t.Error("View.Mask not cleared after SetMasked(false)")
+		t.Errorf("View.Mask = %q after SetMasked(false); want unset", view.Mask)
 	}
+}
+
+// TestSecretPromptHelper_MaskedDraw_LabelReadable exercises the actual gocui
+// View.Mask-applied DRAW path that TestSecretPromptHelper_MaskedRender_RealView
+// (which only inspects the SetContent string, never the drawn cells) missed:
+// it renders the masked prompt into a real gocui View attached to a headless
+// Gui, draws it to gocui's headless tcell screen, and reads the rendered cells
+// back.
+// Regression for dbsavvy-3ye.8 — before the fix the code set View.Mask, which
+// masks EVERY cell at draw time, so the whole popup (label included) drew as
+// bullets. Asserts on the DRAWN cells: (1) the label renders as readable
+// plaintext, (2) the typed buffer renders only as mask runes, (3) the real
+// secret never reaches the screen. Re-introducing View.Mask makes (1) fail.
+//
+// Must NOT use t.Parallel(): gocui.Screen is a process-level global set by the
+// headless Gui. If a second headless-Gui test is ever added to this test binary
+// it must be serialized with this one (the two would otherwise clobber each
+// other's screen during read-back).
+func TestSecretPromptHelper_MaskedDraw_LabelReadable(t *testing.T) {
+	const (
+		secret = "topsecretvalue"
+		label  = "passphrase for SSH key"
+	)
+
+	g, err := gocui.NewGui(gocui.NewGuiOpts{OutputMode: gocui.OutputNormal, Headless: true, Width: 60, Height: 10})
+	if err != nil {
+		t.Fatalf("headless NewGui: %v", err)
+	}
+	defer g.Close()
+
+	pc := newPromptContextForMaskTest(&headlessDriver{g: g})
+	pc.SetState(&maskTestState{active: true, label: label})
+	pc.SetMasked(true)
+
+	typed := false
+	g.SetManagerFunc(func(g *gocui.Gui) error {
+		v, err := g.SetView(string(types.PROMPT), 0, 0, 58, 8, 0)
+		if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+		v.Editable = true
+		v.Wrap = true
+		if !typed {
+			for _, r := range secret {
+				v.TextArea.TypeCharacter(string(r))
+			}
+			typed = true
+		}
+		// Mirror the orchestrator's layout pass: plumb the live view, set the
+		// wrap width, then render. SetMasked was called above so a regressed
+		// SetView/SetMasked that re-applies View.Mask would trip here.
+		pc.SetView(v)
+		pc.SetLabelWrapWidth(v.InnerWidth())
+		return pc.HandleRender()
+	})
+
+	if err := g.ForceLayoutAndRedraw(); err != nil {
+		t.Fatalf("ForceLayoutAndRedraw: %v", err)
+	}
+
+	drawn := readSimScreen(t)
+	if !strings.Contains(drawn, label) {
+		t.Errorf("label not readable in drawn cells (masked-label regression):\n%s", drawn)
+	}
+	if strings.Contains(drawn, secret) {
+		t.Errorf("secret leaked into drawn cells:\n%s", drawn)
+	}
+	if !strings.Contains(drawn, secretMaskRune) {
+		t.Errorf("typed input not masked in drawn cells:\n%s", drawn)
+	}
+}
+
+// secretMaskRune mirrors the unexported constant in pkg/gui/context; the test
+// asserts the drawn cells contain it (masked input) and the plaintext label.
+const secretMaskRune = "•"
+
+// headlessDriver is a GuiDriver that targets a headless gocui.Gui's views by
+// name so PromptContext.HandleRender writes into the real (drawable) view.
+type headlessDriver struct {
+	types.GuiDriver
+	g *gocui.Gui
+}
+
+func (d *headlessDriver) SetContent(viewName, str string) error {
+	v, err := d.g.View(viewName)
+	if err != nil {
+		return err
+	}
+	v.SetContent(str)
+	return nil
+}
+
+func (d *headlessDriver) Update(fn func() error) {
+	if fn != nil {
+		_ = fn()
+	}
+}
+
+// readSimScreen flattens the headless gocui screen's drawn cell buffer into
+// newline-joined rows so tests can assert on what the terminal would show.
+// gocui draws via tcell Screen.Put; Screen.Get reads the same CellBuffer.
+func readSimScreen(t *testing.T) string {
+	t.Helper()
+	scr := gocui.Screen
+	if scr == nil {
+		t.Fatal("gocui.Screen is nil after headless NewGui")
+	}
+	w, h := scr.Size()
+	var b strings.Builder
+	for y := range h {
+		for x := range w {
+			str, _, _ := scr.Get(x, y)
+			if str == "" || str == "\x00" {
+				b.WriteByte(' ')
+				continue
+			}
+			b.WriteString(str)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // maskTestState is a minimal PromptState for the render test.
