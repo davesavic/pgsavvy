@@ -55,6 +55,14 @@ type Deps struct {
 	// Common is the cross-cutting bag (Log, Tr, UserConfig, AppState, Fs).
 	Common *common.Common
 
+	// SetSecretPrompter, when non-nil, receives the TUI masked SSH secret
+	// prompter constructed during wireWithDriver. The app entry-point passes
+	// pg.SetSecretPrompter here so the driver can prompt for SSH key
+	// passphrases / passwords at connect time. A hook (not a direct pg import)
+	// keeps the driver out of the GUI import graph — pkg/app stays the single
+	// driver-wiring authority, mirroring pg.SetGlobalLogger.
+	SetSecretPrompter func(session.SecretPrompter)
+
 	// Store owns AppState mutations + debounced persistence.
 	Store *common.AppStateStore
 
@@ -571,6 +579,18 @@ func (g *Gui) wireWithDriver() error {
 	g.confirmHelp = ui.NewConfirmHelper(g.tree, g.registry.Confirmation)
 	g.promptHelp = ui.NewPromptHelper(g.tree, g.registry.Prompt)
 	g.choiceHelp = ui.NewChoiceHelper(g.tree, g.registry.Selection)
+
+	// SSH masked secret prompt (dbsavvy-jku3): now that the prompt popup
+	// (g.promptHelp), its masker (g.registry.Prompt), and the UI scheduler
+	// (g.OnUIThread) are all live, build the TUI SecretPrompter and hand it to
+	// the pg driver via the app-provided hook.
+	if g.deps.SetSecretPrompter != nil {
+		secretPrompter := ui.NewSecretPromptHelper(g.promptHelp, g.registry.Prompt, g.OnUIThread)
+		if g.deps.Common != nil {
+			secretPrompter.SetLogger(g.deps.Common.Logger())
+		}
+		g.deps.SetSecretPrompter(secretPrompter)
+	}
 	g.toastHelp = ui.NewToastHelper(g.driver)
 	if g.deps.Common != nil {
 		g.toastHelp.SetLogger(g.deps.Common.Logger())

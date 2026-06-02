@@ -32,7 +32,7 @@ type sshTunnel interface {
 // defaults to sshtunnel.Open; tests reassign it to inject a recording fake.
 // Keep this the SMALLEST possible seam — do not grow it into a strategy object.
 var openTunnel = func(ctx context.Context, cfg models.SSHTunnelConfig) (sshTunnel, error) {
-	return sshtunnel.Open(ctx, cfg)
+	return sshtunnel.OpenWithPrompter(ctx, cfg, secretPrompter())
 }
 
 // globalLogger is the package-level *slog.Logger used by Driver / Connection
@@ -57,6 +57,36 @@ func SetGlobalLogger(l *slog.Logger) {
 // in this package call logs.Event(pkgLogger(), …) so a nil logger silently
 // no-ops.
 func pkgLogger() *slog.Logger { return globalLogger.Load() }
+
+// globalSecretPrompter is the package-level masked SSH secret prompter,
+// installed late by SetSecretPrompter from the app entry-point AFTER the
+// GUI (and its prompt popup) is wired — mirroring globalLogger above and
+// preserving the init-time drivers.Register invariant (registration runs
+// before any GUI exists). When unset, Load returns nil and the tunnel
+// layer's nil-prompter contract applies: NO interactive prompting, exactly
+// as the headless sshtunnel.Open path (see sshtunnel.OpenWithPrompter).
+var globalSecretPrompter atomic.Pointer[session.SecretPrompter]
+
+// SetSecretPrompter installs the masked interactive SSH secret prompter used
+// by Open when a tunnelled profile needs an encrypted-key passphrase or SSH
+// password and no *_command is configured. Pass nil to disable interactive
+// prompting (headless). Safe to call multiple times (last write wins).
+func SetSecretPrompter(p session.SecretPrompter) {
+	if p == nil {
+		globalSecretPrompter.Store(nil)
+		return
+	}
+	globalSecretPrompter.Store(&p)
+}
+
+// secretPrompter returns the installed prompter or nil. nil routes through the
+// tunnel layer's headless path (no interactive entry), identical to today.
+func secretPrompter() session.SecretPrompter {
+	if p := globalSecretPrompter.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
 
 // pgCapabilities is the single-source-of-truth Capabilities value for the
 // Postgres driver. Tests assert deep-equality against this var rather than a

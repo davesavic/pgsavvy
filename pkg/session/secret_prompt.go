@@ -33,6 +33,8 @@ var (
 		"session: masked secret prompt cancelled by user")
 	errSecretPromptUnsupported = errors.New(
 		"session: masked secret prompt not supported (no interactive TTY)")
+	errSecretPromptBusy = errors.New(
+		"session: masked secret prompt already in progress")
 )
 
 // NewSecretPromptCancelled returns the user-cancellation error. cause (may be
@@ -77,6 +79,17 @@ func IsSecretPromptCancelled(err error) bool {
 // other headless SecretPrompter).
 func IsSecretPromptUnsupported(err error) bool {
 	return errors.Is(err, errSecretPromptUnsupported)
+}
+
+// NewSecretPromptBusy returns the overlapping-prompt sentinel: a second
+// PromptSecret while one is already in flight returns this immediately rather
+// than clobbering the single shared popup surface. Exported so the TUI
+// SecretPrompter (pkg/gui) can emit the canonical typed error.
+func NewSecretPromptBusy() error { return errSecretPromptBusy }
+
+// IsSecretPromptBusy reports whether err is the overlapping-prompt sentinel.
+func IsSecretPromptBusy(err error) bool {
+	return errors.Is(err, errSecretPromptBusy)
 }
 
 // UnsupportedSecretPrompter is the headless default SecretPrompter. Its

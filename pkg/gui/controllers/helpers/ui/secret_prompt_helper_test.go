@@ -20,11 +20,13 @@ import (
 // registered submit / cancel callbacks so the test can drive them as the
 // PromptController would on <cr> / <esc>.
 type promptStub struct {
-	mu       sync.Mutex
-	label    string
-	onSubmit func(string) error
-	onCancel func() error
-	masked   []bool
+	mu          sync.Mutex
+	label       string
+	onSubmit    func(string) error
+	onCancel    func() error
+	masked      []bool
+	active      bool
+	cancelCalls int
 }
 
 func (s *promptStub) Prompt(label, _ string, onSubmit func(string) error, onCancel func() error) error {
@@ -69,6 +71,25 @@ func (s *promptStub) waitForCallbacks(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("timed out waiting for prompt callbacks to register")
+}
+
+func (s *promptStub) Active() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.active
+}
+
+func (s *promptStub) Cancel() error {
+	s.mu.Lock()
+	s.cancelCalls++
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *promptStub) cancelCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancelCalls
 }
 
 func (s *promptStub) maskedLog() []bool {
@@ -304,5 +325,83 @@ func (d *captureDriver) SetContent(_ string, str string) error {
 func (d *captureDriver) Update(fn func() error) {
 	if fn != nil {
 		_ = fn()
+	}
+}
+
+// TestSecretPromptHelper_CtxCancel_DismissesActivePopup proves a ctx-cancel
+// while the popup is still active clears the mask AND dismisses the popup,
+// leaving no orphaned masked prompt on screen.
+func TestSecretPromptHelper_CtxCancel_DismissesActivePopup(t *testing.T) {
+	stub := &promptStub{active: true}
+	h := NewSecretPromptHelper(stub, stub, inlineScheduler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.PromptSecret(ctx, "hint")
+		done <- err
+	}()
+
+	stub.waitForCallbacks(t)
+	cancel()
+
+	select {
+	case err := <-done:
+		if !session.IsSecretPromptCancelled(err) {
+			t.Fatalf("ctx-cancel err = %v; want cancelled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("PromptSecret did not return after ctx cancel")
+	}
+
+	// The dismissal runs on the inlineScheduler goroutine, so poll for it.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if stub.cancelCount() == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := stub.cancelCount(); got != 1 {
+		t.Fatalf("cancelCalls = %d; want 1 (popup not dismissed)", got)
+	}
+
+	ml := stub.maskedLog()
+	if len(ml) == 0 || ml[len(ml)-1] != false {
+		t.Errorf("masked not cleared on ctx-cancel: %v", ml)
+	}
+}
+
+// TestSecretPromptHelper_Overlapping_ReturnsBusy proves a second PromptSecret
+// while one is already in flight returns the busy sentinel rather than
+// clobbering the single shared popup surface.
+func TestSecretPromptHelper_Overlapping_ReturnsBusy(t *testing.T) {
+	stub := &promptStub{}
+	h := NewSecretPromptHelper(stub, stub, inlineScheduler)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.PromptSecret(context.Background(), "hint")
+		done <- err
+	}()
+
+	// Guarantees call #1 has set busy and registered its callbacks.
+	stub.waitForCallbacks(t)
+
+	if _, err := h.PromptSecret(context.Background(), "hint2"); !session.IsSecretPromptBusy(err) {
+		t.Fatalf("second PromptSecret err = %v; want busy", err)
+	}
+
+	// Drain call #1 so it finishes cleanly (no goroutine leak).
+	if err := stub.submit("value"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("call #1 err = %v; want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("call #1 did not return after submit")
 	}
 }

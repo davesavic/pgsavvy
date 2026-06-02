@@ -3,15 +3,19 @@ package ui
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
 // secretPromptOpener is the narrow surface SecretPromptHelper needs to push a
 // single-line prompt popup and have its <cr>/<esc> bindings invoke the
-// supplied submit / cancel callbacks. *PromptHelper satisfies it.
+// supplied submit / cancel callbacks, plus dismiss the popup on ctx-cancel.
+// *PromptHelper satisfies it.
 type secretPromptOpener interface {
 	Prompt(label, initial string, onSubmit func(value string) error, onCancel func() error) error
+	Cancel() error
+	Active() bool
 }
 
 // secretMasker toggles masked (secret) rendering on the PROMPT popup so the
@@ -41,6 +45,13 @@ type SecretPromptHelper struct {
 	masker   secretMasker
 	schedule uiScheduler
 	logger   *slog.Logger
+
+	// mu guards busy. Held only across the flag transitions at entry and the
+	// deferred reset — never across the blocking result select. Mirrors
+	// chainedPrompterAdapter: the single popup surface allows one prompt at a
+	// time.
+	mu   sync.Mutex
+	busy bool
 }
 
 // NewSecretPromptHelper builds the helper. open pushes the popup, masker
@@ -73,6 +84,19 @@ type secretResult struct {
 // cancel or ctx-done → ("", errSecretPromptCancelled). Never routes through
 // the TUIRefuse refusal.
 func (h *SecretPromptHelper) PromptSecret(ctx context.Context, hint string) (string, error) {
+	h.mu.Lock()
+	if h.busy {
+		h.mu.Unlock()
+		return "", session.NewSecretPromptBusy()
+	}
+	h.busy = true
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		h.busy = false
+		h.mu.Unlock()
+	}()
+
 	resCh := make(chan secretResult, 1)
 
 	h.schedule(func() error {
@@ -96,12 +120,18 @@ func (h *SecretPromptHelper) PromptSecret(ctx context.Context, hint string) (str
 
 	select {
 	case <-ctx.Done():
-		// Clear the mask on the MainLoop so a later normal prompt is not
-		// masked. The pending submit/cancel callbacks become no-op sends into
-		// the buffered channel (or are never invoked); either way no leak.
+		// Clear the mask AND dismiss the popup if it is still active, so a
+		// timed-out / cancelled connect leaves no orphaned masked prompt on
+		// screen. The Active() guard MUST run on the UI lane (the same
+		// goroutine that mutates popup state): a ctx-cancel racing a
+		// successful Submit could otherwise pop a sibling popup. Mirrors
+		// chainedPrompterAdapter's ctx watcher (prompt_chain_adapter.go).
 		h.schedule(func() error {
 			h.masker.SetMasked(false)
-			return nil
+			if !h.open.Active() {
+				return nil
+			}
+			return h.open.Cancel()
 		})
 		return "", session.NewSecretPromptCancelled(ctx.Err())
 	case r := <-resCh:
