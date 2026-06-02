@@ -109,6 +109,7 @@ func BuildPgxConfig(_ context.Context, profile models.Connection, password strin
 
 	readOnly := profile.ReadOnly
 	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		registerUUIDType(conn.TypeMap())
 		return runAfterConnect(ctx, conn, readOnly, canonicalTimeout)
 	}
 
