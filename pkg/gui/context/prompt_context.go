@@ -38,6 +38,31 @@ type PromptContext struct {
 	view       types.View
 	labelWrap  int
 	labelLines int
+	masked     bool
+}
+
+// secretMaskRune is rendered in place of every typed character while the
+// prompt is in masked (secret) mode. Both the content buffer and the live
+// gocui View.Mask use it so the real value never reaches the screen.
+const secretMaskRune = "•"
+
+// SetMasked toggles masked (secret) rendering. While masked, HandleRender
+// substitutes secretMaskRune for every buffer character so the typed value
+// never enters the view's content buffer, and the live View.Mask is set so
+// gocui's tcell draw masks too. Clearing it (on submit/cancel) restores
+// plaintext rendering and clears View.Mask so the next normal prompt is not
+// masked. The real typed value always stays in the TextArea, read verbatim by
+// ReadAndClearBuffer.
+func (p *PromptContext) SetMasked(on bool) {
+	p.masked = on
+	if p.view == nil {
+		return
+	}
+	if on {
+		p.view.Mask = secretMaskRune
+		return
+	}
+	p.view.Mask = ""
 }
 
 // NewPromptContext builds a PromptContext bound to PROMPT. The state
@@ -89,7 +114,20 @@ func (p *PromptContext) SetState(s PromptState) { p.state = s }
 // SetView is called by the orchestrator's Layout Tier-3 popup pass each
 // frame the PROMPT is on the focus stack. ReadAndClearBuffer reads
 // typed text from the supplied view's TextArea.
-func (p *PromptContext) SetView(v types.View) { p.view = v }
+func (p *PromptContext) SetView(v types.View) {
+	p.view = v
+	// Re-apply the mask each frame: the orchestrator DeleteView's the PROMPT
+	// view on pop and recreates it, so a freshly-plumbed view must inherit the
+	// active masked state.
+	if v == nil {
+		return
+	}
+	if p.masked {
+		v.Mask = secretMaskRune
+		return
+	}
+	v.Mask = ""
+}
 
 // SetBuffer replaces the test-mode typed buffer. Real runtime uses
 // v.TextArea via SetView. Retained so existing unit tests (which don't
@@ -136,7 +174,7 @@ func (p *PromptContext) HandleRender() error {
 	}
 	wrapped := wrapLabel(p.state.Label(), p.LabelWrapWidth())
 	p.labelLines = len(wrapped)
-	body := assemblePromptBody(wrapped, p.Buffer())
+	body := assemblePromptBody(wrapped, p.renderBuffer())
 	viewName := p.GetViewName()
 	writeView(p.deps, func() error {
 		return p.deps.GuiDriver.SetContent(viewName, body)
@@ -187,6 +225,18 @@ func (p *PromptContext) CursorXY() (int, int, bool) {
 // HandleRender emitted. CursorXY uses it to compute the buffer
 // row. The layout pass calls this after rendering each frame.
 func (p *PromptContext) SetLabelLineCount(n int) { p.labelLines = n }
+
+// renderBuffer returns the buffer text to write into the content. In masked
+// mode every grapheme of the real buffer is replaced with secretMaskRune so
+// the secret never enters the content buffer; otherwise the buffer is returned
+// verbatim.
+func (p *PromptContext) renderBuffer() string {
+	buf := p.Buffer()
+	if !p.masked {
+		return buf
+	}
+	return strings.Repeat(secretMaskRune, len([]rune(buf)))
+}
 
 // assemblePromptBody joins pre-wrapped label lines with a blank
 // separator and the "> " buffer prefix.
