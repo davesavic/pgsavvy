@@ -602,6 +602,9 @@ func (t *Tab) Title() string {
 	// command tag carries N. Surface it instead of a misleading "0 rows".
 	// dbsavvy-tiu8.
 	if complete && rows == 0 && affected > 0 {
+		if affected == 1 {
+			return "1 row affected"
+		}
 		return fmt.Sprintf("%d rows affected", affected)
 	}
 
@@ -1597,6 +1600,12 @@ func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab) {
 		if tab.rh != nil {
 			if rs := tab.rh.Rows(); rs != nil {
 				tab.rowsAffected = rs.RowsAffected()
+				// Mirror the count into the grid so the column-less DML
+				// body reads "(N row(s) affected)" instead of the
+				// misleading "(0 rows)". dbsavvy-outq.
+				if tab.grid != nil {
+					tab.grid.SetRowsAffected(tab.rowsAffected)
+				}
 			}
 		}
 		tab.mu.Unlock()

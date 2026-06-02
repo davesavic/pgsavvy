@@ -55,6 +55,13 @@ type View struct {
 	rows []models.Row
 	cols []models.ColumnMeta
 
+	// rowsAffected is the driver command-tag count for a DML statement
+	// that returned no result set (zero cols). When > 0 the empty-body
+	// renderers show "(N row(s) affected)" instead of the misleading
+	// "(0 rows)". Set once at stream completion via SetRowsAffected;
+	// stays 0 for SELECTs and in-flight streams. dbsavvy-outq.
+	rowsAffected int64
+
 	title string
 
 	// widths is the per-column display width in cells. Sized to
@@ -606,7 +613,18 @@ func (v *View) snapshot() viewSnapshot {
 		expandedLineOffset: v.expandedLineOffset,
 		pendingEdits:       v.pendingEdits,
 		rowIdentity:        v.rowIdentity,
+		rowsAffected:       v.rowsAffected,
 	}
+}
+
+// SetRowsAffected records the driver command-tag affected-row count for a
+// DML statement that returned no result set. The empty-body renderers use
+// it to show "(N row(s) affected)" in place of "(0 rows)". Safe from any
+// goroutine. dbsavvy-outq.
+func (v *View) SetRowsAffected(n int64) {
+	v.mu.Lock()
+	v.rowsAffected = n
+	v.mu.Unlock()
 }
 
 // loadEstimatedRowsLocked invokes the configured loader (under v.mu).
@@ -661,6 +679,10 @@ type viewSnapshot struct {
 	cols   []models.ColumnMeta
 	widths []int
 	title  string
+
+	// rowsAffected drives the empty-body text for DML without a result
+	// set. > 0 only at stream completion for changing statements. dbsavvy-outq.
+	rowsAffected int64
 
 	cursorRow int
 	cursorCol int
@@ -727,7 +749,7 @@ func (v *View) Render(target *gocui.View) {
 
 	if len(snap.cols) == 0 {
 		if target != nil {
-			target.WriteString(EmptyResultIndicator)
+			target.WriteString(emptyResultText(snap))
 		}
 		return
 	}

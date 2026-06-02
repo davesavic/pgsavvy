@@ -105,6 +105,28 @@ func TestRender_EmptyShowsZeroRows(t *testing.T) {
 	require.NotPanics(t, func() { v2.Render(target2) })
 }
 
+// TestRender_EmptyWithRowsAffected verifies that a DML statement with no
+// result set (zero columns) but a non-zero affected-row count surfaces the
+// affected count in the body instead of the misleading "(0 rows)". Singular
+// vs plural is honoured. dbsavvy-outq.
+func TestRender_EmptyWithRowsAffected(t *testing.T) {
+	v := NewView()
+	v.SetRowsAffected(1)
+	target := newTestView("dml-one")
+	v.Render(target)
+	require.Contains(t, target.Buffer(), "(1 row affected)",
+		"single affected row should read singular")
+	require.NotContains(t, target.Buffer(), "0 rows",
+		"affected DML must not show the zero-row indicator")
+
+	v2 := NewView()
+	v2.SetRowsAffected(5)
+	target2 := newTestView("dml-many")
+	v2.Render(target2)
+	require.Contains(t, target2.Buffer(), "(5 rows affected)",
+		"multiple affected rows should read plural")
+}
+
 // TestRender_HonoursTitle verifies SetTitle propagates into the target
 // gocui.View's Title field during Render.
 func TestRender_HonoursTitle(t *testing.T) {

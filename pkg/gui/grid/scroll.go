@@ -360,7 +360,7 @@ func (v *View) SetCursor(row, col int) {
 // allocate an extra empty trailing line in the buffer.
 func renderBody(snap viewSnapshot, innerW, innerH int) string {
 	if len(snap.cols) == 0 {
-		return EmptyResultIndicator
+		return emptyResultText(snap)
 	}
 	dataRows := innerH - 1
 	if dataRows < 1 {

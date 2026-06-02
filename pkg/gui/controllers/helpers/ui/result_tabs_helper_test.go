@@ -2096,7 +2096,7 @@ func TestTitleRowsAffected(t *testing.T) {
 		want         string
 	}{
 		{"dml no returning", StateComplete, true, 0, 5, "5 rows affected"},
-		{"dml single row", StateComplete, true, 0, 1, "1 rows affected"},
+		{"dml single row", StateComplete, true, 0, 1, "1 row affected"},
 		{"select zero rows", StateComplete, true, 0, 0, "0 rows"},
 		{"select with rows", StateComplete, true, 3, 3, "3 rows"},
 		{"running not yet complete", StateRunning, false, 0, 0, "~0 rows · running"},

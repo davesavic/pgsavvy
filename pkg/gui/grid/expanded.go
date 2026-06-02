@@ -51,7 +51,7 @@ func normaliseViewMode(m string) string {
 // terminal escapes cannot bleed.
 func renderExpanded(snap viewSnapshot, innerW, innerH int) string {
 	if len(snap.cols) == 0 {
-		return EmptyResultIndicator
+		return emptyResultText(snap)
 	}
 	if len(snap.rows) == 0 {
 		// Empty body — just a header banner so the user sees the mode.
