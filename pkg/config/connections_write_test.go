@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -48,6 +49,73 @@ func TestSaveConnections_RoundTrip(t *testing.T) {
 	}
 	if got[0].Name != "dev" || got[1].Name != "prod" {
 		t.Errorf("names = %q,%q; want dev,prod", got[0].Name, got[1].Name)
+	}
+}
+
+func TestSaveConnections_SSHTunnelAllFieldsRoundTrip(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	conns := []models.Connection{{
+		Name:   "dev",
+		Driver: "postgres",
+		DSN:    "postgres://localhost/dev",
+		SSHTunnel: &models.SSHTunnelConfig{
+			Host:              "bastion.example.com",
+			User:              "jump",
+			Port:              2222,
+			IdentityFile:      "/home/u/.ssh/id_ed25519",
+			IdentityFromAgent: true,
+			PassphraseCommand: "pass show ssh/key",
+			KnownHosts:        "/home/u/.ssh/known_hosts",
+		},
+	}}
+	if err := SaveConnections(fs, "/c.yml", conns); err != nil {
+		t.Fatalf("SaveConnections: %v", err)
+	}
+	got, err := LoadConnections(fs, "/c.yml")
+	if err != nil {
+		t.Fatalf("LoadConnections: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if !reflect.DeepEqual(conns[0].SSHTunnel, got[0].SSHTunnel) {
+		t.Errorf("ssh tunnel not preserved.\n want %+v\n  got %+v", conns[0].SSHTunnel, got[0].SSHTunnel)
+	}
+}
+
+func TestSaveConnections_SSHOmitemptyKeysAbsent(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	// Nil tunnel and zero-value new fields must not emit keys.
+	conns := []models.Connection{{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}}
+	if err := SaveConnections(fs, "/c.yml", conns); err != nil {
+		t.Fatalf("SaveConnections: %v", err)
+	}
+	raw, err := afero.ReadFile(fs, "/c.yml")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	body := string(raw)
+	if strings.Contains(body, "ssh_tunnel:") {
+		t.Errorf("nil tunnel emitted ssh_tunnel key:\n%s", body)
+	}
+
+	// A tunnel with only Host/User set must not emit the omitempty new fields.
+	conns2 := []models.Connection{{
+		Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev",
+		SSHTunnel: &models.SSHTunnelConfig{Host: "bastion", User: "ops"},
+	}}
+	if err := SaveConnections(fs, "/c.yml", conns2); err != nil {
+		t.Fatalf("SaveConnections: %v", err)
+	}
+	raw, err = afero.ReadFile(fs, "/c.yml")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	body = string(raw)
+	for _, key := range []string{"identity_from_agent", "passphrase_command", "known_hosts"} {
+		if strings.Contains(body, key) {
+			t.Errorf("empty %q emitted a key:\n%s", key, body)
+		}
 	}
 }
 

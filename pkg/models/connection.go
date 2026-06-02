@@ -26,8 +26,11 @@ type Connection struct {
 
 // SSHTunnelConfig describes an SSH tunnel used to reach the database host.
 type SSHTunnelConfig struct {
-	Host         string `yaml:"host"`
-	User         string `yaml:"user"`
-	Port         int    `yaml:"port"`
-	IdentityFile string `yaml:"identity_file" log:"redact"`
+	Host              string `yaml:"host"`
+	User              string `yaml:"user"`
+	Port              int    `yaml:"port"`
+	IdentityFile      string `yaml:"identity_file" log:"redact"`
+	IdentityFromAgent bool   `yaml:"identity_from_agent,omitempty"`
+	PassphraseCommand string `yaml:"passphrase_command,omitempty" log:"redact"`
+	KnownHosts        string `yaml:"known_hosts,omitempty"`
 }

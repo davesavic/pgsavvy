@@ -55,10 +55,11 @@ func TestRedactingHandler_StructTag_ScrubsLogRedact(t *testing.T) {
 		KeyringRef:      "kr-id",
 		PgpassPath:      "/home/me/.pgpass",
 		SSHTunnel: &models.SSHTunnelConfig{
-			Host:         "bastion",
-			User:         "tunnel",
-			Port:         22,
-			IdentityFile: "/home/me/.ssh/id_rsa",
+			Host:              "bastion",
+			User:              "tunnel",
+			Port:              22,
+			IdentityFile:      "/home/me/.ssh/id_rsa",
+			PassphraseCommand: "pass show ssh/key",
 		},
 	}
 
@@ -84,6 +85,12 @@ func TestRedactingHandler_StructTag_ScrubsLogRedact(t *testing.T) {
 	}
 	if !strings.Contains(out, `"identity_file":"[REDACTED]"`) {
 		t.Errorf("expected identity_file to be redacted, got %s", out)
+	}
+	if !strings.Contains(out, `"passphrase_command":"[REDACTED]"`) {
+		t.Errorf("expected passphrase_command to be redacted, got %s", out)
+	}
+	if strings.Contains(out, "pass show ssh/key") {
+		t.Errorf("passphrase command leaked in plaintext: %s", out)
 	}
 	if !strings.Contains(out, `"name":"primary"`) {
 		t.Errorf("expected name=primary to survive, got %s", out)
