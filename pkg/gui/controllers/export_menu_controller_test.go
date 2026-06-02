@@ -19,7 +19,7 @@ func TestExportMenu_SQLInsertsGating_Editable(t *testing.T) {
 	scopes := []string{"Visible", "Loaded", "Full"}
 
 	// sqlInsertsIdx=-1 mirrors PromptExport's choice when g.Editable()=true.
-	m := popup.NewExportMenu(formats, destinations, scopes, -1, false, false)
+	m := popup.NewExportMenu(formats, destinations, scopes, -1, false)
 
 	// Advance to SQL-INSERTs (idx=5).
 	for range 5 {
@@ -55,7 +55,7 @@ func TestExportMenu_SQLInsertsGating_NotEditable(t *testing.T) {
 	reason := "result spans multiple tables"
 	// sqlInsertsIdx=5 mirrors PromptExport's choice when g.Editable()=false
 	// and g.DisabledReason() != "".
-	m := popup.NewExportMenu(formats, destinations, scopes, 5, false, false)
+	m := popup.NewExportMenu(formats, destinations, scopes, 5, false)
 	m.SetSQLInsertsDisabledReason(reason)
 
 	// Cursor cannot land on the disabled last row via MoveValue (skip-
@@ -74,7 +74,7 @@ func TestExportMenu_SQLInsertsGating_NotEditable(t *testing.T) {
 	// selected format. Construct a single-row menu to force selection
 	// onto the disabled row (the supported entry point per existing
 	// IsSQLInsertsSelected/Body coverage).
-	single := popup.NewExportMenu([]string{"SQL INSERTs"}, destinations, scopes, 0, false, false)
+	single := popup.NewExportMenu([]string{"SQL INSERTs"}, destinations, scopes, 0, false)
 	single.SetSQLInsertsDisabledReason(reason)
 	if !single.IsSQLInsertsSelected() {
 		t.Fatalf("single-row menu: IsSQLInsertsSelected should be true")
@@ -109,7 +109,7 @@ func TestExportMenu_SQLInsertsGating_StateUpdatesOnReopen(t *testing.T) {
 	scopes := []string{"Loaded"}
 
 	// First open: editable.
-	mEditable := popup.NewExportMenu(formats, destinations, scopes, -1, false, false)
+	mEditable := popup.NewExportMenu(formats, destinations, scopes, -1, false)
 	mEditable.MoveValue(+1)
 	if mEditable.IsSQLInsertsSelected() {
 		t.Fatalf("editable open: IsSQLInsertsSelected = true; want false")
@@ -119,13 +119,13 @@ func TestExportMenu_SQLInsertsGating_StateUpdatesOnReopen(t *testing.T) {
 	}
 
 	// Reopen: not editable with reason.
-	mDisabled := popup.NewExportMenu(formats, destinations, scopes, 1, false, false)
+	mDisabled := popup.NewExportMenu(formats, destinations, scopes, 1, false)
 	mDisabled.SetSQLInsertsDisabledReason("no row identity")
 	// MoveValue should skip-clamp; verify the disabled row is still
 	// recognized as disabled when the cursor is forced onto it via a
 	// single-row construction (same pattern as the Body annotation
 	// coverage above).
-	single := popup.NewExportMenu([]string{"SQL INSERTs"}, destinations, scopes, 0, false, false)
+	single := popup.NewExportMenu([]string{"SQL INSERTs"}, destinations, scopes, 0, false)
 	single.SetSQLInsertsDisabledReason("no row identity")
 	if !single.IsSQLInsertsSelected() {
 		t.Fatalf("reopened disabled: IsSQLInsertsSelected = false; want true")

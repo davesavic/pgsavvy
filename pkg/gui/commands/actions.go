@@ -214,17 +214,24 @@ const (
 	ResultReadToEnd      = "result.read_to_end"
 	ResultReadToEndForce = "result.read_to_end_force"
 
-	// /regex filter family (dbsavvy-uv0.4). RESULT_GRID-scoped.
-	//   ResultFilterPrompt    - /     opens the prompt; submit applies
-	//   ResultFilterToggleAll - <C-a> toggles allCols on the active filter
-	//   ResultFilterNext      - n     jump cursor to next match
-	//   ResultFilterPrev      - N     jump cursor to previous match
-	//   ResultFilterClear     - <esc> clear active filter
-	ResultFilterPrompt    = "result.filter.prompt"
-	ResultFilterToggleAll = "result.filter.toggle_all_cols"
-	ResultFilterNext      = "result.filter.next"
-	ResultFilterPrev      = "result.filter.prev"
-	ResultFilterClear     = "result.filter.clear"
+	// In-grid search family (dbsavvy-2ttm). RESULT_GRID-scoped. The ID
+	// STRING values keep their historical "result.filter.*" form so user
+	// keybindings.yaml entries that bind by string stay stable across the
+	// filter→search rename.
+	//   ResultFilterPrompt - /     opens the live search input
+	//   ResultFilterNext   - n     move cursor to next match
+	//   ResultFilterPrev   - N     move cursor to previous match
+	//   ResultFilterClear  - <esc> clear active search
+	ResultFilterPrompt = "result.filter.prompt"
+	ResultFilterNext   = "result.filter.next"
+	ResultFilterPrev   = "result.filter.prev"
+	ResultFilterClear  = "result.filter.clear"
+
+	// SEARCH_LINE-scoped accept / cancel (dbsavvy-2ttm). Internal IDs —
+	// not bound by user keybindings.yaml; driven by the SearchLine
+	// controller's <cr> / <esc> bindings.
+	ResultSearchAccept = "result.search.accept"
+	ResultSearchCancel = "result.search.cancel"
 
 	// In-grid sort (dbsavvy-uv0.5). RESULT_GRID-scoped.
 	//   ResultSortPick - <leader>s opens column picker; first invocation
@@ -280,16 +287,14 @@ const (
 	ResultExportPrompt = "result.export.prompt"
 
 	// ExportMenuUp / Down move the field cursor; Left / Right adjust the
-	// value of the current field; Confirm executes; Cancel pops the popup;
-	// ConfirmFullScopeWithFilter is the typed-YES handler for the
-	// filter-conflict warning. dbsavvy-uv0.9.
-	ExportMenuUp                         = "export.menu.up"
-	ExportMenuDown                       = "export.menu.down"
-	ExportMenuLeft                       = "export.menu.left"
-	ExportMenuRight                      = "export.menu.right"
-	ExportMenuConfirm                    = "export.menu.confirm"
-	ExportMenuCancel                     = "export.menu.cancel"
-	ExportMenuConfirmFullScopeWithFilter = "export.menu.confirm.full.filter"
+	// value of the current field; Confirm executes; Cancel pops the popup.
+	// dbsavvy-uv0.9.
+	ExportMenuUp      = "export.menu.up"
+	ExportMenuDown    = "export.menu.down"
+	ExportMenuLeft    = "export.menu.left"
+	ExportMenuRight   = "export.menu.right"
+	ExportMenuConfirm = "export.menu.confirm"
+	ExportMenuCancel  = "export.menu.cancel"
 
 	// TableInspectOpen opens the TABLE_INSPECT popup from the TABLES rail
 	// (`i` in Normal mode). TableInspectNextTab / PrevTab cycle the tabs of
@@ -604,10 +609,11 @@ func AllActionIDs() []string {
 		ResultReadToEnd,
 		ResultReadToEndForce,
 		ResultFilterPrompt,
-		ResultFilterToggleAll,
 		ResultFilterNext,
 		ResultFilterPrev,
 		ResultFilterClear,
+		ResultSearchAccept,
+		ResultSearchCancel,
 		ResultSortPick,
 		ResultHideOverlay,
 		ResultViewToggle,
@@ -638,7 +644,6 @@ func AllActionIDs() []string {
 		ExportMenuRight,
 		ExportMenuConfirm,
 		ExportMenuCancel,
-		ExportMenuConfirmFullScopeWithFilter,
 		TableInspectOpen,
 		TableInspectNextTab,
 		TableInspectPrevTab,

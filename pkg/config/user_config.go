@@ -74,11 +74,6 @@ type UIConfig struct {
 	// 1_000_000. Must be > 0.
 	ReadToEndWarnThreshold int64 `yaml:"read_to_end_warn_threshold"`
 
-	// FilterMaxRegexBytes caps the byte length of the /regex source
-	// accepted by grid.View.SetFilter. Defense-in-depth against
-	// pathological inputs. Default 4096. Must be > 0. dbsavvy-uv0.4.
-	FilterMaxRegexBytes int `yaml:"filter_max_regex_bytes"`
-
 	// Export carries the result-export knobs surfaced by the
 	// <leader>oe menu. dbsavvy-uv0.9.
 	Export ExportConfig `yaml:"export"`
@@ -187,11 +182,11 @@ type ThemeConfig struct {
 	// CurSearch is the style for the CURRENT in-grid search match (the cell
 	// the cursor sits on). Stronger than SearchHighlight so the active match
 	// stands out from the others. dbsavvy-2ttm.2.
-	CurSearch string `yaml:"cur_search"`
-	DiffAddedFg     string `yaml:"diff_added_fg"`
-	DiffRemovedFg   string `yaml:"diff_removed_fg"`
-	DiffChangedFg   string `yaml:"diff_changed_fg"`
-	PromptFg        string `yaml:"prompt_fg"`
+	CurSearch     string `yaml:"cur_search"`
+	DiffAddedFg   string `yaml:"diff_added_fg"`
+	DiffRemovedFg string `yaml:"diff_removed_fg"`
+	DiffChangedFg string `yaml:"diff_changed_fg"`
+	PromptFg      string `yaml:"prompt_fg"`
 	// DirtyCellBg is the background colour painted on grid cells that have
 	// a staged PendingEdit. dbsavvy-bwq A3 (Z1 Phase A upstream).
 	DirtyCellBg string `yaml:"dirty_cell_bg"`
@@ -232,7 +227,6 @@ func GetDefaultConfig() *UserConfig {
 			ResultPrefetchRows:     50,
 			PrefetchThreshold:      25,
 			ReadToEndWarnThreshold: 1_000_000,
-			FilterMaxRegexBytes:    4096,
 			Export: ExportConfig{
 				BufferedRowWarnThreshold: 100_000,
 				ClipboardMaxBytes:        16 * 1024 * 1024,

@@ -1,7 +1,6 @@
 package grid
 
 import (
-	"regexp"
 	"sync"
 	"time"
 
@@ -118,21 +117,10 @@ type View struct {
 
 	clipboard ClipboardWriter
 
-	// filterState carries the active /regex filter, if any. See
-	// filter.go for the type definition and the SetFilter / ClearFilter /
-	// JumpNextMatch / JumpPrevMatch verbs.
-	filterState filterState
-
-	// filterMaxRegexBytes caps the byte length of regex sources accepted
-	// by SetFilter. Wired from config at chord-registration time; 0
-	// means "use defaultFilterMaxRegexBytes".
-	filterMaxRegexBytes int
-
 	// searchState carries the active plain-substring SEARCH, if any. See
 	// search.go for the type definition and the SetSearch / ClearSearch /
-	// NextMatch / PrevMatch / SearchStatus surface. Unlike filterState the
-	// search never hides rows; it drives cell-major n/N cursor navigation.
-	// dbsavvy-2ttm.
+	// NextMatch / PrevMatch / SearchStatus surface. The search never hides
+	// rows; it drives cell-major n/N cursor navigation. dbsavvy-2ttm.
 	searchState searchState
 
 	// sortState carries the active column sort, if any. See sort.go for
@@ -221,11 +209,10 @@ const defaultMouseDoubleClickMs = 400
 // + AppendRows + Render bring it to life.
 func NewView() *View {
 	return &View{
-		clipboard:           noopClipboard{},
-		lastNearTailFireAt:  -1,
-		filterMaxRegexBytes: defaultFilterMaxRegexBytes,
-		lastHeaderClick:     headerClickState{col: -1},
-		mouseDoubleClickMs:  defaultMouseDoubleClickMs,
+		clipboard:          noopClipboard{},
+		lastNearTailFireAt: -1,
+		lastHeaderClick:    headerClickState{col: -1},
+		mouseDoubleClickMs: defaultMouseDoubleClickMs,
 	}
 }
 
@@ -285,12 +272,9 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 	v.anchorRow = 0
 	v.anchorCol = 0
 	v.lastNearTailFireAt = -1
-	// Clear any active /regex filter — a new schema attach is the reset
-	// signal per dbsavvy-uv0 §Architecture Decisions item 5.
-	v.filterState = filterState{}
 	// Clear any active search — a new schema attach invalidates the
 	// cell-major match list (row/col indices are not stable across a
-	// schema reset). Mirrors the filterState reset. dbsavvy-2ttm.
+	// schema reset). dbsavvy-2ttm.
 	v.searchState = searchState{}
 	// Clear any active sort: a fresh schema attach resets sort/hide/filter
 	// (dbsavvy-uv0 AD-5). T6 will reseed hide-cols from AppState after this
@@ -612,9 +596,6 @@ func (v *View) snapshot() viewSnapshot {
 		anchorRow:          v.anchorRow,
 		anchorCol:          v.anchorCol,
 		frozenFirstCol:     v.frozenFirstCol,
-		filterRe:           v.filterState.re,
-		filterAllCols:      v.filterState.allCols,
-		filterActive:       v.filterState.re != nil,
 		searchMatches:      copyMatches(v.searchState.matches),
 		searchCurrentIdx:   v.searchState.current,
 		searchActive:       v.searchState.query != "",
@@ -691,13 +672,6 @@ type viewSnapshot struct {
 	anchorCol int
 
 	frozenFirstCol bool
-
-	// Filter projection inputs. Render reads these (never v.filterState
-	// directly) so a concurrent SetFilter cannot tear the draw between
-	// snapshot capture and renderBody. dbsavvy-uv0.4.
-	filterRe      *regexp.Regexp
-	filterAllCols bool
-	filterActive  bool
 
 	// Search projection inputs. The highlight pass (T2) reads these
 	// (never v.searchState directly) so a concurrent SetSearch / Next /

@@ -23,12 +23,9 @@ func project(snap viewSnapshot) []int {
 // active filter. dbsavvy-dr6.
 func (v *View) projectionLocked() []int {
 	return project(viewSnapshot{
-		rows:          v.rows,
-		cols:          v.cols,
-		cursorCol:     v.cursorCol,
-		filterRe:      v.filterState.re,
-		filterAllCols: v.filterState.allCols,
-		filterActive:  v.filterState.re != nil,
+		rows:      v.rows,
+		cols:      v.cols,
+		cursorCol: v.cursorCol,
 	})
 }
 
@@ -45,13 +42,12 @@ func projectedPos(proj []int, rawRow int) int {
 }
 
 // applyFilter returns the identity row-index slice (one entry per row,
-// in order), regardless of filter state.
+// in order).
 //
-// dbsavvy-2ttm (T1): the in-grid regex row-filter is being replaced by a
-// plain-substring SEARCH that never hides rows. The filter no longer
-// excludes rows from the projection — that path is now an identity map.
-// The old filterState struct and SetFilter / ClearFilter / JumpNextMatch
-// etc. remain present and compiling but inert until T4 removes them.
+// dbsavvy-2ttm: the in-grid regex row-filter was replaced by a
+// plain-substring SEARCH that never hides rows, so the projection's
+// row-axis is now an identity map. The slot is retained for pipeline
+// composition symmetry with applyHideCols.
 func applyFilter(snap viewSnapshot) []int {
 	out := make([]int, len(snap.rows))
 	for i := range out {

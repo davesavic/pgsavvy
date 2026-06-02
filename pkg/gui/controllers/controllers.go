@@ -65,6 +65,11 @@ type Controllers struct {
 	// promoted the help popup to TabbedPopup; the controller owns the
 	// [, ], <tab>, <esc>, q bindings on CHEATSHEET scope.
 	Cheatsheet *CheatsheetController
+
+	// SearchLine is constructed by the orchestrator (it needs the concrete
+	// SearchLineHelper + SearchLineContext). It owns the <cr>/<esc>
+	// bindings on SEARCH_LINE scope. dbsavvy-2ttm.
+	SearchLine *SearchLineController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -332,6 +337,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "ConflictDialog", ctrl: b.ConflictDialog, attach: true},
 		{name: "FKReversePicker", ctrl: b.FKReversePicker, attach: true},
 		{name: "Cheatsheet", ctrl: b.Cheatsheet, attach: true},
+		{name: "SearchLine", ctrl: b.SearchLine, attach: true},
 	}
 	out := make([]controllerEntry, 0, len(candidates))
 	for _, e := range candidates {

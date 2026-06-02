@@ -146,12 +146,12 @@ type confirmer interface {
 // orchestrator.Gui.OnUIThread.
 type onUIThreader func(func() error)
 
-// prompter is the narrow surface ResultTabsHelper uses to open the
-// /regex prompt. The concrete satisfier is *ui.PromptHelper; tests may
-// inject a fake. nil disables the filter-prompt path (chord becomes
-// a no-op). dbsavvy-uv0.4.
-type prompter interface {
-	Prompt(label, initial string, onSubmit func(value string) error, onCancel func() error) error
+// searchLineOpener is the narrow surface ResultTabsHelper uses to open
+// the bottom-anchored in-grid search input. The concrete satisfier is
+// *ui.SearchLineHelper; tests may inject a fake. nil disables the search
+// path (the "/" chord becomes a no-op). dbsavvy-2ttm.
+type searchLineOpener interface {
+	Open(opts SearchLineOpts) error
 }
 
 // chooser is the narrow surface ResultTabsHelper uses to open the
@@ -163,9 +163,9 @@ type chooser interface {
 
 // toastUpdater extends toastShower with the once-per-tab caveat key
 // surface. *ui.ToastHelper satisfies it; tests inject a recorder. The
-// FilterPrompt handler reaches for ShowOrUpdate when present (so a
+// search caveat handler reaches for ShowOrUpdate when present (so a
 // repeated caveat replaces in place); otherwise it falls back to Show.
-// dbsavvy-uv0.4.
+// dbsavvy-2ttm.
 type toastUpdater interface {
 	ShowOrUpdate(key, message string, ttl time.Duration)
 }
@@ -220,13 +220,10 @@ type ResultTabsHelperDeps struct {
 	// default (1_000_000)". dbsavvy-uv0.3.
 	ReadToEndWarnThreshold int64
 
-	// Prompt pushes the single-line prompt for the /regex chord. nil
-	// disables the filter-prompt path. dbsavvy-uv0.4.
-	Prompt prompter
-
-	// FilterMaxRegexBytes caps the byte length of /regex sources accepted
-	// by SetFilter. 0 means "use grid's default cap (4096)". dbsavvy-uv0.4.
-	FilterMaxRegexBytes int
+	// Search opens the bottom-anchored in-grid search input for the "/"
+	// chord. nil disables the search path (chord becomes a no-op).
+	// dbsavvy-2ttm.
+	Search searchLineOpener
 
 	// Choice pushes the column-picker overlay used by <leader>s. nil
 	// disables the sort-picker path (chord becomes a no-op). dbsavvy-uv0.5.
@@ -313,15 +310,14 @@ const defaultReadToEndWarnThreshold int64 = 1_000_000
 //
 // dbsavvy-66p.12.
 type ResultTabsHelper struct {
-	deps            ResultTabsHelperDeps
-	maxTabs         int
-	nextID          atomic.Int64
-	now             func() time.Time
-	pageSize        int
-	warnThreshold   int64
-	filterByteLimit int
-	sortPickLabel   string
-	doubleClickMs   int
+	deps          ResultTabsHelperDeps
+	maxTabs       int
+	nextID        atomic.Int64
+	now           func() time.Time
+	pageSize      int
+	warnThreshold int64
+	sortPickLabel string
+	doubleClickMs int
 
 	mu       sync.Mutex
 	tabs     []*Tab // ordered by Slot (0..max-1)
@@ -379,10 +375,6 @@ func NewResultTabsHelper(deps ResultTabsHelperDeps) *ResultTabsHelper {
 	if warn <= 0 {
 		warn = defaultReadToEndWarnThreshold
 	}
-	filterCap := deps.FilterMaxRegexBytes
-	if filterCap <= 0 {
-		filterCap = 4096
-	}
 	sortLabel := deps.SortPickLabel
 	if sortLabel == "" {
 		sortLabel = "sort by column"
@@ -392,14 +384,13 @@ func NewResultTabsHelper(deps ResultTabsHelperDeps) *ResultTabsHelper {
 		dblClick = 400
 	}
 	return &ResultTabsHelper{
-		deps:            deps,
-		maxTabs:         max,
-		now:             now,
-		pageSize:        pageSize,
-		warnThreshold:   warn,
-		filterByteLimit: filterCap,
-		sortPickLabel:   sortLabel,
-		doubleClickMs:   dblClick,
+		deps:          deps,
+		maxTabs:       max,
+		now:           now,
+		pageSize:      pageSize,
+		warnThreshold: warn,
+		sortPickLabel: sortLabel,
+		doubleClickMs: dblClick,
 	}
 }
 
@@ -1407,10 +1398,6 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 	// Wire the shared system clipboard so `y` / `yy` yank publishes to the
 	// host clipboard through the common pkg/gui/clipboard transport. dbsavvy U4.
 	t.grid.SetClipboard(clipboard.NewSystemClipboard())
-	// Propagate the configured /regex byte cap into the grid view so a
-	// hot-reloaded config value takes effect on the next tab's filter.
-	// dbsavvy-uv0.4.
-	t.grid.SetFilterMaxRegexBytes(h.filterByteLimit)
 	// Propagate the configured double-click window onto the grid so the
 	// header mouse-debounce uses the user's tuned value. dbsavvy-uv0.5.
 	t.grid.SetMouseDoubleClickMs(h.doubleClickMs)
@@ -2120,24 +2107,28 @@ func (t *Tab) dispose() {
 	})
 }
 
-// --- /regex filter surface (dbsavvy-uv0.4) -------------------------------
+// --- in-grid search surface (dbsavvy-2ttm) -------------------------------
 
-// filterCaveatKey tags the once-per-tab "filtering loaded rows only"
-// toast so ShowOrUpdate replaces in place instead of stacking.
-const filterCaveatKey = "result.filter.caveat"
+// searchCaveatKey tags the once-per-tab "searching loaded rows only"
+// toast so ShowOrUpdate replaces in place instead of stacking. The key
+// is internal (not a bound action ID).
+const searchCaveatKey = "result.search.caveat"
 
-// filterCaveatTTL is the visibility window for the caveat toast.
-const filterCaveatTTL = 5 * time.Second
+// searchCaveatTTL is the visibility window for the caveat toast.
+const searchCaveatTTL = 5 * time.Second
 
-// filterCaveatMessage is the once-per-tab caveat surfaced when /regex
-// is applied to an incomplete tab.
-const filterCaveatMessage = "filtering loaded rows only — press G to load all then re-filter"
+// searchCaveatMessage is the once-per-tab caveat surfaced when search
+// is opened against an incomplete (streaming) tab.
+const searchCaveatMessage = "searching loaded rows only — press G to load all"
 
-// FilterPrompt opens the /regex prompt against the active tab. On
-// submit the regex is applied to the tab's grid; on incomplete tabs
-// the once-per-tab caveat toast fires. No-op when no tab is active or
-// the prompt helper is unwired. dbsavvy-uv0.4.
-func (h *ResultTabsHelper) FilterPrompt() {
+// SearchPrompt opens the bottom-anchored live search input against the
+// active tab. Each keystroke drives g.SetSearch (incremental); <cr>
+// keeps the search active; <esc> clears it and restores the pre-search
+// cursor. On incomplete tabs the once-per-tab caveat toast fires on the
+// first non-empty query. No-op
+// (toast) when no tab is active; no-op when the search helper is unwired.
+// dbsavvy-2ttm.
+func (h *ResultTabsHelper) SearchPrompt() {
 	t := h.Active()
 	if t == nil {
 		h.toast("no result tabs")
@@ -2147,92 +2138,86 @@ func (h *ResultTabsHelper) FilterPrompt() {
 	if g == nil {
 		return
 	}
-	if h.deps.Prompt == nil {
+	if h.deps.Search == nil {
 		return
 	}
-	_ = h.deps.Prompt.Prompt("/", "", func(value string) error {
-		if value == "" {
-			// Empty regex is treated as cancel per AC.
-			return nil
-		}
-		if err := g.SetFilter(value, false); err != nil {
-			h.toast(fmt.Sprintf("filter error: %v", err))
-			return nil
-		}
-		// Filter successfully applied: fire the once-per-tab caveat when
-		// the underlying buffer is still streaming.
-		if !t.Complete() && !t.CaveatShown() {
-			h.showFilterCaveat()
-			t.SetCaveatShown(true)
-		}
-		return nil
-	}, func() error { return nil })
+	_ = h.deps.Search.Open(SearchLineOpts{
+		OnChange: func(query string) {
+			if query != "" && !t.Complete() && !t.CaveatShown() {
+				h.showSearchCaveat()
+				t.SetCaveatShown(true)
+			}
+			g.SetSearch(query)
+		},
+		OnAccept: func(string) {},
+		OnCancel: func() { g.ClearSearch() },
+		CursorSnapshot: func() any {
+			row, col := g.CursorPosition()
+			return [2]int{row, col}
+		},
+		CursorRestore: func(snapshot any) {
+			pos, ok := snapshot.([2]int)
+			if !ok {
+				return
+			}
+			g.SetCursor(pos[0], pos[1])
+		},
+	})
 }
 
-// showFilterCaveat surfaces the filter caveat toast, preferring
+// showSearchCaveat surfaces the search caveat toast, preferring
 // ShowOrUpdate when the toast surface supports it so re-fires replace
-// in place instead of stacking. dbsavvy-uv0.4.
-func (h *ResultTabsHelper) showFilterCaveat() {
+// in place instead of stacking. dbsavvy-2ttm.
+func (h *ResultTabsHelper) showSearchCaveat() {
 	if h.deps.Toast == nil {
 		return
 	}
 	if upd, ok := h.deps.Toast.(toastUpdater); ok {
-		upd.ShowOrUpdate(filterCaveatKey, filterCaveatMessage, filterCaveatTTL)
+		upd.ShowOrUpdate(searchCaveatKey, searchCaveatMessage, searchCaveatTTL)
 		return
 	}
-	h.deps.Toast.Show(filterCaveatMessage, filterCaveatTTL)
+	h.deps.Toast.Show(searchCaveatMessage, searchCaveatTTL)
 }
 
-// FilterToggleAllCols flips the allCols flag of the active filter on
-// the active tab's grid. No-op when no tab is active or no filter is
-// installed. dbsavvy-uv0.4.
-func (h *ResultTabsHelper) FilterToggleAllCols() {
+// SearchNextMatch advances the cursor on the active tab's grid to the
+// next search match. dbsavvy-2ttm.
+func (h *ResultTabsHelper) SearchNextMatch() {
 	g := h.activeGrid()
 	if g == nil {
 		return
 	}
-	g.ToggleFilterAllCols()
+	g.NextMatch()
 }
 
-// FilterJumpNext advances the cursor on the active tab's grid to the
-// next filter match. dbsavvy-uv0.4.
-func (h *ResultTabsHelper) FilterJumpNext() {
+// SearchPrevMatch rewinds the cursor on the active tab's grid to the
+// previous search match. dbsavvy-2ttm.
+func (h *ResultTabsHelper) SearchPrevMatch() {
 	g := h.activeGrid()
 	if g == nil {
 		return
 	}
-	g.JumpNextMatch()
+	g.PrevMatch()
 }
 
-// FilterJumpPrev rewinds the cursor on the active tab's grid to the
-// previous filter match. dbsavvy-uv0.4.
-func (h *ResultTabsHelper) FilterJumpPrev() {
+// SearchClear drops the active search on the active tab's grid.
+// dbsavvy-2ttm.
+func (h *ResultTabsHelper) SearchClear() {
 	g := h.activeGrid()
 	if g == nil {
 		return
 	}
-	g.JumpPrevMatch()
+	g.ClearSearch()
 }
 
-// FilterClear drops the active filter on the active tab's grid.
-// dbsavvy-uv0.4.
-func (h *ResultTabsHelper) FilterClear() {
-	g := h.activeGrid()
-	if g == nil {
-		return
-	}
-	g.ClearFilter()
-}
-
-// FilterActive reports whether the active tab's grid has an active
-// filter. Used by the shared <esc> chord to avoid shadowing other esc
-// handlers when no filter is installed. dbsavvy-uv0.4.
-func (h *ResultTabsHelper) FilterActive() bool {
+// SearchActive reports whether the active tab's grid has an active
+// search. Used by the shared <esc> chord to avoid shadowing other esc
+// handlers when no search is installed. dbsavvy-2ttm.
+func (h *ResultTabsHelper) SearchActive() bool {
 	g := h.activeGrid()
 	if g == nil {
 		return false
 	}
-	return g.FilterActive()
+	return g.SearchActive()
 }
 
 // activeGrid returns the *grid.View attached to the currently-active
@@ -2810,8 +2795,6 @@ func (h *ResultTabsHelper) PromptExport() {
 	_, ri := t.Identity()
 	formats := exportFormatLabels(ri.HasRowIdentity)
 
-	filterActive := g.FilterActive()
-
 	var estimated int64
 	if r := t.Runner(); r != nil {
 		estimated = r.EstimatedRows()
@@ -2841,7 +2824,7 @@ func (h *ResultTabsHelper) PromptExport() {
 		}
 	}
 
-	m := popup.NewExportMenu(formats, destinations, scopes, sqlInsertsIdx, bufferedThresholdExceeded, filterActive)
+	m := popup.NewExportMenu(formats, destinations, scopes, sqlInsertsIdx, bufferedThresholdExceeded)
 	m.SetBufferedFormatIndexes(indexOf(formats, "Markdown"), indexOf(formats, "JSON Array"))
 	m.SetBufferedThresholdLabel(fmt.Sprintf("≥ %d rows", threshold))
 	if sqlInsertsReason != "" {
@@ -2924,21 +2907,6 @@ func (h *ResultTabsHelper) ExportMenuCancel() {
 	}
 }
 
-// ExportMenuConfirmFullScopeWithFilter sets the menu's typed-YES flag
-// when the warning is showing. Bound to `y`. dbsavvy-uv0.9.
-func (h *ResultTabsHelper) ExportMenuConfirmFullScopeWithFilter() {
-	h.mu.Lock()
-	m := h.exportMenu
-	h.mu.Unlock()
-	if m == nil || m.menu == nil {
-		return
-	}
-	if !m.menu.RequiresFullWithFilterConfirmation() {
-		return
-	}
-	m.menu.SetConfirmedFullWithFilter(true)
-}
-
 // ExportMenuConfirm kicks off the export based on the menu's current
 // selection. Pops the menu first (so the user sees the toast), then
 // runs the export on a worker goroutine. dbsavvy-uv0.9.
@@ -2951,10 +2919,6 @@ func (h *ResultTabsHelper) ExportMenuConfirm() {
 	}
 	if reason := m.menu.ConfirmBlockedReason(); reason != "" {
 		h.toast(reason)
-		return
-	}
-	if m.menu.RequiresFullWithFilterConfirmation() {
-		h.toast("press y to confirm Full scope ignoring filter, or move Scope")
 		return
 	}
 

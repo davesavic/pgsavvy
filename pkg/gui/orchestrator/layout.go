@@ -408,6 +408,27 @@ func (g *Gui) RunLayout(w, h int) error {
 					_ = g.driver.SetViewCursor(name, cx+2, cy)
 				}
 			}
+			// SEARCH_LINE view-plumb + width + caret (dbsavvy-2ttm). Like
+			// COMMAND_LINE, the search input is a borderless editable strip
+			// whose TextArea holds the raw query; HandleRender writes the "/"
+			// prefix + right-aligned match count via SetContent. The caret is
+			// offset by len("/")=1 so it tracks the TextArea cursor past the
+			// rendered prefix.
+			if ctx.GetKey() == types.SEARCH_LINE {
+				if view != nil {
+					view.Frame = false
+				}
+				if cl, ok := ctx.(interface{ SetView(types.View) }); ok {
+					cl.SetView(view)
+				}
+				if wsetter, ok := ctx.(interface{ SetWidth(int) }); ok && view != nil {
+					wsetter.SetWidth(view.InnerWidth())
+				}
+				if view != nil && view.TextArea != nil {
+					cx, cy := view.TextArea.GetCursorXY()
+					_ = g.driver.SetViewCursor(name, cx+1, cy)
+				}
+			}
 			_ = ctx.HandleRender()
 			_, _ = g.driver.SetViewOnTop(name)
 			onStack[ctx.GetKey()] = struct{}{}

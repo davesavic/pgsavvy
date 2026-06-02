@@ -33,20 +33,18 @@ type ResultTabsManager interface {
 	// dbsavvy-uv0.3.
 	ReadToEnd()
 
-	// In-grid /regex filter surface (dbsavvy-uv0.4). FilterPrompt opens
-	// the /-labelled prompt and, on submit, applies the regex to the
-	// active tab's grid (firing the once-per-tab caveat toast when the
-	// tab is incomplete). FilterToggleAllCols flips the allCols flag of
-	// the active filter; FilterJumpNext / FilterJumpPrev advance the
-	// cursor to the next / previous match; FilterClear drops the active
-	// filter; FilterActive reports whether any tab currently has an
-	// active filter (used to gate the shared <esc> chord).
-	FilterPrompt()
-	FilterToggleAllCols()
-	FilterJumpNext()
-	FilterJumpPrev()
-	FilterClear()
-	FilterActive() bool
+	// In-grid search surface (dbsavvy-2ttm). SearchPrompt opens the
+	// bottom-anchored live search input; each keystroke drives the active
+	// tab's grid SetSearch (firing the once-per-tab caveat toast when the
+	// tab is incomplete). SearchNextMatch / SearchPrevMatch move the
+	// cursor to the next / previous match; SearchClear drops the active
+	// search; SearchActive reports whether the active tab currently has an
+	// active search (used to gate the shared <esc> chord).
+	SearchPrompt()
+	SearchNextMatch()
+	SearchPrevMatch()
+	SearchClear()
+	SearchActive() bool
 
 	// SortPick opens the column-picker overlay for the active tab. On
 	// submit, SetSort(col) fires; cycling through asc/desc/clear per the
@@ -156,9 +154,8 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"]p", commands.ResultPageNext, tr.Actions.ResultPageNext, types.RESULT_GRID},
 		{"[p", commands.ResultPagePrev, tr.Actions.ResultPagePrev, types.RESULT_GRID},
 		{"G", commands.ResultJumpLast, tr.Actions.ResultJumpLast, types.RESULT_GRID},
-		// dbsavvy-uv0.4: /regex filter chords.
+		// dbsavvy-2ttm: in-grid search chords.
 		{"/", commands.ResultFilterPrompt, tr.Actions.ResultFilterPrompt, types.RESULT_GRID},
-		{"<c-a>", commands.ResultFilterToggleAll, tr.Actions.ResultFilterToggleAll, types.RESULT_GRID},
 		{"n", commands.ResultFilterNext, tr.Actions.ResultFilterNext, types.RESULT_GRID},
 		{"N", commands.ResultFilterPrev, tr.Actions.ResultFilterPrev, types.RESULT_GRID},
 		{"<esc>", commands.ResultFilterClear, tr.Actions.ResultFilterClear, types.RESULT_GRID},
@@ -377,25 +374,14 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 			return nil
 		},
 	})
-	// dbsavvy-uv0.4: /regex filter handlers.
+	// dbsavvy-2ttm: in-grid search handlers.
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ResultFilterPrompt,
 		Description: tr.Actions.ResultFilterPrompt,
 		Tag:         "Result",
 		Handler: func(_ commands.ExecCtx) error {
 			if r.mgr != nil {
-				r.mgr.FilterPrompt()
-			}
-			return nil
-		},
-	})
-	_ = reg.Register(&commands.Command{
-		ID:          commands.ResultFilterToggleAll,
-		Description: tr.Actions.ResultFilterToggleAll,
-		Tag:         "Result",
-		Handler: func(_ commands.ExecCtx) error {
-			if r.mgr != nil {
-				r.mgr.FilterToggleAllCols()
+				r.mgr.SearchPrompt()
 			}
 			return nil
 		},
@@ -406,7 +392,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 		Tag:         "Result",
 		Handler: func(_ commands.ExecCtx) error {
 			if r.mgr != nil {
-				r.mgr.FilterJumpNext()
+				r.mgr.SearchNextMatch()
 			}
 			return nil
 		},
@@ -417,7 +403,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 		Tag:         "Result",
 		Handler: func(_ commands.ExecCtx) error {
 			if r.mgr != nil {
-				r.mgr.FilterJumpPrev()
+				r.mgr.SearchPrevMatch()
 			}
 			return nil
 		},
@@ -430,12 +416,14 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 			if r.mgr == nil {
 				return nil
 			}
+			// Selection-clear short-circuits AHEAD of search-clear so an
+			// active selection + <esc> clears the selection, not the search.
 			if r.mgr.SelectionActive() {
 				r.mgr.ClearSelection()
 				return nil
 			}
-			if r.mgr.FilterActive() {
-				r.mgr.FilterClear()
+			if r.mgr.SearchActive() {
+				r.mgr.SearchClear()
 			}
 			return nil
 		},

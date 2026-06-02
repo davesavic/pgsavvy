@@ -142,12 +142,15 @@ type ActionTranslations struct {
 	ResultReadToEnd      string
 	ResultReadToEndForce string
 
-	// /regex in-grid filter (dbsavvy-uv0.4).
-	ResultFilterPrompt    string
-	ResultFilterToggleAll string
-	ResultFilterNext      string
-	ResultFilterPrev      string
-	ResultFilterClear     string
+	// In-grid search (dbsavvy-2ttm). Struct field names keep the historical
+	// ResultFilter* form (the command-ID strings are unchanged); only the
+	// display VALUES carry search semantics.
+	ResultFilterPrompt string
+	ResultFilterNext   string
+	ResultFilterPrev   string
+	ResultFilterClear  string
+	ResultSearchAccept string
+	ResultSearchCancel string
 
 	// In-grid sort (dbsavvy-uv0.5).
 	ResultSortPick      string
@@ -358,11 +361,12 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultReadToEnd:      "Drain result to end",
 			ResultReadToEndForce: "Drain result to end (force)",
 
-			ResultFilterPrompt:    "Filter rows by regex",
-			ResultFilterToggleAll: "Toggle filter across all columns",
-			ResultFilterNext:      "Jump to next filter match",
-			ResultFilterPrev:      "Jump to previous filter match",
-			ResultFilterClear:     "Clear result filter",
+			ResultFilterPrompt: "Search results",
+			ResultFilterNext:   "Jump to next search match",
+			ResultFilterPrev:   "Jump to previous search match",
+			ResultFilterClear:  "Clear result search",
+			ResultSearchAccept: "Accept search",
+			ResultSearchCancel: "Cancel search",
 
 			ResultSortPick:      "Sort rows by column",
 			ResultSortPickLabel: "sort by column",

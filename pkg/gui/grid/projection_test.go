@@ -9,11 +9,10 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// TestProjection_FilterIsIdentityEvenWhenActive pins the dbsavvy-2ttm (T1)
-// amendment: applyFilter no longer hides rows — even with a filter
-// installed the projection returns every row in raw order. (The regex
-// filter is being superseded by the never-hiding plain-substring SEARCH;
-// the old SetFilter surface still compiles but no longer excludes rows.)
+// TestProjection_FilterIsIdentityEvenWhenActive pins the dbsavvy-2ttm
+// amendment: applyFilter no longer hides rows — the projection returns
+// every row in raw order. (The regex filter was superseded by the
+// never-hiding plain-substring SEARCH.)
 func TestProjection_FilterIsIdentityEvenWhenActive(t *testing.T) {
 	v := NewView()
 	v.SetColumns([]models.ColumnMeta{
@@ -26,7 +25,6 @@ func TestProjection_FilterIsIdentityEvenWhenActive(t *testing.T) {
 	v.AppendRows([]models.Row{{Values: []any{"charlie", int64(5)}}}) // 3
 	v.AppendRows([]models.Row{{Values: []any{"alan", int64(40)}}})   // 4
 
-	require.NoError(t, v.SetFilter("^a", false))
 	v.SetSortIndicator(1, SortAsc) // display-only; must not reorder
 
 	got := projectIndices(v)
@@ -34,9 +32,9 @@ func TestProjection_FilterIsIdentityEvenWhenActive(t *testing.T) {
 	require.Equal(t, []int{0, 1, 2, 3, 4}, got)
 }
 
-// TestProjection_FilterActiveStillIdentity pins that even non-matching
-// rows survive the projection now that applyFilter is identity.
-func TestProjection_FilterActiveStillIdentity(t *testing.T) {
+// TestProjection_AllRowsSurviveIdentity pins that every row survives the
+// projection now that applyFilter is identity.
+func TestProjection_AllRowsSurviveIdentity(t *testing.T) {
 	v := NewView()
 	v.SetColumns([]models.ColumnMeta{
 		{Name: "name", TypeName: "text"},
@@ -45,7 +43,6 @@ func TestProjection_FilterActiveStillIdentity(t *testing.T) {
 	v.AppendRows([]models.Row{{Values: []any{"bravo"}}})
 	v.AppendRows([]models.Row{{Values: []any{"alfa"}}})
 
-	require.NoError(t, v.SetFilter("^a", false))
 	v.SetSortIndicator(0, SortAsc) // display-only; must not reorder
 
 	got := projectIndices(v)

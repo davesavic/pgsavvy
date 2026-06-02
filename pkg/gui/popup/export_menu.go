@@ -55,13 +55,6 @@ type ExportMenu struct {
 
 	bufferedThresholdExceeded bool
 	bufferedThresholdLabel    string
-
-	filterActive            bool
-	confirmedFullWithFilter bool
-
-	// scopeFullIdx is the index of the "Full" scope in scopes[];
-	// resolved at construction by matching label.
-	scopeFullIdx int
 }
 
 // NewExportMenu constructs the state. formats[] should already include or
@@ -69,14 +62,7 @@ type ExportMenu struct {
 // position of "SQL INSERTs" in formats[] when shown-but-disabled (i.e., the
 // caller WANTS the label visible-but-grey); pass -1 to indicate the row
 // should not be rendered at all.
-func NewExportMenu(formats, destinations, scopes []string, sqlInsertsIdx int, bufferedThresholdExceeded, filterActive bool) *ExportMenu {
-	fullIdx := -1
-	for i, s := range scopes {
-		if s == "Full" {
-			fullIdx = i
-			break
-		}
-	}
+func NewExportMenu(formats, destinations, scopes []string, sqlInsertsIdx int, bufferedThresholdExceeded bool) *ExportMenu {
 	return &ExportMenu{
 		formats:                   append([]string(nil), formats...),
 		destinations:              append([]string(nil), destinations...),
@@ -89,8 +75,6 @@ func NewExportMenu(formats, destinations, scopes []string, sqlInsertsIdx int, bu
 		markdownIdx:               -1,
 		jsonArrayIdx:              -1,
 		bufferedThresholdExceeded: bufferedThresholdExceeded,
-		filterActive:              filterActive,
-		scopeFullIdx:              fullIdx,
 	}
 }
 
@@ -247,29 +231,10 @@ func (m *ExportMenu) SetBufferedThresholdLabel(s string) {
 	m.bufferedThresholdLabel = s
 }
 
-// SetConfirmedFullWithFilter records that the caller has collected the
-// typed-YES confirmation for Full-scope + active-filter export.
-func (m *ExportMenu) SetConfirmedFullWithFilter(b bool) {
-	m.confirmedFullWithFilter = b
-}
-
-// RequiresFullWithFilterConfirmation reports whether the menu needs the
-// caller to collect a typed-YES confirmation before Confirm.
-func (m *ExportMenu) RequiresFullWithFilterConfirmation() bool {
-	if !m.filterActive {
-		return false
-	}
-	if m.scopeFullIdx < 0 || m.scopeIdx != m.scopeFullIdx {
-		return false
-	}
-	return !m.confirmedFullWithFilter
-}
-
 // ConfirmBlockedReason returns "" when Confirm is allowed; otherwise a
 // short human-readable reason. Conditions blocking Confirm:
 //   - SQL-INSERTs selected when disabled.
 //   - bufferedThresholdExceeded AND format is Markdown or JSON Array.
-//   - filterActive AND scope == Full AND typed-YES not collected.
 func (m *ExportMenu) ConfirmBlockedReason() string {
 	if m.IsSQLInsertsSelected() {
 		if m.sqlInsertsDisabledReason != "" {
@@ -279,9 +244,6 @@ func (m *ExportMenu) ConfirmBlockedReason() string {
 	}
 	if m.bufferedThresholdExceeded && m.isBufferedFormat() {
 		return "buffered format over threshold — pick a streaming format"
-	}
-	if m.RequiresFullWithFilterConfirmation() {
-		return "Full scope with active filter requires typed confirmation"
 	}
 	return ""
 }
@@ -346,10 +308,6 @@ func (m *ExportMenu) Body() string {
 			b.WriteString("threshold")
 		}
 		b.WriteString(" — Confirm disabled.")
-	}
-
-	if m.RequiresFullWithFilterConfirmation() {
-		b.WriteString("\n\nFull scope ignores your filter — press y to confirm (or change Scope).")
 	}
 
 	return b.String()

@@ -562,13 +562,11 @@ func projectedView(t *testing.T, labels ...string) *View {
 }
 
 // TestCursorNavigation_FollowsProjectedOrder is the dbsavvy-dr6 regression
-// test, updated for dbsavvy-2ttm (T1): applyFilter is now identity, so the
+// test, updated for dbsavvy-2ttm: applyFilter is now identity, so the
 // projection is always the full raw buffer in order and the cursor walks
-// every row. (The filter no longer subsets the projection; SetFilter still
-// compiles but is inert on the row axis.)
+// every row.
 func TestCursorNavigation_FollowsProjectedOrder(t *testing.T) {
 	v := projectedView(t, "match-0", "skip-1", "match-2", "skip-3", "match-4")
-	require.NoError(t, v.SetFilter("^match", false))
 	require.Equal(t, []int{0, 1, 2, 3, 4}, projectIndices(v), "precondition: identity projection")
 
 	// JumpFirst lands on raw 0.

@@ -20,10 +20,6 @@ type ExportMenuManager interface {
 	ExportMenuConfirm()
 	// ExportMenuCancel discards the menu and pops the popup context.
 	ExportMenuCancel()
-	// ExportMenuConfirmFullScopeWithFilter is the typed-YES handler for
-	// the filter-conflict warning shown when scope=full while a filter
-	// is active on the underlying tab.
-	ExportMenuConfirmFullScopeWithFilter()
 }
 
 // ExportMenuController owns the EXPORT_MENU popup bindings opened by
@@ -36,7 +32,6 @@ type ExportMenuManager interface {
 //   - l / <right>           next value of active field
 //   - <cr>                  confirm and start export
 //   - <esc> / q             cancel and close the menu
-//   - y                     confirm full-scope-with-filter warning
 type ExportMenuController struct {
 	baseController
 	mgr ExportMenuManager
@@ -92,15 +87,6 @@ func (e *ExportMenuController) Confirm(_ commands.ExecCtx) error {
 func (e *ExportMenuController) Cancel(_ commands.ExecCtx) error {
 	if e.mgr != nil {
 		e.mgr.ExportMenuCancel()
-	}
-	return nil
-}
-
-// ConfirmFullWithFilter is the typed-YES handler for the filter-conflict
-// warning (scope=full while a filter is active on the source tab).
-func (e *ExportMenuController) ConfirmFullWithFilter(_ commands.ExecCtx) error {
-	if e.mgr != nil {
-		e.mgr.ExportMenuConfirmFullScopeWithFilter()
 	}
 	return nil
 }
@@ -186,13 +172,6 @@ func (e *ExportMenuController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			ActionID:    commands.ExportMenuCancel,
 			Description: tr.Actions.ExportMenuCancel,
 		},
-		{
-			Sequence:    []types.ChordKey{{Code: 'y'}},
-			Mode:        types.ModeNormal,
-			Scope:       types.EXPORT_MENU,
-			ActionID:    commands.ExportMenuConfirmFullScopeWithFilter,
-			Description: tr.Actions.ExportMenuConfirm,
-		},
 	}
 }
 
@@ -231,11 +210,6 @@ func (e *ExportMenuController) RegisterActions(reg *commands.Registry) {
 		ID:          commands.ExportMenuCancel,
 		Description: "Export menu cancel",
 		Handler:     e.Cancel,
-	})
-	_ = reg.Register(&commands.Command{
-		ID:          commands.ExportMenuConfirmFullScopeWithFilter,
-		Description: "Export menu confirm full-scope-with-filter",
-		Handler:     e.ConfirmFullWithFilter,
 	})
 }
 

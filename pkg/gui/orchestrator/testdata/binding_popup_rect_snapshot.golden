@@ -49,7 +49,6 @@ binding	scope=export_menu	key=j	mode=normal
 binding	scope=export_menu	key=k	mode=normal
 binding	scope=export_menu	key=l	mode=normal
 binding	scope=export_menu	key=q	mode=normal
-binding	scope=export_menu	key=y	mode=normal
 binding	scope=fk_reverse_picker	key=<cr>	mode=normal
 binding	scope=fk_reverse_picker	key=<esc>	mode=normal
 binding	scope=fk_reverse_picker	key=<tab>	mode=normal
@@ -220,7 +219,6 @@ binding	scope=result_grid	key=1	mode=normal
 binding	scope=result_grid	key=2	mode=normal
 binding	scope=result_grid	key=3	mode=normal
 binding	scope=result_grid	key=4	mode=normal
-binding	scope=result_grid	key=<c-a>	mode=normal
 binding	scope=result_grid	key=<c-d>	mode=normal
 binding	scope=result_grid	key=<c-h>	mode=normal
 binding	scope=result_grid	key=<c-i>	mode=normal
@@ -278,6 +276,8 @@ binding	scope=schemas	key=U	mode=normal
 binding	scope=schemas	key=j	mode=normal
 binding	scope=schemas	key=k	mode=normal
 binding	scope=schemas	key=r	mode=normal
+binding	scope=search_line	key=<cr>	mode=command
+binding	scope=search_line	key=<esc>	mode=command
 binding	scope=selection	key=<cr>	mode=normal
 binding	scope=selection	key=<down>	mode=normal
 binding	scope=selection	key=<esc>	mode=normal

@@ -174,16 +174,17 @@ type Gui struct {
 	refreshHelper *data.RefreshHelper
 
 	// Built by wireWithDriver.
-	registry    *guicontext.ContextTree
-	controllers *controllers.Controllers
-	confirmHelp *ui.ConfirmHelper
-	promptHelp  *ui.PromptHelper
-	choiceHelp  *ui.ChoiceHelper
-	toastHelp   *ui.ToastHelper
-	tablesHelp  *ui.TablesHelper
-	tipHelp     *ui.TipHelper
-	resultTabsH *ui.ResultTabsHelper
-	noticeHelp  *ui.NoticeHelper
+	registry       *guicontext.ContextTree
+	controllers    *controllers.Controllers
+	confirmHelp    *ui.ConfirmHelper
+	promptHelp     *ui.PromptHelper
+	searchLineHelp *ui.SearchLineHelper
+	choiceHelp     *ui.ChoiceHelper
+	toastHelp      *ui.ToastHelper
+	tablesHelp     *ui.TablesHelper
+	tipHelp        *ui.TipHelper
+	resultTabsH    *ui.ResultTabsHelper
+	noticeHelp     *ui.NoticeHelper
 
 	// Inline-edit helpers (epic dbsavvy-bwq). Built by wireWithDriver
 	// alongside the existing UI helpers; pinned on Gui so future bd
@@ -578,6 +579,7 @@ func (g *Gui) wireWithDriver() error {
 	// UI helpers that need the driver / registry.
 	g.confirmHelp = ui.NewConfirmHelper(g.tree, g.registry.Confirmation)
 	g.promptHelp = ui.NewPromptHelper(g.tree, g.registry.Prompt)
+	g.searchLineHelp = ui.NewSearchLineHelper(g.tree, g.registry.SearchLine)
 	g.choiceHelp = ui.NewChoiceHelper(g.tree, g.registry.Selection)
 
 	// SSH masked secret prompt (dbsavvy-jku3): now that the prompt popup
@@ -605,7 +607,7 @@ func (g *Gui) wireWithDriver() error {
 		Driver:     g.driver,
 		Toast:      g.toastHelp,
 		Confirm:    g.confirmHelp,
-		Prompt:     g.promptHelp,
+		Search:     g.searchLineHelp,
 		Choice:     g.choiceHelp,
 		OnUIThread: g.OnUIThread,
 		StreamFactory: func() ui.StreamRunner {
@@ -715,7 +717,6 @@ func (g *Gui) wireWithDriver() error {
 	if cfg := g.deps.Common.Cfg(); cfg != nil {
 		resultTabsDeps.ResultPageSize = cfg.UI.ResultPageSize
 		resultTabsDeps.ReadToEndWarnThreshold = cfg.UI.ReadToEndWarnThreshold
-		resultTabsDeps.FilterMaxRegexBytes = cfg.UI.FilterMaxRegexBytes
 		resultTabsDeps.MouseDoubleClickMs = cfg.UI.Mouse.DoubleClickMs
 		resultTabsDeps.ExportBufferedRowWarnThreshold = cfg.UI.Export.BufferedRowWarnThreshold
 		resultTabsDeps.ExportClipboardMaxBytes = cfg.UI.Export.ClipboardMaxBytes
@@ -1166,6 +1167,23 @@ func (g *Gui) wireWithDriver() error {
 				g.driver.SetCaretEnabled(enabled)
 			}
 		})
+	}
+	// dbsavvy-2ttm: the SEARCH_LINE search input gets the same caret
+	// toggle through SearchLineHelper's lifecycle, and a SEARCH_LINE
+	// controller for its <cr>/<esc> bindings attached to the context.
+	if g.searchLineHelp != nil {
+		g.searchLineHelp.SetCaretToggler(func(enabled bool) {
+			if g.driver != nil {
+				g.driver.SetCaretEnabled(enabled)
+			}
+		})
+	}
+	if g.registry != nil && g.registry.SearchLine != nil && g.controllers != nil {
+		searchCtrl := controllers.NewSearchLineController(
+			g.deps.Common, helperBag.CoreDeps, g.searchLineHelp, g.registry.SearchLine,
+		)
+		searchCtrl.AttachToContext(&g.registry.SearchLine.BaseContext)
+		g.controllers.SearchLine = searchCtrl
 	}
 
 	// dbsavvy-3vf.9: build the TABLE_INSPECT popup controller and attach
@@ -2134,6 +2152,15 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 					}
 					g.masterEditors[key] = ve
 				}
+			case types.SEARCH_LINE:
+				// dbsavvy-2ttm: the SEARCH_LINE editor fires the
+				// per-keystroke onChange seam so SearchPrompt's OnChange
+				// drives live grid.SetSearch as the user types.
+				opts := []MasterEditorOption{WithSessionLog(g.deps.Common.Logger())}
+				if g.searchLineHelp != nil {
+					opts = append(opts, WithOnPassthroughEdit(g.searchLineHelp.OnChange))
+				}
+				g.masterEditors[key] = NewMasterEditor(ngocui, g.matcher, key, opts...)
 			default:
 				g.masterEditors[key] = NewMasterEditor(ngocui, g.matcher, key, WithSessionLog(g.deps.Common.Logger()))
 			}

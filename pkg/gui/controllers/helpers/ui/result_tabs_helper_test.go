@@ -1465,49 +1465,53 @@ func contains(s, substr string) bool {
 
 // --- dbsavvy-uv0.4 /regex filter tests -----------------------------------
 
-// fakePrompter captures Prompt invocations and auto-submits the
-// configured response when autoSubmit is non-nil. Otherwise it stores
-// the callbacks for the test to drive directly.
-type fakePrompter struct {
-	mu         sync.Mutex
-	lastLabel  string
-	autoSubmit *string
-	onSubmit   func(value string) error
-	onCancel   func() error
+// fakeSearcher captures the SearchLineOpts handed to Open so a test can
+// drive the OnChange / OnCancel seams directly (the live incremental
+// path the master-editor onChange hook would otherwise fire).
+type fakeSearcher struct {
+	mu   sync.Mutex
+	opts SearchLineOpts
 }
 
-func (f *fakePrompter) Prompt(label, _ string, onSubmit func(value string) error, onCancel func() error) error {
+func (f *fakeSearcher) Open(opts SearchLineOpts) error {
 	f.mu.Lock()
-	f.lastLabel = label
-	f.onSubmit = onSubmit
-	f.onCancel = onCancel
-	auto := f.autoSubmit
+	f.opts = opts
 	f.mu.Unlock()
-	if auto != nil {
-		return onSubmit(*auto)
-	}
 	return nil
 }
 
-func (f *fakePrompter) submitDirect(value string) error {
+// typeQuery simulates the user typing query into the search input: it
+// invokes the captured OnChange seam (drives g.SetSearch live).
+func (f *fakeSearcher) typeQuery(query string) {
 	f.mu.Lock()
-	cb := f.onSubmit
+	cb := f.opts.OnChange
 	f.mu.Unlock()
-	if cb == nil {
-		return nil
+	if cb != nil {
+		cb(query)
 	}
-	return cb(value)
 }
 
-func newFilterTestHelper(t *testing.T, prompter *fakePrompter) (*ResultTabsHelper, *fakeToaster) {
+// cancel simulates <esc> while composing: invokes the captured OnCancel
+// seam (clears the search). The cursor-restore closure is driven by the
+// helper in production; here OnCancel alone is enough to assert
+// search-cleared semantics.
+func (f *fakeSearcher) cancel() {
+	f.mu.Lock()
+	cb := f.opts.OnCancel
+	f.mu.Unlock()
+	if cb != nil {
+		cb()
+	}
+}
+
+func newSearchTestHelper(t *testing.T, searcher *fakeSearcher) (*ResultTabsHelper, *fakeToaster) {
 	t.Helper()
 	toaster := &fakeToaster{}
 	deps := ResultTabsHelperDeps{
-		Toast:               toaster,
-		Prompt:              prompter,
-		MaxTabs:             0,
-		Now:                 time.Now,
-		FilterMaxRegexBytes: 4096,
+		Toast:   toaster,
+		Search:  searcher,
+		MaxTabs: 0,
+		Now:     time.Now,
 	}
 	return NewResultTabsHelper(deps), toaster
 }
@@ -1517,7 +1521,7 @@ func newFilterTestHelper(t *testing.T, prompter *fakePrompter) (*ResultTabsHelpe
 // back to false. This is the rerun-in-same-tab path: re-running a SELECT
 // should re-fire the caveat.
 func TestTabCaveatShown_ResetOnStartStreaming(t *testing.T) {
-	h, _ := newFilterTestHelper(t, &fakePrompter{})
+	h, _ := newSearchTestHelper(t, &fakeSearcher{})
 	if err := h.openTab("Q", nil); err != nil {
 		t.Fatalf("openTab: %v", err)
 	}
@@ -1536,12 +1540,14 @@ func TestTabCaveatShown_ResetOnStartStreaming(t *testing.T) {
 	}
 }
 
-// TestFilterPrompt_AppliesAndFiresCaveatOnce verifies the chord-handler
-// behavior: applying a filter on an incomplete tab fires the caveat once
-// and flips caveatShown.
-func TestFilterPrompt_AppliesAndFiresCaveatOnce(t *testing.T) {
-	prompter := &fakePrompter{}
-	h, toaster := newFilterTestHelper(t, prompter)
+// TestSearchPrompt_AppliesLiveAndFiresCaveatOnce verifies the chord-
+// handler behavior: opening search on an incomplete tab does NOT fire the
+// caveat until the first non-empty query; that first non-empty keystroke
+// fires it once and flips caveatShown; a second non-empty keystroke does
+// not re-toast; typing drives live SetSearch.
+func TestSearchPrompt_AppliesLiveAndFiresCaveatOnce(t *testing.T) {
+	searcher := &fakeSearcher{}
+	h, toaster := newSearchTestHelper(t, searcher)
 	if err := h.openTab("Q", nil); err != nil {
 		t.Fatalf("openTab: %v", err)
 	}
@@ -1550,96 +1556,108 @@ func TestFilterPrompt_AppliesAndFiresCaveatOnce(t *testing.T) {
 	tab.Grid().SetColumns([]models.ColumnMeta{{Name: "c", TypeName: "text"}})
 	tab.Grid().AppendRows([]models.Row{{Values: []any{"alice"}}})
 
-	h.FilterPrompt()
-	if err := prompter.submitDirect("alice"); err != nil {
-		t.Fatalf("submitDirect: %v", err)
+	caveatCount := func() int {
+		n := 0
+		for _, m := range toaster.Messages() {
+			if contains(m, "searching loaded rows only") {
+				n++
+			}
+		}
+		return n
 	}
 
-	if !tab.Grid().FilterActive() {
-		t.Error("FilterPrompt → submit must install filter")
+	// Opening search and doing nothing must NOT fire the caveat.
+	h.SearchPrompt()
+	if tab.CaveatShown() {
+		t.Error("open with no keystroke → caveatShown must stay false")
+	}
+	if caveatCount() != 0 {
+		t.Errorf("open with no keystroke → no caveat toast; got %v", toaster.Messages())
+	}
+
+	// An empty-query keystroke alone must NOT fire the caveat.
+	searcher.typeQuery("")
+	if tab.CaveatShown() || caveatCount() != 0 {
+		t.Errorf("empty query → no caveat; shown=%v msgs=%v", tab.CaveatShown(), toaster.Messages())
+	}
+
+	// First non-empty query: caveat fires exactly once and live search installs.
+	searcher.typeQuery("alic")
+	if !tab.Grid().SearchActive() {
+		t.Error("non-empty query must install live search")
 	}
 	if !tab.CaveatShown() {
-		t.Error("incomplete tab + filter applied → caveatShown should flip true")
+		t.Error("first non-empty query on incomplete tab → caveatShown should flip true")
 	}
-	msgs := toaster.Messages()
-	if !containsCaveat(msgs) {
-		t.Errorf("expected caveat toast in %v", msgs)
+	if caveatCount() != 1 {
+		t.Errorf("first non-empty query → exactly one caveat toast; got %v", toaster.Messages())
 	}
 
-	// Second filter on the same tab: caveat must NOT re-fire.
-	toasterBefore := len(toaster.Messages())
-	h.FilterPrompt()
-	if err := prompter.submitDirect("bob"); err != nil {
-		t.Fatalf("submitDirect: %v", err)
-	}
-	caveatsAfter := 0
-	for _, m := range toaster.Messages() {
-		if contains(m, "filtering loaded rows only") {
-			caveatsAfter++
-		}
-	}
-	if caveatsAfter != 1 {
-		t.Errorf("caveat must fire once per tab; got %d caveat toasts (msgs=%v, prev_len=%d)", caveatsAfter, toaster.Messages(), toasterBefore)
+	// Second non-empty query on the same incomplete tab: caveat must NOT re-fire.
+	searcher.typeQuery("bob")
+	if caveatCount() != 1 {
+		t.Errorf("caveat must fire once per tab; got %d caveat toasts (msgs=%v)", caveatCount(), toaster.Messages())
 	}
 }
 
-// TestFilterPrompt_InvalidRegexSurfacesToast verifies invalid regex
-// produces an error toast and leaves the filter inactive.
-func TestFilterPrompt_InvalidRegexSurfacesToast(t *testing.T) {
-	prompter := &fakePrompter{}
-	h, toaster := newFilterTestHelper(t, prompter)
+// TestSearchPrompt_EmptyQueryInactive verifies an empty typed query
+// leaves the search inactive (no highlights).
+func TestSearchPrompt_EmptyQueryInactive(t *testing.T) {
+	searcher := &fakeSearcher{}
+	h, _ := newSearchTestHelper(t, searcher)
 	if err := h.openTab("Q", nil); err != nil {
 		t.Fatalf("openTab: %v", err)
 	}
 	tab := h.Active()
 	tab.Grid().SetColumns([]models.ColumnMeta{{Name: "c", TypeName: "text"}})
+	tab.Grid().AppendRows([]models.Row{{Values: []any{"alice"}}})
 
-	h.FilterPrompt()
-	if err := prompter.submitDirect("["); err != nil {
-		t.Fatalf("submitDirect: %v", err)
-	}
-
-	if tab.Grid().FilterActive() {
-		t.Error("invalid regex must leave filter inactive")
-	}
-	msgs := toaster.Messages()
-	found := false
-	for _, m := range msgs {
-		if contains(m, "filter error") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected 'filter error' toast in %v", msgs)
+	h.SearchPrompt()
+	searcher.typeQuery("")
+	if tab.Grid().SearchActive() {
+		t.Error("empty query must leave search inactive")
 	}
 }
 
-// TestFilterClear_NoOpWhenInactive verifies <esc>-gating behavior:
-// FilterActive returns false when no filter is installed.
-func TestFilterActive_FalseWithoutFilter(t *testing.T) {
-	h, _ := newFilterTestHelper(t, &fakePrompter{})
+// TestSearchPrompt_CancelClearsSearch verifies <esc> while composing
+// clears the active search via the OnCancel seam.
+func TestSearchPrompt_CancelClearsSearch(t *testing.T) {
+	searcher := &fakeSearcher{}
+	h, _ := newSearchTestHelper(t, searcher)
 	if err := h.openTab("Q", nil); err != nil {
 		t.Fatalf("openTab: %v", err)
 	}
-	if h.FilterActive() {
-		t.Error("FilterActive should be false on a fresh tab")
+	tab := h.Active()
+	tab.Grid().SetColumns([]models.ColumnMeta{{Name: "c", TypeName: "text"}})
+	tab.Grid().AppendRows([]models.Row{{Values: []any{"alice"}}})
+
+	h.SearchPrompt()
+	searcher.typeQuery("alic")
+	if !tab.Grid().SearchActive() {
+		t.Fatal("precondition: search should be active after typing")
+	}
+	searcher.cancel()
+	if tab.Grid().SearchActive() {
+		t.Error("OnCancel must clear the active search")
 	}
 }
 
-func containsCaveat(msgs []string) bool {
-	for _, m := range msgs {
-		if contains(m, "filtering loaded rows only") {
-			return true
-		}
+// TestSearchActive_FalseWithoutSearch verifies <esc>-gating behavior:
+// SearchActive returns false when no search is installed.
+func TestSearchActive_FalseWithoutSearch(t *testing.T) {
+	h, _ := newSearchTestHelper(t, &fakeSearcher{})
+	if err := h.openTab("Q", nil); err != nil {
+		t.Fatalf("openTab: %v", err)
 	}
-	return false
+	if h.SearchActive() {
+		t.Error("SearchActive should be false on a fresh tab")
+	}
 }
 
 // --- dbsavvy-uv0.5 sort picker tests -------------------------------------
 
 // fakeChooser captures Choose invocations and exposes hooks for the test
-// to submit / cancel a specific index. Mirrors fakePrompter's shape.
+// to submit / cancel a specific index.
 type fakeChooser struct {
 	mu         sync.Mutex
 	lastLabel  string
@@ -1826,7 +1844,7 @@ func TestSortPick_CancelLeavesStateUnchanged(t *testing.T) {
 }
 
 // TestSortPick_NoTabsToasts pins: SortPick with no tabs surfaces the
-// "no result tabs" toast (matches FilterPrompt behavior).
+// "no result tabs" toast (matches SearchPrompt behavior).
 func TestSortPick_NoTabsToasts(t *testing.T) {
 	chooser := &fakeChooser{}
 	h, toaster := newSortTestHelper(t, chooser)

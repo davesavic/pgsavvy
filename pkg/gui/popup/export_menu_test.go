@@ -18,7 +18,7 @@ func defaultScopes() []string {
 }
 
 func TestExportMenu_InitialState(t *testing.T) {
-	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false, false)
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
 	if m.Field() != FieldFormat {
 		t.Errorf("default field = %v; want FieldFormat", m.Field())
 	}
@@ -28,7 +28,7 @@ func TestExportMenu_InitialState(t *testing.T) {
 }
 
 func TestExportMenu_MoveField_Clamps(t *testing.T) {
-	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false, false)
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
 	m.MoveField(-1)
 	if m.Field() != FieldFormat {
 		t.Errorf("MoveField(-1) from FieldFormat = %v; want FieldFormat", m.Field())
@@ -45,7 +45,7 @@ func TestExportMenu_MoveField_Clamps(t *testing.T) {
 }
 
 func TestExportMenu_MoveValue_AdjustsCurrentField(t *testing.T) {
-	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false, false)
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
 
 	m.MoveValue(+1)
 	if m.FormatIdx() != 1 {
@@ -66,7 +66,7 @@ func TestExportMenu_MoveValue_AdjustsCurrentField(t *testing.T) {
 }
 
 func TestExportMenu_MoveValue_ClampsAtBounds(t *testing.T) {
-	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false, false)
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
 
 	m.MoveValue(-5)
 	if m.FormatIdx() != 0 {
@@ -82,7 +82,7 @@ func TestExportMenu_MoveValue_ClampsAtBounds(t *testing.T) {
 func TestExportMenu_SkipsDisabledSQLInserts_LastIndexClamps(t *testing.T) {
 	// sqlInsertsIdx=5 (last); from formatIdx=4, MoveValue(+1) cannot
 	// advance past the disabled last row → clamp at 4.
-	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), 5, false, false)
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), 5, false)
 	// advance to idx=4
 	for range 4 {
 		m.MoveValue(+1)
@@ -99,7 +99,7 @@ func TestExportMenu_SkipsDisabledSQLInserts_LastIndexClamps(t *testing.T) {
 func TestExportMenu_SkipsDisabledSQLInserts_MiddleIndexSkips(t *testing.T) {
 	// sqlInsertsIdx=3 (middle); from formatIdx=2 MoveValue(+1) skips
 	// disabled idx=3 and lands on idx=4.
-	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), 3, false, false)
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), 3, false)
 	for range 2 {
 		m.MoveValue(+1)
 	}
@@ -114,14 +114,14 @@ func TestExportMenu_SkipsDisabledSQLInserts_MiddleIndexSkips(t *testing.T) {
 
 func TestExportMenu_ConfirmBlockedWhenSQLInsertsDisabled(t *testing.T) {
 	formats := defaultFormats()
-	m := NewExportMenu(formats, defaultDestinations(), defaultScopes(), 5, false, false)
+	m := NewExportMenu(formats, defaultDestinations(), defaultScopes(), 5, false)
 	// Force selection of the disabled row directly via internal state
 	// would violate API; instead, exercise via the same path the caller
 	// uses — there's no public setter, so verify the case where
 	// initial selection coincidentally lands on it. Simulate by
 	// constructing a single-format list where the only row is disabled.
 	single := []string{"SQL INSERTs"}
-	m2 := NewExportMenu(single, defaultDestinations(), defaultScopes(), 0, false, false)
+	m2 := NewExportMenu(single, defaultDestinations(), defaultScopes(), 0, false)
 	if !m2.IsSQLInsertsSelected() {
 		t.Fatalf("with single disabled row, IsSQLInsertsSelected should be true")
 	}
@@ -140,7 +140,7 @@ func TestExportMenu_ConfirmBlockedWhenSQLInsertsDisabled(t *testing.T) {
 }
 
 func TestExportMenu_ConfirmBlockedWhenBufferedThresholdExceeded(t *testing.T) {
-	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, true, false)
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, true)
 	m.SetBufferedFormatIndexes(4 /*markdown*/, 3 /*jsonArray*/)
 
 	// Advance to Markdown (idx=4).
@@ -173,47 +173,8 @@ func TestExportMenu_ConfirmBlockedWhenBufferedThresholdExceeded(t *testing.T) {
 	}
 }
 
-func TestExportMenu_RequiresFullWithFilterConfirmation(t *testing.T) {
-	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false, true)
-	// Default scope is "Loaded" (idx=0) → no confirmation needed.
-	if m.RequiresFullWithFilterConfirmation() {
-		t.Errorf("RequiresFullWithFilterConfirmation at Loaded = true; want false")
-	}
-
-	// Move scope to Full.
-	m.MoveField(+1) // dest
-	m.MoveField(+1) // scope
-	m.MoveValue(+1) // Full
-	if m.ScopeLabel() != "Full" {
-		t.Fatalf("setup: ScopeLabel = %q; want Full", m.ScopeLabel())
-	}
-	if !m.RequiresFullWithFilterConfirmation() {
-		t.Errorf("RequiresFullWithFilterConfirmation at Full + filterActive + !confirmed = false; want true")
-	}
-	if m.ConfirmBlockedReason() == "" {
-		t.Errorf("ConfirmBlockedReason should be non-empty when full-with-filter unconfirmed")
-	}
-}
-
-func TestExportMenu_ConfirmedFullWithFilter_ClearsRequirement(t *testing.T) {
-	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false, true)
-	m.MoveField(+1)
-	m.MoveField(+1)
-	m.MoveValue(+1)
-	if !m.RequiresFullWithFilterConfirmation() {
-		t.Fatalf("setup: should require confirmation")
-	}
-	m.SetConfirmedFullWithFilter(true)
-	if m.RequiresFullWithFilterConfirmation() {
-		t.Errorf("RequiresFullWithFilterConfirmation after SetConfirmedFullWithFilter(true) = true; want false")
-	}
-	if m.ConfirmBlockedReason() != "" {
-		t.Errorf("ConfirmBlockedReason after confirm = %q; want empty", m.ConfirmBlockedReason())
-	}
-}
-
 func TestExportMenu_Body_HighlightsCursorField(t *testing.T) {
-	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false, false)
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
 
 	body := m.Body()
 	if !strings.Contains(body, "> Format:") {
@@ -241,7 +202,7 @@ func TestExportMenu_Body_HighlightsCursorField(t *testing.T) {
 
 func TestExportMenu_Body_RendersDisabledSQLInsertsAnnotation(t *testing.T) {
 	single := []string{"SQL INSERTs"}
-	m := NewExportMenu(single, defaultDestinations(), defaultScopes(), 0, false, false)
+	m := NewExportMenu(single, defaultDestinations(), defaultScopes(), 0, false)
 	body := m.Body()
 	if !strings.Contains(body, "disabled — result is not a single base table") {
 		t.Errorf("body should annotate disabled SQL INSERTs row: %q", body)
@@ -254,7 +215,7 @@ func TestExportMenu_Body_RendersDisabledSQLInsertsAnnotation(t *testing.T) {
 // the legacy default text. dbsavvy-bwq.11 (A8).
 func TestExportMenu_Body_RendersF2DisabledReason(t *testing.T) {
 	single := []string{"SQL INSERTs"}
-	m := NewExportMenu(single, defaultDestinations(), defaultScopes(), 0, false, false)
+	m := NewExportMenu(single, defaultDestinations(), defaultScopes(), 0, false)
 	m.SetSQLInsertsDisabledReason("result spans multiple tables")
 	body := m.Body()
 	if !strings.Contains(body, "disabled: result spans multiple tables") {
@@ -269,7 +230,7 @@ func TestExportMenu_Body_RendersF2DisabledReason(t *testing.T) {
 }
 
 func TestExportMenu_Body_RendersWarningFooter(t *testing.T) {
-	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, true, false)
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, true)
 	m.SetBufferedFormatIndexes(4, 3)
 	m.SetBufferedThresholdLabel("≥ 10000 rows")
 	for range 4 {
@@ -278,15 +239,5 @@ func TestExportMenu_Body_RendersWarningFooter(t *testing.T) {
 	body := m.Body()
 	if !strings.Contains(body, "WARNING: buffered format on ≥ 10000 rows — Confirm disabled.") {
 		t.Errorf("body should contain warning footer with threshold label: %q", body)
-	}
-
-	// And full-with-filter footer.
-	m2 := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false, true)
-	m2.MoveField(+1)
-	m2.MoveField(+1)
-	m2.MoveValue(+1)
-	body2 := m2.Body()
-	if !strings.Contains(body2, "Full scope ignores your filter — press y to confirm") {
-		t.Errorf("body should contain full-with-filter footer: %q", body2)
 	}
 }

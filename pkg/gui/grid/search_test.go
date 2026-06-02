@@ -9,6 +9,21 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
+// twoColView builds a view with two text columns and the supplied rows
+// installed. Cursor starts at (0,0); column meta is text/text.
+func twoColView(t *testing.T, rows [][]any) *View {
+	t.Helper()
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{
+		{Name: "name", TypeName: "text"},
+		{Name: "city", TypeName: "text"},
+	})
+	for _, r := range rows {
+		v.AppendRows([]models.Row{{Values: r}})
+	}
+	return v
+}
+
 // TestSetSearch_SmartCaseInsensitive pins: an all-lowercase query matches
 // case-insensitively (vim/ripgrep smart-case).
 func TestSetSearch_SmartCaseInsensitive(t *testing.T) {

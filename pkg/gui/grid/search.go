@@ -9,7 +9,7 @@ import (
 )
 
 // searchState carries the in-grid plain-substring SEARCH (dbsavvy-2ttm).
-// Distinct from filterState: search never hides rows — it produces a
+// Search never hides rows — it produces a
 // cell-major match list with UTF-8 byte offsets into each cell's
 // renderCellPlain output, and drives n/N cursor navigation across cells
 // in reading order. The match list is recomputed under the write lock on
