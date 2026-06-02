@@ -1,0 +1,5 @@
+FROM alpine:3.20
+RUN apk add --no-cache openssh-server && ssh-keygen -A && adduser -D -s /bin/sh tester && passwd -u tester
+COPY sshd_config /etc/ssh/sshd_config
+EXPOSE 22
+CMD ["/usr/sbin/sshd","-D","-e"]

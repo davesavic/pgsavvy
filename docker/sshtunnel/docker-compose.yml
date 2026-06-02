@@ -1,0 +1,37 @@
+services:
+  bastion:
+    build:
+      context: .
+      dockerfile: Dockerfile.bastion
+    container_name: dbsavvy-bastion
+    restart: unless-stopped
+    ports:
+      - "2222:22"
+    volumes:
+      - ./authorized_keys:/etc/authorized_keys/authorized_keys:ro
+    networks:
+      - default
+      - private
+
+  privatepg:
+    image: postgres:17-alpine
+    container_name: dbsavvy-privatepg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dbsavvy
+      POSTGRES_PASSWORD: dbsavvy
+      POSTGRES_DB: dbsavvy_test
+    volumes:
+      - ../postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbsavvy -d dbsavvy_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - private
+
+networks:
+  private:
+    internal: true

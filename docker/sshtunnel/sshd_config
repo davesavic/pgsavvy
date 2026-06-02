@@ -1,0 +1,6 @@
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitRootLogin no
+AllowTcpForwarding yes
+PermitOpen any
+AuthorizedKeysFile /etc/authorized_keys/authorized_keys

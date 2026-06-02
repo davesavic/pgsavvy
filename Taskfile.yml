@@ -6,6 +6,8 @@ version: '3'
 vars:
   PG_COMPOSE: docker/postgres/docker-compose.yml
   PG_DSN: '{{.DBSAVVY_TEST_PG | default "postgres://dbsavvy:dbsavvy@localhost:5432/dbsavvy_test"}}'
+  SSH_COMPOSE: docker/sshtunnel/docker-compose.yml
+  SSH_KEY: docker/sshtunnel/.keys/id_ed25519
 
 tasks:
   default:
@@ -33,6 +35,22 @@ tasks:
     desc: Tear down the docker/postgres fixture (removes the container and volume).
     cmds:
       - docker compose -f {{.PG_COMPOSE}} down -v
+
+  sshtunnel:up:
+    desc: Bring up the SSH bastion + private Postgres fixture (ephemeral keypair, generated if missing).
+    cmds:
+      - mkdir -p docker/sshtunnel/.keys
+      - test -f {{.SSH_KEY}} || ssh-keygen -t ed25519 -N "" -f {{.SSH_KEY}}
+      - cp {{.SSH_KEY}}.pub docker/sshtunnel/authorized_keys
+      - docker compose -f {{.SSH_COMPOSE}} up -d --build --wait
+      - 'echo "ssh tunnel fixture up. Export the following before running the integration tests:"'
+      - 'echo "  export DBSAVVY_TEST_SSH_BASTION=localhost:2222"'
+      - 'echo "  export DBSAVVY_TEST_SSH_KEY=$(pwd)/{{.SSH_KEY}}"'
+
+  sshtunnel:down:
+    desc: Tear down the SSH bastion + private Postgres fixture (removes containers and volumes).
+    cmds:
+      - docker compose -f {{.SSH_COMPOSE}} down -v
 
   test:integration:
     desc: Run integration tests against a live Postgres (requires DBSAVVY_TEST_PG + docker fixture).
