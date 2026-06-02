@@ -119,6 +119,31 @@ func TestRunLayoutDisablesCaretOnSideRailFocus(t *testing.T) {
 	}
 }
 
+// TestRunLayoutDisablesCaretOnConfirmationPopup regresses the "cursor
+// at the top of the confirmation dialog" bug (dbsavvy-u6p7). The confirm
+// popup is a non-editable TEMPORARY_POPUP that opens over the focused
+// QUERY_EDITOR, which leaves g.Cursor enabled from the prior frame.
+// Unless the layout actively clears the caret when a non-editable popup
+// is on top, gocui draws a stale terminal cursor at the popup's (0,0).
+func TestRunLayoutDisablesCaretOnConfirmationPopup(t *testing.T) {
+	g, rec := buildTestGui(t)
+	confirm := g.Registry().Confirmation
+	if confirm == nil {
+		t.Fatal("registry.Confirmation is nil")
+	}
+	if err := g.ContextTree().Push(confirm); err != nil {
+		t.Fatalf("Push(confirmation): %v", err)
+	}
+	// Pre-stain the caret as if the QUERY_EDITOR beneath had enabled it.
+	rec.SetCaretEnabled(true)
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if rec.CaretEnabled {
+		t.Fatalf("CaretEnabled = true with CONFIRMATION on top; layout must clear the caret for a non-editable popup. log=%v", rec.AllCaretEnabledLog())
+	}
+}
+
 func TestRunLayoutCreatesSideRails(t *testing.T) {
 	g, rec := buildTestGui(t)
 	// Pop CONNECTION_MANAGER first so the layout pass paints the side rails.

@@ -43,12 +43,24 @@ func (c *ConfirmationContext) SetContent(title, body string) {
 	c.body = body
 }
 
-// HandleRender writes the title and body into the gocui view.
+// GetTitle returns the dynamic confirmation title so the layout pass can
+// paint it as the popup's frame heading. Falls back to the static
+// BaseContext title when no content has been installed yet.
+func (c *ConfirmationContext) GetTitle() string {
+	if c.title != "" {
+		return c.title
+	}
+	return c.BaseContext.GetTitle()
+}
+
+// HandleRender writes the body into the gocui view. The title is painted
+// as the frame heading by the layout pass (see GetTitle), so it is not
+// repeated in the body content.
 func (c *ConfirmationContext) HandleRender() error {
 	if c.title == "" && c.body == "" {
 		return nil
 	}
-	content := fmt.Sprintf("%s\n\n%s\n\n[y]es / [n]o", c.title, c.body)
+	content := fmt.Sprintf("%s\n\n[y]es / [n]o", c.body)
 	viewName := c.GetViewName()
 	writeView(c.deps, func() error {
 		return c.deps.GuiDriver.SetContent(viewName, content)

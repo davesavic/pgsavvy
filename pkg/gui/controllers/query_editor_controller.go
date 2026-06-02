@@ -417,13 +417,28 @@ func (q *QueryEditorController) runNeedsConfirm(stmts []string) bool {
 	return false
 }
 
-// confirmRunBody builds the popup body: the single statement (truncated)
+// confirmRunBody builds the popup body: the single statement (preview)
 // or the count for a multi-statement run.
 func confirmRunBody(stmts []string) string {
 	if len(stmts) == 1 {
-		return fmt.Sprintf("Execute this statement?\n\n%s", truncateSQL(stmts[0]))
+		return fmt.Sprintf("Execute this statement?\n\n%s", confirmSQLPreview(stmts[0]))
 	}
 	return fmt.Sprintf("Execute %d statements?", len(stmts))
+}
+
+// confirmSQLPreview prepares a single statement for the confirmation
+// popup. Whitespace runs collapse to single spaces so the popup view's
+// word-wrap can reflow the statement to the box width (unlike the dense
+// dry-run table, which uses truncateSQL's hard 64-char cap). An outsized
+// statement is capped so the [y]es/[n]o prompt below it stays on screen.
+func confirmSQLPreview(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	const max = 400
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-1]) + "…"
 }
 
 func (q *QueryEditorController) handleRunAll(_ commands.ExecCtx) error {

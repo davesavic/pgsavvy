@@ -429,6 +429,18 @@ func (g *Gui) RunLayout(w, h int) error {
 					_ = g.driver.SetViewCursor(name, cx+1, cy)
 				}
 			}
+			// CONFIRMATION styling (dbsavvy-u6p7): the popup is always the
+			// focused modal while it's on top, so paint its border with the
+			// active-border colour (popups are skipped by the Tier-1
+			// applyFocusFrameColors pass). gocui resets FrameColor on each
+			// SetView, so this must run after SetView, every frame. The
+			// dynamic title moves to the frame heading (GetTitle override),
+			// and Wrap reflows a long SQL statement to the box width.
+			if ctx.GetKey() == types.CONFIRMATION && view != nil {
+				view.Title = ctx.GetTitle()
+				view.Wrap = true
+				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+			}
 			_ = ctx.HandleRender()
 			_, _ = g.driver.SetViewOnTop(name)
 			onStack[ctx.GetKey()] = struct{}{}
@@ -575,6 +587,18 @@ func (g *Gui) RunLayout(w, h int) error {
 				// steady-block.
 				if enabled && gocui.Screen != nil {
 					gocui.Screen.SetCursorStyle(tcell.CursorStyleSteadyBlock)
+				}
+			default:
+				// Non-tiled top context (a focus-stack popup). Editable
+				// popups (PROMPT, COMMAND_LINE, CELL_EDITOR, SEARCH_LINE)
+				// self-enable the caret on HandleFocus and own it. A
+				// non-editable popup (CONFIRMATION, MENU, …) must actively
+				// clear any caret it inherited from the editable context
+				// beneath it, or gocui draws a stale cursor at the popup's
+				// (0,0) — e.g. CONFIRMATION pushed over a focused
+				// QUERY_EDITOR (dbsavvy-u6p7).
+				if !top.GetKey().IsEditable() {
+					g.driver.SetCaretEnabled(false)
 				}
 			}
 		}
