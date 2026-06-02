@@ -999,6 +999,12 @@ func (g *Gui) wireWithDriver() error {
 			}
 			return g.resultTabsH.ActivePlanContext()
 		},
+		// ConnProfile surfaces the live profile captured at Connect so the
+		// query editor can gate mutating statements behind ConfirmWrites /
+		// ConfirmDDL. nil until the first successful Connect. dbsavvy-wxkf.
+		ConnProfile: func() *models.Connection {
+			return g.activeConnProfile
+		},
 	}
 
 	// ThreadingDeps (DESIGN.md §17 / dbsavvy-66p.1) — all three closures

@@ -511,6 +511,103 @@ func TestQueryEditorRunOnSecondLineRoutesCorrectStatement(t *testing.T) {
 	}
 }
 
+// runEditorWith builds a query-editor controller over a recording runner
+// session with the given buffer text and connection profile, drives the
+// QueryRun action, and returns the recorder + fake confirm for assertions.
+// dbsavvy-wxkf.
+func runEditorWith(t *testing.T, bufText string, conn *models.Connection) (*recordingRunnerSession, *fakeConfirm) {
+	t.Helper()
+	rec := &recordingRunnerSession{}
+	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+
+	base := newBag()
+	base.HelperBag.QueryRunner = runner
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: bufText, Off: 0}
+	base.HelperBag.ResultTabs = &fakeResultTabs{}
+	base.HelperBag.ConnProfile = func() *models.Connection { return conn }
+
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+	return rec, base.Confirm
+}
+
+// TestQueryEditorConfirmWritesGatesUpdate verifies that with ConfirmWrites
+// enabled an UPDATE is NOT executed until the confirmation popup's onYes
+// fires. dbsavvy-wxkf.
+func TestQueryEditorConfirmWritesGatesUpdate(t *testing.T) {
+	rec, confirm := runEditorWith(t, "UPDATE t SET a=1", &models.Connection{ConfirmWrites: true})
+
+	if len(rec.streamCalls) != 0 {
+		t.Fatalf("statement executed before confirmation: %#v", rec.streamCalls)
+	}
+	if len(confirm.calls) != 1 {
+		t.Fatalf("confirm popup calls = %d, want 1", len(confirm.calls))
+	}
+	if confirm.calls[0].OnYes == nil {
+		t.Fatal("confirm onYes is nil")
+	}
+	if err := confirm.calls[0].OnYes(); err != nil {
+		t.Fatalf("onYes err = %v", err)
+	}
+	if len(rec.streamCalls) != 1 {
+		t.Fatalf("after confirm streamCalls = %d, want 1", len(rec.streamCalls))
+	}
+	if rec.streamCalls[0].SQL != "UPDATE t SET a=1" {
+		t.Fatalf("dispatched SQL = %q", rec.streamCalls[0].SQL)
+	}
+}
+
+// TestQueryEditorConfirmWritesSkipsSelect verifies a read-only statement
+// runs immediately even with ConfirmWrites enabled. dbsavvy-wxkf.
+func TestQueryEditorConfirmWritesSkipsSelect(t *testing.T) {
+	rec, confirm := runEditorWith(t, "SELECT 1", &models.Connection{ConfirmWrites: true})
+
+	if len(confirm.calls) != 0 {
+		t.Fatalf("SELECT triggered a confirmation popup: %#v", confirm.calls)
+	}
+	if len(rec.streamCalls) != 1 {
+		t.Fatalf("SELECT not executed: streamCalls = %d, want 1", len(rec.streamCalls))
+	}
+}
+
+// TestQueryEditorConfirmWritesOffRunsUpdate verifies an UPDATE runs without
+// a prompt when the connection has ConfirmWrites disabled. dbsavvy-wxkf.
+func TestQueryEditorConfirmWritesOffRunsUpdate(t *testing.T) {
+	rec, confirm := runEditorWith(t, "UPDATE t SET a=1", &models.Connection{ConfirmWrites: false})
+
+	if len(confirm.calls) != 0 {
+		t.Fatalf("UPDATE prompted despite ConfirmWrites=false: %#v", confirm.calls)
+	}
+	if len(rec.streamCalls) != 1 {
+		t.Fatalf("UPDATE not executed: streamCalls = %d, want 1", len(rec.streamCalls))
+	}
+}
+
+// TestQueryEditorConfirmDDLGatesCreate verifies ConfirmDDL gates a DDL
+// statement but ConfirmWrites alone does not. dbsavvy-wxkf.
+func TestQueryEditorConfirmDDLGatesCreate(t *testing.T) {
+	rec, confirm := runEditorWith(t, "CREATE TABLE t (id int)", &models.Connection{ConfirmDDL: true})
+	if len(confirm.calls) != 1 {
+		t.Fatalf("DDL with ConfirmDDL did not prompt: calls=%d", len(confirm.calls))
+	}
+	if len(rec.streamCalls) != 0 {
+		t.Fatalf("DDL executed before confirmation: %#v", rec.streamCalls)
+	}
+
+	rec2, confirm2 := runEditorWith(t, "CREATE TABLE t (id int)", &models.Connection{ConfirmWrites: true})
+	if len(confirm2.calls) != 0 {
+		t.Fatalf("DDL prompted under ConfirmWrites-only: %#v", confirm2.calls)
+	}
+	if len(rec2.streamCalls) != 1 {
+		t.Fatalf("DDL not executed under ConfirmWrites-only: %d", len(rec2.streamCalls))
+	}
+}
+
 // TestQueryEditorRunAppliesConfigDefaultTimeout covers dbsavvy-fow.7
 // (U15): when query.default_statement_timeout is non-zero, the streaming
 // run path must apply it as the streamed Query.Timeout so the pg Stream

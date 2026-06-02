@@ -160,6 +160,14 @@ type QueryDeps struct {
 	// RegisterActions and to reach the Matcher when needed. Nil during
 	// unit tests that do not exercise dispatch.
 	KbRuntime *keys.Runtime
+
+	// ConnProfile returns the currently-bound connection profile (or nil
+	// when none is active). The query editor reads ConfirmWrites /
+	// ConfirmDDL off it to gate mutating-statement execution behind a
+	// confirmation prompt. Distinct name from EditDeps.ActiveConnection-
+	// Profile so the two embedded bundles don't collide in HelperBag.
+	// Nil-safe — a nil closure means "never confirm". dbsavvy-wxkf.
+	ConnProfile func() *models.Connection
 }
 
 // ThreadingDeps carries the UI-thread / worker scheduling closures

@@ -259,18 +259,20 @@ func (q *QueryEditorController) runOne(ec commands.ExecCtx, newTx bool) error {
 		q.toast("no active connection")
 		return nil
 	}
-	runID := newRunID()
-	if q.helpers.Notice != nil {
-		q.helpers.Notice.OnRunStart(runID)
-	}
-	attached := q.runStatement(stmt, data.RunOptions{NewTx: newTx})
-	if q.helpers.Notice != nil {
-		if attached {
-			q.helpers.Notice.Finish(runID)
-		} else {
-			q.helpers.Notice.OnRunEnd(runID)
+	q.confirmRun([]string{stmt}, func() {
+		runID := newRunID()
+		if q.helpers.Notice != nil {
+			q.helpers.Notice.OnRunStart(runID)
 		}
-	}
+		attached := q.runStatement(stmt, data.RunOptions{NewTx: newTx})
+		if q.helpers.Notice != nil {
+			if attached {
+				q.helpers.Notice.Finish(runID)
+			} else {
+				q.helpers.Notice.OnRunEnd(runID)
+			}
+		}
+	})
 	return nil
 }
 
@@ -292,18 +294,20 @@ func (q *QueryEditorController) RunSQL(stmt string) bool {
 		q.toast("no active connection")
 		return false
 	}
-	runID := newRunID()
-	if q.helpers.Notice != nil {
-		q.helpers.Notice.OnRunStart(runID)
-	}
-	attached := q.runStatement(stmt, data.RunOptions{})
-	if q.helpers.Notice != nil {
-		if attached {
-			q.helpers.Notice.Finish(runID)
-		} else {
-			q.helpers.Notice.OnRunEnd(runID)
+	q.confirmRun([]string{stmt}, func() {
+		runID := newRunID()
+		if q.helpers.Notice != nil {
+			q.helpers.Notice.OnRunStart(runID)
 		}
-	}
+		attached := q.runStatement(stmt, data.RunOptions{})
+		if q.helpers.Notice != nil {
+			if attached {
+				q.helpers.Notice.Finish(runID)
+			} else {
+				q.helpers.Notice.OnRunEnd(runID)
+			}
+		}
+	})
 	return true
 }
 
@@ -322,21 +326,16 @@ func (q *QueryEditorController) runVisualSelection(newTx bool) error {
 		q.toast("no selection")
 		return nil
 	}
-	stmts := editor.SplitStatements(text)
-	// Count non-empty statements for the cap check so a leading ';'
-	// doesn't artificially inflate the count.
-	nonEmpty := 0
-	for _, s := range stmts {
-		if strings.TrimSpace(s) != "" {
-			nonEmpty++
-		}
-	}
-	if nonEmpty == 0 {
+	// Collect non-empty statements once: the cap check, the confirm gate,
+	// and the run loop all consume the same cleaned list (a leading ';'
+	// would otherwise inflate the count).
+	cleaned := nonEmptyStatements(editor.SplitStatements(text))
+	if len(cleaned) == 0 {
 		q.toast("no statements found")
 		return nil
 	}
-	if nonEmpty > maxVisualRunBatch {
-		q.toast(fmt.Sprintf("visual run: %d statements exceeds cap %d; narrow selection", nonEmpty, maxVisualRunBatch))
+	if len(cleaned) > maxVisualRunBatch {
+		q.toast(fmt.Sprintf("visual run: %d statements exceeds cap %d; narrow selection", len(cleaned), maxVisualRunBatch))
 		return nil
 	}
 	runner := q.helpers.QueryRunner
@@ -344,34 +343,92 @@ func (q *QueryEditorController) runVisualSelection(newTx bool) error {
 		q.toast("no active connection")
 		return nil
 	}
-	runID := newRunID()
-	if q.helpers.Notice != nil {
-		q.helpers.Notice.OnRunStart(runID)
-	}
-	attached := 0
-	for _, raw := range stmts {
-		stmt := strings.TrimSpace(raw)
-		if stmt == "" {
-			continue
+	q.confirmRun(cleaned, func() {
+		runID := newRunID()
+		if q.helpers.Notice != nil {
+			q.helpers.Notice.OnRunStart(runID)
 		}
-		if q.runStatement(stmt, data.RunOptions{NewTx: newTx}) {
-			attached++
+		attached := 0
+		for _, stmt := range cleaned {
+			if q.runStatement(stmt, data.RunOptions{NewTx: newTx}) {
+				attached++
+			}
 		}
-	}
-	if q.helpers.Notice != nil {
-		if attached == 0 {
-			q.helpers.Notice.OnRunEnd(runID)
-		} else {
-			q.helpers.Notice.Finish(runID)
+		if q.helpers.Notice != nil {
+			if attached == 0 {
+				q.helpers.Notice.OnRunEnd(runID)
+			} else {
+				q.helpers.Notice.Finish(runID)
+			}
 		}
-	}
+	})
 	return nil
 }
 
+// nonEmptyStatements trims each split statement and drops the blanks (a
+// leading ';' or trailing newline yields empty fragments).
+func nonEmptyStatements(stmts []string) []string {
+	out := make([]string, 0, len(stmts))
+	for _, raw := range stmts {
+		if s := strings.TrimSpace(raw); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// confirmRun gates proceed behind a confirmation popup when the active
+// connection requires it for any statement in stmts (ConfirmWrites for DML,
+// ConfirmDDL for DDL). When no confirmation is needed proceed runs
+// immediately; otherwise the popup's onYes invokes it, so each caller's
+// synchronous run-scope bookkeeping still runs — just after the user
+// confirms. Cancelling drops the run entirely. dbsavvy-wxkf.
+func (q *QueryEditorController) confirmRun(stmts []string, proceed func()) {
+	if q.helpers.Confirm == nil || !q.runNeedsConfirm(stmts) {
+		proceed()
+		return
+	}
+	_ = q.helpers.Confirm.Confirm("Confirm execution", confirmRunBody(stmts), func() error {
+		proceed()
+		return nil
+	}, nil)
+}
+
+// runNeedsConfirm reports whether any statement in stmts requires a
+// confirmation prompt under the active connection's ConfirmWrites /
+// ConfirmDDL flags.
+func (q *QueryEditorController) runNeedsConfirm(stmts []string) bool {
+	if q.helpers.ConnProfile == nil {
+		return false
+	}
+	conn := q.helpers.ConnProfile()
+	if conn == nil || (!conn.ConfirmWrites && !conn.ConfirmDDL) {
+		return false
+	}
+	for _, s := range stmts {
+		kind := query.Classify(s)
+		if kind == query.KindDML && conn.ConfirmWrites {
+			return true
+		}
+		if kind == query.KindDDL && conn.ConfirmDDL {
+			return true
+		}
+	}
+	return false
+}
+
+// confirmRunBody builds the popup body: the single statement (truncated)
+// or the count for a multi-statement run.
+func confirmRunBody(stmts []string) string {
+	if len(stmts) == 1 {
+		return fmt.Sprintf("Execute this statement?\n\n%s", truncateSQL(stmts[0]))
+	}
+	return fmt.Sprintf("Execute %d statements?", len(stmts))
+}
+
 func (q *QueryEditorController) handleRunAll(_ commands.ExecCtx) error {
-	buf := q.bufferText()
-	stmts := editor.SplitStatements(buf)
-	if len(stmts) == 0 {
+	cleaned := nonEmptyStatements(editor.SplitStatements(q.bufferText()))
+	if len(cleaned) == 0 {
 		q.toast("no statements found")
 		return nil
 	}
@@ -380,29 +437,27 @@ func (q *QueryEditorController) handleRunAll(_ commands.ExecCtx) error {
 		q.toast("no active connection")
 		return nil
 	}
-	runID := newRunID()
-	if q.helpers.Notice != nil {
-		q.helpers.Notice.OnRunStart(runID)
-	}
-	attached := 0
-	for _, raw := range stmts {
-		stmt := strings.TrimSpace(raw)
-		if stmt == "" {
-			continue
+	q.confirmRun(cleaned, func() {
+		runID := newRunID()
+		if q.helpers.Notice != nil {
+			q.helpers.Notice.OnRunStart(runID)
 		}
-		if q.runStatement(stmt, data.RunOptions{}) {
-			attached++
+		attached := 0
+		for _, stmt := range cleaned {
+			if q.runStatement(stmt, data.RunOptions{}) {
+				attached++
+			}
 		}
-	}
-	if q.helpers.Notice != nil {
-		if attached == 0 {
-			// Nothing attached → no drain worker will fire OnRunEnd.
-			// Tear down the run scope directly to avoid stranding state.
-			q.helpers.Notice.OnRunEnd(runID)
-		} else {
-			q.helpers.Notice.Finish(runID)
+		if q.helpers.Notice != nil {
+			if attached == 0 {
+				// Nothing attached → no drain worker will fire OnRunEnd.
+				// Tear down the run scope directly to avoid stranding state.
+				q.helpers.Notice.OnRunEnd(runID)
+			} else {
+				q.helpers.Notice.Finish(runID)
+			}
 		}
-	}
+	})
 	return nil
 }
 
