@@ -52,13 +52,26 @@ type Tunnel struct {
 // Open validates cfg, builds auth methods, verifies the host key (TOFU), and
 // establishes an SSH client to the bastion. The supplied ctx bounds the TCP
 // dial and the SSH handshake; cancelling it unblocks a stalled handshake.
+//
+// Open is the headless entry point: it never prompts interactively. Secret-
+// requiring auth (encrypted key without passphrase_command, or interactive
+// password) is unavailable; use OpenWithPrompter to supply a SecretPrompter.
 func Open(ctx context.Context, cfg models.SSHTunnelConfig) (*Tunnel, error) {
+	return OpenWithPrompter(ctx, cfg, nil)
+}
+
+// OpenWithPrompter is Open with an optional SecretPrompter used to resolve
+// interactive secrets (an encrypted-key passphrase when no passphrase_command
+// is set, or an SSH password when no ssh_password_command is set). A nil
+// prompter disables all interactive prompting and behaves exactly as the
+// headless Open: command/agent/key paths are unchanged.
+func OpenWithPrompter(ctx context.Context, cfg models.SSHTunnelConfig, prompter session.SecretPrompter) (*Tunnel, error) {
 	if err := session.ValidateSSHTunnel(&cfg); err != nil {
 		return nil, err
 	}
 	port := session.SSHTunnelPort(&cfg)
 
-	methods, selected, err := authMethods(ctx, cfg)
+	methods, selected, err := authMethods(ctx, cfg, prompter)
 	if err != nil {
 		return nil, err
 	}

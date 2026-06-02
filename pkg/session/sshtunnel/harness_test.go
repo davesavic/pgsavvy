@@ -1,6 +1,7 @@
 package sshtunnel
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -12,6 +13,21 @@ import (
 
 	"golang.org/x/crypto/ssh"
 )
+
+// fakeSecretPrompter is a canned-response session.SecretPrompter for tests.
+// It records the hint it was last asked with.
+type fakeSecretPrompter struct {
+	value string
+	err   error
+	hint  string
+	calls int
+}
+
+func (f *fakeSecretPrompter) PromptSecret(_ context.Context, hint string) (string, error) {
+	f.hint = hint
+	f.calls++
+	return f.value, f.err
+}
 
 // genKey returns a fresh ed25519 ssh.Signer plus its PEM-encoded (unencrypted)
 // OpenSSH private key.
@@ -76,6 +92,49 @@ func startServer(t *testing.T, hostKey ssh.Signer, authorizedKey ssh.PublicKey) 
 	cfg := &ssh.ServerConfig{
 		PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			if string(key.Marshal()) == string(authorizedKey.Marshal()) {
+				return &ssh.Permissions{}, nil
+			}
+			return nil, errUnauthorized
+		},
+	}
+	cfg.AddHostKey(hostKey)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("bastion listen: %v", err)
+	}
+
+	srv := &testServer{
+		Addr:      ln.Addr().String(),
+		HostKey:   hostKey,
+		Backend:   backendLn.Addr().String(),
+		listener:  ln,
+		backendLn: backendLn,
+	}
+	go srv.serve(cfg)
+
+	t.Cleanup(func() {
+		_ = ln.Close()
+		_ = backendLn.Close()
+	})
+	return srv
+}
+
+// startPasswordServer launches a bastion authorizing a single password,
+// fronted by hostKey, plus a backend echo server. Both shut down via
+// t.Cleanup.
+func startPasswordServer(t *testing.T, hostKey ssh.Signer, password string) *testServer {
+	t.Helper()
+
+	backendLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("backend listen: %v", err)
+	}
+	go runEchoBackend(backendLn)
+
+	cfg := &ssh.ServerConfig{
+		PasswordCallback: func(_ ssh.ConnMetadata, pw []byte) (*ssh.Permissions, error) {
+			if string(pw) == password {
 				return &ssh.Permissions{}, nil
 			}
 			return nil, errUnauthorized

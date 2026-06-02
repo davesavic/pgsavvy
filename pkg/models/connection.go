@@ -32,5 +32,9 @@ type SSHTunnelConfig struct {
 	IdentityFile      string `yaml:"identity_file" log:"redact"`
 	IdentityFromAgent bool   `yaml:"identity_from_agent,omitempty"`
 	PassphraseCommand string `yaml:"passphrase_command,omitempty" log:"redact"`
-	KnownHosts        string `yaml:"known_hosts,omitempty"`
+	// SSHPasswordCommand resolves the SSH password (ssh.Password auth) by
+	// running a command non-interactively. When empty and a SecretPrompter is
+	// available, the password is prompted interactively instead.
+	SSHPasswordCommand string `yaml:"ssh_password_command,omitempty" log:"redact"`
+	KnownHosts         string `yaml:"known_hosts,omitempty"`
 }
