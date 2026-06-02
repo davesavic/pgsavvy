@@ -297,6 +297,20 @@ func isSpecial(b *types.ChordBinding, sp types.SpecialKey) bool {
 	return k.Special == sp && k.Mod == 0 && k.Code == 0
 }
 
+// isRuneSeq reports whether b is a multi-keystroke ChordBinding whose
+// keys are exactly the bare runes in rs (no modifiers, no SpecialKey).
+func isRuneSeq(b *types.ChordBinding, rs ...rune) bool {
+	if b == nil || len(b.Sequence) != len(rs) {
+		return false
+	}
+	for i, k := range b.Sequence {
+		if k.Special != types.KeyNone || k.Mod != 0 || k.Code != rs[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // invokeAction resolves b.ActionID against reg and invokes the
 // registered handler with a zero ExecCtx. Returns an error if no
 // handler is registered for the binding's ActionID.

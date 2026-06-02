@@ -192,6 +192,30 @@ func (cm *ConnectionManagerController) Up(_ commands.ExecCtx) error {
 	return nil
 }
 
+// First jumps the list cursor to the first profile. No-op in connecting or
+// form mode (where gg/G carry no list meaning) or when unwired.
+func (cm *ConnectionManagerController) First(_ commands.ExecCtx) error {
+	if cm.deps.Ctx == nil || cm.inConnectingMode() || cm.inFormMode() {
+		return nil
+	}
+	cm.deps.Ctx.SetCursor(0)
+	return nil
+}
+
+// Last jumps the list cursor to the final profile. No-op in connecting or
+// form mode, on an empty list, or when unwired.
+func (cm *ConnectionManagerController) Last(_ commands.ExecCtx) error {
+	if cm.deps.Ctx == nil || cm.inConnectingMode() || cm.inFormMode() {
+		return nil
+	}
+	n := len(cm.deps.Ctx.Items())
+	if n == 0 {
+		return nil
+	}
+	cm.deps.Ctx.SetCursor(n - 1)
+	return nil
+}
+
 // Confirm handles <CR>. In connecting mode it re-attempts (Retry); in form
 // mode it saves the form (validate-all → OnSaveConnection → ModeList); in list
 // mode it flips the modal into connecting mode and starts the connect
@@ -382,6 +406,20 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Description: tr.Actions.Up,
 		},
 		{
+			Sequence:    []types.ChordKey{{Code: 'g'}, {Code: 'g'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CONNECTION_MANAGER,
+			ActionID:    commands.ConnectionManagerJumpFirst,
+			Description: tr.Actions.JumpFirst,
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'G'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CONNECTION_MANAGER,
+			ActionID:    commands.ConnectionManagerJumpLast,
+			Description: tr.Actions.JumpLast,
+		},
+		{
 			Sequence:    []types.ChordKey{{Special: types.KeyEnter}},
 			Mode:        types.ModeNormal,
 			Scope:       types.CONNECTION_MANAGER,
@@ -491,6 +529,16 @@ func (cm *ConnectionManagerController) RegisterActions(reg *commands.Registry) {
 		ID:          commands.ConnectionManagerUp,
 		Description: "Move connection manager cursor up",
 		Handler:     cm.Up,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerJumpFirst,
+		Description: "Jump connection manager cursor to first row",
+		Handler:     cm.First,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerJumpLast,
+		Description: "Jump connection manager cursor to last row",
+		Handler:     cm.Last,
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerConfirm,

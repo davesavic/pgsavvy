@@ -41,6 +41,42 @@ func TestListControllerTraitDownAndUp(t *testing.T) {
 	}
 }
 
+// gg jumps the cursor to the first row; G jumps it to the last row.
+// Exercised via the schemas controller which embeds the trait.
+func TestListControllerTraitJumpFirstAndLast(t *testing.T) {
+	b := newBag()
+	cur := &fakeCursor{idx: 3, items: []any{1, 2, 3, 4, 5, 6, 7}}
+	ctrl := controllers.NewSchemasController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, cur, b.SchemaPicker)
+	reg := commands.NewRegistry()
+	ctrl.ListControllerTrait.RegisterActions(reg)
+	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
+
+	ggFired, gFired := false, false
+	for _, kb := range bindings {
+		if isRuneSeq(kb, 'g', 'g') {
+			if err := invokeAction(reg, kb); err != nil {
+				t.Fatalf("gg: %v", err)
+			}
+			if cur.idx != 0 {
+				t.Fatalf("cursor idx after gg = %d, want 0", cur.idx)
+			}
+			ggFired = true
+		}
+		if isRune(kb, 'G') {
+			if err := invokeAction(reg, kb); err != nil {
+				t.Fatalf("G: %v", err)
+			}
+			if cur.idx != 6 {
+				t.Fatalf("cursor idx after G = %d, want 6", cur.idx)
+			}
+			gFired = true
+		}
+	}
+	if !ggFired || !gFired {
+		t.Fatalf("expected both gg and G bindings, ggFired=%v gFired=%v", ggFired, gFired)
+	}
+}
+
 // The trait <CR> binding fires the controller-supplied onConfirm.
 func TestListControllerTraitConfirmDelegates(t *testing.T) {
 	b := newBag()

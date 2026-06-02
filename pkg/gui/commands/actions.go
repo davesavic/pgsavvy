@@ -48,6 +48,11 @@ const (
 	ListDown    = "list.down"
 	ListConfirm = "list.confirm"
 
+	// ListJumpFirst / ListJumpLast — published by ListControllerTrait
+	// (shared by every side-rail). `gg`/`G`.
+	ListJumpFirst = "list.jump.first"
+	ListJumpLast  = "list.jump.last"
+
 	// Rail-switch family — published by every side-rail controller via
 	// railSwitchBindings (pkg/gui/controllers/shared.go). Digits 1..4
 	// jump to a specific rail; `<tab>` cycles to the next rail.
@@ -151,10 +156,12 @@ const (
 	// retries from the error state); r retries from the connecting/error
 	// body. The connect lifecycle renders inside the modal (no standalone
 	// CONNECTING push).
-	ConnectionManagerDown    = "connection_manager.down"
-	ConnectionManagerUp      = "connection_manager.up"
-	ConnectionManagerConfirm = "connection_manager.confirm"
-	ConnectionManagerRetry   = "connection_manager.retry"
+	ConnectionManagerDown      = "connection_manager.down"
+	ConnectionManagerUp        = "connection_manager.up"
+	ConnectionManagerConfirm   = "connection_manager.confirm"
+	ConnectionManagerRetry     = "connection_manager.retry"
+	ConnectionManagerJumpFirst = "connection_manager.jump.first"
+	ConnectionManagerJumpLast  = "connection_manager.jump.last"
 
 	// ConnectionManager add/edit form actions (dbsavvy-dyf).
 	// CONNECTION_MANAGER-scoped. In ModeList a opens a blank add form and e
@@ -561,6 +568,8 @@ func AllActionIDs() []string {
 		ListUp,
 		ListDown,
 		ListConfirm,
+		ListJumpFirst,
+		ListJumpLast,
 		RailSwitchSchemas,
 		RailSwitchTables,
 		RailSwitchQueryEditor,
@@ -731,6 +740,8 @@ func AllActionIDs() []string {
 		ConnectionManagerUp,
 		ConnectionManagerConfirm,
 		ConnectionManagerRetry,
+		ConnectionManagerJumpFirst,
+		ConnectionManagerJumpLast,
 		ConnectionManagerAdd,
 		ConnectionManagerEdit,
 		ConnectionManagerFieldNext,

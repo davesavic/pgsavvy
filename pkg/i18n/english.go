@@ -241,10 +241,12 @@ type ActionTranslations struct {
 	// Cursor movement and confirmation primitives used by every side
 	// rail controller. Added by T7a (enn.8) to satisfy the M11i rule
 	// that every KeyBinding.Description sources from Tr.Actions.*.
-	Down    string
-	Up      string
-	Confirm string
-	Cancel  string
+	Down      string
+	Up        string
+	Confirm   string
+	Cancel    string
+	JumpFirst string
+	JumpLast  string
 
 	// RefreshRail is the description for the `r` per-rail refresh
 	// binding (dbsavvy-56u.1).
@@ -429,10 +431,12 @@ func EnglishTranslationSet() *TranslationSet {
 			RailDown:     "Next rail",
 			RailLastRail: "Last rail",
 
-			Down:    "Down",
-			Up:      "Up",
-			Confirm: "Select",
-			Cancel:  "Cancel",
+			Down:      "Down",
+			Up:        "Up",
+			Confirm:   "Select",
+			Cancel:    "Cancel",
+			JumpFirst: "Jump to first",
+			JumpLast:  "Jump to last",
 
 			RefreshRail: "Refresh",
 		},

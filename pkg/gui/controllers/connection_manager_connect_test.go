@@ -62,6 +62,29 @@ func TestConnectionManagerController_JKMovesCursor(t *testing.T) {
 	}
 }
 
+// TestConnectionManagerController_GGAndGJump asserts gg jumps the cursor to
+// the first profile and G jumps it to the last, in list mode.
+func TestConnectionManagerController_GGAndGJump(t *testing.T) {
+	ctx := newModalCtx()
+	ctx.SetItems([]any{
+		&models.Connection{Name: "alpha"},
+		&models.Connection{Name: "beta"},
+		&models.Connection{Name: "gamma"},
+	})
+	ctx.SetCursor(1)
+	ctrl := controllers.NewConnectionManagerController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, nil)
+	ctrl.SetDeps(controllers.ConnectionManagerDeps{Ctx: ctx})
+
+	invokeMatching(t, ctrl, func(b *types.ChordBinding) bool { return isRune(b, 'G') })
+	if ctx.Cursor() != 2 {
+		t.Fatalf("after G cursor = %d, want 2", ctx.Cursor())
+	}
+	invokeMatching(t, ctrl, func(b *types.ChordBinding) bool { return isRuneSeq(b, 'g', 'g') })
+	if ctx.Cursor() != 0 {
+		t.Fatalf("after gg cursor = %d, want 0", ctx.Cursor())
+	}
+}
+
 // TestConnectionManagerController_EnterConnectsSelected asserts <CR> in list
 // mode invokes Connect with the selected profile (AC3).
 func TestConnectionManagerController_EnterConnectsSelected(t *testing.T) {

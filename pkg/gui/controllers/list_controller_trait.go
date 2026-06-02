@@ -74,6 +74,28 @@ func (l *ListControllerTrait[T]) Up(_ commands.ExecCtx) error {
 	return nil
 }
 
+// First jumps the cursor to the first row. Safe on empty lists (no-op).
+func (l *ListControllerTrait[T]) First(_ commands.ExecCtx) error {
+	if l.cursor == nil {
+		return nil
+	}
+	l.cursor.SetCursor(0)
+	return nil
+}
+
+// Last jumps the cursor to the final row. Safe on empty lists (no-op).
+func (l *ListControllerTrait[T]) Last(_ commands.ExecCtx) error {
+	if l.cursor == nil {
+		return nil
+	}
+	n := len(l.cursor.Items())
+	if n == 0 {
+		return nil
+	}
+	l.cursor.SetCursor(n - 1)
+	return nil
+}
+
 // Confirm fires the controller-supplied callback. Nil callback → no-op.
 func (l *ListControllerTrait[T]) Confirm(ctx commands.ExecCtx) error {
 	if l.onConfirm == nil {
@@ -106,6 +128,16 @@ func (l *ListControllerTrait[T]) RegisterActions(reg *commands.Registry) {
 		Description: "Activate list row (" + l.viewName + ")",
 		Handler:     l.Confirm,
 	})
+	_ = reg.Register(&commands.Command{
+		ID:          listActionID(commands.ListJumpFirst, l.viewName),
+		Description: "Jump list cursor to first row (" + l.viewName + ")",
+		Handler:     l.First,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          listActionID(commands.ListJumpLast, l.viewName),
+		Description: "Jump list cursor to last row (" + l.viewName + ")",
+		Handler:     l.Last,
+	})
 }
 
 // baseBindings returns the j/k/<CR> bindings every side rail shares.
@@ -137,6 +169,20 @@ func (l *ListControllerTrait[T]) baseBindings() []*types.ChordBinding {
 			ActionID:    listActionID(commands.ListConfirm, l.viewName),
 			Description: tr.Actions.Confirm,
 			ShowInBar:   true,
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'g'}, {Code: 'g'}},
+			Mode:        types.ModeNormal,
+			Scope:       scope,
+			ActionID:    listActionID(commands.ListJumpFirst, l.viewName),
+			Description: tr.Actions.JumpFirst,
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'G'}},
+			Mode:        types.ModeNormal,
+			Scope:       scope,
+			ActionID:    listActionID(commands.ListJumpLast, l.viewName),
+			Description: tr.Actions.JumpLast,
 		},
 	}
 }

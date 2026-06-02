@@ -29,9 +29,11 @@ binding	scope=connection_manager	key=<cr>	mode=normal
 binding	scope=connection_manager	key=<esc>	mode=normal
 binding	scope=connection_manager	key=<s-tab>	mode=normal
 binding	scope=connection_manager	key=<tab>	mode=normal
+binding	scope=connection_manager	key=G	mode=normal
 binding	scope=connection_manager	key=a	mode=normal
 binding	scope=connection_manager	key=d	mode=normal
 binding	scope=connection_manager	key=e	mode=normal
+binding	scope=connection_manager	key=gg	mode=normal
 binding	scope=connection_manager	key=i	mode=normal
 binding	scope=connection_manager	key=j	mode=normal
 binding	scope=connection_manager	key=k	mode=normal
@@ -271,8 +273,10 @@ binding	scope=schemas	key=<c-l>	mode=normal
 binding	scope=schemas	key=<cr>	mode=normal
 binding	scope=schemas	key=<leader>H	mode=normal
 binding	scope=schemas	key=<tab>	mode=normal
+binding	scope=schemas	key=G	mode=normal
 binding	scope=schemas	key=H	mode=normal
 binding	scope=schemas	key=U	mode=normal
+binding	scope=schemas	key=gg	mode=normal
 binding	scope=schemas	key=j	mode=normal
 binding	scope=schemas	key=k	mode=normal
 binding	scope=schemas	key=r	mode=normal
@@ -298,6 +302,8 @@ binding	scope=tables	key=<c-k>	mode=normal
 binding	scope=tables	key=<c-l>	mode=normal
 binding	scope=tables	key=<cr>	mode=normal
 binding	scope=tables	key=<tab>	mode=normal
+binding	scope=tables	key=G	mode=normal
+binding	scope=tables	key=gg	mode=normal
 binding	scope=tables	key=i	mode=normal
 binding	scope=tables	key=j	mode=normal
 binding	scope=tables	key=k	mode=normal
