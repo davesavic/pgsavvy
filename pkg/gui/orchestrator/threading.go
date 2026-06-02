@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync/atomic"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
@@ -122,7 +121,11 @@ func (g *Gui) searchStatusAccessor() func() (string, int, int, bool) {
 			return "", 0, 0, false
 		}
 		focused := g.tree.Current()
-		if focused == nil || !strings.HasPrefix(string(focused.GetKey()), string(types.ResultTabViewPrefix)) {
+		// The result pane is a single focus-stack context (RESULT_GRID); the
+		// per-slot result_tab_<slot> names are views behind it, never the
+		// focused key. Gate on RESULT_GRID so the segment shows when the grid
+		// has focus and clears the next frame after focus leaves it.
+		if focused == nil || focused.GetKey() != types.RESULT_GRID {
 			return "", 0, 0, false
 		}
 		tab := g.resultTabsH.Active()
