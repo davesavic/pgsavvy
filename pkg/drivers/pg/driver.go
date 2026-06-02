@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -12,8 +13,27 @@ import (
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/logs"
+	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/dbsavvy/pkg/session/sshtunnel"
 )
+
+// sshTunnel is the minimal SSH-tunnel surface the pg driver depends on. It is
+// satisfied by *sshtunnel.Tunnel and exists ONLY so the openTunnel seam can be
+// overridden with a fake in unit tests (sshtunnel.Open establishes a live SSH
+// client, which cannot run offline). Connection stores this interface, not the
+// concrete type, so the fake flows end-to-end through Open and Close.
+type sshTunnel interface {
+	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
+	Close() error
+}
+
+// openTunnel is the package-private seam for establishing an SSH tunnel. It
+// defaults to sshtunnel.Open; tests reassign it to inject a recording fake.
+// Keep this the SMALLEST possible seam — do not grow it into a strategy object.
+var openTunnel = func(ctx context.Context, cfg models.SSHTunnelConfig) (sshTunnel, error) {
+	return sshtunnel.Open(ctx, cfg)
+}
 
 // globalLogger is the package-level *slog.Logger used by Driver / Connection
 // / Session instrumentation emits. It is set ONCE by SetGlobalLogger from the
@@ -133,8 +153,26 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 	router := NewNoticeRouter()
 	cfg.ConnConfig.OnNotice = router.route
 
+	// SSH tunnel (epic ssh-tunnel T5): when the profile carries an
+	// SSHTunnelConfig the tunnel MUST be established before the pool is
+	// created so every DB dial routes through it. On success we mutate cfg
+	// (same idiom as OnNotice above) to inject the tunnel's DialContext as
+	// pgconn's DialFunc, and an identity LookupFunc so pgconn does NOT resolve
+	// the bastion-only DSN host client-side — the raw hostname must reach
+	// DialContext for the SSH server to resolve it bastion-side (F1).
+	tunnel, err := openSSHTunnel(ctx, profile.SSHTunnel)
+	if err != nil {
+		emitDone(err)
+		return nil, err
+	}
+	if tunnel != nil {
+		cfg.ConnConfig.DialFunc = tunnel.DialContext
+		cfg.ConnConfig.LookupFunc = identityLookup
+	}
+
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
+		closeTunnel(tunnel)
 		wrapped := fmt.Errorf("pg: open: %s", session.RedactDSN(err.Error()))
 		emitDone(wrapped)
 		return nil, wrapped
@@ -142,6 +180,7 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
+		closeTunnel(tunnel)
 		wrapped := fmt.Errorf("pg: ping: %s", session.RedactDSN(err.Error()))
 		emitDone(wrapped)
 		return nil, wrapped
@@ -150,6 +189,7 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 	var version string
 	if err := pool.QueryRow(ctx, "SELECT version()").Scan(&version); err != nil {
 		pool.Close()
+		closeTunnel(tunnel)
 		wrapped := fmt.Errorf("pg: server version: %w", err)
 		emitDone(wrapped)
 		return nil, wrapped
@@ -161,7 +201,36 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 		serverVersion: version,
 		majorVersion:  parseMajorVersion(version),
 		notices:       router,
+		tunnel:        tunnel,
 	}, nil
+}
+
+// openSSHTunnel opens an SSH tunnel for cfg, or returns (nil, nil) when cfg is
+// nil (no tunnel configured). A non-nil error is the typed SSH error from the
+// tunnel layer (sshtunnel.IsDialError reports true); the pool is never created
+// in that case.
+func openSSHTunnel(ctx context.Context, cfg *models.SSHTunnelConfig) (sshTunnel, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	return openTunnel(ctx, *cfg)
+}
+
+// closeTunnel closes t when non-nil. Used on Open failure paths after the
+// tunnel is established so a leak cannot escape a Connection that is never
+// returned.
+func closeTunnel(t sshTunnel) {
+	if t == nil {
+		return
+	}
+	_ = t.Close()
+}
+
+// identityLookup is an identity-passthrough pgconn.LookupFunc: it returns the
+// host unresolved so the raw hostname reaches the tunnel's DialContext and the
+// SSH server performs resolution bastion-side. Installed only when tunnelling.
+func identityLookup(_ context.Context, host string) ([]string, error) {
+	return []string{host}, nil
 }
 
 // parseMajorVersion extracts the leading numeric major from a "PostgreSQL X.Y …"

@@ -54,6 +54,11 @@ type Connection struct {
 	// creation in Driver.Open. Per-session subscription and pgconn↔SessionID
 	// bookkeeping is performed by newSession / Session.Close.
 	notices *NoticeRouter
+
+	// tunnel is the SSH tunnel routing all DB dials (epic ssh-tunnel T5). It
+	// is nil when the profile carries no SSHTunnelConfig. Close closes it AFTER
+	// the pool (AD3), inside closeOnce, so in-flight dials drain first.
+	tunnel sshTunnel
 }
 
 // Close releases the underlying pgxpool.Pool. Idempotent: second and
@@ -61,6 +66,7 @@ type Connection struct {
 // sessions are present (sessions > 0) a single stderr WARN is emitted before
 // the pool is closed.
 func (c *Connection) Close() error {
+	var tunnelErr error
 	c.closeOnce.Do(func() {
 		outstanding := c.sessions.Load()
 		if outstanding > 0 {
@@ -69,9 +75,14 @@ func (c *Connection) Close() error {
 		logs.Event(pkgLogger(), "db", "conn_close",
 			slog.Int("outstanding_sessions", int(outstanding)),
 		)
+		// Pool first, then the tunnel (AD3): the pool's dials route through the
+		// tunnel, so closing the tunnel first could abort an in-flight drain.
 		c.pool.Close()
+		if c.tunnel != nil {
+			tunnelErr = c.tunnel.Close()
+		}
 	})
-	return nil
+	return tunnelErr
 }
 
 // Ping forwards to the underlying pool. A non-nil ctx Deadline is honored.
