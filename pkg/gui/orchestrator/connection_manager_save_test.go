@@ -184,6 +184,59 @@ func TestConnectionManagerAddAppendsRow(t *testing.T) {
 	}
 }
 
+// TestConnectionManagerSaveSSHTunnelRoundTrip covers T6: an add form with SSH
+// host/user/port set and identity_from_agent toggled on persists those values
+// to connections.yml and reloads them intact.
+func TestConnectionManagerSaveSSHTunnelRoundTrip(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	path := "/cfg/connections.yml"
+
+	g, _ := bootstrapSaveGui(t, fs, path)
+	modal := pushModal(t, g)
+
+	if err := g.Controllers().ConnectionManager.Add(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	// Focus index after Add is 0. Functional order: name(0) driver(1) dsn(2)
+	// read_only(3) confirm_writes(4) confirm_ddl(5) statement_timeout(6)
+	// color(7) label(8) tags(9) ssh_host(10) ssh_user(11) ssh_port(12)
+	// identity_file(13) identity_from_agent(14) known_hosts(15). Move +1 at a
+	// time so the relative cursor stays predictable.
+	modal.FormSetFocusedValue("ssh-conn") // name @ 0
+	modal.FormMoveFocus(2)
+	modal.FormSetFocusedValue("postgres://localhost:5432/db") // dsn @ 2
+	modal.FormMoveFocus(8)
+	modal.FormSetFocusedValue("bastion.prod") // ssh_host @ 10
+	modal.FormMoveFocus(1)
+	modal.FormSetFocusedValue("deploy") // ssh_user @ 11
+	modal.FormMoveFocus(1)
+	modal.FormSetFocusedValue("2222") // ssh_port @ 12
+	modal.FormMoveFocus(2)
+	modal.FormToggleFocused() // identity_from_agent @ 14
+
+	if err := g.Controllers().ConnectionManager.Confirm(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if modal.Mode() != guicontext.ModeList {
+		t.Fatalf("mode = %v after save, want ModeList", modal.Mode())
+	}
+
+	loaded, err := config.LoadConnections(fs, path)
+	if err != nil {
+		t.Fatalf("post LoadConnections: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("post: got %d rows, want 1", len(loaded))
+	}
+	tun := loaded[0].SSHTunnel
+	if tun == nil {
+		t.Fatal("SSHTunnel = nil after save")
+	}
+	if tun.Host != "bastion.prod" || tun.User != "deploy" || tun.Port != 2222 || !tun.IdentityFromAgent {
+		t.Fatalf("SSHTunnel = %+v, want host=bastion.prod user=deploy port=2222 agent=true", tun)
+	}
+}
+
 // TestConnectionManagerEscBeforeSaveNoWrite covers AC4: opening a form and
 // pressing Esc (cancel) before save leaves connections.yml byte-for-byte
 // unchanged.

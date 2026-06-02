@@ -3,11 +3,13 @@ package context
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
 // connFieldKind classifies how a form row is edited (dbsavvy-dyf):
@@ -40,8 +42,14 @@ const (
 	fieldColor
 	fieldLabel
 	fieldTags
+	// SSH tunnel rows — editable, mapping to Connection.SSHTunnel (T6).
+	fieldSSHHost
+	fieldSSHUser
+	fieldSSHPort
+	fieldSSHIdentityFile
+	fieldSSHIdentityFromAgent
+	fieldSSHKnownHosts
 	// "(soon)" rows — rendered, never focusable.
-	fieldSSHTunnel
 	fieldKeyring
 	fieldPgpass
 	fieldPasswordCommand
@@ -54,8 +62,8 @@ type connFieldSpec struct {
 	kind  connFieldKind
 }
 
-// connFormSpecs is the ordered row layout. The first ten rows are functional;
-// the trailing four are greyed "(soon)" placeholders (dbsavvy-dyf scope).
+// connFormSpecs is the ordered row layout. The first ten rows plus the six SSH
+// rows are functional; the trailing three are greyed "(soon)" placeholders.
 var connFormSpecs = []connFieldSpec{
 	{fieldName, "name", fieldText},
 	{fieldDriverSel, "driver", fieldDriver},
@@ -67,7 +75,12 @@ var connFormSpecs = []connFieldSpec{
 	{fieldColor, "color", fieldText},
 	{fieldLabel, "label", fieldText},
 	{fieldTags, "tags", fieldText},
-	{fieldSSHTunnel, "ssh_tunnel", fieldSoon},
+	{fieldSSHHost, "ssh_host", fieldText},
+	{fieldSSHUser, "ssh_user", fieldText},
+	{fieldSSHPort, "ssh_port", fieldText},
+	{fieldSSHIdentityFile, "identity_file", fieldText},
+	{fieldSSHIdentityFromAgent, "identity_from_agent", fieldToggle},
+	{fieldSSHKnownHosts, "known_hosts", fieldText},
 	{fieldKeyring, "keyring", fieldSoon},
 	{fieldPgpass, "pgpass", fieldSoon},
 	{fieldPasswordCommand, "password_command", fieldSoon},
@@ -159,16 +172,48 @@ func (f *connForm) cycleDriver() {
 
 // toggleFocused flips the focused toggle, or cycles the driver when the
 // driver row is focused. No-op on text rows.
-func (f *connForm) toggleFocused() {
-	switch f.focusedSpec().id {
+func (f *connForm) toggleFocused() { f.toggle(f.focusedSpec().id) }
+
+// toggle flips the toggle row identified by id (or cycles the driver). No-op
+// on text rows. Split out from toggleFocused so save-time / test code can flip
+// a field by id without moving the cursor onto it.
+func (f *connForm) toggle(id connFieldID) {
+	switch id {
 	case fieldReadOnly:
 		f.conn.ReadOnly = !f.conn.ReadOnly
 	case fieldConfirmWrites:
 		f.conn.ConfirmWrites = !f.conn.ConfirmWrites
 	case fieldConfirmDDL:
 		f.conn.ConfirmDDL = !f.conn.ConfirmDDL
+	case fieldSSHIdentityFromAgent:
+		f.ensureSSHTunnel().IdentityFromAgent = !f.conn.SSHTunnel.IdentityFromAgent
+		f.normalizeSSHTunnel()
 	case fieldDriverSel:
 		f.cycleDriver()
+	}
+}
+
+// ensureSSHTunnel lazily allocates the SSHTunnel pointer so a first edit has a
+// struct to write into. Returns the (now non-nil) config.
+func (f *connForm) ensureSSHTunnel() *models.SSHTunnelConfig {
+	if f.conn.SSHTunnel == nil {
+		f.conn.SSHTunnel = &models.SSHTunnelConfig{}
+	}
+	return f.conn.SSHTunnel
+}
+
+// normalizeSSHTunnel drops the SSHTunnel pointer back to nil when every
+// form-editable input is empty/false, so yaml omitempty omits the key. The
+// YAML-only secret commands (PassphraseCommand/SSHPasswordCommand) are not form
+// inputs, so they intentionally do NOT keep the struct alive here.
+func (f *connForm) normalizeSSHTunnel() {
+	t := f.conn.SSHTunnel
+	if t == nil {
+		return
+	}
+	if t.Host == "" && t.User == "" && t.Port == 0 &&
+		t.IdentityFile == "" && !t.IdentityFromAgent && t.KnownHosts == "" {
+		f.conn.SSHTunnel = nil
 	}
 }
 
@@ -188,8 +233,29 @@ func (f *connForm) textValue(id connFieldID) string {
 		return f.conn.Label
 	case fieldTags:
 		return strings.Join(f.conn.Tags, ", ")
+	case fieldSSHHost:
+		return f.sshString(func(t *models.SSHTunnelConfig) string { return t.Host })
+	case fieldSSHUser:
+		return f.sshString(func(t *models.SSHTunnelConfig) string { return t.User })
+	case fieldSSHIdentityFile:
+		return f.sshString(func(t *models.SSHTunnelConfig) string { return t.IdentityFile })
+	case fieldSSHKnownHosts:
+		return f.sshString(func(t *models.SSHTunnelConfig) string { return t.KnownHosts })
+	case fieldSSHPort:
+		if f.conn.SSHTunnel == nil || f.conn.SSHTunnel.Port == 0 {
+			return ""
+		}
+		return strconv.Itoa(f.conn.SSHTunnel.Port)
 	}
 	return ""
+}
+
+// sshString reads a string field from the tunnel config, nil-safe.
+func (f *connForm) sshString(get func(*models.SSHTunnelConfig) string) string {
+	if f.conn.SSHTunnel == nil {
+		return ""
+	}
+	return get(f.conn.SSHTunnel)
 }
 
 // setTextValue stores a validated string value into the edited connection.
@@ -208,6 +274,24 @@ func (f *connForm) setTextValue(id connFieldID, v string) {
 		f.conn.Label = v
 	case fieldTags:
 		f.conn.Tags = parseTags(v)
+	case fieldSSHHost:
+		f.ensureSSHTunnel().Host = v
+		f.normalizeSSHTunnel()
+	case fieldSSHUser:
+		f.ensureSSHTunnel().User = v
+		f.normalizeSSHTunnel()
+	case fieldSSHIdentityFile:
+		f.ensureSSHTunnel().IdentityFile = v
+		f.normalizeSSHTunnel()
+	case fieldSSHKnownHosts:
+		f.ensureSSHTunnel().KnownHosts = v
+		f.normalizeSSHTunnel()
+	case fieldSSHPort:
+		// The port validator already rejected non-numeric input at the popup;
+		// an empty string clears the port to 0 (unset).
+		port, _ := strconv.Atoi(v)
+		f.ensureSSHTunnel().Port = port
+		f.normalizeSSHTunnel()
 	}
 }
 
@@ -273,6 +357,35 @@ func (f *connForm) validatorFor(id connFieldID, tr *i18n.TranslationSet) func(st
 		return func(s string) error { return f.validateName(s, tr) }
 	case fieldDSN:
 		return func(s string) error { return validateDSN(s, tr) }
+	case fieldSSHPort:
+		return validateSSHPort
+	case fieldSSHIdentityFile:
+		return validateIdentityFile
+	}
+	return nil
+}
+
+// validateSSHPort accepts an empty string (port unset) or an integer in the
+// 1-65535 TCP range. Anything else is rejected at the prompt popup.
+func validateSSHPort(raw string) error {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return nil
+	}
+	port, err := strconv.Atoi(v)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535")
+	}
+	return nil
+}
+
+// validateIdentityFile applies a light path-shape check: empty is allowed and
+// control characters / newlines are rejected. It does NOT touch the filesystem.
+func validateIdentityFile(raw string) error {
+	for _, r := range raw {
+		if r == '\n' || r == '\r' || (r < 0x20 && r != '\t') {
+			return fmt.Errorf("identity file path must not contain control characters")
+		}
 	}
 	return nil
 }
@@ -286,6 +399,12 @@ func (f *connForm) validateAll(tr *i18n.TranslationSet) (msg string, fieldIdx in
 	}
 	if err := validateDSN(f.conn.DSN, tr); err != nil {
 		return err.Error(), f.focusIndexOf(fieldDSN), false
+	}
+	// Drop a tunnel whose every input is blank, then reuse the session-layer
+	// rule as the single source of truth for host/user-required.
+	f.normalizeSSHTunnel()
+	if err := session.ValidateSSHTunnel(f.conn.SSHTunnel); err != nil {
+		return err.Error(), f.focusIndexOf(fieldSSHHost), false
 	}
 	return "", 0, true
 }
@@ -348,6 +467,8 @@ func (f *connForm) toggleValue(id connFieldID) bool {
 		return f.conn.ConfirmWrites
 	case fieldConfirmDDL:
 		return f.conn.ConfirmDDL
+	case fieldSSHIdentityFromAgent:
+		return f.conn.SSHTunnel != nil && f.conn.SSHTunnel.IdentityFromAgent
 	}
 	return false
 }

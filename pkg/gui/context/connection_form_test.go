@@ -23,7 +23,9 @@ func TestForm_RendersAllFunctionalAndSoonRows(t *testing.T) {
 	for _, want := range []string{
 		"name:", "driver:", "dsn:", "read_only:", "confirm_writes:",
 		"confirm_ddl:", "statement_timeout:", "color:", "label:", "tags:",
-		"ssh_tunnel:", "keyring:", "pgpass:", "password_command:",
+		"ssh_host:", "ssh_user:", "ssh_port:", "identity_file:",
+		"identity_from_agent:", "known_hosts:",
+		"keyring:", "pgpass:", "password_command:",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("form body missing %q\n%s", want, body)
@@ -31,6 +33,11 @@ func TestForm_RendersAllFunctionalAndSoonRows(t *testing.T) {
 	}
 	if !strings.Contains(body, "(soon)") {
 		t.Errorf("form body missing greyed (soon) marker\n%s", body)
+	}
+	// ssh_tunnel was reclassified from a "(soon)" placeholder into the six
+	// editable sub-rows above; its old label must no longer render.
+	if strings.Contains(body, "ssh_tunnel:") {
+		t.Errorf("ssh_tunnel: still rendered as a row; expected the 6 SSH sub-rows\n%s", body)
 	}
 }
 
@@ -50,16 +57,16 @@ func TestForm_AddSeedsFirstDriver(t *testing.T) {
 func TestForm_FieldNavMovesFocusAndSkipsSoonRows(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
-	// 10 functional rows → focusable count is 10.
-	if got := len(c.form.focusableSpecs()); got != 10 {
-		t.Fatalf("focusable rows = %d, want 10", got)
+	// 10 base functional rows + 6 SSH rows → focusable count is 16.
+	if got := len(c.form.focusableSpecs()); got != 16 {
+		t.Fatalf("focusable rows = %d, want 16", got)
 	}
-	// Move far past the end; clamps to the last functional row (tags).
+	// Move far past the end; clamps to the last functional row (known_hosts).
 	for range 50 {
 		c.FormMoveFocus(1)
 	}
-	if id := c.form.focusedSpec().id; id != fieldTags {
-		t.Fatalf("focus after over-move = %v, want fieldTags", id)
+	if id := c.form.focusedSpec().id; id != fieldSSHKnownHosts {
+		t.Fatalf("focus after over-move = %v, want fieldSSHKnownHosts", id)
 	}
 	// Move far up; clamps to name.
 	for range 50 {
@@ -215,5 +222,170 @@ func TestForm_TagsRoundTrip(t *testing.T) {
 	}
 	if c.FormFocusedValue() != "prod, db" {
 		t.Errorf("tags display = %q, want 'prod, db'", c.FormFocusedValue())
+	}
+}
+
+// TestForm_SSHRowsAreFocusable asserts the six new SSH rows are focusable
+// (not "(soon)") so the cursor lands on them (T6).
+func TestForm_SSHRowsAreFocusable(t *testing.T) {
+	c := newTestConnectionManager(&captureDriver{}, nil, nil)
+	c.OpenAddForm(nil, testDrivers)
+
+	got := map[connFieldID]bool{}
+	for _, s := range c.form.focusableSpecs() {
+		got[s.id] = true
+	}
+	for _, id := range []connFieldID{
+		fieldSSHHost, fieldSSHUser, fieldSSHPort,
+		fieldSSHIdentityFile, fieldSSHIdentityFromAgent, fieldSSHKnownHosts,
+	} {
+		if !got[id] {
+			t.Errorf("SSH field %v not focusable", id)
+		}
+	}
+}
+
+// TestForm_SSHTextRoundTrip asserts each SSH text field reads back what was
+// set, allocating SSHTunnel on first write (T6).
+func TestForm_SSHTextRoundTrip(t *testing.T) {
+	f := &connForm{}
+
+	f.setTextValue(fieldSSHHost, "bastion.prod")
+	f.setTextValue(fieldSSHUser, "deploy")
+	f.setTextValue(fieldSSHPort, "2222")
+	f.setTextValue(fieldSSHIdentityFile, "~/.ssh/id_ed25519")
+	f.setTextValue(fieldSSHKnownHosts, "~/.ssh/known_hosts")
+
+	if f.conn.SSHTunnel == nil {
+		t.Fatal("SSHTunnel nil after SSH edits")
+	}
+	if f.textValue(fieldSSHHost) != "bastion.prod" {
+		t.Errorf("host = %q, want bastion.prod", f.textValue(fieldSSHHost))
+	}
+	if f.textValue(fieldSSHUser) != "deploy" {
+		t.Errorf("user = %q, want deploy", f.textValue(fieldSSHUser))
+	}
+	if f.textValue(fieldSSHPort) != "2222" {
+		t.Errorf("port = %q, want 2222", f.textValue(fieldSSHPort))
+	}
+	if f.textValue(fieldSSHIdentityFile) != "~/.ssh/id_ed25519" {
+		t.Errorf("identity_file = %q", f.textValue(fieldSSHIdentityFile))
+	}
+	if f.textValue(fieldSSHKnownHosts) != "~/.ssh/known_hosts" {
+		t.Errorf("known_hosts = %q", f.textValue(fieldSSHKnownHosts))
+	}
+}
+
+// TestForm_SSHPortNilSafeAndZero asserts port reads empty when unset (nil
+// tunnel or Port==0) (T6).
+func TestForm_SSHPortNilSafeAndZero(t *testing.T) {
+	f := &connForm{}
+	if got := f.textValue(fieldSSHPort); got != "" {
+		t.Errorf("port on nil tunnel = %q, want empty", got)
+	}
+	f.setTextValue(fieldSSHHost, "h")
+	if got := f.textValue(fieldSSHPort); got != "" {
+		t.Errorf("port with Port==0 = %q, want empty", got)
+	}
+}
+
+// TestForm_SSHAgentToggle asserts the agent toggle flips and reads back, and
+// allocates the tunnel on toggle-on (T6).
+func TestForm_SSHAgentToggle(t *testing.T) {
+	f := &connForm{}
+	if f.toggleValue(fieldSSHIdentityFromAgent) {
+		t.Fatal("agent toggle on for nil tunnel")
+	}
+	f.toggle(fieldSSHIdentityFromAgent)
+	if f.conn.SSHTunnel == nil {
+		t.Fatal("SSHTunnel nil after agent toggle-on")
+	}
+	if !f.toggleValue(fieldSSHIdentityFromAgent) {
+		t.Fatal("agent toggle not on after toggle")
+	}
+	f.toggle(fieldSSHIdentityFromAgent)
+	if f.conn.SSHTunnel != nil {
+		t.Fatal("SSHTunnel not normalized to nil after toggle-off")
+	}
+}
+
+// TestForm_SSHNormalizeToNil asserts that clearing all SSH inputs drops the
+// SSHTunnel pointer so yaml omitempty omits the key (T6).
+func TestForm_SSHNormalizeToNil(t *testing.T) {
+	f := &connForm{}
+	f.setTextValue(fieldSSHHost, "h")
+	if f.conn.SSHTunnel == nil {
+		t.Fatal("SSHTunnel nil after host set")
+	}
+	f.setTextValue(fieldSSHHost, "")
+	if f.conn.SSHTunnel != nil {
+		t.Fatal("SSHTunnel not nil after clearing the only field")
+	}
+}
+
+// TestForm_SSHPortValidator covers the prompt-popup port validator: empty
+// allowed (unset), out-of-range rejected, in-range accepted (T6).
+func TestForm_SSHPortValidator(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	f := &connForm{}
+	v := f.validatorFor(fieldSSHPort, tr)
+	if v == nil {
+		t.Fatal("no validator for ssh_port")
+	}
+	if err := v(""); err != nil {
+		t.Errorf("empty port rejected: %v", err)
+	}
+	if err := v("5432"); err != nil {
+		t.Errorf("in-range port rejected: %v", err)
+	}
+	if err := v("70000"); err == nil {
+		t.Error("out-of-range port 70000 accepted")
+	}
+	if err := v("0"); err == nil {
+		t.Error("port 0 accepted (out of 1-65535)")
+	}
+	if err := v("abc"); err == nil {
+		t.Error("non-numeric port accepted")
+	}
+}
+
+// TestForm_SSHIdentityFileValidator rejects control chars/newlines, allows
+// empty and normal paths (T6).
+func TestForm_SSHIdentityFileValidator(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	f := &connForm{}
+	v := f.validatorFor(fieldSSHIdentityFile, tr)
+	if v == nil {
+		t.Fatal("no validator for identity_file")
+	}
+	if err := v(""); err != nil {
+		t.Errorf("empty identity_file rejected: %v", err)
+	}
+	if err := v("~/.ssh/id_ed25519"); err != nil {
+		t.Errorf("normal path rejected: %v", err)
+	}
+	if err := v("/path/with\nnewline"); err == nil {
+		t.Error("path with newline accepted")
+	}
+}
+
+// TestForm_ValidateAllSSHHostRequired asserts that an SSH tunnel with agent
+// auth but no host fails validate-all (host required, reusing
+// session.ValidateSSHTunnel) (T6).
+func TestForm_ValidateAllSSHHostRequired(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	c := newTestConnectionManager(&captureDriver{}, nil, nil)
+	c.OpenAddForm(nil, testDrivers)
+	c.form.conn.Name = "ok"
+	c.form.conn.DSN = "postgres://u@h/db"
+	// Agent on, host empty → tunnel non-nil, host missing.
+	c.form.toggle(fieldSSHIdentityFromAgent)
+
+	_, _, _, ok := c.FormValidateAll(tr)
+	if ok {
+		t.Fatal("validate-all passed with SSH agent on but no host")
+	}
+	if c.form.focusedSpec().id != fieldSSHHost {
+		t.Errorf("focus after SSH-host failure = %v, want fieldSSHHost", c.form.focusedSpec().id)
 	}
 }
