@@ -324,6 +324,7 @@ popuprect	key=prompt	x0=10	y0=25	x1=90	y1=75
 popuprect	key=query_editor	none
 popuprect	key=result_grid	none
 popuprect	key=schemas	none
+popuprect	key=search_line	x0=0	y0=99	x1=100	y1=101
 popuprect	key=selection	x0=25	y0=25	x1=75	y1=75
 popuprect	key=suggestions	none
 popuprect	key=table_data_editor	none

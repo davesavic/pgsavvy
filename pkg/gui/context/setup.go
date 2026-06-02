@@ -28,6 +28,9 @@ type ContextTree struct {
 	Selection    *SelectionContext
 	Suggestions  *SuggestionsContext
 	CommandLine  *CommandLineContext
+	// SearchLine is the bottom-anchored in-grid search input
+	// (epic dbsavvy-2ttm). TEMPORARY_POPUP kind, mirrors CommandLine.
+	SearchLine *SearchLineContext
 	// HideOverlay is the <leader>gH column-visibility overlay
 	// (dbsavvy-uv0.6). TEMPORARY_POPUP kind.
 	HideOverlay *HideOverlayContext
@@ -195,6 +198,14 @@ func contextSpecs() []contextSpec {
 				return NewCommandLineContext(b, d, d.ModeStore)
 			},
 			assign: func(t *ContextTree, c types.IBaseContext) { t.CommandLine = c.(*CommandLineContext) },
+		},
+		{
+			key: types.SEARCH_LINE, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCommandLine},
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewSearchLineContext(b, d, d.ModeStore)
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.SearchLine = c.(*SearchLineContext) },
 		},
 		{
 			key: types.HIDE_OVERLAY, kind: types.TEMPORARY_POPUP, inFlatten: true,

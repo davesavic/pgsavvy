@@ -12,8 +12,9 @@ func TestNewContextTreeReturnsAllContexts(t *testing.T) {
 		t.Fatal("NewContextTree returned nil")
 	}
 	flat := tree.Flatten()
-	if len(flat) != 26 {
-		t.Fatalf("Flatten() len = %d, want 26 (19 live + 4 stub + 2 main + 1 persistent)", len(flat))
+	// dbsavvy-2ttm.3 adds SEARCH_LINE (TEMPORARY_POPUP), 26→27.
+	if len(flat) != 27 {
+		t.Fatalf("Flatten() len = %d, want 27 (20 live + 4 stub + 2 main + 1 persistent)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -111,7 +112,8 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		types.SIDE_CONTEXT: 2,
 		// dbsavvy-bwq.py4: CellEditor, CommitDialog, ConflictDialog and
 		// FKReversePicker take TEMPORARY_POPUP from 9→13.
-		types.TEMPORARY_POPUP: 13,
+		// dbsavvy-2ttm.3: SEARCH_LINE takes it 13→14.
+		types.TEMPORARY_POPUP: 14,
 		types.EXTRAS_CONTEXT:  0,
 		types.GLOBAL_CONTEXT:  1,
 		types.DISPLAY_CONTEXT: 3,

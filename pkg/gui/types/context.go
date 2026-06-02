@@ -103,11 +103,16 @@ const (
 	SELECTION         ContextKey = "selection"
 	SUGGESTIONS       ContextKey = "suggestions"
 	COMMAND_LINE      ContextKey = "command_line"
-	HISTORY           ContextKey = "history"
-	WHICH_KEY         ContextKey = "which_key"
-	GLOBAL            ContextKey = "global"
-	LIMIT             ContextKey = "limit"
-	CHEATSHEET        ContextKey = "cheatsheet"
+	// SEARCH_LINE is the dedicated bottom-anchored single-line in-grid
+	// search input (epic dbsavvy-2ttm). Mirrors COMMAND_LINE geometry
+	// (PopupSizeCommandLine) but renders a "/" prefix and fires an
+	// onChange seam per keystroke. TEMPORARY_POPUP, editable.
+	SEARCH_LINE ContextKey = "search_line"
+	HISTORY     ContextKey = "history"
+	WHICH_KEY   ContextKey = "which_key"
+	GLOBAL      ContextKey = "global"
+	LIMIT       ContextKey = "limit"
+	CHEATSHEET  ContextKey = "cheatsheet"
 	// HIDE_OVERLAY is the in-grid column-visibility overlay opened by
 	// <leader>gH on the active result tab (dbsavvy-uv0.6).
 	HIDE_OVERLAY ContextKey = "hide_overlay"
@@ -165,6 +170,7 @@ func AllContextKeys() []ContextKey {
 		SELECTION,
 		SUGGESTIONS,
 		COMMAND_LINE,
+		SEARCH_LINE,
 		HISTORY,
 		WHICH_KEY,
 		GLOBAL,
@@ -200,7 +206,7 @@ func AllContextKeys() []ContextKey {
 // context, so flipping here has no runtime effect until the real
 // QUERY_EDITOR context lands.
 func (k ContextKey) IsEditable() bool {
-	return k == COMMAND_LINE || k == QUERY_EDITOR || k == PROMPT || k == CELL_EDITOR
+	return k == COMMAND_LINE || k == QUERY_EDITOR || k == PROMPT || k == CELL_EDITOR || k == SEARCH_LINE
 }
 
 // KeybindingsOpts is the (currently empty) bag passed to GetKeybindings

@@ -38,6 +38,21 @@ func WithSessionLog(l *slog.Logger) MasterEditorOption {
 	}
 }
 
+// WithOnPassthroughEdit registers an onChange seam invoked SYNCHRONOUSLY
+// on the MainLoop after gocui.DefaultEditor.Edit applies a Passthrough
+// keystroke, with the post-edit (non-destructive) TextArea content. The
+// hook fires ONLY for the SEARCH_LINE scope (decision AD-3); attaching
+// it to any other scope's editor is a no-op. gocui runs Editor.Edit
+// synchronously inside processEvent on the single MainLoop goroutine, so
+// the post-edit read is race-free. The hook MUST NOT re-enter the
+// dispatcher, push/pop the focus stack, or trigger a render/snapshot
+// (AD-4); deferred work belongs on gui.Update. nil disables the seam.
+func WithOnPassthroughEdit(fn func(content string)) MasterEditorOption {
+	return func(e *masterEditor) {
+		e.onPassthroughEdit = fn
+	}
+}
+
 // Dispatcher is the side-channel a master Editor exposes so test
 // harnesses (testfake.RecorderGuiDriver.FeedChord) can drive a chord
 // sequence through the editor and observe the raw keys.DispatchResult
@@ -90,6 +105,10 @@ type masterEditor struct {
 	scope      types.ContextKey
 	viewName   string
 	sessionLog *slog.Logger
+	// onPassthroughEdit is the SEARCH_LINE onChange seam (AD-3). Fired
+	// synchronously after a Passthrough keystroke writes into v.TextArea,
+	// with the post-edit content. Scope-gated: only SEARCH_LINE invokes it.
+	onPassthroughEdit func(content string)
 
 	mu           sync.Mutex
 	pendingRunes []rune
@@ -205,7 +224,9 @@ func (e *masterEditor) applyResult(v *gocui.View, raw gocui.Key, decoded keys.Ke
 			if v == nil {
 				return false
 			}
-			return gocui.DefaultEditor.Edit(v, raw)
+			out := gocui.DefaultEditor.Edit(v, raw)
+			e.fireOnPassthroughEdit(v)
+			return out
 		}
 		return false
 	case keys.FellThrough:
@@ -217,6 +238,21 @@ func (e *masterEditor) applyResult(v *gocui.View, raw gocui.Key, decoded keys.Ke
 		return true
 	}
 	return false
+}
+
+// fireOnPassthroughEdit invokes the SEARCH_LINE onChange seam with the
+// post-edit (non-destructive) TextArea content. Scope-gated to
+// SEARCH_LINE (AD-3) so PROMPT / QUERY_EDITOR / COMMAND_LINE never fire
+// it. Called synchronously on the MainLoop after DefaultEditor.Edit;
+// the read of v.TextArea is race-free for that reason.
+func (e *masterEditor) fireOnPassthroughEdit(v *gocui.View) {
+	if e.onPassthroughEdit == nil || e.scope != types.SEARCH_LINE {
+		return
+	}
+	if v == nil || v.TextArea == nil {
+		return
+	}
+	e.onPassthroughEdit(v.TextArea.GetContent())
 }
 
 // appendPendingRune buffers decoded's rune (if any) on the pending
