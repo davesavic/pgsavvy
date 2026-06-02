@@ -163,6 +163,7 @@ type wrappedRowStream struct {
 
 func (w *wrappedRowStream) Columns() []models.ColumnMeta { return w.inner.Columns() }
 func (w *wrappedRowStream) QueryID() models.QueryID      { return w.inner.QueryID() }
+func (w *wrappedRowStream) RowsAffected() int64          { return w.inner.RowsAffected() }
 
 func (w *wrappedRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 	row, ok, err := w.inner.Next(ctx)

@@ -410,7 +410,12 @@ type Tab struct {
 	state    TabState
 	pinned   bool
 	rowCount int64
-	err      error
+	// rowsAffected is the driver's command-tag affected-row count,
+	// captured at stream completion. For DML without RETURNING the result
+	// set is empty (rowCount 0) so this is the only count to display
+	// ("N rows affected"). dbsavvy-tiu8.
+	rowsAffected int64
+	err          error
 	// origSQL is the canonical statement text behind this tab. It serves
 	// two readers with disjoint tab lifecycles: the QueryError position
 	// caret on error tabs (dbsavvy-fow.3, set via SetErrorSQL) and the
@@ -581,6 +586,7 @@ func (t *Tab) Title() string {
 	t.mu.Lock()
 	state := t.state
 	rows := t.rowCount
+	affected := t.rowsAffected
 	complete := t.complete
 	t.mu.Unlock()
 
@@ -590,6 +596,13 @@ func (t *Tab) Title() string {
 	case StateConnectionLost:
 		// hq5.6: "(error: connection terminated, N rows received)"
 		return fmt.Sprintf("(error: connection terminated, %d rows received)", rows)
+	}
+
+	// DML without RETURNING yields no result rows but changes N rows; the
+	// command tag carries N. Surface it instead of a misleading "0 rows".
+	// dbsavvy-tiu8.
+	if complete && rows == 0 && affected > 0 {
+		return fmt.Sprintf("%d rows affected", affected)
 	}
 
 	rowsSegment := fmt.Sprintf("%d rows", rows)
@@ -1578,6 +1591,14 @@ func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab) {
 			}
 		}
 		tab.complete = true
+		// The stream has terminated, so the driver's command tag is now
+		// populated — capture the affected-row count for the title.
+		// dbsavvy-tiu8.
+		if tab.rh != nil {
+			if rs := tab.rh.Rows(); rs != nil {
+				tab.rowsAffected = rs.RowsAffected()
+			}
+		}
 		tab.mu.Unlock()
 		return nil
 	}

@@ -67,6 +67,7 @@ func (s *stubRowStream) Close() error {
 }
 
 func (s *stubRowStream) QueryID() models.QueryID { return models.QueryID{} }
+func (s *stubRowStream) RowsAffected() int64     { return 0 }
 
 var _ drivers.RowStream = (*stubRowStream)(nil)
 

@@ -78,6 +78,7 @@ func newBlockingRowStream(signalAfter int) *blockingRowStream {
 
 func (s *blockingRowStream) Columns() []models.ColumnMeta { return nil }
 func (s *blockingRowStream) QueryID() models.QueryID      { return s.qid }
+func (s *blockingRowStream) RowsAffected() int64          { return 0 }
 
 func (s *blockingRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 	// Promptly honour a cancelled task context (RBM.Stop / preempt) so the

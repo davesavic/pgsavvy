@@ -55,6 +55,14 @@ type pgRowStream struct {
 	cancel context.CancelFunc
 
 	closed atomic.Bool
+
+	// rowsAffected captures pgx's CommandTag().RowsAffected() at release
+	// time. pgx only populates the command tag inside Rows.Close(), so it
+	// is read in release() AFTER s.rows.Close() — reading it earlier (e.g.
+	// in the EOF branch of Next before release) yields 0. Surfaced via
+	// RowsAffected() so the UI can report "N rows affected" for DML that
+	// returns no result rows (dbsavvy-tiu8).
+	rowsAffected atomic.Int64
 }
 
 // newPgRowStream wraps a freshly-issued pgx.Rows. The caller (Session.Stream)
@@ -85,6 +93,10 @@ func (s *pgRowStream) Columns() []models.ColumnMeta { return s.columns }
 // returned, so callers may read this BEFORE calling Next() to wire cancel
 // (task 66p.4) or result routing.
 func (s *pgRowStream) QueryID() models.QueryID { return s.queryID }
+
+// RowsAffected returns the command tag's affected-row count, captured in
+// release() once the stream terminates. Returns 0 before termination.
+func (s *pgRowStream) RowsAffected() int64 { return s.rowsAffected.Load() }
 
 // Next advances the underlying pgx.Rows by one. The (row, ok, err) triple
 // matches drivers.RowStream:
@@ -168,6 +180,10 @@ func (s *pgRowStream) release() {
 		return
 	}
 	s.rows.Close()
+	// pgx populates the command tag inside Rows.Close(), so capture the
+	// affected-row count here (after Close) rather than at the EOF branch
+	// of Next where it would still be zero. dbsavvy-tiu8.
+	s.rowsAffected.Store(s.rows.CommandTag().RowsAffected())
 	// Stop the statement-timeout deadline timer (if any) on the same
 	// once-guarded path. Calling cancel after the deadline already fired is
 	// a documented no-op, so this is safe regardless of WHY we released

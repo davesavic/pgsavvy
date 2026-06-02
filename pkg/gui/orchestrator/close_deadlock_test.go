@@ -21,6 +21,7 @@ func (eofRowStream) Columns() []models.ColumnMeta                   { return nil
 func (eofRowStream) Next(context.Context) (models.Row, bool, error) { return models.Row{}, false, nil }
 func (eofRowStream) Close() error                                   { return nil }
 func (s eofRowStream) QueryID() models.QueryID                      { return s.qid }
+func (s eofRowStream) RowsAffected() int64                          { return 0 }
 
 // fakeStreamSession embeds drivers.Session so only the two methods the
 // stream-start path actually invokes need bodies; any other call panics

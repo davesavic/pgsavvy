@@ -28,6 +28,7 @@ func (f *fakeColRowStream) Next(context.Context) (models.Row, bool, error) {
 }
 func (f *fakeColRowStream) Close() error            { return nil }
 func (f *fakeColRowStream) QueryID() models.QueryID { return models.QueryID{} }
+func (f *fakeColRowStream) RowsAffected() int64     { return 0 }
 
 // capturingStreamRunner records every NewQueryTask and captures the appendRows
 // + onDone callbacks so a test can drive rows into the tab synchronously

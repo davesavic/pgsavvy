@@ -1889,6 +1889,7 @@ func (s *stubColumnStream) Next(_ context.Context) (models.Row, bool, error) {
 }
 func (s *stubColumnStream) Close() error            { return nil }
 func (s *stubColumnStream) QueryID() models.QueryID { return models.QueryID{} }
+func (s *stubColumnStream) RowsAffected() int64     { return 0 }
 
 // TestOpenTab_InstallsStreamColumnsOnGrid is the regression test for
 // dbsavvy-dqp. Prior to the fix, the result grid stayed at zero columns
@@ -2079,6 +2080,39 @@ func TestLayoutPaintRendersDataTabTitle(t *testing.T) {
 	}
 	if v.Footer != tab.Title() {
 		t.Errorf("view.Footer = %q, want %q", v.Footer, tab.Title())
+	}
+}
+
+// TestTitleRowsAffected covers the DML-without-RETURNING case: a completed
+// tab with zero result rows but a non-zero command-tag count must report
+// "N rows affected" rather than the misleading "0 rows". dbsavvy-tiu8.
+func TestTitleRowsAffected(t *testing.T) {
+	tests := []struct {
+		name         string
+		state        TabState
+		complete     bool
+		rowCount     int64
+		rowsAffected int64
+		want         string
+	}{
+		{"dml no returning", StateComplete, true, 0, 5, "5 rows affected"},
+		{"dml single row", StateComplete, true, 0, 1, "1 rows affected"},
+		{"select zero rows", StateComplete, true, 0, 0, "0 rows"},
+		{"select with rows", StateComplete, true, 3, 3, "3 rows"},
+		{"running not yet complete", StateRunning, false, 0, 0, "~0 rows · running"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tab := &Tab{
+				state:        tc.state,
+				complete:     tc.complete,
+				rowCount:     tc.rowCount,
+				rowsAffected: tc.rowsAffected,
+			}
+			if got := tab.Title(); got != tc.want {
+				t.Errorf("Title() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

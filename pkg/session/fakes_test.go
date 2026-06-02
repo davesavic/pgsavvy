@@ -50,6 +50,7 @@ type fakeRowStream struct {
 
 func (s *fakeRowStream) Columns() []models.ColumnMeta { return s.cols }
 func (s *fakeRowStream) QueryID() models.QueryID      { return s.qid }
+func (s *fakeRowStream) RowsAffected() int64          { return 0 }
 func (s *fakeRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 	if s.closed.Load() {
 		return models.Row{}, false, errors.New("fakeRowStream: closed")
@@ -254,6 +255,7 @@ type errorTermRowStream struct {
 
 func (s *errorTermRowStream) Columns() []models.ColumnMeta { return nil }
 func (s *errorTermRowStream) QueryID() models.QueryID      { return s.qid }
+func (s *errorTermRowStream) RowsAffected() int64          { return 0 }
 func (s *errorTermRowStream) Close() error                 { s.closed.Store(true); return nil }
 func (s *errorTermRowStream) Next(context.Context) (models.Row, bool, error) {
 	return models.Row{}, false, s.termErr

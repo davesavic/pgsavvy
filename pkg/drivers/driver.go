@@ -97,6 +97,12 @@ type RowStream interface {
 	Next(ctx context.Context) (models.Row, bool, error)
 	Close() error
 	QueryID() models.QueryID
+	// RowsAffected returns the command tag's affected-row count (e.g. the
+	// 5 in "UPDATE 5"). Only meaningful once the stream has terminated
+	// (clean EOF, error, or Close); reads before then return 0. For
+	// DML without RETURNING the result set is empty, so this is the only
+	// signal of how many rows the statement changed.
+	RowsAffected() int64
 }
 
 // Capabilities advertises the static feature flags a driver exposes; UI code

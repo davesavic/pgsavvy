@@ -46,6 +46,46 @@ func TestPgStreamQueryIDPopulatedBeforeFirstNext(t *testing.T) {
 	}
 }
 
+// TestPgStreamRowsAffectedForDML verifies that a DML statement without
+// RETURNING — which yields no result rows — still surfaces its affected-row
+// count via RowStream.RowsAffected() after the stream is drained. The count
+// is captured in release() after pgx populates the command tag in
+// Rows.Close(). dbsavvy-tiu8.
+func TestPgStreamRowsAffectedForDML(t *testing.T) {
+	sess := requirePGSession(t)
+	ctx := context.Background()
+	if _, err := sess.Execute(ctx, models.Query{SQL: "CREATE TEMP TABLE rowsaffected_test (id int)"}); err != nil {
+		t.Fatalf("create temp table: %v", err)
+	}
+	if _, err := sess.Execute(ctx, models.Query{SQL: "INSERT INTO rowsaffected_test SELECT generate_series(1, 3)"}); err != nil {
+		t.Fatalf("seed insert: %v", err)
+	}
+
+	stream, err := sess.Stream(ctx, models.Query{SQL: "UPDATE rowsaffected_test SET id = id + 1"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	// Drain to EOF — an UPDATE without RETURNING produces zero rows.
+	rows := 0
+	for {
+		_, ok, err := stream.Next(ctx)
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		if !ok {
+			break
+		}
+		rows++
+	}
+	if rows != 0 {
+		t.Errorf("UPDATE without RETURNING yielded %d rows, want 0", rows)
+	}
+	if got := stream.RowsAffected(); got != 3 {
+		t.Errorf("RowsAffected() = %d, want 3", got)
+	}
+	_ = stream.Close()
+}
+
 func TestPgStreamLazyIterationCount(t *testing.T) {
 	sess := requirePGSession(t)
 	stream, err := sess.Stream(context.Background(), models.Query{
