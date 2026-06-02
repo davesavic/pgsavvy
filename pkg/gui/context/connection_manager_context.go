@@ -75,10 +75,15 @@ func (c *ConnectionManagerContext) SetOnShow(fn func()) { c.onShow = fn }
 
 // HandleFocus fires when the modal gains focus — either a fresh push onto the
 // stack or when a child popup (PROMPT, CONFIRM) pops and returns focus here.
-// In ModeForm a child popup return must preserve the form; in all other modes
-// it resets to ModeList and refreshes the row data. Nil-safe (dbsavvy-1rf).
+// In ModeForm a child popup return must preserve the form; likewise ModeConnecting
+// must survive the SSH-secret PROMPT popup popping mid-connect (dbsavvy-308u) —
+// otherwise a reset to ModeList makes body() draw the row list and swallows a
+// subsequent dial error. In all other modes it resets to ModeList and refreshes
+// the row data. Both connecting-mode exits (success pop, Esc cancel) already
+// reset to ModeList, so the modal is never re-opened stranded in ModeConnecting.
+// Nil-safe (dbsavvy-1rf).
 func (c *ConnectionManagerContext) HandleFocus(_ types.OnFocusOpts) error {
-	if c.mode == ModeForm {
+	if c.mode == ModeForm || c.mode == ModeConnecting {
 		return nil
 	}
 	c.mode = ModeList

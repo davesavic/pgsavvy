@@ -143,13 +143,13 @@ func TestConnectionManagerContext_ConnectingMode(t *testing.T) {
 	}
 }
 
-// TestConnectionManagerContext_HandleFocusRunsOnShowAndResetsMode asserts
-// pushing the modal resets it to list mode and runs the populate closure
-// (AC2 cursor-on-show wiring; AC3 re-open lands on the list).
-func TestConnectionManagerContext_HandleFocusRunsOnShowAndResetsMode(t *testing.T) {
+// TestConnectionManagerContext_HandleFocusRunsOnShowInListMode asserts that
+// regaining focus in list mode (a fresh re-open, or returning from a CONFIRM
+// delete popup) runs the populate closure so the rows refresh (AC2 cursor-on-
+// show wiring; AC3 re-open lands on the list).
+func TestConnectionManagerContext_HandleFocusRunsOnShowInListMode(t *testing.T) {
 	drv := &captureDriver{}
 	c := newTestConnectionManager(drv, nil, nil)
-	c.SetMode(ModeConnecting)
 	shown := 0
 	c.SetOnShow(func() { shown++ })
 	if err := c.HandleFocus(types.OnFocusOpts{}); err != nil {
@@ -160,6 +160,42 @@ func TestConnectionManagerContext_HandleFocusRunsOnShowAndResetsMode(t *testing.
 	}
 	if shown != 1 {
 		t.Errorf("onShow fired %d times, want 1", shown)
+	}
+}
+
+// TestConnectionManagerContext_HandleFocusPreservesConnectingMode reproduces
+// the SSH-connect bug (dbsavvy-308u): the SSH passphrase PROMPT popup pops
+// mid-connect and returns focus to the modal in ModeConnecting. HandleFocus
+// must NOT reset the mode — if it does, a subsequent dial error written to the
+// ConnectingState sink is swallowed because body() renders the row list
+// instead of the error. Mirrors HandleFocusPreservesFormMode.
+func TestConnectionManagerContext_HandleFocusPreservesConnectingMode(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestConnectionManager(drv, nil, nil)
+	c.SetItems([]any{&models.Connection{Name: "alpha"}})
+	c.ConnectingState().SetConnecting("alpha")
+	c.SetMode(ModeConnecting)
+	shown := 0
+	c.SetOnShow(func() { shown++ })
+
+	// SSH passphrase PROMPT popup pops, returning focus to the modal.
+	if err := c.HandleFocus(types.OnFocusOpts{}); err != nil {
+		t.Fatalf("HandleFocus: %v", err)
+	}
+	if c.Mode() != ModeConnecting {
+		t.Fatalf("mode after popup return = %v, want ModeConnecting", c.Mode())
+	}
+	if shown != 0 {
+		t.Errorf("onShow fired %d times, want 0 (connecting mode should skip refresh)", shown)
+	}
+
+	// The dial then fails; the error must render in the modal, not be swallowed.
+	c.ConnectingState().SetError("ssh: handshake failed")
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	if !strings.Contains(drv.lastContent, "ssh: handshake failed") {
+		t.Fatalf("error body not rendered after popup return: %q", drv.lastContent)
 	}
 }
 
