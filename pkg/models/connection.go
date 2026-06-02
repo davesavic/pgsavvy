@@ -28,8 +28,8 @@ type Connection struct {
 type SSHTunnelConfig struct {
 	Host              string `yaml:"host"`
 	User              string `yaml:"user"`
-	Port              int    `yaml:"port"`
-	IdentityFile      string `yaml:"identity_file" log:"redact"`
+	Port              int    `yaml:"port,omitempty"`
+	IdentityFile      string `yaml:"identity_file,omitempty" log:"redact"`
 	IdentityFromAgent bool   `yaml:"identity_from_agent,omitempty"`
 	PassphraseCommand string `yaml:"passphrase_command,omitempty" log:"redact"`
 	// SSHPasswordCommand resolves the SSH password (ssh.Password auth) by

@@ -112,7 +112,7 @@ func TestSaveConnections_SSHOmitemptyKeysAbsent(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	body = string(raw)
-	for _, key := range []string{"identity_from_agent", "passphrase_command", "known_hosts"} {
+	for _, key := range []string{"port", "identity_file", "identity_from_agent", "passphrase_command", "known_hosts"} {
 		if strings.Contains(body, key) {
 			t.Errorf("empty %q emitted a key:\n%s", key, body)
 		}
