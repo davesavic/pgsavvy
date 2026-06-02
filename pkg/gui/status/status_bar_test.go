@@ -408,3 +408,30 @@ func TestBuildStatusLine_SessionSettings_LongSearchPath(t *testing.T) {
 		t.Fatalf("got %q, must not contain full untruncated search_path", got)
 	}
 }
+
+func TestSearchIndicator_Inactive(t *testing.T) {
+	if got := SearchIndicator("alic", 3, 40, false); got != "" {
+		t.Fatalf("SearchIndicator(active=false) = %q, want empty", got)
+	}
+	// query/counts are ignored when inactive — even a populated query
+	// must yield the empty segment so the caller appends nothing.
+	if got := SearchIndicator("", 0, 0, false); got != "" {
+		t.Fatalf("SearchIndicator(empty, inactive) = %q, want empty", got)
+	}
+}
+
+func TestSearchIndicator_ActiveWithMatches(t *testing.T) {
+	got := SearchIndicator("alic", 3, 40, true)
+	want := "search: alic 3/40"
+	if got != want {
+		t.Fatalf("SearchIndicator(active, total>0) = %q, want %q", got, want)
+	}
+}
+
+func TestSearchIndicator_ActiveNoMatches(t *testing.T) {
+	got := SearchIndicator("alic", 0, 0, true)
+	want := "search: alic 0/0" + optionSep + "no matches"
+	if got != want {
+		t.Fatalf("SearchIndicator(active, total==0) = %q, want %q", got, want)
+	}
+}

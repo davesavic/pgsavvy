@@ -526,6 +526,7 @@ func (g *Gui) RunLayout(w, h int) error {
 			SpinnerFrame:    g.SpinnerFrame,
 			TxStatus:        g.txStatusAccessor(),
 			SessionSettings: g.sessionSettingsAccessor(),
+			SearchStatus:    g.searchStatusAccessor(),
 		})
 	}
 

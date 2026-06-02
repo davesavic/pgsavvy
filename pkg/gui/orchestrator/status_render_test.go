@@ -4,8 +4,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/davesavic/dbsavvy/pkg/gui"
+	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
+	"github.com/davesavic/dbsavvy/pkg/gui/keys"
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/i18n"
 )
 
 // fakeToastSource implements ToastSource with explicit message/level
@@ -230,5 +235,71 @@ func TestToastHelper_ClassifyLevelByMessageContent(t *testing.T) {
 				t.Fatalf("CurrentLevel() = %v; want %v for msg %q", got, tc.want, tc.msg)
 			}
 		})
+	}
+}
+
+// renderWithSearchProvider drives RenderStatusLine through its default
+// (non-toast) branch with a minimal Tree + KbRuntime so the search
+// segment append path executes. focusKey is the key of the pushed
+// context (use a result-tab key to simulate result-pane focus);
+// searchStatus is injected as the SearchStatus provider. Returns the
+// resulting AppStatusViewName buffer.
+func renderWithSearchProvider(t *testing.T, focusKey types.ContextKey, searchStatus func() (string, int, int, bool)) string {
+	t.Helper()
+	rec := newStatusRenderRecorder(t)
+
+	tree := gui.NewContextTree()
+	if err := tree.Push(guicontext.NewStubContext(focusKey, string(focusKey))); err != nil {
+		t.Fatalf("push stub context: %v", err)
+	}
+	rt := keys.NewRuntime(nil, nil, keys.NewModeStore(), nil, nil)
+
+	RenderStatusLine(StatusRenderDeps{
+		Driver:       rec,
+		Tree:         tree,
+		KbRuntime:    rt,
+		Tr:           i18n.EnglishTranslationSet(),
+		SearchStatus: searchStatus,
+	})
+	return rec.GetViewBuffer(AppStatusViewName)
+}
+
+// TestRenderStatusLine_SearchProviderConsultedAndRendered proves the
+// SearchStatus provider seam is consulted on the render pass and its
+// active output appears in the status line (dbsavvy-2ttm.5).
+func TestRenderStatusLine_SearchProviderConsultedAndRendered(t *testing.T) {
+	consulted := false
+	buf := renderWithSearchProvider(t, types.ResultTabKey(0), func() (string, int, int, bool) {
+		consulted = true
+		return "alic", 3, 40, true
+	})
+	if !consulted {
+		t.Fatalf("SearchStatus provider was not consulted")
+	}
+	if !strings.Contains(buf, "search: alic 3/40") {
+		t.Fatalf("status buffer = %q; want it to contain active search segment", buf)
+	}
+}
+
+// TestRenderStatusLine_SearchSegmentAbsentWhenInactive covers the
+// clear-on-inactive / clear-on-tab-switch mechanism: when the live
+// provider reports active=false (focus left a result tab or search was
+// cleared) the segment must be absent on the next frame.
+func TestRenderStatusLine_SearchSegmentAbsentWhenInactive(t *testing.T) {
+	buf := renderWithSearchProvider(t, types.ResultTabKey(0), func() (string, int, int, bool) {
+		return "", 0, 0, false
+	})
+	if strings.Contains(buf, "search:") {
+		t.Fatalf("status buffer = %q; want no search segment when provider inactive", buf)
+	}
+}
+
+// TestRenderStatusLine_SearchSegmentAbsentWhenProviderNil confirms the
+// bootstrap-safety fallback: a nil SearchStatus provider renders no
+// segment and does not panic.
+func TestRenderStatusLine_SearchSegmentAbsentWhenProviderNil(t *testing.T) {
+	buf := renderWithSearchProvider(t, types.ResultTabKey(0), nil)
+	if strings.Contains(buf, "search:") {
+		t.Fatalf("status buffer = %q; want no search segment when provider nil", buf)
 	}
 }

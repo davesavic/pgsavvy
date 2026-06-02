@@ -89,6 +89,14 @@ type StatusRenderDeps struct {
 	// (search_path, role, etc.) for display in the status bar. Nil →
 	// no settings section rendered (bootstrap safety / no session).
 	SessionSettings func() map[string]string
+	// SearchStatus reports the active-search state for the focused
+	// result tab's grid (dbsavvy-2ttm.5). It MUST read the live active
+	// grid at call time (every frame) — not a captured pointer — so a
+	// tab switch reflects the new tab's count and clears when focus
+	// leaves a result tab. Returns active=false when focus is not a
+	// result tab, no tab is active, or no search is live. Nil → no
+	// search segment rendered (bootstrap safety / partial test wiring).
+	SearchStatus func() (query string, cur, total int, active bool)
 }
 
 // RenderStatusLine resolves the focused context's mode label, builds the
@@ -194,6 +202,16 @@ func RenderStatusLine(d StatusRenderDeps) {
 	var sessSettings map[string]string
 	if d.SessionSettings != nil {
 		sessSettings = d.SessionSettings()
+	}
+	// Active-search segment: read the focused result tab's grid live each
+	// frame (provider must not capture a *grid.View) so a tab switch or
+	// search clear is reflected on the next pass. Appended as a status
+	// option so it sits alongside the other line-2 sections; absent when
+	// the provider reports active=false.
+	if d.SearchStatus != nil {
+		if seg := status.SearchIndicator(d.SearchStatus()); seg != "" {
+			options = append(options, seg)
+		}
 	}
 	line := status.BuildStatusLine(label, conn, options, d.Tr, busy, frame, txSt, txSp, sessSettings)
 	_ = d.Driver.SetContent(AppStatusViewName, line)

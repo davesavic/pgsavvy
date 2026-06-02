@@ -3,10 +3,12 @@ package orchestrator
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -99,6 +101,39 @@ func (g *Gui) sessionSettingsAccessor() func() map[string]string {
 			return nil
 		}
 		return snap.All()
+	}
+}
+
+// searchStatusAccessor returns a closure suitable for
+// StatusRenderDeps.SearchStatus. The closure reads the LIVE active
+// result tab's grid at call time (every render frame) — it captures no
+// *grid.View pointer — so a tab switch reflects the new tab's match
+// count and the segment clears the next frame after focus leaves a
+// result tab or the search is cleared (dbsavvy-2ttm.5). Returns
+// active=false when focus is not a result tab, no tab is active, or no
+// search is live. Returns nil when the tab helper is unwired (bootstrap
+// safety — no result pane yet).
+func (g *Gui) searchStatusAccessor() func() (string, int, int, bool) {
+	if g.resultTabsH == nil {
+		return nil
+	}
+	return func() (string, int, int, bool) {
+		if g.tree == nil {
+			return "", 0, 0, false
+		}
+		focused := g.tree.Current()
+		if focused == nil || !strings.HasPrefix(string(focused.GetKey()), string(types.ResultTabViewPrefix)) {
+			return "", 0, 0, false
+		}
+		tab := g.resultTabsH.Active()
+		if tab == nil {
+			return "", 0, 0, false
+		}
+		grid := tab.Grid()
+		if grid == nil {
+			return "", 0, 0, false
+		}
+		return grid.SearchStatus()
 	}
 }
 

@@ -143,6 +143,23 @@ func txIndicator(st models.TxStatus, savepoints []string) string {
 	}
 }
 
+// SearchIndicator renders the active-search status segment for the
+// status bar (dbsavvy-2ttm.5). Returns "" when active is false, so the
+// caller appends nothing when no search is live on the focused result
+// tab. Active searches render "search: <query> <cur>/<total>"; when
+// total == 0 the " · no matches" suffix is appended using the shared
+// optionSep so the empty-result case is visible at a glance.
+func SearchIndicator(query string, cur, total int, active bool) string {
+	if !active {
+		return ""
+	}
+	seg := fmt.Sprintf("search: %s %d/%d", query, cur, total)
+	if total == 0 {
+		return seg + optionSep + "no matches"
+	}
+	return seg
+}
+
 // settingsSearchPathMaxLen is the maximum length of a search_path value
 // before truncation. Values longer than this are clipped and suffixed
 // with "..." to prevent status bar overflow.
