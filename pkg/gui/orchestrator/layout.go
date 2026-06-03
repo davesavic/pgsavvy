@@ -470,6 +470,19 @@ func (g *Gui) RunLayout(w, h int) error {
 				view.Title = ctx.GetTitle()
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
+			// HISTORY styling (dbsavvy-o9k0): the query-history browse popup
+			// is the focused modal while on top, so give it the same
+			// focused-modal treatment as TABLE_INSPECT — surface its
+			// "History" frame title and paint the active border (popups are
+			// skipped by the Tier-1 applyFocusFrameColors pass; gocui only
+			// resets FrameColor when the view is freshly created, so this
+			// runs after SetView every frame). No Wrap: the body is
+			// pre-formatted with a "> " cursor marker that reflow would
+			// mangle.
+			if ctx.GetKey() == types.HISTORY && view != nil {
+				view.Title = ctx.GetTitle()
+				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+			}
 			_ = ctx.HandleRender()
 			_, _ = g.driver.SetViewOnTop(name)
 			onStack[ctx.GetKey()] = struct{}{}
