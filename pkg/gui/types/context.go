@@ -62,6 +62,11 @@ const (
 	// PopupSizeCellEditor: centred, height-bounded edit popup whose max
 	// width is derived from the live canvas width by the orchestrator.
 	PopupSizeCellEditor
+	// PopupSizePrompt: centred, capped to a small fixed max cols×rows
+	// (orchestrator-owned prompt constants) — a single-field prompt popup
+	// sized to its label+input rather than a screen fraction. Clamped to
+	// the canvas at render time so small terminals don't overflow.
+	PopupSizePrompt
 	// PopupSizeAnchored: a cursor-anchored dropdown (the completion
 	// SUGGESTIONS popup). The geometry is NOT computed by popupRectFor —
 	// it needs the live editor view handle (Dimensions/Origin) and the

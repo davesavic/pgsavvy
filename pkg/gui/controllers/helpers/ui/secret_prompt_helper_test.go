@@ -306,9 +306,11 @@ func TestSecretPromptHelper_MaskedRender_RealView(t *testing.T) {
 // back.
 // Regression for dbsavvy-3ye.8 — before the fix the code set View.Mask, which
 // masks EVERY cell at draw time, so the whole popup (label included) drew as
-// bullets. Asserts on the DRAWN cells: (1) the label renders as readable
-// plaintext, (2) the typed buffer renders only as mask runes, (3) the real
-// secret never reaches the screen. Re-introducing View.Mask makes (1) fail.
+// bullets. The masked-prompt label now renders as the frame title (the body is
+// just the masked input line). Asserts on the DRAWN cells: (1) the label
+// renders as readable plaintext (in the title), (2) the typed buffer renders
+// only as mask runes, (3) the real secret never reaches the screen.
+// Re-introducing View.Mask makes (1) fail.
 //
 // Must NOT use t.Parallel(): gocui.Screen is a process-level global set by the
 // headless Gui. If a second headless-Gui test is ever added to this test binary
@@ -345,10 +347,12 @@ func TestSecretPromptHelper_MaskedDraw_LabelReadable(t *testing.T) {
 			typed = true
 		}
 		// Mirror the orchestrator's layout pass: plumb the live view, set the
-		// wrap width, then render. SetMasked was called above so a regressed
-		// SetView/SetMasked that re-applies View.Mask would trip here.
+		// wrap width, publish the masked-prompt label as the frame title, then
+		// render. SetMasked was called above so a regressed SetView/SetMasked
+		// that re-applies View.Mask would mask the title too and trip here.
 		pc.SetView(v)
 		pc.SetLabelWrapWidth(v.InnerWidth())
+		v.Title = pc.GetTitle()
 		return pc.HandleRender()
 	})
 
