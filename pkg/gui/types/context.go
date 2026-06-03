@@ -1,5 +1,7 @@
 package types
 
+import "strings"
+
 // ContextKind classifies a Context by its layout/lifecycle role. See
 // DESIGN.md §8 lines 561-571.
 type ContextKind int
@@ -212,6 +214,23 @@ func AllContextKeys() []ContextKey {
 // QUERY_EDITOR context lands.
 func (k ContextKey) IsEditable() bool {
 	return k == COMMAND_LINE || k == QUERY_EDITOR || k == PROMPT || k == CELL_EDITOR || k == SEARCH_LINE
+}
+
+// Display humanizes the snake_case key into a readable label for popup
+// chrome — the cheatsheet tab bar + scope banner show these instead of
+// the raw slug ("query_editor" -> "Query Editor", "global" -> "Global").
+func (k ContextKey) Display() string {
+	if k == "" {
+		return ""
+	}
+	words := strings.Split(string(k), "_")
+	for i, w := range words {
+		if w == "" {
+			continue
+		}
+		words[i] = strings.ToUpper(w[:1]) + w[1:]
+	}
+	return strings.Join(words, " ")
 }
 
 // KeybindingsOpts is the (currently empty) bag passed to GetKeybindings

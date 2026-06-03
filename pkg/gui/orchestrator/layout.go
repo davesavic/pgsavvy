@@ -483,7 +483,21 @@ func (g *Gui) RunLayout(w, h int) error {
 				view.Title = ctx.GetTitle()
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
+			// CHEATSHEET styling + scroll (dbsavvy-quyg): the keybinding
+			// cheatsheet is the focused modal while on top, so give it the
+			// same "Keybindings" frame title + active border as HISTORY
+			// (popups are skipped by the Tier-1 applyFocusFrameColors pass;
+			// gocui resets FrameColor on SetView, so this runs every frame).
+			// The scroll origin is applied AFTER HandleRender below so
+			// view.LinesHeight reflects the freshly written body.
+			if ctx.GetKey() == types.CHEATSHEET && view != nil {
+				view.Title = ctx.GetTitle()
+				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+			}
 			_ = ctx.HandleRender()
+			if ctx.GetKey() == types.CHEATSHEET && view != nil {
+				applyCheatsheetScroll(view, ctx)
+			}
 			_, _ = g.driver.SetViewOnTop(name)
 			onStack[ctx.GetKey()] = struct{}{}
 		}
@@ -1161,6 +1175,36 @@ func resolveFocusedRailName(stackViewName, activeTabView string) string {
 		return activeTabView
 	}
 	return stackViewName
+}
+
+// cheatsheetScroller is the scroll surface CheatsheetContext exposes. The
+// layout owns the bottom clamp because only it knows the rendered content
+// height + viewport rows; the context owns the top clamp (>= 0).
+type cheatsheetScroller interface {
+	ScrollY() int
+	SetScrollY(int)
+}
+
+// applyCheatsheetScroll pins the cheatsheet view's vertical origin to the
+// context's scroll offset, clamped to the content's last page. Called
+// after HandleRender so view.LinesHeight reflects the freshly written
+// body. The clamped value is written back so `G` (a large sentinel) and
+// any over-scroll settle exactly on the last page (dbsavvy-quyg).
+func applyCheatsheetScroll(view *gocui.View, ctx types.IBaseContext) {
+	sc, ok := ctx.(cheatsheetScroller)
+	if !ok {
+		return
+	}
+	maxOY := view.LinesHeight() - view.InnerHeight()
+	if maxOY < 0 {
+		maxOY = 0
+	}
+	oy := sc.ScrollY()
+	if oy > maxOY {
+		oy = maxOY
+		sc.SetScrollY(oy)
+	}
+	view.SetOriginY(oy)
 }
 
 func applyFocusFrameColors(rails map[string]*gocui.View, focusedName string, active, inactive gocui.Attribute) {
