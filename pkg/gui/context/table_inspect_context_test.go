@@ -83,7 +83,7 @@ func TestTableInspectContext_HandleRender_DelegatesToBody(t *testing.T) {
 
 // Regression test for dbsavvy-3vf: the context layer must NOT strip
 // control bytes from the composed body. AD-17 places SafeText at the
-// leaf panel layer (formatColumn / formatIndex). Stripping at this
+// leaf panel layer (columnCells / indexCells). Stripping at this
 // layer destroys the legitimate \x1b color escape on the active-tab
 // header and every \n between header and rows, collapsing the popup
 // into a single unreadable line. See bug report 2026-05-23.

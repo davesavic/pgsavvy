@@ -230,8 +230,33 @@ func TestColumnsPanel_FormatsNonNullAndDefault(t *testing.T) {
 	if !strings.Contains(body, "default=nextval()") {
 		t.Errorf("Body() should contain default=nextval(): %q", body)
 	}
-	if strings.Count(body, "\n") != 1 {
-		t.Errorf("Body() expected one newline between rows: %q", body)
+	if strings.Count(body, "\n") != 2 {
+		t.Errorf("Body() expected header + two rows (2 newlines): %q", body)
+	}
+}
+
+func TestColumnsPanel_AlignsColumnsWithHeader(t *testing.T) {
+	base := context.NewBaseContext(context.BaseContextOpts{
+		Key:      types.COLUMNS,
+		ViewName: string(types.COLUMNS),
+		Kind:     types.SIDE_CONTEXT,
+	})
+	cc := context.NewColumnsContext(base, types.ContextTreeDeps{})
+	cc.SetItems([]any{
+		&models.Column{Name: "id", DataType: "bigint", Nullable: false},
+		&models.Column{Name: "created_at", DataType: "timestamptz", Nullable: false},
+	})
+	p := controllers.NewColumnsPanel(cc)
+	lines := strings.Split(p.Body(), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected header + 2 rows, got %d lines: %q", len(lines), lines)
+	}
+	if !strings.HasPrefix(lines[0], "NAME") {
+		t.Errorf("first line should be header starting with NAME: %q", lines[0])
+	}
+	// The type column must begin at the same offset on every data row.
+	if off1, off2 := strings.Index(lines[1], "bigint"), strings.Index(lines[2], "timestamptz"); off1 != off2 {
+		t.Errorf("type column not aligned: bigint@%d timestamptz@%d (%q / %q)", off1, off2, lines[1], lines[2])
 	}
 }
 
@@ -256,7 +281,32 @@ func TestIndexesPanel_FormatsUniqueAndColumns(t *testing.T) {
 	if !strings.Contains(body, "(email)") {
 		t.Errorf("Body() should contain (email): %q", body)
 	}
-	if !strings.Contains(body, "using btree") {
-		t.Errorf("Body() should contain `using btree`: %q", body)
+	if !strings.Contains(body, "btree") {
+		t.Errorf("Body() should contain method `btree`: %q", body)
+	}
+}
+
+func TestIndexesPanel_AlignsColumnsWithHeader(t *testing.T) {
+	base := context.NewBaseContext(context.BaseContextOpts{
+		Key:      types.INDEXES,
+		ViewName: string(types.INDEXES),
+		Kind:     types.SIDE_CONTEXT,
+	})
+	ic := context.NewIndexesContext(base, types.ContextTreeDeps{})
+	ic.SetItems([]any{
+		&models.Index{Name: "idx_data", Columns: []string{"data"}, Method: "gin"},
+		&models.Index{Name: "users_pkey", IsPrimary: true, IsUnique: true, Columns: []string{"id"}, Method: "btree"},
+	})
+	p := controllers.NewIndexesPanel(ic)
+	lines := strings.Split(p.Body(), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected header + 2 rows, got %d lines: %q", len(lines), lines)
+	}
+	if !strings.HasPrefix(lines[0], "NAME") {
+		t.Errorf("first line should be header starting with NAME: %q", lines[0])
+	}
+	// The columns list must begin at the same offset on every data row.
+	if off1, off2 := strings.Index(lines[1], "(data)"), strings.Index(lines[2], "(id)"); off1 != off2 {
+		t.Errorf("columns not aligned: (data)@%d (id)@%d (%q / %q)", off1, off2, lines[1], lines[2])
 	}
 }
