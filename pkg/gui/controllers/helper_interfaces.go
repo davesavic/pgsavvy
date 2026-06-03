@@ -245,6 +245,7 @@ type EditorBufferReader interface {
 	SelectionText() (string, bool)
 	ReplaceAll(text string) error
 	ReplaceSelection(text string) error
+	InsertAtCursor(text string) error
 }
 
 // NoticeReporter routes server NOTICE / WARNING messages from

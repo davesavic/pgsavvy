@@ -72,6 +72,8 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.HIDE_OVERLAY, types.TEMPORARY_POPUP},
 		{types.EXPORT_MENU, types.TEMPORARY_POPUP},
 		{types.TABLE_INSPECT, types.TEMPORARY_POPUP},
+		// dbsavvy-o9k0.5: HISTORY promoted from STUB to TEMPORARY_POPUP.
+		{types.HISTORY, types.TEMPORARY_POPUP},
 		// 1 GLOBAL, 3 DISPLAY (messages panel removed by dbsavvy-fc2.1).
 		{types.GLOBAL, types.GLOBAL_CONTEXT},
 		{types.LIMIT, types.DISPLAY_CONTEXT},
@@ -82,11 +84,10 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		// 2 MAIN_CONTEXT (CONNECTING removed by dbsavvy-bsh).
 		{types.QUERY_EDITOR, types.MAIN_CONTEXT},
 		{types.CONNECTION_MANAGER, types.MAIN_CONTEXT},
-		// 4 STUB (TABLE_DATA_EDITOR + RESULT_GRID + PLAN + HISTORY).
+		// 3 STUB (TABLE_DATA_EDITOR + RESULT_GRID + PLAN).
 		{types.TABLE_DATA_EDITOR, types.STUB},
 		{types.RESULT_GRID, types.STUB},
 		{types.PLAN, types.STUB},
-		{types.HISTORY, types.STUB},
 	}
 	if len(cases) != 22 {
 		t.Fatalf("test bug: cases len = %d, want 22", len(cases))
@@ -113,7 +114,8 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		// dbsavvy-bwq.py4: CellEditor, CommitDialog, ConflictDialog and
 		// FKReversePicker take TEMPORARY_POPUP from 9→13.
 		// dbsavvy-2ttm.3: SEARCH_LINE takes it 13→14.
-		types.TEMPORARY_POPUP: 14,
+		// dbsavvy-o9k0.5: HISTORY (promoted from STUB) takes it 14→15.
+		types.TEMPORARY_POPUP: 15,
 		types.EXTRAS_CONTEXT:  0,
 		types.GLOBAL_CONTEXT:  1,
 		types.DISPLAY_CONTEXT: 3,
@@ -122,7 +124,9 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		// dbsavvy-e53.2 adds CONNECTING (MAIN_CONTEXT), so MAIN_CONTEXT is 2.
 		// dbsavvy-bsh removes CONNECTING, so MAIN_CONTEXT is 2.
 		types.MAIN_CONTEXT: 2,
-		types.STUB:         4,
+		// dbsavvy-o9k0.5 promotes HISTORY from STUB to TEMPORARY_POPUP, so
+		// STUB drops 4→3.
+		types.STUB: 3,
 		// dbsavvy-56u.2 introduces FIRST_RUN_TIP, the first
 		// PERSISTENT_POPUP shipped by the app.
 		types.PERSISTENT_POPUP: 1,

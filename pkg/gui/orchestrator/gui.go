@@ -1207,6 +1207,25 @@ func (g *Gui) wireWithDriver() error {
 		g.controllers.TableInspect = inspectCtrl
 	}
 
+	// dbsavvy-o9k0.5: build the HISTORY popup controller and attach it to
+	// its context so its j/k/gg/G/<cr>/<esc> bindings reach the trie via
+	// AllDefaultBindings. Constructed here — not in AttachControllers —
+	// because it needs a Pop-capable handle on the focus-stack
+	// (*gui.ContextTree). refocus is nil: ContextTree.Pop already fires
+	// HandleFocus on the new stack top (the query editor), so no explicit
+	// focus call is needed after the <cr> insert pops the popup (mirrors
+	// the FKReversePicker / TableInspect close path which rely on Pop
+	// alone). The editor buffer adapter receives the inserted SQL.
+	if g.registry != nil && g.registry.History != nil && g.tree != nil {
+		historyCtx := g.registry.History
+		historyCtrl := controllers.NewHistoryController(
+			g.deps.Common, helperBag.CoreDeps, historyCtx,
+			newEditorBufferAdapter(g.registry.QueryEditor), g.tree, nil,
+		)
+		historyCtrl.AttachToContext(&historyCtx.BaseContext)
+		g.controllers.History = historyCtrl
+	}
+
 	// dbsavvy-bwq.Z1: build the CHEATSHEET popup controller and attach it
 	// to the context so the [, ], <tab>, <esc>, q bindings reach the trie
 	// via AllDefaultBindings. Constructed here — not in AttachControllers
@@ -1356,6 +1375,13 @@ func (g *Gui) wireWithDriver() error {
 	// already on top re-targets without a second Push.
 	if g.registry != nil && g.registry.TableInspect != nil && g.tree != nil {
 		g.registerTableInspectOpen(connectInv)
+	}
+
+	// dbsavvy-o9k0.5: HistoryOpen — `<leader>h` in the QUERY_EDITOR opens
+	// the recent-query browser popup. Pushes on the UI thread, loads
+	// Recent(N) off-thread, mutates the context on the UI thread.
+	if g.registry != nil && g.registry.History != nil && g.tree != nil {
+		g.registerHistoryOpen()
 	}
 
 	// dbsavvy-ioaj: rail highlight+jump search (/ n N <esc>) on SCHEMAS
@@ -1939,6 +1965,57 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 			g.OnWorker(func(_ gocui.Task) error {
 				defer done()
 				connectInv.populateIndexesRail(context.Background(), sch, tname)
+				return nil
+			})
+			return nil
+		},
+	})
+}
+
+// historyRecentLimit caps the window of recent rows the HISTORY popup
+// loads. 500 is generous for a browse-and-pick surface (v1 has no
+// filter) while bounding the single-statement read + render cost.
+const historyRecentLimit = 500
+
+// registerHistoryOpen registers the HistoryOpen action handler. When the
+// store is unopened (g.history nil) the handler is a no-op (no popup,
+// no toast — the editor stays put). Otherwise it pushes the HISTORY
+// popup on the UI thread, loads Recent(N) on a worker goroutine, and
+// publishes the rows back on the UI thread via OnUIThreadContentOnly.
+// SetRows / Push are NEVER called from the worker (data race under
+// -race). Mirrors registerTableInspectOpen's threading shape.
+func (g *Gui) registerHistoryOpen() {
+	historyCtx := g.registry.History
+
+	_ = g.cmdRegistry.Register(&commands.Command{
+		ID:          commands.HistoryOpen,
+		Description: "Open query history",
+		Handler: func(_ commands.ExecCtx) error {
+			if g.history == nil {
+				return nil
+			}
+
+			// Re-open semantics: if the popup is already on top, reload in
+			// place rather than stacking a second copy.
+			cur := g.tree.Current()
+			if cur == nil || cur.GetKey() != types.HISTORY {
+				historyCtx.SetRows(nil)
+				if err := g.tree.Push(historyCtx); err != nil {
+					return err
+				}
+			}
+
+			store := g.history
+			g.OnWorker(func(_ gocui.Task) error {
+				rows, err := store.Recent(context.Background(), historyRecentLimit)
+				if err != nil {
+					g.deps.Common.Logger().Warn("gui: history recent", "err", err)
+					return nil
+				}
+				g.OnUIThreadContentOnly(func() error {
+					historyCtx.SetRows(rows)
+					return nil
+				})
 				return nil
 			})
 			return nil

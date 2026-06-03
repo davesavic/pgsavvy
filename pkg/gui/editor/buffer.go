@@ -541,6 +541,15 @@ func splitTextOnNewline(s string) [][]rune {
 	return out
 }
 
+// EndOfInsert returns the Position the cursor should occupy after
+// inserting text at p — the end of the freshly inserted span. Callers
+// that Apply an EditKindInsert at p then SetCursor the result keep the
+// cursor following the insertion point (the VimEditor insert path and
+// editorBufferAdapter.InsertAtCursor both do this).
+func EndOfInsert(p Position, text string) Position {
+	return advancePos(p, text)
+}
+
 // advancePos returns the Position reached after inserting text at p.
 // Internal newlines advance the line counter and reset the column;
 // the final chunk's rune length advances the column on the

@@ -109,6 +109,30 @@ func (a *editorBufferAdapter) ReplaceAll(text string) error {
 	return nil
 }
 
+// InsertAtCursor splices text in at the canonical Buffer cursor and
+// moves the cursor to the end of the inserted text. The whole insert
+// (multi-line text included) is committed as ONE editor.EditKindInsert,
+// so a single `u` reverts it. dbsavvy-o9k0.2.
+func (a *editorBufferAdapter) InsertAtCursor(text string) error {
+	if a == nil || a.qec == nil {
+		return nil
+	}
+	buf := a.qec.Buffer()
+	if buf == nil {
+		return nil
+	}
+	cursor := buf.CursorPos()
+	if err := buf.Apply(editor.Edit{
+		Kind:  editor.EditKindInsert,
+		Range: editor.Range{Start: cursor, End: cursor},
+		Text:  text,
+	}); err != nil {
+		return err
+	}
+	buf.SetCursor(editor.EndOfInsert(cursor, text))
+	return nil
+}
+
 // ReplaceSelection replaces the visual selection with text. Exits
 // visual mode after the replacement. dbsavvy-4y5.4.2.
 func (a *editorBufferAdapter) ReplaceSelection(text string) error {

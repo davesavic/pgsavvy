@@ -12,6 +12,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
@@ -359,5 +360,109 @@ func TestEditorBufferReaderReadsBuffer(t *testing.T) {
 	// "SELECT 1;\n" = 10 bytes; cursor at col 9 of line 1 → 10 + 9 = 19.
 	if got, want := bag.EditorBuffer.CursorOffset(), 19; got != want {
 		t.Fatalf("CursorOffset() = %d, want %d", got, want)
+	}
+}
+
+// editorBufferForTest seeds the canonical QueryEditor Buffer with seed
+// text + cursor and returns the live buffer plus the controller-facing
+// EditorBufferReader, both backed by the same real *editor.Buffer.
+func editorBufferForTest(t *testing.T, seed string, cursor editor.Position) (*editor.Buffer, controllers.EditorBufferReader) {
+	t.Helper()
+	g, _ := buildTestGuiWithHistory(t)
+	qec := g.Registry().QueryEditor
+	if qec == nil {
+		t.Fatal("registry.QueryEditor is nil after wireWithDriver")
+	}
+	buf := qec.Buffer()
+	if seed != "" {
+		if err := buf.Apply(editor.Edit{
+			Kind:  editor.EditKindInsert,
+			Range: editor.Range{Start: editor.Position{}, End: editor.Position{}},
+			Text:  seed,
+		}); err != nil {
+			t.Fatalf("seed Buffer.Apply: %v", err)
+		}
+	}
+	buf.SetCursor(cursor)
+	bag := g.HelperBagForTest()
+	if bag.EditorBuffer == nil {
+		t.Fatal("HelperBag.EditorBuffer is nil after wireWithDriver")
+	}
+	return buf, bag.EditorBuffer
+}
+
+func TestEditorBufferAdapterInsertAtCursorMid(t *testing.T) {
+	// "SELECT ;" — cursor between "SELECT " and ";" (col 7).
+	buf, ed := editorBufferForTest(t, "SELECT ;", editor.Position{Line: 0, Col: 7})
+	if err := ed.InsertAtCursor("1"); err != nil {
+		t.Fatalf("InsertAtCursor: %v", err)
+	}
+	if got, want := buf.String(), "SELECT 1;"; got != want {
+		t.Fatalf("after insert String() = %q, want %q", got, want)
+	}
+	if got, want := buf.CursorPos(), (editor.Position{Line: 0, Col: 8}); got != want {
+		t.Fatalf("cursor = %+v, want %+v (end of inserted text)", got, want)
+	}
+}
+
+func TestEditorBufferAdapterInsertAtCursorOneUndo(t *testing.T) {
+	buf, ed := editorBufferForTest(t, "SELECT ;", editor.Position{Line: 0, Col: 7})
+	if err := ed.InsertAtCursor("1"); err != nil {
+		t.Fatalf("InsertAtCursor: %v", err)
+	}
+	if err := buf.Undo(); err != nil {
+		t.Fatalf("Undo: %v", err)
+	}
+	if got, want := buf.String(), "SELECT ;"; got != want {
+		t.Fatalf("after single Undo String() = %q, want pre-insert %q", got, want)
+	}
+}
+
+func TestEditorBufferAdapterInsertAtCursorEmptyBuffer(t *testing.T) {
+	buf, ed := editorBufferForTest(t, "", editor.Position{})
+	if err := ed.InsertAtCursor("hello"); err != nil {
+		t.Fatalf("InsertAtCursor: %v", err)
+	}
+	if got, want := buf.String(), "hello"; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+	if got, want := buf.CursorPos(), (editor.Position{Line: 0, Col: 5}); got != want {
+		t.Fatalf("cursor = %+v, want %+v", got, want)
+	}
+}
+
+func TestEditorBufferAdapterInsertAtCursorEndOfBuffer(t *testing.T) {
+	// Cursor at end of single-line buffer "abc" (col 3).
+	buf, ed := editorBufferForTest(t, "abc", editor.Position{Line: 0, Col: 3})
+	if err := ed.InsertAtCursor("def"); err != nil {
+		t.Fatalf("InsertAtCursor: %v", err)
+	}
+	if got, want := buf.String(), "abcdef"; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+	if got, want := buf.CursorPos(), (editor.Position{Line: 0, Col: 6}); got != want {
+		t.Fatalf("cursor = %+v, want %+v", got, want)
+	}
+}
+
+func TestEditorBufferAdapterInsertAtCursorMultiLineOneUndo(t *testing.T) {
+	// Cursor at end of "a" (col 1); insert text containing newlines.
+	buf, ed := editorBufferForTest(t, "a", editor.Position{Line: 0, Col: 1})
+	if err := ed.InsertAtCursor("X\nY\nZ"); err != nil {
+		t.Fatalf("InsertAtCursor: %v", err)
+	}
+	if got, want := buf.String(), "aX\nY\nZ"; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+	// End of inserted span: started at {0,1}, two newlines → line 2, last
+	// chunk "Z" → col 1.
+	if got, want := buf.CursorPos(), (editor.Position{Line: 2, Col: 1}); got != want {
+		t.Fatalf("cursor = %+v, want %+v", got, want)
+	}
+	if err := buf.Undo(); err != nil {
+		t.Fatalf("Undo: %v", err)
+	}
+	if got, want := buf.String(), "a"; got != want {
+		t.Fatalf("after single Undo String() = %q, want %q (multi-line insert is one undo step)", got, want)
 	}
 }

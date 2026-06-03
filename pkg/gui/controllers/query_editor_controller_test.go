@@ -27,6 +27,9 @@ type fakeEditorBuffer struct {
 	Off    int
 	Sel    string
 	HasSel bool
+	// Inserted records every InsertAtCursor argument in call order so
+	// T4's history-replay tests can assert what text was inserted.
+	Inserted []string
 }
 
 func (f *fakeEditorBuffer) BufferText() string              { return f.Text }
@@ -34,6 +37,10 @@ func (f *fakeEditorBuffer) CursorOffset() int               { return f.Off }
 func (f *fakeEditorBuffer) SelectionText() (string, bool)   { return f.Sel, f.HasSel }
 func (f *fakeEditorBuffer) ReplaceAll(_ string) error       { return nil }
 func (f *fakeEditorBuffer) ReplaceSelection(_ string) error { return nil }
+func (f *fakeEditorBuffer) InsertAtCursor(text string) error {
+	f.Inserted = append(f.Inserted, text)
+	return nil
+}
 
 type fakeResultTabs struct {
 	resultCalls []resultCall

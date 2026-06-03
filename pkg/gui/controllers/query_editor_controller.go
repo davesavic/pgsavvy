@@ -122,6 +122,7 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		{"<leader>!", commands.QueryRunInNewTx, tr.Actions.QueryRunInNewTx, 0, false},
 		{"<leader>f", commands.QueryFormat, tr.Actions.QueryFormat, defaultMode, false},
 		{"<leader>f", commands.QueryFormat, tr.Actions.QueryFormat, visualRunModes, false},
+		{"<leader>h", commands.HistoryOpen, tr.Actions.HistoryOpen, defaultMode, false},
 	}
 	out := make([]*types.ChordBinding, 0, len(specs)+6)
 	for _, s := range specs {

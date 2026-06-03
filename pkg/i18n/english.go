@@ -180,6 +180,9 @@ type ActionTranslations struct {
 	TableInspectPrevTab string
 	TableInspectClose   string
 
+	// History popup (dbsavvy-o9k0).
+	HistoryOpen string
+
 	// Expanded view mode + result-grid motion (dbsavvy-uv0.7).
 	ResultViewToggle      string
 	ResultCursorDown      string
@@ -398,6 +401,8 @@ func EnglishTranslationSet() *TranslationSet {
 			TableInspectNextTab: "Next tab",
 			TableInspectPrevTab: "Previous tab",
 			TableInspectClose:   "Close",
+
+			HistoryOpen: "Open query history",
 
 			ResultViewToggle:      "Toggle expanded view",
 			ResultCursorDown:      "Cursor down",

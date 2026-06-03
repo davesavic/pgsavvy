@@ -301,6 +301,52 @@ func (a *sessionRecorderAdapter) Record(stmt string, durMs int64, rowsAffected i
 	a.h.Record(stmt, durMs, rowsAffected, succeeded, a.connID)
 }
 
+// HistoryRow is a single recorded statement read back from the history store.
+type HistoryRow struct {
+	ID           int64
+	ExecutedAt   int64
+	SQL          string
+	DurationMS   int64
+	Succeeded    bool
+	ConnectionID string
+}
+
+// Recent returns up to limit rows from history, newest first (id DESC).
+// limit <= 0 returns an empty (non-nil) slice and a nil error.
+func (h *History) Recent(ctx context.Context, limit int) ([]HistoryRow, error) {
+	if limit <= 0 {
+		return []HistoryRow{}, nil
+	}
+
+	const q = `SELECT id, executed_at, sql, duration_ms, succeeded, connection_id
+FROM history
+ORDER BY id DESC
+LIMIT ?`
+
+	rows, err := h.db.QueryContext(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query: history recent: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]HistoryRow, 0, limit)
+	for rows.Next() {
+		var (
+			r    HistoryRow
+			succ int64
+		)
+		if err := rows.Scan(&r.ID, &r.ExecutedAt, &r.SQL, &r.DurationMS, &succ, &r.ConnectionID); err != nil {
+			return nil, fmt.Errorf("query: history recent scan: %w", err)
+		}
+		r.Succeeded = succ != 0
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("query: history recent rows: %w", err)
+	}
+	return out, nil
+}
+
 // SearchByPrefix returns up to limit distinct sql statements from history whose
 // FTS5 token stream contains a token starting with prefix, ordered by most
 // recent first. limit <= 0 or an empty/blank prefix returns an empty slice.
