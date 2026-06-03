@@ -518,12 +518,23 @@ func (c *connectInvoker) setActiveConn(profile *models.Connection) {
 // Best-effort: a LoadSchemas error is logged and swallowed — the user
 // still has the open connection and can retry by re-pressing <cr>.
 // Empty registry / context (test wiring) collapses to a silent no-op.
+//
+// dbsavvy-zt9: this runs on a WORKER goroutine, so the publishSchemaItems
+// call (a mutex-free SetItems write the MainLoop reads every frame) is
+// marshaled onto the UI thread via runOnUIThread, mirroring the
+// load-on-worker / publish-on-UI-thread split (dbsavvy-fow.1). The other
+// publishSchemaItems caller (the connect path) is already on the UI thread
+// and stays raw, so the marshal lives here at the worker call site rather
+// than inside publishSchemaItems.
 func (c *connectInvoker) populateSchemasRail(ctx context.Context) {
 	items, ok := c.loadSchemaItems(ctx)
 	if !ok {
 		return
 	}
-	c.publishSchemaItems(items, ok)
+	c.runOnUIThread(func() error {
+		c.publishSchemaItems(items, ok)
+		return nil
+	})
 }
 
 // loadSchemaItems is the I/O+compute phase of populateSchemasRail: it
@@ -647,6 +658,11 @@ func (c *connectInvoker) publishSchemaItems(items []any, ok bool) {
 // TablesContext.items are left intact so a transient failure does not
 // blank a previously-loaded list. An empty schema name is a silent
 // no-op (matches the picker's empty-list contract).
+//
+// dbsavvy-zt9: this runs on a WORKER goroutine, so the SetItems publish (a
+// mutex-free items+cursor write the MainLoop reads every frame) is marshaled
+// onto the UI thread via runOnUIThread to serialise with render-frame reads,
+// mirroring the load-on-worker / publish-on-UI-thread split (dbsavvy-fow.1).
 func (c *connectInvoker) populateTablesRail(ctx context.Context, schema string) {
 	if c == nil || c.g == nil || c.helper == nil {
 		return
@@ -666,7 +682,11 @@ func (c *connectInvoker) populateTablesRail(ctx context.Context, schema string) 
 	for i := range tables {
 		items[i] = tables[i]
 	}
-	c.g.registry.Tables.SetItems(items)
+	tablesCtx := c.g.registry.Tables
+	c.runOnUIThread(func() error {
+		tablesCtx.SetItems(items)
+		return nil
+	})
 }
 
 // populateColumnsRail loads the column list for (schema, table) via
@@ -677,6 +697,11 @@ func (c *connectInvoker) populateTablesRail(ctx context.Context, schema string) 
 // Best-effort: a LoadColumns error is logged and swallowed; the existing
 // ColumnsContext.items are left intact so a transient failure does not
 // blank a previously-loaded list. Empty schema/table is a silent no-op.
+//
+// dbsavvy-zt9: this runs on a WORKER goroutine, so the SetItems publish (a
+// mutex-free items+cursor write the MainLoop reads every frame) is marshaled
+// onto the UI thread via runOnUIThread to serialise with render-frame reads,
+// mirroring the load-on-worker / publish-on-UI-thread split (dbsavvy-fow.1).
 func (c *connectInvoker) populateColumnsRail(ctx context.Context, schema, table string) {
 	if c == nil || c.g == nil || c.helper == nil {
 		return
@@ -696,7 +721,11 @@ func (c *connectInvoker) populateColumnsRail(ctx context.Context, schema, table 
 	for i := range cols {
 		items[i] = cols[i]
 	}
-	c.g.registry.Columns.SetItems(items)
+	columnsCtx := c.g.registry.Columns
+	c.runOnUIThread(func() error {
+		columnsCtx.SetItems(items)
+		return nil
+	})
 }
 
 // populateIndexesRail loads the index list for (schema, table) via
@@ -708,6 +737,11 @@ func (c *connectInvoker) populateColumnsRail(ctx context.Context, schema, table 
 // Best-effort: a LoadIndexes error is logged and swallowed; the existing
 // IndexesContext.items are left intact so a transient failure does not
 // blank a previously-loaded list. Empty schema/table is a silent no-op.
+//
+// dbsavvy-zt9: this runs on a WORKER goroutine, so the SetItems publish (a
+// mutex-free items+cursor write the MainLoop reads every frame) is marshaled
+// onto the UI thread via runOnUIThread to serialise with render-frame reads,
+// mirroring the load-on-worker / publish-on-UI-thread split (dbsavvy-fow.1).
 func (c *connectInvoker) populateIndexesRail(ctx context.Context, schema, table string) {
 	if c == nil || c.g == nil || c.helper == nil {
 		return
@@ -727,7 +761,11 @@ func (c *connectInvoker) populateIndexesRail(ctx context.Context, schema, table 
 	for i := range idxs {
 		items[i] = idxs[i]
 	}
-	c.g.registry.Indexes.SetItems(items)
+	indexesCtx := c.g.registry.Indexes
+	c.runOnUIThread(func() error {
+		indexesCtx.SetItems(items)
+		return nil
+	})
 }
 
 // loadQueryEditorBuffer is the I/O phase of the dbsavvy-wwd.9 post-Connect

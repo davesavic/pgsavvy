@@ -285,3 +285,47 @@ func TestPopulateIndexesRailEmptyKeysIsNoop(t *testing.T) {
 		t.Fatalf("empty table: Items() = %d, want 0", got)
 	}
 }
+
+// dbsavvy-zt9: populateIndexesRail runs on a worker goroutine, so its
+// SetItems publish (a mutex-free items+cursor write the MainLoop reads
+// every render frame) MUST be marshaled onto the UI thread rather than
+// written raw on the worker. With a wired driver, runOnUIThread routes
+// the publish through GuiDriver.Update; the recorder runs Update inline,
+// so we assert (a) exactly one Update was recorded by the populate call
+// (the marshal happened) and (b) the items still landed (recorder inline
+// execution mirrors the MainLoop draining the queued func). A raw,
+// unmarshaled SetItems would NOT increment UpdateCalls — that is the
+// regression this guards against.
+func TestPopulateIndexesRailMarshalsSetItemsOntoUIThread(t *testing.T) {
+	g, rec := buildTestGuiWithHistory(t)
+
+	caps := drivers.Capabilities{}
+	driverName, conn := registerWireFake(t, caps)
+	conn.indexes = []models.Index{
+		{Name: "users_pkey", Schema: "public", Table: "users"},
+		{Name: "users_email_idx", Schema: "public", Table: "users"},
+	}
+
+	bag := g.HelperBagForTest()
+	profile := &models.Connection{Name: "wire-indexes-marshal", Driver: driverName, DSN: "postgres://stub"}
+	if err := bag.Connect.Connect(context.Background(), profile); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	// Snapshot AFTER Connect so we count only the populate call's marshal.
+	preUpdate := rec.UpdateCalls
+
+	g.PopulateIndexesRailForTest("public", "users")
+
+	if got := rec.UpdateCalls - preUpdate; got != 1 {
+		t.Fatalf("UpdateCalls delta = %d, want 1 — SetItems must be marshaled "+
+			"through driver.Update exactly once (raw write would be 0)", got)
+	}
+	if errs := rec.UpdateErrors(); len(errs) != 0 {
+		t.Fatalf("driver propagated errors from the marshaled publish: %v", errs)
+	}
+	if got := len(g.Registry().Indexes.Items()); got != 2 {
+		t.Fatalf("IndexesContext.Items() = %d, want 2 — marshaled publish must "+
+			"still land the rows (recorder runs Update inline)", got)
+	}
+}
