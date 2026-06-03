@@ -322,6 +322,11 @@ const (
 	TableInspectPrevTab = "table_inspect.prev_tab"
 	TableInspectClose   = "table_inspect.close"
 
+	// HistoryOpen opens the HISTORY recent-query browser popup from the
+	// QUERY_EDITOR (`<leader>h` in Normal mode). Loads Recent(N) off the
+	// UI thread and pushes the popup (dbsavvy-o9k0).
+	HistoryOpen = "history.open"
+
 	// Plan family — owned by PlanController (dbsavvy-uv0.8). All PLAN-
 	// scoped; published only when a plan tab is the focused context.
 	//   PlanToggle        - <CR> toggles collapse on the cursor node
@@ -671,6 +676,7 @@ func AllActionIDs() []string {
 		TableInspectNextTab,
 		TableInspectPrevTab,
 		TableInspectClose,
+		HistoryOpen,
 		PlanToggle,
 		PlanExpandAll,
 		PlanCollapseAll,

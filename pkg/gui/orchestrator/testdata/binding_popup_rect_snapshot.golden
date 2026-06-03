@@ -80,6 +80,12 @@ binding	scope=hide_overlay	key=j	mode=normal
 binding	scope=hide_overlay	key=k	mode=normal
 binding	scope=hide_overlay	key=q	mode=normal
 binding	scope=hide_overlay	key=␣	mode=normal
+binding	scope=history	key=<cr>	mode=normal
+binding	scope=history	key=<esc>	mode=normal
+binding	scope=history	key=G	mode=normal
+binding	scope=history	key=gg	mode=normal
+binding	scope=history	key=j	mode=normal
+binding	scope=history	key=k	mode=normal
 binding	scope=menu	key=<cr>	mode=normal
 binding	scope=menu	key=<esc>	mode=normal
 binding	scope=plan	key=<c-a>	mode=normal
@@ -123,6 +129,7 @@ binding	scope=query_editor	key=<leader>R	mode=normal
 binding	scope=query_editor	key=<leader>e	mode=normal
 binding	scope=query_editor	key=<leader>f	mode=mode(0x1c)
 binding	scope=query_editor	key=<leader>f	mode=normal
+binding	scope=query_editor	key=<leader>h	mode=normal
 binding	scope=query_editor	key=<leader>r	mode=mode(0x1c)
 binding	scope=query_editor	key=<leader>r	mode=normal
 binding	scope=query_editor	key=<leader>tR	mode=normal
@@ -329,7 +336,7 @@ popuprect	key=first_run_tip	none
 popuprect	key=fk_reverse_picker	x0=20	y0=20	x1=80	y1=80
 popuprect	key=global	none
 popuprect	key=hide_overlay	x0=25	y0=25	x1=75	y1=75
-popuprect	key=history	none
+popuprect	key=history	x0=20	y0=20	x1=80	y1=80
 popuprect	key=indexes	none
 popuprect	key=limit	none
 popuprect	key=menu	x0=25	y0=25	x1=75	y1=75

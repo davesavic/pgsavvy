@@ -74,12 +74,15 @@ type ContextTree struct {
 	// bordered box over a blank background.
 	ConnectionManager *ConnectionManagerContext
 
+	// History is the <leader>h recent-query browser popup
+	// (dbsavvy-o9k0). TEMPORARY_POPUP kind.
+	History *HistoryContext
+
 	// Stub instances for the remaining deferred Contexts; Layout
 	// filters these by Kind == STUB so they never reach SetView.
 	TableDataEditor *StubContext
 	ResultGrid      *StubContext
 	Plan            *StubContext
-	History         *StubContext
 
 	// all is the flattened, ordered slice of every Context that
 	// participates in Flatten()/ByKey() iteration. Built once by
@@ -255,6 +258,14 @@ func contextSpecs() []contextSpec {
 			},
 			assign: func(t *ContextTree, c types.IBaseContext) { t.FKReversePicker = c.(*FKReversePickerContext) },
 		},
+		{
+			key: types.HISTORY, kind: types.TEMPORARY_POPUP, title: "History", inFlatten: true,
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.6, HeightFrac: 0.6},
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewHistoryContext(b, d)
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.History = c.(*HistoryContext) },
+		},
 
 		// GLOBAL / DISPLAY.
 		{
@@ -342,13 +353,6 @@ func contextSpecs() []contextSpec {
 				return NewStubContext(types.PLAN, string(types.PLAN))
 			},
 			assign: func(t *ContextTree, c types.IBaseContext) { t.Plan = c.(*StubContext) },
-		},
-		{
-			key: types.HISTORY, kind: types.STUB, inFlatten: true,
-			build: func(_ BaseContext, _ types.ContextTreeDeps) types.IBaseContext {
-				return NewStubContext(types.HISTORY, string(types.HISTORY))
-			},
-			assign: func(t *ContextTree, c types.IBaseContext) { t.History = c.(*StubContext) },
 		},
 	}
 }

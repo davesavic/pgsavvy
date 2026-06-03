@@ -48,6 +48,13 @@ type Controllers struct {
 	ConflictDialog  *ConflictDialogController
 	FKReversePicker *FKReversePickerController
 
+	// History is constructed by the orchestrator alongside TableInspect:
+	// it takes a Pop-capable handle on the focus-stack (*gui.ContextTree)
+	// which this package cannot import. The bundle still owns it so
+	// RegisterActions + AllDefaultBindings include its bindings
+	// (dbsavvy-o9k0.5).
+	History *HistoryController
+
 	// Reconnect owns the <leader>R GLOBAL binding and the reconnect
 	// dialog (hq5.7).
 	Reconnect *ReconnectController
@@ -296,8 +303,9 @@ type controllerRegistrant interface {
 
 // entries returns one controllerEntry per NON-NIL controller field in the
 // bundle, in declaration order. It is the single registry the three derived
-// paths iterate. The 6 orchestrator-constructed controllers (TableInspect,
-// CellEditor, CommitDialog, ConflictDialog, FKReversePicker, Cheatsheet) are
+// paths iterate. The 7 orchestrator-constructed controllers (TableInspect,
+// CellEditor, CommitDialog, ConflictDialog, FKReversePicker, History,
+// Cheatsheet) are
 // nil until the orchestrator assigns them; they are skipped here when nil and
 // picked up automatically once non-nil (AllDefaultBindings / RegisterActions
 // run after full construction at gui.go:1289). VimEditor is the only
@@ -336,6 +344,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "CommitDialog", ctrl: b.CommitDialog, attach: true},
 		{name: "ConflictDialog", ctrl: b.ConflictDialog, attach: true},
 		{name: "FKReversePicker", ctrl: b.FKReversePicker, attach: true},
+		{name: "History", ctrl: b.History, attach: true},
 		{name: "Cheatsheet", ctrl: b.Cheatsheet, attach: true},
 		{name: "SearchLine", ctrl: b.SearchLine, attach: true},
 	}

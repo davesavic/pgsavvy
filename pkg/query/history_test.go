@@ -369,6 +369,121 @@ func insertN(t *testing.T, db *sql.DB, n int) {
 	require.NoError(t, tx.Commit())
 }
 
+func TestHistoryRecent_NewestFirst(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	path := filepath.Join(t.TempDir(), "history.sqlite")
+	h, err := New(path)
+	require.NoError(t, err)
+	defer func() { _ = h.Close() }()
+
+	h.Record("SELECT 1", 1, 1, true, "c1")
+	h.Record("SELECT 2", 1, 1, true, "c1")
+	h.Record("SELECT 3", 1, 1, true, "c1")
+	waitForHistoryFlush(t, h, 3)
+
+	got, err := h.Recent(context.Background(), 10)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	require.Equal(t, "SELECT 3", got[0].SQL)
+	require.Equal(t, "SELECT 2", got[1].SQL)
+	require.Equal(t, "SELECT 1", got[2].SQL)
+	require.Greater(t, got[0].ID, got[1].ID)
+	require.Greater(t, got[1].ID, got[2].ID)
+}
+
+func TestHistoryRecent_SucceededMapping(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	path := filepath.Join(t.TempDir(), "history.sqlite")
+	h, err := New(path)
+	require.NoError(t, err)
+	defer func() { _ = h.Close() }()
+
+	h.Record("SELECT ok", 1, 1, true, "c1")
+	h.Record("SELECT fail", 1, 0, false, "c1")
+	waitForHistoryFlush(t, h, 2)
+
+	got, err := h.Recent(context.Background(), 10)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	// Newest first: "SELECT fail" was recorded last.
+	require.Equal(t, "SELECT fail", got[0].SQL)
+	require.False(t, got[0].Succeeded)
+	require.Equal(t, "SELECT ok", got[1].SQL)
+	require.True(t, got[1].Succeeded)
+}
+
+func TestHistoryRecent_LimitZeroOrNegative(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	path := filepath.Join(t.TempDir(), "history.sqlite")
+	h, err := New(path)
+	require.NoError(t, err)
+	defer func() { _ = h.Close() }()
+
+	h.Record("SELECT 1", 1, 1, true, "c1")
+	waitForHistoryFlush(t, h, 1)
+
+	for _, limit := range []int{0, -1} {
+		got, err := h.Recent(context.Background(), limit)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Empty(t, got)
+	}
+}
+
+func TestHistoryRecent_EmptyStore(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	path := filepath.Join(t.TempDir(), "history.sqlite")
+	h, err := New(path)
+	require.NoError(t, err)
+	defer func() { _ = h.Close() }()
+
+	got, err := h.Recent(context.Background(), 10)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Empty(t, got)
+}
+
+func TestHistoryRecent_LimitExceedsRowCount(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	path := filepath.Join(t.TempDir(), "history.sqlite")
+	h, err := New(path)
+	require.NoError(t, err)
+	defer func() { _ = h.Close() }()
+
+	h.Record("SELECT 1", 1, 1, true, "c1")
+	h.Record("SELECT 2", 1, 1, true, "c1")
+	waitForHistoryFlush(t, h, 2)
+
+	got, err := h.Recent(context.Background(), 100)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+}
+
+func TestHistoryRecent_LimitEqualsRowCount(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	path := filepath.Join(t.TempDir(), "history.sqlite")
+	h, err := New(path)
+	require.NoError(t, err)
+	defer func() { _ = h.Close() }()
+
+	h.Record("SELECT 1", 1, 1, true, "c1")
+	h.Record("SELECT 2", 1, 1, true, "c1")
+	h.Record("SELECT 3", 1, 1, true, "c1")
+	waitForHistoryFlush(t, h, 3)
+
+	got, err := h.Recent(context.Background(), 3)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	require.Equal(t, "SELECT 3", got[0].SQL)
+	require.Equal(t, "SELECT 1", got[2].SQL)
+}
+
 func TestHistory_RecordNonBlockingLatency(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history.sqlite")
 	h, err := New(path)
