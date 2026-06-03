@@ -234,6 +234,16 @@ const (
 	ResultFilterPrev   = "result.filter.prev"
 	ResultFilterClear  = "result.filter.clear"
 
+	// dbsavvy-ioaj: left-rail (Schemas/Tables) highlight+jump search.
+	//   RailSearchPrompt - /     opens the search input on the focused rail
+	//   RailSearchNext   - n     jump to next rail match
+	//   RailSearchPrev   - N     jump to previous rail match
+	//   RailSearchClear  - <esc> clear active rail search (no-op when inactive)
+	RailSearchPrompt = "rail.search.prompt"
+	RailSearchNext   = "rail.search.next"
+	RailSearchPrev   = "rail.search.prev"
+	RailSearchClear  = "rail.search.clear"
+
 	// SEARCH_LINE-scoped accept / cancel (dbsavvy-2ttm). Internal IDs —
 	// not bound by user keybindings.yaml; driven by the SearchLine
 	// controller's <cr> / <esc> bindings.
@@ -621,6 +631,10 @@ func AllActionIDs() []string {
 		ResultFilterNext,
 		ResultFilterPrev,
 		ResultFilterClear,
+		RailSearchPrompt,
+		RailSearchNext,
+		RailSearchPrev,
+		RailSearchClear,
 		ResultSearchAccept,
 		ResultSearchCancel,
 		ResultSortPick,

@@ -1358,6 +1358,13 @@ func (g *Gui) wireWithDriver() error {
 		g.registerTableInspectOpen(connectInv)
 	}
 
+	// dbsavvy-ioaj: rail highlight+jump search (/ n N <esc>) on SCHEMAS
+	// and TABLES. Single action IDs; the handler resolves the focused
+	// rail from ctx.Scope. Needs the registry + SearchLine helper.
+	if g.registry != nil && g.cmdRegistry != nil && g.searchLineHelp != nil {
+		g.registerRailSearch()
+	}
+
 	// Rail-switch (1-6, Tab) needs the focus tree + context registry,
 	// which the Controllers aggregate does not hold; register here. The
 	// results-resolver closes over g.resultTabsH so digit 6 / cycle-to-
@@ -1934,6 +1941,112 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 				connectInv.populateIndexesRail(context.Background(), sch, tname)
 				return nil
 			})
+			return nil
+		},
+	})
+}
+
+// railForScope returns the focused side-rail SideListContext for a
+// rail-search scope, or nil for any other scope.
+func (g *Gui) railForScope(scope types.ContextKey) *guicontext.SideListContext {
+	if g.registry == nil {
+		return nil
+	}
+	switch scope {
+	case types.TABLES:
+		if g.registry.Tables != nil {
+			return &g.registry.Tables.SideListContext
+		}
+	case types.SCHEMAS:
+		if g.registry.Schemas != nil {
+			return &g.registry.Schemas.SideListContext
+		}
+	}
+	return nil
+}
+
+// setRailMatchCount pushes the cur/total slot into the SearchLine strip
+// (visible only while the input is open). Empty when the search is inactive.
+func (g *Gui) setRailMatchCount(rail *guicontext.SideListContext) {
+	if g.searchLineHelp == nil || rail == nil {
+		return
+	}
+	_, cur, total, active := rail.SearchStatus()
+	if !active {
+		g.searchLineHelp.SetMatchCount("")
+		return
+	}
+	g.searchLineHelp.SetMatchCount(fmt.Sprintf("%d/%d", cur, total))
+}
+
+// openRailSearch opens the SearchLine input bound to rail. Mirrors the
+// grid SearchPrompt: incremental OnChange drives SetSearch; <cr> is
+// land-only (OnAccept no-op, search stays active); <esc> cancels
+// (CursorRestore puts the cursor back, then ClearSearch).
+func (g *Gui) openRailSearch(rail *guicontext.SideListContext) error {
+	if g.searchLineHelp == nil || rail == nil {
+		return nil
+	}
+	return g.searchLineHelp.Open(ui.SearchLineOpts{
+		OnChange: func(query string) {
+			rail.SetSearch(query)
+			g.setRailMatchCount(rail)
+		},
+		OnAccept:       func(string) {},
+		OnCancel:       func() { rail.ClearSearch() },
+		CursorSnapshot: func() any { return rail.Cursor() },
+		CursorRestore: func(snap any) {
+			if i, ok := snap.(int); ok {
+				rail.SetCursor(i)
+			}
+		},
+	})
+}
+
+// registerRailSearch wires the four rail-search action handlers. Each
+// resolves the focused rail from ctx.Scope so one handler serves both
+// SCHEMAS and TABLES. <esc>-clear is a no-op when no search is active
+// (mirrors the RESULT_GRID <esc> precedent; there is no global <esc>
+// focus-pop on the rails to fall through to).
+func (g *Gui) registerRailSearch() {
+	reg := g.cmdRegistry
+	_ = reg.Register(&commands.Command{
+		ID: commands.RailSearchPrompt, Description: "Search rail",
+		Handler: func(ctx commands.ExecCtx) error { return g.openRailSearch(g.railForScope(ctx.Scope)) },
+	})
+	_ = reg.Register(&commands.Command{
+		ID: commands.RailSearchNext, Description: "Next rail match",
+		Handler: func(ctx commands.ExecCtx) error {
+			rail := g.railForScope(ctx.Scope)
+			if rail == nil {
+				return nil
+			}
+			rail.NextMatch()
+			g.setRailMatchCount(rail)
+			return nil
+		},
+	})
+	_ = reg.Register(&commands.Command{
+		ID: commands.RailSearchPrev, Description: "Prev rail match",
+		Handler: func(ctx commands.ExecCtx) error {
+			rail := g.railForScope(ctx.Scope)
+			if rail == nil {
+				return nil
+			}
+			rail.PrevMatch()
+			g.setRailMatchCount(rail)
+			return nil
+		},
+	})
+	_ = reg.Register(&commands.Command{
+		ID: commands.RailSearchClear, Description: "Clear rail search",
+		Handler: func(ctx commands.ExecCtx) error {
+			rail := g.railForScope(ctx.Scope)
+			if rail == nil || !rail.SearchActive() {
+				return nil // no-op when inactive
+			}
+			rail.ClearSearch()
+			g.setRailMatchCount(rail)
 			return nil
 		},
 	})

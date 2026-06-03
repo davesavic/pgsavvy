@@ -80,6 +80,40 @@ func (c *TablesController) GetKeybindings(_ types.KeybindingsOpts) []*types.Chor
 		Description: tr.Actions.TableInspectOpen,
 		ShowInBar:   true,
 	})
+	// dbsavvy-ioaj: rail highlight+jump search. Single action IDs bound
+	// on TABLES; the orchestrator handler resolves the focused rail from
+	// ctx.Scope. j/k/gg/G/<CR> (baseBindings) and r/i are untouched.
+	out = append(out,
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Code: '/'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.TABLES,
+			ActionID:    commands.RailSearchPrompt,
+			Description: tr.Actions.RailSearchPrompt,
+		},
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Code: 'n'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.TABLES,
+			ActionID:    commands.RailSearchNext,
+			Description: tr.Actions.RailSearchNext,
+		},
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Code: 'N'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.TABLES,
+			ActionID:    commands.RailSearchPrev,
+			Description: tr.Actions.RailSearchPrev,
+		},
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Special: types.KeyEsc}},
+			Mode:        types.ModeNormal,
+			Scope:       types.TABLES,
+			ActionID:    commands.RailSearchClear,
+			Description: tr.Actions.RailSearchClear,
+		},
+	)
+
 	out = append(out, railSwitchBindings(view, tr)...)
 	return out
 }

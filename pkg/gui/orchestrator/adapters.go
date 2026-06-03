@@ -57,6 +57,10 @@ func (a schemasPickerAdapter) ToggleShowHidden() {
 		return
 	}
 	a.registry.SetShowHiddenMode(!a.registry.GetShowHiddenMode())
+	// dbsavvy-ioaj note 3: drop any active rail search on a show-hidden
+	// toggle (UI-thread path, race-free) so n/N can't park the cursor on
+	// a now-hidden row. Must precede the HandleRender kick below.
+	a.registry.ClearSearch()
 	// Force a re-render: the SCHEMAS view content is recomputed by
 	// renderRows on the next HandleRender pass and the toggle changes
 	// which rows survive the runtime-hidden filter. Without this kick

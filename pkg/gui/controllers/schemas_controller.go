@@ -172,6 +172,40 @@ func (s *SchemasController) GetKeybindings(_ types.KeybindingsOpts) []*types.Cho
 		})
 	}
 
+	// dbsavvy-ioaj: rail highlight+jump search. Single action IDs bound
+	// on SCHEMAS; the orchestrator handler resolves the focused rail from
+	// ctx.Scope. H/U/<leader>H/r and baseBindings are untouched.
+	out = append(out,
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Code: '/'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.SCHEMAS,
+			ActionID:    commands.RailSearchPrompt,
+			Description: tr.Actions.RailSearchPrompt,
+		},
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Code: 'n'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.SCHEMAS,
+			ActionID:    commands.RailSearchNext,
+			Description: tr.Actions.RailSearchNext,
+		},
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Code: 'N'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.SCHEMAS,
+			ActionID:    commands.RailSearchPrev,
+			Description: tr.Actions.RailSearchPrev,
+		},
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Special: types.KeyEsc}},
+			Mode:        types.ModeNormal,
+			Scope:       types.SCHEMAS,
+			ActionID:    commands.RailSearchClear,
+			Description: tr.Actions.RailSearchClear,
+		},
+	)
+
 	out = append(out, railSwitchBindings(view, tr)...)
 	return out
 }

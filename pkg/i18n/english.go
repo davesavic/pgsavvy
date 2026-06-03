@@ -152,6 +152,12 @@ type ActionTranslations struct {
 	ResultSearchAccept string
 	ResultSearchCancel string
 
+	// Left-rail (Schemas/Tables) highlight+jump search (dbsavvy-ioaj).
+	RailSearchPrompt string
+	RailSearchNext   string
+	RailSearchPrev   string
+	RailSearchClear  string
+
 	// In-grid sort (dbsavvy-uv0.5).
 	ResultSortPick      string
 	ResultSortPickLabel string
@@ -369,6 +375,11 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultFilterClear:  "Clear result search",
 			ResultSearchAccept: "Accept search",
 			ResultSearchCancel: "Cancel search",
+
+			RailSearchPrompt: "Search rail",
+			RailSearchNext:   "Jump to next rail match",
+			RailSearchPrev:   "Jump to previous rail match",
+			RailSearchClear:  "Clear rail search",
 
 			ResultSortPick:      "Sort rows by column",
 			ResultSortPickLabel: "sort by column",
