@@ -457,6 +457,19 @@ func (g *Gui) RunLayout(w, h int) error {
 				view.Wrap = true
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
+			// TABLE_INSPECT styling (dbsavvy-2048): the columns/indexes
+			// inspect popup is the focused modal while on top, so give it
+			// the same focused-modal treatment as CONFIRMATION/PROMPT —
+			// surface its "Table inspect" frame title and paint the active
+			// border (popups are skipped by the Tier-1
+			// applyFocusFrameColors pass; gocui only resets FrameColor when
+			// the view is freshly created, so this runs after SetView every
+			// frame). No Wrap: the tabbed body is pre-formatted and would
+			// be mangled by reflow.
+			if ctx.GetKey() == types.TABLE_INSPECT && view != nil {
+				view.Title = ctx.GetTitle()
+				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+			}
 			_ = ctx.HandleRender()
 			_, _ = g.driver.SetViewOnTop(name)
 			onStack[ctx.GetKey()] = struct{}{}
