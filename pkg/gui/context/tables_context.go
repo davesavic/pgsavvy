@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/grid"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -16,9 +17,11 @@ type TablesContext struct {
 
 // NewTablesContext builds a TablesContext bound to the TABLES key and view.
 func NewTablesContext(base BaseContext, deps Deps) *TablesContext {
-	return &TablesContext{
+	ctx := &TablesContext{
 		SideListContext: NewSideListContext(base, deps),
 	}
+	ctx.SetRailNameAccessor(func(it any) string { return grid.SanitizeCellEscapes(tableName(it)) })
+	return ctx
 }
 
 // HandleRender writes the table-row text into the TABLES view each
@@ -53,7 +56,7 @@ func (t *TablesContext) renderRows() string {
 		if i == t.cursor {
 			marker = "> "
 		}
-		name := tableName(item)
+		name := t.nameOf(item)
 		if name == "" {
 			if dim {
 				fmt.Fprintf(&b, "%s\x1b[2m%v\x1b[0m\n", marker, item)
@@ -62,11 +65,8 @@ func (t *TablesContext) renderRows() string {
 			}
 			continue
 		}
-		if dim {
-			fmt.Fprintf(&b, "%s\x1b[2m%s\x1b[0m\n", marker, name)
-		} else {
-			fmt.Fprintf(&b, "%s%s\n", marker, name)
-		}
+		spans := t.highlightSpansForRow(i)
+		fmt.Fprintf(&b, "%s%s\n", marker, renderRailName(name, dim, spans))
 	}
 	return b.String()
 }

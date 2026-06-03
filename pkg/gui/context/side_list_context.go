@@ -225,3 +225,21 @@ func (s *SideListContext) SearchStatus() (query string, cur, total int, active b
 // Matches returns the current match slice. Single-threaded on the UI
 // thread; callers must not mutate it.
 func (s *SideListContext) Matches() []RailMatch { return s.search.matches }
+
+// highlightSpansForRow returns the highlight spans for the row at RAW
+// index i, flagging the current match. nil when search is inactive or the
+// row has no matches (so renderRows stays on the clean path).
+func (s *SideListContext) highlightSpansForRow(i int) []railHighlightSpan {
+	if !s.SearchActive() {
+		return nil
+	}
+	var out []railHighlightSpan
+	for j := range s.search.matches {
+		m := s.search.matches[j]
+		if m.RowIndex != i {
+			continue
+		}
+		out = append(out, railHighlightSpan{start: m.ByteStart, end: m.ByteEnd, current: j == s.search.current})
+	}
+	return out
+}
