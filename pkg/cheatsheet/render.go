@@ -96,5 +96,5 @@ func ScopeLabel(scope types.ContextKey, tr *i18n.TranslationSet) string {
 	if scope == "all" && tr != nil {
 		return tr.CheatsheetScopeAllLabel
 	}
-	return string(scope)
+	return scope.Display()
 }

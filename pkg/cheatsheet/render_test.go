@@ -102,11 +102,11 @@ func TestScopeLabel_AllReplacedWithFriendlyLabel(t *testing.T) {
 	if got := ScopeLabel("all", tr); got != tr.CheatsheetScopeAllLabel {
 		t.Fatalf("ScopeLabel(all) = %q, want %q", got, tr.CheatsheetScopeAllLabel)
 	}
-	if got := ScopeLabel(types.TABLES, tr); got != "tables" {
-		t.Fatalf("ScopeLabel(TABLES) = %q, want %q", got, "tables")
+	if got := ScopeLabel(types.TABLES, tr); got != "Tables" {
+		t.Fatalf("ScopeLabel(TABLES) = %q, want %q", got, "Tables")
 	}
-	if got := ScopeLabel("all", nil); got != "all" {
-		t.Fatalf("ScopeLabel(all, nil tr) = %q, want %q", got, "all")
+	if got := ScopeLabel("all", nil); got != "All" {
+		t.Fatalf("ScopeLabel(all, nil tr) = %q, want %q", got, "All")
 	}
 }
 

@@ -13,10 +13,25 @@ import (
 // IDs only ever fire under the CHEATSHEET scope and have no user-facing
 // config knob (the bindings are shipped defaults).
 const (
-	cheatsheetNextTabID = "cheatsheet.next_tab"
-	cheatsheetPrevTabID = "cheatsheet.prev_tab"
-	cheatsheetCloseID   = "cheatsheet.close"
+	cheatsheetNextTabID  = "cheatsheet.next_tab"
+	cheatsheetPrevTabID  = "cheatsheet.prev_tab"
+	cheatsheetCloseID    = "cheatsheet.close"
+	cheatsheetDownID     = "cheatsheet.scroll_down"
+	cheatsheetUpID       = "cheatsheet.scroll_up"
+	cheatsheetPageDownID = "cheatsheet.page_down"
+	cheatsheetPageUpID   = "cheatsheet.page_up"
+	cheatsheetTopID      = "cheatsheet.scroll_top"
+	cheatsheetBottomID   = "cheatsheet.scroll_bottom"
 )
+
+// cheatsheetHalfPage is the fixed line delta for <c-d>/<c-u>. The popup
+// caps at ~30 rows (cheatsheetMaxRows), so a half-page of 10 lines is a
+// comfortable jump without needing the live viewport height here.
+const cheatsheetHalfPage = 10
+
+// cheatsheetScrollBottom is the sentinel offset for `G`; the layout pass
+// clamps it down to the content's last page.
+const cheatsheetScrollBottom = 1 << 20
 
 // cheatsheetTree is the narrow focus-stack surface CheatsheetController
 // uses to pop the popup off the stack. *gui.ContextTree satisfies it.
@@ -75,26 +90,61 @@ func NewCheatsheetController(
 	}
 }
 
-// NextTab advances the active tab on the installed TabbedPopup state.
-// No-op when the context or state is unwired.
+// NextTab advances the active tab on the installed TabbedPopup state and
+// resets the scroll offset so the new tab opens at the top. No-op when
+// the context or state is unwired.
 func (h *CheatsheetController) NextTab(_ commands.ExecCtx) error {
 	if h.ctx == nil {
 		return nil
 	}
 	if s := h.ctx.State(); s != nil {
 		s.NextTab()
+		h.ctx.SetScrollY(0)
 	}
 	return nil
 }
 
-// PrevTab rewinds the active tab on the installed TabbedPopup state.
-// No-op when the context or state is unwired.
+// PrevTab rewinds the active tab on the installed TabbedPopup state and
+// resets the scroll offset so the new tab opens at the top. No-op when
+// the context or state is unwired.
 func (h *CheatsheetController) PrevTab(_ commands.ExecCtx) error {
 	if h.ctx == nil {
 		return nil
 	}
 	if s := h.ctx.State(); s != nil {
 		s.PrevTab()
+		h.ctx.SetScrollY(0)
+	}
+	return nil
+}
+
+// scroll moves the cheatsheet view offset by delta lines. The context
+// clamps the top edge; the layout pass clamps the bottom against the
+// rendered content height.
+func (h *CheatsheetController) scroll(delta int) error {
+	if h.ctx != nil {
+		h.ctx.Scroll(delta)
+	}
+	return nil
+}
+
+// ScrollDown / ScrollUp move one line; PageDown / PageUp move a half
+// page; Top / Bottom jump to the first / last page.
+func (h *CheatsheetController) ScrollDown(commands.ExecCtx) error { return h.scroll(1) }
+func (h *CheatsheetController) ScrollUp(commands.ExecCtx) error   { return h.scroll(-1) }
+func (h *CheatsheetController) PageDown(commands.ExecCtx) error   { return h.scroll(cheatsheetHalfPage) }
+func (h *CheatsheetController) PageUp(commands.ExecCtx) error     { return h.scroll(-cheatsheetHalfPage) }
+
+func (h *CheatsheetController) ScrollTop(commands.ExecCtx) error {
+	if h.ctx != nil {
+		h.ctx.SetScrollY(0)
+	}
+	return nil
+}
+
+func (h *CheatsheetController) ScrollBottom(commands.ExecCtx) error {
+	if h.ctx != nil {
+		h.ctx.SetScrollY(cheatsheetScrollBottom)
 	}
 	return nil
 }
@@ -150,6 +200,62 @@ func (h *CheatsheetController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			ActionID:    cheatsheetCloseID,
 			Description: "Cheatsheet close",
 		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'j'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CHEATSHEET,
+			ActionID:    cheatsheetDownID,
+			Description: "Cheatsheet scroll down",
+		},
+		{
+			Sequence:    []types.ChordKey{{Special: types.KeyDown}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CHEATSHEET,
+			ActionID:    cheatsheetDownID,
+			Description: "Cheatsheet scroll down",
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'k'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CHEATSHEET,
+			ActionID:    cheatsheetUpID,
+			Description: "Cheatsheet scroll up",
+		},
+		{
+			Sequence:    []types.ChordKey{{Special: types.KeyUp}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CHEATSHEET,
+			ActionID:    cheatsheetUpID,
+			Description: "Cheatsheet scroll up",
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'd', Mod: types.ChordModCtrl}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CHEATSHEET,
+			ActionID:    cheatsheetPageDownID,
+			Description: "Cheatsheet half-page down",
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'u', Mod: types.ChordModCtrl}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CHEATSHEET,
+			ActionID:    cheatsheetPageUpID,
+			Description: "Cheatsheet half-page up",
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'g'}, {Code: 'g'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CHEATSHEET,
+			ActionID:    cheatsheetTopID,
+			Description: "Cheatsheet scroll to top",
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'G'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CHEATSHEET,
+			ActionID:    cheatsheetBottomID,
+			Description: "Cheatsheet scroll to bottom",
+		},
 	}
 }
 
@@ -176,6 +282,25 @@ func (h *CheatsheetController) RegisterActions(reg *commands.Registry) {
 		Tag:         "Help",
 		Handler:     h.Close,
 	})
+	for _, b := range []struct {
+		id      string
+		desc    string
+		handler func(commands.ExecCtx) error
+	}{
+		{cheatsheetDownID, "Cheatsheet scroll down", h.ScrollDown},
+		{cheatsheetUpID, "Cheatsheet scroll up", h.ScrollUp},
+		{cheatsheetPageDownID, "Cheatsheet half-page down", h.PageDown},
+		{cheatsheetPageUpID, "Cheatsheet half-page up", h.PageUp},
+		{cheatsheetTopID, "Cheatsheet scroll to top", h.ScrollTop},
+		{cheatsheetBottomID, "Cheatsheet scroll to bottom", h.ScrollBottom},
+	} {
+		_ = reg.Register(&commands.Command{
+			ID:          b.id,
+			Description: b.desc,
+			Tag:         "Help",
+			Handler:     b.handler,
+		})
+	}
 }
 
 // AttachToContext registers GetKeybindings on the CHEATSHEET context.
@@ -207,12 +332,12 @@ func BuildCheatsheetTabs(focused types.ContextKey, render func(scope types.Conte
 	if focused != "" && focused != types.GLOBAL {
 		body := render(focused)
 		tabs = append(tabs, popup.Tab{
-			Title: string(focused),
+			Title: focused.Display(),
 			Panel: NewCheatsheetScopePanel(body),
 		})
 	}
 	tabs = append(tabs, popup.Tab{
-		Title: "global",
+		Title: types.GLOBAL.Display(),
 		Panel: NewCheatsheetScopePanel(render(types.GLOBAL)),
 	})
 	return popup.NewTabbedPopup(tabs)

@@ -29,9 +29,10 @@ type CheatsheetContext struct {
 	deps   depsAlias
 	render func(scope types.ContextKey) string
 
-	mu    sync.Mutex
-	scope types.ContextKey
-	state *popup.TabbedPopup
+	mu      sync.Mutex
+	scope   types.ContextKey
+	state   *popup.TabbedPopup
+	scrollY int
 }
 
 // NewCheatsheetContext builds the CHEATSHEET context. render may be nil
@@ -86,7 +87,40 @@ func (c *CheatsheetContext) SetRender(render func(scope types.ContextKey) string
 func (c *CheatsheetContext) SetState(s *popup.TabbedPopup) {
 	c.mu.Lock()
 	c.state = s
+	c.scrollY = 0
 	c.mu.Unlock()
+}
+
+// Scroll moves the vertical view offset by delta lines, clamping at the
+// top (never negative). The upper bound is enforced by the layout pass,
+// which knows the rendered content height and viewport rows. delta < 0
+// scrolls up; delta > 0 scrolls down.
+func (c *CheatsheetContext) Scroll(delta int) {
+	c.mu.Lock()
+	c.scrollY += delta
+	if c.scrollY < 0 {
+		c.scrollY = 0
+	}
+	c.mu.Unlock()
+}
+
+// SetScrollY sets the absolute vertical offset, clamping at the top. The
+// layout pass calls this to write back the offset it clamped to the
+// content's max scroll (so `G` / over-scroll settle at the last page).
+func (c *CheatsheetContext) SetScrollY(y int) {
+	c.mu.Lock()
+	if y < 0 {
+		y = 0
+	}
+	c.scrollY = y
+	c.mu.Unlock()
+}
+
+// ScrollY returns the current vertical view offset (lines).
+func (c *CheatsheetContext) ScrollY() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.scrollY
 }
 
 // State returns the installed TabbedPopup or nil. Concurrent-safe.
