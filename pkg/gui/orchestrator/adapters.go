@@ -906,7 +906,10 @@ func (c *connectInvoker) restoreSessionSettings(ctx context.Context, sess *sessi
 	}
 
 	return replaySessionSettings(ctx, saved, func(ctx context.Context, sql string) error {
-		_, err := sess.Execute(ctx, models.Query{SQL: sql})
+		// Restoration SETs are internal bootstrap, not user queries — keep
+		// them out of query history. A SET the user types themselves still
+		// records normally (this only suppresses the replay path).
+		_, err := sess.Execute(session.WithoutLogging(ctx), models.Query{SQL: sql})
 		return err
 	}, sess.SettingsSnapshot(), c.g.deps.Common.Logger(), connID)
 }
