@@ -178,6 +178,11 @@ func (g *Gui) RunLayout(w, h int) error {
 					v.SetContent(content)
 					cur := buf.CursorPos()
 					v.FocusPoint(cur.Col, cur.Line, true)
+					// FocusPoint pins only the vertical origin; without
+					// this the editor never scrolls horizontally, so
+					// lines wider than the pane clip past the right
+					// border and the caret vanishes (dbsavvy-jdyt).
+					scrollEditorColumnIntoView(v, cur.Col)
 				}
 			}
 			// Attach the VimEditor master editor every frame.
