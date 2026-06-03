@@ -107,6 +107,9 @@ func (c *HistoryContext) HandleRender() error {
 	writeView(c.deps, func() error {
 		return c.deps.GuiDriver.SetContent(viewName, body)
 	})
+	// Pin the gocui scroll origin to the cursor so the selected row stays in
+	// view as j/k/G move it past the popup's bottom (mirrors the side rails).
+	scrollSideRailIntoView(c.deps, viewName, c.cursor)
 	return nil
 }
 
