@@ -252,12 +252,43 @@ func (c *connectInvoker) Retry() {
 	c.startAttempt(p)
 }
 
+// teardownForSwitch disconnects the live connection when the incoming profile
+// differs from the one currently active, so connectWithGen can re-Connect
+// through the shared ConnectHelper (which rejects a second Connect while a
+// Session is open). It is a no-op on a first connect (no active profile) and
+// on a same-profile re-select. Runs on the worker — the same lane, and the
+// same teardown ordering, as reconnectInvoker.Reconnect (dbsavvy-k70h).
+func (c *connectInvoker) teardownForSwitch(profile *models.Connection) {
+	if c.g == nil || profile == nil {
+		return
+	}
+	active := c.g.activeConnID
+	if active == "" || active == profile.Name {
+		return
+	}
+	// Close the query session FIRST — it releases its pooled conn; closing the
+	// pool (helper.Disconnect) before that deadlocks waiting on the still-held
+	// conn (dbsavvy-txb).
+	if c.g.activeSQLSession != nil {
+		_ = c.g.activeSQLSession.Close()
+		c.g.activeSQLSession = nil
+	}
+	c.helper.Disconnect()
+}
+
 func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Connection, gen uint64) error {
 	// --- WORKER PHASE: all blocking I/O runs here (Connect itself runs on
 	// the worker goroutine — connections_controller.go schedules it via
 	// OnWorker). Nothing in this phase writes GUI state the MainLoop reads;
 	// results are collected into locals and published in the single
 	// OnUIThread closure below (dbsavvy-fow.1).
+	//
+	// dbsavvy-k70h: switching to a different profile mid-session (e.g.
+	// <leader>C → pick another connection) must tear the live connection down
+	// first — the shared ConnectHelper rejects a second Connect with "already
+	// connected" while a Session is open. No-op on a first connect or a
+	// same-profile re-select.
+	c.teardownForSwitch(profile)
 	conn, _, err := c.helper.Connect(ctx, profile)
 	if err != nil {
 		c.routeConnectError(gen, err)
