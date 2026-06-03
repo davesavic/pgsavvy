@@ -1,8 +1,8 @@
 package controllers
 
 import (
-	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
@@ -10,6 +10,13 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
+)
+
+// columnHeader / indexHeader are the fixed header rows prepended to the
+// aligned column/index tables.
+var (
+	columnHeader = []string{"NAME", "TYPE", "NULL", "DEFAULT"}
+	indexHeader  = []string{"NAME", "FLAGS", "COLUMNS", "METHOD"}
 )
 
 // inspectTree is the narrow focus-stack surface TableInspectController
@@ -33,32 +40,22 @@ func NewColumnsPanel(ctx *context.ColumnsContext) *ColumnsPanel {
 	return &ColumnsPanel{ctx: ctx}
 }
 
-// Body returns the formatted column list, or the empty-state placeholder.
+// Body returns the aligned column table (header + one row per column),
+// or the empty-state placeholder.
 func (p *ColumnsPanel) Body() string {
 	if p == nil || p.ctx == nil {
 		return "(no columns)"
 	}
-	items := p.ctx.Items()
-	if len(items) == 0 {
+	rows := make([][]string, 0, len(p.ctx.Items())+1)
+	for _, it := range p.ctx.Items() {
+		if c := asColumn(it); c != nil {
+			rows = append(rows, columnCells(c))
+		}
+	}
+	if len(rows) == 0 {
 		return "(no columns)"
 	}
-	var b strings.Builder
-	first := true
-	for _, it := range items {
-		c := asColumn(it)
-		if c == nil {
-			continue
-		}
-		if !first {
-			b.WriteByte('\n')
-		}
-		first = false
-		b.WriteString(formatColumn(c))
-	}
-	if first {
-		return "(no columns)"
-	}
-	return b.String()
+	return alignRows(append([][]string{columnHeader}, rows...))
 }
 
 // HandleKey is the popup.Panel side of the contract; this panel does
@@ -75,27 +72,24 @@ func asColumn(it any) *models.Column {
 	return nil
 }
 
-// formatColumn renders a single column row.
-// Layout: "<name>  <type>[ NOT NULL][  default=<x>]".
-// Every DB-supplied string passes through config.SafeText (AMD-5c).
-func formatColumn(c *models.Column) string {
-	if c == nil {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(config.SafeText(c.Name))
-	if c.DataType != "" {
-		b.WriteString("  ")
-		b.WriteString(config.SafeText(c.DataType))
-	}
+// columnCells renders a single column as the cells of an aligned row:
+// {name, type, null-marker, default}. Every DB-supplied string passes
+// through config.SafeText (AMD-5c).
+func columnCells(c *models.Column) []string {
+	null := ""
 	if !c.Nullable {
-		b.WriteString("  NOT NULL")
+		null = "NOT NULL"
 	}
+	def := ""
 	if c.Default != "" {
-		b.WriteString("  default=")
-		b.WriteString(config.SafeText(c.Default))
+		def = "default=" + config.SafeText(c.Default)
 	}
-	return b.String()
+	return []string{
+		config.SafeText(c.Name),
+		config.SafeText(c.DataType),
+		null,
+		def,
+	}
 }
 
 // IndexesPanel renders the indexes tab of the TABLE_INSPECT popup.
@@ -108,32 +102,22 @@ func NewIndexesPanel(ctx *context.IndexesContext) *IndexesPanel {
 	return &IndexesPanel{ctx: ctx}
 }
 
-// Body renders the index list, or the empty-state placeholder.
+// Body renders the aligned index table (header + one row per index), or
+// the empty-state placeholder.
 func (p *IndexesPanel) Body() string {
 	if p == nil || p.ctx == nil {
 		return "(no indexes)"
 	}
-	items := p.ctx.Items()
-	if len(items) == 0 {
+	rows := make([][]string, 0, len(p.ctx.Items())+1)
+	for _, it := range p.ctx.Items() {
+		if idx := asIndex(it); idx != nil {
+			rows = append(rows, indexCells(idx))
+		}
+	}
+	if len(rows) == 0 {
 		return "(no indexes)"
 	}
-	var b strings.Builder
-	first := true
-	for _, it := range items {
-		idx := asIndex(it)
-		if idx == nil {
-			continue
-		}
-		if !first {
-			b.WriteByte('\n')
-		}
-		first = false
-		b.WriteString(formatIndex(idx))
-	}
-	if first {
-		return "(no indexes)"
-	}
-	return b.String()
+	return alignRows(append([][]string{indexHeader}, rows...))
 }
 
 // HandleKey is the popup.Panel side of the contract; this panel does
@@ -150,30 +134,91 @@ func asIndex(it any) *models.Index {
 	return nil
 }
 
-// formatIndex renders a single index row.
-// Layout: "<name>[ UNIQUE][ PK]  (<cols>)[  using <method>]".
-func formatIndex(idx *models.Index) string {
-	if idx == nil {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(config.SafeText(idx.Name))
+// indexCells renders a single index as the cells of an aligned row:
+// {name, flags, columns, method}. Flags are "PK"/"UNIQUE" (space-joined);
+// columns are wrapped in parentheses. Every DB-supplied string passes
+// through config.SafeText.
+func indexCells(idx *models.Index) []string {
+	flags := make([]string, 0, 2)
 	if idx.IsPrimary {
-		b.WriteString(" PK")
+		flags = append(flags, "PK")
 	}
 	if idx.IsUnique {
-		b.WriteString(" UNIQUE")
+		flags = append(flags, "UNIQUE")
 	}
+	cols := ""
 	if len(idx.Columns) > 0 {
 		safeCols := make([]string, 0, len(idx.Columns))
 		for _, col := range idx.Columns {
 			safeCols = append(safeCols, config.SafeText(col))
 		}
-		fmt.Fprintf(&b, "  (%s)", strings.Join(safeCols, ", "))
+		cols = "(" + strings.Join(safeCols, ", ") + ")"
 	}
-	if idx.Method != "" {
-		b.WriteString("  using ")
-		b.WriteString(config.SafeText(idx.Method))
+	return []string{
+		config.SafeText(idx.Name),
+		strings.Join(flags, " "),
+		cols,
+		config.SafeText(idx.Method),
+	}
+}
+
+// alignRows renders rows as a fixed-width table: each column is padded to
+// the widest cell in that column so values line up vertically. Cells are
+// separated by two spaces; trailing empty cells produce no padding, so
+// lines carry no trailing whitespace. Rows are joined by '\n'.
+func alignRows(rows [][]string) string {
+	widths := columnWidths(rows)
+	lines := make([]string, 0, len(rows))
+	for _, row := range rows {
+		lines = append(lines, padRow(row, widths))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// columnWidths returns the max rune width of each column across all rows.
+func columnWidths(rows [][]string) []int {
+	n := 0
+	for _, row := range rows {
+		if len(row) > n {
+			n = len(row)
+		}
+	}
+	widths := make([]int, n)
+	for _, row := range rows {
+		for i, cell := range row {
+			if w := utf8.RuneCountInString(cell); w > widths[i] {
+				widths[i] = w
+			}
+		}
+	}
+	return widths
+}
+
+// padRow joins a row's cells with a two-space gap, padding each cell to
+// its column width. The last non-empty cell (and any empty cells after
+// it) are not padded, so no trailing whitespace is emitted.
+func padRow(row []string, widths []int) string {
+	last := -1
+	for i, cell := range row {
+		if cell != "" {
+			last = i
+		}
+	}
+	var b strings.Builder
+	for i := 0; i <= last; i++ {
+		if i > 0 {
+			b.WriteString("  ")
+		}
+		cell := ""
+		if i < len(row) {
+			cell = row[i]
+		}
+		b.WriteString(cell)
+		if i < last {
+			if pad := widths[i] - utf8.RuneCountInString(cell); pad > 0 {
+				b.WriteString(strings.Repeat(" ", pad))
+			}
+		}
 	}
 	return b.String()
 }
