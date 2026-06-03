@@ -63,6 +63,24 @@ const secretMaskRune = "•"
 // editor echoed into the buffer).
 func (p *PromptContext) SetMasked(on bool) { p.masked = on }
 
+// Masked reports whether the prompt is in masked (secret) mode. The
+// layout pass reads it to size the popup compactly: a masked prompt has
+// no in-body label (it's the title), so its body is a single input line.
+func (p *PromptContext) Masked() bool { return p.masked }
+
+// GetTitle renders the prompt label as the frame heading while masked.
+// The masked prompt is the SSH credential prompt (the only caller of
+// SetMasked), so its label ("SSH Password" / "SSH Key Password") moves
+// to the box title and HandleRender drops the in-body label line.
+// Unmasked prompts fall back to the BaseContext title (empty by default,
+// which suppresses the heading) so their appearance is unchanged.
+func (p *PromptContext) GetTitle() string {
+	if p.masked && p.state != nil {
+		return p.state.Label()
+	}
+	return p.BaseContext.GetTitle()
+}
+
 // NewPromptContext builds a PromptContext bound to PROMPT. The state
 // reader is wired post-construction via SetState. modes may be nil
 // (test wiring) — HandleFocus / HandleFocusLost become no-ops in that
@@ -159,10 +177,21 @@ func (p *PromptContext) HandleRender() error {
 	if p.state == nil || !p.state.Active() {
 		return nil
 	}
+	viewName := p.GetViewName()
+	// Masked (SSH credential) prompt: the label is the frame title (see
+	// GetTitle), so the body is just the masked input line on row 0 — no
+	// in-body label, no separator.
+	if p.masked {
+		p.labelLines = 0
+		body := "> " + p.renderBuffer()
+		writeView(p.deps, func() error {
+			return p.deps.GuiDriver.SetContent(viewName, body)
+		})
+		return nil
+	}
 	wrapped := wrapLabel(p.state.Label(), p.LabelWrapWidth())
 	p.labelLines = len(wrapped)
 	body := assemblePromptBody(wrapped, p.renderBuffer())
-	viewName := p.GetViewName()
 	writeView(p.deps, func() error {
 		return p.deps.GuiDriver.SetContent(viewName, body)
 	})
@@ -205,6 +234,9 @@ func (p *PromptContext) CursorXY() (int, int, bool) {
 		cx = len(p.Buffer())
 	}
 	y := p.labelLines + 1 // <labelLines>\n + 1 blank line, then buffer
+	if p.masked {
+		y = 0 // masked body is the input line alone, on row 0
+	}
 	return 2 + cx, y, true
 }
 

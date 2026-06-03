@@ -169,9 +169,11 @@ func contextSpecs() []contextSpec {
 		},
 		{
 			key: types.PROMPT, kind: types.TEMPORARY_POPUP, inFlatten: true,
-			// 0.8 (not the generic 0.5) so wrapped validator-error bodies
-			// don't truncate at the right edge (dbsavvy-8p5).
-			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.8, HeightFrac: 0.5},
+			// Content-capped box (dbsavvy-jzeo): a single-field prompt sized
+			// to its label+input, not a screen fraction. The cap is wide
+			// enough that wrapped validator-error bodies (dbsavvy-8p5) don't
+			// truncate at the right edge.
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizePrompt},
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewPromptContext(b, d) },
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.Prompt = c.(*PromptContext) },
 		},

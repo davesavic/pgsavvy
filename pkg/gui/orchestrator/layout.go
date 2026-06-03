@@ -382,6 +382,17 @@ func (g *Gui) RunLayout(w, h int) error {
 						_ = g.driver.SetViewCursor(name, x, y)
 					}
 				}
+				// The prompt is always the focused modal while on top, so
+				// paint its border with the active-border colour (yellow;
+				// popups are skipped by the Tier-1 applyFocusFrameColors
+				// pass) and surface its title (set for the masked SSH
+				// credential prompt — see PromptContext.GetTitle). gocui
+				// resets FrameColor on each SetView, so this must run after
+				// SetView, every frame. Mirrors the CONFIRMATION path below.
+				if view != nil {
+					view.Title = ctx.GetTitle()
+					view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+				}
 			}
 			// CELL_EDITOR view-plumb + seed + caret anchor (dbsavvy-tzi.2).
 			// Like PROMPT, CELL_EDITOR is an editable popup whose keystrokes
@@ -763,6 +774,12 @@ func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int)
 		cw := canvas.X1 - canvas.X0
 		maxCols := cw * 3 / 5
 		return centeredRectMaxSize(canvas, maxCols, cellEditorMaxRows), true
+	case types.PopupSizePrompt:
+		canvas, ok := dims["popup-overlay"]
+		if !ok {
+			return rect{}, false
+		}
+		return centeredRectMaxSize(canvas, promptMaxCols, promptMaxRows), true
 	default:
 		// PopupSizeNone: non-popup contexts plus LIMIT/WHICH_KEY (which
 		// render via renderLimitOverlay / the which-key overlay, not this
@@ -801,6 +818,17 @@ const (
 func (g *Gui) popupRect(ctx types.IBaseContext, dims map[string]ui.Dimensions, w, h int) (rect, bool) {
 	if guicontext.PopupRectSpecFor(ctx.GetKey()).Kind == types.PopupSizeAnchored {
 		return g.anchoredPopupRect(ctx, dims, w, h)
+	}
+	// A masked PROMPT (the SSH credential prompt) carries its label in the
+	// frame title, so its body is a single input line — size it compactly
+	// instead of the worst-case validator-error height the fixed cap
+	// reserves. popupRectFor still returns a valid rect for the key (the
+	// wiring invariant only exercises that pure path), so this override is
+	// purely the live, context-aware refinement.
+	if m, ok := ctx.(interface{ Masked() bool }); ok && m.Masked() {
+		if canvas, ok := dims["popup-overlay"]; ok {
+			return centeredRectMaxSize(canvas, promptMaxCols, maskedPromptMaxRows), true
+		}
 	}
 	return popupRectFor(ctx.GetKey(), dims, w, h)
 }
@@ -908,6 +936,23 @@ const (
 // "> <buffer>" line. Height-bounded by design so the popup doesn't
 // occlude the result grid being edited (dbsavvy-tzi.1).
 const cellEditorMaxRows = 5
+
+// promptMaxRows / promptMaxCols cap the single-field PROMPT popup
+// (dbsavvy-jzeo). The frame's top+bottom borders consume 2 rows; the
+// remaining 6 content rows hold a word-wrapped label (1 line normally,
+// up to ~3 for a multi-line validator-error re-prompt), a blank
+// separator, and the "> <buffer>" input line — sized to the field, not
+// a screen fraction. Clamped to the canvas at render time.
+const (
+	promptMaxRows = 8
+	promptMaxCols = 64
+)
+
+// maskedPromptMaxRows caps the masked (SSH credential) prompt height. Its
+// label is the frame title, so the body is a single "> <buffer>" input
+// line — top+bottom borders plus that line plus one spare row. Kept tight
+// so the single-field secret prompt isn't an oversized box.
+const maskedPromptMaxRows = 4
 
 // renderWhichKeyOverlay positions the WHICH_KEY view in the bottom
 // right corner of popup-overlay and invokes WhichKeyContext.HandleRender

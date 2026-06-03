@@ -334,7 +334,7 @@ popuprect	key=indexes	none
 popuprect	key=limit	none
 popuprect	key=menu	x0=25	y0=25	x1=75	y1=75
 popuprect	key=plan	none
-popuprect	key=prompt	x0=10	y0=25	x1=90	y1=75
+popuprect	key=prompt	x0=18	y0=46	x1=82	y1=54
 popuprect	key=query_editor	none
 popuprect	key=result_grid	none
 popuprect	key=schemas	none

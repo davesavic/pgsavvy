@@ -83,7 +83,7 @@ func passwordAuth(ctx context.Context, cfg models.SSHTunnelConfig, prompter sess
 		return ssh.Password(pw), nil
 	}
 
-	pw, err := prompter.PromptSecret(ctx, "ssh password")
+	pw, err := prompter.PromptSecret(ctx, "SSH Password")
 	if err != nil {
 		return nil, dialErr("ssh password auth: prompt", err)
 	}
@@ -159,7 +159,7 @@ func identityPassphrase(ctx context.Context, cfg models.SSHTunnelConfig, prompte
 		return "", dialErr("encrypted identity key requires a passphrase; set passphrase_command", nil)
 	}
 
-	pass, err := prompter.PromptSecret(ctx, "passphrase for SSH key")
+	pass, err := prompter.PromptSecret(ctx, "SSH Key Password")
 	if err != nil {
 		return "", dialErr("decrypt identity key: passphrase prompt", err)
 	}
