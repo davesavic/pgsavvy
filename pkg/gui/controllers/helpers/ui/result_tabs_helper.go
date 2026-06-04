@@ -347,6 +347,15 @@ type ResultTabsHelper struct {
 	// SetOnActiveClosed. dbsavvy-aqw.
 	onActiveClosed func()
 
+	// onActiveChanged fires after a user-initiated tab switch (Cycle /
+	// Jump) moves the active selection to a different tab. The orchestrator
+	// wires it to re-point the focus stack onto the new active tab's view
+	// via ContextTree.Replace, so gocui's current-view (and thus the
+	// dispatch scope) follows the visible tab. Without it, leader chords
+	// dispatch under the prior tab's scope. Default no-op; set via
+	// SetOnActiveChanged. dbsavvy-pc4k.
+	onActiveChanged func()
+
 	// onSortRequest fires when a sort entry point (the <leader>s picker or
 	// a grid header double-click) requests a sort on the active tab. The
 	// callback receives the RAW 0-based grid column index; the
@@ -984,6 +993,16 @@ func (h *ResultTabsHelper) SetOnActiveClosed(fn func()) {
 	h.mu.Unlock()
 }
 
+// SetOnActiveChanged registers a callback fired after a user-initiated
+// tab switch (Cycle / Jump) lands on a different tab. The orchestrator
+// wires it to re-point the focus stack onto the new active tab's view.
+// Passing nil unhooks. dbsavvy-pc4k.
+func (h *ResultTabsHelper) SetOnActiveChanged(fn func()) {
+	h.mu.Lock()
+	h.onActiveChanged = fn
+	h.mu.Unlock()
+}
+
 // SetOnSortRequest registers the callback both sort entry points route
 // through (<leader>s picker submit + grid header double-click). The
 // callback receives the RAW 0-based grid column index; the
@@ -1059,8 +1078,14 @@ func (h *ResultTabsHelper) Jump(i int) {
 		h.toast(fmt.Sprintf("no tab %d", i))
 		return
 	}
+	prev := h.activeID
 	h.activeID = found.id
+	changed := h.activeID != prev
+	cb := h.onActiveChanged
 	h.mu.Unlock()
+	if changed && cb != nil {
+		cb()
+	}
 }
 
 // Cycle moves active to next (dir == +1) / prev (dir == -1) tab in
@@ -1092,8 +1117,14 @@ func (h *ResultTabsHelper) Cycle(dir int) {
 		step = -1
 	}
 	next := (currentIdx + step + len(ordered)) % len(ordered)
+	prev := h.activeID
 	h.activeID = ordered[next].id
+	changed := h.activeID != prev
+	cb := h.onActiveChanged
 	h.mu.Unlock()
+	if changed && cb != nil {
+		cb()
+	}
 }
 
 // Page advances (dir > 0) or rewinds (dir < 0) the active tab's grid
