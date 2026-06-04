@@ -334,15 +334,17 @@ const (
 	//   PlanCollapseAll   - <C-x> collapses every node except the root
 	//   PlanJumpHeaviest  - H jumps cursor to heaviest descendant subtree
 	//   PlanToggleRaw     - o flips raw-text vs tree view
-	//   PlanCursorDown    - j cursor +1
-	//   PlanCursorUp      - k cursor -1
-	PlanToggle       = "plan.toggle"
-	PlanExpandAll    = "plan.expand_all"
-	PlanCollapseAll  = "plan.collapse_all"
-	PlanJumpHeaviest = "plan.jump_heaviest"
-	PlanToggleRaw    = "plan.toggle_raw"
-	PlanCursorDown   = "plan.cursor_down"
-	PlanCursorUp     = "plan.cursor_up"
+	//   PlanToggleInsights- i shows/hides the plan-doctor insights strip
+	//   PlanCursorDown    - j cursor +1 (or strip selection +1 when insights active)
+	//   PlanCursorUp      - k cursor -1 (or strip selection -1 when insights active)
+	PlanToggle         = "plan.toggle"
+	PlanExpandAll      = "plan.expand_all"
+	PlanCollapseAll    = "plan.collapse_all"
+	PlanJumpHeaviest   = "plan.jump_heaviest"
+	PlanToggleRaw      = "plan.toggle_raw"
+	PlanToggleInsights = "plan.toggle_insights"
+	PlanCursorDown     = "plan.cursor_down"
+	PlanCursorUp       = "plan.cursor_up"
 
 	// Motion family — owned by VimEditorController (dbsavvy-wwd.5).
 	// Defaults follow vim: w/b/e (word_*), W/B/E (WORD_*), 0/^/$,
@@ -682,6 +684,7 @@ func AllActionIDs() []string {
 		PlanCollapseAll,
 		PlanJumpHeaviest,
 		PlanToggleRaw,
+		PlanToggleInsights,
 		PlanCursorDown,
 		PlanCursorUp,
 		MotionWordNext,

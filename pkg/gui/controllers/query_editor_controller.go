@@ -395,6 +395,18 @@ func (q *QueryEditorController) confirmRun(stmts []string, proceed func()) {
 	}, nil)
 }
 
+// connReadOnly reports whether the active connection profile is read-only.
+// Returns false when no profile is wired (test path), which is the safe
+// default for the EffectiveAnalyze gate (writes are gated rather than waved
+// through on a read-only assumption).
+func (q *QueryEditorController) connReadOnly() bool {
+	if q.helpers.ConnProfile == nil {
+		return false
+	}
+	conn := q.helpers.ConnProfile()
+	return conn != nil && conn.ReadOnly
+}
+
 // runNeedsConfirm reports whether any statement in stmts requires a
 // confirmation prompt under the active connection's ConfirmWrites /
 // ConfirmDDL flags.
@@ -636,16 +648,26 @@ func (q *QueryEditorController) explain(_ commands.ExecCtx, analyze bool) error 
 		q.toast("no active connection")
 		return nil
 	}
+	// Fail-closed gate: ANALYZE executes the statement, so downgrade it to an
+	// estimate-only plan when the statement may write on a writable connection
+	// (covers writable CTEs that classify as KindOther). dbsavvy-u1n.
+	effectiveAnalyze := query.EffectiveAnalyze(stmt, q.connReadOnly(), analyze)
+	if analyze && !effectiveAnalyze {
+		q.toast("ANALYZE skipped — statement may execute writes/side effects")
+	}
 	// Resolve unqualified names against the selected schema, mirroring the run
 	// path so EXPLAIN reflects what Run would execute (dbsavvy-u1n).
 	defaultSchema := ""
 	if q.helpers.Schemas != nil {
 		defaultSchema = q.helpers.Schemas.SelectedSchemaName()
 	}
-	plan, err := runner.Explain(context.Background(), stmt, analyze, defaultSchema)
+	plan, err := runner.Explain(context.Background(), stmt, effectiveAnalyze, defaultSchema)
 	if err != nil {
 		q.surfaceErr(stmt, err)
 		return nil
+	}
+	if plan.Notice != "" {
+		q.toast(plan.Notice)
 	}
 	q.openPlanTab(stmt, plan)
 	return nil

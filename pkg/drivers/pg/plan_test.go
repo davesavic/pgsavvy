@@ -71,8 +71,12 @@ func TestParsePlanJSON_ScalarDetailOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, plan.Node)
 	require.NotNil(t, plan.Node.Detail)
-	require.Equal(t, "false", plan.Node.Detail["Parallel Aware"])
-	require.Equal(t, "users", plan.Node.Detail["Relation Name"])
+	// Relation Name and Parallel Aware are now promoted to typed fields and
+	// must no longer appear in Detail.
+	require.Equal(t, "users", plan.Node.RelationName)
+	require.NotContains(t, plan.Node.Detail, "Relation Name")
+	require.False(t, plan.Node.ParallelAware)
+	require.NotContains(t, plan.Node.Detail, "Parallel Aware")
 	// float64 stringifies to "0.5" via fmt.Sprint
 	require.Contains(t, plan.Node.Detail, "Startup Cost")
 	// Array and object values are NOT recorded in Detail.
@@ -153,6 +157,153 @@ func TestParsePlanJSON_ActualFieldsPopulated(t *testing.T) {
 	require.True(t, plan.Analyzed, "Analyzed should flip true when any Actual* key is present")
 }
 
+// TestParsePlanJSON_RealAnalyzeKeysFlipAnalyzed is the regression for
+// AMENDMENT 3: PG never emits "Actual Total Cost" — the keys it actually
+// emits under ANALYZE are "Actual Total Time" / "Actual Startup Time" /
+// "Actual Loops". This verifies they lift into typed fields and that the
+// timing-based nodeHasActuals arm flips Analyzed true.
+func TestParsePlanJSON_RealAnalyzeKeysFlipAnalyzed(t *testing.T) {
+	raw := []byte(`[{"Plan": {
+	  "Node Type": "Seq Scan",
+	  "Total Cost": 12.5,
+	  "Plan Rows": 100,
+	  "Actual Startup Time": 0.05,
+	  "Actual Total Time": 4.2,
+	  "Actual Rows": 87,
+	  "Actual Loops": 1
+	}}]`)
+	plan, err := parsePlanJSON(raw)
+	require.NoError(t, err)
+	require.NotNil(t, plan.Node)
+	require.InDelta(t, 0.05, plan.Node.ActualStartupTime, 0.0001)
+	require.InDelta(t, 4.2, plan.Node.ActualTotalTime, 0.0001)
+	require.Equal(t, int64(87), plan.Node.ActualRows)
+	require.Equal(t, int64(1), plan.Node.Loops)
+	require.True(t, plan.Analyzed, "Analyzed should flip true via the ActualTotalTime arm")
+}
+
+// TestParsePlanJSON_AnalyzeBuffersVerboseGolden is the end-to-end golden
+// fixture round-tripping the full set of T2-promoted fields from an
+// ANALYZE + BUFFERS + VERBOSE + SETTINGS document, including a parallel
+// child node with worker/buffer accounting and a sort node.
+func TestParsePlanJSON_AnalyzeBuffersVerboseGolden(t *testing.T) {
+	raw := []byte(`[{
+	  "Plan": {
+	    "Node Type": "Sort",
+	    "Parallel Aware": false,
+	    "Total Cost": 200.5,
+	    "Plan Rows": 1000,
+	    "Plan Width": 64,
+	    "Actual Startup Time": 1.1,
+	    "Actual Total Time": 12.3,
+	    "Actual Rows": 950,
+	    "Actual Loops": 1,
+	    "Sort Method": "quicksort",
+	    "Sort Space Used": 128,
+	    "Output": ["users.id", "users.name"],
+	    "Shared Hit Blocks": 40,
+	    "Shared Read Blocks": 8,
+	    "Plans": [
+	      {
+	        "Node Type": "Index Only Scan",
+	        "Parallel Aware": true,
+	        "Relation Name": "users",
+	        "Alias": "u",
+	        "Index Name": "users_pkey",
+	        "Total Cost": 100.0,
+	        "Plan Rows": 1000,
+	        "Plan Width": 64,
+	        "Actual Total Time": 6.5,
+	        "Actual Rows": 1000,
+	        "Actual Loops": 1,
+	        "Workers Launched": 2,
+	        "Heap Fetches": 3,
+	        "Rows Removed by Filter": 17,
+	        "Shared Hit Blocks": 100,
+	        "Shared Read Blocks": 20,
+	        "Shared Written Blocks": 1,
+	        "Local Hit Blocks": 2,
+	        "Local Read Blocks": 3,
+	        "Local Written Blocks": 4,
+	        "Temp Read Blocks": 5,
+	        "Temp Written Blocks": 6
+	      }
+	    ]
+	  },
+	  "Settings": {"work_mem": "4MB", "random_page_cost": "1.1"}
+	}]`)
+	plan, err := parsePlanJSON(raw)
+	require.NoError(t, err)
+	require.True(t, plan.Analyzed)
+
+	root := plan.Node
+	require.NotNil(t, root)
+	require.Equal(t, "Sort", root.Op)
+	require.Equal(t, 64, root.PlanWidth)
+	require.InDelta(t, 1.1, root.ActualStartupTime, 0.0001)
+	require.InDelta(t, 12.3, root.ActualTotalTime, 0.0001)
+	require.Equal(t, "quicksort", root.SortMethod)
+	require.Equal(t, int64(128), root.SortSpaceUsed)
+	require.False(t, root.ParallelAware)
+	require.Equal(t, []string{"users.id", "users.name"}, root.OutputColumns)
+	require.Equal(t, int64(40), root.SharedHitBlocks)
+	require.Equal(t, int64(8), root.SharedReadBlocks)
+
+	require.Len(t, root.Children, 1)
+	child := root.Children[0]
+	require.Equal(t, "Index Only Scan", child.Op)
+	require.True(t, child.ParallelAware)
+	require.Equal(t, "users", child.RelationName)
+	require.Equal(t, "u", child.Alias)
+	require.Equal(t, "users_pkey", child.IndexName)
+	require.Equal(t, 2, child.WorkersLaunched)
+	require.Equal(t, int64(3), child.HeapFetches)
+	require.Equal(t, int64(17), child.RowsRemovedByFilter)
+	require.Equal(t, int64(100), child.SharedHitBlocks)
+	require.Equal(t, int64(20), child.SharedReadBlocks)
+	require.Equal(t, int64(1), child.SharedWrittenBlocks)
+	require.Equal(t, int64(2), child.LocalHitBlocks)
+	require.Equal(t, int64(3), child.LocalReadBlocks)
+	require.Equal(t, int64(4), child.LocalWrittenBlocks)
+	require.Equal(t, int64(5), child.TempReadBlocks)
+	require.Equal(t, int64(6), child.TempWrittenBlocks)
+
+	// Promoted keys must not leak into Detail.
+	require.NotContains(t, child.Detail, "Relation Name")
+	require.NotContains(t, child.Detail, "Shared Hit Blocks")
+	require.NotContains(t, child.Detail, "Heap Fetches")
+
+	// Settings round-trips from the top-level envelope.
+	require.Equal(t, "4MB", plan.Settings["work_mem"])
+	require.Equal(t, "1.1", plan.Settings["random_page_cost"])
+}
+
+// TestParsePlanJSON_EstimateOnlyLeavesNewFieldsZero is the estimate-only
+// regression: a plain EXPLAIN (no ANALYZE/BUFFERS/VERBOSE/SETTINGS) leaves
+// every T2-promoted field at its zero value and Plan.Settings nil.
+func TestParsePlanJSON_EstimateOnlyLeavesNewFieldsZero(t *testing.T) {
+	raw := []byte(`[{"Plan": {"Node Type": "Seq Scan", "Total Cost": 1.0, "Plan Rows": 1}}]`)
+	plan, err := parsePlanJSON(raw)
+	require.NoError(t, err)
+	require.NotNil(t, plan.Node)
+	require.False(t, plan.Analyzed)
+	require.Nil(t, plan.Settings)
+
+	n := plan.Node
+	require.Zero(t, n.ActualTotalTime)
+	require.Zero(t, n.ActualStartupTime)
+	require.Zero(t, n.PlanWidth)
+	require.Zero(t, n.RowsRemovedByFilter)
+	require.Zero(t, n.SharedHitBlocks)
+	require.Zero(t, n.WorkersLaunched)
+	require.False(t, n.ParallelAware)
+	require.Empty(t, n.SortMethod)
+	require.Zero(t, n.SortSpaceUsed)
+	require.Zero(t, n.HeapFetches)
+	require.Empty(t, n.RelationName)
+	require.Empty(t, n.OutputColumns)
+}
+
 // TestParsePlanJSON_AnalyzedFalseWithoutActuals confirms the Analyzed
 // flag stays false on plain EXPLAIN output (no ANALYZE actuals).
 func TestParsePlanJSON_AnalyzedFalseWithoutActuals(t *testing.T) {
@@ -161,6 +312,28 @@ func TestParsePlanJSON_AnalyzedFalseWithoutActuals(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, plan.Node)
 	require.False(t, plan.Analyzed)
+}
+
+// TestParsePlanJSON_WrongTypeCoercesToZero is the T2 edge-case regression:
+// when a numeric key carries a STRING value and a bool key carries a wrong
+// type, the jsonNumberTo* helpers coerce to zero and the bool stays false
+// without panicking. The test completing is proof that parsing did not panic.
+func TestParsePlanJSON_WrongTypeCoercesToZero(t *testing.T) {
+	raw := []byte(`[{"Plan": {
+	  "Node Type": "Seq Scan",
+	  "Total Cost": "abc",
+	  "Plan Rows": 1,
+	  "Plan Width": "nope",
+	  "Shared Hit Blocks": "x",
+	  "Parallel Aware": "yes"
+	}}]`)
+	plan, err := parsePlanJSON(raw)
+	require.NoError(t, err)
+	require.NotNil(t, plan.Node)
+	require.Zero(t, plan.Node.Cost)
+	require.Zero(t, plan.Node.PlanWidth)
+	require.Zero(t, plan.Node.SharedHitBlocks)
+	require.False(t, plan.Node.ParallelAware)
 }
 
 // TestParsePlanJSON_AnalyzedDescendantTriggersFlag exercises the

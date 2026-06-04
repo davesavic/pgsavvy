@@ -421,10 +421,11 @@ type recordingRunnerSession struct {
 		Q       models.Query
 		Analyze bool
 	}
-	cancelCalls []models.QueryID
-	beginCalls  int
-	inTx        bool
-	lastTx      *recordingTransaction
+	explainNotice string
+	cancelCalls   []models.QueryID
+	beginCalls    int
+	inTx          bool
+	lastTx        *recordingTransaction
 }
 
 // recordingTransaction is a minimal drivers.Transaction stub.
@@ -457,7 +458,7 @@ func (r *recordingRunnerSession) Explain(_ stdcontext.Context, q models.Query, a
 		Q       models.Query
 		Analyze bool
 	}{q, analyze})
-	return models.Plan{}, nil
+	return models.Plan{Notice: r.explainNotice}, nil
 }
 
 func (r *recordingRunnerSession) Begin(_ stdcontext.Context, _ models.TxOptions) (drivers.Transaction, error) {
@@ -876,7 +877,11 @@ func TestQueryEditorExplainAnalyzeWrapsInBeginRollback(t *testing.T) {
 
 	base := newBag()
 	base.HelperBag.QueryRunner = runner
-	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "INSERT INTO t VALUES (1);", Off: 3}
+	// SELECT (not a write) so the fail-closed EffectiveAnalyze gate keeps
+	// analyze=true; this test verifies the QueryRunner Begin/Rollback wrap,
+	// not the gate. A write statement would (correctly) be downgraded to
+	// estimate-only and never reach Begin. dbsavvy-u1n.
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT * FROM t;", Off: 3}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
 	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
@@ -897,6 +902,32 @@ func TestQueryEditorExplainAnalyzeWrapsInBeginRollback(t *testing.T) {
 	}
 	if len(rec.explainCalls) != 1 || !rec.explainCalls[0].Analyze {
 		t.Fatalf("explainCalls = %#v, want one analyze", rec.explainCalls)
+	}
+}
+
+// TestQueryEditorExplainNoticeToasts asserts that when the driver falls back to
+// a bare EXPLAIN it surfaces the degraded-mode notice via a toast (T1: the
+// EXPLAIN option-unsupported fallback must be user-visible, not silent).
+func TestQueryEditorExplainNoticeToasts(t *testing.T) {
+	const notice = "EXPLAIN options unsupported by server; showing basic plan"
+	rec := &recordingRunnerSession{explainNotice: notice}
+	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+
+	base := newBag()
+	base.HelperBag.QueryRunner = runner
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1;", Off: 3}
+	base.HelperBag.ResultTabs = &fakeResultTabs{}
+
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	cmd, _ := reg.Get(commands.QueryExplain)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Explain handler err = %v", err)
+	}
+	if len(base.Toast.msgs) != 1 || base.Toast.msgs[0].Msg != notice {
+		t.Fatalf("Toast msgs = %#v, want one degraded-notice toast %q", base.Toast.msgs, notice)
 	}
 }
 

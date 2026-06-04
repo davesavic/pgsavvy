@@ -531,23 +531,33 @@ func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (pl
 		logs.Event(log, "db", "explain", attrs...)
 	}()
 
-	jsonSQL := "EXPLAIN (FORMAT JSON) " + q.SQL
-	textSQL := "EXPLAIN " + q.SQL
-	if analyze {
-		jsonSQL = "EXPLAIN (ANALYZE, FORMAT JSON) " + q.SQL
-		textSQL = "EXPLAIN ANALYZE " + q.SQL
-	}
+	// The enriched JSON option set captures diagnostics (buffers, verbose
+	// output, server settings) that the bare form discards; only the JSON
+	// document is parsed, so textSQL stays a bare EXPLAIN [ANALYZE] for the
+	// human-readable RawText pane.
+	jsonSQL, textSQL := enrichedExplainSQL(q.SQL, analyze)
 
 	// JSON format: a single row, single column carrying the JSON document.
 	var rawJSON []byte
-	if err := s.conn.QueryRow(ctx, jsonSQL, q.Args...).Scan(&rawJSON); err != nil {
+	var notice string
+	err := s.conn.QueryRow(ctx, jsonSQL, q.Args...).Scan(&rawJSON)
+	if isUnsupportedExplainOption(err) {
+		// PG<12 / a server that rejects the enriched option set: retry with
+		// the bare option set so EXPLAIN still succeeds, just without the
+		// extra diagnostics.
+		jsonSQL, textSQL = bareExplainSQL(q.SQL, analyze)
+		notice = "EXPLAIN options unsupported by server; showing basic plan"
+		err = s.conn.QueryRow(ctx, jsonSQL, q.Args...).Scan(&rawJSON)
+	}
+	if err != nil {
 		return models.Plan{}, wrapPgError(err)
 	}
 
-	plan, err := parsePlanJSON(rawJSON)
+	plan, err = parsePlanJSON(rawJSON)
 	if err != nil {
 		return models.Plan{}, err
 	}
+	plan.Notice = notice
 
 	// Text format: one row per output line.
 	rows, err := s.conn.Query(ctx, textSQL, q.Args...)
@@ -568,6 +578,41 @@ func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (pl
 	}
 	plan.RawText = strings.Join(lines, "\n")
 	return plan, nil
+}
+
+// enrichedExplainSQL builds the JSON and text EXPLAIN statements with the
+// enriched option set. The JSON form adds BUFFERS, VERBOSE and SETTINGS so the
+// plan document carries diagnostics the bare form discards. The text form stays
+// a bare EXPLAIN [ANALYZE]: only the JSON document is parsed, so the text pane
+// only needs the human-readable plan.
+func enrichedExplainSQL(sql string, analyze bool) (jsonSQL, textSQL string) {
+	if analyze {
+		return "EXPLAIN (ANALYZE, BUFFERS, VERBOSE, SETTINGS, FORMAT JSON) " + sql,
+			"EXPLAIN ANALYZE " + sql
+	}
+	return "EXPLAIN (VERBOSE, SETTINGS, FORMAT JSON) " + sql,
+		"EXPLAIN " + sql
+}
+
+// bareExplainSQL builds the minimal EXPLAIN statements used as the fallback when
+// a server rejects the enriched option set (e.g. PG<12, which lacks SETTINGS).
+func bareExplainSQL(sql string, analyze bool) (jsonSQL, textSQL string) {
+	if analyze {
+		return "EXPLAIN (ANALYZE, FORMAT JSON) " + sql, "EXPLAIN ANALYZE " + sql
+	}
+	return "EXPLAIN (FORMAT JSON) " + sql, "EXPLAIN " + sql
+}
+
+// isUnsupportedExplainOption reports whether err is a server-side syntax error
+// (SQLSTATE 42601), which is what PostgreSQL returns when it does not recognize
+// an EXPLAIN option (e.g. SETTINGS on PG<12). Used to trigger the bare-EXPLAIN
+// fallback. Any other error is propagated unchanged.
+func isUnsupportedExplainOption(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42601"
 }
 
 // Begin starts a new transaction on this Session. Only one transaction may be
