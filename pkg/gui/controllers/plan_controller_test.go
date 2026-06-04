@@ -277,14 +277,18 @@ func TestPlanController_InsightsNav_JKEnter(t *testing.T) {
 }
 
 // TestPlanController_NoFindings_KeysDriveTree pins the empty-state contract:
-// with no findings the i toggle is a no-op and j/Enter still drive the tree.
+// with no findings the i toggle still opens an (empty) strip for feedback, but
+// it never owns navigation — j/Enter still drive the tree.
 func TestPlanController_NoFindings_KeysDriveTree(t *testing.T) {
 	f := newPlanControllerFixture(t) // estimate-only sample plan, no findings
 	if err := f.ctrl.handleToggleInsights(commands.ExecCtx{}); err != nil {
 		t.Fatalf("handleToggleInsights: %v", err)
 	}
-	if f.pc.InsightsActive() || f.pc.ShowInsights() {
-		t.Fatal("toggle must be a no-op with no findings")
+	if !f.pc.ShowInsights() {
+		t.Fatal("toggle should open the strip even with no findings (no silent no-op)")
+	}
+	if f.pc.InsightsActive() {
+		t.Fatal("an empty strip must not own navigation")
 	}
 	// j drives the TREE cursor, not a strip.
 	if err := f.ctrl.handleCursorDown(commands.ExecCtx{}); err != nil {

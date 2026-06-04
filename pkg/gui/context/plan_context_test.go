@@ -1,6 +1,7 @@
 package context
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -640,20 +641,77 @@ func TestPlanContext_InsightsStrip_RenderAndToggle(t *testing.T) {
 	}
 }
 
+// TestPlanContext_InsightsStrip_ShowsSuggestedFix pins that the strip renders a
+// finding's SuggestedFix, not just its Explanation. The fix is the actionable
+// half of a finding; omitting it leaves the diagnostic without a remedy.
+func TestPlanContext_InsightsStrip_ShowsSuggestedFix(t *testing.T) {
+	pc := newTestPlanContext(findingPlan())
+	pc.ToggleInsights()
+	body := pc.RenderBody()
+	if !strings.Contains(body, "Fix:") {
+		t.Errorf("strip should label the suggested fix; body=%q", body)
+	}
+	if !strings.Contains(body, "run ANALYZE events") {
+		t.Errorf("strip should render the SuggestedFix text; body=%q", body)
+	}
+}
+
 // TestPlanContext_InsightsStrip_EmptyState pins the no-findings path: the
-// toggle is a no-op (strip stays hidden, insights never owns navigation) so
-// tree keys are never hijacked over an empty strip.
+// toggle still flips the strip on (so i is never a silent no-op) and renders an
+// explicit empty state, but insights never owns navigation (InsightsActive is
+// false) so tree keys are not hijacked over an empty strip.
 func TestPlanContext_InsightsStrip_EmptyState(t *testing.T) {
 	pc := newTestPlanContext(samplePlan()) // estimate-only, no findings
 	if len(pc.Findings()) != 0 {
 		t.Fatalf("samplePlan should yield no findings, got %d", len(pc.Findings()))
 	}
 	pc.ToggleInsights()
-	if pc.ShowInsights() || pc.InsightsActive() {
-		t.Error("ToggleInsights must be a no-op with no findings")
+	if !pc.ShowInsights() {
+		t.Error("ToggleInsights must flip the strip on even with no findings (no silent no-op)")
 	}
-	if strings.Contains(pc.RenderBody(), "INSIGHTS") {
-		t.Errorf("no-findings body must not render a strip; body=%q", pc.RenderBody())
+	if pc.InsightsActive() {
+		t.Error("an empty strip must not own navigation")
+	}
+	body := pc.RenderBody()
+	if !strings.Contains(body, "INSIGHTS (0)") {
+		t.Errorf("empty-state body should render the INSIGHTS (0) header; body=%q", body)
+	}
+	if !strings.Contains(body, "no issues detected") {
+		t.Errorf("empty-state body should explain there are no findings; body=%q", body)
+	}
+	pc.ToggleInsights()
+	if pc.ShowInsights() {
+		t.Error("second ToggleInsights should hide the empty strip")
+	}
+}
+
+// TestPlanContext_InsightsStrip_WrapsToViewport pins that long finding
+// explanations wrap to the panel's inner width rather than spilling past it.
+func TestPlanContext_InsightsStrip_WrapsToViewport(t *testing.T) {
+	pc := newTestPlanContext(samplePlan())
+	pc.findings = []plandoctor.Finding{{
+		Severity:    plandoctor.SeverityWarn,
+		Title:       "Selective sequential scan",
+		Explanation: "sequential scan read 1000000 rows and discarded 999980 via filter (100% rejected)",
+	}}
+	pc.showInsights = true
+	const width = 40
+	pc.SetViewportWidth(width)
+	body := pc.RenderBody()
+
+	ansi := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	var explanationLines int
+	for _, line := range strings.Split(body, "\n") {
+		plain := ansi.ReplaceAllString(line, "")
+		if w := len([]rune(plain)); w > width {
+			t.Errorf("strip line exceeds viewport width %d: %q (%d cols)", width, plain, w)
+		}
+		if strings.Contains(plain, "sequential scan") || strings.Contains(plain, "rejected") {
+			explanationLines++
+		}
+	}
+	if explanationLines < 2 {
+		t.Errorf("long explanation should wrap onto >=2 lines, got %d", explanationLines)
 	}
 }
 

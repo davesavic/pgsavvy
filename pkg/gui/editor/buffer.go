@@ -72,6 +72,13 @@ type Buffer struct {
 	History   *UndoTree
 	Selection *Range
 
+	// yankFlash is the transient post-yank highlight range (Neovim
+	// on_yank parity). yankFlashEpoch monotonically increments per
+	// SetYankFlash so a delayed clear timer only clears the flash it
+	// armed; both are guarded by mu.
+	yankFlash      *Range
+	yankFlashEpoch uint64
+
 	ConnectionID string
 	Path         string
 	UUID         string
@@ -103,6 +110,7 @@ func (b *Buffer) applyRecordLocked(e Edit) error {
 	b.History.Apply(e)
 	b.Dirty = true
 	b.cancelSelectionIfOverlap(e.Range)
+	b.clearYankFlashLocked()
 	return nil
 }
 
@@ -153,6 +161,7 @@ func (b *Buffer) Undo() error {
 	b.clampCursorLocked()
 	b.Dirty = true
 	b.cancelSelectionIfOverlap(rev.Range)
+	b.clearYankFlashLocked()
 	return nil
 }
 
@@ -174,6 +183,7 @@ func (b *Buffer) Redo() error {
 	b.clampCursorLocked()
 	b.Dirty = true
 	b.cancelSelectionIfOverlap(fwd.Range)
+	b.clearYankFlashLocked()
 	return nil
 }
 
@@ -305,6 +315,51 @@ func (b *Buffer) SelectionSnapshot() *Range {
 	}
 	cp := *b.Selection
 	return &cp
+}
+
+// SetYankFlash stores a copy of r as the active post-yank highlight,
+// bumps the flash epoch, and returns the new epoch. The caller passes
+// the returned epoch to a delayed ClearYankFlash so a later yank that
+// re-arms the flash invalidates the earlier timer.
+func (b *Buffer) SetYankFlash(r Range) uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	cp := r
+	b.yankFlash = &cp
+	b.yankFlashEpoch++
+	return b.yankFlashEpoch
+}
+
+// ClearYankFlash clears the flash only when epoch matches the current
+// flash epoch; a stale epoch (a newer SetYankFlash has since run, or a
+// mutation already cleared the flash) is a no-op.
+func (b *Buffer) ClearYankFlash(epoch uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if epoch != b.yankFlashEpoch {
+		return
+	}
+	b.yankFlash = nil
+}
+
+// YankFlashSnapshot returns a copy of the active flash range, or nil
+// when no flash is armed. Mirrors SelectionSnapshot.
+func (b *Buffer) YankFlashSnapshot() *Range {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.yankFlash == nil {
+		return nil
+	}
+	cp := *b.yankFlash
+	return &cp
+}
+
+// clearYankFlashLocked drops the flash on the next text mutation
+// (Apply/Undo/Redo) for Neovim on_yank parity. The epoch is left
+// untouched so any in-flight delayed ClearYankFlash still no-ops.
+// Caller must hold b.mu.
+func (b *Buffer) clearYankFlashLocked() {
+	b.yankFlash = nil
 }
 
 // LinesCopy returns a deep copy of Lines safe to hand off to a

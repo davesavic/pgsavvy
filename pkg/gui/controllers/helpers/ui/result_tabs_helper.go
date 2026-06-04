@@ -1864,6 +1864,10 @@ func (h *ResultTabsHelper) LayoutPaint(driver types.GuiDriver, x0, y0, x1, y1 in
 				// (defensive: should not happen post-OpenPlanTab, but
 				// keeps the layout pass nil-safe).
 				if pc := t.planContextSnapshot(); pc != nil {
+					// Record the panel's inner width so the insights strip wraps
+					// long explanations to fit instead of clipping at the edge.
+					w, _ := view.InnerSize()
+					pc.SetViewportWidth(w)
 					_ = driver.SetContent(name, pc.RenderBody())
 				} else {
 					_ = driver.SetContent(name, t.planRawSnapshot())

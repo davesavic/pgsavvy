@@ -373,6 +373,9 @@ func syncViewToBuffer(v *gocui.View, buf *Buffer) {
 	if sel := buf.SelectionSnapshot(); sel != nil {
 		content = ApplySelectionOverlay(content, *sel)
 	}
+	if flash := buf.YankFlashSnapshot(); flash != nil {
+		content = ApplyYankFlashOverlay(content, *flash)
+	}
 	v.SetContent(content)
 	cur := buf.CursorPos()
 	v.SetCursor(cur.Col, cur.Line)

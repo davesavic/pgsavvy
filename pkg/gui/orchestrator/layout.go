@@ -175,6 +175,9 @@ func (g *Gui) RunLayout(w, h int) error {
 					if sel := buf.SelectionSnapshot(); sel != nil {
 						content = editor.ApplySelectionOverlay(content, *sel)
 					}
+					if flash := buf.YankFlashSnapshot(); flash != nil {
+						content = editor.ApplyYankFlashOverlay(content, *flash)
+					}
 					v.SetContent(content)
 					cur := buf.CursorPos()
 					v.FocusPoint(cur.Col, cur.Line, true)

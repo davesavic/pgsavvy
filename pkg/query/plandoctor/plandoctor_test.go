@@ -126,16 +126,32 @@ func TestBadRowEstimateNoRelationNoEmptyName(t *testing.T) {
 // --- Materiality floor --------------------------------------------------------
 
 func TestMaterialityFloorSuppressesTrivialNode(t *testing.T) {
-	// Ratio trips hard (1000x) but the node is sub-ms — must produce nothing.
+	// Ratio trips hard (1000x) but the node is below the self-time floor
+	// (0.05ms < minSelfTimeMs) — must produce nothing.
 	n := &models.PlanNode{
 		Op: "Seq Scan", RelationName: "tiny",
 		EstRows: 1, ActualRows: 1000, Loops: 1,
-		ActualTotalTime:     0.2,
+		ActualTotalTime:     0.05,
 		RowsRemovedByFilter: 100000,
 	}
 	got := Analyze(analyzedPlan(n))
 	if len(got) != 0 {
 		t.Fatalf("trivial node should yield 0 findings, got %d: %+v", len(got), got)
+	}
+}
+
+// TestMaterialityFloorSurfacesSubMillisecondNode pins the loosened floor: a node
+// whose self-time sits between the old 1.0ms and the new 0.1ms floors (0.3ms)
+// now clears materiality, so a real bad-row-estimate finding is surfaced rather
+// than suppressed for being fast.
+func TestMaterialityFloorSurfacesSubMillisecondNode(t *testing.T) {
+	n := &models.PlanNode{
+		Op: "Seq Scan", RelationName: "small",
+		EstRows: 1, ActualRows: 1000, Loops: 1,
+		ActualTotalTime: 0.3,
+	}
+	if _, ok := findRule(Analyze(analyzedPlan(n)), "Bad row estimate"); !ok {
+		t.Fatal("a 0.3ms node with a 1000x estimate error should surface a finding under the loosened floor")
 	}
 }
 

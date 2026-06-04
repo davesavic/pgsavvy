@@ -2,6 +2,7 @@ package controllers
 
 import (
 	stdctx "context"
+	"time"
 	"unicode"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/clipboard"
@@ -42,6 +43,12 @@ type VimEditorController struct {
 	// external content wins (unnamedplus semantics).
 	lastWrite string
 
+	// flasher is the optional post-yank highlight seam (Neovim on_yank
+	// parity). Nil => no flash (no behavior change). Wired post-construction
+	// via SetYankFlasher so test wiring can keep the two-arg
+	// NewVimEditorController call shape. Fired only on the yank operator.
+	flasher YankFlasher
+
 	// completionEngine is the optional completion driver. Wired
 	// post-construction via SetCompletionEngine. Nil = TriggerCompletion
 	// is a silent no-op.
@@ -77,6 +84,35 @@ func NewVimEditorController(qec *context.QueryEditorContext, matcher *keys.Match
 // orchestrator wires the live SystemClipboard; tests inject a fake.
 func (c *VimEditorController) SetClipboard(cb clipboard.Clipboard) {
 	c.clipboard = cb
+}
+
+// YankFlasher is the narrow post-yank highlight seam the controller fires
+// after a yank. Declared in the controllers package (not helpers/ui) so the
+// controllers package does not import helpers/ui — the concrete
+// ui.YankFlashHelper is wired in by the orchestrator, which imports both.
+type YankFlasher interface {
+	Flash(buf *editor.Buffer, r editor.Range, ttl time.Duration)
+}
+
+// SetYankFlasher wires the post-yank highlight seam. Nil leaves the
+// controller flash-free (no behavior change). The orchestrator wires the
+// live ui.YankFlashHelper; tests inject a fake.
+func (c *VimEditorController) SetYankFlasher(f YankFlasher) {
+	c.flasher = f
+}
+
+// yankFlashTTL is how long the post-yank highlight stays armed before the
+// scheduled clear fires (Neovim's default on_yank timeout).
+const yankFlashTTL = 150 * time.Millisecond
+
+// flashYank fires the post-yank highlight for r, gated to the yank operator
+// only (delete/change also produce a non-empty capture but must not tint the
+// just-removed text). No-op when no flasher is wired.
+func (c *VimEditorController) flashYank(actionID string, buf *editor.Buffer, r editor.Range) {
+	if c.flasher == nil || actionID != commands.OperatorYank {
+		return
+	}
+	c.flasher.Flash(buf, r, yankFlashTTL)
 }
 
 // SetCompletionEngine wires the completion engine the controller
@@ -1228,6 +1264,8 @@ func (c *VimEditorController) applyPending(buf *editor.Buffer, r editor.Range, c
 	if capture != "" {
 		c.writeRegister(ctx.Register, capture)
 		c.mirrorYankToClipboard(spec.actionID, ctx.Register, capture)
+		// r is already half-open (op-pending motion range); flash as-is.
+		c.flashYank(spec.actionID, buf, r)
 	}
 	// Repeat-store bookkeeping (wwd.9 will consume this for `.`).
 	rep.LastOpID = pendingOpID
@@ -1339,6 +1377,14 @@ func (c *VimEditorController) operatorVisualApply(buf *editor.Buffer, spec opera
 	if capture != "" {
 		c.writeRegister(ec.Register, capture)
 		c.mirrorYankToClipboard(spec.actionID, ec.Register, capture)
+		// Flash exactly the span Yank consumed. In this codebase the
+		// post-NormaliseRange `sel` is ALREADY half-open: TextInRange slices
+		// [Start.Col:End.Col), so the same `sel` passed to spec.apply tints
+		// precisely the yanked text. NO endCol++ here (that would tint one
+		// trailing column past the yank). Verified: visual `y` over cols
+		// [0,0]→[0,5] on "hello world" yanks "hello" and sel.End.Col==5, so
+		// half-open [0,5) is correct. Use sel captured before ExitVisual.
+		c.flashYank(spec.actionID, buf, sel)
 	}
 	editor.ExitVisual(buf)
 	if rep := c.repeat(); rep != nil {
@@ -1375,6 +1421,8 @@ func (c *VimEditorController) operatorDoubledApply(buf *editor.Buffer, spec oper
 	if capture != "" {
 		c.writeRegister(ec.Register, capture)
 		c.mirrorYankToClipboard(spec.actionID, ec.Register, capture)
+		// r is LineWise (yy); flash tints whole lines, no col change.
+		c.flashYank(spec.actionID, buf, r)
 	}
 	if rep := c.repeat(); rep != nil {
 		rep.LastOpID = spec.actionID
