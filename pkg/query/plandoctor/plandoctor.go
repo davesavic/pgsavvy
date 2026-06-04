@@ -38,10 +38,13 @@ type Finding struct {
 // or, for estimate-only plans, the estimated self-cost.
 const (
 	// minSelfTimeMs is the smallest exclusive (self) wall-time, in
-	// milliseconds, for a node to be worth flagging in an analyzed plan.
-	// Anything under ~1ms is noise on any real workload; the example trivial
-	// plan in the spec (0.2ms) sits well below this.
-	minSelfTimeMs = 1.0
+	// milliseconds, for a node to be worth flagging in an analyzed plan. The
+	// floor exists only to drop genuinely trivial sub-0.1ms nodes; it was
+	// loosened from 1.0ms because fast-but-imperfect plans (small/cached
+	// tables) kept every node under 1ms and so surfaced no findings at all —
+	// including predictive ones like a bad row estimate that matter regardless
+	// of how fast the node ran today. dbsavvy-v6ep.
+	minSelfTimeMs = 0.1
 	// minSelfCost is the smallest exclusive (self) planner cost for a node to
 	// be worth flagging in an estimate-only plan. Postgres seq-scans a handful
 	// of pages for well under this; it corresponds to roughly a few hundred

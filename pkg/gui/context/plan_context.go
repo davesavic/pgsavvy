@@ -53,11 +53,16 @@ type PlanContext struct {
 	findings      []plandoctor.Finding
 	findingByNode map[*models.PlanNode]plandoctor.Finding
 	// showInsights is the per-tab insights-strip toggle, mirroring showRaw.
-	// When true AND findings exist, the strip is rendered and j/k/Enter
-	// target the strip (see InsightsActive); the toggle is a no-op with no
-	// findings so navigation never gets hijacked over an empty strip.
+	// When true the strip is always rendered (an explicit "no issues detected"
+	// empty state when there are no findings) so pressing i is never a silent
+	// no-op. j/k/Enter only target the strip when it actually has findings (see
+	// InsightsActive), so an empty strip never hijacks tree navigation.
 	showInsights  bool
 	insightCursor int
+	// viewportWidth is the panel's inner width, recorded by the layout pass so
+	// the insights strip can wrap long explanations to fit. 0 (tests /
+	// pre-layout) disables wrapping.
+	viewportWidth int
 }
 
 // MinVisibleForColoring is the threshold below which heat coloring is
@@ -322,13 +327,21 @@ func (p *PlanContext) ToggleRaw() {
 	p.showRaw = !p.showRaw
 }
 
-// ToggleInsights flips the insights strip on/off. With no findings it is a
-// no-op (the strip stays hidden and tree keys are never hijacked), mirroring
-// the idempotent showRaw toggle.
-func (p *PlanContext) ToggleInsights() {
-	if len(p.findings) == 0 {
-		return
+// SetViewportWidth records the panel's inner width so the insights strip can
+// wrap long explanations to fit. The layout pass calls it each frame; a value
+// <= 0 (tests / pre-layout) disables wrapping.
+func (p *PlanContext) SetViewportWidth(w int) {
+	if w < 0 {
+		w = 0
 	}
+	p.viewportWidth = w
+}
+
+// ToggleInsights flips the insights strip on/off, mirroring the idempotent
+// showRaw toggle. It always toggles — even with no findings — so the strip can
+// surface an explicit empty state rather than letting i do nothing. Navigation
+// is still only hijacked when findings exist (see InsightsActive).
+func (p *PlanContext) ToggleInsights() {
 	p.showInsights = !p.showInsights
 }
 
@@ -417,7 +430,7 @@ func (p *PlanContext) RenderBody() string {
 		thresholds = costThresholds(vis, p.plan.Analyzed)
 	}
 	var b strings.Builder
-	if p.showInsights && len(p.findings) > 0 {
+	if p.showInsights {
 		p.renderInsightsStrip(&b, useColor)
 	}
 	for i, v := range vis {
@@ -454,11 +467,27 @@ func (p *PlanContext) RenderBody() string {
 	return b.String()
 }
 
-// renderInsightsStrip writes the ranked findings list to b: a header followed
-// by one line per finding, the selected one marked with "> ". Caller guarantees
-// at least one finding.
+// insightIndent prefixes wrapped explanation lines so they sit under their
+// finding's title rather than at the strip's left margin.
+const insightIndent = "    "
+
+// renderInsightsStrip writes the ranked findings list to b: a header, then per
+// finding a marked title line ("> " on the selected one) followed by the
+// explanation and the "Fix: " suggestion, each word-wrapped to the viewport so
+// long diagnostics never spill past the panel. With no findings it writes an
+// explicit empty state so a toggled-on strip always shows feedback.
 func (p *PlanContext) renderInsightsStrip(b *strings.Builder, colorOn bool) {
+	if len(p.findings) == 0 {
+		b.WriteString("INSIGHTS (0) — no issues detected\n\n")
+		return
+	}
 	fmt.Fprintf(b, "INSIGHTS (%d)\n", len(p.findings))
+	// wrapLabel treats a width <= 0 as "do not wrap", which is the pre-layout
+	// and unit-test path; otherwise reserve the indent so wrapped lines fit.
+	wrapWidth := 0
+	if p.viewportWidth > 0 {
+		wrapWidth = p.viewportWidth - len(insightIndent)
+	}
 	for i, f := range p.findings {
 		marker := "  "
 		if i == p.insightCursor {
@@ -469,7 +498,15 @@ func (p *PlanContext) renderInsightsStrip(b *strings.Builder, colorOn bool) {
 		if colorOn {
 			label = applySeverityColor(label, f.Severity)
 		}
-		fmt.Fprintf(b, "%s%s — %s\n", marker, label, f.Explanation)
+		fmt.Fprintf(b, "%s%s\n", marker, label)
+		for _, line := range wrapLabel(f.Explanation, wrapWidth) {
+			fmt.Fprintf(b, "%s%s\n", insightIndent, line)
+		}
+		if f.SuggestedFix != "" {
+			for _, line := range wrapLabel("Fix: "+f.SuggestedFix, wrapWidth) {
+				fmt.Fprintf(b, "%s%s\n", insightIndent, line)
+			}
+		}
 	}
 	b.WriteByte('\n')
 }

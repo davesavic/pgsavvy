@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -1201,5 +1202,168 @@ func TestChangeInnerWordSetsRepeatState(t *testing.T) {
 	if rep.LastOpID != commands.OperatorChange || rep.LastTextObjectID != commands.TextObjectInnerWord {
 		t.Fatalf("repeat state = {op:%q to:%q}, want {op:%q to:%q}",
 			rep.LastOpID, rep.LastTextObjectID, commands.OperatorChange, commands.TextObjectInnerWord)
+	}
+}
+
+// --- dbsavvy-o6da: post-yank flash fired only on the yank operator ---
+
+// fakeYankFlasher records the (buf, range) of the last Flash call so the
+// operator tests can assert the flash fires (and with the expected span) on
+// yank paths and never on delete/change paths.
+type fakeYankFlasher struct {
+	calls   int
+	lastBuf *editor.Buffer
+	lastR   editor.Range
+}
+
+func (f *fakeYankFlasher) Flash(buf *editor.Buffer, r editor.Range, _ time.Duration) {
+	f.calls++
+	f.lastBuf = buf
+	f.lastR = r
+}
+
+// flashCtrl builds a controller wired with a fake YankFlasher.
+func flashCtrl(t *testing.T) (*controllers.VimEditorController, *commands.Registry, *context.QueryEditorContext, *fakeYankFlasher) {
+	t.Helper()
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	flasher := &fakeYankFlasher{}
+	ctrl.SetYankFlasher(flasher)
+	return ctrl, reg, qec, flasher
+}
+
+// POSITIVE: `yy` (doubled linewise) flashes the whole-line LineWise range.
+func TestYankFlashDoubledYank(t *testing.T) {
+	_, reg, qec, flasher := flashCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	doubledYank(t, reg, 0)
+
+	if flasher.calls != 1 {
+		t.Fatalf("Flash calls = %d, want 1", flasher.calls)
+	}
+	if !flasher.lastR.LineWise {
+		t.Errorf("yy flash range LineWise = false, want true")
+	}
+	if flasher.lastR.Start.Line != 0 || flasher.lastR.End.Line != 0 {
+		t.Errorf("yy flash range = %+v, want single line 0", flasher.lastR)
+	}
+}
+
+// POSITIVE: `yw` (op-pending motion) flashes the half-open motion span.
+func TestYankFlashOpPendingMotion(t *testing.T) {
+	_, reg, qec, flasher := flashCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.MotionWordNext, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if flasher.calls != 1 {
+		t.Fatalf("Flash calls = %d, want 1", flasher.calls)
+	}
+	// `yw` over "hello world" yanks "hello " → half-open [0,0)-[0,6).
+	want := editor.Range{Start: editor.Position{Line: 0, Col: 0}, End: editor.Position{Line: 0, Col: 6}}
+	if flasher.lastR.Start != want.Start || flasher.lastR.End != want.End {
+		t.Errorf("yw flash range = %+v, want %+v", flasher.lastR, want)
+	}
+}
+
+// POSITIVE: visual `y` flashes the yanked charwise span as half-open. The
+// selection End (cursor col 5) is already the half-open end of the yanked
+// text ("hello", cols 0..4), so NO endCol++ — the flash end stays at 5.
+func TestYankFlashVisualCharwise(t *testing.T) {
+	_, reg, qec, flasher := flashCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisual)
+	editor.ExtendSelection(buf, editor.Position{Line: 0, Col: 5})
+
+	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeVisual})
+
+	if flasher.calls != 1 {
+		t.Fatalf("Flash calls = %d, want 1", flasher.calls)
+	}
+	// Selection captured BEFORE ExitVisual; matches the yanked "hello" span.
+	if buf.Selection != nil {
+		t.Errorf("Selection still set after visual yank, want nil")
+	}
+	want := editor.Range{Start: editor.Position{Line: 0, Col: 0}, End: editor.Position{Line: 0, Col: 5}}
+	if flasher.lastR.Start != want.Start || flasher.lastR.End != want.End {
+		t.Errorf("visual-y flash range = %+v, want %+v (half-open, no endCol++)", flasher.lastR, want)
+	}
+	if flasher.lastR.LineWise {
+		t.Errorf("visual charwise yank flash LineWise = true, want false")
+	}
+}
+
+// NEGATIVE: `dd` produces a non-empty capture but must NOT flash.
+func TestYankFlashDoubledDeleteNoFlash(t *testing.T) {
+	_, reg, qec, flasher := flashCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	doubledDelete(t, reg, 0)
+
+	if flasher.calls != 0 {
+		t.Fatalf("dd flashed (%d calls), want 0", flasher.calls)
+	}
+}
+
+// NEGATIVE: `cw` (op-pending change) must NOT flash.
+func TestYankFlashOpPendingChangeNoFlash(t *testing.T) {
+	_, reg, qec, flasher := flashCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	runHandler(t, reg, commands.OperatorChange, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.MotionWordNext, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if flasher.calls != 0 {
+		t.Fatalf("cw flashed (%d calls), want 0", flasher.calls)
+	}
+}
+
+// NEGATIVE: visual `d` must NOT flash.
+func TestYankFlashVisualDeleteNoFlash(t *testing.T) {
+	_, reg, qec, flasher := flashCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisual)
+	editor.ExtendSelection(buf, editor.Position{Line: 0, Col: 5})
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeVisual})
+
+	if flasher.calls != 0 {
+		t.Fatalf("visual delete flashed (%d calls), want 0", flasher.calls)
+	}
+}
+
+// nil flasher: a yank with no flasher wired still writes the register and
+// does not panic.
+func TestYankFlashNilFlasherNoPanic(t *testing.T) {
+	qec, matcher, _ := newOperatorQEC(t)
+	ctrl := controllers.NewVimEditorController(qec, matcher)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	// No SetYankFlasher call: flasher stays nil.
+
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("only line")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	doubledYank(t, reg, 0)
+
+	if got := matcher.Registers().Get('"'); got != "only line\n" {
+		t.Errorf("register \" = %q, want %q (yank must still write with nil flasher)", got, "only line\n")
 	}
 }

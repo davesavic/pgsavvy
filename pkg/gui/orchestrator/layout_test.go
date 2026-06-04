@@ -1043,3 +1043,124 @@ func TestRunLayoutCellEditorRePushSeedsNewValue(t *testing.T) {
 		t.Fatalf("Buffer() after re-open = %q, want %q (leftover state or stale view)", got, "bob")
 	}
 }
+
+// seedEditorBuffer inserts text into a *editor.Buffer at origin and parks
+// the cursor at (0,0). Helper for the seam-2 yank-flash render tests.
+func seedEditorBuffer(t *testing.T, buf *editor.Buffer, text string) {
+	t.Helper()
+	if err := buf.Apply(editor.Edit{
+		Kind:  editor.EditKindInsert,
+		Range: editor.Range{Start: editor.Position{Line: 0, Col: 0}, End: editor.Position{Line: 0, Col: 0}},
+		Text:  text,
+	}); err != nil {
+		t.Fatalf("seed editor buffer: %v", err)
+	}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+}
+
+// TestRunLayoutPaintsYankFlash exercises SEAM 2 (RunLayout's QUERY_EDITOR
+// sync block) end-to-end: a flash set DIRECTLY on the live editor buffer
+// (no Task-C trigger) must be read via YankFlashSnapshot and fed through
+// editor.ApplyYankFlashOverlay in its OWN nil-check (no live selection),
+// then SetContent'd into the main pane. The layout writes to a real
+// *gocui.View, which parses the overlay's ANSI into per-cell attributes —
+// so the read-back view content holds the flashed glyphs (ANSI stripped);
+// the raw \x1b[43m is asserted at the pure-overlay layer in the editor
+// package's yank_flash_test.go. This proves the seam reads the snapshot
+// in the real layout path and renders without panic.
+func TestRunLayoutPaintsYankFlash(t *testing.T) {
+	g, rec := buildTestGui(t)
+	// Make SetView(QUERY_EDITOR) return a real view so the sync block's
+	// `if v != nil` branch (and thus v.SetContent) executes.
+	rec.EnableRealView(string(types.QUERY_EDITOR))
+	// Pop the CONNECTION_MANAGER modal so the main pane lays out.
+	_ = g.ContextTree().Push(g.Registry().Schemas)
+
+	qec := g.Registry().QueryEditor
+	if qec == nil {
+		t.Fatal("registry.QueryEditor is nil")
+	}
+	buf := qec.Buffer()
+	seedEditorBuffer(t, buf, "SELECT id FROM bar")
+	buf.SetYankFlash(editor.Range{
+		Start: editor.Position{Line: 0, Col: 0},
+		End:   editor.Position{Line: 0, Col: 6},
+	})
+	if buf.SelectionSnapshot() != nil {
+		t.Fatal("precondition: no live selection expected for a normal-mode yank")
+	}
+
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+
+	v := rec.RealView(string(types.QUERY_EDITOR))
+	if v == nil {
+		t.Fatal("QUERY_EDITOR real view not created; seam never ran")
+	}
+	if got := v.Buffer(); !strings.Contains(got, "SELECT id FROM bar") {
+		t.Fatalf("flashed text missing from rendered main pane: %q", got)
+	}
+}
+
+// TestRunLayoutNoFlashRegression locks SEAM 2's no-flash path: with no
+// flash armed, the rendered main-pane content must equal the
+// selection-only render of the same buffer (glyph-level, since gocui
+// strips ANSI to attributes). Guards against the flash block mutating
+// output when no flash is present.
+func TestRunLayoutNoFlashRegression(t *testing.T) {
+	render := func(arm func(*editor.Buffer)) string {
+		g, rec := buildTestGui(t)
+		rec.EnableRealView(string(types.QUERY_EDITOR))
+		_ = g.ContextTree().Push(g.Registry().Schemas)
+		buf := g.Registry().QueryEditor.Buffer()
+		seedEditorBuffer(t, buf, "SELECT id FROM bar")
+		arm(buf)
+		if err := g.RunLayout(120, 40); err != nil {
+			t.Fatalf("RunLayout: %v", err)
+		}
+		v := rec.RealView(string(types.QUERY_EDITOR))
+		if v == nil {
+			t.Fatal("QUERY_EDITOR real view not created")
+		}
+		return v.Buffer()
+	}
+
+	baseline := render(func(*editor.Buffer) {})
+	cleared := render(func(b *editor.Buffer) {
+		epoch := b.SetYankFlash(editor.Range{
+			Start: editor.Position{Line: 0, Col: 0},
+			End:   editor.Position{Line: 0, Col: 6},
+		})
+		b.ClearYankFlash(epoch)
+	})
+	if cleared != baseline {
+		t.Fatalf("no-flash render diverged:\n  got      %q\n  baseline %q", cleared, baseline)
+	}
+}
+
+// TestRunLayoutOutOfBoundsFlashNoPanic feeds SEAM 2 a flash range past the
+// buffer bounds. ApplyYankFlashOverlay is panic-safe; RunLayout must
+// complete without panic.
+func TestRunLayoutOutOfBoundsFlashNoPanic(t *testing.T) {
+	g, rec := buildTestGui(t)
+	rec.EnableRealView(string(types.QUERY_EDITOR))
+	_ = g.ContextTree().Push(g.Registry().Schemas)
+	buf := g.Registry().QueryEditor.Buffer()
+	seedEditorBuffer(t, buf, "abc")
+	buf.SetYankFlash(editor.Range{
+		Start: editor.Position{Line: 5, Col: 0},
+		End:   editor.Position{Line: 6, Col: 99},
+	})
+
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	v := rec.RealView(string(types.QUERY_EDITOR))
+	if v == nil {
+		t.Fatal("QUERY_EDITOR real view not created")
+	}
+	if got := v.Buffer(); !strings.Contains(got, "abc") {
+		t.Fatalf("text missing after out-of-bounds flash render: %q", got)
+	}
+}

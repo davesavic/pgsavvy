@@ -1387,6 +1387,15 @@ func (g *Gui) wireWithDriver() error {
 		g.controllers.VimEditor.SetSuggestionsContext(g.registry.Suggestions)
 	}
 
+	// dbsavvy-o6da: wire the post-yank highlight seam so a yank tints the
+	// yanked span for yankFlashTTL (Neovim on_yank parity). Constructed here
+	// (not in the controllers wiring layer) because the concrete helper lives
+	// in helpers/ui and the controllers package must not import it; g.driver
+	// is set well before this point (toastHelp uses it earlier).
+	if g.controllers != nil && g.controllers.VimEditor != nil {
+		g.controllers.VimEditor.SetYankFlasher(ui.NewYankFlashHelper(g.driver))
+	}
+
 	// Register every controller's action handlers with the registry.
 	g.controllers.RegisterActions(g.cmdRegistry)
 
