@@ -274,6 +274,67 @@ func TestCycleWrapsAroundBoundaries(t *testing.T) {
 	}
 }
 
+// TestCycleFiresOnActiveChanged: cycling the active tab must fire
+// onActiveChanged so the orchestrator can re-point the focus stack onto
+// the newly-active tab's view. Without this the gocui current-view stays
+// on the prior tab and leader chords dispatch under the stale scope
+// (e.g. PLAN instead of RESULT_GRID). dbsavvy-pc4k.
+func TestCycleFiresOnActiveChanged(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	var fired int
+	h.SetOnActiveChanged(func() { fired++ })
+	for _, sql := range []string{"a", "b"} {
+		_ = h.openTab(sql, nil)
+	}
+	fired = 0 // ignore any fire from openTab; isolate the Cycle.
+	h.Cycle(1)
+	if fired != 1 {
+		t.Fatalf("onActiveChanged fired %d times after Cycle, want 1", fired)
+	}
+}
+
+// TestCycleWithNoTabsDoesNotFireOnActiveChanged: no tab switch occurred,
+// so no focus reconciliation is needed.
+func TestCycleWithNoTabsDoesNotFireOnActiveChanged(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	var fired int
+	h.SetOnActiveChanged(func() { fired++ })
+	h.Cycle(1)
+	if fired != 0 {
+		t.Fatalf("onActiveChanged fired %d times with no tabs, want 0", fired)
+	}
+}
+
+// TestJumpFiresOnActiveChanged: a digit jump (<leader>1..9) changes the
+// active tab and must re-point focus the same way Cycle does. dbsavvy-pc4k.
+func TestJumpFiresOnActiveChanged(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	var fired int
+	h.SetOnActiveChanged(func() { fired++ })
+	for _, sql := range []string{"a", "b"} {
+		_ = h.openTab(sql, nil)
+	}
+	fired = 0 // isolate the Jump.
+	h.Jump(1) // slot 0 -> a
+	if fired != 1 {
+		t.Fatalf("onActiveChanged fired %d times after Jump, want 1", fired)
+	}
+}
+
+// TestJumpOutOfRangeDoesNotFireOnActiveChanged: a rejected jump leaves the
+// active selection untouched, so no focus reconciliation fires.
+func TestJumpOutOfRangeDoesNotFireOnActiveChanged(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	var fired int
+	h.SetOnActiveChanged(func() { fired++ })
+	_ = h.openTab("a", nil)
+	fired = 0
+	h.Jump(5) // no slot 5
+	if fired != 0 {
+		t.Fatalf("onActiveChanged fired %d times on out-of-range Jump, want 0", fired)
+	}
+}
+
 // --- Close ----------------------------------------------------------------
 
 func TestCloseActiveShiftsToPrevSlot(t *testing.T) {

@@ -809,6 +809,27 @@ func (g *Gui) wireWithDriver() error {
 				_ = g.tree.Push(g.registry.QueryEditor)
 			}
 		})
+		// dbsavvy-pc4k: a user-initiated tab switch (gt/gT cycle, <leader>1..9
+		// jump) moves the active tab but not the focus stack, so gocui's
+		// current-view (RunLayout reads tree.Current().GetViewName()) stays on
+		// the prior tab's view and leader chords dispatch under the stale scope
+		// (e.g. PLAN instead of RESULT_GRID). Re-point the stack onto the new
+		// active tab's view. Replace (not Push) because grid->grid switches
+		// share the RESULT_GRID key and Push no-ops on a key match. Guarded to
+		// the case where the result pane already holds focus: <leader> jumps are
+		// GLOBAL-scoped and must not steal focus from the query editor or a rail.
+		g.resultTabsH.SetOnActiveChanged(func() {
+			if g.tree == nil {
+				return
+			}
+			top := g.tree.Current()
+			if top == nil || (top.GetKey() != types.RESULT_GRID && top.GetKey() != types.PLAN) {
+				return
+			}
+			if next := g.resultTabsH.ActiveContext(); next != nil {
+				_ = g.tree.Replace(next)
+			}
+		})
 	}
 	// FKForwardHelper drives `gd` forward FK navigation. Cache routes
 	// each Get through activeSessionFKCacheAdapter so per-Connect
