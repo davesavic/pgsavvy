@@ -323,10 +323,11 @@ const insertExitModeMask = types.ModeInsert | types.ModeOperatorPending
 // Normal only. Vim's undo/redo are Normal-mode commands.
 const editorHistoryModeMask = types.ModeNormal
 
-// pasteModeMask is the Mode mask under which `p` (paste) fires — Normal
-// only in wwd.8. Visual-mode paste (replacing selection with register
-// contents) is deferred.
-const pasteModeMask = types.ModeNormal
+// pasteModeMask is the NON-Normal Mode mask under which `p` (paste)
+// fires — the visual modes, where `p` replaces the selection with the
+// register contents. Normal-mode `p` is registered separately (the zero
+// sentinel ModeNormal cannot be ORed into a bitmask).
+const pasteModeMask = types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 
 // editorRepeatModeMask is the Mode mask under which `.` fires — Normal
 // only. Replaying a captured operator from Visual or OperatorPending
@@ -523,16 +524,21 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			Tag:         s.tag,
 		})
 	}
-	// Paste binding: `p` Normal-only.
+	// Paste binding: `p` in Normal (paste after cursor) and in the
+	// visual modes (replace the selection with the register contents).
+	// ModeNormal is the zero sentinel so it is registered separately
+	// from the visual mask.
 	if seq, err := keys.SequenceFromShorthand("p"); err == nil {
-		out = append(out, &types.ChordBinding{
-			Sequence:    seq,
-			Mode:        pasteModeMask,
-			Scope:       types.QUERY_EDITOR,
-			ActionID:    commands.EditorPaste,
-			Description: "paste after cursor",
-			Tag:         "Edit",
-		})
+		for _, mode := range []types.Mode{types.ModeNormal, pasteModeMask} {
+			out = append(out, &types.ChordBinding{
+				Sequence:    seq,
+				Mode:        mode,
+				Scope:       types.QUERY_EDITOR,
+				ActionID:    commands.EditorPaste,
+				Description: "paste after cursor",
+				Tag:         "Edit",
+			})
+		}
 	}
 	// Repeat binding: `.` Normal-only (wwd.9).
 	if seq, err := keys.SequenceFromShorthand("."); err == nil {
@@ -1463,6 +1469,9 @@ func (c *VimEditorController) pasteHandler() commands.Handler {
 		if buf == nil {
 			return nil
 		}
+		if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
+			return c.visualPaste(buf, ec)
+		}
 		text := c.readRegister(ec.Register)
 		if text == "" {
 			return nil
@@ -1505,6 +1514,89 @@ func (c *VimEditorController) pasteHandler() commands.Handler {
 		}
 		return nil
 	}
+}
+
+// visualPaste implements `p` in the visual modes: the selection is
+// deleted and the effective register's contents are put in its place,
+// then Visual is exited back to Normal. An empty register leaves the
+// buffer unchanged. The deleted text is intentionally NOT
+// written back to any register — vim clobbers the unnamed register
+// here, but preserving it lets the same yank replace several
+// selections in turn, which is the more useful behaviour.
+func (c *VimEditorController) visualPaste(buf *editor.Buffer, ec commands.ExecCtx) error {
+	if buf.Selection == nil {
+		editor.ExitVisual(buf)
+		c.setMode(types.ModeNormal)
+		return nil
+	}
+	text := c.readRegister(ec.Register)
+	if text == "" {
+		editor.ExitVisual(buf)
+		c.setMode(types.ModeNormal)
+		return nil
+	}
+	sel := *buf.Selection
+	if ec.Mode.Has(types.ModeVisualLine) {
+		sel = editor.LineWiseFromVisualLine(buf, sel)
+	} else {
+		sel = editor.NormaliseRange(sel)
+	}
+	if _, err := editor.Delete(buf, sel); err != nil {
+		return err
+	}
+	if err := c.putAt(buf, sel.Start, text); err != nil {
+		return err
+	}
+	editor.ExitVisual(buf)
+	c.setMode(types.ModeNormal)
+	return nil
+}
+
+// putAt inserts register text at the position left by a visual-mode
+// delete. Line-wise register contents (trailing '\n') become whole
+// lines at start.Line — or are appended below the last line when the
+// delete consumed the buffer's tail. Char-wise contents are inserted
+// inline at start.
+func (c *VimEditorController) putAt(buf *editor.Buffer, start editor.Position, text string) error {
+	if text[len(text)-1] == '\n' {
+		body := text[:len(text)-1]
+		if start.Line < buf.LineCount() {
+			pos := editor.Position{Line: start.Line, Col: 0}
+			if err := buf.Apply(editor.Edit{
+				Kind:  editor.EditKindInsert,
+				Range: editor.Range{Start: pos, End: pos},
+				Text:  body + "\n",
+			}); err != nil {
+				return err
+			}
+			buf.SetCursor(editor.Position{Line: start.Line, Col: 0})
+			return nil
+		}
+		last := buf.LineCount() - 1
+		pos := editor.Position{Line: last, Col: buf.LineRuneLen(last)}
+		if err := buf.Apply(editor.Edit{
+			Kind:  editor.EditKindInsert,
+			Range: editor.Range{Start: pos, End: pos},
+			Text:  "\n" + body,
+		}); err != nil {
+			return err
+		}
+		buf.SetCursor(editor.Position{Line: last + 1, Col: 0})
+		return nil
+	}
+	pos := start
+	if maxCol := buf.LineRuneLen(pos.Line); pos.Col > maxCol {
+		pos.Col = maxCol
+	}
+	if err := buf.Apply(editor.Edit{
+		Kind:  editor.EditKindInsert,
+		Range: editor.Range{Start: pos, End: pos},
+		Text:  text,
+	}); err != nil {
+		return err
+	}
+	buf.SetCursor(pos)
+	return nil
 }
 
 // buffer returns the live *editor.Buffer of the wired

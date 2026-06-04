@@ -228,6 +228,7 @@ binding	scope=query_editor	key=k	mode=normal
 binding	scope=query_editor	key=l	mode=mode(0x3c)
 binding	scope=query_editor	key=l	mode=normal
 binding	scope=query_editor	key=o	mode=normal
+binding	scope=query_editor	key=p	mode=mode(0x1c)
 binding	scope=query_editor	key=p	mode=normal
 binding	scope=query_editor	key=u	mode=normal
 binding	scope=query_editor	key=v	mode=normal
