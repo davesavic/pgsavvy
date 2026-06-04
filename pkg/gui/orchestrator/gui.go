@@ -2401,6 +2401,13 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 	// the prior view (gocui's per-view Editor pointer is replaced on
 	// attach, and result_tab views never become editable text targets).
 	g.masterEditors[types.RESULT_GRID] = NewMasterEditor(ngocui, g.matcher, types.RESULT_GRID, WithSessionLog(g.deps.Common.Logger()))
+	// PLAN master editor (dbsavvy-s7gn). Plan tabs share the dynamic
+	// result_tab_<slot> view with grid tabs, but their PLAN-scoped bindings
+	// (o/H/<CR>/j/k/i) must dispatch under PLAN, not RESULT_GRID. Like
+	// RESULT_GRID this context has no static view, so the Flatten loop skips
+	// it; build the editor here and let RunLayout's Tier-1.5 pass pick it for
+	// plan tabs by the active tab's context key.
+	g.masterEditors[types.PLAN] = NewMasterEditor(ngocui, g.matcher, types.PLAN, WithSessionLog(g.deps.Common.Logger()))
 	return nil
 }
 

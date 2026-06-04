@@ -44,7 +44,28 @@ func parsePlanJSON(raw []byte) (models.Plan, error) {
 		return models.Plan{}, fmt.Errorf("EXPLAIN parse failed: %q is not an object", "Plan")
 	}
 	node := buildPlanNode(planMap)
-	return models.Plan{Node: node, Analyzed: nodeHasActuals(node)}, nil
+	plan := models.Plan{
+		Node:     node,
+		Analyzed: nodeHasActuals(node),
+		Settings: parseSettings(envelope[0]["Settings"]),
+	}
+	plan.ComputeDerived()
+	return plan, nil
+}
+
+// parseSettings lifts the top-level "Settings" object PG emits under
+// `EXPLAIN (SETTINGS)` into a flat string map. Returns nil when the key is
+// absent or not an object, so the estimate-only path leaves Plan.Settings nil.
+func parseSettings(v any) map[string]string {
+	obj, ok := v.(map[string]any)
+	if !ok || len(obj) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(obj))
+	for k, val := range obj {
+		out[k] = fmt.Sprint(val)
+	}
+	return out
 }
 
 // nodeHasActuals reports whether n (or any descendant) carries one or more
@@ -54,7 +75,7 @@ func nodeHasActuals(n *models.PlanNode) bool {
 	if n == nil {
 		return false
 	}
-	if n.ActualCost != 0 || n.ActualRows != 0 || n.Loops != 0 {
+	if n.ActualCost != 0 || n.ActualRows != 0 || n.Loops != 0 || n.ActualTotalTime != 0 {
 		return true
 	}
 	for _, c := range n.Children {
@@ -66,11 +87,12 @@ func nodeHasActuals(n *models.PlanNode) bool {
 }
 
 // buildPlanNode recursively transforms a decoded EXPLAIN-JSON object into a
-// *models.PlanNode. Recognized keys ("Node Type", "Total Cost", "Plan Rows",
-// "Plans") are lifted into typed fields; every other scalar key is stringified
-// into Detail via fmt.Sprint. Nested arrays/objects other than the "Plans"
-// child list are skipped (not recorded in Detail) to keep the map flat — UI
-// rendering only consumes scalar metadata.
+// *models.PlanNode. Recognized keys (cost/row estimates, ANALYZE actuals,
+// BUFFERS accounting, VERBOSE "Output", relation identity, sort/parallel
+// diagnostics, "Plans") are lifted into typed fields; every other scalar key
+// is stringified into Detail via fmt.Sprint. Nested arrays/objects other than
+// the recognized "Plans" / "Output" lists are skipped (not recorded in Detail)
+// to keep the map flat — UI rendering only consumes scalar metadata.
 func buildPlanNode(m map[string]any) *models.PlanNode {
 	if m == nil {
 		return nil
@@ -92,6 +114,64 @@ func buildPlanNode(m map[string]any) *models.PlanNode {
 			n.ActualRows = jsonNumberToInt64(v)
 		case "Actual Loops":
 			n.Loops = jsonNumberToInt64(v)
+		case "Actual Total Time":
+			n.ActualTotalTime = jsonNumberToFloat(v)
+		case "Actual Startup Time":
+			n.ActualStartupTime = jsonNumberToFloat(v)
+		case "Plan Width":
+			n.PlanWidth = int(jsonNumberToInt64(v))
+		case "Rows Removed by Filter":
+			n.RowsRemovedByFilter = jsonNumberToInt64(v)
+		case "Shared Hit Blocks":
+			n.SharedHitBlocks = jsonNumberToInt64(v)
+		case "Shared Read Blocks":
+			n.SharedReadBlocks = jsonNumberToInt64(v)
+		case "Shared Written Blocks":
+			n.SharedWrittenBlocks = jsonNumberToInt64(v)
+		case "Local Hit Blocks":
+			n.LocalHitBlocks = jsonNumberToInt64(v)
+		case "Local Read Blocks":
+			n.LocalReadBlocks = jsonNumberToInt64(v)
+		case "Local Written Blocks":
+			n.LocalWrittenBlocks = jsonNumberToInt64(v)
+		case "Temp Read Blocks":
+			n.TempReadBlocks = jsonNumberToInt64(v)
+		case "Temp Written Blocks":
+			n.TempWrittenBlocks = jsonNumberToInt64(v)
+		case "Workers Launched":
+			n.WorkersLaunched = int(jsonNumberToInt64(v))
+		case "Parallel Aware":
+			if b, ok := v.(bool); ok {
+				n.ParallelAware = b
+			}
+		case "Sort Method":
+			if s, ok := v.(string); ok {
+				n.SortMethod = s
+			}
+		case "Sort Space Used":
+			n.SortSpaceUsed = jsonNumberToInt64(v)
+		case "Heap Fetches":
+			n.HeapFetches = jsonNumberToInt64(v)
+		case "Relation Name":
+			if s, ok := v.(string); ok {
+				n.RelationName = s
+			}
+		case "Alias":
+			if s, ok := v.(string); ok {
+				n.Alias = s
+			}
+		case "Index Name":
+			if s, ok := v.(string); ok {
+				n.IndexName = s
+			}
+		case "Output":
+			if arr, ok := v.([]any); ok {
+				for _, col := range arr {
+					if s, ok := col.(string); ok {
+						n.OutputColumns = append(n.OutputColumns, s)
+					}
+				}
+			}
 		case "Plans":
 			if arr, ok := v.([]any); ok {
 				for _, child := range arr {

@@ -231,7 +231,13 @@ func (g *Gui) RunLayout(w, h int) error {
 
 				activeTabView = g.resultTabsH.LayoutPaint(g.driver, d.X0, contentY0, d.X1, d.Y1)
 				if activeTabView != "" {
-					if ed, ok := g.masterEditors[types.RESULT_GRID]; ok {
+					// Pick the editor by the active tab's context key: plan tabs
+					// dispatch under PLAN, grid tabs under RESULT_GRID (dbsavvy-s7gn).
+					editorKey := types.RESULT_GRID
+					if ac := g.resultTabsH.ActiveContext(); ac != nil {
+						editorKey = ac.GetKey()
+					}
+					if ed, ok := g.masterEditors[editorKey]; ok {
 						_ = g.driver.SetMasterEditor(activeTabView, ed)
 					}
 					if v, err := g.driver.ViewByName(activeTabView); err == nil && v != nil {

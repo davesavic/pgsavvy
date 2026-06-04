@@ -8,6 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/grid"
 	"github.com/davesavic/dbsavvy/pkg/gui/presentation"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/query/plandoctor"
 	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
@@ -22,10 +23,11 @@ import (
 //     nodes; every visible node renders one line prefixed by a tree
 //     glyph (▼ expanded, ▶ collapsed, ─ leaf) and indented by depth.
 //     Columns: name | est-cost | est-rows. When plan.Analyzed is true,
-//     three more columns (actual-cost | actual-rows | loops) are
-//     appended. Cost-percentile coloring (neutral→warning) is applied
-//     to the cost column when theme.IsMonochrome() is false AND the
-//     visible-node count is ≥ 4 (degenerate plans skip coloring).
+//     three more columns (actual-time | actual-rows | loops) are
+//     appended. Self-basis coloring (neutral→warning), bucketed on
+//     EXCLUSIVE self-time (analyzed) or self-cost (estimate-only), is
+//     applied to the cost column when theme.IsMonochrome() is false AND
+//     the visible-node count is ≥ 4 (degenerate plans skip coloring).
 //   - raw (o toggle): plan.RawText is rendered verbatim through
 //     grid.SanitizeCellEscapes so server-side ANSI cannot bleed
 //     through. AC requires the call site to exist even when the
@@ -43,23 +45,54 @@ type PlanContext struct {
 	cursor    int
 	collapsed map[*models.PlanNode]bool
 	showRaw   bool
+
+	// Plan-doctor findings, computed once at construction over the SAME node
+	// pointers VisibleNodes walks (pointer-identity contract from
+	// plandoctor.Analyze). findingByNode maps each flagged node to its
+	// highest-ranked finding for the inline tree badge.
+	findings      []plandoctor.Finding
+	findingByNode map[*models.PlanNode]plandoctor.Finding
+	// showInsights is the per-tab insights-strip toggle, mirroring showRaw.
+	// When true AND findings exist, the strip is rendered and j/k/Enter
+	// target the strip (see InsightsActive); the toggle is a no-op with no
+	// findings so navigation never gets hijacked over an empty strip.
+	showInsights  bool
+	insightCursor int
 }
 
-// MinVisibleForColoring is the AC-documented threshold below which cost-
-// percentile coloring is suppressed entirely. Plans with fewer than 4
-// visible nodes are too degenerate to bucket meaningfully. dbsavvy-uv0.8.
-const MinVisibleForColoring = 4
+// MinVisibleForColoring is the threshold below which heat coloring is
+// suppressed entirely. A single visible node is degenerate — it would
+// always land in the top percentile bucket and paint solid red — so the
+// floor is 2, the smallest plan where one node can be hotter than another.
+// dbsavvy-64b0.
+const MinVisibleForColoring = 2
 
 // NewPlanContext constructs a PlanContext bound to base's key/view. The
 // supplied plan is held by value; a nil plan.Node renders an empty body
 // in tree mode (raw mode still works as long as plan.RawText is set).
 func NewPlanContext(base BaseContext, deps Deps, plan models.Plan) *PlanContext {
-	return &PlanContext{
+	// Guarantee derived heat fields (SelfCost/SelfTime/…) are populated for
+	// every caller, not only the parse path. ComputeDerived is idempotent, so
+	// the double-call on parsed plans is harmless.
+	plan.ComputeDerived()
+	pc := &PlanContext{
 		BaseContext: base,
 		deps:        deps,
 		plan:        plan,
 		collapsed:   map[*models.PlanNode]bool{},
 	}
+	// Analyze over the stored plan so finding NodeRefs share pointer identity
+	// with the nodes VisibleNodes/RenderBody walk (plan.Node is the same tree
+	// pointer after the value copy). Findings are ranked; the first one seen
+	// for a node is its highest-ranked, used for the badge.
+	pc.findings = plandoctor.Analyze(&pc.plan)
+	pc.findingByNode = make(map[*models.PlanNode]plandoctor.Finding, len(pc.findings))
+	for _, f := range pc.findings {
+		if _, seen := pc.findingByNode[f.NodeRef]; !seen {
+			pc.findingByNode[f.NodeRef] = f
+		}
+	}
+	return pc
 }
 
 // Plan returns the underlying plan (read-only view; callers must not
@@ -71,6 +104,22 @@ func (p *PlanContext) Cursor() int { return p.cursor }
 
 // ShowRaw reports whether the context is in raw-text mode.
 func (p *PlanContext) ShowRaw() bool { return p.showRaw }
+
+// Findings returns the ranked plan-doctor findings for this plan (never nil).
+func (p *PlanContext) Findings() []plandoctor.Finding { return p.findings }
+
+// ShowInsights reports whether the insights strip is toggled on.
+func (p *PlanContext) ShowInsights() bool { return p.showInsights }
+
+// InsightCursor returns the selected index into Findings while the strip is on.
+func (p *PlanContext) InsightCursor() int { return p.insightCursor }
+
+// InsightsActive reports whether insights navigation owns j/k/Enter: the strip
+// is toggled on AND there is at least one finding to navigate. The controller
+// routes on this so an empty strip never steals tree keys.
+func (p *PlanContext) InsightsActive() bool {
+	return p.showInsights && len(p.findings) > 0
+}
 
 // CollapsedCount returns the number of currently-collapsed nodes — a
 // test-friendly accessor (the map itself stays private).
@@ -211,8 +260,11 @@ func (p *PlanContext) CollapseAllButRoot() {
 	}
 }
 
-// JumpHeaviest moves the cursor to the heaviest child (by Cost) within
-// the cursor node's subtree. Tie-break: first child encountered in
+// JumpHeaviest moves the cursor to the heaviest child within the cursor
+// node's subtree, ranked by the SAME self-basis the heat map uses
+// (SelfTime when the plan is analyzed, else SelfCost; clamped >=0). This
+// keeps the H key, heat coloring, and (later) insights agreeing on one
+// "real bottleneck" definition. Tie-break: first child encountered in
 // depth-first iteration wins. No-op when the cursor is on a leaf.
 // dbsavvy-uv0.8 AC: "H jumps cursor to heaviest child of cursor's
 // subtree (DFS tie-break: first encountered)".
@@ -221,20 +273,21 @@ func (p *PlanContext) JumpHeaviest() {
 	if root == nil || len(root.Children) == 0 {
 		return
 	}
+	analyzed := p.plan.Analyzed
 	// DFS over the cursor node's subtree (excluding the cursor node
-	// itself), tracking the highest-cost descendant. Tie-break: first
-	// encountered (do NOT overwrite on equal cost).
+	// itself), tracking the highest self-basis descendant. Tie-break: first
+	// encountered (do NOT overwrite on equal basis).
 	var heaviest *models.PlanNode
-	var heaviestCost float64
+	var heaviestBasis float64
 	var walk func(n *models.PlanNode)
 	walk = func(n *models.PlanNode) {
 		if n == nil {
 			return
 		}
 		if n != root {
-			if heaviest == nil || n.Cost > heaviestCost {
+			if b := heatBasis(n, analyzed); heaviest == nil || b > heaviestBasis {
 				heaviest = n
-				heaviestCost = n.Cost
+				heaviestBasis = b
 			}
 		}
 		for _, c := range n.Children {
@@ -269,6 +322,60 @@ func (p *PlanContext) ToggleRaw() {
 	p.showRaw = !p.showRaw
 }
 
+// ToggleInsights flips the insights strip on/off. With no findings it is a
+// no-op (the strip stays hidden and tree keys are never hijacked), mirroring
+// the idempotent showRaw toggle.
+func (p *PlanContext) ToggleInsights() {
+	if len(p.findings) == 0 {
+		return
+	}
+	p.showInsights = !p.showInsights
+}
+
+// MoveInsightCursor advances the strip selection by delta, clamping into
+// [0, len(findings)-1]. A move with no findings snaps to 0.
+func (p *PlanContext) MoveInsightCursor(delta int) {
+	if len(p.findings) == 0 {
+		p.insightCursor = 0
+		return
+	}
+	next := p.insightCursor + delta
+	if next < 0 {
+		next = 0
+	}
+	if next >= len(p.findings) {
+		next = len(p.findings) - 1
+	}
+	p.insightCursor = next
+}
+
+// JumpToSelectedFinding moves the tree cursor onto the selected finding's node,
+// expanding every ancestor so it is visible (reusing findPath, root-relative).
+// No-op when there are no findings or the finding's node is unreachable.
+func (p *PlanContext) JumpToSelectedFinding() {
+	if p.insightCursor < 0 || p.insightCursor >= len(p.findings) {
+		return
+	}
+	target := p.findings[p.insightCursor].NodeRef
+	path := findPath(p.plan.Node, target)
+	if path == nil {
+		return
+	}
+	for _, n := range path {
+		if n == target {
+			break
+		}
+		delete(p.collapsed, n)
+	}
+	vis := p.VisibleNodes()
+	for i, v := range vis {
+		if v.Node == target {
+			p.cursor = i
+			return
+		}
+	}
+}
+
 // HandleRender writes the current view body. Routes through the GuiDriver
 // using writeView so a nil driver (unit tests / pre-wire) is a silent
 // no-op. dbsavvy-uv0.8.
@@ -300,12 +407,19 @@ func (p *PlanContext) RenderBody() string {
 	if len(vis) == 0 {
 		return ""
 	}
-	colorize := !theme.IsMonochrome() && len(vis) >= MinVisibleForColoring
+	// useColor honors NO_COLOR for any coloring (heat + severity glyphs).
+	// colorize additionally requires enough nodes for the heat percentiles
+	// to be meaningful; severity coloring is not subject to that gate.
+	useColor := !theme.IsMonochrome()
+	colorize := useColor && len(vis) >= MinVisibleForColoring
 	var thresholds [4]float64
 	if colorize {
-		thresholds = costThresholds(vis)
+		thresholds = costThresholds(vis, p.plan.Analyzed)
 	}
 	var b strings.Builder
+	if p.showInsights && len(p.findings) > 0 {
+		p.renderInsightsStrip(&b, useColor)
+	}
 	for i, v := range vis {
 		glyph := glyphFor(v.Node, p.collapsed[v.Node])
 		marker := "  "
@@ -313,20 +427,90 @@ func (p *PlanContext) RenderBody() string {
 			marker = "> "
 		}
 		indent := strings.Repeat("  ", v.Depth)
-		costStr := formatCost(v.Node.Cost)
-		if colorize {
-			costStr = applyCostColor(costStr, v.Node.Cost, thresholds)
-		}
-		fmt.Fprintf(&b, "%s%s%s %s", marker, indent, glyph, v.Node.Op)
-		// est-cost / est-rows columns.
-		fmt.Fprintf(&b, "  cost=%s rows=%d", costStr, v.Node.EstRows)
+
+		// Build the whole row first, then heat-color it as a unit so the
+		// glyph, op name, and metrics all carry the node's heat — not just
+		// the cost token.
+		var row strings.Builder
+		fmt.Fprintf(&row, "%s%s%s %s", marker, indent, glyph, v.Node.Op)
+		fmt.Fprintf(&row, "  cost=%s rows=%d", formatCost(v.Node.Cost), v.Node.EstRows)
 		if p.plan.Analyzed {
-			fmt.Fprintf(&b, "  actual_cost=%s actual_rows=%d loops=%d",
-				formatCost(v.Node.ActualCost), v.Node.ActualRows, v.Node.Loops)
+			fmt.Fprintf(&row, "  actual_time=%s actual_rows=%d loops=%d",
+				formatCost(v.Node.ActualTotalTime), v.Node.ActualRows, v.Node.Loops)
+		}
+		line := row.String()
+		if colorize {
+			line = applyHeatColor(line, heatBasis(v.Node, p.plan.Analyzed), thresholds)
+		}
+		b.WriteString(line)
+
+		// The finding badge keeps its own severity color, appended after the
+		// heat-colored row so the two color spans never overlap.
+		if f, ok := p.findingByNode[v.Node]; ok {
+			fmt.Fprintf(&b, "  %s", badgeFor(f, useColor))
 		}
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// renderInsightsStrip writes the ranked findings list to b: a header followed
+// by one line per finding, the selected one marked with "> ". Caller guarantees
+// at least one finding.
+func (p *PlanContext) renderInsightsStrip(b *strings.Builder, colorOn bool) {
+	fmt.Fprintf(b, "INSIGHTS (%d)\n", len(p.findings))
+	for i, f := range p.findings {
+		marker := "  "
+		if i == p.insightCursor {
+			marker = "> "
+		}
+		// Color the glyph+title by severity; leave the explanation neutral.
+		label := severityGlyph(f.Severity) + " " + f.Title
+		if colorOn {
+			label = applySeverityColor(label, f.Severity)
+		}
+		fmt.Fprintf(b, "%s%s — %s\n", marker, label, f.Explanation)
+	}
+	b.WriteByte('\n')
+}
+
+// badgeFor renders the inline tree-row badge for a flagged node: a severity
+// glyph and the finding title (e.g. "⚠ Bad row estimate"), colored by
+// severity when colorOn.
+func badgeFor(f plandoctor.Finding, colorOn bool) string {
+	badge := severityGlyph(f.Severity) + " " + f.Title
+	if colorOn {
+		return applySeverityColor(badge, f.Severity)
+	}
+	return badge
+}
+
+// severityColor maps a finding severity to an ANSI SGR foreground escape:
+// blocker→red, warn→yellow, info→cyan. Cyan is deliberately distinct from
+// the heat palette (yellow/red) so severity reads as its own dimension.
+func severityColor(s plandoctor.Severity) string {
+	switch s {
+	case plandoctor.SeverityBlocker:
+		return "\x1b[31m" // red
+	case plandoctor.SeverityWarn:
+		return "\x1b[33m" // yellow
+	default:
+		return "\x1b[36m" // cyan (info)
+	}
+}
+
+// applySeverityColor wraps s in the severity's SGR escape + reset.
+func applySeverityColor(s string, sev plandoctor.Severity) string {
+	return severityColor(sev) + s + "\x1b[0m"
+}
+
+// severityGlyph maps a finding severity to a single-rune marker. Warn and
+// Blocker share the warning sign; Info uses the information sign.
+func severityGlyph(s plandoctor.Severity) string {
+	if s == plandoctor.SeverityInfo {
+		return "ℹ"
+	}
+	return "⚠"
 }
 
 // glyphFor returns the tree glyph appropriate for n's collapse state +
@@ -354,16 +538,35 @@ func formatCost(c float64) string {
 	return fmt.Sprintf("%.1f", c)
 }
 
+// heatBasis returns the EXCLUSIVE (self) magnitude that drives heat coloring
+// and JumpHeaviest for a single node: SelfTime when the plan carries ANALYZE
+// actuals, else SelfCost. The value is clamped to >=0 — Self* can be negative
+// (parallel workers / InitPlan / Append summing child totals past the parent),
+// and a negative basis would sort to the bottom of the percentile buckets and
+// RE-INVERT the heat map. The stored Self* fields stay raw for T4/T5 honesty;
+// only the coloring/ranking basis is clamped.
+func heatBasis(n *models.PlanNode, analyzed bool) float64 {
+	v := n.SelfCost
+	if analyzed {
+		v = n.SelfTime
+	}
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
 // costThresholds returns [P50, P75, P90, P95] of the visible nodes'
-// Cost fields. Used by applyCostColor to bucket each cost into a
+// self-basis (SelfTime when analyzed, else SelfCost; clamped >=0 via
+// heatBasis). Used by applyHeatColor to bucket each node into a
 // neutral→warning gradient. Returns zero thresholds when vis is empty.
-func costThresholds(vis []VisibleNode) [4]float64 {
+func costThresholds(vis []VisibleNode, analyzed bool) [4]float64 {
 	if len(vis) == 0 {
 		return [4]float64{}
 	}
 	costs := make([]float64, len(vis))
 	for i, v := range vis {
-		costs[i] = v.Node.Cost
+		costs[i] = heatBasis(v.Node, analyzed)
 	}
 	sort.Float64s(costs)
 	pick := func(p float64) float64 {
@@ -379,13 +582,13 @@ func costThresholds(vis []VisibleNode) [4]float64 {
 	return [4]float64{pick(0.50), pick(0.75), pick(0.90), pick(0.95)}
 }
 
-// applyCostColor wraps s in an ANSI SGR escape whose color reflects the
-// cost-percentile bucket (neutral → yellow → red → bold red). The
-// mapping is intentionally simple — we lean on the existing ANSI 8-color
-// palette so terminals without truecolor still render the gradient.
-// The caller is responsible for the IsMonochrome / vis-count gate;
-// applyCostColor itself does not consult theme state.
-func applyCostColor(s string, cost float64, t [4]float64) string {
+// applyHeatColor wraps s (a whole rendered tree row) in an ANSI SGR escape
+// whose color reflects the self-basis percentile bucket (neutral → yellow →
+// red → bold red). The mapping is intentionally simple — we lean on the
+// existing ANSI 8-color palette so terminals without truecolor still render
+// the gradient. The caller is responsible for the IsMonochrome / vis-count
+// gate; applyHeatColor itself does not consult theme state.
+func applyHeatColor(s string, basis float64, t [4]float64) string {
 	const (
 		reset   = "\x1b[0m"
 		neutral = "" // no escape — default fg
@@ -395,13 +598,13 @@ func applyCostColor(s string, cost float64, t [4]float64) string {
 	)
 	var code string
 	switch {
-	case cost >= t[3]: // ≥ P95
+	case basis >= t[3]: // ≥ P95
 		code = bred
-	case cost >= t[2]: // ≥ P90
+	case basis >= t[2]: // ≥ P90
 		code = red
-	case cost >= t[1]: // ≥ P75
+	case basis >= t[1]: // ≥ P75
 		code = yellow
-	case cost >= t[0]: // ≥ P50
+	case basis >= t[0]: // ≥ P50
 		code = yellow
 	default:
 		code = neutral
