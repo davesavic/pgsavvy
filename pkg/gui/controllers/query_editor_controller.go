@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -754,6 +755,13 @@ func (q *QueryEditorController) toast(msg string) {
 }
 
 func (q *QueryEditorController) surfaceErr(stmt string, err error) {
+	// gr7e.2: a preempt fence is transient — the prior query is still
+	// terminating. Surface a retry toast rather than a sticky error tab.
+	if errors.Is(err, session.ErrPreemptPending) {
+		q.toast("Previous query is still terminating — please retry in a moment.")
+		return
+	}
+
 	// hq5.6: detect connection-dead errors and trigger disconnect flow.
 	if drivers.IsConnectionDead(err) {
 		q.handleConnectionDead(err)

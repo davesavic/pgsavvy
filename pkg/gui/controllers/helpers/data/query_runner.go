@@ -33,6 +33,7 @@ type RunnerSession interface {
 	Cancel(qid models.QueryID) error
 	SetDisconnected(bool)
 	IsDisconnected() bool
+	MarkPreemptPending()
 }
 
 var _ RunnerSession = (*session.SQLSession)(nil)
@@ -102,8 +103,11 @@ type QueryRunner struct {
 	// preempt, when non-nil, stops any in-flight result-tab stream before
 	// a new session op acquires the per-session queue lock. Set once at
 	// wire time via SetPreempter; nil in unit tests that don't exercise
-	// preemption.
-	preempt func()
+	// preemption. Returns true when the bounded Stop-wait EXPIRED — the
+	// prior worker is still live and streamMu is still held — so the caller
+	// fences the session (MarkPreemptPending) and the guarded session op
+	// below fails fast with ErrPreemptPending. gr7e.2.
+	preempt func() bool
 }
 
 // NewQueryRunner builds a QueryRunner bound to sess. caps captures the
@@ -174,7 +178,7 @@ func (r *QueryRunner) Unbind() {
 // the per-session queue (last-wins). Set once at wire time; the hook is
 // stored on the runner itself so it survives Bind / Unbind. fn may be
 // nil to clear the hook. Safe to call on a nil receiver.
-func (r *QueryRunner) SetPreempter(fn func()) {
+func (r *QueryRunner) SetPreempter(fn func() bool) {
 	if r == nil {
 		return
 	}
@@ -182,11 +186,19 @@ func (r *QueryRunner) SetPreempter(fn func()) {
 }
 
 // preemptInFlight invokes the preempt hook when one is installed. Nil-safe.
+// When the hook reports expiry (the bounded Stop-wait elapsed with the prior
+// worker still live and streamMu still held) it fences the bound session so
+// the guarded session op the caller runs next fails fast with
+// ErrPreemptPending rather than deadlocking on streamMu. gr7e.2.
 func (r *QueryRunner) preemptInFlight() {
 	if r == nil || r.preempt == nil {
 		return
 	}
-	r.preempt()
+	if r.preempt() {
+		if b := r.load(); b != nil && b.sess != nil {
+			b.sess.MarkPreemptPending()
+		}
+	}
 }
 
 // load returns the current binding snapshot. Never returns nil — the

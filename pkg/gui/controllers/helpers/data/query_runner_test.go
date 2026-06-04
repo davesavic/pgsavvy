@@ -45,6 +45,8 @@ type fakeRunnerSession struct {
 	lastTx *fakeTransaction
 
 	streamRH *session.RunHandle
+
+	preemptMarked int
 }
 
 type explainCall struct {
@@ -93,6 +95,7 @@ func (f *fakeRunnerSession) Cancel(qid models.QueryID) error {
 
 func (f *fakeRunnerSession) SetDisconnected(_ bool) {}
 func (f *fakeRunnerSession) IsDisconnected() bool   { return false }
+func (f *fakeRunnerSession) MarkPreemptPending()    { f.preemptMarked++ }
 
 func TestQueryRunnerRunDispatchesStream(t *testing.T) {
 	fs := &fakeRunnerSession{}
@@ -335,9 +338,10 @@ func TestPreemptInFlightFiresBeforeSessionOp(t *testing.T) {
 
 			preemptCalls := 0
 			callsAtPreempt := -1
-			r.SetPreempter(func() {
+			r.SetPreempter(func() bool {
 				preemptCalls++
 				callsAtPreempt = cs.calls()
+				return false
 			})
 
 			if err := tc.invoke(r); err != nil {
@@ -353,6 +357,33 @@ func TestPreemptInFlightFiresBeforeSessionOp(t *testing.T) {
 	}
 }
 
+// TestPreemptExpiryMarksSessionFence is the gr7e.2/AD4 seam guard: when the
+// preempt hook reports expiry (worker still live, streamMu held), the
+// QueryRunner — the one layer holding the session — must mark the session
+// preemptPending so the subsequent op fails fast instead of deadlocking. A
+// non-expiring preempt must NOT fence.
+func TestPreemptExpiryMarksSessionFence(t *testing.T) {
+	expired := &fakeRunnerSession{}
+	r := NewQueryRunner(expired, drivers.Capabilities{})
+	r.SetPreempter(func() bool { return true }) // simulate bound-expiry
+	if _, err := r.Run(context.Background(), "SELECT 1", RunOptions{}); err != nil {
+		t.Fatalf("Run err = %v", err)
+	}
+	if expired.preemptMarked != 1 {
+		t.Fatalf("expiry: MarkPreemptPending called %d times, want 1", expired.preemptMarked)
+	}
+
+	ok := &fakeRunnerSession{}
+	r2 := NewQueryRunner(ok, drivers.Capabilities{})
+	r2.SetPreempter(func() bool { return false }) // no expiry
+	if _, err := r2.Run(context.Background(), "SELECT 1", RunOptions{}); err != nil {
+		t.Fatalf("Run err = %v", err)
+	}
+	if ok.preemptMarked != 0 {
+		t.Fatalf("no expiry: MarkPreemptPending called %d times, want 0", ok.preemptMarked)
+	}
+}
+
 // TestPreemptSurvivesUnbindRebind is the highest-risk regression guard:
 // the preempt hook lives on *QueryRunner, NOT on runnerBinding, so an
 // atomic Bind / Unbind swap on reconnect must not silently drop it and
@@ -362,7 +393,7 @@ func TestPreemptSurvivesUnbindRebind(t *testing.T) {
 	r := NewQueryRunner(&fakeRunnerSession{}, drivers.Capabilities{})
 
 	fired := 0
-	r.SetPreempter(func() { fired++ })
+	r.SetPreempter(func() bool { fired++; return false })
 
 	// Swap the binding twice (Unbind then re-Bind with a fresh session),
 	// mirroring a disconnect / reconnect cycle.

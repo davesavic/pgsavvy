@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/grid"
 	"github.com/davesavic/dbsavvy/pkg/gui/popup"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
@@ -42,6 +44,12 @@ const resultTabInitialRows = 200
 
 // resultTabToastTTL is the lifetime of toasts surfaced by the helper.
 const resultTabToastTTL = 4 * time.Second
+
+// preemptStopBound caps the wall-clock wait for the preempt cancel+Stop loop
+// to drain every in-flight worker. On expiry the worker is still live and
+// streamMu is still held; PreemptInFlight warn-logs and returns expired so the
+// QueryRunner fences the session. gr7e.2 (AD2/AD4).
+const preemptStopBound = 5 * time.Second
 
 // TabState classifies the lifecycle phase of a result tab. The string
 // values are surfaced directly in the rendered title.
@@ -198,6 +206,10 @@ type ResultTabsHelperDeps struct {
 	// ordering. Defaults to time.Now when nil.
 	Now func() time.Time
 
+	// After is the timer used to bound the preempt Stop-wait. Defaults to
+	// time.After. Injectable for deterministic tests. gr7e.2.
+	After func(time.Duration) <-chan time.Time
+
 	// Confirm pushes a confirmation popup. Used by ReadToEnd above
 	// ReadToEndWarnThreshold to make the user explicitly opt in to a
 	// large drain. nil disables the warning path. dbsavvy-uv0.3.
@@ -314,10 +326,16 @@ type ResultTabsHelper struct {
 	maxTabs       int
 	nextID        atomic.Int64
 	now           func() time.Time
+	after         func(time.Duration) <-chan time.Time
 	pageSize      int
 	warnThreshold int64
 	sortPickLabel string
 	doubleClickMs int
+
+	// log is the structured logger for instrumentation (e.g. the preempt
+	// cancel path). Set post-construction via SetLogger; nil-safe — logs.Event
+	// no-ops on a nil logger, so unit tests that skip SetLogger emit nothing.
+	log *slog.Logger
 
 	mu       sync.Mutex
 	tabs     []*Tab // ordered by Slot (0..max-1)
@@ -376,6 +394,10 @@ func NewResultTabsHelper(deps ResultTabsHelperDeps) *ResultTabsHelper {
 	if now == nil {
 		now = time.Now
 	}
+	after := deps.After
+	if after == nil {
+		after = time.After
+	}
 	pageSize := deps.ResultPageSize
 	if pageSize <= 0 {
 		pageSize = grid.ResultPageSize
@@ -396,6 +418,7 @@ func NewResultTabsHelper(deps ResultTabsHelperDeps) *ResultTabsHelper {
 		deps:          deps,
 		maxTabs:       max,
 		now:           now,
+		after:         after,
 		pageSize:      pageSize,
 		warnThreshold: warn,
 		sortPickLabel: sortLabel,
@@ -1267,21 +1290,35 @@ func (h *ResultTabsHelper) CancelActive() error {
 // still holding streamMu — the worker never reaches EOF, so RunHandle's
 // finish() (which unlocks the queue) never runs. A subsequent synchronous
 // Stream on the UI goroutine would then block on streamMu forever and
-// freeze the TUI. rh.Cancel() does not help (a parked worker never calls
-// Next to observe the driver cancel); only Stop() makes the worker return,
-// close its stream, and release the lock — and it does so on the worker's
-// own goroutine, so the caller's next Stream.Lock proceeds rather than
-// deadlocking.
+// freeze the TUI. We issue rh.Cancel() first: for a worker BLOCKED inside
+// the driver's row stream waiting on the server (the incident path), the
+// out-of-band wire CancelRequest aborts it promptly (~40s → ~1s) where a
+// plain Stop() would have to wait out the server. We STILL call Stop()
+// because (a) a worker parked PAST the initial-fill window never calls Next
+// to observe the driver cancel, and only Stop() makes it return, close its
+// stream, and release streamMu; and (b) Stop runs that release on the
+// worker's own goroutine (before close(doneCh)), so the caller's next
+// Stream.Lock proceeds rather than deadlocking (dbsavvy-dk6). Stop stays
+// synchronous; the driver round-trip is done after the locks are dropped.
 //
 // Running tabs keep the rows already rendered; their state flips to
 // Cancelled. Queued tabs' waiters are aborted (their queuedCancel is
 // closed) without a driver round-trip — and before Running tabs are
 // stopped, so a queued waiter cannot auto-start when the prior stream's
 // Done closes.
-func (h *ResultTabsHelper) PreemptInFlight() {
+//
+// gr7e.2 (AD2/AD4): the cancel+Stop loop is bounded by preemptStopBound. The
+// common fast path — gr7e.1's Cancel aborts a blocked worker in ~1s — lets
+// Stop complete and release streamMu before this returns false, preserving
+// dbsavvy-dk6's guarantee. If the worker does NOT exit within the bound
+// (parked past initial-fill on a dead/slow host), the wait is abandoned (the
+// goroutine unblocks when the worker finally exits) and PreemptInFlight
+// returns expired=true so the QueryRunner fences the session; the next session
+// op then fails fast with ErrPreemptPending instead of deadlocking on streamMu.
+func (h *ResultTabsHelper) PreemptInFlight() bool {
 	h.mu.Lock()
 	var queuedChans []chan struct{}
-	var runners []StreamRunner
+	var inflight []preemptTarget
 	for _, t := range h.tabs {
 		t.mu.Lock()
 		switch t.state {
@@ -1294,9 +1331,7 @@ func (h *ResultTabsHelper) PreemptInFlight() {
 		case StateRunning, StateSorting:
 			t.state = StateCancelled
 			t.cancelled = true
-			if t.runner != nil {
-				runners = append(runners, t.runner)
-			}
+			inflight = append(inflight, preemptTarget{rh: t.rh, runner: t.runner})
 		}
 		t.mu.Unlock()
 	}
@@ -1311,9 +1346,72 @@ func (h *ResultTabsHelper) PreemptInFlight() {
 			close(ch)
 		}
 	}
-	for _, r := range runners {
-		r.Stop()
+	if len(inflight) == 0 {
+		return false
 	}
+	// Cancel before Stop, with the driver round-trip outside every lock.
+	// Cancel aborts a worker blocked in Next promptly; Stop then guarantees
+	// streamMu is released even for a parked worker. A Cancel error must not
+	// skip Stop. gr7e.1. The loop runs on its own goroutine so the wait can
+	// be bounded (gr7e.2): if a worker never exits, the goroutine unblocks
+	// when it eventually does, and the preempt_cancel log still fires then.
+	// Snapshot the logger before spawning: on the timeout path the goroutine
+	// is abandoned and may emit its preempt_cancel log long after this returns,
+	// so it must not read h.log concurrently with a later SetLogger.
+	logger := h.log
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var cancelErr string
+		for _, tgt := range inflight {
+			if tgt.rh != nil {
+				if err := tgt.rh.Cancel(); err != nil && cancelErr == "" {
+					cancelErr = err.Error()
+				}
+			}
+			if tgt.runner != nil {
+				tgt.runner.Stop()
+			}
+		}
+		logs.Event(logger, "db", "preempt_cancel",
+			slog.Int("tabs", len(inflight)),
+			slog.String("cancel_err", cancelErr))
+	}()
+	after := h.after
+	if after == nil {
+		after = time.After
+	}
+	select {
+	case <-done:
+		return false
+	case <-after(preemptStopBound):
+		// Worker did not exit within the bound: streamMu is still held by the
+		// live worker (released only in the session onFinish). Warn-log and
+		// return expired=true so the QueryRunner fences the session; the
+		// abandoned goroutine above unblocks when the worker finally exits.
+		// AD2/AD4. logs.Event hard-codes Debug, so emit the WARN directly,
+		// mirroring SQLSession.Close's direct-logger warn precedent.
+		if logger != nil {
+			logger.LogAttrs(context.Background(), slog.LevelWarn, "preempt_stop_timeout",
+				slog.String("cat", "db"),
+				slog.String("evt", "preempt_stop_timeout"),
+				slog.Int64("bound_ms", preemptStopBound.Milliseconds()))
+		}
+		return true
+	}
+}
+
+// SetLogger wires the structured logger used by PreemptInFlight's cancel
+// telemetry. Mirrors ToastHelper.SetLogger; safe to omit in tests (logs.Event
+// no-ops on nil). gr7e.1.
+func (h *ResultTabsHelper) SetLogger(l *slog.Logger) { h.log = l }
+
+// preemptTarget pairs a tab's RunHandle and StreamRunner captured under the
+// tab lock so PreemptInFlight can cancel+stop them after every lock is
+// dropped (mirrors cancelTab's capture). gr7e.1.
+type preemptTarget struct {
+	rh     runHandle
+	runner StreamRunner
 }
 
 // MarkConnectionLost flips every running/queued/sorting tab to

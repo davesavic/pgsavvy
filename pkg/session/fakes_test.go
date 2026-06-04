@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -16,9 +17,11 @@ import (
 // SQLSession exercises: Cancel + AcquireSession (returning a stub error
 // when called — SQLSession never re-acquires) + Close stubs.
 type fakeConn struct {
-	cancelCount atomic.Int32
-	cancelErr   error
-	lastCancel  atomic.Pointer[models.QueryID]
+	cancelCount       atomic.Int32
+	cancelErr         error
+	lastCancel        atomic.Pointer[models.QueryID]
+	cancelHadDeadline atomic.Bool
+	cancelDeadline    atomic.Pointer[time.Time]
 }
 
 func (c *fakeConn) Close() error               { return nil }
@@ -28,10 +31,15 @@ func (c *fakeConn) AcquireSession(context.Context) (drivers.Session, error) {
 	return nil, errors.New("fakeConn: AcquireSession not used by these tests")
 }
 
-func (c *fakeConn) Cancel(_ context.Context, qid models.QueryID) error {
+func (c *fakeConn) Cancel(ctx context.Context, qid models.QueryID) error {
 	c.cancelCount.Add(1)
 	cp := qid
 	c.lastCancel.Store(&cp)
+	if dl, ok := ctx.Deadline(); ok {
+		c.cancelHadDeadline.Store(true)
+		d := dl
+		c.cancelDeadline.Store(&d)
+	}
 	return c.cancelErr
 }
 

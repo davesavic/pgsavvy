@@ -199,6 +199,125 @@ func TestSQLSessionCancel_InFlightCallsConnCancelOnce(t *testing.T) {
 	_ = rh.Rows().Close()
 }
 
+// TestSQLSessionCancel_BoundsCancelDialDeadline is the gr7e.1/AD5 guard: the
+// cancel round-trip must run under a bounded context so rh.Cancel() cannot
+// freeze the UI on a dead/slow host. Prior code used context.Background()
+// (no deadline); this asserts the conn.Cancel ctx now carries a deadline a
+// few seconds out.
+func TestSQLSessionCancel_BoundsCancelDialDeadline(t *testing.T) {
+	s, fc, fs := newTestSession(t, nil)
+	release := make(chan struct{})
+	staged := &fakeRowStream{
+		qid:     models.QueryID{SessionID: 42, BackendPID: 7, Nonce: 1},
+		total:   1,
+		blockOn: release,
+	}
+	fs.streams = []func() drivers.RowStream{func() drivers.RowStream { return staged }}
+
+	rh, err := s.Stream(context.Background(), models.Query{SQL: "SELECT pg_sleep(60)"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	before := time.Now()
+	if err := s.Cancel(rh.QueryID()); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	if !fc.cancelHadDeadline.Load() {
+		t.Fatal("conn.Cancel received a ctx with NO deadline; AD5 requires a bounded cancel dial")
+	}
+	dl := fc.cancelDeadline.Load()
+	if dl == nil {
+		t.Fatal("cancel deadline not captured")
+	}
+	if d := dl.Sub(before); d <= 0 || d > 10*time.Second {
+		t.Errorf("cancel ctx deadline = %v out, want a small positive bound (~3s)", d)
+	}
+
+	// Release the stream so finish/Close can complete and goleak passes.
+	close(release)
+	for {
+		_, ok, err := rh.Rows().Next(context.Background())
+		if !ok || err != nil {
+			break
+		}
+	}
+	<-rh.Done()
+	_ = rh.Rows().Close()
+}
+
+// TestSQLSession_PreemptPendingFencesThenClears is the gr7e.2/AD4 guard: a
+// bound-expiry fence (MarkPreemptPending) makes Stream/Execute/Explain/Begin
+// fail fast with ErrPreemptPending instead of blocking on streamMu while the
+// wedged worker still holds it; onFinish clears the fence when the worker
+// finally exits, after which the next op proceeds. Without this, the bounded
+// Stop merely relocates the dbsavvy-dk6 deadlock to the next query.
+func TestSQLSession_PreemptPendingFencesThenClears(t *testing.T) {
+	s, _, fs := newTestSession(t, nil)
+	release := make(chan struct{})
+	first := &fakeRowStream{
+		qid:     models.QueryID{SessionID: 42, BackendPID: 7, Nonce: 1},
+		total:   1,
+		blockOn: release,
+	}
+	second := &fakeRowStream{
+		qid:   models.QueryID{SessionID: 42, BackendPID: 7, Nonce: 2},
+		total: 1,
+	}
+	fs.streams = []func() drivers.RowStream{
+		func() drivers.RowStream { return first },
+		func() drivers.RowStream { return second },
+	}
+
+	rh, err := s.Stream(context.Background(), models.Query{SQL: "SELECT 1"})
+	if err != nil {
+		t.Fatalf("first Stream: %v", err)
+	}
+
+	// Simulate a bound-expiry fence while the worker is still live (streamMu held).
+	s.MarkPreemptPending()
+
+	// Every guarded op must fail fast with ErrPreemptPending — NOT block on streamMu.
+	if _, err := s.Stream(context.Background(), models.Query{SQL: "SELECT 2"}); !errors.Is(err, session.ErrPreemptPending) {
+		t.Fatalf("Stream during fence = %v, want ErrPreemptPending", err)
+	}
+	if _, err := s.Execute(context.Background(), models.Query{SQL: "SELECT 2"}); !errors.Is(err, session.ErrPreemptPending) {
+		t.Fatalf("Execute during fence = %v, want ErrPreemptPending", err)
+	}
+	if _, err := s.Explain(context.Background(), models.Query{SQL: "SELECT 2"}, false); !errors.Is(err, session.ErrPreemptPending) {
+		t.Fatalf("Explain during fence = %v, want ErrPreemptPending", err)
+	}
+	if _, err := s.Begin(context.Background(), models.TxOptions{}); !errors.Is(err, session.ErrPreemptPending) {
+		t.Fatalf("Begin during fence = %v, want ErrPreemptPending", err)
+	}
+
+	// Release the wedged worker; onFinish clears the fence and releases streamMu.
+	close(release)
+	for {
+		_, ok, err := rh.Rows().Next(context.Background())
+		if !ok || err != nil {
+			break
+		}
+	}
+	<-rh.Done()
+	_ = rh.Rows().Close()
+
+	// Fence lifted: the next Stream now proceeds (consuming the second stream).
+	rh2, err := s.Stream(context.Background(), models.Query{SQL: "SELECT 3"})
+	if err != nil {
+		t.Fatalf("Stream after worker exit = %v, want nil (fence must clear in onFinish)", err)
+	}
+	for {
+		_, ok, err := rh2.Rows().Next(context.Background())
+		if !ok || err != nil {
+			break
+		}
+	}
+	<-rh2.Done()
+	_ = rh2.Rows().Close()
+}
+
 func TestRunHandleCancel_AfterDoneIsIdempotent(t *testing.T) {
 	s, fc, fs := newTestSession(t, nil)
 	staged := &fakeRowStream{qid: models.QueryID{SessionID: 42, Nonce: 1}, total: 0}

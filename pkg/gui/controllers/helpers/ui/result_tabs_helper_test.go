@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -705,6 +706,261 @@ func TestPreemptInFlightAbortsQueuedTab(t *testing.T) {
 	}
 	if got := runners[0].StopCount(); got != 1 {
 		t.Errorf("A runner Stop count = %d, want 1", got)
+	}
+}
+
+// seqRecorder records an ordered event log shared by a recordingRunHandle
+// and a recordingRunner so a test can assert Cancel-before-Stop ordering.
+type seqRecorder struct {
+	mu  sync.Mutex
+	seq []string
+}
+
+func (s *seqRecorder) add(ev string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seq = append(s.seq, ev)
+}
+
+func (s *seqRecorder) events() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.seq))
+	copy(out, s.seq)
+	return out
+}
+
+// recordingRunHandle logs "cancel" before delegating to the embedded fake.
+type recordingRunHandle struct {
+	*fakeRunHandle
+	rec *seqRecorder
+}
+
+func (r *recordingRunHandle) Cancel() error {
+	r.rec.add("cancel")
+	return r.fakeRunHandle.Cancel()
+}
+
+// recordingRunner logs "stop" before delegating to the embedded fake.
+type recordingRunner struct {
+	*fakeStreamRunner
+	rec *seqRecorder
+}
+
+func (r *recordingRunner) Stop() {
+	r.rec.add("stop")
+	r.fakeStreamRunner.Stop()
+}
+
+// TestPreemptInFlightCancelsBeforeStop is the gr7e.1 ordering guard: a
+// running tab's RunHandle.Cancel() (which aborts a worker blocked in Next)
+// must fire BEFORE its runner.Stop(), mirroring cancelTab.
+func TestPreemptInFlightCancelsBeforeStop(t *testing.T) {
+	rec := &seqRecorder{}
+	factory := func() StreamRunner {
+		return &recordingRunner{fakeStreamRunner: &fakeStreamRunner{}, rec: rec}
+	}
+	h, _ := newTestHelper(t, factory)
+
+	rh := &recordingRunHandle{fakeRunHandle: newFakeRunHandle(), rec: rec}
+	if err := h.openTab("A", rh); err != nil {
+		t.Fatalf("openTab A: %v", err)
+	}
+	if h.Active().State() != StateRunning {
+		t.Fatalf("A state = %v, want Running", h.Active().State())
+	}
+
+	h.PreemptInFlight()
+
+	if !rh.wasCancelled() {
+		t.Error("running tab's RunHandle was not cancelled")
+	}
+	got := rec.events()
+	if len(got) != 2 || got[0] != "cancel" || got[1] != "stop" {
+		t.Errorf("event order = %v, want [cancel stop] (Cancel must precede Stop)", got)
+	}
+}
+
+// TestPreemptInFlightCancelErrStillStops asserts a non-nil Cancel error does
+// NOT skip runner.Stop() — Stop is what releases streamMu (dbsavvy-dk6).
+func TestPreemptInFlightCancelErrStillStops(t *testing.T) {
+	var runners []*fakeStreamRunner
+	factory := func() StreamRunner {
+		r := &fakeStreamRunner{}
+		runners = append(runners, r)
+		return r
+	}
+	h, _ := newTestHelper(t, factory)
+
+	rh := newFakeRunHandle()
+	rh.cancelErr = errors.New("boom")
+	if err := h.openTab("A", rh); err != nil {
+		t.Fatalf("openTab A: %v", err)
+	}
+	tabA := h.Active()
+
+	h.PreemptInFlight()
+
+	if !rh.wasCancelled() {
+		t.Error("running tab's RunHandle was not cancelled")
+	}
+	if got := runners[0].StopCount(); got != 1 {
+		t.Errorf("Stop count = %d, want 1 (a Cancel error must not skip Stop)", got)
+	}
+	if tabA.State() != StateCancelled {
+		t.Errorf("A state = %v, want Cancelled", tabA.State())
+	}
+}
+
+// TestPreemptInFlightNilRunHandleNoPanic asserts a running tab whose rh is
+// nil does not panic and still Stops.
+func TestPreemptInFlightNilRunHandleNoPanic(t *testing.T) {
+	var runners []*fakeStreamRunner
+	factory := func() StreamRunner {
+		r := &fakeStreamRunner{}
+		runners = append(runners, r)
+		return r
+	}
+	h, _ := newTestHelper(t, factory)
+
+	if err := h.openTab("A", nil); err != nil {
+		t.Fatalf("openTab A: %v", err)
+	}
+	if h.Active().State() != StateRunning {
+		t.Fatalf("A state = %v, want Running", h.Active().State())
+	}
+
+	h.PreemptInFlight() // must not panic on a nil RunHandle
+
+	if got := runners[0].StopCount(); got != 1 {
+		t.Errorf("Stop count = %d, want 1", got)
+	}
+	if h.Active().State() != StateCancelled {
+		t.Errorf("A state = %v, want Cancelled", h.Active().State())
+	}
+}
+
+// TestPreemptInFlightQueuedTabNotCancelled asserts the queued tab is aborted
+// without a driver Cancel, while the running tab ahead of it IS cancelled.
+func TestPreemptInFlightQueuedTabNotCancelled(t *testing.T) {
+	h, _ := newTestHelper(t, func() StreamRunner { return &fakeStreamRunner{} })
+
+	rhA := newFakeRunHandle()
+	rhB := newFakeRunHandle()
+	_ = h.openTab("A", rhA)
+	_ = h.openTab("B", rhB) // queues behind running A
+	if h.Active().State() != StateQueued {
+		t.Fatalf("B state = %v, want Queued", h.Active().State())
+	}
+
+	h.PreemptInFlight()
+
+	if rhB.wasCancelled() {
+		t.Error("queued tab's RunHandle should not receive a driver Cancel")
+	}
+	if !rhA.wasCancelled() {
+		t.Error("running tab's RunHandle should be cancelled")
+	}
+}
+
+// blockingStopRunner is a StreamRunner whose Stop() blocks until unblock is
+// closed — used to wedge PreemptInFlight's Stop-wait so the bound fires.
+type blockingStopRunner struct {
+	*fakeStreamRunner
+	unblock chan struct{}
+}
+
+func (r *blockingStopRunner) Stop() {
+	<-r.unblock
+	r.fakeStreamRunner.Stop()
+}
+
+// capturingHandler records emitted slog records so a test can assert the
+// preempt_stop_timeout warning fired.
+type capturingHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *capturingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+func (h *capturingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *capturingHandler) hasWarn(msg string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		if r.Level == slog.LevelWarn && r.Message == msg {
+			return true
+		}
+	}
+	return false
+}
+
+func newPreemptHelper(t *testing.T, factory StreamRunnerFactory, after func(time.Duration) <-chan time.Time) (*ResultTabsHelper, *capturingHandler) {
+	t.Helper()
+	h := NewResultTabsHelper(ResultTabsHelperDeps{
+		Toast:         &fakeToaster{},
+		StreamFactory: factory,
+		Now:           time.Now,
+		After:         after,
+	})
+	cap := &capturingHandler{}
+	h.SetLogger(slog.New(cap))
+	return h, cap
+}
+
+// TestPreemptInFlightFastPathReturnsFalse: when the cancel+Stop loop drains
+// before the bound (the common post-gr7e.1 case), PreemptInFlight returns
+// false (not expired) and emits no timeout warning.
+func TestPreemptInFlightFastPathReturnsFalse(t *testing.T) {
+	h, cap := newPreemptHelper(t, func() StreamRunner { return &fakeStreamRunner{} }, nil)
+	if err := h.openTab("A", newFakeRunHandle()); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+
+	if expired := h.PreemptInFlight(); expired {
+		t.Fatal("fast path: PreemptInFlight returned expired=true, want false")
+	}
+	if cap.hasWarn("preempt_stop_timeout") {
+		t.Error("fast path emitted a preempt_stop_timeout warning, want none")
+	}
+}
+
+// TestPreemptInFlightTimeoutReturnsExpired: when Stop wedges past the bound,
+// PreemptInFlight returns expired=true and warn-logs preempt_stop_timeout —
+// the signal the QueryRunner uses to fence the session (gr7e.2/AD2/AD4).
+func TestPreemptInFlightTimeoutReturnsExpired(t *testing.T) {
+	unblock := make(chan struct{})
+	factory := func() StreamRunner {
+		return &blockingStopRunner{fakeStreamRunner: &fakeStreamRunner{}, unblock: unblock}
+	}
+	// Injected timer fires the bound immediately — deterministic, no wall clock.
+	fireNow := func(time.Duration) <-chan time.Time {
+		ch := make(chan time.Time, 1)
+		ch <- time.Now()
+		return ch
+	}
+	h, cap := newPreemptHelper(t, factory, fireNow)
+	if err := h.openTab("A", newFakeRunHandle()); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+
+	expired := h.PreemptInFlight()
+	// Release the wedged Stop so the abandoned goroutine exits (no leak).
+	close(unblock)
+
+	if !expired {
+		t.Fatal("timeout: PreemptInFlight returned false, want expired=true")
+	}
+	if !cap.hasWarn("preempt_stop_timeout") {
+		t.Error("timeout: expected a warn preempt_stop_timeout log record")
 	}
 }
 
