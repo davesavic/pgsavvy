@@ -722,6 +722,9 @@ func (g *Gui) wireWithDriver() error {
 		resultTabsDeps.ExportClipboardMaxBytes = cfg.UI.Export.ClipboardMaxBytes
 	}
 	g.resultTabsH = ui.NewResultTabsHelper(resultTabsDeps)
+	if g.deps.Common != nil {
+		g.resultTabsH.SetLogger(g.deps.Common.Logger())
+	}
 
 	// NoticeHelper routes server NOTICE / WARNING messages from streaming
 	// queries to a first-of-run toast. dbsavvy-66p.13.

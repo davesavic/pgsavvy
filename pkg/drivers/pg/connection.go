@@ -246,6 +246,14 @@ func (c *Connection) cancelInner(ctx context.Context, qid models.QueryID) error 
 		return fmt.Errorf("pg: cancel: write: %w", err)
 	}
 
+	// Bound the close-wait read so a server that never closes the cancel
+	// conn cannot block forever. The dial already honors ctx's deadline; mirror
+	// it onto the read. A timeout surfaces as a (discarded) read error, so the
+	// non-flaky behavior below is preserved. AD5.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetReadDeadline(deadline)
+	}
+
 	// Mirror libpq's behavior: wait for the server to close the conn before
 	// returning. The read result is intentionally discarded — Postgres never
 	// sends a reply on the cancel channel; the server simply closes after

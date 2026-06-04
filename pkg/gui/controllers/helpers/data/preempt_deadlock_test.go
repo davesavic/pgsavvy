@@ -2,6 +2,7 @@ package data_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -66,6 +67,14 @@ type blockingRowStream struct {
 
 	parkOnce sync.Once
 	parkedCh chan struct{}
+
+	// closeGate, when non-nil, blocks Close() until it is closed — simulating
+	// the incident's driver behavior where rows.Close() drains until the
+	// server-side query finishes rather than aborting. It wedges the RBM
+	// worker inside release() so PreemptInFlight's Stop-wait cannot drain
+	// within its bound, exercising the gr7e.2 abandon path. Nil = instant
+	// Close (the default cancellable-worker behavior).
+	closeGate chan struct{}
 }
 
 func newBlockingRowStream(signalAfter int) *blockingRowStream {
@@ -100,6 +109,9 @@ func (s *blockingRowStream) Next(ctx context.Context) (models.Row, bool, error) 
 }
 
 func (s *blockingRowStream) Close() error {
+	if s.closeGate != nil {
+		<-s.closeGate
+	}
 	s.closed = true
 	return nil
 }
@@ -388,5 +400,98 @@ func TestParkedStreamThenFKReverseDoesNotDeadlock(t *testing.T) {
 		return err
 	})
 
+	f.cleanup(t)
+}
+
+// newAbandonFixture mirrors newParkedStreamFixture but (a) wedges the parked
+// stream's Close() so the RBM worker cannot finish when Stop fires, and (b)
+// injects a fire-immediately preempt Stop-wait timer. Together these force the
+// gr7e.2 abandon path deterministically: the cancel+Stop loop never drains, so
+// PreemptInFlight expires its bound and the QueryRunner fences the session.
+func newAbandonFixture(t *testing.T) (*parkedStreamFixture, *blockingRowStream) {
+	t.Helper()
+
+	rs := newBlockingRowStream(200)
+	rs.closeGate = make(chan struct{})
+	inner := &blockingSession{rs: rs}
+	sess := session.New(&parkedConn{}, inner, session.Options{})
+
+	var workers sync.WaitGroup
+	onWorker := func(fn func(gocui.Task) error) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			_ = fn(nil)
+		}()
+	}
+	onUIThread := func(fn func() error) { _ = fn() }
+
+	// Fire the bound immediately. With Close() wedged the loop's done channel
+	// never closes, so the timer branch wins deterministically (no flake).
+	fireNow := func(time.Duration) <-chan time.Time {
+		ch := make(chan time.Time, 1)
+		ch <- time.Now()
+		return ch
+	}
+
+	tabs := ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{
+		StreamFactory: func() ui.StreamRunner {
+			return tasks.New(onWorker, onUIThread)
+		},
+		OnUIThread: onUIThread,
+		After:      fireNow,
+	})
+
+	runner := data.NewQueryRunnerForSession(sess, drivers.Capabilities{})
+	runner.SetPreempter(tabs.PreemptInFlight)
+
+	return &parkedStreamFixture{
+		runner:  runner,
+		tabs:    tabs,
+		sess:    sess,
+		parked:  rs.parkedCh,
+		workers: &workers,
+	}, rs
+}
+
+// TestParkedStreamAbandonFencesSessionNoDeadlock is the gr7e.2/AD4 end-to-end
+// guard for an UNcancellable worker: a parked stream whose Close() wedges (the
+// incident's drain-don't-abort behavior) cannot drain within the preempt
+// Stop-wait bound. The bound expires, the QueryRunner fences the session, and
+// the NEXT op returns ErrPreemptPending fast instead of deadlocking on the
+// still-held streamMu. When the worker finally exits, the fence clears and the
+// abandoned Stop goroutine unblocks (goleak verifies no leak).
+func TestParkedStreamAbandonFencesSessionNoDeadlock(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	f, rs := newAbandonFixture(t)
+	f.startParkedStream(t)
+
+	// The dependent op preempts; the wedged Close makes the Stop-wait expire,
+	// fencing the session. Explain must return ErrPreemptPending fast, never
+	// block on the still-held streamMu.
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.runner.Explain(context.Background(), "SELECT 1", false, "")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, session.ErrPreemptPending) {
+			t.Fatalf("Explain after preempt-abandon = %v, want ErrPreemptPending", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("DEADLOCK: Explain blocked on streamMu after the preempt Stop-wait was abandoned")
+	}
+
+	// A further op while the worker is still wedged is likewise fenced, and
+	// starts no new stream.
+	if _, err := f.runner.Run(context.Background(), "SELECT 2", data.RunOptions{}); !errors.Is(err, session.ErrPreemptPending) {
+		t.Fatalf("Run during fence = %v, want ErrPreemptPending", err)
+	}
+
+	// Release the wedged Close: the worker finishes, onFinish clears the fence
+	// and releases streamMu, and the abandoned Stop goroutine unblocks.
+	close(rs.closeGate)
 	f.cleanup(t)
 }

@@ -33,9 +33,12 @@ func (fakeStreamSession) Stream(context.Context, models.Query) (drivers.RowStrea
 	return eofRowStream{qid: models.QueryID{SessionID: 1, Nonce: 1}}, nil
 }
 
-// fakeConn embeds drivers.Connection; the stream-start path needs none
-// of its methods.
+// fakeConn embeds drivers.Connection; only Cancel is reachable — Gui.Close
+// preempts in-flight tabs (PreemptInFlight) which cancels each RunHandle
+// before Stop. The remaining methods stay nil stubs.
 type fakeConn struct{ drivers.Connection }
+
+func (fakeConn) Cancel(context.Context, models.QueryID) error { return nil }
 
 // TestCloseDoesNotDeadlockWithParkedResultTabWorker reproduces the
 // shutdown hang: a result tab whose stream reached EOF leaves its

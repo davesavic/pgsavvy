@@ -426,6 +426,7 @@ type recordingRunnerSession struct {
 	beginCalls    int
 	inTx          bool
 	lastTx        *recordingTransaction
+	streamErr     error
 }
 
 // recordingTransaction is a minimal drivers.Transaction stub.
@@ -450,7 +451,7 @@ func (r *recordingRunnerSession) Execute(_ stdcontext.Context, q models.Query) (
 
 func (r *recordingRunnerSession) Stream(_ stdcontext.Context, q models.Query) (*session.RunHandle, error) {
 	r.streamCalls = append(r.streamCalls, q)
-	return nil, nil
+	return nil, r.streamErr
 }
 
 func (r *recordingRunnerSession) Explain(_ stdcontext.Context, q models.Query, analyze bool) (models.Plan, error) {
@@ -484,6 +485,7 @@ func (r *recordingRunnerSession) Cancel(qid models.QueryID) error {
 
 func (r *recordingRunnerSession) SetDisconnected(_ bool) {}
 func (r *recordingRunnerSession) IsDisconnected() bool   { return false }
+func (r *recordingRunnerSession) MarkPreemptPending()    {}
 
 // TestQueryEditorRunOnSecondLineRoutesCorrectStatement covers the AC:
 //
@@ -792,6 +794,33 @@ func TestQueryEditorRunSQLDispatchesStatement(t *testing.T) {
 	}
 }
 
+// TestSurfaceErrPreemptPendingShowsToastNotErrorTab is the gr7e.2/AD4 UI
+// guard: a session refusing a query because a prior one is still terminating
+// (ErrPreemptPending) must surface as a transient toast, NOT a sticky error
+// tab — the prior query failed nothing, it is merely still winding down.
+func TestSurfaceErrPreemptPendingShowsToastNotErrorTab(t *testing.T) {
+	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
+	rec := &recordingRunnerSession{streamErr: session.ErrPreemptPending}
+	b.HelperBag.QueryRunner = data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+	b.Buffer.Text = "SELECT 1"
+	b.HelperBag.ConnProfile = func() *models.Connection { return &models.Connection{} }
+
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+
+	if len(b.Tabs.errorCalls) != 0 {
+		t.Fatalf("ErrPreemptPending opened %d error tab(s), want 0 (should be a transient toast)", len(b.Tabs.errorCalls))
+	}
+	if len(b.Toast.msgs) != 1 {
+		t.Fatalf("Toast msgs = %#v, want exactly one preempt-pending toast", b.Toast.msgs)
+	}
+}
+
 // preemptRecorder records, at each PreemptInFlight call, how many
 // streams the runner session has issued so far — a witness for ordering.
 // Wired to the runner via SetPreempter (dbsavvy-lxn.1: preemption now
@@ -802,8 +831,9 @@ type preemptRecorder struct {
 	preemptStreamLens []int
 }
 
-func (p *preemptRecorder) PreemptInFlight() {
+func (p *preemptRecorder) PreemptInFlight() bool {
 	p.preemptStreamLens = append(p.preemptStreamLens, len(p.rec.streamCalls))
+	return false
 }
 
 // TestQueryEditorRunAllPreemptsBeforeEachStream is the deadlock-fix wiring

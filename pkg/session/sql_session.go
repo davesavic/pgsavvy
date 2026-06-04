@@ -18,6 +18,12 @@ import (
 // has been marked connection-dead via SetDisconnected. hq5.6.
 var ErrDisconnected = errors.New("session: connection lost")
 
+// ErrPreemptPending is returned by Stream/Execute/Explain/Begin when a prior
+// query's worker did not exit within the bounded preempt Stop-wait and is
+// still holding streamMu. The fence lifts when that wedged worker finally
+// exits (its onFinish releases streamMu and clears the flag). gr7e.2 (AD4).
+var ErrPreemptPending = errors.New("session: prior query still terminating")
+
 // noticeAttacher is the optional capability of a drivers.Session: when the
 // concrete driver supports notice plumbing (probed via
 // Connection.Capabilities().HasNotice) it implements AttachNotice on the
@@ -33,6 +39,14 @@ type noticeAttacher interface {
 // larger than the per-run buffer (64) so a burst can land in this channel
 // while the fan-out goroutine forwards it to the active run.
 const sqlSessionNoticeBuffer = 128
+
+// cancelDialBound caps the wall-clock cost of a single cancel attempt. The
+// cancel issues an out-of-band CancelRequest over a fresh connection; on a
+// dead or slow host the dial (and the subsequent close-wait read) could
+// otherwise block indefinitely, freezing a UI thread that calls Cancel
+// synchronously (e.g. PreemptInFlight). 3s is well above a healthy
+// round-trip yet short enough to stay responsive. AD5.
+const cancelDialBound = 3 * time.Second
 
 // Options configures a SQLSession at New time. HistoryRecorder may be nil
 // (the package installs noopHistoryRecorder); Logger may be nil (a no-op
@@ -84,6 +98,12 @@ type SQLSession struct {
 	// Once true the session rejects new Execute/Stream/Begin attempts and the
 	// UI renders the schema rail dimmed. hq5.6.
 	disconnected atomic.Bool
+
+	// preemptPending is set when a bounded preempt Stop-wait expired with the
+	// prior worker still live (streamMu still held). Once true the session
+	// rejects new Execute/Stream/Explain/Begin attempts with ErrPreemptPending
+	// until the wedged worker's onFinish releases streamMu and clears it. gr7e.2.
+	preemptPending atomic.Bool
 
 	// fkCache is the per-Connection foreign-key cache. Constructed lazily on
 	// first FKCache() call so SQLSessions whose callers never need FK metadata
@@ -168,6 +188,13 @@ func (s *SQLSession) SettingsSnapshot() *SettingsSnapshot { return s.settings }
 // Execute/Stream/Begin calls return ErrDisconnected. Idempotent. hq5.6.
 func (s *SQLSession) SetDisconnected(v bool) { s.disconnected.Store(v) }
 
+// MarkPreemptPending fences the session after a bounded preempt Stop-wait
+// expired with the prior worker still live. New Execute/Stream/Explain/Begin
+// calls return ErrPreemptPending until the wedged worker's onFinish releases
+// streamMu and clears the flag. Called by the QueryRunner on bound-expiry.
+// gr7e.2.
+func (s *SQLSession) MarkPreemptPending() { s.preemptPending.Store(true) }
+
 // IsDisconnected reports whether the session has been marked
 // connection-dead via SetDisconnected. hq5.6.
 func (s *SQLSession) IsDisconnected() bool { return s.disconnected.Load() }
@@ -196,6 +223,9 @@ func (s *SQLSession) SavepointNames() []string {
 func (s *SQLSession) Execute(ctx context.Context, q models.Query) (models.Result, error) {
 	if s.disconnected.Load() {
 		return models.Result{}, ErrDisconnected
+	}
+	if s.preemptPending.Load() {
+		return models.Result{}, ErrPreemptPending
 	}
 	s.streamMu.Lock()
 	defer s.streamMu.Unlock()
@@ -245,6 +275,9 @@ func (s *SQLSession) Explain(ctx context.Context, q models.Query, analyze bool) 
 	if s.disconnected.Load() {
 		return models.Plan{}, ErrDisconnected
 	}
+	if s.preemptPending.Load() {
+		return models.Plan{}, ErrPreemptPending
+	}
 	s.streamMu.Lock()
 	defer s.streamMu.Unlock()
 	plan, err := s.inner.Explain(ctx, q, analyze)
@@ -262,6 +295,9 @@ func (s *SQLSession) Explain(ctx context.Context, q models.Query, analyze bool) 
 func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, error) {
 	if s.disconnected.Load() {
 		return nil, ErrDisconnected
+	}
+	if s.preemptPending.Load() {
+		return nil, ErrPreemptPending
 	}
 	s.streamMu.Lock()
 
@@ -318,7 +354,9 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 	}
 
 	rh.cancelFn = func() error {
-		return s.conn.Cancel(context.Background(), rh.QueryID())
+		ctx, cancel := context.WithTimeout(context.Background(), cancelDialBound)
+		defer cancel()
+		return s.conn.Cancel(ctx, rh.QueryID())
 	}
 	rh.onFinish = func(termErr error) {
 		s.runActive.Store(nil)
@@ -352,6 +390,10 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 				s.disconnected.Store(true)
 			}
 		}
+		// The wedged worker has now exited and is releasing streamMu; lift the
+		// preempt fence at the same instant so a fenced session reopens for new
+		// queries exactly when the queue is free again. gr7e.2.
+		s.preemptPending.Store(false)
 		s.streamMu.Unlock()
 	}
 
@@ -368,6 +410,9 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 func (s *SQLSession) Begin(ctx context.Context, opts models.TxOptions) (drivers.Transaction, error) {
 	if s.disconnected.Load() {
 		return nil, ErrDisconnected
+	}
+	if s.preemptPending.Load() {
+		return nil, ErrPreemptPending
 	}
 	s.streamMu.Lock()
 	defer s.streamMu.Unlock()
