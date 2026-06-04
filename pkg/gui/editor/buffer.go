@@ -273,6 +273,14 @@ func (b *Buffer) LineRuneLen(line int) int {
 	return len(b.Lines[line].Runes)
 }
 
+// LineCount returns the number of lines in the buffer. Snapshot read
+// under b.mu.RLock.
+func (b *Buffer) LineCount() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.Lines)
+}
+
 // SetCursor writes p to Cursor under b.mu. Used by VimEditor after
 // Apply to keep Cursor following the insertion point; future motion
 // handlers (wwd.5) call this too.

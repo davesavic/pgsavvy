@@ -331,6 +331,127 @@ func TestPasteLinewiseInsertsOnNewLine(t *testing.T) {
 	}
 }
 
+// --- Visual-mode paste (p replaces selection) ---
+
+func TestVisualLinePasteReplacesSelection(t *testing.T) {
+	_, reg, qec, matcher, modes := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("line0")},
+		{Runes: []rune("line1")},
+		{Runes: []rune("line2")},
+		{Runes: []rune("line3")},
+	}
+	buf.SetCursor(editor.Position{Line: 1, Col: 0})
+	// V on line1, extend to line2 → line-wise selection of line1+line2.
+	editor.EnterVisual(buf, types.ModeVisualLine)
+	editor.ExtendSelection(buf, editor.Position{Line: 2, Col: 0})
+	matcher.Registers().Set('"', "REPLACED\n") // line-wise register
+
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeVisualLine})
+
+	want := []string{"line0", "REPLACED", "line3"}
+	if len(buf.Lines) != len(want) {
+		t.Fatalf("Lines after visual-line paste = %d, want %d", len(buf.Lines), len(want))
+	}
+	for i, w := range want {
+		if got := string(buf.Lines[i].Runes); got != w {
+			t.Errorf("Line %d = %q, want %q", i, got, w)
+		}
+	}
+	if buf.Selection != nil {
+		t.Errorf("Selection still set after visual paste, want nil (ExitVisual)")
+	}
+	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeNormal {
+		t.Errorf("mode = %v, want Normal", got)
+	}
+}
+
+func TestVisualLinePastePreservesRegister(t *testing.T) {
+	_, reg, qec, matcher, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("line0")},
+		{Runes: []rune("line1")},
+	}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisualLine)
+	matcher.Registers().Set('"', "REPLACED\n")
+
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeVisualLine})
+
+	if got := matcher.Registers().Get('"'); got != "REPLACED\n" {
+		t.Errorf("register \" after visual paste = %q, want unchanged %q", got, "REPLACED\n")
+	}
+}
+
+func TestVisualLinePasteAtEndOfBuffer(t *testing.T) {
+	_, reg, qec, matcher, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("line0")},
+		{Runes: []rune("line1")},
+		{Runes: []rune("line2")},
+		{Runes: []rune("line3")},
+	}
+	buf.SetCursor(editor.Position{Line: 2, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisualLine)
+	editor.ExtendSelection(buf, editor.Position{Line: 3, Col: 0})
+	matcher.Registers().Set('"', "REPLACED\n")
+
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeVisualLine})
+
+	want := []string{"line0", "line1", "REPLACED"}
+	if len(buf.Lines) != len(want) {
+		t.Fatalf("Lines after end-of-buffer visual paste = %d, want %d", len(buf.Lines), len(want))
+	}
+	for i, w := range want {
+		if got := string(buf.Lines[i].Runes); got != w {
+			t.Errorf("Line %d = %q, want %q", i, got, w)
+		}
+	}
+}
+
+func TestVisualCharPasteReplacesSelection(t *testing.T) {
+	_, reg, qec, matcher, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 6})
+	editor.EnterVisual(buf, types.ModeVisual)
+	editor.ExtendSelection(buf, editor.Position{Line: 0, Col: 11})
+	matcher.Registers().Set('"', "vim") // char-wise register
+
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeVisual})
+
+	if got := string(buf.Lines[0].Runes); got != "hello vim" {
+		t.Errorf("after visual-char paste = %q, want %q", got, "hello vim")
+	}
+}
+
+func TestVisualPasteEmptyRegisterIsNoOp(t *testing.T) {
+	_, reg, qec, _, modes := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("line0")},
+		{Runes: []rune("line1")},
+	}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisualLine)
+	editor.ExtendSelection(buf, editor.Position{Line: 1, Col: 0})
+
+	runHandler(t, reg, commands.EditorPaste, commands.ExecCtx{Mode: types.ModeVisualLine})
+
+	if len(buf.Lines) != 2 {
+		t.Fatalf("buffer mutated by empty-register visual paste: %d lines, want 2", len(buf.Lines))
+	}
+	if buf.Selection != nil {
+		t.Errorf("Selection still set after visual paste, want nil")
+	}
+	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeNormal {
+		t.Errorf("mode = %v, want Normal", got)
+	}
+}
+
 // --- Mode bounds + cancel path ---
 
 func TestEscClearsOperatorPending(t *testing.T) {
