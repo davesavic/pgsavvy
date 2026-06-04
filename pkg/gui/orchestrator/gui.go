@@ -1526,37 +1526,16 @@ func (g *Gui) wireWithDriver() error {
 
 	// COMMAND_LINE action commands. The CommandLineContext doubles as
 	// the holder (it implements types.IBaseContext + ReadAndClearBuffer).
-	toaster := func(msg string) {
-		if g.toastHelp != nil {
-			g.toastHelp.Show(msg, 3*time.Second)
-		}
-	}
-	caret := func(enabled bool) {
-		if g.driver != nil {
-			g.driver.SetCaretEnabled(enabled)
-		}
-	}
 	cmdDeps := keys.CommandLineCommandDeps{
 		Stack:        g.tree,
 		Context:      g.registry.CommandLine,
 		ExRegistry:   g.exRegistry,
-		Toaster:      toaster,
-		CaretToggler: caret,
+		Toaster:      g.toaster,
+		CaretToggler: g.caret,
 	}
 	_ = g.cmdRegistry.Register(keys.CommandOpenCommand(cmdDeps))
 	_ = g.cmdRegistry.Register(keys.CommandCancelCommand(cmdDeps))
 	_ = g.cmdRegistry.Register(keys.CommandSubmitCommand(cmdDeps))
-
-	// kindOf classifies a ContextKey by walking the registry; used by
-	// Build to expand `scope: all` and by :reload.
-	kindOf := func(k types.ContextKey) types.ContextKind {
-		for _, ctx := range g.registry.Flatten() {
-			if ctx != nil && ctx.GetKey() == k {
-				return ctx.GetKind()
-			}
-		}
-		return types.GLOBAL_CONTEXT
-	}
 
 	// dbsavvy-56u.3: validate UserConfig now that cmdRegistry and the
 	// context registry are populated. Deviation from AD-2 literal ordering
@@ -1586,7 +1565,7 @@ func (g *Gui) wireWithDriver() error {
 	// Build the trie.
 	svc := keys.NewKeybindingService()
 	defaults := controllers.AllDefaultBindings(g.controllers)
-	trieSet, warnings, buildErr := svc.Build(defaults, cfg, g.cmdRegistry, kindOf)
+	trieSet, warnings, buildErr := svc.Build(defaults, cfg, g.cmdRegistry, g.kindOf)
 	if buildErr != nil {
 		return fmt.Errorf("gui: Build: %w", buildErr)
 	}
@@ -1596,153 +1575,30 @@ func (g *Gui) wireWithDriver() error {
 	g.lastWarnings = warnings
 	matcher.SwapTrieSet(trieSet)
 
-	// :reload ex-command. The LoadUserConfig closure is a minimal-viable
-	// stub: it returns the currently-loaded config rather than re-reading
-	// from disk. A real on-disk reload requires plumbing the bootstrap
-	// path through Deps; that lands in a follow-up. The AC only asks
-	// that :reload triggers exactly one matcher.SwapTrieSet — the stub
-	// satisfies that contract.
-	reloadDeps := keys.ReloadDeps{
-		LoadUserConfig: func() (*config.UserConfig, error) {
-			if c := g.deps.Common.Cfg(); c != nil {
-				return c, nil
-			}
-			return config.GetDefaultConfig(), nil
-		},
-		Defaults: defaults,
-		Registry: g.cmdRegistry,
-		KindOf:   kindOf,
-		Service:  svc,
-		Matcher:  matcher,
-		Toaster:  toaster,
-		Log:      g.deps.Common.Logger(),
-	}
-	_ = g.exRegistry.Register(keys.ReloadCommand(reloadDeps))
+	// :reload ex-command — see registerReloadEx for the LoadUserConfig
+	// stub rationale. defaults / svc are wireWithDriver locals; g.matcher
+	// (== matcher) is used inside the method.
+	_ = g.registerReloadEx(defaults, svc)
 
-	// :q / :quit — vim-style quit ex-commands. Return gocui.ErrQuit so
-	// the submit dispatcher can propagate it up through the gocui main
-	// loop. CommandSubmitCommand recognises ErrQuit specifically and
-	// skips its default toast-and-swallow path.
-	//
-	// dbsavvy-bwq.Z1: `:q` consults the PendingDiscardHelper before
-	// returning ErrQuit. When the PendingEditSet is non-empty the guard
-	// surfaces an instructional toast (`:w` / `:q!` / `<leader>cU`) and
-	// the quit is aborted (return nil so submit doesn't propagate
-	// ErrQuit). `:q!` bypasses the guard; `:w` opens the commit dialog.
-	quitExHandler := func(_ []string, _ commands.ExecCtx) error {
-		// Delegate to the AppQuit command handler so :q, <leader>q,
-		// and <c-c> share the same guard chain (pending-edit +
-		// open-tx checks). The handler is registered by
-		// QuitController.RegisterActions.
-		if g.cmdRegistry != nil {
-			if cmd, ok := g.cmdRegistry.Get(commands.AppQuit); ok && cmd != nil && cmd.Handler != nil {
-				return cmd.Handler(commands.ExecCtx{})
-			}
-		}
-		return gocui.ErrQuit
-	}
-	forceQuitHandler := func(_ []string, _ commands.ExecCtx) error {
-		return gocui.ErrQuit
-	}
-	writeExHandler := func(_ []string, _ commands.ExecCtx) error {
-		if g.cmdRegistry == nil {
-			return nil
-		}
-		cmd, ok := g.cmdRegistry.Get(commands.CommitDialogOpen)
-		if !ok || cmd == nil || cmd.Handler == nil {
-			return nil
-		}
-		return cmd.Handler(commands.ExecCtx{})
-	}
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "q", Description: "Quit", Handler: quitExHandler})
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "quit", Description: "Quit", Handler: quitExHandler})
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "q!", Description: "Force quit", Handler: forceQuitHandler})
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "w", Description: "Open commit dialog", Handler: writeExHandler})
+	// :q / :quit / :q! / :w — vim-style quit/write ex-commands. Handlers
+	// live in gui_ex_commands.go.
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "q", Description: "Quit", Handler: g.handleQuitEx})
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "quit", Description: "Quit", Handler: g.handleQuitEx})
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "q!", Description: "Force quit", Handler: g.handleForceQuitEx})
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "w", Description: "Open commit dialog", Handler: g.handleWriteEx})
 
-	// :set / :reset — execute SET/RESET on the live SQL session,
-	// update SettingsSnapshot, persist to AppState.LastSessionSettings,
-	// and (for search_path) refresh the schema rail. Unrecognised
-	// settings pass through to normal SQL execution. hq5.8.
-	//
-	// Recognised settings whose successful SET updates the snapshot:
-	//   search_path, role, time zone / timezone, application_name, statement_timeout.
-	recognisedSettings := map[string]bool{
-		"search_path":       true,
-		"role":              true,
-		"time":              true, // SET TIME ZONE — "time" is args[0], "zone" is args[1]
-		"timezone":          true,
-		"application_name":  true,
-		"statement_timeout": true,
-	}
-
-	setExHandler := func(args []string, _ commands.ExecCtx) error {
-		if len(args) == 0 {
-			toaster("SET requires a setting name")
-			return nil
-		}
-		sess := g.activeSQLSession
-		if sess == nil {
-			toaster("no active session")
-			return nil
-		}
-
-		// Reconstruct the full SQL from the tokens. The ex-line
-		// already split on whitespace so we rejoin.
-		fullSQL := "SET " + strings.Join(args, " ")
-
-		// Determine the canonical setting key and the value portion.
-		settingKey := strings.ToLower(args[0])
-		var settingValue string
-
-		// Handle "SET TIME ZONE ..." — two-word setting name.
-		if settingKey == "time" && len(args) >= 2 && strings.EqualFold(args[1], "zone") {
-			settingKey = "timezone"
-			// Value is everything after "TIME ZONE" (skip the TO/= if present).
-			valStart := 2
-			if len(args) > 3 && (strings.EqualFold(args[2], "to") || args[2] == "=") {
-				valStart = 3
-			}
-			if valStart < len(args) {
-				settingValue = strings.Join(args[valStart:], " ")
-			}
-		} else if len(args) >= 2 {
-			// Normal form: SET <key> TO <value> or SET <key> = <value>.
-			valStart := 1
-			if len(args) > 2 && (strings.EqualFold(args[1], "to") || args[1] == "=") {
-				valStart = 2
-			}
-			settingValue = strings.Join(args[valStart:], " ")
-		}
-
-		isRecognised := recognisedSettings[settingKey]
-
-		// AD-7: execute on worker, never block UI thread.
-		g.OnWorker(func(_ gocui.Task) error {
-			_, err := sess.Execute(context.Background(), models.Query{SQL: fullSQL})
-			if err != nil {
-				toaster(fmt.Sprintf("SET failed: %s", err))
-				return nil
-			}
-
-			if isRecognised {
-				g.persistTrackedSetting(context.Background(), settingKey, settingValue)
-			}
-
-			toaster(fmt.Sprintf("OK: %s", fullSQL))
-			return nil
-		})
-		return nil
-	}
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "set", Description: "Execute SET on session", Handler: setExHandler})
+	// :set — execute SET on the live SQL session. Handler in
+	// gui_ex_commands.go.
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "set", Description: "Execute SET on session", Handler: g.handleSetEx})
 
 	// hq5.10: wire the search_path quick-set prompt to the SET handler.
 	if g.controllers != nil && g.controllers.SearchPath != nil {
-		g.controllers.SearchPath.SetRunner = setExHandler
+		g.controllers.SearchPath.SetRunner = g.handleSetEx
 	}
 
 	// hq5.11: wire the statement timeout prompt to the SET handler + AppState.
 	if g.controllers != nil && g.controllers.StatementTimeout != nil {
-		g.controllers.StatementTimeout.SetRunner = setExHandler
+		g.controllers.StatementTimeout.SetRunner = g.handleSetEx
 		g.controllers.StatementTimeout.ActiveConnID = func() string {
 			return g.activeConnID
 		}
@@ -1765,66 +1621,15 @@ func (g *Gui) wireWithDriver() error {
 		}
 	}
 
-	resetExHandler := func(args []string, _ commands.ExecCtx) error {
-		if len(args) == 0 {
-			toaster("RESET requires a setting name")
-			return nil
-		}
-		sess := g.activeSQLSession
-		if sess == nil {
-			toaster("no active session")
-			return nil
-		}
-
-		fullSQL := "RESET " + strings.Join(args, " ")
-		settingKey := strings.ToLower(args[0])
-
-		g.OnWorker(func(_ gocui.Task) error {
-			_, err := sess.Execute(context.Background(), models.Query{SQL: fullSQL})
-			if err != nil {
-				toaster(fmt.Sprintf("RESET failed: %s", err))
-				return nil
-			}
-
-			// Delete the key from the snapshot so it reverts to the
-			// server default.
-			if recognisedSettings[settingKey] {
-				sess.SettingsSnapshot().Delete(settingKey)
-
-				connID := g.activeConnID
-				if connID != "" && g.deps.Store != nil {
-					g.deps.Store.MutateAndSave(func(a *common.AppState) {
-						if a.LastSessionSettings == nil {
-							return
-						}
-						inner := a.LastSessionSettings[connID]
-						if inner == nil {
-							return
-						}
-						delete(inner, settingKey)
-					})
-				}
-
-				if (settingKey == "role" || settingKey == "search_path") && g.refreshHelper != nil {
-					_ = g.refreshHelper.RefreshSchemas(context.Background())
-				}
-			}
-
-			toaster(fmt.Sprintf("OK: %s", fullSQL))
-			return nil
-		})
-		return nil
-	}
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "reset", Description: "Execute RESET on session", Handler: resetExHandler})
+	// :reset — execute RESET on the live SQL session. Handler in
+	// gui_ex_commands.go.
+	_ = g.exRegistry.Register(keys.ExCommand{Name: "reset", Description: "Execute RESET on session", Handler: g.handleResetEx})
 
 	// :c — reject cross-database attach (not supported). hq5.8.
 	_ = g.exRegistry.Register(keys.ExCommand{
 		Name:        "c",
 		Description: "Cross-database attach (not supported)",
-		Handler: func(_ []string, _ commands.ExecCtx) error {
-			toaster("cross-database attach not supported — create a separate connection profile")
-			return nil
-		},
+		Handler:     g.handleCrossDBEx,
 	})
 
 	// Master Editor on editable views (today only COMMAND_LINE) +
