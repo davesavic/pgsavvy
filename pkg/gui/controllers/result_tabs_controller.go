@@ -878,6 +878,7 @@ func (r *ResultTabsController) yankHandler(row bool) commands.Handler {
 		if !ok {
 			return nil
 		}
+		r.flashYank(g, row)
 		switch {
 		case errors.Is(err, grid.ErrClipboardTooLarge):
 			r.toast("clipboard: value too large")
@@ -890,6 +891,30 @@ func (r *ResultTabsController) yankHandler(row bool) commands.Handler {
 		}
 		return nil
 	}
+}
+
+// flashYank arms the grid's transient post-yank highlight over the just-
+// yanked cell (row=false) or row (row=true) and schedules its auto-clear
+// after yankFlashTTL — the same TTL and yellow tint the SQL editor uses for
+// its on_yank flash (dbsavvy-o6da parity). The epoch returned by FlashYank*
+// makes a later yank's clear supersede this one. A nil driver (test wiring)
+// or empty grid (epoch 0) skips the scheduled clear. dbsavvy-j8xr.
+func (r *ResultTabsController) flashYank(g *grid.View, row bool) {
+	flash := g.FlashYankCell
+	if row {
+		flash = g.FlashYankRow
+	}
+	epoch := flash()
+	drv := r.helpers.Driver
+	if epoch == 0 || drv == nil {
+		return
+	}
+	time.AfterFunc(yankFlashTTL, func() {
+		drv.Update(func() error {
+			g.ClearYankFlash(epoch)
+			return nil
+		})
+	})
 }
 
 // toast surfaces msg via the helper bag's ToastHelper. No-op when the
