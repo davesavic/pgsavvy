@@ -196,6 +196,14 @@ type View struct {
 	// clears them on discard. Nil means "no edits staged" (treated as
 	// IsEmpty by the helpers). dbsavvy-bwq.6 (A3).
 	pendingEdits *models.PendingEditSet
+
+	// yankFlash is the transient post-yank highlight range, armed by
+	// FlashYankCell / FlashYankRow and auto-cleared after the flash TTL by
+	// the controller's delayed ClearYankFlash. nil means no active flash.
+	// yankFlashEpoch guards a stale clear from dropping a newer flash. See
+	// yank_flash.go (mirrors editor.Buffer). dbsavvy-j8xr.
+	yankFlash      *yankFlashRange
+	yankFlashEpoch uint64
 }
 
 // headerClickState is the per-View state used by HandleHeaderClick to
@@ -614,6 +622,7 @@ func (v *View) snapshot() viewSnapshot {
 		pendingEdits:       v.pendingEdits,
 		rowIdentity:        v.rowIdentity,
 		rowsAffected:       v.rowsAffected,
+		yankFlash:          copyYankFlash(v.yankFlash),
 	}
 }
 
@@ -724,6 +733,12 @@ type viewSnapshot struct {
 	// row against staged edits. dbsavvy-cyh.
 	pendingEdits *models.PendingEditSet
 	rowIdentity  []int
+
+	// yankFlash is the transient post-yank highlight range (defensive copy).
+	// renderDataLine reads it via inYankFlash so a concurrent FlashYank* /
+	// ClearYankFlash cannot tear the frame. nil means no active flash.
+	// dbsavvy-j8xr.
+	yankFlash *yankFlashRange
 }
 
 // Render draws the current grid into the target gocui view. target may

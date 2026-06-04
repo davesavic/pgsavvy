@@ -568,6 +568,11 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 		// skip the reverse-video wrap so the highlight stays visible.
 		if spans := cellHighlightSpans(snap, r, c); len(spans) > 0 {
 			styled = renderCellPaddedHighlighted(value, snap.cols[c], w, isDirty, spans)
+		} else if inYankFlash(snap, r, c) {
+			// dbsavvy-j8xr: the transient post-yank flash wins over the
+			// selection highlight for its TTL so the just-yanked cell/row is
+			// unmistakably the one that landed on the clipboard.
+			styled = applyYankFlashHighlight(styled)
 		} else if inSelection(snap, r, c) {
 			styled = applySelectionHighlight(styled)
 		}
