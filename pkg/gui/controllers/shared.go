@@ -105,7 +105,9 @@ func railDirectionalBindings(scope types.ContextKey, tr *i18n.TranslationSet) []
 			{Sequence: []types.ChordKey{ctrlH}, Scope: scope, ActionID: commands.RailSwitchLastRail, Description: tr.Actions.RailLastRail},
 			{Sequence: []types.ChordKey{ctrlJ}, Scope: scope, ActionID: commands.RailSwitchResults, Description: tr.Actions.RailResults},
 		}
-	case types.RESULT_GRID:
+	case types.RESULT_GRID, types.PLAN:
+		// PLAN tabs occupy the same physical result pane as the grid, so they
+		// reuse the grid's directional mapping (dbsavvy-s7gn).
 		return []*types.ChordBinding{
 			{Sequence: []types.ChordKey{ctrlH}, Scope: scope, ActionID: commands.RailSwitchTables, Description: tr.Actions.RailTables},
 			{Sequence: []types.ChordKey{ctrlK}, Scope: scope, ActionID: commands.RailSwitchQueryEditor, Description: tr.Actions.RailQueryEditor},

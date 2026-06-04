@@ -24,8 +24,9 @@ type PlanContextResolver func() *context.PlanContext
 //	<C-x>   plan.collapse_all   collapse every interior node except root
 //	H       plan.jump_heaviest  jump to heaviest descendant by cost
 //	o       plan.toggle_raw     toggle tree ↔ raw-text view
-//	j       plan.cursor_down    move cursor down by one visible row
-//	k       plan.cursor_up      move cursor up by one visible row
+//	i       plan.toggle_insights show/hide the plan-doctor insights strip
+//	j       plan.cursor_down    move cursor / strip selection down one row
+//	k       plan.cursor_up      move cursor / strip selection up one row
 //
 // All handlers delegate to the current PlanContext via the resolver;
 // when the resolver returns nil (no active plan tab) every handler is a
@@ -44,7 +45,7 @@ func NewPlanController(c *common.Common, core CoreDeps, resolve PlanContextResol
 	}
 }
 
-// GetKeybindings returns the seven PLAN-scoped bindings. All run in
+// GetKeybindings returns the eight PLAN-scoped bindings. All run in
 // Normal mode; the PLAN context is not editable, so no Insert/Visual
 // modes are wired.
 //
@@ -53,7 +54,7 @@ func NewPlanController(c *common.Common, core CoreDeps, resolve PlanContextResol
 // ups add Tr.Actions.Plan* fields, swap each literal for the
 // translated string.
 func (p *PlanController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
-	return []*types.ChordBinding{
+	out := []*types.ChordBinding{
 		{
 			Sequence:    []types.ChordKey{{Special: types.KeyEnter}},
 			Mode:        types.ModeNormal,
@@ -90,6 +91,13 @@ func (p *PlanController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordB
 			Description: "Toggle plan raw-text view",
 		},
 		{
+			Sequence:    []types.ChordKey{{Code: 'i'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.PLAN,
+			ActionID:    commands.PlanToggleInsights,
+			Description: "Toggle plan-doctor insights strip",
+		},
+		{
 			Sequence:    []types.ChordKey{{Code: 'j'}},
 			Mode:        types.ModeNormal,
 			Scope:       types.PLAN,
@@ -104,9 +112,33 @@ func (p *PlanController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordB
 			Description: "Move plan cursor up",
 		},
 	}
+	// Republish the result-pane navigation chords under PLAN. The PLAN master
+	// editor dispatches only under PLAN (+ GLOBAL), so without these a plan tab
+	// traps the user: rail switches (1..4 + <tab>) and tab-cycle (gt/gT) all
+	// FellThrough with no way back to a grid tab. Mirrors the dbsavvy-usj
+	// rationale ResultTabsController applies to RESULT_GRID. dbsavvy-s7gn.
+	tr := p.tr()
+	out = append(out, railSwitchBindings(string(types.PLAN), tr)...)
+	out = append(out,
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Code: 'g'}, {Code: 't'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.PLAN,
+			ActionID:    commands.ResultTabNext,
+			Description: tr.Actions.ResultTabNext,
+		},
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Code: 'g'}, {Code: 'T'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.PLAN,
+			ActionID:    commands.ResultTabPrev,
+			Description: tr.Actions.ResultTabPrev,
+		},
+	)
+	return out
 }
 
-// RegisterActions wires the seven handlers to reg.
+// RegisterActions wires the eight handlers to reg.
 func (p *PlanController) RegisterActions(reg *commands.Registry) {
 	if reg == nil {
 		return
@@ -122,6 +154,7 @@ func (p *PlanController) RegisterActions(reg *commands.Registry) {
 		{commands.PlanCollapseAll, "Collapse every plan node except root", p.handleCollapseAll},
 		{commands.PlanJumpHeaviest, "Jump cursor to heaviest descendant", p.handleJumpHeaviest},
 		{commands.PlanToggleRaw, "Toggle plan raw-text view", p.handleToggleRaw},
+		{commands.PlanToggleInsights, "Toggle plan-doctor insights strip", p.handleToggleInsights},
 		{commands.PlanCursorDown, "Move plan cursor down", p.handleCursorDown},
 		{commands.PlanCursorUp, "Move plan cursor up", p.handleCursorUp},
 	}
@@ -155,12 +188,28 @@ func (p *PlanController) active() *context.PlanContext {
 	return p.resolve()
 }
 
+// handleToggle dispatches <CR>. When the insights strip owns navigation it
+// jumps the tree cursor to the selected finding's node; otherwise it toggles
+// collapse on the cursor node.
 func (p *PlanController) handleToggle(_ commands.ExecCtx) error {
 	pc := p.active()
 	if pc == nil {
 		return nil
 	}
+	if pc.InsightsActive() {
+		pc.JumpToSelectedFinding()
+		return pc.HandleRender()
+	}
 	pc.Toggle()
+	return pc.HandleRender()
+}
+
+func (p *PlanController) handleToggleInsights(_ commands.ExecCtx) error {
+	pc := p.active()
+	if pc == nil {
+		return nil
+	}
+	pc.ToggleInsights()
 	return pc.HandleRender()
 }
 
@@ -200,19 +249,31 @@ func (p *PlanController) handleToggleRaw(_ commands.ExecCtx) error {
 	return pc.HandleRender()
 }
 
+// handleCursorDown dispatches j: moves the strip selection when insights own
+// navigation, else the tree cursor.
 func (p *PlanController) handleCursorDown(_ commands.ExecCtx) error {
 	pc := p.active()
 	if pc == nil {
 		return nil
 	}
+	if pc.InsightsActive() {
+		pc.MoveInsightCursor(1)
+		return pc.HandleRender()
+	}
 	pc.MoveCursor(1)
 	return pc.HandleRender()
 }
 
+// handleCursorUp dispatches k: moves the strip selection when insights own
+// navigation, else the tree cursor.
 func (p *PlanController) handleCursorUp(_ commands.ExecCtx) error {
 	pc := p.active()
 	if pc == nil {
 		return nil
+	}
+	if pc.InsightsActive() {
+		pc.MoveInsightCursor(-1)
+		return pc.HandleRender()
 	}
 	pc.MoveCursor(-1)
 	return pc.HandleRender()
