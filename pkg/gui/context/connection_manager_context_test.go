@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -279,5 +280,44 @@ func TestConnectionManagerContext_Kind(t *testing.T) {
 	}
 	if got := c.GetKey(); got != types.CONNECTION_MANAGER {
 		t.Fatalf("GetKey() = %q, want %q", got, types.CONNECTION_MANAGER)
+	}
+}
+
+// TestConnectionManagerContext_OptionsBarFilterHidesFieldEditInListMode locks
+// the dbsavvy-4ndv fix: in ModeList the status bar must NOT advertise the
+// form-only "Edit form field" (ConnectionManagerFieldEdit) binding, while the
+// list-appropriate actions stay visible. ModeForm keeps FieldEdit visible.
+func TestConnectionManagerContext_OptionsBarFilterHidesFieldEditInListMode(t *testing.T) {
+	c := newTestConnectionManager(&captureDriver{}, nil, nil)
+	if c.Mode() != ModeList {
+		t.Fatalf("precondition: mode = %v, want ModeList", c.Mode())
+	}
+
+	listFilter := c.OptionsBarFilter()
+	if listFilter == nil {
+		t.Fatal("ModeList OptionsBarFilter() = nil, want a predicate that hides form-only actions")
+	}
+	if listFilter(commands.ConnectionManagerFieldEdit) {
+		t.Error("ModeList shows ConnectionManagerFieldEdit, want it hidden")
+	}
+	for _, id := range []string{
+		commands.ConnectionManagerConfirm,
+		commands.ConnectionManagerClose,
+		commands.ConnectionManagerAdd,
+		commands.ConnectionManagerEdit,
+		commands.ConnectionManagerDelete,
+	} {
+		if !listFilter(id) {
+			t.Errorf("ModeList hides %q, want it visible", id)
+		}
+	}
+
+	c.OpenAddForm(nil, nil)
+	if c.Mode() != ModeForm {
+		t.Fatalf("precondition: mode = %v, want ModeForm", c.Mode())
+	}
+	formFilter := c.OptionsBarFilter()
+	if formFilter == nil || !formFilter(commands.ConnectionManagerFieldEdit) {
+		t.Error("ModeForm hides ConnectionManagerFieldEdit, want it visible")
 	}
 }
