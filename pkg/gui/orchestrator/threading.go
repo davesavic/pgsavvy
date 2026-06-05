@@ -69,7 +69,7 @@ func (g *Gui) SpinnerFrame() int64 {
 // The closure reads the live queryRunner's transaction state. Returns nil
 // when no queryRunner exists (bootstrap safety — no connection yet).
 func (g *Gui) txStatusAccessor() func() (models.TxStatus, []string) {
-	r := g.queryRunner
+	r := g.queryState.queryRunner
 	if r == nil {
 		return nil
 	}
@@ -90,7 +90,7 @@ func (g *Gui) txStatusAccessor() func() (models.TxStatus, []string) {
 // activeSQLSession's SettingsSnapshot. Returns nil when no session
 // exists (bootstrap safety — no connection yet).
 func (g *Gui) sessionSettingsAccessor() func() map[string]string {
-	sess := g.activeSQLSession
+	sess := g.queryState.activeSQLSession
 	if sess == nil {
 		return nil
 	}

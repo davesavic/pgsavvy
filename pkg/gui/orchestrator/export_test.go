@@ -14,7 +14,7 @@ func (g *Gui) HistoryStoreForTest() *query.History {
 	if g == nil {
 		return nil
 	}
-	return g.history
+	return g.queryState.history
 }
 
 // SearchPathSetRunnerForTest exposes the SetRunner wired onto the SearchPath

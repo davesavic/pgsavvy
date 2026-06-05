@@ -202,16 +202,8 @@ type Gui struct {
 	// Connection-lifecycle state surfaced by the activeConnAdapter.
 	connectionState connectionState
 
-	// Query runtime (dbsavvy-66p.16). queryRunner is built empty in
-	// wireWithDriver and stashed in the HelperBag so controllers' value-
-	// copy of the bag stays valid across Bind / Unbind. history is a
-	// process-wide singleton opened lazily on first wireWithDriver and
-	// closed in Gui.Close. activeSQLSession is the SQLSession the most
-	// recent connectInvoker.Connect built; Close cancels any in-flight
-	// run via its Close().
-	queryRunner      *data.QueryRunner
-	history          *query.History
-	activeSQLSession *session.SQLSession
+	// Query-execution state surfaced by the query runtime.
+	queryState queryState
 
 	// closed is true once Close has run; idempotent guard.
 	closed bool
@@ -252,6 +244,20 @@ type keybindingSystem struct {
 
 	// Test overrides for Matcher timing; nil means use cfg + defaults.
 	delayOverrides *keyDelayOverrides
+}
+
+// queryState groups the query-execution fields surfaced by the query
+// runtime (dbsavvy-66p.16, regrouped in dbsavvy-y5th.1.8). queryRunner is
+// built empty in wireWithDriver and stashed in the HelperBag so
+// controllers' value-copy of the bag stays valid across Bind / Unbind.
+// history is a process-wide singleton opened lazily on first
+// wireWithDriver and closed in Gui.Close. activeSQLSession is the
+// SQLSession the most recent connectInvoker.Connect built; Close cancels
+// any in-flight run via its Close().
+type queryState struct {
+	queryRunner      *data.QueryRunner
+	history          *query.History
+	activeSQLSession *session.SQLSession
 }
 
 // connectionState groups the connection-lifecycle fields surfaced by the
@@ -463,7 +469,7 @@ func (g *Gui) wireWithDriver() error {
 	// degrades to "no history" rather than blocking the TUI from coming
 	// up. The Warn line gives the operator a thread to pull on. Subsequent
 	// wireWithDriver calls (test seam re-runs) reuse the open handle.
-	if g.history == nil {
+	if g.queryState.history == nil {
 		hp := g.deps.HistoryProvider
 		if hp == nil {
 			hp = defaultHistoryProvider
@@ -472,14 +478,14 @@ func (g *Gui) wireWithDriver() error {
 		if hErr != nil {
 			g.deps.Common.Logger().Warn("gui: history open", "err", hErr)
 		} else {
-			g.history = h
+			g.queryState.history = h
 		}
 	}
 
 	// Build the empty QueryRunner shell that survives Connect / Disconnect
 	// cycles. connectInvoker.Bind swaps the inner session atomically.
-	if g.queryRunner == nil {
-		g.queryRunner = data.NewQueryRunner(nil, drivers.Capabilities{})
+	if g.queryState.queryRunner == nil {
+		g.queryState.queryRunner = data.NewQueryRunner(nil, drivers.Capabilities{})
 	}
 
 	// dbsavvy-bwq.py4: instantiate the inline-edit helpers. Each is built
@@ -507,7 +513,7 @@ func (g *Gui) wireWithDriver() error {
 	// FK-forward helper). Runs after g.queryRunner and g.jumpListH exist.
 	g.wireResultTabs(tr)
 
-	connectInv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
+	connectInv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryState.queryRunner, history: g.queryState.history}
 
 	// dbsavvy-56u.1: wire the RefreshHelper closures over the live
 	// populateXxxRail helpers + refreshConnectionsRail.
@@ -601,8 +607,8 @@ func schemaSearchPathSQL(schema string) (sql, displayValue string) {
 // worker goroutine. Shared by the :set handler and schema-rail selection
 // (dbsavvy-1bb).
 func (g *Gui) persistTrackedSetting(ctx context.Context, settingKey, settingValue string) {
-	if g.activeSQLSession != nil {
-		g.activeSQLSession.SettingsSnapshot().Set(settingKey, settingValue)
+	if g.queryState.activeSQLSession != nil {
+		g.queryState.activeSQLSession.SettingsSnapshot().Set(settingKey, settingValue)
 	}
 
 	if connID := g.connectionState.activeConnID; connID != "" && g.deps.Store != nil {
@@ -706,7 +712,7 @@ func (g *Gui) registerHistoryOpen() {
 		ID:          commands.HistoryOpen,
 		Description: "Open query history",
 		Handler: func(_ commands.ExecCtx) error {
-			if g.history == nil {
+			if g.queryState.history == nil {
 				return nil
 			}
 
@@ -720,7 +726,7 @@ func (g *Gui) registerHistoryOpen() {
 				}
 			}
 
-			store := g.history
+			store := g.queryState.history
 			g.OnWorker(func(_ gocui.Task) error {
 				rows, err := store.Recent(context.Background(), historyRecentLimit)
 				if err != nil {
@@ -941,12 +947,12 @@ func (g *Gui) deleteConnectionFromModal(connName string) error {
 		if g.resultTabsH != nil {
 			g.resultTabsH.PreemptInFlight()
 		}
-		if g.activeSQLSession != nil {
-			_ = g.activeSQLSession.Close()
-			g.activeSQLSession = nil
+		if g.queryState.activeSQLSession != nil {
+			_ = g.queryState.activeSQLSession.Close()
+			g.queryState.activeSQLSession = nil
 		}
-		if g.queryRunner != nil {
-			g.queryRunner.Unbind()
+		if g.queryState.queryRunner != nil {
+			g.queryState.queryRunner.Unbind()
 		}
 		if g.connectHelper != nil {
 			g.connectHelper.Disconnect()
@@ -1279,23 +1285,23 @@ func (g *Gui) Close() error {
 	// briefly for it to terminate) before the history writer drains.
 	// Without this ordering a finishing run could push one more
 	// historyEntry into a channel whose receiver has already exited.
-	if g.activeSQLSession != nil {
-		if err := g.activeSQLSession.Close(); err != nil {
+	if g.queryState.activeSQLSession != nil {
+		if err := g.queryState.activeSQLSession.Close(); err != nil {
 			firstErr = err
 		}
-		g.activeSQLSession = nil
+		g.queryState.activeSQLSession = nil
 	}
 	// Unbind so any controller that still holds the runner sees
 	// HasSession() == false. Also resets the runner's `last` handle so
 	// Cancel after Close is a silent no-op.
-	if g.queryRunner != nil {
-		g.queryRunner.Unbind()
+	if g.queryState.queryRunner != nil {
+		g.queryState.queryRunner.Unbind()
 	}
-	if g.history != nil {
-		if err := g.history.Close(); err != nil && firstErr == nil {
+	if g.queryState.history != nil {
+		if err := g.queryState.history.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
-		g.history = nil
+		g.queryState.history = nil
 	}
 	if g.deps.Store != nil {
 		if err := g.deps.Store.Flush(); err != nil {
@@ -1415,13 +1421,13 @@ func (g *Gui) HelperBagForTest() controllers.HelperBag {
 	if g.registry != nil {
 		qec = g.registry.QueryEditor
 	}
-	connectInv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
+	connectInv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryState.queryRunner, history: g.queryState.history}
 	return controllers.HelperBag{
 		NavDeps: controllers.NavDeps{
 			Connect: connectInv,
 		},
 		QueryDeps: controllers.QueryDeps{
-			QueryRunner:  g.queryRunner,
+			QueryRunner:  g.queryState.queryRunner,
 			EditorBuffer: newEditorBufferAdapter(qec),
 		},
 	}
@@ -1429,7 +1435,7 @@ func (g *Gui) HelperBagForTest() controllers.HelperBag {
 
 // ActiveSQLSessionForTest returns the SQLSession the most recent Connect
 // installed, or nil. Test-only.
-func (g *Gui) ActiveSQLSessionForTest() *session.SQLSession { return g.activeSQLSession }
+func (g *Gui) ActiveSQLSessionForTest() *session.SQLSession { return g.queryState.activeSQLSession }
 
 // ActiveConnIDForTest returns the active connection ID set by the most
 // recent successful Connect. Test-only — used by the dbsavvy-fow.1
@@ -1460,7 +1466,7 @@ func (g *Gui) PopulateIndexesRailForTest(schema, table string) {
 	if g == nil {
 		return
 	}
-	inv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
+	inv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryState.queryRunner, history: g.queryState.history}
 	inv.populateIndexesRail(context.Background(), schema, table)
 }
 
@@ -1470,7 +1476,7 @@ func (g *Gui) PopulateColumnsRailForTest(schema, table string) {
 	if g == nil {
 		return
 	}
-	inv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
+	inv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryState.queryRunner, history: g.queryState.history}
 	inv.populateColumnsRail(context.Background(), schema, table)
 }
 

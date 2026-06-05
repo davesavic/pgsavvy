@@ -257,9 +257,9 @@ func (g *Gui) wireEditorCompletion() {
 			editor.NewFunctionSource(sessionProv),
 			editor.KeywordsSource{PriorityVal: 20},
 		}
-		if g.history != nil {
+		if g.queryState.history != nil {
 			sources = append(sources, editor.HistorySource{
-				Store:       g.history,
+				Store:       g.queryState.history,
 				PriorityVal: 10,
 			})
 		}

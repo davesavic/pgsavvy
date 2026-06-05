@@ -28,10 +28,10 @@ func (a *activeSessionFKCacheAdapter) Get(ctx context.Context, schema, table str
 	if a == nil || a.g == nil {
 		return nil, errors.New("fk forward: cache adapter not bound to gui")
 	}
-	if a.g.activeSQLSession == nil {
+	if a.g.queryState.activeSQLSession == nil {
 		return nil, errors.New("fk forward: no active session")
 	}
-	fkc := a.g.activeSQLSession.FKCache()
+	fkc := a.g.queryState.activeSQLSession.FKCache()
 	if fkc == nil {
 		return nil, errors.New("fk forward: active session has no fk cache")
 	}
@@ -67,10 +67,10 @@ func (g *Gui) preemptForFKCacheLoad() {
 // via its inFlight guard, which would otherwise panic "session: concurrent
 // use". Same last-wins rationale as activeSessionFKCacheAdapter.Get.
 func (g *Gui) lookupReverseFK(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
-	if g == nil || g.activeSQLSession == nil {
+	if g == nil || g.queryState.activeSQLSession == nil {
 		return nil, errors.New("no active session")
 	}
-	fkc := g.activeSQLSession.FKCache()
+	fkc := g.queryState.activeSQLSession.FKCache()
 	if fkc == nil {
 		return nil, errors.New("active session has no fk cache")
 	}

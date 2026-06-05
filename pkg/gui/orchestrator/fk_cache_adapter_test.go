@@ -174,7 +174,7 @@ func newParkedFKFixture(t *testing.T, inner *fkGuardSession) *Gui {
 	}
 	// Simulate the parked stream holding the driver session's inFlight guard.
 	inner.acquire()
-	return &Gui{resultTabsH: tabs, activeSQLSession: sess}
+	return &Gui{resultTabsH: tabs, queryState: queryState{activeSQLSession: sess}}
 }
 
 // TestFKForwardLoadPreemptsParkedStream proves the gd forward path

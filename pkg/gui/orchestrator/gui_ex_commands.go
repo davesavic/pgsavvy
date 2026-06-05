@@ -135,7 +135,7 @@ func (g *Gui) handleSetEx(args []string, _ commands.ExecCtx) error {
 		g.toaster("SET requires a setting name")
 		return nil
 	}
-	sess := g.activeSQLSession
+	sess := g.queryState.activeSQLSession
 	if sess == nil {
 		g.toaster("no active session")
 		return nil
@@ -196,7 +196,7 @@ func (g *Gui) handleResetEx(args []string, _ commands.ExecCtx) error {
 		g.toaster("RESET requires a setting name")
 		return nil
 	}
-	sess := g.activeSQLSession
+	sess := g.queryState.activeSQLSession
 	if sess == nil {
 		g.toaster("no active session")
 		return nil
