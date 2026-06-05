@@ -2417,6 +2417,8 @@ func TestTitleRowsAffected(t *testing.T) {
 		{"select zero rows", StateComplete, true, 0, 0, "0 rows"},
 		{"select with rows", StateComplete, true, 3, 3, "3 rows"},
 		{"running not yet complete", StateRunning, false, 0, 0, "~0 rows · running"},
+		{"cancelled drained", StateCancelled, true, 1, 1, "1 rows · cancelled"},
+		{"detached drained", StateDetached, true, 2, 2, "2 rows · detached"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

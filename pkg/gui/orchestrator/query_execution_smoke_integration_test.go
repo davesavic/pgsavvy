@@ -293,13 +293,14 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		if got := active.RowCount(); got != 3 {
 			t.Fatalf("RowCount = %d, want 3", got)
 		}
-		// Title format: "result %d: %s (%s, %d rows)" where %d = slot+1.
-		// Tabs are 1-indexed in user-facing UI (dbsavvy-ipb resolved via
-		// option (a)) so the first tab's title starts with "result 1:".
-		title := active.Title()
-		if !strings.Contains(title, "result 1:") {
-			t.Fatalf("Title = %q; expected to contain 'result 1:'", title)
+		// The slot number / label moved out of the frame title and onto the
+		// tab-bar strip (Title() now carries only non-redundant metadata —
+		// the row count). Assert the 1-indexed UI position via Slot()+1
+		// (dbsavvy-ipb resolved via option (a)) and the row count via Title().
+		if got := active.Slot() + 1; got != 1 {
+			t.Fatalf("first tab UI index = %d, want 1", got)
 		}
+		title := active.Title()
 		if !strings.Contains(title, "3 rows") {
 			t.Fatalf("Title = %q; expected to contain '3 rows'", title)
 		}
@@ -669,14 +670,19 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		// step09 stays active here; RunLayout paints the tab body via
 		// ResultTabsHelper.LayoutPaint which now routes through
 		// PlanContext.RenderBody.
-		if err := s.g.RunLayout(120, 40); err != nil {
-			t.Fatalf("RunLayout: %v", err)
-		}
 		active := helper.Active()
 		if active == nil {
 			t.Fatal("no active tab to assert against")
 		}
 		viewName := active.ViewName()
+		// LayoutPaint only paints a tab body when driver.SetView returns a
+		// non-nil view; the recorder returns nil for un-enabled names. Opt
+		// this tab's view into the real-view path before laying out so the
+		// rendered body is captured (mirrors the unit-test pattern).
+		s.rec.EnableRealView(viewName)
+		if err := s.g.RunLayout(120, 40); err != nil {
+			t.Fatalf("RunLayout: %v", err)
+		}
 		buf := s.rec.GetViewBuffer(viewName)
 		// At least one of the three tree glyphs must appear in the
 		// rendered body. The exact glyph depends on the plan shape (a

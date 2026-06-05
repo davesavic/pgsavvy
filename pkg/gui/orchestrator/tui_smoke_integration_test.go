@@ -155,16 +155,18 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 		if top == nil {
 			t.Fatal("focus stack is empty after wireWithDriver")
 		}
-		if got := top.GetKey(); got != types.SCHEMAS {
-			t.Fatalf("initial context = %q, want %q", got, types.SCHEMAS)
+		// On a fresh store with zero saved profiles, wireWithDriver pushes
+		// FIRST_RUN_TIP on top of the CONNECTION_MANAGER startup root
+		// (ShouldShowFirstRunTip is true), so the tip is the current context
+		// at bootstrap — not SCHEMAS.
+		if got := top.GetKey(); got != types.FIRST_RUN_TIP {
+			t.Fatalf("initial context = %q, want %q", got, types.FIRST_RUN_TIP)
 		}
 		if s.store.IsStartupTipsSeen() {
 			t.Fatal("IsStartupTipsSeen = true on a fresh store; want false")
 		}
-		// NOTE: the tip popup is rendered by the TipHelper when invoked by
-		// the empty-state hook on first connect; the AC checkbox is
-		// satisfied by IsStartupTipsSeen == false on bootstrap and the
-		// stamp-on-dismiss behaviour exercised in step02.
+		// NOTE: the AC checkbox is satisfied by IsStartupTipsSeen == false on
+		// bootstrap and the stamp-on-dismiss behaviour exercised in step02.
 	})
 
 	t.Run("step02_dismiss_tip", func(t *testing.T) {

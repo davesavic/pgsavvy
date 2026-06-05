@@ -644,7 +644,7 @@ func (t *Tab) Title() string {
 	if state == StateRunning || state == StateQueued || state == StateSorting {
 		rowsSegment = "~" + rowsSegment
 	}
-	if complete {
+	if complete && state == StateComplete {
 		return rowsSegment
 	}
 	return fmt.Sprintf("%s · %s", rowsSegment, state)
