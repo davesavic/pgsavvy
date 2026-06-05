@@ -103,8 +103,19 @@ func TestSQLSessionStream_EndToEndDoneClosesAfterEOF(t *testing.T) {
 func TestSQLSessionNoticeFanIn_DeliversRaiseNoticeToActiveRun(t *testing.T) {
 	s, _ := requirePGSQLSession(t)
 
+	// Stream runs via the extended query protocol, which rejects multiple
+	// commands in one string. RAISE NOTICE needs PL/pgSQL, and the notice
+	// only fans into the RunHandle while its rows are being read — so define
+	// a session-temp function that raises the notice AND returns a row, then
+	// stream a single SELECT over it (one command, with rows to drain).
+	if _, err := s.Execute(context.Background(), models.Query{
+		SQL: `CREATE FUNCTION pg_temp.sqlsession_notice() RETURNS int LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'hello from sqlsession'; RETURN 1; END $$`,
+	}); err != nil {
+		t.Fatalf("create temp notice function: %v", err)
+	}
+
 	rh, err := s.Stream(context.Background(), models.Query{
-		SQL: `DO $$ BEGIN RAISE NOTICE 'hello from sqlsession'; END $$; SELECT 1`,
+		SQL: `SELECT pg_temp.sqlsession_notice()`,
 	})
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
@@ -122,11 +133,10 @@ func TestSQLSessionNoticeFanIn_DeliversRaiseNoticeToActiveRun(t *testing.T) {
 			break
 		}
 	}
+	// finish() runs the notice flush barrier before closing Done, so every
+	// notice the query emitted is already routed into rh.Notices() by the
+	// time Done closes — no async wait needed.
 	<-rh.Done()
-
-	// Notices are delivered asynchronously by pgx; give the fan-out
-	// goroutine a moment to drain noticeCh before reading.
-	time.Sleep(100 * time.Millisecond)
 
 	var got []string
 	for n := range rh.Notices() {
