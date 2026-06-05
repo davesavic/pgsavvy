@@ -127,13 +127,14 @@ func TestConnectionManagerController_EnterEmptyListNoConnect(t *testing.T) {
 	}
 }
 
-// TestConnectionManagerController_ConnectingModeRetryAndCancel asserts that in
-// connecting mode <CR>/r invoke Retry, <esc> invokes CancelConnecting (NOT the
-// Close callback), and j/k are inert (AC3 / AC6).
-func TestConnectionManagerController_ConnectingModeRetryAndCancel(t *testing.T) {
+// TestConnectionManagerController_ConnectingErrorRetryAndCancel asserts that in
+// the error sub-phase <CR>/r invoke Retry, <esc> invokes CancelConnecting (NOT
+// the Close callback), and j/k are inert (AC3 / AC6).
+func TestConnectionManagerController_ConnectingErrorRetryAndCancel(t *testing.T) {
 	ctx := newModalCtx()
 	ctx.SetItems([]any{&models.Connection{Name: "alpha"}})
 	ctx.SetMode(guicontext.ModeConnecting)
+	ctx.ConnectingState().SetError("boom") // error sub-phase: retry allowed
 
 	retries, cancels, closes := 0, 0, 0
 	ctrl := controllers.NewConnectionManagerController(nil, controllers.CoreDeps{}, controllers.UIDeps{},
@@ -147,7 +148,7 @@ func TestConnectionManagerController_ConnectingModeRetryAndCancel(t *testing.T) 
 	invokeMatching(t, ctrl, func(b *types.ChordBinding) bool { return isSpecial(b, types.KeyEnter) })
 	invokeMatching(t, ctrl, func(b *types.ChordBinding) bool { return isRune(b, 'r') })
 	if retries != 2 {
-		t.Fatalf("Retry fired %d times (<CR>+r), want 2", retries)
+		t.Fatalf("Retry fired %d times (<CR>+r) in error phase, want 2", retries)
 	}
 
 	invokeMatching(t, ctrl, func(b *types.ChordBinding) bool { return isSpecial(b, types.KeyEsc) })
@@ -163,6 +164,36 @@ func TestConnectionManagerController_ConnectingModeRetryAndCancel(t *testing.T) 
 	invokeMatching(t, ctrl, func(b *types.ChordBinding) bool { return isRune(b, 'j') })
 	if ctx.Cursor() != before {
 		t.Fatalf("j moved cursor in connecting mode: %d -> %d", before, ctx.Cursor())
+	}
+}
+
+// TestConnectionManagerController_ActiveDialIgnoresRetry asserts that during the
+// active-dial phase (ModeConnecting with no error set) <CR>/r do NOT invoke
+// Retry — retrying mid-dial would supersede the in-flight attempt and re-prompt
+// for credentials. Only <esc> acts, cancelling the dial (dbsavvy-f4fz).
+func TestConnectionManagerController_ActiveDialIgnoresRetry(t *testing.T) {
+	ctx := newModalCtx()
+	ctx.SetItems([]any{&models.Connection{Name: "alpha"}})
+	ctx.SetMode(guicontext.ModeConnecting)
+	ctx.ConnectingState().SetConnecting("alpha") // active-dial phase: no error
+
+	retries, cancels := 0, 0
+	ctrl := controllers.NewConnectionManagerController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, func() {})
+	ctrl.SetDeps(controllers.ConnectionManagerDeps{
+		Ctx:              ctx,
+		Retry:            func() { retries++ },
+		CancelConnecting: func() { cancels++ },
+	})
+
+	invokeMatching(t, ctrl, func(b *types.ChordBinding) bool { return isSpecial(b, types.KeyEnter) })
+	invokeMatching(t, ctrl, func(b *types.ChordBinding) bool { return isRune(b, 'r') })
+	if retries != 0 {
+		t.Fatalf("Retry fired %d times during active dial (<CR>+r), want 0", retries)
+	}
+
+	invokeMatching(t, ctrl, func(b *types.ChordBinding) bool { return isSpecial(b, types.KeyEsc) })
+	if cancels != 1 {
+		t.Fatalf("CancelConnecting fired %d times during active dial, want 1", cancels)
 	}
 }
 

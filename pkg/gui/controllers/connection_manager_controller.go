@@ -128,6 +128,15 @@ func (cm *ConnectionManagerController) inConnectingMode() bool {
 	return cm.deps.Ctx != nil && cm.deps.Ctx.Mode() == context.ModeConnecting
 }
 
+// inErrorState reports whether the connecting modal is in its error sub-phase
+// (a failed attempt awaiting retry/back). Retry is gated on this: during the
+// active-dial phase (connecting body, no error) only Esc is allowed, since
+// retrying mid-dial supersedes the in-flight attempt and re-prompts for
+// credentials (dbsavvy-f4fz).
+func (cm *ConnectionManagerController) inErrorState() bool {
+	return cm.inConnectingMode() && cm.deps.Ctx.ConnectingState().IsError()
+}
+
 // inFormMode reports whether the modal is rendering the add/edit form. False
 // when the context is unwired.
 func (cm *ConnectionManagerController) inFormMode() bool {
@@ -222,7 +231,9 @@ func (cm *ConnectionManagerController) Last(_ commands.ExecCtx) error {
 // lifecycle for the selected profile. nil-safe throughout.
 func (cm *ConnectionManagerController) Confirm(_ commands.ExecCtx) error {
 	if cm.inConnectingMode() {
-		if cm.deps.Retry != nil {
+		// Active dial: swallow Enter (only Esc cancels). Retry only from the
+		// error sub-phase — see inErrorState (dbsavvy-f4fz).
+		if cm.inErrorState() && cm.deps.Retry != nil {
 			cm.deps.Retry()
 		}
 		return nil
@@ -379,10 +390,11 @@ func (cm *ConnectionManagerController) Toggle(_ commands.ExecCtx) error {
 	return nil
 }
 
-// Retry handles r in connecting mode → re-attempt the most recent profile.
-// No-op in list mode or when unwired.
+// Retry handles r → re-attempt the most recent profile. Only fires from the
+// error sub-phase; inert during the active dial (where only Esc cancels) and
+// in list mode or when unwired (dbsavvy-f4fz).
 func (cm *ConnectionManagerController) Retry(_ commands.ExecCtx) error {
-	if !cm.inConnectingMode() || cm.deps.Retry == nil {
+	if !cm.inErrorState() || cm.deps.Retry == nil {
 		return nil
 	}
 	cm.deps.Retry()
