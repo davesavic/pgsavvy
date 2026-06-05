@@ -34,7 +34,15 @@ type RunHandle struct {
 
 	rows *wrappedRowStream
 
-	done           chan struct{}
+	done chan struct{}
+
+	// notices is fed by the session fan-out goroutine (routeNotice) and
+	// closed by finish(). Those run on different goroutines, so noticeMu +
+	// noticeClosed serialize close-vs-send: a notice that arrives after the
+	// run terminates must NOT send on the closed channel (panic). See
+	// TestRunHandle_RouteNoticeAfterFinish_NoPanic.
+	noticeMu       sync.Mutex
+	noticeClosed   bool
 	notices        chan pgconn.Notice
 	droppedNotices atomic.Uint64
 
@@ -44,6 +52,12 @@ type RunHandle struct {
 	// terminal stream error (nil on clean EOF or successful close).
 	onFinish func(err error)
 	cancelFn func() error
+
+	// flush is installed by SQLSession.Stream. finish() invokes it (while this
+	// run is still the active run) to drain any notices still queued in the
+	// session fan-out into this handle before its notice channel closes. nil
+	// when the driver has no notice plumbing.
+	flush func()
 
 	once         sync.Once
 	rowsObserved atomic.Int64
@@ -118,10 +132,18 @@ func (r *RunHandle) Cancel() error {
 // observed at termination, or nil for clean EOF / successful close.
 func (r *RunHandle) finish(err error) {
 	r.once.Do(func() {
+		// Drain queued notices into this run (while it is still the active run)
+		// before onFinish clears runActive and before the channel closes.
+		if r.flush != nil {
+			r.flush()
+		}
 		if r.onFinish != nil {
 			r.onFinish(err)
 		}
+		r.noticeMu.Lock()
+		r.noticeClosed = true
 		close(r.notices)
+		r.noticeMu.Unlock()
 		close(r.done)
 	})
 }
@@ -133,6 +155,14 @@ func (r *RunHandle) finish(err error) {
 func (r *RunHandle) routeNotice(n pgconn.Notice) {
 	if r.noticeHook != nil {
 		r.noticeHook(n)
+	}
+	r.noticeMu.Lock()
+	defer r.noticeMu.Unlock()
+	// finish() has closed the channel; a late notice for an already-terminated
+	// run is dropped rather than sent on a closed channel.
+	if r.noticeClosed {
+		r.droppedNotices.Add(1)
+		return
 	}
 	select {
 	case r.notices <- n:

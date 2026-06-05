@@ -91,6 +91,16 @@ type SQLSession struct {
 	noticeCh chan pgconn.Notice
 	noticeWG sync.WaitGroup
 
+	// noticeFlush is the unbuffered barrier a finishing run uses to drain any
+	// notices still queued in noticeCh before its per-run channel closes. The
+	// unbuffered handoff forces finish() to block until the fan-out goroutine
+	// is back at its select — i.e. after any in-flight routeNotice completes —
+	// so a notice emitted by an instantly-finishing query is delivered, not
+	// dropped at EOF. fanoutDone is closed when the fan-out exits so a flush
+	// during Close cannot block forever.
+	noticeFlush chan flushReq
+	fanoutDone  chan struct{}
+
 	closeOnce sync.Once
 	closed    atomic.Bool
 
@@ -147,6 +157,8 @@ func New(conn drivers.Connection, inner drivers.Session, opts Options) *SQLSessi
 
 	if na, ok := inner.(noticeAttacher); ok {
 		s.noticeCh = make(chan pgconn.Notice, sqlSessionNoticeBuffer)
+		s.noticeFlush = make(chan flushReq)
+		s.fanoutDone = make(chan struct{})
 		na.AttachNotice(s.noticeCh)
 		s.noticeWG.Add(1)
 		go s.fanOutNotices()
@@ -358,6 +370,7 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 		defer cancel()
 		return s.conn.Cancel(ctx, rh.QueryID())
 	}
+	rh.flush = func() { s.flushNotices(rh) }
 	rh.onFinish = func(termErr error) {
 		s.runActive.Store(nil)
 		s.registry.Unregister(sid)
@@ -497,18 +510,71 @@ func (s *SQLSession) Close() error {
 	return err
 }
 
+// flushReq is the barrier message a finishing run sends to the fan-out
+// goroutine: route every notice still buffered in noticeCh to rh, then close
+// ack. See SQLSession.noticeFlush.
+type flushReq struct {
+	rh  *RunHandle
+	ack chan struct{}
+}
+
 // fanOutNotices forwards every notice received on noticeCh to the
 // currently-active RunHandle. Notices delivered while runActive is nil
 // (between runs) are dropped on the floor — the SQLSession does not
-// retain them.
+// retain them. A flushReq drains the remaining buffer into the finishing
+// run before its per-run channel closes.
 func (s *SQLSession) fanOutNotices() {
+	defer close(s.fanoutDone)
 	defer s.noticeWG.Done()
-	for n := range s.noticeCh {
-		rh := s.runActive.Load()
-		if rh == nil {
-			continue
+	for {
+		select {
+		case n, ok := <-s.noticeCh:
+			if !ok {
+				return
+			}
+			if rh := s.runActive.Load(); rh != nil {
+				rh.routeNotice(n)
+			}
+		case req := <-s.noticeFlush:
+			closed := s.drainNoticesInto(req.rh)
+			close(req.ack)
+			if closed {
+				return
+			}
 		}
-		rh.routeNotice(n)
+	}
+}
+
+// drainNoticesInto routes every currently-buffered notice to rh without
+// blocking. Returns true if noticeCh was closed mid-drain (the fan-out loop
+// should then exit).
+func (s *SQLSession) drainNoticesInto(rh *RunHandle) bool {
+	for {
+		select {
+		case n, ok := <-s.noticeCh:
+			if !ok {
+				return true
+			}
+			rh.routeNotice(n)
+		default:
+			return false
+		}
+	}
+}
+
+// flushNotices runs the barrier from a finishing run: it blocks until the
+// fan-out goroutine has drained noticeCh into rh (so a notice emitted by an
+// instantly-finishing query is routed before rh's channel closes), or returns
+// immediately if there is no fan-out or it has already exited.
+func (s *SQLSession) flushNotices(rh *RunHandle) {
+	if s.noticeFlush == nil {
+		return
+	}
+	ack := make(chan struct{})
+	select {
+	case s.noticeFlush <- flushReq{rh: rh, ack: ack}:
+		<-ack
+	case <-s.fanoutDone:
 	}
 }
 
