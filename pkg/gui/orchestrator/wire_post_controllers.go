@@ -141,7 +141,7 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 		// the master Editor's Passthrough branch would not delegate to
 		// gocui.DefaultEditor and paste / arrow-key edits would silently
 		// drop (dbsavvy-7k9, dbsavvy-f5t).
-		g.registry.Prompt.SetModes(g.modeStore)
+		g.registry.Prompt.SetModes(g.keybindingSystem.modeStore)
 		// Plumb the read-and-clear surface so PromptController.Submit
 		// reads the typed value from the view's TextArea (production
 		// path) instead of an internal buffer the controller no longer

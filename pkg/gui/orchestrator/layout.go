@@ -193,7 +193,7 @@ func (g *Gui) RunLayout(w, h int) error {
 			// stashes v.Editor, so the gocui dispatch loop routes keys
 			// here (gui.go:1576). SetMasterEditor is idempotent;
 			// production and recorder-driver paths converge by name.
-			if ed, ok := g.masterEditors[qec.GetKey()]; ok {
+			if ed, ok := g.keybindingSystem.masterEditors[qec.GetKey()]; ok {
 				_ = g.driver.SetMasterEditor(name, ed)
 			}
 			_ = qec.HandleRender()
@@ -240,7 +240,7 @@ func (g *Gui) RunLayout(w, h int) error {
 					if ac := g.resultTabsH.ActiveContext(); ac != nil {
 						editorKey = ac.GetKey()
 					}
-					if ed, ok := g.masterEditors[editorKey]; ok {
+					if ed, ok := g.keybindingSystem.masterEditors[editorKey]; ok {
 						_ = g.driver.SetMasterEditor(activeTabView, ed)
 					}
 					if v, err := g.driver.ViewByName(activeTabView); err == nil && v != nil {
@@ -300,7 +300,7 @@ func (g *Gui) RunLayout(w, h int) error {
 			// SetView while still wanting the editor registered by name
 			// (FeedChord dispatches through it); production gocui's
 			// SetMasterEditor looks the view up by name internally.
-			if ed, ok := g.masterEditors[ctx.GetKey()]; ok {
+			if ed, ok := g.keybindingSystem.masterEditors[ctx.GetKey()]; ok {
 				_ = g.driver.SetMasterEditor(name, ed)
 			}
 			// COMMAND_LINE-specific frame / prompt / view-plumb. On fresh
@@ -595,7 +595,7 @@ func (g *Gui) RunLayout(w, h int) error {
 		RenderStatusLine(StatusRenderDeps{
 			Driver:          g.driver,
 			Tree:            g.tree,
-			KbRuntime:       g.kbRuntime,
+			KbRuntime:       g.keybindingSystem.kbRuntime,
 			ActiveConn:      activeConn,
 			Tr:              tr,
 			Toast:           g.toastHelp,
