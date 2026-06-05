@@ -83,7 +83,7 @@ var connFormSpecs = []connFieldSpec{
 	{fieldSSHIdentityFromAgent, "identity_from_agent", fieldToggle},
 	{fieldSSHKnownHosts, "known_hosts", fieldText},
 	{fieldKeyring, "keyring", fieldSoon},
-	{fieldPgpass, "pgpass", fieldSoon},
+	{fieldPgpass, "pgpass", fieldText},
 	{fieldPasswordCommand, "password_command", fieldSoon},
 }
 
@@ -247,6 +247,8 @@ func (f *connForm) textValue(id connFieldID) string {
 			return ""
 		}
 		return strconv.Itoa(f.conn.SSHTunnel.Port)
+	case fieldPgpass:
+		return f.conn.PgpassPath
 	}
 	return ""
 }
@@ -293,6 +295,8 @@ func (f *connForm) setTextValue(id connFieldID, v string) {
 		port, _ := strconv.Atoi(v)
 		f.ensureSSHTunnel().Port = port
 		f.normalizeSSHTunnel()
+	case fieldPgpass:
+		f.conn.PgpassPath = v
 	}
 }
 
@@ -362,6 +366,8 @@ func (f *connForm) validatorFor(id connFieldID, tr *i18n.TranslationSet) func(st
 		return validateSSHPort
 	case fieldSSHIdentityFile:
 		return validateIdentityFile
+	case fieldPgpass:
+		return validatePgpassPath
 	}
 	return nil
 }
@@ -386,6 +392,19 @@ func validateIdentityFile(raw string) error {
 	for _, r := range raw {
 		if r == '\n' || r == '\r' || (r < 0x20 && r != '\t') {
 			return fmt.Errorf("identity file path must not contain control characters")
+		}
+	}
+	return nil
+}
+
+// validatePgpassPath applies the same light path-shape check as
+// validateIdentityFile: empty is allowed and control characters / newlines are
+// rejected. It does NOT touch the filesystem; the session layer reads and
+// permission-checks the file at connect time.
+func validatePgpassPath(raw string) error {
+	for _, r := range raw {
+		if r == '\n' || r == '\r' || (r < 0x20 && r != '\t') {
+			return fmt.Errorf("pgpass path must not contain control characters")
 		}
 	}
 	return nil
