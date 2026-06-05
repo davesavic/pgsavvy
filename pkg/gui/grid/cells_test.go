@@ -1,10 +1,12 @@
 package grid
 
 import (
+	"math/big"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -29,6 +31,20 @@ func TestRenderCellPlain_ArrayLiteral(t *testing.T) {
 	col := models.ColumnMeta{Name: "tags", TypeName: "_text"}
 	visible := renderCellPlain([]any{"admin", "founder", "editor"}, col)
 	require.Equal(t, "{admin,founder,editor}", visible)
+}
+
+// TestRenderCellPlain_Numeric asserts that a Postgres numeric/decimal
+// value (which pgx decodes into a pgtype.Numeric struct that has no
+// Stringer) renders as its decimal text rather than Go's default struct
+// formatting. Before the fix, `select sum(file_size_bytes)` rendered as
+// "{94793049 0 false finite true}" because the default %v branch dumped
+// the struct fields. Any value implementing driver.Valuer is now rendered
+// from its driver value.
+func TestRenderCellPlain_Numeric(t *testing.T) {
+	resetThemeForTest(t)
+	col := models.ColumnMeta{Name: "total", TypeName: "numeric"}
+	n := pgtype.Numeric{Int: big.NewInt(94793049), Exp: 0, Valid: true}
+	require.Equal(t, "94793049", renderCellPlain(n, col))
 }
 
 // TestRenderCellPlain_JSONObject asserts a json/jsonb column value that

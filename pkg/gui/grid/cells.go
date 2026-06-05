@@ -1,6 +1,7 @@
 package grid
 
 import (
+	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -128,11 +129,31 @@ func renderCellPlain(value any, col models.ColumnMeta) string {
 	default:
 		s, ok := FormatArrayLiteral(value)
 		if !ok {
-			s = fmt.Sprintf("%v", value)
+			s = formatScalar(value)
 		}
 		s = capCellBytes(s)
 		return SanitizeCellEscapes(s)
 	}
+}
+
+// formatScalar stringifies a non-array scalar cell value. pgx decodes SQL
+// numeric/decimal (and a handful of other types) into pgtype structs that
+// have no Stringer, so a bare %v dumps their fields — a numeric prints as
+// "{94793049 0 false finite true}" instead of "94793049". Anything that
+// implements driver.Valuer is rendered from its driver value (the
+// canonical decimal string for numerics); plain Go scalars fall through to
+// %v. Keeping this on the driver.Valuer interface keeps the grid package
+// driver-agnostic — it never imports pgtype.
+func formatScalar(value any) string {
+	v, ok := value.(driver.Valuer)
+	if !ok {
+		return fmt.Sprintf("%v", value)
+	}
+	dv, err := v.Value()
+	if err != nil || dv == nil {
+		return fmt.Sprintf("%v", value)
+	}
+	return fmt.Sprintf("%v", dv)
 }
 
 // capCellBytes enforces the MaxCellRenderBytes safety cap (so a huge
