@@ -286,8 +286,10 @@ func (c *ConnectionManagerContext) rowSuffix(conn *models.Connection) string {
 }
 
 // OptionsBarFilter returns a predicate that selects which ShowInBar action IDs
-// are visible for the current internal mode. Nil means show all (ModeList
-// default). The status bar renderer type-asserts to this method each frame.
+// are visible for the current internal mode. Each mode returns an explicit
+// allowlist so form-only bindings (e.g. ConnectionManagerFieldEdit) do not leak
+// into the list bar. The status bar renderer type-asserts to this method each
+// frame.
 func (c *ConnectionManagerContext) OptionsBarFilter() func(string) bool {
 	switch c.mode {
 	case ModeForm:
@@ -302,8 +304,14 @@ func (c *ConnectionManagerContext) OptionsBarFilter() func(string) bool {
 				id == commands.ConnectionManagerClose ||
 				id == commands.ConnectionManagerConfirm
 		}
-	default:
-		return nil
+	default: // ModeList
+		return func(id string) bool {
+			return id == commands.ConnectionManagerConfirm ||
+				id == commands.ConnectionManagerClose ||
+				id == commands.ConnectionManagerAdd ||
+				id == commands.ConnectionManagerEdit ||
+				id == commands.ConnectionManagerDelete
+		}
 	}
 }
 
