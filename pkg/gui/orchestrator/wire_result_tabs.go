@@ -148,7 +148,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 	// acquires the per-session queue lock, so no synchronous session op on
 	// the UI goroutine can freeze the TUI (dbsavvy-lxn.1). Set on the runner
 	// itself so it survives Bind / Unbind on reconnect.
-	g.queryRunner.SetPreempter(g.resultTabsH.PreemptInFlight)
+	g.queryState.queryRunner.SetPreempter(g.resultTabsH.PreemptInFlight)
 
 	// dbsavvy-bwq.15: prune jump entries belonging to a closed result
 	// tab so <c-o>/<c-i> never resurface stale references. Wired after
@@ -208,7 +208,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 	g.fkForwardH = helpers.NewFKForwardHelper(helpers.FKForwardDeps{
 		Cache:    &activeSessionFKCacheAdapter{g: g},
 		JumpList: g.jumpListH,
-		Runner:   g.queryRunner,
+		Runner:   g.queryState.queryRunner,
 		Tabs:     g.resultTabsH,
 		Toast:    g.toastHelp,
 		Busy:     nil,

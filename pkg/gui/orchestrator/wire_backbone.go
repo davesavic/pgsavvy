@@ -180,7 +180,7 @@ func (g *Gui) wireContextRegistry(tr *i18n.TranslationSet, provider func() []mod
 		// connection-dead. The closure reads the queryRunner's live state
 		// on every render so the transition is visible immediately.
 		IsDisconnected: func() bool {
-			return g.queryRunner != nil && g.queryRunner.IsDisconnected()
+			return g.queryState.queryRunner != nil && g.queryState.queryRunner.IsDisconnected()
 		},
 		// dbsavvy-56u.2: first-run welcome tip copy. Nil-safe when tr is
 		// absent (test fixtures) — the context renders nothing.
@@ -238,8 +238,8 @@ func (g *Gui) wireRefreshHelperDeps(connectInv *connectInvoker) {
 		// dbsavvy-bwq.13: a manual schemas-rail refresh is the user's signal
 		// that on-disk schema/table shape may have changed, so drop the FK
 		// metadata cache; B5/B6 navigation will repopulate on demand.
-		if g.activeSQLSession != nil {
-			if fkc := g.activeSQLSession.FKCache(); fkc != nil {
+		if g.queryState.activeSQLSession != nil {
+			if fkc := g.queryState.activeSQLSession.FKCache(); fkc != nil {
 				fkc.InvalidateAll()
 			}
 		}
@@ -328,7 +328,7 @@ func (g *Gui) wireNavDeps(connectInv *connectInvoker, tablePicker tablesPickerAd
 	// a ListTables call (hq5.7 ping-on-interaction).
 	nav.OnSchemaActivate = func(schema string) {
 		// hq5.7: if disconnected, trigger the reconnect flow instead.
-		if g.queryRunner != nil && g.queryRunner.IsDisconnected() {
+		if g.queryState.queryRunner != nil && g.queryState.queryRunner.IsDisconnected() {
 			if g.controllers != nil && g.controllers.Reconnect != nil {
 				_ = g.controllers.Reconnect.Reconnect(commands.ExecCtx{})
 			}
@@ -342,7 +342,7 @@ func (g *Gui) wireNavDeps(connectInv *connectInvoker, tablePicker tablesPickerAd
 			// unqualified queries resolve against it and the status bar
 			// reflects the active schema. On failure (e.g. schema dropped
 			// out from under us) keep loading its tables regardless.
-			if sess := g.activeSQLSession; sess != nil {
+			if sess := g.queryState.activeSQLSession; sess != nil {
 				sql, value := schemaSearchPathSQL(schema)
 				if _, err := sess.Execute(context.Background(), models.Query{SQL: sql}); err != nil {
 					logs.Event(g.deps.Common.Logger(), "gui", "schema_search_path_failed",
@@ -384,7 +384,7 @@ func (g *Gui) wireHelperDeps() (controllers.UIDeps, controllers.QueryDeps, contr
 
 	// QueryDeps — all optional; set directly.
 	query := controllers.QueryDeps{
-		QueryRunner:  g.queryRunner,
+		QueryRunner:  g.queryState.queryRunner,
 		ResultTabs:   g.resultTabsH,
 		EditorBuffer: newEditorBufferAdapter(g.registry.QueryEditor),
 		Notice:       g.noticeHelp,
@@ -505,7 +505,7 @@ func (g *Gui) wireInlineEditControllers(helperBag controllers.HelperBag) {
 				g.deps.Common, helperBag.CoreDeps, controllers.FKReversePickerDeps{
 					Context: pickerCtx,
 					Tree:    g.tree,
-					Runner:  g.queryRunner,
+					Runner:  g.queryState.queryRunner,
 					Tabs:    g.resultTabsH,
 					Jumps:   g.jumpListH,
 					Toast:   g.toastHelp,

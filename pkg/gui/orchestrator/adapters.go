@@ -269,9 +269,9 @@ func (c *connectInvoker) teardownForSwitch(profile *models.Connection) {
 	// Close the query session FIRST — it releases its pooled conn; closing the
 	// pool (helper.Disconnect) before that deadlocks waiting on the still-held
 	// conn (dbsavvy-txb).
-	if c.g.activeSQLSession != nil {
-		_ = c.g.activeSQLSession.Close()
-		c.g.activeSQLSession = nil
+	if c.g.queryState.activeSQLSession != nil {
+		_ = c.g.queryState.activeSQLSession.Close()
+		c.g.queryState.activeSQLSession = nil
 	}
 	c.helper.Disconnect()
 }
@@ -913,7 +913,7 @@ func (c *connectInvoker) publishQueryRuntime(rt queryRuntime) {
 		c.runner.Bind(rt.sqlSess, rt.caps)
 	}
 	if c.g != nil {
-		c.g.activeSQLSession = rt.sqlSess
+		c.g.queryState.activeSQLSession = rt.sqlSess
 	}
 }
 
@@ -1215,9 +1215,9 @@ func (r *reconnectInvoker) Reconnect(ctx context.Context, profile *models.Connec
 	// inner pool conn; if we close the pool first (helper.Disconnect) the
 	// pool's Close blocks forever waiting for that outstanding conn to be
 	// released, deadlocking the reconnect. dbsavvy-txb.
-	if r.inv.g != nil && r.inv.g.activeSQLSession != nil {
-		_ = r.inv.g.activeSQLSession.Close()
-		r.inv.g.activeSQLSession = nil
+	if r.inv.g != nil && r.inv.g.queryState.activeSQLSession != nil {
+		_ = r.inv.g.queryState.activeSQLSession.Close()
+		r.inv.g.queryState.activeSQLSession = nil
 	}
 	// Tear down the schema-rail session + pool. This also satisfies the
 	// "data: already connected (call Disconnect first)" guard in Connect.
