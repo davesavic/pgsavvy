@@ -76,6 +76,44 @@ func TestConnectionManagerContext_RendersRowsWithHostDbAndMarker(t *testing.T) {
 	}
 }
 
+// TestConnectionManagerContext_RendersRowColour asserts that when the
+// decoration hook returns a recognised colour name, the row's label is wrapped
+// in the matching ANSI foreground SGR + reset so the connection renders tinted
+// (dbsavvy-biak). Rows whose colour is empty stay bare.
+func TestConnectionManagerContext_RendersRowColour(t *testing.T) {
+	drv := &captureDriver{}
+	hook := func(c *models.Connection) (string, string, string) {
+		if c.Name == "alpha" {
+			return "", c.Name, "red"
+		}
+		return "", c.Name, ""
+	}
+	c := newTestConnectionManager(drv, hook, nil)
+	c.SetItems([]any{
+		&models.Connection{Name: "alpha"},
+		&models.Connection{Name: "beta"},
+	})
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(drv.lastContent, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("rendered %d lines, want 2; body=%q", len(lines), drv.lastContent)
+	}
+	if !strings.Contains(lines[0], "\x1b[31m") {
+		t.Errorf("red row missing ANSI red SGR: %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "\x1b[0m") {
+		t.Errorf("red row missing ANSI reset: %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "\x1b[31malpha") {
+		t.Errorf("red SGR must precede the label: %q", lines[0])
+	}
+	if strings.Contains(lines[1], "\x1b[") {
+		t.Errorf("bare row must carry no ANSI escape: %q", lines[1])
+	}
+}
+
 // TestConnectionManagerContext_EmptyStateShowsAdd asserts zero connections
 // render the '[a] add' empty-state body (AC4).
 func TestConnectionManagerContext_EmptyStateShowsAdd(t *testing.T) {

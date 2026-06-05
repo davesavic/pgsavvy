@@ -9,6 +9,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
 const (
@@ -224,28 +225,10 @@ func tintHeaderForConn(header string, conn *models.Connection) string {
 
 // ansiSGRForColor maps an 8-colour name onto its ANSI foreground SGR.
 // Unknown tokens (hex codes, names not in the standard palette, empty)
-// return "" so callers can fall back to no tinting.
+// return "" so callers can fall back to no tinting. Delegates to the shared
+// theme.AnsiFgSGR converter.
 func ansiSGRForColor(s string) string {
-	switch strings.ToLower(s) {
-	case "black":
-		return "\x1b[30m"
-	case "red":
-		return "\x1b[31m"
-	case "green":
-		return "\x1b[32m"
-	case "yellow":
-		return "\x1b[33m"
-	case "blue":
-		return "\x1b[34m"
-	case "magenta":
-		return "\x1b[35m"
-	case "cyan":
-		return "\x1b[36m"
-	case "white":
-		return "\x1b[37m"
-	default:
-		return ""
-	}
+	return theme.AnsiFgSGR(s)
 }
 
 // LabelForMode maps a Mode to its i18n banner string. ModeNormal returns
