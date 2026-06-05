@@ -32,29 +32,29 @@ import (
 // runtime. Extracted verbatim from wireWithDriver (dbsavvy-y5th.1.4).
 func (g *Gui) wireKeybindingSystem(cfg *config.UserConfig) error {
 	// Build the keybinding-system collaborators.
-	g.cmdRegistry = commands.NewRegistry()
-	g.modeStore = keys.NewModeStore()
-	g.whichkey = keys.NewWhichKey()
-	g.exRegistry = keys.NewExRegistry()
+	g.keybindingSystem.cmdRegistry = commands.NewRegistry()
+	g.keybindingSystem.modeStore = keys.NewModeStore()
+	g.keybindingSystem.whichkey = keys.NewWhichKey()
+	g.keybindingSystem.exRegistry = keys.NewExRegistry()
 
 	// dbsavvy-8s2.5: wire the per-session logger into the input-side
 	// stores so mode_set / mode_reset / ctx_* events flow through
 	// logs.Event. nil-safe — logs.Event short-circuits on nil.
-	g.modeStore.SetSessionLog(g.deps.Common.Logger())
+	g.keybindingSystem.modeStore.SetSessionLog(g.deps.Common.Logger())
 	if g.tree != nil {
 		g.tree.SetSessionLog(g.deps.Common.Logger())
 	}
 
 	leader, _ := leaderRunesFromCfg(cfg)
-	tlen, ttlen, wdelay := resolveKeyDelays(cfg, g.delayOverrides)
+	tlen, ttlen, wdelay := resolveKeyDelays(cfg, g.keybindingSystem.delayOverrides)
 	matcher, err := keys.NewMatcher(nil, keys.MatcherConfig{
-		Modes:         g.modeStore,
+		Modes:         g.keybindingSystem.modeStore,
 		Leader:        leader,
 		TimeoutLen:    tlen,
 		TtimeoutLen:   ttlen,
 		WhichKeyDelay: wdelay,
 		Registers:     keys.NewRegisterStore(),
-		WhichKey:      g.whichkey,
+		WhichKey:      g.keybindingSystem.whichkey,
 		Log:           g.deps.Common.Logger(),
 		// Surface swallowed handler errors and disabled-binding reasons
 		// as toasts. Late-bound: g.toastHelp is constructed later in this
@@ -70,12 +70,12 @@ func (g *Gui) wireKeybindingSystem(cfg *config.UserConfig) error {
 	if err != nil {
 		return fmt.Errorf("gui: NewMatcher: %w", err)
 	}
-	g.matcher = matcher
+	g.keybindingSystem.matcher = matcher
 	// dbsavvy-8s2.5: wire the per-session logger into the matcher so
 	// chord_resolved events flow through logs.Event. nil-safe.
-	g.matcher.SetSessionLog(g.deps.Common.Logger())
-	runtime := keys.NewRuntime(g.cmdRegistry, matcher, g.modeStore, g.whichkey, g.exRegistry)
-	g.kbRuntime = runtime
+	g.keybindingSystem.matcher.SetSessionLog(g.deps.Common.Logger())
+	runtime := keys.NewRuntime(g.keybindingSystem.cmdRegistry, matcher, g.keybindingSystem.modeStore, g.keybindingSystem.whichkey, g.keybindingSystem.exRegistry)
+	g.keybindingSystem.kbRuntime = runtime
 	return nil
 }
 
@@ -85,10 +85,10 @@ func (g *Gui) wireKeybindingSystem(cfg *config.UserConfig) error {
 // hasn't published a TrieSet yet (early bootstrap). Extracted from the closure
 // in wireWithDriver (dbsavvy-y5th.1.4).
 func (g *Gui) cheatsheetRender(scope types.ContextKey) string {
-	if g.matcher == nil {
+	if g.keybindingSystem.matcher == nil {
 		return ""
 	}
-	ts := g.matcher.TrieSet()
+	ts := g.keybindingSystem.matcher.TrieSet()
 	if ts == nil {
 		return ""
 	}
@@ -108,14 +108,14 @@ func (g *Gui) cheatsheetRender(scope types.ContextKey) string {
 // nil rows as a silent no-op (see whichkey_context.go:73-76). Extracted from the
 // closure in wireWithDriver (dbsavvy-y5th.1.4).
 func (g *Gui) whichKeyRows(scope types.ContextKey, prefix []types.ChordKey) []types.ChildRow {
-	if g.matcher == nil || g.modeStore == nil {
+	if g.keybindingSystem.matcher == nil || g.keybindingSystem.modeStore == nil {
 		return nil
 	}
-	ts := g.matcher.TrieSet()
+	ts := g.keybindingSystem.matcher.TrieSet()
 	if ts == nil {
 		return nil
 	}
-	mode := g.modeStore.Get(scope)
+	mode := g.keybindingSystem.modeStore.Get(scope)
 	// dbsavvy-81j: union the focused scope's continuations with GLOBAL's,
 	// mirroring Dispatch's scope→GLOBAL fall-through, so the popup lists
 	// every key that would actually fire (e.g. global <leader>1..9 while
@@ -129,7 +129,7 @@ func (g *Gui) whichKeyRows(scope types.ContextKey, prefix []types.ChordKey) []ty
 
 // wireContextRegistry builds the context registry with hooks closed over the
 // driver. Extracted verbatim from wireWithDriver (dbsavvy-y5th.1.4); must run
-// after wireKeybindingSystem (reads g.matcher / g.modeStore / g.whichkey).
+// after wireKeybindingSystem (reads g.keybindingSystem.matcher / g.keybindingSystem.modeStore / g.keybindingSystem.whichkey).
 func (g *Gui) wireContextRegistry(tr *i18n.TranslationSet, provider func() []models.Connection) {
 	// Build the context registry with hooks closed over the driver.
 	ctxDeps := types.ContextTreeDeps{
@@ -155,14 +155,14 @@ func (g *Gui) wireContextRegistry(tr *i18n.TranslationSet, provider func() []mod
 			return config.SafeText(host) + "/" + config.SafeText(db)
 		},
 		LimitText:        presentation.NewLimitText(tr),
-		ModeStore:        g.modeStore,
-		WhichKey:         g.whichkey,
+		ModeStore:        g.keybindingSystem.modeStore,
+		WhichKey:         g.keybindingSystem.whichkey,
 		WhichKeyRows:     g.whichKeyRows,
 		CheatsheetRender: g.cheatsheetRender,
 		// dbsavvy-wwd.1: QueryEditorContext.HandleFocusLost calls
 		// matcher.Cancel via this minimal interface to keep
 		// pkg/gui/context decoupled from pkg/gui/keys.
-		Matcher: g.matcher,
+		Matcher: g.keybindingSystem.matcher,
 		// dbsavvy-wwd.9: buffer-save dispatch closure. The MainLoop
 		// caller already supplies a string snapshot (Buffer.String
 		// takes RLock); the worker just writes raw `.sql` text to disk.
@@ -388,7 +388,7 @@ func (g *Gui) wireHelperDeps() (controllers.UIDeps, controllers.QueryDeps, contr
 		ResultTabs:   g.resultTabsH,
 		EditorBuffer: newEditorBufferAdapter(g.registry.QueryEditor),
 		Notice:       g.noticeHelp,
-		KbRuntime:    g.kbRuntime,
+		KbRuntime:    g.keybindingSystem.kbRuntime,
 		// PlanController dispatches against the active plan tab's
 		// PlanContext (dbsavvy-uv0.8). Closing over g.resultTabsH so
 		// ActivePlanContext stays in lockstep with whatever the user
@@ -436,7 +436,7 @@ func (g *Gui) wireInlineEditControllers(helperBag controllers.HelperBag) {
 			// gocui.DefaultEditor (TextArea). Mirrors Prompt.SetModes
 			// (gui.go ~822). NOTE: ModeInsert, not ModeCommand — the
 			// commit/discard chords bind under ModeInsert. dbsavvy-tzi.3.
-			cellCtx.SetModes(g.modeStore)
+			cellCtx.SetModes(g.keybindingSystem.modeStore)
 			cellCtrl := controllers.NewCellEditorController(
 				g.deps.Common, helperBag.CoreDeps, helperBag.UIDeps, cellCtx, g.tree, nil, nil,
 			)
@@ -532,7 +532,7 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 	}
 
 	// Register every controller's action handlers with the registry.
-	g.controllers.RegisterActions(g.cmdRegistry)
+	g.controllers.RegisterActions(g.keybindingSystem.cmdRegistry)
 
 	// dbsavvy-3vf.9: TableInspectOpen — `i` on TABLES opens the tabbed
 	// popup, sets the target (schema, table), and dispatches column +
@@ -552,7 +552,7 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 	// dbsavvy-ioaj: rail highlight+jump search (/ n N <esc>) on SCHEMAS
 	// and TABLES. Single action IDs; the handler resolves the focused
 	// rail from ctx.Scope. Needs the registry + SearchLine helper.
-	if g.registry != nil && g.cmdRegistry != nil && g.searchLineHelp != nil {
+	if g.registry != nil && g.keybindingSystem.cmdRegistry != nil && g.searchLineHelp != nil {
 		g.registerRailSearch()
 	}
 
@@ -568,7 +568,7 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 		}
 		return g.resultTabsH.ActiveContext()
 	}
-	controllers.RegisterRailSwitchActions(g.cmdRegistry, g.tree, g.registry, resolveResults)
+	controllers.RegisterRailSwitchActions(g.keybindingSystem.cmdRegistry, g.tree, g.registry, resolveResults)
 
 	// Cheatsheet popup: capture the focused scope, build a TabbedPopup
 	// with one tab per scope (focused + global), install it on the
@@ -576,7 +576,7 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 	// RunLayout's Tier-3 popup pass (layout.go) renders the popup on
 	// the next layout frame. Tab cycling + close run through the trie
 	// via CheatsheetController bindings (dbsavvy-bwq.Z1).
-	_ = g.cmdRegistry.Register(&commands.Command{
+	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
 		ID:          commands.HelpCheatsheet,
 		Description: "Show cheatsheet",
 		Tag:         "Help",
@@ -599,7 +599,7 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 	// dbsavvy-bsh: <leader>C opens the CONNECTION_MANAGER modal mid-session.
 	// GLOBAL-scoped so it fires from any focused view. The handler pushes
 	// the modal onto the focus stack (OnShow populates + restores cursor).
-	_ = g.cmdRegistry.Register(&commands.Command{
+	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
 		ID:          commands.ConnectionManagerOpen,
 		Description: "Open connection manager",
 		Tag:         "Connection",
@@ -619,7 +619,7 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 	// dismisses; error logged at warn"). The store's debounced save is
 	// fire-and-forget; any persistence failure is captured by the store
 	// itself via LastSaveErr + its own slog cat=state event.
-	_ = g.cmdRegistry.Register(&commands.Command{
+	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
 		ID:          commands.TipDismiss,
 		Description: "Dismiss first-run tip",
 		Handler: func(commands.ExecCtx) error {
@@ -647,7 +647,7 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 	// minimal welcome popup); the driver shim mirrors the CHEATSHEET <esc>
 	// pattern above.
 	dismissTip := func() error {
-		cmd, ok := g.cmdRegistry.Get(commands.TipDismiss)
+		cmd, ok := g.keybindingSystem.cmdRegistry.Get(commands.TipDismiss)
 		if !ok || cmd == nil || cmd.Handler == nil {
 			return nil
 		}
@@ -661,13 +661,13 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 	cmdDeps := keys.CommandLineCommandDeps{
 		Stack:        g.tree,
 		Context:      g.registry.CommandLine,
-		ExRegistry:   g.exRegistry,
+		ExRegistry:   g.keybindingSystem.exRegistry,
 		Toaster:      g.toaster,
 		CaretToggler: g.caret,
 	}
-	_ = g.cmdRegistry.Register(keys.CommandOpenCommand(cmdDeps))
-	_ = g.cmdRegistry.Register(keys.CommandCancelCommand(cmdDeps))
-	_ = g.cmdRegistry.Register(keys.CommandSubmitCommand(cmdDeps))
+	_ = g.keybindingSystem.cmdRegistry.Register(keys.CommandOpenCommand(cmdDeps))
+	_ = g.keybindingSystem.cmdRegistry.Register(keys.CommandCancelCommand(cmdDeps))
+	_ = g.keybindingSystem.cmdRegistry.Register(keys.CommandSubmitCommand(cmdDeps))
 }
 
 // wireTrie validates the user config and builds the keybinding trie. Returns the
@@ -683,7 +683,7 @@ func (g *Gui) wireTrie(cfg *config.UserConfig) (*keys.TrieSet, []*types.ChordBin
 	// runs regardless of where the error originates.
 	if cfg != nil {
 		deps := config.ValidationDeps{
-			ActionExists: func(id string) bool { return g.cmdRegistry.Has(id) },
+			ActionExists: func(id string) bool { return g.keybindingSystem.cmdRegistry.Has(id) },
 			ScopeExists:  g.scopeExistsPredicate(),
 		}
 		cfgWarns, cfgErrs := config.ValidateUserConfig(cfg, deps)
@@ -702,15 +702,15 @@ func (g *Gui) wireTrie(cfg *config.UserConfig) (*keys.TrieSet, []*types.ChordBin
 	// Build the trie.
 	svc := keys.NewKeybindingService()
 	defaults := controllers.AllDefaultBindings(g.controllers)
-	trieSet, warnings, buildErr := svc.Build(defaults, cfg, g.cmdRegistry, g.kindOf)
+	trieSet, warnings, buildErr := svc.Build(defaults, cfg, g.keybindingSystem.cmdRegistry, g.kindOf)
 	if buildErr != nil {
 		return nil, nil, nil, fmt.Errorf("gui: Build: %w", buildErr)
 	}
 	for _, w := range warnings {
 		g.deps.Common.Logger().Warn(fmt.Sprintf("keybindings: [%s] %s (%s)", w.Code, w.Message, w.Origin))
 	}
-	g.lastWarnings = warnings
-	g.matcher.SwapTrieSet(trieSet)
+	g.keybindingSystem.lastWarnings = warnings
+	g.keybindingSystem.matcher.SwapTrieSet(trieSet)
 	return trieSet, defaults, svc, nil
 }
 
@@ -719,20 +719,20 @@ func (g *Gui) wireTrie(cfg *config.UserConfig) (*keys.TrieSet, []*types.ChordBin
 // Extracted verbatim from wireWithDriver (dbsavvy-y5th.1.4).
 func (g *Gui) wireExCommands(defaults []*types.ChordBinding, svc *keys.KeybindingService) {
 	// :reload ex-command — see registerReloadEx for the LoadUserConfig
-	// stub rationale. defaults / svc are wireWithDriver locals; g.matcher
+	// stub rationale. defaults / svc are wireWithDriver locals; g.keybindingSystem.matcher
 	// (== matcher) is used inside the method.
 	_ = g.registerReloadEx(defaults, svc)
 
 	// :q / :quit / :q! / :w — vim-style quit/write ex-commands. Handlers
 	// live in gui_ex_commands.go.
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "q", Description: "Quit", Handler: g.handleQuitEx})
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "quit", Description: "Quit", Handler: g.handleQuitEx})
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "q!", Description: "Force quit", Handler: g.handleForceQuitEx})
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "w", Description: "Open commit dialog", Handler: g.handleWriteEx})
+	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "q", Description: "Quit", Handler: g.handleQuitEx})
+	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "quit", Description: "Quit", Handler: g.handleQuitEx})
+	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "q!", Description: "Force quit", Handler: g.handleForceQuitEx})
+	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "w", Description: "Open commit dialog", Handler: g.handleWriteEx})
 
 	// :set — execute SET on the live SQL session. Handler in
 	// gui_ex_commands.go.
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "set", Description: "Execute SET on session", Handler: g.handleSetEx})
+	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "set", Description: "Execute SET on session", Handler: g.handleSetEx})
 
 	// hq5.10: wire the search_path quick-set prompt to the SET handler.
 	if g.controllers != nil && g.controllers.SearchPath != nil {
@@ -766,10 +766,10 @@ func (g *Gui) wireExCommands(defaults []*types.ChordBinding, svc *keys.Keybindin
 
 	// :reset — execute RESET on the live SQL session. Handler in
 	// gui_ex_commands.go.
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "reset", Description: "Execute RESET on session", Handler: g.handleResetEx})
+	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "reset", Description: "Execute RESET on session", Handler: g.handleResetEx})
 
 	// :c — reject cross-database attach (not supported). hq5.8.
-	_ = g.exRegistry.Register(keys.ExCommand{
+	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{
 		Name:        "c",
 		Description: "Cross-database attach (not supported)",
 		Handler:     g.handleCrossDBEx,
@@ -794,7 +794,7 @@ func (g *Gui) wireKeyDispatch(trieSet *keys.TrieSet, cfg *config.UserConfig, tab
 			Log:         g.deps.Common.Logger(),
 			Tree:        g.tree,
 			Registry:    g.registry,
-			Matcher:     g.matcher,
+			Matcher:     g.keybindingSystem.matcher,
 			TableDouble: g.tablesHelp,
 			TablePicker: tablePicker,
 		}); err != nil {
@@ -806,8 +806,8 @@ func (g *Gui) wireKeyDispatch(trieSet *keys.TrieSet, cfg *config.UserConfig, tab
 	// SetCurrentView is plumbed inline by RunLayout (Tier 4 final step)
 	// rather than via a swap hook, so it can't race the Layout pass's
 	// SetViewOnTop loop.
-	g.tree.RegisterSwapHook(g.matcher.Cancel)
-	g.tree.RegisterSwapHook(g.whichkey.Hide)
+	g.tree.RegisterSwapHook(g.keybindingSystem.matcher.Cancel)
+	g.tree.RegisterSwapHook(g.keybindingSystem.whichkey.Hide)
 
 	// Cancel the active result-tab stream when the user navigates out
 	// of the QueryEditor / result-tab pane while a query is still

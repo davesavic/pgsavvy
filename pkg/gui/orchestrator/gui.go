@@ -111,7 +111,7 @@ type keyDelayOverrides struct {
 // then to the documented Matcher defaults.
 func WithKeyDelays(timeoutLen, ttimeoutLen, whichKeyDelay time.Duration) Option {
 	return func(g *Gui) {
-		g.delayOverrides = &keyDelayOverrides{
+		g.keybindingSystem.delayOverrides = &keyDelayOverrides{
 			timeoutLen:    timeoutLen,
 			ttimeoutLen:   ttimeoutLen,
 			whichKeyDelay: whichKeyDelay,
@@ -197,6 +197,34 @@ type Gui struct {
 	fkForwardH      *helpers.FKForwardHelper
 
 	// Keybinding system (built by wireWithDriver).
+	keybindingSystem keybindingSystem
+
+	// Connection-lifecycle state surfaced by the activeConnAdapter.
+	connectionState connectionState
+
+	// Query runtime (dbsavvy-66p.16). queryRunner is built empty in
+	// wireWithDriver and stashed in the HelperBag so controllers' value-
+	// copy of the bag stays valid across Bind / Unbind. history is a
+	// process-wide singleton opened lazily on first wireWithDriver and
+	// closed in Gui.Close. activeSQLSession is the SQLSession the most
+	// recent connectInvoker.Connect built; Close cancels any in-flight
+	// run via its Close().
+	queryRunner      *data.QueryRunner
+	history          *query.History
+	activeSQLSession *session.SQLSession
+
+	// closed is true once Close has run; idempotent guard.
+	closed bool
+
+	// Threading-model + busy-spinner state (DESIGN.md §17, U8). See
+	// threading.go for the OnUIThread / OnUIThreadContentOnly / OnWorker
+	// methods that consume these fields.
+	spinnerState spinnerState
+}
+
+// keybindingSystem groups the keybinding-subsystem collaborators built by
+// wireWithDriver (dbsavvy-y5th.1.7).
+type keybindingSystem struct {
 	cmdRegistry *commands.Registry
 	matcher     *keys.Matcher
 	modeStore   *keys.ModeStore
@@ -224,28 +252,6 @@ type Gui struct {
 
 	// Test overrides for Matcher timing; nil means use cfg + defaults.
 	delayOverrides *keyDelayOverrides
-
-	// Connection-lifecycle state surfaced by the activeConnAdapter.
-	connectionState connectionState
-
-	// Query runtime (dbsavvy-66p.16). queryRunner is built empty in
-	// wireWithDriver and stashed in the HelperBag so controllers' value-
-	// copy of the bag stays valid across Bind / Unbind. history is a
-	// process-wide singleton opened lazily on first wireWithDriver and
-	// closed in Gui.Close. activeSQLSession is the SQLSession the most
-	// recent connectInvoker.Connect built; Close cancels any in-flight
-	// run via its Close().
-	queryRunner      *data.QueryRunner
-	history          *query.History
-	activeSQLSession *session.SQLSession
-
-	// closed is true once Close has run; idempotent guard.
-	closed bool
-
-	// Threading-model + busy-spinner state (DESIGN.md §17, U8). See
-	// threading.go for the OnUIThread / OnUIThreadContentOnly / OnWorker
-	// methods that consume these fields.
-	spinnerState spinnerState
 }
 
 // connectionState groups the connection-lifecycle fields surfaced by the
@@ -431,7 +437,7 @@ func (g *Gui) wireWithDriver() error {
 
 	// Build the keybinding-system collaborators (matcher + runtime). MUST run
 	// before wireContextRegistry — the registry's ctxDeps.Matcher reads
-	// g.matcher, which this sets.
+	// g.keybindingSystem.matcher, which this sets.
 	if err := g.wireKeybindingSystem(cfg); err != nil {
 		return err
 	}
@@ -622,7 +628,7 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 	columnsCtx := g.registry.Columns
 	indexesCtx := g.registry.Indexes
 
-	_ = g.cmdRegistry.Register(&commands.Command{
+	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
 		ID:          commands.TableInspectOpen,
 		Description: "Open table inspect",
 		Handler: func(_ commands.ExecCtx) error {
@@ -696,7 +702,7 @@ const historyRecentLimit = 500
 func (g *Gui) registerHistoryOpen() {
 	historyCtx := g.registry.History
 
-	_ = g.cmdRegistry.Register(&commands.Command{
+	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
 		ID:          commands.HistoryOpen,
 		Description: "Open query history",
 		Handler: func(_ commands.ExecCtx) error {
@@ -795,7 +801,7 @@ func (g *Gui) openRailSearch(rail *guicontext.SideListContext) error {
 // (mirrors the RESULT_GRID <esc> precedent; there is no global <esc>
 // focus-pop on the rails to fall through to).
 func (g *Gui) registerRailSearch() {
-	reg := g.cmdRegistry
+	reg := g.keybindingSystem.cmdRegistry
 	_ = reg.Register(&commands.Command{
 		ID: commands.RailSearchPrompt, Description: "Search rail",
 		Handler: func(ctx commands.ExecCtx) error { return g.openRailSearch(g.railForScope(ctx.Scope)) },
@@ -1020,7 +1026,7 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 		ngocui = real.Gocui()
 	}
 
-	g.masterEditors = map[types.ContextKey]gocui.Editor{}
+	g.keybindingSystem.masterEditors = map[types.ContextKey]gocui.Editor{}
 
 	for _, ctx := range g.registry.Flatten() {
 		if ctx == nil || ctx.GetKind() == types.STUB {
@@ -1040,7 +1046,7 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 			switch key {
 			case types.QUERY_EDITOR:
 				if g.registry.QueryEditor != nil {
-					ve := editor.NewVimEditor(g.registry.QueryEditor, g.matcher, key, editor.WithSessionLog(g.deps.Common.Logger()), editor.WithGuiDriver(g.driver))
+					ve := editor.NewVimEditor(g.registry.QueryEditor, g.keybindingSystem.matcher, key, editor.WithSessionLog(g.deps.Common.Logger()), editor.WithGuiDriver(g.driver))
 					// dbsavvy-etp.1: wire the Tab/Enter popup-navigation seam
 					// to the controller so the insert path can drive the
 					// completion popup.
@@ -1055,7 +1061,7 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 							ve.SetAutoCompleter(g.controllers.VimEditor.AutoTrigger)
 						}
 					}
-					g.masterEditors[key] = ve
+					g.keybindingSystem.masterEditors[key] = ve
 				}
 			case types.SEARCH_LINE:
 				// dbsavvy-2ttm: the SEARCH_LINE editor fires the
@@ -1065,9 +1071,9 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 				if g.searchLineHelp != nil {
 					opts = append(opts, WithOnPassthroughEdit(g.searchLineHelp.OnChange))
 				}
-				g.masterEditors[key] = NewMasterEditor(ngocui, g.matcher, key, opts...)
+				g.keybindingSystem.masterEditors[key] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, key, opts...)
 			default:
-				g.masterEditors[key] = NewMasterEditor(ngocui, g.matcher, key, WithSessionLog(g.deps.Common.Logger()))
+				g.keybindingSystem.masterEditors[key] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, key, WithSessionLog(g.deps.Common.Logger()))
 			}
 			continue
 		}
@@ -1109,14 +1115,14 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 	// cheap, and re-pushes between tabs do not strand a stale editor on
 	// the prior view (gocui's per-view Editor pointer is replaced on
 	// attach, and result_tab views never become editable text targets).
-	g.masterEditors[types.RESULT_GRID] = NewMasterEditor(ngocui, g.matcher, types.RESULT_GRID, WithSessionLog(g.deps.Common.Logger()))
+	g.keybindingSystem.masterEditors[types.RESULT_GRID] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, types.RESULT_GRID, WithSessionLog(g.deps.Common.Logger()))
 	// PLAN master editor (dbsavvy-s7gn). Plan tabs share the dynamic
 	// result_tab_<slot> view with grid tabs, but their PLAN-scoped bindings
 	// (o/H/<CR>/j/k/i) must dispatch under PLAN, not RESULT_GRID. Like
 	// RESULT_GRID this context has no static view, so the Flatten loop skips
 	// it; build the editor here and let RunLayout's Tier-1.5 pass pick it for
 	// plan tabs by the active tab's context key.
-	g.masterEditors[types.PLAN] = NewMasterEditor(ngocui, g.matcher, types.PLAN, WithSessionLog(g.deps.Common.Logger()))
+	g.keybindingSystem.masterEditors[types.PLAN] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, types.PLAN, WithSessionLog(g.deps.Common.Logger()))
 	return nil
 }
 
@@ -1161,7 +1167,7 @@ func (g *Gui) installShimsForScope(trieSet *keys.TrieSet, scope types.ContextKey
 			seen[sk] = struct{}{}
 			dispatchKey := k
 			handler := func() error {
-				_, err := g.matcher.Dispatch(scope, dispatchKey)
+				_, err := g.keybindingSystem.matcher.Dispatch(scope, dispatchKey)
 				return err
 			}
 			if err := g.driver.SetKeybinding(view, gk, gmod, handler); err != nil {
@@ -1193,7 +1199,7 @@ func (g *Gui) installEscAbortShim(scope types.ContextKey, view string) error {
 		return nil
 	}
 	handler := func() error {
-		_, derr := g.matcher.Dispatch(scope, escKey)
+		_, derr := g.keybindingSystem.matcher.Dispatch(scope, escKey)
 		return derr
 	}
 	return g.driver.SetKeybinding(view, gk, gmod, handler)
@@ -1530,26 +1536,26 @@ func (g *Gui) Registry() *guicontext.ContextTree { return g.registry }
 func (g *Gui) Controllers() *controllers.Controllers { return g.controllers }
 
 // CommandRegistry returns the commands.Registry. Test accessor.
-func (g *Gui) CommandRegistry() *commands.Registry { return g.cmdRegistry }
+func (g *Gui) CommandRegistry() *commands.Registry { return g.keybindingSystem.cmdRegistry }
 
 // ExRegistry returns the ex-command registry. Test accessor.
-func (g *Gui) ExRegistry() *keys.ExRegistry { return g.exRegistry }
+func (g *Gui) ExRegistry() *keys.ExRegistry { return g.keybindingSystem.exRegistry }
 
 // Matcher returns the active Matcher. Test accessor.
-func (g *Gui) Matcher() *keys.Matcher { return g.matcher }
+func (g *Gui) Matcher() *keys.Matcher { return g.keybindingSystem.matcher }
 
 // WhichKey returns the WhichKey notifier. Test accessor — dlp.14 reads
 // Visible() to assert the popup mechanic.
-func (g *Gui) WhichKey() *keys.WhichKey { return g.whichkey }
+func (g *Gui) WhichKey() *keys.WhichKey { return g.keybindingSystem.whichkey }
 
 // ModeStore returns the ModeStore. Test accessor — dlp.14 toggles modes
 // to exercise the mode-conditional dispatch paths.
-func (g *Gui) ModeStore() *keys.ModeStore { return g.modeStore }
+func (g *Gui) ModeStore() *keys.ModeStore { return g.keybindingSystem.modeStore }
 
 // Warnings returns the Warning slice captured during the most recent
 // wireWithDriver Build pass. Test accessor used by the dlp.14 smoke
 // walkthrough to assert ambient warnings.
-func (g *Gui) Warnings() []keys.Warning { return g.lastWarnings }
+func (g *Gui) Warnings() []keys.Warning { return g.keybindingSystem.lastWarnings }
 
 // ToastHelper returns the toast helper. Test accessor — dlp.14 reads
 // History() to assert reload / toast emissions.
@@ -1565,10 +1571,10 @@ func (g *Gui) ResultTabsHelper() *ui.ResultTabsHelper { return g.resultTabsH }
 // dbsavvy-etp.4 asserts the QUERY_EDITOR VimEditor has (or has not) the
 // as-you-type auto-completer wired per editor.autocomplete.
 func (g *Gui) MasterEditorForTest(key types.ContextKey) gocui.Editor {
-	if g.masterEditors == nil {
+	if g.keybindingSystem.masterEditors == nil {
 		return nil
 	}
-	return g.masterEditors[key]
+	return g.keybindingSystem.masterEditors[key]
 }
 
 // leaderRunesFromCfg extracts the leader / localleader runes from cfg,

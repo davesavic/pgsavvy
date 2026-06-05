@@ -65,8 +65,8 @@ var recognisedSettings = map[string]bool{
 //
 // defaults and svc are wireWithDriver locals (built from
 // controllers.AllDefaultBindings + keys.NewKeybindingService) so they are
-// passed in. g.matcher == matcher (assigned earlier in wireWithDriver),
-// so the live matcher is referenced via g.matcher.
+// passed in. g.keybindingSystem.matcher == matcher (assigned earlier in wireWithDriver),
+// so the live matcher is referenced via g.keybindingSystem.matcher.
 func (g *Gui) registerReloadEx(defaults []*types.ChordBinding, svc *keys.KeybindingService) error {
 	reloadDeps := keys.ReloadDeps{
 		LoadUserConfig: func() (*config.UserConfig, error) {
@@ -76,14 +76,14 @@ func (g *Gui) registerReloadEx(defaults []*types.ChordBinding, svc *keys.Keybind
 			return config.GetDefaultConfig(), nil
 		},
 		Defaults: defaults,
-		Registry: g.cmdRegistry,
+		Registry: g.keybindingSystem.cmdRegistry,
 		KindOf:   g.kindOf,
 		Service:  svc,
-		Matcher:  g.matcher,
+		Matcher:  g.keybindingSystem.matcher,
 		Toaster:  g.toaster,
 		Log:      g.deps.Common.Logger(),
 	}
-	return g.exRegistry.Register(keys.ReloadCommand(reloadDeps))
+	return g.keybindingSystem.exRegistry.Register(keys.ReloadCommand(reloadDeps))
 }
 
 // handleQuitEx is the :q / :quit handler. Return gocui.ErrQuit so the
@@ -101,8 +101,8 @@ func (g *Gui) handleQuitEx(_ []string, _ commands.ExecCtx) error {
 	// and <c-c> share the same guard chain (pending-edit +
 	// open-tx checks). The handler is registered by
 	// QuitController.RegisterActions.
-	if g.cmdRegistry != nil {
-		if cmd, ok := g.cmdRegistry.Get(commands.AppQuit); ok && cmd != nil && cmd.Handler != nil {
+	if g.keybindingSystem.cmdRegistry != nil {
+		if cmd, ok := g.keybindingSystem.cmdRegistry.Get(commands.AppQuit); ok && cmd != nil && cmd.Handler != nil {
 			return cmd.Handler(commands.ExecCtx{})
 		}
 	}
@@ -116,10 +116,10 @@ func (g *Gui) handleForceQuitEx(_ []string, _ commands.ExecCtx) error {
 
 // handleWriteEx is the :w handler; it opens the commit dialog.
 func (g *Gui) handleWriteEx(_ []string, _ commands.ExecCtx) error {
-	if g.cmdRegistry == nil {
+	if g.keybindingSystem.cmdRegistry == nil {
 		return nil
 	}
-	cmd, ok := g.cmdRegistry.Get(commands.CommitDialogOpen)
+	cmd, ok := g.keybindingSystem.cmdRegistry.Get(commands.CommitDialogOpen)
 	if !ok || cmd == nil || cmd.Handler == nil {
 		return nil
 	}
