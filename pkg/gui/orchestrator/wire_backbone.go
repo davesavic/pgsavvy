@@ -139,7 +139,7 @@ func (g *Gui) wireContextRegistry(tr *i18n.TranslationSet, provider func() []mod
 		PresentationHook: presentation.NewPresentationHook(),
 		// dbsavvy-e53.6: live active-connection marker. The accessor is
 		// read on every render so the "●" marker tracks connect/disconnect.
-		PerRowDecorationHook: presentation.NewPerRowDecorationHook(func() string { return g.activeConnID }),
+		PerRowDecorationHook: presentation.NewPerRowDecorationHook(func() string { return g.connectionState.activeConnID }),
 		// dbsavvy-e53.6: enrich each picker row with the parsed host/db
 		// endpoint. SECURITY: only the discrete host + database fields are
 		// surfaced (never the raw DSN / password); each leaf is run through
@@ -334,8 +334,8 @@ func (g *Gui) wireNavDeps(connectInv *connectInvoker, tablePicker tablesPickerAd
 			}
 			return
 		}
-		if g.deps.Store != nil && g.activeConnID != "" {
-			g.deps.Store.SetLastSchemaName(g.activeConnID, schema)
+		if g.deps.Store != nil && g.connectionState.activeConnID != "" {
+			g.deps.Store.SetLastSchemaName(g.connectionState.activeConnID, schema)
 		}
 		g.OnWorker(func(_ gocui.Task) error {
 			// dbsavvy-1bb: make the selected schema the live search_path so
@@ -404,7 +404,7 @@ func (g *Gui) wireHelperDeps() (controllers.UIDeps, controllers.QueryDeps, contr
 		// query editor can gate mutating statements behind ConfirmWrites /
 		// ConfirmDDL. nil until the first successful Connect. dbsavvy-wxkf.
 		ConnProfile: func() *models.Connection {
-			return g.activeConnProfile
+			return g.connectionState.activeConnProfile
 		},
 	}
 
@@ -743,7 +743,7 @@ func (g *Gui) wireExCommands(defaults []*types.ChordBinding, svc *keys.Keybindin
 	if g.controllers != nil && g.controllers.StatementTimeout != nil {
 		g.controllers.StatementTimeout.SetRunner = g.handleSetEx
 		g.controllers.StatementTimeout.ActiveConnID = func() string {
-			return g.activeConnID
+			return g.connectionState.activeConnID
 		}
 		g.controllers.StatementTimeout.PersistTimeout = func(connID, timeout string) {
 			if g.deps.Store == nil {

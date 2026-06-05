@@ -577,11 +577,11 @@ func (g *Gui) RunLayout(w, h int) error {
 		// Connections side rail walks). A missing provider or empty ID
 		// collapses to nil — BuildStatusLine renders the no-conn slot.
 		activeConn := func() *models.Connection {
-			if g.activeConnID == "" || g.deps.ConnectionsProvider == nil {
+			if g.connectionState.activeConnID == "" || g.deps.ConnectionsProvider == nil {
 				return nil
 			}
 			for _, c := range g.deps.ConnectionsProvider() {
-				if c.Name == g.activeConnID {
+				if c.Name == g.connectionState.activeConnID {
 					cp := c
 					return &cp
 				}

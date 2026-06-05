@@ -225,15 +225,8 @@ type Gui struct {
 	// Test overrides for Matcher timing; nil means use cfg + defaults.
 	delayOverrides *keyDelayOverrides
 
-	// Connection state surfaced by the activeConnAdapter.
-	activeConnID      string
-	activeConnProfile *models.Connection
-
-	// onTableActivate stashes the HelperBag.OnTableActivate closure
-	// wireWithDriver installed, so tests can invoke the composite
-	// TABLES <CR> path without reaching through AttachControllers.
-	// dbsavvy-56u.1.
-	onTableActivate func(*models.Table) error
+	// Connection-lifecycle state surfaced by the activeConnAdapter.
+	connectionState connectionState
 
 	// Query runtime (dbsavvy-66p.16). queryRunner is built empty in
 	// wireWithDriver and stashed in the HelperBag so controllers' value-
@@ -253,6 +246,20 @@ type Gui struct {
 	// threading.go for the OnUIThread / OnUIThreadContentOnly / OnWorker
 	// methods that consume these fields.
 	spinnerState spinnerState
+}
+
+// connectionState groups the connection-lifecycle fields surfaced by the
+// activeConnAdapter (dbsavvy-y5th.1.6).
+type connectionState struct {
+	// Connection state surfaced by the activeConnAdapter.
+	activeConnID      string
+	activeConnProfile *models.Connection
+
+	// onTableActivate stashes the HelperBag.OnTableActivate closure
+	// wireWithDriver installed, so tests can invoke the composite
+	// TABLES <CR> path without reaching through AttachControllers.
+	// dbsavvy-56u.1.
+	onTableActivate func(*models.Table) error
 
 	// connectGen is the supersession token for in-flight Connects
 	// (dbsavvy-fow.1). Each connectInvoker.Connect bumps it on entry and
@@ -592,7 +599,7 @@ func (g *Gui) persistTrackedSetting(ctx context.Context, settingKey, settingValu
 		g.activeSQLSession.SettingsSnapshot().Set(settingKey, settingValue)
 	}
 
-	if connID := g.activeConnID; connID != "" && g.deps.Store != nil {
+	if connID := g.connectionState.activeConnID; connID != "" && g.deps.Store != nil {
 		g.deps.Store.MutateAndSave(func(a *common.AppState) {
 			if a.LastSessionSettings == nil {
 				a.LastSessionSettings = make(map[string]map[string]string)
@@ -847,8 +854,8 @@ func (g *Gui) buildOnTableActivate(_ *connectInvoker) func(*models.Table) error 
 		if table == nil || g.controllers == nil || g.controllers.QueryEditor == nil {
 			return nil
 		}
-		if g.deps.Store != nil && g.activeConnID != "" {
-			g.deps.Store.SetLastTableName(g.activeConnID, table.Name)
+		if g.deps.Store != nil && g.connectionState.activeConnID != "" {
+			g.deps.Store.SetLastTableName(g.connectionState.activeConnID, table.Name)
 		}
 		sql := fmt.Sprintf("SELECT * FROM %s LIMIT %d",
 			pg.QuoteQualified(table.Schema, table.Name), defaultTablePreviewLimit)
@@ -863,7 +870,7 @@ func (g *Gui) buildOnTableActivate(_ *connectInvoker) func(*models.Table) error 
 		}
 		return nil
 	}
-	g.onTableActivate = fn
+	g.connectionState.onTableActivate = fn
 	return fn
 }
 
@@ -924,7 +931,7 @@ func (g *Gui) saveConnectionForm(conn models.Connection, isEdit bool, originalNa
 // active-conn state). Then it removes the profile from connections.yml via
 // config.DeleteConnection and refreshes the modal list. Runs on the MainLoop.
 func (g *Gui) deleteConnectionFromModal(connName string) error {
-	if connName == g.activeConnID {
+	if connName == g.connectionState.activeConnID {
 		if g.resultTabsH != nil {
 			g.resultTabsH.PreemptInFlight()
 		}
@@ -938,8 +945,8 @@ func (g *Gui) deleteConnectionFromModal(connName string) error {
 		if g.connectHelper != nil {
 			g.connectHelper.Disconnect()
 		}
-		g.activeConnID = ""
-		g.activeConnProfile = nil
+		g.connectionState.activeConnID = ""
+		g.connectionState.activeConnProfile = nil
 	}
 
 	fs := fsFromCommon(g.deps.Common)
@@ -1384,7 +1391,7 @@ func (g *Gui) hiddenSchemasForActiveConn() []string {
 	if g == nil || g.deps.Store == nil {
 		return nil
 	}
-	connID := g.activeConnID
+	connID := g.connectionState.activeConnID
 	if connID == "" {
 		return nil
 	}
@@ -1421,12 +1428,12 @@ func (g *Gui) ActiveSQLSessionForTest() *session.SQLSession { return g.activeSQL
 // ActiveConnIDForTest returns the active connection ID set by the most
 // recent successful Connect. Test-only — used by the dbsavvy-fow.1
 // supersession test to assert a stale connect did not clobber it.
-func (g *Gui) ActiveConnIDForTest() string { return g.activeConnID }
+func (g *Gui) ActiveConnIDForTest() string { return g.connectionState.activeConnID }
 
 // BumpConnectGenForTest advances the supersession token, simulating a
 // newer activation arriving while a prior connect is still in flight.
 // Test-only (dbsavvy-fow.1).
-func (g *Gui) BumpConnectGenForTest() { g.connectGen.Add(1) }
+func (g *Gui) BumpConnectGenForTest() { g.connectionState.connectGen.Add(1) }
 
 // LastConnectionIDForTest returns the persisted AppState.LastConnectionID,
 // or "" when the Store is unwired. Test-only — the cancel-supersession test

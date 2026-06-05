@@ -76,7 +76,7 @@ func (g *Gui) wireEditDeps() controllers.EditDeps {
 		// ActiveConnectionProfile surfaces the live profile captured at
 		// connectInvoker.Connect. nil until the first successful Connect.
 		ActiveConnectionProfile: func() *models.Connection {
-			return g.activeConnProfile
+			return g.connectionState.activeConnProfile
 		},
 	}
 }
