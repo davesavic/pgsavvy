@@ -269,10 +269,14 @@ func (cm *ConnectionManagerController) Add(_ commands.ExecCtx) error {
 	return nil
 }
 
-// Edit opens the form seeded from the selected list row (ModeList only). No-op
-// on an empty list or when unwired.
-func (cm *ConnectionManagerController) Edit(_ commands.ExecCtx) error {
-	if cm.deps.Ctx == nil || cm.inConnectingMode() || cm.inFormMode() {
+// Edit is the `i` handler. In form mode it routes to FieldEdit so the same key
+// edits the focused field; otherwise it opens the form seeded from the selected
+// list row. No-op on an empty list or when unwired.
+func (cm *ConnectionManagerController) Edit(ec commands.ExecCtx) error {
+	if cm.inFormMode() {
+		return cm.FieldEdit(ec)
+	}
+	if cm.deps.Ctx == nil || cm.inConnectingMode() {
 		return nil
 	}
 	conn, ok := cm.deps.Ctx.SelectedItem().(*models.Connection)
@@ -451,7 +455,11 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			ShowInBar:   true,
 		},
 		{
-			Sequence:    []types.ChordKey{{Code: 'e'}},
+			// `i` is the single context-sensitive edit key: in list mode it
+			// opens the edit-connection form; in form mode the Edit handler
+			// routes to FieldEdit so the same key edits the focused field. The
+			// trie is last-wins, so the two behaviours share ONE binding.
+			Sequence:    []types.ChordKey{{Code: 'i'}},
 			Mode:        types.ModeNormal,
 			Scope:       types.CONNECTION_MANAGER,
 			ActionID:    commands.ConnectionManagerEdit,
@@ -464,14 +472,6 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Scope:       types.CONNECTION_MANAGER,
 			ActionID:    commands.ConnectionManagerDelete,
 			Description: tr.Actions.DeleteConnection,
-			ShowInBar:   true,
-		},
-		{
-			Sequence:    []types.ChordKey{{Code: 'i'}},
-			Mode:        types.ModeNormal,
-			Scope:       types.CONNECTION_MANAGER,
-			ActionID:    commands.ConnectionManagerFieldEdit,
-			Description: tr.Actions.EditField,
 			ShowInBar:   true,
 		},
 		{
@@ -517,47 +517,47 @@ func (cm *ConnectionManagerController) RegisterActions(reg *commands.Registry) {
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerClose,
-		Description: "Close connection manager",
+		Description: "Close",
 		Handler:     cm.Close,
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerDown,
-		Description: "Move connection manager cursor down",
+		Description: "Cursor down",
 		Handler:     cm.Down,
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerUp,
-		Description: "Move connection manager cursor up",
+		Description: "Cursor up",
 		Handler:     cm.Up,
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerJumpFirst,
-		Description: "Jump connection manager cursor to first row",
+		Description: "Jump to first row",
 		Handler:     cm.First,
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerJumpLast,
-		Description: "Jump connection manager cursor to last row",
+		Description: "Jump to last row",
 		Handler:     cm.Last,
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerConfirm,
-		Description: "Connect / retry from connection manager",
+		Description: "Connect",
 		Handler:     cm.Confirm,
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerRetry,
-		Description: "Retry connection from connection manager",
+		Description: "Retry",
 		Handler:     cm.Retry,
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerAdd,
-		Description: "Open add-connection form",
+		Description: "Add connection",
 		Handler:     cm.Add,
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerEdit,
-		Description: "Open edit-connection form",
+		Description: "Edit connection/field",
 		Handler:     cm.Edit,
 	})
 	_ = reg.Register(&commands.Command{
@@ -572,7 +572,7 @@ func (cm *ConnectionManagerController) RegisterActions(reg *commands.Registry) {
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerFieldEdit,
-		Description: "Edit focused form field",
+		Description: "Edit form field",
 		Handler:     cm.FieldEdit,
 	})
 	_ = reg.Register(&commands.Command{
@@ -582,7 +582,7 @@ func (cm *ConnectionManagerController) RegisterActions(reg *commands.Registry) {
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ConnectionManagerDelete,
-		Description: "Delete selected connection",
+		Description: "Delete connection",
 		Handler:     cm.Delete,
 	})
 }

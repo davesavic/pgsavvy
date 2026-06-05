@@ -113,6 +113,66 @@ func TestController_EditSeedsFromSelectedRow(t *testing.T) {
 	}
 }
 
+// TestController_EditBoundToIAndFieldEditUnbound locks the dbsavvy-j3wi rebind:
+// `i` is the single edit key (→ ConnectionManagerEdit), `e` is no longer bound,
+// and ConnectionManagerFieldEdit has no key of its own (reached via routing).
+func TestController_EditBoundToIAndFieldEditUnbound(t *testing.T) {
+	ctrl := newFormController(newFormCtx(), &capturePrompt{}, nil)
+	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
+
+	iCount := 0
+	var iAction, eAction string
+	fieldEditBound := false
+	for _, b := range bindings {
+		if len(b.Sequence) != 1 {
+			continue
+		}
+		switch b.Sequence[0].Code {
+		case 'i':
+			iCount++
+			iAction = b.ActionID
+		case 'e':
+			eAction = b.ActionID
+		}
+		if b.ActionID == commands.ConnectionManagerFieldEdit {
+			fieldEditBound = true
+		}
+	}
+	if iCount != 1 {
+		t.Fatalf("`i` bindings = %d, want exactly 1", iCount)
+	}
+	if iAction != commands.ConnectionManagerEdit {
+		t.Errorf("`i` → %q, want ConnectionManagerEdit", iAction)
+	}
+	if eAction != "" {
+		t.Errorf("`e` still bound to %q, want unbound", eAction)
+	}
+	if fieldEditBound {
+		t.Error("ConnectionManagerFieldEdit still has a key binding, want unbound (reached via routing)")
+	}
+}
+
+// TestController_EditKeyRoutesToFieldEditInFormMode asserts the single `i`
+// binding (ConnectionManagerEdit) edits the focused field when the modal is
+// already in form mode, instead of no-opping (dbsavvy-j3wi).
+func TestController_EditKeyRoutesToFieldEditInFormMode(t *testing.T) {
+	ctx := newFormCtx()
+	prompt := &capturePrompt{}
+	ctrl := newFormController(ctx, prompt, nil)
+
+	dispatchCM(t, ctrl, commands.ConnectionManagerAdd)
+	if ctx.Mode() != guicontext.ModeForm {
+		t.Fatalf("precondition mode = %v, want ModeForm", ctx.Mode())
+	}
+	dispatchCM(t, ctrl, commands.ConnectionManagerEdit)
+	if !prompt.active {
+		t.Fatal("Edit in form mode did not open the field prompt (routing failed)")
+	}
+	if prompt.label != "name" {
+		t.Errorf("prompt label = %q, want name", prompt.label)
+	}
+}
+
 // TestController_FieldEditTextOpensPromptAndStores asserts `i` on a text field
 // opens the prompt and a valid submit stores the value (AC2 popup-return flow).
 func TestController_FieldEditTextOpensPromptAndStores(t *testing.T) {

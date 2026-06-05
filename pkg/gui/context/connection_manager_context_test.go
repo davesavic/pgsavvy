@@ -284,9 +284,11 @@ func TestConnectionManagerContext_Kind(t *testing.T) {
 }
 
 // TestConnectionManagerContext_OptionsBarFilterHidesFieldEditInListMode locks
-// the dbsavvy-4ndv fix: in ModeList the status bar must NOT advertise the
-// form-only "Edit form field" (ConnectionManagerFieldEdit) binding, while the
-// list-appropriate actions stay visible. ModeForm keeps FieldEdit visible.
+// the dbsavvy-4ndv fix plus the dbsavvy-j3wi rebind: in ModeList the status bar
+// must NOT advertise the now-unbound ConnectionManagerFieldEdit, while the
+// list-appropriate actions stay visible. After the `e`→`i` rebind the single
+// edit action is ConnectionManagerEdit, so ModeForm advertises it (the `i`
+// "Edit connection/field" binding) and hides the dead ConnectionManagerFieldEdit.
 func TestConnectionManagerContext_OptionsBarFilterHidesFieldEditInListMode(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	if c.Mode() != ModeList {
@@ -317,7 +319,10 @@ func TestConnectionManagerContext_OptionsBarFilterHidesFieldEditInListMode(t *te
 		t.Fatalf("precondition: mode = %v, want ModeForm", c.Mode())
 	}
 	formFilter := c.OptionsBarFilter()
-	if formFilter == nil || !formFilter(commands.ConnectionManagerFieldEdit) {
-		t.Error("ModeForm hides ConnectionManagerFieldEdit, want it visible")
+	if formFilter == nil || !formFilter(commands.ConnectionManagerEdit) {
+		t.Error("ModeForm hides ConnectionManagerEdit, want it visible (the `i` edit binding)")
+	}
+	if formFilter != nil && formFilter(commands.ConnectionManagerFieldEdit) {
+		t.Error("ModeForm shows ConnectionManagerFieldEdit, want it hidden (now unbound)")
 	}
 }
