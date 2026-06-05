@@ -1255,26 +1255,7 @@ func ansiSGRForStyle(s *theme.Style) string {
 	if s == nil {
 		return ""
 	}
-	switch strings.ToLower(s.Fg) {
-	case "black":
-		return "\x1b[30m"
-	case "red":
-		return "\x1b[31m"
-	case "green":
-		return "\x1b[32m"
-	case "yellow":
-		return "\x1b[33m"
-	case "blue":
-		return "\x1b[34m"
-	case "magenta":
-		return "\x1b[35m"
-	case "cyan":
-		return "\x1b[36m"
-	case "white":
-		return "\x1b[37m"
-	default:
-		return ""
-	}
+	return theme.AnsiFgSGR(s.Fg)
 }
 
 // frameAttr translates a theme.Style colour-name into the gocui.Attribute

@@ -8,6 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
 // ConnectionManagerMode is the modal's two-state render mode (dbsavvy-1rf).
@@ -250,11 +251,14 @@ func (c *ConnectionManagerContext) renderRows() string {
 			continue
 		}
 		if c.deps.PerRowDecorationHook != nil {
-			icon, label, _ := c.deps.PerRowDecorationHook(conn)
+			icon, label, color := c.deps.PerRowDecorationHook(conn)
 			if label == "" {
 				label = conn.Name
 			}
 			label += c.rowSuffix(conn)
+			if sgr := theme.AnsiFgSGR(color); sgr != "" {
+				label = sgr + label + theme.AnsiReset
+			}
 			if icon != "" {
 				fmt.Fprintf(&b, "%s%s %s\n", marker, icon, label)
 			} else {

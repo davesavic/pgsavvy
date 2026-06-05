@@ -254,28 +254,10 @@ func sgrPrefixForStyle(s theme.Style) string {
 
 // ansiFgCode maps a W3C colour name to its ANSI SGR escape. Hex
 // values and unknown tokens collapse to "" — same fallback policy as
-// promptStyledLine in the orchestrator.
+// promptStyledLine in the orchestrator. Delegates to the shared
+// theme.AnsiFgSGR converter.
 func ansiFgCode(fg string) string {
-	switch strings.ToLower(fg) {
-	case "black":
-		return "\x1b[30m"
-	case "red":
-		return "\x1b[31m"
-	case "green":
-		return "\x1b[32m"
-	case "yellow":
-		return "\x1b[33m"
-	case "blue":
-		return "\x1b[34m"
-	case "magenta":
-		return "\x1b[35m"
-	case "cyan":
-		return "\x1b[36m"
-	case "white":
-		return "\x1b[37m"
-	default:
-		return ""
-	}
+	return theme.AnsiFgSGR(fg)
 }
 
 // ansiBgCode maps a colour token to its ANSI background SGR escape.
