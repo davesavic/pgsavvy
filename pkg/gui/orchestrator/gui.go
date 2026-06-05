@@ -11,8 +11,6 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,7 +20,6 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/spf13/afero"
 
-	"github.com/davesavic/dbsavvy/pkg/cheatsheet"
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/config"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
@@ -38,7 +35,6 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/popup"
-	"github.com/davesavic/dbsavvy/pkg/gui/presentation"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/logs"
@@ -419,185 +415,18 @@ func (g *Gui) wireWithDriver() error {
 		provider = func() []models.Connection { return nil }
 	}
 
-	// Build the keybinding-system collaborators.
-	g.cmdRegistry = commands.NewRegistry()
-	g.modeStore = keys.NewModeStore()
-	g.whichkey = keys.NewWhichKey()
-	g.exRegistry = keys.NewExRegistry()
-
-	// dbsavvy-8s2.5: wire the per-session logger into the input-side
-	// stores so mode_set / mode_reset / ctx_* events flow through
-	// logs.Event. nil-safe — logs.Event short-circuits on nil.
-	g.modeStore.SetSessionLog(g.deps.Common.Logger())
-	if g.tree != nil {
-		g.tree.SetSessionLog(g.deps.Common.Logger())
-	}
-
-	leader, _ := leaderRunesFromCfg(cfg)
-	tlen, ttlen, wdelay := resolveKeyDelays(cfg, g.delayOverrides)
-	matcher, err := keys.NewMatcher(nil, keys.MatcherConfig{
-		Modes:         g.modeStore,
-		Leader:        leader,
-		TimeoutLen:    tlen,
-		TtimeoutLen:   ttlen,
-		WhichKeyDelay: wdelay,
-		Registers:     keys.NewRegisterStore(),
-		WhichKey:      g.whichkey,
-		Log:           g.deps.Common.Logger(),
-		// Surface swallowed handler errors and disabled-binding reasons
-		// as toasts. Late-bound: g.toastHelp is constructed later in this
-		// method, but by the time any key dispatches it is non-nil
-		// (dbsavvy-26i — without this, handler errors only hit the debug
-		// log and apply/commit failures look like silent no-ops).
-		Toaster: func(msg string) {
-			if g.toastHelp != nil {
-				g.toastHelp.Show(msg, matcherToastTTL)
-			}
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("gui: NewMatcher: %w", err)
-	}
-	g.matcher = matcher
-	// dbsavvy-8s2.5: wire the per-session logger into the matcher so
-	// chord_resolved events flow through logs.Event. nil-safe.
-	g.matcher.SetSessionLog(g.deps.Common.Logger())
-	runtime := keys.NewRuntime(g.cmdRegistry, matcher, g.modeStore, g.whichkey, g.exRegistry)
-	g.kbRuntime = runtime
-
-	// Cheatsheet render closure. Captures the live matcher + tr so the
-	// CheatsheetContext renders the current TrieSet snapshot every time
-	// `?` is pressed. Returns the empty string when the matcher hasn't
-	// published a TrieSet yet (early bootstrap).
-	cheatsheetRender := func(scope types.ContextKey) string {
-		if g.matcher == nil {
-			return ""
-		}
-		ts := g.matcher.TrieSet()
-		if ts == nil {
-			return ""
-		}
-		out := cheatsheet.Generate(cheatsheet.GenerateInput{
-			Trie:  ts,
-			Scope: scope,
-			Tr:    tr,
-		})
-		return cheatsheet.Render(out, tr, cheatsheet.ScopeLabel(scope, tr))
-	}
-
-	// WhichKey rows resolver (dbsavvy-tro.4). Captures the live matcher +
-	// modeStore so WhichKeyContext.HandleRender pulls the immediate
-	// children of the current (scope, prefix) on every render frame,
-	// merged across the focused scope and GLOBAL (dbsavvy-81j).
-	// Returns nil when the matcher hasn't published a TrieSet yet or when
-	// prefix doesn't resolve in either the (mode, scope) or (mode, GLOBAL)
-	// trie — the context's HandleRender treats nil rows as a silent no-op
-	// (see whichkey_context.go:73-76).
-	whichKeyRows := func(scope types.ContextKey, prefix []types.ChordKey) []types.ChildRow {
-		if g.matcher == nil || g.modeStore == nil {
-			return nil
-		}
-		ts := g.matcher.TrieSet()
-		if ts == nil {
-			return nil
-		}
-		mode := g.modeStore.Get(scope)
-		// dbsavvy-81j: union the focused scope's continuations with GLOBAL's,
-		// mirroring Dispatch's scope→GLOBAL fall-through, so the popup lists
-		// every key that would actually fire (e.g. global <leader>1..9 while
-		// focused on RESULT_GRID), not just the scope-specific ones.
-		rows, ok := ts.ChildrenAtMerged(mode, scope, prefix)
-		if !ok {
-			return nil
-		}
-		return rows
+	// Build the keybinding-system collaborators (matcher + runtime). MUST run
+	// before wireContextRegistry — the registry's ctxDeps.Matcher reads
+	// g.matcher, which this sets.
+	if err := g.wireKeybindingSystem(cfg); err != nil {
+		return err
 	}
 
 	// Build the context registry with hooks closed over the driver.
-	ctxDeps := types.ContextTreeDeps{
-		GuiDriver:        g.driver,
-		EmptyStateHook:   data.NewEmptyStateHook(tr, provider),
-		RailEmptyText:    railEmptyText(tr),
-		PresentationHook: presentation.NewPresentationHook(),
-		// dbsavvy-e53.6: live active-connection marker. The accessor is
-		// read on every render so the "●" marker tracks connect/disconnect.
-		PerRowDecorationHook: presentation.NewPerRowDecorationHook(func() string { return g.activeConnID }),
-		// dbsavvy-e53.6: enrich each picker row with the parsed host/db
-		// endpoint. SECURITY: only the discrete host + database fields are
-		// surfaced (never the raw DSN / password); each leaf is run through
-		// config.SafeText. Malformed/empty DSN → "" → name-only row.
-		RowSuffix: func(c *models.Connection) string {
-			if c == nil {
-				return ""
-			}
-			host, db := session.ParseDSNEndpoint(c.DSN)
-			if host == "" && db == "" {
-				return ""
-			}
-			return config.SafeText(host) + "/" + config.SafeText(db)
-		},
-		LimitText:        presentation.NewLimitText(tr),
-		ModeStore:        g.modeStore,
-		WhichKey:         g.whichkey,
-		WhichKeyRows:     whichKeyRows,
-		CheatsheetRender: cheatsheetRender,
-		// dbsavvy-wwd.1: QueryEditorContext.HandleFocusLost calls
-		// matcher.Cancel via this minimal interface to keep
-		// pkg/gui/context decoupled from pkg/gui/keys.
-		Matcher: g.matcher,
-		// dbsavvy-wwd.9: buffer-save dispatch closure. The MainLoop
-		// caller already supplies a string snapshot (Buffer.String
-		// takes RLock); the worker just writes raw `.sql` text to disk.
-		// Common.Fs / Common.StateDir may be nil/empty in test wiring —
-		// the closure short-circuits via SaveBufferLines' empty-path
-		// guard so this stays safe for fixtures.
-		SaveBuffer: g.saveQueryEditorBuffer,
-		// dbsavvy-56u.4: runtime-hidden lookup for SchemasContext.
-		// renderRows uses this to skip AppState.HiddenSchemas[connID]
-		// entries unless showHiddenMode is on. Closure captures the live
-		// AppState pointer and the activeConnID; both can be empty in
-		// test wiring → empty slice, no filtering applied.
-		HiddenSchemasForActiveConn: g.hiddenSchemasForActiveConn,
-		// hq5.6: dims schema/table/column/index rails when the session is
-		// connection-dead. The closure reads the queryRunner's live state
-		// on every render so the transition is visible immediately.
-		IsDisconnected: func() bool {
-			return g.queryRunner != nil && g.queryRunner.IsDisconnected()
-		},
-		// dbsavvy-56u.2: first-run welcome tip copy. Nil-safe when tr is
-		// absent (test fixtures) — the context renders nothing.
-		FirstRunTipText: func() (string, string) {
-			if tr == nil {
-				return "", ""
-			}
-			return tr.FirstRunTipTitle, tr.FirstRunTipBody
-		},
-	}
-	g.registry = guicontext.NewContextTree(ctxDeps)
+	g.wireContextRegistry(tr, provider)
 
 	// UI helpers that need the driver / registry.
-	g.confirmHelp = ui.NewConfirmHelper(g.tree, g.registry.Confirmation)
-	g.promptHelp = ui.NewPromptHelper(g.tree, g.registry.Prompt)
-	g.searchLineHelp = ui.NewSearchLineHelper(g.tree, g.registry.SearchLine)
-	g.choiceHelp = ui.NewChoiceHelper(g.tree, g.registry.Selection)
-
-	// SSH masked secret prompt (dbsavvy-jku3): now that the prompt popup
-	// (g.promptHelp), its masker (g.registry.Prompt), and the UI scheduler
-	// (g.OnUIThread) are all live, build the TUI SecretPrompter and hand it to
-	// the pg driver via the app-provided hook.
-	if g.deps.SetSecretPrompter != nil {
-		secretPrompter := ui.NewSecretPromptHelper(g.promptHelp, g.registry.Prompt, g.OnUIThread)
-		if g.deps.Common != nil {
-			secretPrompter.SetLogger(g.deps.Common.Logger())
-		}
-		g.deps.SetSecretPrompter(secretPrompter)
-	}
-	g.toastHelp = ui.NewToastHelper(g.driver)
-	if g.deps.Common != nil {
-		g.toastHelp.SetLogger(g.deps.Common.Logger())
-	}
-	g.tablesHelp = ui.NewTablesHelper(g.toastHelp, tr)
-	g.tipHelp = ui.NewTipHelper(g.tree, g.deps.Store)
+	g.wireUIHelpers(tr)
 
 	// NoticeHelper routes server NOTICE / WARNING messages from streaming
 	// queries to a first-of-run toast. dbsavvy-66p.13.
@@ -661,55 +490,9 @@ func (g *Gui) wireWithDriver() error {
 	connectInv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryRunner, history: g.history}
 
 	// dbsavvy-56u.1: wire the RefreshHelper closures over the live
-	// populateXxxRail helpers + refreshConnectionsRail. Each closure
-	// reloads driver data AND pushes it through the rail context's
-	// SetItems. RefreshTables/Columns/Indexes apply a stale-guard
-	// against the rail's currently-selected schema/table identifier:
-	// if the user navigated away while Load was in flight, the load
-	// result is discarded so a stale list never overwrites the new
-	// focus's rail.
-	g.refreshHelper.SetSchemasRefresher(func(ctx context.Context) error {
-		// dbsavvy-bwq.13: a manual schemas-rail refresh is the user's signal
-		// that on-disk schema/table shape may have changed, so drop the FK
-		// metadata cache; B5/B6 navigation will repopulate on demand.
-		if g.activeSQLSession != nil {
-			if fkc := g.activeSQLSession.FKCache(); fkc != nil {
-				fkc.InvalidateAll()
-			}
-		}
-		connectInv.populateSchemasRail(ctx)
-		return nil
-	})
-	g.refreshHelper.SetTablesRefresher(func(ctx context.Context, schema string) error {
-		if g.registry != nil && g.registry.Schemas != nil {
-			cur := schemasPickerAdapter{registry: g.registry.Schemas}.SelectedSchemaName()
-			if cur != "" && cur != schema {
-				return nil
-			}
-		}
-		connectInv.populateTablesRail(ctx, schema)
-		return nil
-	})
-	g.refreshHelper.SetColumnsRefresher(func(ctx context.Context, schema, table string) error {
-		if g.registry != nil && g.registry.Tables != nil {
-			t := tablesPickerAdapter{registry: g.registry.Tables}.SelectedTable()
-			if t != nil && (t.Schema != schema || t.Name != table) {
-				return nil
-			}
-		}
-		connectInv.populateColumnsRail(ctx, schema, table)
-		return nil
-	})
-	g.refreshHelper.SetIndexesRefresher(func(ctx context.Context, schema, table string) error {
-		if g.registry != nil && g.registry.Tables != nil {
-			t := tablesPickerAdapter{registry: g.registry.Tables}.SelectedTable()
-			if t != nil && (t.Schema != schema || t.Name != table) {
-				return nil
-			}
-		}
-		connectInv.populateIndexesRail(ctx, schema, table)
-		return nil
-	})
+	// populateXxxRail helpers + refreshConnectionsRail.
+	g.wireRefreshHelperDeps(connectInv)
+
 	// CoreDeps — fail-fast: NewCoreDeps panics if driver or logger is
 	// nil. wireWithDriver has already rejected a nil driver above
 	// (gui.go: "nil driver"), and Common.Logger() never returns nil, so
@@ -718,132 +501,9 @@ func (g *Gui) wireWithDriver() error {
 	// crash rather than a silently dead keybinding (dbsavvy-fow.10 D2).
 	core := controllers.NewCoreDeps(g.driver, g.deps.Common.Logger())
 
-	// NavDeps — Connect is the required (compile-time) parameter; the
-	// optional pickers/closures are set on the returned struct.
-	nav := controllers.NewNavDeps(connectInv)
-	nav.Schemas = schemasPickerAdapter{registry: g.registry.Schemas}
-	nav.Tables = tablePicker
-	nav.ActiveConnection = &activeConnAdapter{g: g}
-	nav.SchemasHelper = g.schemasHelper
-	nav.ConnectionForm = &connectionFormInvoker{g: g, helper: g.formHelper, prompter: newChainedPrompterAdapter(g.promptHelp, g.choiceHelp, g.OnUIThread)}
-	nav.Refresh = g.refreshHelper
-	nav.HiddenPatterns = defaultHiddenPatterns
-	// hq5.7: reconnect invoker + pick-connection callback.
-	reconnInv := &reconnectInvoker{helper: g.connectHelper, inv: connectInv}
-	nav.Reconnector = reconnInv
-	nav.OnPickConnection = func() error {
-		if g.tree == nil || g.registry == nil || g.registry.ConnectionManager == nil {
-			return nil
-		}
-		return g.tree.Push(g.registry.ConnectionManager)
-	}
-	// dbsavvy-bsh: Esc in list mode pops the modal when mid-session (stack
-	// depth > 1) and is a no-op at startup root (depth <= 1).
-	nav.OnCloseConnectionManager = func() {
-		if g.tree == nil {
-			return
-		}
-		if len(g.tree.Stack()) <= 1 {
-			return // startup root: Esc is a no-op
-		}
-		// dbsavvy-yea: the modal (MAIN_CONTEXT) covered whatever main pane
-		// was active when it opened. Restore it on close so focus returns
-		// where the user was — the query editor (or a result tab). nil when
-		// the user was on a side rail, leaving focus there.
-		prevMain := g.tree.TakeEvictedMain()
-		if err := g.tree.Pop(); err != nil {
-			return
-		}
-		if prevMain != nil {
-			_ = g.tree.Push(prevMain)
-		}
-	}
-	// <CR> on a schema row reloads the TABLES rail via a worker
-	// (dbsavvy-04n). When the session is disconnected the handler
-	// short-circuits into the reconnect dialog instead of attempting
-	// a ListTables call (hq5.7 ping-on-interaction).
-	nav.OnSchemaActivate = func(schema string) {
-		// hq5.7: if disconnected, trigger the reconnect flow instead.
-		if g.queryRunner != nil && g.queryRunner.IsDisconnected() {
-			if g.controllers != nil && g.controllers.Reconnect != nil {
-				_ = g.controllers.Reconnect.Reconnect(commands.ExecCtx{})
-			}
-			return
-		}
-		if g.deps.Store != nil && g.activeConnID != "" {
-			g.deps.Store.SetLastSchemaName(g.activeConnID, schema)
-		}
-		g.OnWorker(func(_ gocui.Task) error {
-			// dbsavvy-1bb: make the selected schema the live search_path so
-			// unqualified queries resolve against it and the status bar
-			// reflects the active schema. On failure (e.g. schema dropped
-			// out from under us) keep loading its tables regardless.
-			if sess := g.activeSQLSession; sess != nil {
-				sql, value := schemaSearchPathSQL(schema)
-				if _, err := sess.Execute(context.Background(), models.Query{SQL: sql}); err != nil {
-					logs.Event(g.deps.Common.Logger(), "gui", "schema_search_path_failed",
-						slog.String("schema", schema),
-						slog.String("err", err.Error()))
-				} else {
-					g.persistTrackedSetting(context.Background(), "search_path", value)
-				}
-			}
-
-			connectInv.populateTablesRail(context.Background(), schema)
-
-			// Push the refreshed TABLES context onto the focus stack so the
-			// user lands there after picking a schema.
-			return connectInv.g.tree.Push(g.registry.Tables)
-		})
-	}
-	// <CR> on a table row loads the COLUMNS and INDEXES rails for
-	// the selected table on a single worker (dbsavvy-56u.1 AD-3 —
-	// one composite enqueue prevents double-focus-jumps and stale-
-	// load races between the two rails). Both rails are pushed
-	// atomically after Load completes; the focus push targets the
-	// COLUMNS rail, matching the pre-56u.1 behaviour.
-	nav.OnTableActivate = g.buildOnTableActivate(connectInv)
-
-	// UIDeps — Confirm and Toast are the required (compile-time)
-	// parameters; the remaining popups are set on the returned struct.
-	uiDeps := controllers.NewUIDeps(g.confirmHelp, g.toastHelp)
-	uiDeps.Prompt = g.promptHelp
-	uiDeps.Choice = g.choiceHelp
-	uiDeps.Tip = g.tipHelp
-	uiDeps.TableDouble = g.tablesHelp
-	uiDeps.Menu = &menuPushHelper{tree: g.tree, menu: g.registry.Menu}
-
-	// QueryDeps — all optional; set directly.
-	query := controllers.QueryDeps{
-		QueryRunner:  g.queryRunner,
-		ResultTabs:   g.resultTabsH,
-		EditorBuffer: newEditorBufferAdapter(g.registry.QueryEditor),
-		Notice:       g.noticeHelp,
-		KbRuntime:    runtime,
-		// PlanController dispatches against the active plan tab's
-		// PlanContext (dbsavvy-uv0.8). Closing over g.resultTabsH so
-		// ActivePlanContext stays in lockstep with whatever the user
-		// has currently focused. Nil-safe — returns nil when the
-		// helper is unwired or no plan tab is active.
-		ActivePlanContextFn: func() *guicontext.PlanContext {
-			if g.resultTabsH == nil {
-				return nil
-			}
-			return g.resultTabsH.ActivePlanContext()
-		},
-		// ConnProfile surfaces the live profile captured at Connect so the
-		// query editor can gate mutating statements behind ConfirmWrites /
-		// ConfirmDDL. nil until the first successful Connect. dbsavvy-wxkf.
-		ConnProfile: func() *models.Connection {
-			return g.activeConnProfile
-		},
-	}
-
-	// ThreadingDeps (DESIGN.md §17 / dbsavvy-66p.1) — all three closures
-	// are required (compile-time) parameters. Bound to the Gui's methods
-	// so controllers can schedule UI-thread work and spawn background
-	// workers without importing the orchestrator.
-	threading := controllers.NewThreadingDeps(g.OnUIThread, g.OnUIThreadContentOnly, g.OnWorker)
+	// NavDeps + UIDeps / QueryDeps / ThreadingDeps bundles.
+	nav := g.wireNavDeps(connectInv, tablePicker)
+	uiDeps, query, threading := g.wireHelperDeps()
 
 	edit := g.wireEditDeps()
 
@@ -861,400 +521,30 @@ func (g *Gui) wireWithDriver() error {
 
 	// dbsavvy-bwq.py4: build the four inline-edit popup controllers and
 	// attach each to its context so their bindings reach the trie via
-	// AllDefaultBindings. Mirrors the TableInspect path above —
-	// constructed here because every controller needs a FocusPopper
-	// handle on the focus-stack (*gui.ContextTree), which the controllers
-	// package cannot import. Z1 (dbsavvy-bwq.23) follows up to plumb the
-	// per-controller hooks (apply, dry-run, picker, store, runner) once
-	// the apply pipeline and per-table store land.
-	if g.registry != nil && g.tree != nil {
-		if cellCtx := g.registry.CellEditor; cellCtx != nil {
-			// Wire the per-scope ModeSetter so CellEditorContext.HandleFocus
-			// can flip the CELL_EDITOR scope into ModeInsert on push — the
-			// master Editor's Passthrough then delegates printable runes to
-			// gocui.DefaultEditor (TextArea). Mirrors Prompt.SetModes
-			// (gui.go ~822). NOTE: ModeInsert, not ModeCommand — the
-			// commit/discard chords bind under ModeInsert. dbsavvy-tzi.3.
-			cellCtx.SetModes(g.modeStore)
-			cellCtrl := controllers.NewCellEditorController(
-				g.deps.Common, helperBag.CoreDeps, helperBag.UIDeps, cellCtx, g.tree, nil, nil,
-			)
-			cellCtrl.AttachToContext(&cellCtx.BaseContext)
-			// dbsavvy-6lq / dbsavvy-8oo #9: picker resolves the active tab's
-			// grid + cursor per call; store resolves the per-(connID,
-			// baseTable) PendingEditSet via the same helperBag closure the
-			// commit dialog uses, keeping both flows on the same set.
-			cellCtrl.SetPicker(cellEditorPicker{tabs: g.resultTabsH})
-			cellCtrl.SetStore(cellEditorStore{resolve: helperBag.ActivePendingEditSet})
-			g.controllers.CellEditor = cellCtrl
-		}
-		// dbsavvy-bb6 (#6) + dbsavvy-lda (#7): a single CellApplyHelper
-		// instance is shared by the commit-dialog apply/dry-run hooks and
-		// the conflict-dialog overwrite hook. The helper is stateless
-		// beyond its acquirer; both dialogs route through the same
-		// connHelperAcquirer so per-call session resolution stays unified.
-		cellApply := helpers.NewCellApplyHelper(helpers.CellApplyDeps{
-			Acquirer: connHelperAcquirer{h: g.connectHelper},
-		})
-		if commitCtx := g.registry.CommitDialog; commitCtx != nil {
-			commitCtrl := controllers.NewCommitDialogController(
-				g.deps.Common, helperBag.CoreDeps, helperBag.UIDeps, helperBag.EditDeps, commitCtx, g.tree,
-			)
-			commitCtrl.AttachToContext(&commitCtx.BaseContext)
-			g.controllers.CommitDialog = commitCtrl
-
-			// dbsavvy-bb6 / dbsavvy-8oo #6: wire the apply / dry-run /
-			// show-sql hooks. CellApplyHelper acquires its own session
-			// per call via connHelperAcquirer so it does not entangle
-			// with the user's main SQLSession transactions.
-			cdDeps := commitDialogDeps{
-				apply:       cellApply,
-				tabs:        g.resultTabsH,
-				conflictCtx: g.registry.ConflictDialog,
-				tree:        g.tree,
-				toast:       g.toastHelp,
-				logger:      g.deps.Common.Logger(),
-				onUI:        g.OnUIThread,
-			}
-			commitCtrl.SetApplyHook(commitApplyHook{deps: cdDeps})
-			commitCtrl.SetDryRunHook(commitDryRunHook{deps: cdDeps})
-			commitCtrl.SetShowSqlHook(commitShowSqlHook{logger: cdDeps.logger})
-		}
-		if conflictCtx := g.registry.ConflictDialog; conflictCtx != nil {
-			conflictCtrl := controllers.NewConflictDialogController(
-				g.deps.Common, helperBag.CoreDeps, conflictCtx, g.tree,
-			)
-			conflictCtrl.AttachToContext(&conflictCtx.BaseContext)
-			g.controllers.ConflictDialog = conflictCtrl
-
-			// dbsavvy-lda / dbsavvy-8oo #7: wire refresh + overwrite hooks.
-			// Cancel is intentionally unwired — the controller's default
-			// pop already covers the no-mutation Esc path.
-			cfDeps := conflictDialogDeps{
-				apply:         cellApply,
-				tabs:          g.resultTabsH,
-				toast:         g.toastHelp,
-				activeSetFunc: helperBag.ActivePendingEditSet,
-			}
-			conflictCtrl.SetRefreshHook(conflictRefreshHook{deps: cfDeps})
-			conflictCtrl.SetOverwriteHook(conflictOverwriteHook{deps: cfDeps})
-		}
-		if pickerCtx := g.registry.FKReversePicker; pickerCtx != nil {
-			pickerCtrl := controllers.NewFKReversePickerController(
-				g.deps.Common, helperBag.CoreDeps, controllers.FKReversePickerDeps{
-					Context: pickerCtx,
-					Tree:    g.tree,
-					Runner:  g.queryRunner,
-					Tabs:    g.resultTabsH,
-					Jumps:   g.jumpListH,
-					Toast:   g.toastHelp,
-				},
-			)
-			pickerCtrl.AttachToContext(&pickerCtx.BaseContext)
-			g.controllers.FKReversePicker = pickerCtrl
-		}
-	}
+	// AllDefaultBindings.
+	g.wireInlineEditControllers(helperBag)
 
 	g.wireEditorCompletion()
 
-	// dbsavvy-o6da: wire the post-yank highlight seam so a yank tints the
-	// yanked span for yankFlashTTL (Neovim on_yank parity). Constructed here
-	// (not in the controllers wiring layer) because the concrete helper lives
-	// in helpers/ui and the controllers package must not import it; g.driver
-	// is set well before this point (toastHelp uses it earlier).
-	if g.controllers != nil && g.controllers.VimEditor != nil {
-		g.controllers.VimEditor.SetYankFlasher(ui.NewYankFlashHelper(g.driver))
-	}
+	// Register every controller's action handlers + the orchestrator-owned
+	// commands (cheatsheet, connection-manager, tip dismiss, rail switch,
+	// command-line).
+	g.wireActionRegistrations(connectInv)
 
-	// Register every controller's action handlers with the registry.
-	g.controllers.RegisterActions(g.cmdRegistry)
-
-	// dbsavvy-3vf.9: TableInspectOpen — `i` on TABLES opens the tabbed
-	// popup, sets the target (schema, table), and dispatches column +
-	// index refreshes via OnWorker. Re-pressing `i` while the popup is
-	// already on top re-targets without a second Push.
-	if g.registry != nil && g.registry.TableInspect != nil && g.tree != nil {
-		g.registerTableInspectOpen(connectInv)
-	}
-
-	// dbsavvy-o9k0.5: HistoryOpen — `<leader>h` in the QUERY_EDITOR opens
-	// the recent-query browser popup. Pushes on the UI thread, loads
-	// Recent(N) off-thread, mutates the context on the UI thread.
-	if g.registry != nil && g.registry.History != nil && g.tree != nil {
-		g.registerHistoryOpen()
-	}
-
-	// dbsavvy-ioaj: rail highlight+jump search (/ n N <esc>) on SCHEMAS
-	// and TABLES. Single action IDs; the handler resolves the focused
-	// rail from ctx.Scope. Needs the registry + SearchLine helper.
-	if g.registry != nil && g.cmdRegistry != nil && g.searchLineHelp != nil {
-		g.registerRailSearch()
-	}
-
-	// Rail-switch (1-6, Tab) needs the focus tree + context registry,
-	// which the Controllers aggregate does not hold; register here. The
-	// results-resolver closes over g.resultTabsH so digit 6 / cycle-to-
-	// results push the live active tab's IBaseContext onto the focus
-	// stack (dbsavvy-usj). nil helper → resolver returns nil → digit 6
-	// is a silent no-op (e.g. pre-Connect, helper not yet wired).
-	resolveResults := func() types.IBaseContext {
-		if g.resultTabsH == nil {
-			return nil
-		}
-		return g.resultTabsH.ActiveContext()
-	}
-	controllers.RegisterRailSwitchActions(g.cmdRegistry, g.tree, g.registry, resolveResults)
-
-	// Cheatsheet popup: capture the focused scope, build a TabbedPopup
-	// with one tab per scope (focused + global), install it on the
-	// CheatsheetContext, then push the context onto the focus stack.
-	// RunLayout's Tier-3 popup pass (layout.go) renders the popup on
-	// the next layout frame. Tab cycling + close run through the trie
-	// via CheatsheetController bindings (dbsavvy-bwq.Z1).
-	_ = g.cmdRegistry.Register(&commands.Command{
-		ID:          commands.HelpCheatsheet,
-		Description: "Show cheatsheet",
-		Tag:         "Help",
-		Handler: func(commands.ExecCtx) error {
-			if g.registry == nil || g.registry.Cheatsheet == nil {
-				return nil
-			}
-			scope := types.GLOBAL
-			if top := g.tree.Current(); top != nil {
-				scope = top.GetKey()
-			}
-			g.registry.Cheatsheet.SetScope(scope)
-			g.registry.Cheatsheet.SetState(
-				controllers.BuildCheatsheetTabs(scope, cheatsheetRender),
-			)
-			return g.tree.Push(g.registry.Cheatsheet)
-		},
-	})
-
-	// dbsavvy-bsh: <leader>C opens the CONNECTION_MANAGER modal mid-session.
-	// GLOBAL-scoped so it fires from any focused view. The handler pushes
-	// the modal onto the focus stack (OnShow populates + restores cursor).
-	_ = g.cmdRegistry.Register(&commands.Command{
-		ID:          commands.ConnectionManagerOpen,
-		Description: "Open connection manager",
-		Tag:         "Connection",
-		Handler: func(commands.ExecCtx) error {
-			if g.tree == nil || g.registry == nil || g.registry.ConnectionManager == nil {
-				return nil
-			}
-			return g.tree.Push(g.registry.ConnectionManager)
-		},
-	})
-
-	// dbsavvy-56u.2: TipDismiss handler. Pops the FIRST_RUN_TIP popup
-	// and stamps StartupTipsSeenAt via AppStateStore.StampStartupTips.
-	// The action is wired regardless of whether the tip is currently
-	// visible — the popped Pop() error is logged at warn and the dismiss
-	// proceeds (AC: "if StampStartupTips fails to persist, tip still
-	// dismisses; error logged at warn"). The store's debounced save is
-	// fire-and-forget; any persistence failure is captured by the store
-	// itself via LastSaveErr + its own slog cat=state event.
-	_ = g.cmdRegistry.Register(&commands.Command{
-		ID:          commands.TipDismiss,
-		Description: "Dismiss first-run tip",
-		Handler: func(commands.ExecCtx) error {
-			if g.deps.Store != nil {
-				g.deps.Store.StampStartupTips()
-			}
-			if g.tree != nil {
-				if err := g.tree.Pop(); err != nil && err != gui.ErrPopAtBottom {
-					if g.deps.Common != nil {
-						logs.Event(g.deps.Common.Logger(), "gui", "first_run_tip_pop_failed",
-							slog.String("err", err.Error()),
-						)
-					}
-				}
-			}
-			if g.deps.Common != nil {
-				logs.Event(g.deps.Common.Logger(), "gui", "first_run_tip_dismissed")
-			}
-			return nil
-		},
-	})
-
-	// <esc> / <cr> on the FIRST_RUN_TIP view dispatch TipDismiss directly
-	// via the driver. FIRST_RUN_TIP carries no controller bindings (it's a
-	// minimal welcome popup); the driver shim mirrors the CHEATSHEET <esc>
-	// pattern above.
-	dismissTip := func() error {
-		cmd, ok := g.cmdRegistry.Get(commands.TipDismiss)
-		if !ok || cmd == nil || cmd.Handler == nil {
-			return nil
-		}
-		return cmd.Handler(commands.ExecCtx{})
-	}
-	_ = g.driver.SetKeybinding(string(types.FIRST_RUN_TIP), gocui.NewKeyName(gocui.KeyEsc), gocui.ModNone, dismissTip)
-	_ = g.driver.SetKeybinding(string(types.FIRST_RUN_TIP), gocui.NewKeyName(gocui.KeyEnter), gocui.ModNone, dismissTip)
-
-	// COMMAND_LINE action commands. The CommandLineContext doubles as
-	// the holder (it implements types.IBaseContext + ReadAndClearBuffer).
-	cmdDeps := keys.CommandLineCommandDeps{
-		Stack:        g.tree,
-		Context:      g.registry.CommandLine,
-		ExRegistry:   g.exRegistry,
-		Toaster:      g.toaster,
-		CaretToggler: g.caret,
-	}
-	_ = g.cmdRegistry.Register(keys.CommandOpenCommand(cmdDeps))
-	_ = g.cmdRegistry.Register(keys.CommandCancelCommand(cmdDeps))
-	_ = g.cmdRegistry.Register(keys.CommandSubmitCommand(cmdDeps))
-
-	// dbsavvy-56u.3: validate UserConfig now that cmdRegistry and the
-	// context registry are populated. Deviation from AD-2 literal ordering
-	// (validate-after-NewGui-before-RunAndHandleError) — registries are
-	// built inside wireWithDriver, so validation moves here. AD-2's safety
-	// rationale (deferred g.Close fires) is preserved: g.Close is idempotent
-	// (gui.go:986-989) and entry_point.go's `defer func() { _ = g.Close() }()`
-	// runs regardless of where the error originates.
-	if cfg != nil {
-		deps := config.ValidationDeps{
-			ActionExists: func(id string) bool { return g.cmdRegistry.Has(id) },
-			ScopeExists:  g.scopeExistsPredicate(),
-		}
-		cfgWarns, cfgErrs := config.ValidateUserConfig(cfg, deps)
-		for _, w := range cfgWarns {
-			fmt.Fprintf(os.Stderr, "config: warning: %s\n", w)
-		}
-		if len(cfgErrs) > 0 {
-			for _, e := range cfgErrs {
-				fmt.Fprintf(os.Stderr, "config: %s\n", e)
-			}
-			return fmt.Errorf("config: %d validation error(s)", len(cfgErrs))
-		}
-		g.deps.Common.Logger().Info("config: validated", "warnings", len(cfgWarns), "cat", "app")
-	}
-
-	// Build the trie.
-	svc := keys.NewKeybindingService()
-	defaults := controllers.AllDefaultBindings(g.controllers)
-	trieSet, warnings, buildErr := svc.Build(defaults, cfg, g.cmdRegistry, g.kindOf)
-	if buildErr != nil {
-		return fmt.Errorf("gui: Build: %w", buildErr)
-	}
-	for _, w := range warnings {
-		g.deps.Common.Logger().Warn(fmt.Sprintf("keybindings: [%s] %s (%s)", w.Code, w.Message, w.Origin))
-	}
-	g.lastWarnings = warnings
-	matcher.SwapTrieSet(trieSet)
-
-	// :reload ex-command — see registerReloadEx for the LoadUserConfig
-	// stub rationale. defaults / svc are wireWithDriver locals; g.matcher
-	// (== matcher) is used inside the method.
-	_ = g.registerReloadEx(defaults, svc)
-
-	// :q / :quit / :q! / :w — vim-style quit/write ex-commands. Handlers
-	// live in gui_ex_commands.go.
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "q", Description: "Quit", Handler: g.handleQuitEx})
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "quit", Description: "Quit", Handler: g.handleQuitEx})
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "q!", Description: "Force quit", Handler: g.handleForceQuitEx})
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "w", Description: "Open commit dialog", Handler: g.handleWriteEx})
-
-	// :set — execute SET on the live SQL session. Handler in
-	// gui_ex_commands.go.
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "set", Description: "Execute SET on session", Handler: g.handleSetEx})
-
-	// hq5.10: wire the search_path quick-set prompt to the SET handler.
-	if g.controllers != nil && g.controllers.SearchPath != nil {
-		g.controllers.SearchPath.SetRunner = g.handleSetEx
-	}
-
-	// hq5.11: wire the statement timeout prompt to the SET handler + AppState.
-	if g.controllers != nil && g.controllers.StatementTimeout != nil {
-		g.controllers.StatementTimeout.SetRunner = g.handleSetEx
-		g.controllers.StatementTimeout.ActiveConnID = func() string {
-			return g.activeConnID
-		}
-		g.controllers.StatementTimeout.PersistTimeout = func(connID, timeout string) {
-			if g.deps.Store == nil {
-				return
-			}
-			g.deps.Store.MutateAndSave(func(a *common.AppState) {
-				if timeout == "" {
-					if a.StatementTimeoutOverride != nil {
-						delete(a.StatementTimeoutOverride, connID)
-					}
-					return
-				}
-				if a.StatementTimeoutOverride == nil {
-					a.StatementTimeoutOverride = make(map[string]string)
-				}
-				a.StatementTimeoutOverride[connID] = timeout
-			})
-		}
-	}
-
-	// :reset — execute RESET on the live SQL session. Handler in
-	// gui_ex_commands.go.
-	_ = g.exRegistry.Register(keys.ExCommand{Name: "reset", Description: "Execute RESET on session", Handler: g.handleResetEx})
-
-	// :c — reject cross-database attach (not supported). hq5.8.
-	_ = g.exRegistry.Register(keys.ExCommand{
-		Name:        "c",
-		Description: "Cross-database attach (not supported)",
-		Handler:     g.handleCrossDBEx,
-	})
-
-	// Master Editor on editable views (today only COMMAND_LINE) +
-	// per-key SetKeybinding shims on every non-editable view.
-	if err := g.installKeyDispatch(trieSet); err != nil {
+	// Validate the user config + build the keybinding trie.
+	trieSet, defaults, svc, err := g.wireTrie(cfg)
+	if err != nil {
 		return err
 	}
 
-	// Mouse wiring is gated on cfg.UI.Mouse.Enabled.
-	if cfg.UI.Mouse.Enabled {
-		if err := ui.WireMouse(ui.MouseWiringDeps{
-			Driver:      g.driver,
-			Log:         g.deps.Common.Logger(),
-			Tree:        g.tree,
-			Registry:    g.registry,
-			Matcher:     matcher,
-			TableDouble: g.tablesHelp,
-			TablePicker: tablePicker,
-		}); err != nil {
-			return fmt.Errorf("gui: wire mouse: %w", err)
-		}
-	}
+	// Register the vim-style ex-commands (:q / :w / :set / :reset / :c /
+	// :reload) + the search-path / statement-timeout prompt runners.
+	g.wireExCommands(defaults, svc)
 
-	// Cancel any pending matcher partial / which-key on focus change.
-	// SetCurrentView is plumbed inline by RunLayout (Tier 4 final step)
-	// rather than via a swap hook, so it can't race the Layout pass's
-	// SetViewOnTop loop.
-	g.tree.RegisterSwapHook(matcher.Cancel)
-	g.tree.RegisterSwapHook(g.whichkey.Hide)
-
-	// Cancel the active result-tab stream when the user navigates out
-	// of the QueryEditor / result-tab pane while a query is still
-	// Running. dbsavvy-66p.17.
-	installResultTabsSwapHook(g.tree, g.resultTabsH)
-
-	// Seed the CONNECTION_MANAGER modal's list from the on-disk profiles
-	// before the first render frame.
-	g.refreshConnectionManagerRail()
-	g.restoreConnectionManagerCursor()
-
-	// Push the CONNECTION_MANAGER modal as the startup root context.
-	if err := g.tree.Push(g.registry.ConnectionManager); err != nil {
+	// Master Editor / per-key dispatch, mouse wiring, focus-swap hooks,
+	// CONNECTION_MANAGER startup root, first-run tip.
+	if err := g.wireKeyDispatch(trieSet, cfg, tablePicker); err != nil {
 		return err
-	}
-
-	// dbsavvy-56u.2: push the first-run welcome tip on top of the modal
-	// when the user has never dismissed it AND has no profiles. The
-	// FIRST_RUN_TIP context is a PERSISTENT_POPUP so subsequent popup
-	// pushes do not auto-evict it. The dismiss action (TipDismiss) pops
-	// it and stamps StartupTipsSeenAt.
-	if g.registry.FirstRunTip != nil &&
-		data.ShouldShowFirstRunTip(g.deps.Store, g.deps.ConnectionsProvider) {
-		if g.deps.Common != nil {
-			logs.Event(g.deps.Common.Logger(), "gui", "first_run_tip_shown")
-		}
-		if err := g.tree.Push(g.registry.FirstRunTip); err != nil {
-			return err
-		}
 	}
 	return nil
 }
