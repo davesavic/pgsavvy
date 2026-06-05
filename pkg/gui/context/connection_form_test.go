@@ -57,16 +57,16 @@ func TestForm_AddSeedsFirstDriver(t *testing.T) {
 func TestForm_FieldNavMovesFocusAndSkipsSoonRows(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
-	// 10 base functional rows + 6 SSH rows → focusable count is 16.
-	if got := len(c.form.focusableSpecs()); got != 16 {
-		t.Fatalf("focusable rows = %d, want 16", got)
+	// 10 base functional rows + 6 SSH rows + pgpass → focusable count is 17.
+	if got := len(c.form.focusableSpecs()); got != 17 {
+		t.Fatalf("focusable rows = %d, want 17", got)
 	}
-	// Move far past the end; clamps to the last functional row (known_hosts).
+	// Move far past the end; clamps to the last functional row (pgpass).
 	for range 50 {
 		c.FormMoveFocus(1)
 	}
-	if id := c.form.focusedSpec().id; id != fieldSSHKnownHosts {
-		t.Fatalf("focus after over-move = %v, want fieldSSHKnownHosts", id)
+	if id := c.form.focusedSpec().id; id != fieldPgpass {
+		t.Fatalf("focus after over-move = %v, want fieldPgpass", id)
 	}
 	// Move far up; clamps to name.
 	for range 50 {
@@ -362,6 +362,52 @@ func TestForm_SSHIdentityFileValidator(t *testing.T) {
 		t.Errorf("empty identity_file rejected: %v", err)
 	}
 	if err := v("~/.ssh/id_ed25519"); err != nil {
+		t.Errorf("normal path rejected: %v", err)
+	}
+	if err := v("/path/with\nnewline"); err == nil {
+		t.Error("path with newline accepted")
+	}
+}
+
+// TestForm_PgpassIsFocusable asserts the pgpass row is now an editable text
+// field the cursor lands on, not a greyed "(soon)" placeholder (dbsavvy-km7u).
+func TestForm_PgpassIsFocusable(t *testing.T) {
+	c := newTestConnectionManager(&captureDriver{}, nil, nil)
+	c.OpenAddForm(nil, testDrivers)
+	for _, s := range c.form.focusableSpecs() {
+		if s.id == fieldPgpass {
+			return
+		}
+	}
+	t.Error("fieldPgpass not focusable")
+}
+
+// TestForm_PgpassTextRoundTrip asserts the pgpass row reads/writes
+// conn.PgpassPath (dbsavvy-km7u).
+func TestForm_PgpassTextRoundTrip(t *testing.T) {
+	f := &connForm{}
+	f.setTextValue(fieldPgpass, "~/.pgpass")
+	if f.conn.PgpassPath != "~/.pgpass" {
+		t.Errorf("PgpassPath = %q, want ~/.pgpass", f.conn.PgpassPath)
+	}
+	if got := f.textValue(fieldPgpass); got != "~/.pgpass" {
+		t.Errorf("textValue(pgpass) = %q, want ~/.pgpass", got)
+	}
+}
+
+// TestForm_PgpassValidator rejects control chars/newlines, allows empty and
+// normal paths (dbsavvy-km7u).
+func TestForm_PgpassValidator(t *testing.T) {
+	tr := i18n.EnglishTranslationSet()
+	f := &connForm{}
+	v := f.validatorFor(fieldPgpass, tr)
+	if v == nil {
+		t.Fatal("no validator for pgpass")
+	}
+	if err := v(""); err != nil {
+		t.Errorf("empty pgpass rejected: %v", err)
+	}
+	if err := v("~/.pgpass"); err != nil {
 		t.Errorf("normal path rejected: %v", err)
 	}
 	if err := v("/path/with\nnewline"); err == nil {
