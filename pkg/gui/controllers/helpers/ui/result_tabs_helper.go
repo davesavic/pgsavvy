@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -28,6 +30,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/dbsavvy/pkg/utils"
 )
 
 // DefaultMaxResultTabs is the shipped tab-count cap. The helper accepts
@@ -274,6 +277,14 @@ type ResultTabsHelperDeps struct {
 	PushExportMenu func() error
 	// PopExportMenu pops the EXPORT_MENU context off the focus stack.
 	PopExportMenu func() error
+
+	// EditExportPath opens the editable PROMPT seeded with initial and
+	// records onSubmit / onCancel. Wired by the orchestrator to
+	// PromptHelper.Prompt. Pushing the PROMPT (a TEMPORARY_POPUP) auto-pops
+	// the EXPORT_MENU (also a TEMPORARY_POPUP); the callbacks re-push the
+	// menu via PushExportMenu so focus returns to it. nil disables the
+	// edit-path path (the 'i' binding becomes a no-op). dbsavvy-uv0.9.
+	EditExportPath func(initial string, onSubmit func(string) error, onCancel func() error) error
 
 	// OnWorker dispatches a closure onto a background worker goroutine
 	// (mirrors orchestrator.Gui.OnWorker). The <leader>oe export pipeline
@@ -3007,7 +3018,7 @@ func (h *ResultTabsHelper) PromptExport() {
 	if g == nil {
 		return
 	}
-	_, ri := t.Identity()
+	connID, ri := t.Identity()
 	formats := exportFormatLabels(ri.HasRowIdentity)
 
 	var estimated int64
@@ -3045,6 +3056,20 @@ func (h *ResultTabsHelper) PromptExport() {
 	if sqlInsertsReason != "" {
 		m.SetSQLInsertsDisabledReason(sqlInsertsReason)
 	}
+
+	// Prefill the File destination path from the same download-dir +
+	// DefaultFilename logic buildDestination uses, deriving the extension
+	// from the initially-selected format (formats[0]). The menu keeps the
+	// extension in sync as the format is cycled until the user edits it.
+	base := ri.BaseTable
+	if base == "" {
+		base = "result"
+	}
+	defaultPath := filepath.Join(
+		env.GetDownloadDir(),
+		exporter.DefaultFilename(connID, base, extFor(formats[0]), h.now()),
+	)
+	m.Prefill(defaultPath)
 
 	h.mu.Lock()
 	h.exportMenu = &activeExportMenu{tab: t, menu: m}
@@ -3122,6 +3147,61 @@ func (h *ResultTabsHelper) ExportMenuCancel() {
 	}
 }
 
+// ExportMenuEditPath opens the editable PROMPT seeded with the menu's
+// current Path. No-op unless the Path field is active (File destination).
+// On submit the value is trimmed and rejected if it contains control
+// characters; valid values are written back via SetPath. Both submit and
+// cancel re-push the EXPORT_MENU so focus returns to it (pushing the
+// PROMPT auto-popped the menu). dbsavvy-uv0.9.
+func (h *ResultTabsHelper) ExportMenuEditPath() {
+	h.mu.Lock()
+	m := h.exportMenu
+	edit := h.deps.EditExportPath
+	h.mu.Unlock()
+	if m == nil || m.menu == nil || edit == nil {
+		return
+	}
+	if !m.menu.IsPathFieldActive() {
+		return
+	}
+
+	menu := m.menu
+	reopen := func() error {
+		if push := h.deps.PushExportMenu; push != nil {
+			return push()
+		}
+		return nil
+	}
+	onCancel := func() error { return reopen() }
+	// onSubmit re-opens the PROMPT (seeded with the rejected value) on a
+	// validation failure so the user can fix the typo in place. It returns
+	// nil in that case — returning the bare error gets swallowed by
+	// master_editor.go and drops the user out with no menu and no feedback.
+	var onSubmit func(value string) error
+	onSubmit = func(value string) error {
+		value = strings.TrimSpace(value)
+		if err := validateExportPath(value); err != nil {
+			h.toast(err.Error())
+			return edit(value, onSubmit, onCancel)
+		}
+		menu.SetPath(value)
+		return reopen()
+	}
+	_ = edit(menu.Path(), onSubmit, onCancel)
+}
+
+// validateExportPath rejects control characters in an export path,
+// mirroring connection_form.validatePgpassPath. It does not touch the
+// filesystem (parent-dir validation lives in NewFileDestPath, T4).
+func validateExportPath(raw string) error {
+	for _, r := range raw {
+		if r == '\n' || r == '\r' || (r < 0x20 && r != '\t') {
+			return fmt.Errorf("path must not contain control characters")
+		}
+	}
+	return nil
+}
+
 // ExportMenuConfirm kicks off the export based on the menu's current
 // selection. Pops the menu first (so the user sees the toast), then
 // runs the export on a worker goroutine. dbsavvy-uv0.9.
@@ -3137,23 +3217,38 @@ func (h *ResultTabsHelper) ExportMenuConfirm() {
 		return
 	}
 
+	// Snapshot every menu field BEFORE popping the menu: pushing the
+	// CONFIRMATION (a TEMPORARY_POPUP) over the EXPORT_MENU auto-pops the
+	// menu, after which h.exportMenu.menu may be nil. dbsavvy-uv0.9 (T4).
 	tab := m.tab
 	formatLabel := m.menu.FormatLabel()
 	destLabel := m.menu.DestinationLabel()
 	scopeIdx := m.menu.ScopeIdx()
+	menuPath := m.menu.Path()
 
 	format, ferr := h.buildFormat(tab, formatLabel)
 	if ferr != nil {
 		h.toast(ferr.Error())
 		return
 	}
-	dest, derr := h.buildDestination(tab, destLabel, formatLabel)
+
+	// Resolve the final absolute path once: ExpandHome handles "~", and a
+	// relative result is joined under the download dir. This single value
+	// feeds the existence check, the overwrite-confirm body, the toast, and
+	// NewFileDestPath (via buildDestination) so they can never diverge.
+	resolvedPath, rerr := h.resolveExportPath(destLabel, menuPath)
+	if rerr != nil {
+		h.toast(rerr.Error())
+		return
+	}
+
+	dest, derr := h.buildDestination(destLabel, resolvedPath)
 	if derr != nil {
 		h.toast(derr.Error())
 		return
 	}
 
-	// Pop the menu off the focus stack now.
+	// Pop the menu off the focus stack now (after snapshotting its fields).
 	h.mu.Lock()
 	h.exportMenu = nil
 	h.mu.Unlock()
@@ -3166,6 +3261,64 @@ func (h *ResultTabsHelper) ExportMenuConfirm() {
 		return
 	}
 
+	dispatch := func() {
+		h.dispatchExport(tab, format, dest, scopeIdx, resolvedPath)
+	}
+
+	// Overwrite guard: when the File destination already exists, confirm on
+	// the UI thread BEFORE dispatching to a worker (calling Confirm inside
+	// the worker would deadlock — mirrors ReadToEnd's confirm-then-dispatch
+	// ordering). Yes dispatches the export; No aborts with no write. The
+	// Clipboard branch (resolvedPath == "") and a non-existent target both
+	// dispatch immediately.
+	if h.fileExists(destLabel, resolvedPath) && h.deps.Confirm != nil {
+		_ = h.deps.Confirm.Confirm(
+			"Overwrite?",
+			fmt.Sprintf("%s already exists. Overwrite?", resolvedPath),
+			func() error { dispatch(); return nil },
+			func() error { return nil },
+		)
+		return
+	}
+
+	dispatch()
+}
+
+// resolveExportPath expands "~" in the user-supplied path and joins a relative
+// result under the download dir, yielding the absolute final path. Returns ""
+// for non-File destinations (the path is irrelevant for clipboard).
+// dbsavvy-uv0.9 (T4).
+func (h *ResultTabsHelper) resolveExportPath(destLabel, menuPath string) (string, error) {
+	if destLabel != "File" {
+		return "", nil
+	}
+	if strings.TrimSpace(menuPath) == "" {
+		return "", errors.New("export path is empty")
+	}
+	expanded, err := utils.ExpandHome(menuPath)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(expanded) {
+		return expanded, nil
+	}
+	return filepath.Join(env.GetDownloadDir(), expanded), nil
+}
+
+// fileExists reports whether the File-destination target already exists on
+// disk. Always false for non-File destinations. dbsavvy-uv0.9 (T4).
+func (h *ResultTabsHelper) fileExists(destLabel, resolvedPath string) bool {
+	if destLabel != "File" || resolvedPath == "" {
+		return false
+	}
+	_, err := os.Stat(resolvedPath)
+	return err == nil
+}
+
+// dispatchExport stashes the cancel handle and runs the export on a worker
+// goroutine, surfacing the outcome via a toast. The completion toast carries
+// resolvedPath as the final written path. dbsavvy-uv0.9 (T4).
+func (h *ResultTabsHelper) dispatchExport(tab *Tab, format exporter.Format, dest exporter.Destination, scopeIdx int, resolvedPath string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	h.mu.Lock()
 	// Keep cancel reachable so ExportMenuCancel-on-shutdown still aborts
@@ -3187,7 +3340,13 @@ func (h *ResultTabsHelper) ExportMenuConfirm() {
 			}
 			return nil
 		}
-		h.toast("export complete: " + descriptor)
+		// File exports report the resolved final path; the Clipboard branch
+		// (resolvedPath == "") keeps the Destination's own descriptor.
+		final := resolvedPath
+		if final == "" {
+			final = descriptor
+		}
+		h.toast("export complete: " + final)
 		return nil
 	})
 }
@@ -3238,19 +3397,14 @@ func (h *ResultTabsHelper) buildFormat(t *Tab, label string) (exporter.Format, e
 }
 
 // buildDestination resolves the menu's selected destination label to an
-// exporter.Destination.
-func (h *ResultTabsHelper) buildDestination(t *Tab, destLabel, formatLabel string) (exporter.Destination, error) {
+// exporter.Destination. resolvedPath is the already-expanded, absolute final
+// path computed by ExportMenuConfirm (the single source of truth shared with
+// the existence check, the overwrite-confirm body, and the completion toast);
+// it is only consulted for the File destination. dbsavvy-uv0.9 (T4).
+func (h *ResultTabsHelper) buildDestination(destLabel, resolvedPath string) (exporter.Destination, error) {
 	switch destLabel {
 	case "File":
-		downloadDir := env.GetDownloadDir()
-		connID, ri := t.Identity()
-		base := ri.BaseTable
-		if base == "" {
-			base = "result"
-		}
-		ext := extFor(formatLabel)
-		filename := exporter.DefaultFilename(connID, base, ext, h.now())
-		return exporter.NewFileDest(downloadDir, filename), nil
+		return exporter.NewFileDestPath(resolvedPath), nil
 	case "Clipboard":
 		maxBytes := h.deps.ExportClipboardMaxBytes
 		if maxBytes <= 0 {

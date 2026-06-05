@@ -61,6 +61,19 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		resultTabsDeps.PopExportMenu = func() error {
 			return g.tree.Pop()
 		}
+		// dbsavvy-uv0.9: 'i' on the Path field opens the editable PROMPT
+		// seeded with the current path. Pushing the PROMPT auto-pops the
+		// EXPORT_MENU; the helper's onSubmit/onCancel re-push it via
+		// PushExportMenu so focus returns to the menu.
+		if g.promptHelp != nil {
+			resultTabsDeps.EditExportPath = func(initial string, onSubmit func(string) error, onCancel func() error) error {
+				label := "Path"
+				if tr != nil {
+					label = tr.Actions.ExportMenuEditPath
+				}
+				return g.promptHelp.Prompt(label, initial, onSubmit, onCancel)
+			}
+		}
 	}
 	resultTabsDeps.OnWorker = g.OnWorker
 	// dbsavvy-s8y (Gap 2b): production editability introspection. Resolve

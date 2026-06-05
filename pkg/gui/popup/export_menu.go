@@ -1,6 +1,9 @@
 package popup
 
-import "strings"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // ExportMenuField identifies the currently-focused selector row.
 type ExportMenuField int
@@ -8,6 +11,7 @@ type ExportMenuField int
 const (
 	FieldFormat ExportMenuField = iota
 	FieldDestination
+	FieldPath
 	FieldScope
 )
 
@@ -33,6 +37,13 @@ type ExportMenu struct {
 	destIdx   int
 	scopeIdx  int
 	field     ExportMenuField
+
+	// path is the editable File destination path. While pathEdited is
+	// false the Format↔extension sync keeps path's extension in step with
+	// the selected format; once the user edits it (SetPath) the path is
+	// frozen and the extension is no longer rewritten.
+	path       string
+	pathEdited bool
 
 	// sqlInsertsIdx is the index into formats[] of the "SQL INSERTs" row
 	// when shown-but-disabled; -1 when the row should not be rendered as
@@ -81,12 +92,42 @@ func NewExportMenu(formats, destinations, scopes []string, sqlInsertsIdx int, bu
 // Field returns the currently-focused selector row.
 func (m *ExportMenu) Field() ExportMenuField { return m.field }
 
-// MoveField adjusts the field cursor by d, clamping to [FieldFormat, FieldScope].
+// IsPathFieldActive reports whether the Path row is the active field AND
+// editable (File destination). The 'i' edit-path binding gates on this so
+// the seeded PROMPT only opens when there is a Path to edit.
+func (m *ExportMenu) IsPathFieldActive() bool {
+	return m.field == FieldPath && m.pathVisible()
+}
+
+// MoveField adjusts the field cursor by d, clamping to
+// [FieldFormat, FieldScope]. FieldPath is skipped while the Path row is
+// hidden (Destination != File) so the cursor never lands on an
+// unrendered row, mirroring the disabled SQL-INSERTs skip-nav.
 func (m *ExportMenu) MoveField(d int) {
 	n := int(m.field) + d
 	n = max(n, int(FieldFormat))
 	n = min(n, int(FieldScope))
+	if !m.pathVisible() && n == int(FieldPath) {
+		n += sign(d)
+	}
 	m.field = ExportMenuField(n)
+}
+
+// sign returns the direction of d as -1, 0 or +1.
+func sign(d int) int {
+	if d < 0 {
+		return -1
+	}
+	if d > 0 {
+		return 1
+	}
+	return 0
+}
+
+// pathVisible reports whether the Path row is rendered/navigable. The
+// path is a File-only destination, so it is hidden for Clipboard.
+func (m *ExportMenu) pathVisible() bool {
+	return m.DestinationLabel() == "File"
 }
 
 // MoveValue adjusts the value at the current field by d, clamping to
@@ -98,11 +139,49 @@ func (m *ExportMenu) MoveValue(d int) {
 	switch m.field {
 	case FieldFormat:
 		m.moveFormatValue(d)
+		m.syncPathExt()
 	case FieldDestination:
 		m.destIdx = clamp(m.destIdx+d, 0, len(m.destinations)-1)
 	case FieldScope:
 		m.scopeIdx = clamp(m.scopeIdx+d, 0, len(m.scopes)-1)
 	}
+}
+
+// syncPathExt rewrites the Path's extension to match the current format
+// while the user has not manually edited the path. Replacement targets
+// the LAST dot (filepath.Ext) so "a.old.csv" → "a.old.json". Once
+// pathEdited is set (via SetPath) the extension is frozen.
+func (m *ExportMenu) syncPathExt() {
+	if m.pathEdited || m.path == "" {
+		return
+	}
+	ext := formatExt(m.FormatLabel())
+	if ext == "" {
+		return
+	}
+	old := filepath.Ext(m.path)
+	m.path = strings.TrimSuffix(m.path, old) + "." + ext
+}
+
+// formatExt maps a Format label to its filesystem extension (no leading
+// dot). Mirrors ui.extFor; kept here so the menu can rewrite the Path's
+// extension when the format is cycled without reaching into package ui.
+func formatExt(label string) string {
+	switch label {
+	case "CSV":
+		return "csv"
+	case "TSV":
+		return "tsv"
+	case "NDJSON":
+		return "ndjson"
+	case "JSON Array":
+		return "json"
+	case "Markdown":
+		return "md"
+	case "SQL INSERTs":
+		return "sql"
+	}
+	return ""
 }
 
 func (m *ExportMenu) moveFormatValue(d int) {
@@ -180,6 +259,27 @@ func (m *ExportMenu) DestinationLabel() string {
 		return ""
 	}
 	return m.destinations[m.destIdx]
+}
+
+// Path returns the current File destination path. Empty until prefilled
+// by the caller. Backed by the unexported `path` field, mirroring how
+// the label accessors expose their unexported backing state.
+func (m *ExportMenu) Path() string { return m.path }
+
+// SetPath sets the File destination path and marks it as user-edited,
+// freezing the Format↔extension sync so subsequent format cycling no
+// longer rewrites the extension.
+func (m *ExportMenu) SetPath(v string) {
+	m.path = v
+	m.pathEdited = true
+}
+
+// Prefill seeds the auto-suggested path WITHOUT marking it user-edited,
+// so the Format↔extension sync stays active until the user edits the
+// path via SetPath. Called once when the menu is opened.
+func (m *ExportMenu) Prefill(v string) {
+	m.path = v
+	m.pathEdited = false
 }
 
 // ScopeLabel returns the current Scope label.
@@ -292,6 +392,13 @@ func (m *ExportMenu) Body() string {
 	b.WriteString("Destination: ")
 	b.WriteString(m.DestinationLabel())
 	b.WriteByte('\n')
+
+	if m.pathVisible() {
+		b.WriteString(m.rowPrefix(FieldPath))
+		b.WriteString("Path:        ")
+		b.WriteString(m.path)
+		b.WriteByte('\n')
+	}
 
 	b.WriteString(m.rowPrefix(FieldScope))
 	b.WriteString("Scope:       ")

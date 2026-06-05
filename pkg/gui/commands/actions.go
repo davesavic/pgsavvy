@@ -312,6 +312,10 @@ const (
 	ExportMenuRight   = "export.menu.right"
 	ExportMenuConfirm = "export.menu.confirm"
 	ExportMenuCancel  = "export.menu.cancel"
+	// ExportMenuEditPath opens the editable PROMPT seeded with the current
+	// File-destination Path. No-op unless the Path field is active.
+	// dbsavvy-uv0.9.
+	ExportMenuEditPath = "export.menu.editpath"
 
 	// TableInspectOpen opens the TABLE_INSPECT popup from the TABLES rail
 	// (`i` in Normal mode). TableInspectNextTab / PrevTab cycle the tabs of
@@ -674,6 +678,7 @@ func AllActionIDs() []string {
 		ExportMenuRight,
 		ExportMenuConfirm,
 		ExportMenuCancel,
+		ExportMenuEditPath,
 		TableInspectOpen,
 		TableInspectNextTab,
 		TableInspectPrevTab,

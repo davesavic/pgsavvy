@@ -173,6 +173,7 @@ type ActionTranslations struct {
 	ExportMenuRight    string
 	ExportMenuConfirm  string
 	ExportMenuCancel   string
+	ExportMenuEditPath string
 
 	// Table-inspect popup (dbsavvy-3vf).
 	TableInspectOpen    string
@@ -394,6 +395,7 @@ func EnglishTranslationSet() *TranslationSet {
 			ExportMenuRight:    "Next value",
 			ExportMenuConfirm:  "Start export",
 			ExportMenuCancel:   "Cancel",
+			ExportMenuEditPath: "Edit path",
 
 			TableInspectOpen:    "Open table inspect",
 			TableInspectNextTab: "Next tab",

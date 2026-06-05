@@ -4,8 +4,77 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/popup"
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
+
+// fakeExportMenuMgr records ExportMenuManager dispatches for the
+// controller binding tests.
+type fakeExportMenuMgr struct {
+	editPathCalls int
+}
+
+func (f *fakeExportMenuMgr) ExportMenuMoveField(int) {}
+func (f *fakeExportMenuMgr) ExportMenuMoveValue(int) {}
+func (f *fakeExportMenuMgr) ExportMenuConfirm()      {}
+func (f *fakeExportMenuMgr) ExportMenuCancel()       {}
+func (f *fakeExportMenuMgr) ExportMenuEditPath()     { f.editPathCalls++ }
+
+// TestExportMenuController_IBindsEditPath asserts the 'i' rune dispatches
+// ExportMenuEditPath in EXPORT_MENU/Normal scope.
+func TestExportMenuController_IBindsEditPath(t *testing.T) {
+	ctrl := controllers.NewExportMenuController(nil, controllers.CoreDeps{}, nil)
+	found := false
+	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
+		if kb.Scope != types.EXPORT_MENU || len(kb.Sequence) != 1 {
+			continue
+		}
+		k := kb.Sequence[0]
+		if k.Code == 'i' && kb.Mode == types.ModeNormal && kb.ActionID == commands.ExportMenuEditPath {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("EXPORT_MENU 'i' binding -> ExportMenuEditPath missing")
+	}
+}
+
+// TestExportMenuController_EditPathDispatches asserts EditPath delegates to
+// the manager.
+func TestExportMenuController_EditPathDispatches(t *testing.T) {
+	mgr := &fakeExportMenuMgr{}
+	ctrl := controllers.NewExportMenuController(nil, controllers.CoreDeps{}, mgr)
+	if err := ctrl.EditPath(commands.ExecCtx{}); err != nil {
+		t.Fatalf("EditPath returned error: %v", err)
+	}
+	if mgr.editPathCalls != 1 {
+		t.Fatalf("ExportMenuEditPath called %d times; want 1", mgr.editPathCalls)
+	}
+}
+
+// TestExportMenu_IsPathFieldActive verifies the predicate is true only when
+// the Path row is the cursor AND the destination is File.
+func TestExportMenu_IsPathFieldActive(t *testing.T) {
+	m := popup.NewExportMenu([]string{"CSV"}, []string{"File", "Clipboard"}, []string{"Loaded"}, -1, false)
+	if m.IsPathFieldActive() {
+		t.Error("IsPathFieldActive true on FieldFormat")
+	}
+	m.MoveField(+1) // Destination
+	m.MoveField(+1) // Path
+	if !m.IsPathFieldActive() {
+		t.Error("IsPathFieldActive false on FieldPath/File")
+	}
+	// Switch destination to Clipboard (from the Destination row): Path is
+	// no longer File-only-visible, so the predicate must be false.
+	m.MoveField(-1) // back to Destination
+	m.MoveValue(+1) // Clipboard
+	m.MoveField(+1) // would-be Path; skips since Path hidden under Clipboard
+	if m.IsPathFieldActive() {
+		t.Error("IsPathFieldActive true after switching to Clipboard")
+	}
+}
 
 // TestExportMenu_SQLInsertsGating_Editable verifies that when the
 // underlying GridView reports Editable=true (sqlInsertsIdx=-1, no
