@@ -10,6 +10,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
 // connFieldKind classifies how a form row is edited (dbsavvy-dyf):
@@ -438,6 +439,17 @@ func (f *connForm) render() string {
 	return b.String()
 }
 
+// colorPreviewSGR returns the ANSI foreground escape used to tint the colour
+// field's own value, accepting both standard names ("red") and hex codes
+// ("#ff4d4d", "#abc"). Returns "" when the token is neither, so the value is
+// shown untinted.
+func colorPreviewSGR(v string) string {
+	if sgr := theme.AnsiFgSGR(v); sgr != "" {
+		return sgr
+	}
+	return theme.AnsiFgHexSGR(v)
+}
+
 // displayValue renders the right-hand value column for a row.
 func (f *connForm) displayValue(s connFieldSpec) string {
 	switch s.kind {
@@ -454,6 +466,11 @@ func (f *connForm) displayValue(s connFieldSpec) string {
 		v := f.textValue(s.id)
 		if v == "" {
 			return "(empty)"
+		}
+		if s.id == fieldColor {
+			if sgr := colorPreviewSGR(v); sgr != "" {
+				return sgr + v + theme.AnsiReset
+			}
 		}
 		return v
 	}
