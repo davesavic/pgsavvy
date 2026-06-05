@@ -38,12 +38,11 @@ type ExportMenu struct {
 	scopeIdx  int
 	field     ExportMenuField
 
-	// path is the editable File destination path. While pathEdited is
-	// false the Format↔extension sync keeps path's extension in step with
-	// the selected format; once the user edits it (SetPath) the path is
-	// frozen and the extension is no longer rewritten.
-	path       string
-	pathEdited bool
+	// path is the editable File destination path. The Format↔extension
+	// sync keeps path's extension in step with the selected format at all
+	// times: the user owns the basename/dir (via SetPath), the format owns
+	// the extension, so the filename never lies about its contents.
+	path string
 
 	// sqlInsertsIdx is the index into formats[] of the "SQL INSERTs" row
 	// when shown-but-disabled; -1 when the row should not be rendered as
@@ -147,12 +146,13 @@ func (m *ExportMenu) MoveValue(d int) {
 	}
 }
 
-// syncPathExt rewrites the Path's extension to match the current format
-// while the user has not manually edited the path. Replacement targets
-// the LAST dot (filepath.Ext) so "a.old.csv" → "a.old.json". Once
-// pathEdited is set (via SetPath) the extension is frozen.
+// syncPathExt rewrites the Path's extension to match the current format,
+// preserving the user's basename/dir. Replacement targets the LAST dot
+// (filepath.Ext) so "a.old.csv" → "a.old.json". Called whenever the
+// format is cycled or the path is edited, so the extension can never
+// drift out of step with the selected format.
 func (m *ExportMenu) syncPathExt() {
-	if m.pathEdited || m.path == "" {
+	if m.path == "" {
 		return
 	}
 	ext := formatExt(m.FormatLabel())
@@ -266,20 +266,18 @@ func (m *ExportMenu) DestinationLabel() string {
 // the label accessors expose their unexported backing state.
 func (m *ExportMenu) Path() string { return m.path }
 
-// SetPath sets the File destination path and marks it as user-edited,
-// freezing the Format↔extension sync so subsequent format cycling no
-// longer rewrites the extension.
+// SetPath sets the File destination path (the user owns the basename/dir)
+// and normalises its extension to the current format, so a stale or
+// mistyped extension can never reach the export.
 func (m *ExportMenu) SetPath(v string) {
 	m.path = v
-	m.pathEdited = true
+	m.syncPathExt()
 }
 
-// Prefill seeds the auto-suggested path WITHOUT marking it user-edited,
-// so the Format↔extension sync stays active until the user edits the
-// path via SetPath. Called once when the menu is opened.
+// Prefill seeds the auto-suggested path. Called once when the menu is
+// opened; the path already carries the initial format's extension.
 func (m *ExportMenu) Prefill(v string) {
 	m.path = v
-	m.pathEdited = false
 }
 
 // ScopeLabel returns the current Scope label.
