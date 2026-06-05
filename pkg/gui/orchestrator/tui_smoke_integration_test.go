@@ -579,13 +579,24 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 		if err := s.rec.SetSize(80, 24); err != nil {
 			t.Fatalf("SetSize(80,24): %v", err)
 		}
-		after := len(s.rec.AllSetViewCalls())
+		calls := s.rec.AllSetViewCalls()
+		after := len(calls)
 		if after <= before {
 			t.Fatalf("RunLayout did not fire on SetSize: before=%d after=%d", before, after)
 		}
-		// At normal size the CONNECTIONS view must be (re)created.
-		if !s.rec.HasSetView(string(types.SCHEMAS)) {
-			t.Fatal("expected SetView(connections) at normal size")
+		// At normal size the schemas rail view must be (re)created. Check the
+		// SetView calls from THIS layout pass (after the resize) rather than
+		// all-time history, which would already contain schemas from the
+		// earlier connect/navigate steps and pass tautologically.
+		found := false
+		for _, c := range calls[before:] {
+			if c.Name == string(types.SCHEMAS) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("expected schemas rail SetView after resize back")
 		}
 	})
 
