@@ -279,8 +279,12 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 				t.Errorf("motion.buffer_start sequence = %+v, want ['g','g']", kb.Sequence)
 			}
 			ggFound = true
-			ggMode = kb.Mode
-			break
+			// Normal-mode motions are published as a separate binding whose
+			// Mode is ModeNormal (== 0, the zero sentinel that cannot be OR'd
+			// into a mask), alongside the OperatorPending|Visual* binding.
+			// Accumulate every matching binding's mask rather than capturing
+			// only the first, which may be the zero-valued Normal entry.
+			ggMode |= kb.Mode
 		}
 		if !ggFound {
 			t.Fatal("VimEditorController did not publish a binding for motion.buffer_start")
