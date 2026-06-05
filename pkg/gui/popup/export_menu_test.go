@@ -35,8 +35,9 @@ func TestExportMenu_MoveField_Clamps(t *testing.T) {
 	}
 	m.MoveField(+1)
 	m.MoveField(+1)
+	m.MoveField(+1)
 	if m.Field() != FieldScope {
-		t.Fatalf("after +1,+1 field = %v; want FieldScope", m.Field())
+		t.Fatalf("after +1,+1,+1 field = %v; want FieldScope", m.Field())
 	}
 	m.MoveField(+1)
 	if m.Field() != FieldScope {
@@ -193,10 +194,16 @@ func TestExportMenu_Body_HighlightsCursorField(t *testing.T) {
 		t.Errorf("after MoveField(+1), Format row should be unmarked: %q", body)
 	}
 
+	m.MoveField(+1) // → FieldPath (File destination, so Path is navigable)
+	body = m.Body()
+	if !strings.Contains(body, "> Path:") {
+		t.Errorf("after second MoveField(+1), body should mark FieldPath with '> ': %q", body)
+	}
+
 	m.MoveField(+1)
 	body = m.Body()
 	if !strings.Contains(body, "> Scope:") {
-		t.Errorf("after second MoveField(+1), body should mark FieldScope with '> ': %q", body)
+		t.Errorf("after third MoveField(+1), body should mark FieldScope with '> ': %q", body)
 	}
 }
 
@@ -226,6 +233,85 @@ func TestExportMenu_Body_RendersF2DisabledReason(t *testing.T) {
 	}
 	if got := m.ConfirmBlockedReason(); !strings.Contains(got, "result spans multiple tables") {
 		t.Errorf("ConfirmBlockedReason should include F2 reason: %q", got)
+	}
+}
+
+func TestExportMenu_Path_PrefillAndAccessors(t *testing.T) {
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
+	if m.Path() != "" {
+		t.Errorf("default Path = %q; want empty", m.Path())
+	}
+	m.Prefill("/tmp/a.csv")
+	if m.Path() != "/tmp/a.csv" {
+		t.Errorf("after Prefill, Path = %q; want /tmp/a.csv", m.Path())
+	}
+	m.SetPath("/tmp/custom.json")
+	if m.Path() != "/tmp/custom.json" {
+		t.Errorf("after SetPath, Path = %q; want /tmp/custom.json", m.Path())
+	}
+}
+
+func TestExportMenu_Path_SyncsExtensionWithFormat(t *testing.T) {
+	// formats[0]=CSV; cycling to JSON Array (idx 3) should rewrite the
+	// LAST extension only: a.old.csv → a.old.json.
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
+	m.Prefill("/tmp/a.old.csv")
+	for range 3 {
+		m.MoveValue(+1) // → JSON Array
+	}
+	if m.FormatLabel() != "JSON Array" {
+		t.Fatalf("setup: FormatLabel = %q; want JSON Array", m.FormatLabel())
+	}
+	if m.Path() != "/tmp/a.old.json" {
+		t.Errorf("Path after format cycle = %q; want /tmp/a.old.json", m.Path())
+	}
+}
+
+func TestExportMenu_Path_FrozenAfterSetPath(t *testing.T) {
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
+	m.Prefill("/tmp/a.csv")
+	m.SetPath("/tmp/keep.csv")
+	m.MoveValue(+1) // cycle format off CSV
+	if m.Path() != "/tmp/keep.csv" {
+		t.Errorf("Path after SetPath+format cycle = %q; want frozen /tmp/keep.csv", m.Path())
+	}
+}
+
+func TestExportMenu_Path_RenderedOnlyForFileDestination(t *testing.T) {
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
+	m.Prefill("/tmp/a.csv")
+
+	body := m.Body()
+	if !strings.Contains(body, "Path:        /tmp/a.csv") {
+		t.Errorf("File destination body should render Path row: %q", body)
+	}
+
+	// Switch Destination → Clipboard (idx 1).
+	m.MoveField(+1) // → FieldDestination
+	m.MoveValue(+1) // → Clipboard
+	if m.DestinationLabel() != "Clipboard" {
+		t.Fatalf("setup: DestinationLabel = %q; want Clipboard", m.DestinationLabel())
+	}
+	body = m.Body()
+	if strings.Contains(body, "Path:") {
+		t.Errorf("Clipboard destination body should omit Path row: %q", body)
+	}
+}
+
+func TestExportMenu_Path_SkippedInNavForClipboard(t *testing.T) {
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
+	// Move to Destination and select Clipboard.
+	m.MoveField(+1) // → FieldDestination
+	m.MoveValue(+1) // → Clipboard
+	// Moving down must skip the hidden FieldPath and land on FieldScope.
+	m.MoveField(+1)
+	if m.Field() != FieldScope {
+		t.Errorf("MoveField(+1) from Destination with Clipboard = %v; want FieldScope (Path skipped)", m.Field())
+	}
+	// Moving back up must skip FieldPath again, landing on Destination.
+	m.MoveField(-1)
+	if m.Field() != FieldDestination {
+		t.Errorf("MoveField(-1) from Scope with Clipboard = %v; want FieldDestination (Path skipped)", m.Field())
 	}
 }
 

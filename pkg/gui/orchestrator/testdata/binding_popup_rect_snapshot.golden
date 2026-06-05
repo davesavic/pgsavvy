@@ -54,6 +54,7 @@ binding	scope=export_menu	key=<left>	mode=normal
 binding	scope=export_menu	key=<right>	mode=normal
 binding	scope=export_menu	key=<up>	mode=normal
 binding	scope=export_menu	key=h	mode=normal
+binding	scope=export_menu	key=i	mode=normal
 binding	scope=export_menu	key=j	mode=normal
 binding	scope=export_menu	key=k	mode=normal
 binding	scope=export_menu	key=l	mode=normal

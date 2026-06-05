@@ -4,14 +4,13 @@ import (
 	"context"
 	"net"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/dbsavvy/pkg/utils"
 )
 
 // authMethods builds the ordered list of ssh.AuthMethod values from cfg.
@@ -110,9 +109,9 @@ func agentAuth() (ssh.AuthMethod, error) {
 // keys are unlocked via PassphraseCommand when set; otherwise a typed
 // DialError directs the operator to configure passphrase_command.
 func identityAuth(ctx context.Context, cfg models.SSHTunnelConfig, prompter session.SecretPrompter) (ssh.AuthMethod, error) {
-	path, err := expandHome(cfg.IdentityFile)
+	path, err := utils.ExpandHome(cfg.IdentityFile)
 	if err != nil {
-		return nil, err
+		return nil, dialErr("resolve identity file path", err)
 	}
 
 	pem, err := os.ReadFile(path)
@@ -175,21 +174,4 @@ func asPassphraseMissing(err error, target **ssh.PassphraseMissingError) bool {
 		*target = pm
 	}
 	return ok
-}
-
-// expandHome resolves a leading "~" to the user's home directory. A bare "~"
-// or "~/..." is expanded; any other path is returned unchanged. A missing HOME
-// (os.UserHomeDir error) yields a typed DialError rather than a panic.
-func expandHome(path string) (string, error) {
-	if path != "~" && !strings.HasPrefix(path, "~/") {
-		return path, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", dialErr("resolve home directory for ~ expansion", err)
-	}
-	if path == "~" {
-		return home, nil
-	}
-	return filepath.Join(home, path[2:]), nil
 }

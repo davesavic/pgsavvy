@@ -20,6 +20,9 @@ type ExportMenuManager interface {
 	ExportMenuConfirm()
 	// ExportMenuCancel discards the menu and pops the popup context.
 	ExportMenuCancel()
+	// ExportMenuEditPath opens the seeded PROMPT to edit the Path field.
+	// No-op unless the Path field is active (File destination).
+	ExportMenuEditPath()
 }
 
 // ExportMenuController owns the EXPORT_MENU popup bindings opened by
@@ -87,6 +90,15 @@ func (e *ExportMenuController) Confirm(_ commands.ExecCtx) error {
 func (e *ExportMenuController) Cancel(_ commands.ExecCtx) error {
 	if e.mgr != nil {
 		e.mgr.ExportMenuCancel()
+	}
+	return nil
+}
+
+// EditPath opens the seeded PROMPT to edit the Path field. The manager
+// no-ops unless the Path field is active.
+func (e *ExportMenuController) EditPath(_ commands.ExecCtx) error {
+	if e.mgr != nil {
+		e.mgr.ExportMenuEditPath()
 	}
 	return nil
 }
@@ -172,6 +184,13 @@ func (e *ExportMenuController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			ActionID:    commands.ExportMenuCancel,
 			Description: tr.Actions.ExportMenuCancel,
 		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'i'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.EXPORT_MENU,
+			ActionID:    commands.ExportMenuEditPath,
+			Description: tr.Actions.ExportMenuEditPath,
+		},
 	}
 }
 
@@ -210,6 +229,11 @@ func (e *ExportMenuController) RegisterActions(reg *commands.Registry) {
 		ID:          commands.ExportMenuCancel,
 		Description: "Export menu cancel",
 		Handler:     e.Cancel,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ExportMenuEditPath,
+		Description: "Export menu edit path",
+		Handler:     e.EditPath,
 	})
 }
 

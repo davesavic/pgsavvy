@@ -23,7 +23,7 @@ func TestBuildDestination_Clipboard_WritesToConfiguredWriter(t *testing.T) {
 	rec := &recordingClipboard{}
 	h := NewResultTabsHelper(ResultTabsHelperDeps{ExportClipboard: rec})
 
-	dest, err := h.buildDestination(nil, "Clipboard", "CSV")
+	dest, err := h.buildDestination("Clipboard", "")
 	if err != nil {
 		t.Fatalf("buildDestination: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestBuildDestination_Clipboard_WritesToConfiguredWriter(t *testing.T) {
 // The destination is no longer offered, and the builder must reject it.
 func TestBuildDestination_StdoutRemoved(t *testing.T) {
 	h := NewResultTabsHelper(ResultTabsHelperDeps{})
-	if _, err := h.buildDestination(nil, "stdout", "CSV"); err == nil {
+	if _, err := h.buildDestination("stdout", ""); err == nil {
 		t.Fatal("buildDestination(\"stdout\") = nil error, want rejected")
 	}
 }

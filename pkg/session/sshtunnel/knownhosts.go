@@ -9,6 +9,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"github.com/davesavic/dbsavvy/pkg/utils"
 )
 
 // knownHostsMu serializes the read-check-append critical section of the TOFU
@@ -74,7 +76,11 @@ func hostKeyCallback(knownHostsPath string) (ssh.HostKeyCallback, error) {
 // the default ~/.ssh/known_hosts.
 func resolveKnownHostsPath(explicit string) (string, error) {
 	if explicit != "" {
-		return expandHome(explicit)
+		path, err := utils.ExpandHome(explicit)
+		if err != nil {
+			return "", dialErr("resolve known_hosts path", err)
+		}
+		return path, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
