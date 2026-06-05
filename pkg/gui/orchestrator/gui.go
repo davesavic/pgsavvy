@@ -125,7 +125,7 @@ func WithKeyDelays(timeoutLen, ttimeoutLen, whichKeyDelay time.Duration) Option 
 func WithClock(clk Clock) Option {
 	return func(g *Gui) {
 		if clk != nil {
-			g.clock = clk
+			g.spinnerState.clock = clk
 		}
 	}
 }
@@ -249,25 +249,10 @@ type Gui struct {
 	// closed is true once Close has run; idempotent guard.
 	closed bool
 
-	// Threading-model state (DESIGN.md §17). See threading.go for the
-	// OnUIThread / OnUIThreadContentOnly / OnWorker methods that consume
-	// these fields.
-	//
-	//   - busy is the in-flight-worker counter (atomic; ticked by
-	//     OnWorker, read by BusyCount for the bottom spinner).
-	//   - workersWG joins live OnWorker goroutines on shutdown so the
-	//     goleak smoke tests have a deterministic quiescence point.
-	busy      int64
-	workersWG sync.WaitGroup
-
-	// onWorkerSampleCounter implements the AD-20 quiescence-preserving
-	// sampling for cat=state worker_start / worker_end emits. Every
-	// OnWorker invocation increments it; the counter % 10 == 0 sample
-	// gate plus mandatory quiescence-transition emits (busy_before==0 /
-	// busy_after==0) together yield 2 + N/10 worker lines per burst.
-	// Per AD-20 this MUST be a field on *Gui (not package-level) so
-	// concurrent test Guis don't share state.
-	onWorkerSampleCounter atomic.Uint64
+	// Threading-model + busy-spinner state (DESIGN.md §17, U8). See
+	// threading.go for the OnUIThread / OnUIThreadContentOnly / OnWorker
+	// methods that consume these fields.
+	spinnerState spinnerState
 
 	// connectGen is the supersession token for in-flight Connects
 	// (dbsavvy-fow.1). Each connectInvoker.Connect bumps it on entry and
@@ -278,6 +263,28 @@ type Gui struct {
 	// clobber a more recent connection. Atomic so concurrent worker-
 	// goroutine Connects don't race the bump.
 	connectGen atomic.Uint64
+}
+
+// spinnerState groups the busy-counter + busy-spinner ticker fields
+// (DESIGN.md §17, U8).
+type spinnerState struct {
+	// busy is the in-flight-worker counter (atomic; ticked by OnWorker,
+	// read by BusyCount for the bottom spinner). MUST stay FIRST:
+	// 8-byte alignment for atomic.AddInt64 on 32-bit.
+	busy int64
+
+	// workersWG joins live OnWorker goroutines on shutdown so the
+	// goleak smoke tests have a deterministic quiescence point.
+	workersWG sync.WaitGroup
+
+	// onWorkerSampleCounter implements the AD-20 quiescence-preserving
+	// sampling for cat=state worker_start / worker_end emits. Every
+	// OnWorker invocation increments it; the counter % 10 == 0 sample
+	// gate plus mandatory quiescence-transition emits (busy_before==0 /
+	// busy_after==0) together yield 2 + N/10 worker lines per burst.
+	// Per AD-20 this MUST be a field on *Gui (not package-level) so
+	// concurrent test Guis don't share state.
+	onWorkerSampleCounter atomic.Uint64
 
 	// Busy-spinner animation state (U8). The spinner glyph advances off a
 	// wall-clock frame counter ticked by a periodic content-only
@@ -308,9 +315,9 @@ type Gui struct {
 // or UseDriverForTest (test).
 func NewGui(deps Deps, opts ...Option) *Gui {
 	g := &Gui{
-		deps:  deps,
-		tree:  gui.NewContextTree(),
-		clock: realClock{},
+		deps:         deps,
+		tree:         gui.NewContextTree(),
+		spinnerState: spinnerState{clock: realClock{}},
 	}
 	g.connectHelper = data.NewConnectHelper()
 	g.schemasHelper = data.NewSchemasHelper(deps.Common, deps.Store)
@@ -1252,7 +1259,7 @@ func (g *Gui) Close() error {
 	// teardown so the goleak smoke tests see a quiescent goroutine pool
 	// (DESIGN.md §17). Safe to call when no workers were ever spawned —
 	// sync.WaitGroup.Wait on a zero counter returns immediately.
-	g.workersWG.Wait()
+	g.spinnerState.workersWG.Wait()
 	var firstErr error
 	// Close the active SQLSession FIRST so an in-flight Stream gets
 	// cancelled (SQLSession.Close cancels the live RunHandle and waits
@@ -1461,7 +1468,7 @@ func (g *Gui) OnWorkerCountForTest() uint64 {
 	if g == nil {
 		return 0
 	}
-	return g.onWorkerSampleCounter.Load()
+	return g.spinnerState.onWorkerSampleCounter.Load()
 }
 
 // WaitForWorkersForTest blocks until every OnWorker goroutine launched
@@ -1471,7 +1478,7 @@ func (g *Gui) WaitForWorkersForTest() {
 	if g == nil {
 		return
 	}
-	g.workersWG.Wait()
+	g.spinnerState.workersWG.Wait()
 }
 
 // ChoiceHelperForTest returns the ChoiceHelper wired by wireWithDriver,
