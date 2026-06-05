@@ -122,7 +122,7 @@ func renderCellPlain(value any, col models.ColumnMeta) string {
 	case kindBytes:
 		return renderBytesCell(value)
 	case kindJSON:
-		s := fmt.Sprintf("%v", value)
+		s := FormatJSONValue(value)
 		s = capCellBytes(s)
 		return SanitizeCellEscapes(s)
 	default:

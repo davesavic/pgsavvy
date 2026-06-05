@@ -127,6 +127,16 @@ func (p *PromptContext) HandleFocusLost(_ types.OnFocusLostOpts) error {
 // no state is set.
 func (p *PromptContext) SetState(s PromptState) { p.state = s }
 
+// LabelText returns the current prompt label (empty when no state is
+// wired). The layout pass reads it to size the popup wide enough that
+// the label and input fit without horizontal scrolling (dbsavvy-lcxe).
+func (p *PromptContext) LabelText() string {
+	if p.state == nil {
+		return ""
+	}
+	return p.state.Label()
+}
+
 // SetView is called by the orchestrator's Layout Tier-3 popup pass each
 // frame the PROMPT is on the focus stack. ReadAndClearBuffer reads
 // typed text from the supplied view's TextArea. Masking is handled entirely

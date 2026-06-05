@@ -3,8 +3,20 @@ package orchestrator
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 )
+
+// TestFormatForEdit_JSONObject asserts the cell-editor seed for a
+// json/jsonb value pgx decoded into a Go map is JSON text, not Go's
+// default map formatting (map[plan:pro]) that the user would otherwise
+// have to hand-correct. Mirrors the grid renderer so seed and display
+// agree. dbsavvy json-cell-format.
+func TestFormatForEdit_JSONObject(t *testing.T) {
+	got := cellEditorPicker{}.FormatForEdit(map[string]any{"plan": "pro", "active": true})
+	require.Equal(t, `{"active":true,"plan":"pro"}`, got)
+}
 
 // TestStreamBlocksEdit pins the edit-gate state policy: inline edits are
 // permitted during StateRunning (rows are buffered, appends are

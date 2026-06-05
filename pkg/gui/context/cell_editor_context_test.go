@@ -161,6 +161,56 @@ func TestCellEditorContext_SatisfiesIBaseContext(t *testing.T) {
 	var _ types.IBaseContext = &CellEditorContext{}
 }
 
+// TestCellEditorContext_CursorXYNoView pins the no-view (unit-test) caret
+// contract: inactive → ok=false so the layout skips placing a caret;
+// active → x = prefix width (2) + the buffer rune count (cursor assumed at
+// end), y = 0. The horizontally-scrolled view path is exercised in the
+// tmux integration check (no real gocui view in unit tests).
+func TestCellEditorContext_CursorXYNoView(t *testing.T) {
+	c := newTestCellEditor(nil)
+	if _, _, ok := c.CursorXY(); ok {
+		t.Fatal("CursorXY ok=true while inactive; want false")
+	}
+	c.Open("plan", models.ColumnMeta{Name: "data"}, []any{int64(1)}, "plan")
+	x, y, ok := c.CursorXY()
+	if !ok {
+		t.Fatal("CursorXY ok=false while active; want true")
+	}
+	if want := len(cellEditorPrefix) + len("plan"); x != want {
+		t.Errorf("CursorXY x = %d, want %d", x, want)
+	}
+	if y != 0 {
+		t.Errorf("CursorXY y = %d, want 0", y)
+	}
+}
+
+// TestWindowRunes covers the horizontal-scroll window: clamping a start
+// past the end, a zero window (no measurable view width) returning the
+// remainder, normal mid-string windows, and multibyte rune boundaries
+// (the slice must not split a rune).
+func TestWindowRunes(t *testing.T) {
+	cases := []struct {
+		name       string
+		s          string
+		start, win int
+		want       string
+	}{
+		{"zero win returns remainder", "abcdef", 2, 0, "cdef"},
+		{"window clamps to end", "abcdef", 3, 10, "def"},
+		{"mid window", "abcdef", 1, 3, "bcd"},
+		{"start past end", "abc", 9, 4, ""},
+		{"negative start clamps to 0", "abc", -2, 2, "ab"},
+		{"multibyte boundary", "héllo", 0, 3, "hél"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := windowRunes(tc.s, tc.start, tc.win); got != tc.want {
+				t.Errorf("windowRunes(%q,%d,%d) = %q, want %q", tc.s, tc.start, tc.win, got, tc.want)
+			}
+		})
+	}
+}
+
 // caretCaptureDriver embeds captureDriver (which records SetContent) and
 // additionally records the last SetCaretEnabled call so the focus hooks'
 // caret toggle is observable. The embedded stubDriver's SetCaretEnabled is

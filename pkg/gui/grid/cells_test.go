@@ -31,6 +31,28 @@ func TestRenderCellPlain_ArrayLiteral(t *testing.T) {
 	require.Equal(t, "{admin,founder,editor}", visible)
 }
 
+// TestRenderCellPlain_JSONObject asserts a json/jsonb column value that
+// pgx decoded into a Go map renders as JSON text ({"plan":"pro"}) rather
+// than Go's default map formatting (map[plan:pro]). Keys are emitted in
+// json.Marshal's sorted order. dbsavvy json-cell-format.
+func TestRenderCellPlain_JSONObject(t *testing.T) {
+	resetThemeForTest(t)
+	col := models.ColumnMeta{Name: "data", TypeName: "jsonb"}
+	visible := renderCellPlain(map[string]any{"plan": "pro", "active": true}, col)
+	require.Equal(t, `{"active":true,"plan":"pro"}`, visible)
+}
+
+// TestRenderCellPlain_JSONPassthrough asserts JSON values that arrive
+// already as text ([]byte or string) are passed through unchanged rather
+// than re-marshaled — json.Marshal of a []byte would base64-encode it and
+// of a string would add quotes.
+func TestRenderCellPlain_JSONPassthrough(t *testing.T) {
+	resetThemeForTest(t)
+	col := models.ColumnMeta{Name: "data", TypeName: "jsonb"}
+	require.Equal(t, `{"a":1}`, renderCellPlain([]byte(`{"a":1}`), col))
+	require.Equal(t, `{"a":1}`, renderCellPlain(`{"a":1}`, col))
+}
+
 // TestRenderCell_NullItalic asserts NULL cells emit the italic SGR and
 // the literal "NULL".
 func TestRenderCell_NullItalic(t *testing.T) {

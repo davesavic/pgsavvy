@@ -1,10 +1,41 @@
 package grid
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
 )
+
+// FormatJSONValue renders a json/jsonb cell value as JSON text. pgx
+// decodes a json/jsonb column into a Go map/slice for objects/arrays, or
+// leaves it as []byte/string when it arrives as raw text. The structured
+// forms are marshaled back to JSON; byte/string forms pass through
+// unchanged so we don't double-encode (json.Marshal of a []byte yields
+// base64, of a string adds a layer of quotes). On a marshal error the Go
+// default %v form is returned so a cell still shows something.
+//
+// Like FormatArrayLiteral, this is the single source of truth for JSON
+// cell formatting, shared by the grid renderer and the cell editor's
+// edit-seed so display and seed stay identical.
+func FormatJSONValue(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	case json.RawMessage:
+		return string(t)
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", v)
+		}
+		return string(b)
+	}
+}
 
 // FormatArrayLiteral renders a Go slice — the shape pgx decodes a
 // Postgres array column into — as Postgres array *input* syntax:

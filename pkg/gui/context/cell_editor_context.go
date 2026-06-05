@@ -223,18 +223,83 @@ func (c *CellEditorContext) ReadAndClearBuffer() string {
 	return s
 }
 
+// cellEditorPrefix is the body prefix HandleRender writes before the
+// buffer. Its width is the horizontal offset the caret (CursorXY) and the
+// scroll window (hScroll) both account for.
+const cellEditorPrefix = "> "
+
 // HandleRender writes the popup body — a single "> <buffer>" line —
 // into the gocui view. No-op when inactive or when no driver is wired.
 // The visual frame (border, position over the cursor cell) is owned by
 // the layout pass; this hook only paints the buffer.
+//
+// The buffer is horizontally scrolled (hScroll) so the caret stays
+// visible when the value is wider than the box: only the window of runes
+// around the cursor is painted, and CursorXY places the caret at the
+// matching column. The layout pass pins the view origin to 0 so these
+// absolute coordinates line up.
 func (c *CellEditorContext) HandleRender() error {
 	if !c.active {
 		return nil
 	}
-	body := "> " + c.Buffer()
+	buf := c.Buffer()
+	start, _, win := c.hScroll(buf)
+	body := cellEditorPrefix + windowRunes(buf, start, win)
 	viewName := c.GetViewName()
 	writeView(c.deps, func() error {
 		return c.deps.GuiDriver.SetContent(viewName, body)
 	})
 	return nil
+}
+
+// hScroll computes the horizontal scroll state for the current frame:
+// the rune offset of the first visible buffer rune (start), the TextArea
+// cursor column (cx), and the number of columns available for buffer text
+// after the prefix (win). Once the cursor passes the right edge the
+// window slides right so the caret is always inside it. With no view
+// wired (unit tests) the window is unbounded and start is 0.
+func (c *CellEditorContext) hScroll(buf string) (start, cx, win int) {
+	cx = len([]rune(buf))
+	width := 0
+	if c.view != nil {
+		if c.view.TextArea != nil {
+			cx, _ = c.view.TextArea.GetCursorXY()
+		}
+		width = c.view.InnerWidth()
+	}
+	if width <= 0 {
+		return 0, cx, 0 // no view / unmeasurable: render the whole buffer
+	}
+	win = max(width-len(cellEditorPrefix), 1)
+	if cx >= win {
+		start = cx - win + 1
+	}
+	return start, cx, win
+}
+
+// CursorXY returns the caret coordinates (origin-0, after the "> "
+// prefix) the layout pass feeds to SetViewCursor. The X is the prefix
+// width plus the cursor's offset inside the visible window, so the caret
+// tracks edits and Left/Right motion even when the value is scrolled.
+// ok is false while inactive so the layout skips placing a caret on a
+// popup that isn't shown. Mirrors PromptContext.CursorXY.
+func (c *CellEditorContext) CursorXY() (int, int, bool) {
+	if !c.active {
+		return 0, 0, false
+	}
+	start, cx, _ := c.hScroll(c.Buffer())
+	return len(cellEditorPrefix) + (cx - start), 0, true
+}
+
+// windowRunes returns the substring of s spanning [start, start+win)
+// runes, clamped to the bounds of s. A win of 0 (no measurable view
+// width) returns the remainder from start so the whole buffer renders.
+func windowRunes(s string, start, win int) string {
+	r := []rune(s)
+	start = min(max(start, 0), len(r))
+	if win <= 0 {
+		return string(r[start:])
+	}
+	end := min(start+win, len(r))
+	return string(r[start:end])
 }

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
@@ -108,6 +109,13 @@ func (p cellEditorPicker) FormatForEdit(v any) string {
 	}
 	if t, ok := v.(time.Time); ok {
 		return t.Format("2006-01-02 15:04:05.999999-07:00")
+	}
+	// json/jsonb objects decode to a Go map; seed the editor with JSON
+	// text ({"k":"v"}) — the same string the grid shows — rather than
+	// Go's map[k:v] form (dbsavvy json-cell-format). No column meta is
+	// threaded here, so detect by Go shape: a map is always JSON.
+	if reflect.ValueOf(v).Kind() == reflect.Map {
+		return grid.FormatJSONValue(v)
 	}
 	// Array columns (text[] etc.) decode to a Go slice; seed the editor
 	// with Postgres array syntax {a,b,c} — the same string the grid

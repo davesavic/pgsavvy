@@ -386,6 +386,19 @@ func (g *Gui) RunLayout(w, h int) error {
 					// when the view is nil (recorder driver path).
 					wsetter.SetLabelWrapWidth(view.InnerWidth())
 				}
+				// Pin the horizontal origin to 0 (dbsavvy-lcxe). The popup
+				// is sized (popupRect) to fit the label and "> "+buffer, so
+				// the view never needs to scroll horizontally. gocui's
+				// RenderTextArea (run by DefaultEditor on each keystroke)
+				// only *reduces* the origin when the cursor moves left of
+				// it, so after editing a long path down to a short one a
+				// stale origin > 0 would persist and clip the label and the
+				// "> " prefix. Resetting it each frame keeps content
+				// left-anchored; CursorXY below sets the caret in absolute
+				// (origin-0) coordinates to match.
+				if view != nil {
+					view.SetOrigin(0, view.OriginY())
+				}
 				if cur, ok := ctx.(interface{ CursorXY() (int, int, bool) }); ok {
 					if x, y, active := cur.CursorXY(); active {
 						_ = g.driver.SetViewCursor(name, x, y)
@@ -425,12 +438,29 @@ func (g *Gui) RunLayout(w, h int) error {
 						}
 					}
 				}
-				// Caret tracks the TextArea cursor, offset by len("> ")=2 for
-				// the body prefix HandleRender writes via SetContent. Under the
-				// recorder driver view is nil → skip (no real caret to place).
-				if view != nil && view.TextArea != nil {
-					cx, cy := view.TextArea.GetCursorXY()
-					_ = g.driver.SetViewCursor(name, cx+2, cy)
+				// Pin the horizontal origin to 0 each frame (mirrors the
+				// PROMPT path above, dbsavvy-lcxe). HandleRender repaints the
+				// "> "+buffer line via SetContent in absolute (origin-0)
+				// coordinates and scrolls the buffer itself when it outgrows
+				// the box (CellEditorContext.hScroll), but the master Editor's
+				// gocui.DefaultEditor calls RenderTextArea on every keystroke,
+				// which scrolls OriginX right. A stale OriginX > 0 would then
+				// double-scroll the manually-windowed content and push the
+				// caret off the box. Resetting it keeps the line left-anchored
+				// so the windowed render and CursorXY below line up.
+				if view != nil {
+					view.SetOrigin(0, view.OriginY())
+				}
+				// Anchor the caret via the context's CursorXY (mirrors PROMPT,
+				// lines above): it returns the prefix-offset column inside the
+				// horizontally-scrolled window, so the caret stays visible even
+				// when the value is wider than the box. Under the recorder
+				// driver SetView returns nil → CursorXY still reports the
+				// logical position and SetViewCursor is a no-op on the fake.
+				if cur, ok := ctx.(interface{ CursorXY() (int, int, bool) }); ok {
+					if cx, cy, active := cur.CursorXY(); active {
+						_ = g.driver.SetViewCursor(name, cx, cy)
+					}
 				}
 			}
 			// SEARCH_LINE view-plumb + width + caret (dbsavvy-2ttm). Like
@@ -879,6 +909,25 @@ func (g *Gui) popupRect(ctx types.IBaseContext, dims map[string]ui.Dimensions, w
 			return centeredRectMaxSize(canvas, promptMaxCols, maskedPromptMaxRows), true
 		}
 	}
+	// An unmasked PROMPT (e.g. the export edit-path / pgpass path field)
+	// sizes its box to fit the label and "> "+buffer so a long path does
+	// not horizontally scroll the shared view — which would clip the
+	// label and hide the caret (dbsavvy-lcxe). The buffer is read live so
+	// the box tracks typing; Initial() seeds the width on the first frame
+	// before the TextArea is plumbed in.
+	if ctx.GetKey() == types.PROMPT {
+		if canvas, ok := dims["popup-overlay"]; ok {
+			labelRunes := longestLineRunes(promptLabelOf(ctx))
+			bufferRunes := len([]rune(promptBufferOf(ctx)))
+			if g.promptHelp != nil {
+				if n := len([]rune(g.promptHelp.Initial())); n > bufferRunes {
+					bufferRunes = n
+				}
+			}
+			cols := promptPopupCols(labelRunes, bufferRunes, canvas.X1-canvas.X0)
+			return centeredRectMaxSize(canvas, cols, promptMaxRows), true
+		}
+	}
 	return popupRectFor(ctx.GetKey(), dims, w, h)
 }
 
@@ -996,6 +1045,66 @@ const (
 	promptMaxRows = 8
 	promptMaxCols = 64
 )
+
+// promptPopupCols returns the column count the unmasked PROMPT popup
+// needs so its content fits without horizontal scrolling (dbsavvy-lcxe).
+// The label and the editable buffer share one gocui view, so a single
+// horizontal origin governs both lines: if the buffer is wide enough to
+// scroll the origin (to chase the end-of-buffer caret), it drags the
+// label and the "> " body prefix off the left edge, and the caret lands
+// at view-x >= inner width where gocui's draw() hides it. Sizing the box
+// to the content avoids the scroll entirely for realistic paths.
+//
+// content is the widest of the longest label line and the "> "+buffer
+// input line (the "> " prefix is 2 cols). The result adds 2 for the
+// frame borders plus 1 spare column so the end-of-buffer caret stays
+// strictly inside the inner width, is floored at promptMaxCols (small
+// prompts keep the compact box) and clamped to the canvas width.
+func promptPopupCols(labelRunes, bufferRunes, canvasCols int) int {
+	content := labelRunes
+	if w := 2 + bufferRunes; w > content {
+		content = w
+	}
+	cols := content + 3
+	if cols < promptMaxCols {
+		cols = promptMaxCols
+	}
+	if cols > canvasCols {
+		cols = canvasCols
+	}
+	return cols
+}
+
+// promptLabelOf reads the prompt label via the duck-typed LabelText
+// accessor, returning "" for contexts that don't expose it (the
+// recorder-driver / non-PROMPT paths).
+func promptLabelOf(ctx types.IBaseContext) string {
+	if lr, ok := ctx.(interface{ LabelText() string }); ok {
+		return lr.LabelText()
+	}
+	return ""
+}
+
+// promptBufferOf reads the prompt's typed buffer via the duck-typed
+// Buffer accessor, returning "" when absent.
+func promptBufferOf(ctx types.IBaseContext) string {
+	if br, ok := ctx.(interface{ Buffer() string }); ok {
+		return br.Buffer()
+	}
+	return ""
+}
+
+// longestLineRunes returns the rune count of the widest \n-separated
+// line in s (labels may carry multi-line validator-error text).
+func longestLineRunes(s string) int {
+	max := 0
+	for _, line := range strings.Split(s, "\n") {
+		if n := len([]rune(line)); n > max {
+			max = n
+		}
+	}
+	return max
+}
 
 // maskedPromptMaxRows caps the masked (SSH credential) prompt height. Its
 // label is the frame title, so the body is a single "> <buffer>" input
