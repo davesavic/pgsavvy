@@ -94,7 +94,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		editable := reason == ""
 
 		readOnly := false
-		if p := g.activeConnProfile; p != nil {
+		if p := g.connectionState.activeConnProfile; p != nil {
 			readOnly = p.ReadOnly
 		}
 		editable, reason = pg.ApplyConnectionGate(editable, reason, readOnly, true /* pg SupportsInlineEdit */)

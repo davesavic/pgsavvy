@@ -96,7 +96,7 @@ func (a *activeConnAdapter) ActiveConnectionID() string {
 	if a.g == nil {
 		return ""
 	}
-	return a.g.activeConnID
+	return a.g.connectionState.activeConnID
 }
 
 // connectInvoker is the controllers.ConnectInvoker facade. It calls the
@@ -140,7 +140,7 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	// so a slow/timed-out dial can't clobber a more recent connection.
 	var gen uint64
 	if c.g != nil {
-		gen = c.g.connectGen.Add(1)
+		gen = c.g.connectionState.connectGen.Add(1)
 	}
 	return c.connectWithGen(ctx, profile, gen)
 }
@@ -154,7 +154,7 @@ func (c *connectInvoker) startAttempt(profile *models.Connection) {
 	if c == nil || c.g == nil || profile == nil {
 		return
 	}
-	gen := c.g.connectGen.Add(1)
+	gen := c.g.connectionState.connectGen.Add(1)
 	// Cancel-only, no deadline: the network connect budget lives in the pg
 	// driver (connectTimeout), applied AFTER interactive credential prompts so
 	// a human typing a passphrase is not charged against the dial budget (epic
@@ -232,7 +232,7 @@ func (c *connectInvoker) Cancel() {
 	c.cancelFn = nil
 	c.mu.Unlock()
 	if c.g != nil {
-		c.g.connectGen.Add(1)
+		c.g.connectionState.connectGen.Add(1)
 	}
 	if cf != nil {
 		cf()
@@ -262,7 +262,7 @@ func (c *connectInvoker) teardownForSwitch(profile *models.Connection) {
 	if c.g == nil || profile == nil {
 		return
 	}
-	active := c.g.activeConnID
+	active := c.g.connectionState.activeConnID
 	if active == "" || active == profile.Name {
 		return
 	}
@@ -447,7 +447,7 @@ func (c *connectInvoker) isStaleConnect(gen uint64) bool {
 	if c == nil || c.g == nil {
 		return false
 	}
-	return c.g.connectGen.Load() != gen
+	return c.g.connectionState.connectGen.Load() != gen
 }
 
 // routeConnectError marshals the failure onto the UI thread and paints it
@@ -535,12 +535,12 @@ func (c *connectInvoker) setActiveConn(profile *models.Connection) {
 		return
 	}
 	if profile == nil {
-		c.g.activeConnID = ""
-		c.g.activeConnProfile = nil
+		c.g.connectionState.activeConnID = ""
+		c.g.connectionState.activeConnProfile = nil
 		return
 	}
-	c.g.activeConnID = profile.Name
-	c.g.activeConnProfile = profile
+	c.g.connectionState.activeConnID = profile.Name
+	c.g.connectionState.activeConnProfile = profile
 }
 
 // populateSchemasRail loads the schema list via ConnectHelper.LoadSchemas

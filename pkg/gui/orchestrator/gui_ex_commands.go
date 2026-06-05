@@ -217,7 +217,7 @@ func (g *Gui) handleResetEx(args []string, _ commands.ExecCtx) error {
 		if recognisedSettings[settingKey] {
 			sess.SettingsSnapshot().Delete(settingKey)
 
-			connID := g.activeConnID
+			connID := g.connectionState.activeConnID
 			if connID != "" && g.deps.Store != nil {
 				g.deps.Store.MutateAndSave(func(a *common.AppState) {
 					if a.LastSessionSettings == nil {
