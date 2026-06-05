@@ -129,14 +129,13 @@ func TestEditabilityIntrospect_MaterializedView(t *testing.T) {
 
 func TestEditabilityIntrospect_NoPKTable(t *testing.T) {
 	sess := openIntegrationSession(t)
-	// Create a transient table with no PK / UNIQUE inside a tx so the
-	// fixture stays pristine. Use a CREATE TEMP TABLE so it's confined
-	// to the session.
+	// Create a transient table with no PK / UNIQUE so the fixture stays
+	// pristine. Execute autocommits each statement, so a CREATE TEMP TABLE
+	// without ON COMMIT DROP survives for the rest of the session (temp
+	// tables are session-scoped) and is removed by the cleanup below.
 	if _, err := sess.Execute(context.Background(), models.Query{
-		SQL: "CREATE TEMP TABLE editability_no_pk_test (a int, b int) ON COMMIT DROP",
+		SQL: "CREATE TEMP TABLE editability_no_pk_test (a int, b int)",
 	}); err != nil {
-		// CREATE TEMP TABLE without a transaction stays for the session
-		// — drop it on cleanup.
 		t.Fatalf("create temp table: %v", err)
 	}
 	t.Cleanup(func() {

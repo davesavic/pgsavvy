@@ -571,7 +571,7 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build synthetic ShowInBar: %v", err)
 		}
-		opts := orchestrator.CollectOptionsForScope(trie, types.ModeNormal, types.TABLES, s.tr)
+		opts := orchestrator.CollectOptionsForScope(trie, types.ModeNormal, types.TABLES, s.tr, nil)
 		// CollectOptionsForScope reads the description off the resolved
 		// *commands.Command (NOT the binding's local Description field).
 		// The synthetic binding cites commands.AppQuit, whose registered

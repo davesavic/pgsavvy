@@ -255,7 +255,6 @@ func TestResultSortDBSide_AC(t *testing.T) {
 	if !bag.QueryRunner.HasSession() {
 		t.Fatal("QueryRunner.HasSession() = false after Connect")
 	}
-	ensureLogView(t, s.rec)
 
 	helper := s.g.ResultTabsHelper()
 	if helper == nil {
