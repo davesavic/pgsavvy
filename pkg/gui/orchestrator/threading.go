@@ -34,14 +34,14 @@ const onWorkerSampleN = 10
 // decrements (delta=-1, called when a worker returns) the busy counter.
 // Exposed via BusyCount() for the status renderer / smoke tests.
 func (g *Gui) busyDelta(delta int64) int64 {
-	return atomic.AddInt64(&g.busy, delta)
+	return atomic.AddInt64(&g.spinnerState.busy, delta)
 }
 
 // BusyCount returns the current number of in-flight OnWorker goroutines.
 // Zero means the spinner should be hidden; positive means at least one
 // background job is running. Safe to call from any goroutine.
 func (g *Gui) BusyCount() int64 {
-	return atomic.LoadInt64(&g.busy)
+	return atomic.LoadInt64(&g.spinnerState.busy)
 }
 
 // SpinnerFrame returns the wall-clock frame index for the busy spinner
@@ -52,17 +52,17 @@ func (g *Gui) BusyCount() int64 {
 // while busy>0, so the value is harmless then. Safe to call from any
 // goroutine.
 func (g *Gui) SpinnerFrame() int64 {
-	g.spinnerMu.Lock()
-	armed := g.spinnerTicker != nil
-	start := g.spinnerStart
-	g.spinnerMu.Unlock()
+	g.spinnerState.spinnerMu.Lock()
+	armed := g.spinnerState.spinnerTicker != nil
+	start := g.spinnerState.spinnerStart
+	g.spinnerState.spinnerMu.Unlock()
 	if !armed {
 		return 0
 	}
-	if g.clock == nil {
+	if g.spinnerState.clock == nil {
 		return 0
 	}
-	return int64(g.clock.Now().Sub(start) / spinnerTickInterval)
+	return int64(g.spinnerState.clock.Now().Sub(start) / spinnerTickInterval)
 }
 
 // txStatusAccessor returns a closure suitable for StatusRenderDeps.TxStatus.
@@ -147,24 +147,24 @@ func (g *Gui) searchStatusAccessor() func() (string, int, int, bool) {
 // goroutine forwards each tick to OnUIThreadContentOnly until stopSpinner
 // closes spinnerStop.
 func (g *Gui) armSpinner() {
-	if g.clock == nil {
+	if g.spinnerState.clock == nil {
 		return
 	}
-	g.spinnerMu.Lock()
-	defer g.spinnerMu.Unlock()
-	if g.spinnerTicker != nil {
+	g.spinnerState.spinnerMu.Lock()
+	defer g.spinnerState.spinnerMu.Unlock()
+	if g.spinnerState.spinnerTicker != nil {
 		// Already armed (a concurrent worker won the race). Exactly-one
 		// invariant preserved.
 		return
 	}
-	g.spinnerStart = g.clock.Now()
-	ticker := g.clock.NewTicker(spinnerTickInterval)
+	g.spinnerState.spinnerStart = g.spinnerState.clock.Now()
+	ticker := g.spinnerState.clock.NewTicker(spinnerTickInterval)
 	stop := make(chan struct{})
-	g.spinnerTicker = ticker
-	g.spinnerStop = stop
-	g.workersWG.Add(1)
+	g.spinnerState.spinnerTicker = ticker
+	g.spinnerState.spinnerStop = stop
+	g.spinnerState.workersWG.Add(1)
 	go func() {
-		defer g.workersWG.Done()
+		defer g.spinnerState.workersWG.Done()
 		ch := ticker.Chan()
 		for {
 			select {
@@ -183,15 +183,15 @@ func (g *Gui) armSpinner() {
 // nothing is armed. Stopping the ticker and closing spinnerStop wakes the
 // drain goroutine, which then returns and decrements workersWG.
 func (g *Gui) stopSpinner() {
-	g.spinnerMu.Lock()
-	defer g.spinnerMu.Unlock()
-	if g.spinnerTicker == nil {
+	g.spinnerState.spinnerMu.Lock()
+	defer g.spinnerState.spinnerMu.Unlock()
+	if g.spinnerState.spinnerTicker == nil {
 		return
 	}
-	g.spinnerTicker.Stop()
-	close(g.spinnerStop)
-	g.spinnerTicker = nil
-	g.spinnerStop = nil
+	g.spinnerState.spinnerTicker.Stop()
+	close(g.spinnerState.spinnerStop)
+	g.spinnerState.spinnerTicker = nil
+	g.spinnerState.spinnerStop = nil
 }
 
 // OnUIThread schedules fn for execution on the gocui MainLoop with a
@@ -248,7 +248,7 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 	}
 	busyAfter := g.busyDelta(+1)
 	busyBefore := busyAfter - 1
-	g.workersWG.Add(1)
+	g.spinnerState.workersWG.Add(1)
 	task := gocui.NewFakeTask()
 
 	// AD-20 sampling gate (starts): always emit on the start-of-busy
@@ -258,7 +258,7 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 	// counter returns to quiescence (busy_after == 0) and never on
 	// non-transition completions. Together this yields the 2 + N/10
 	// shape the AD-20 burst-sampling test asserts.
-	sampleTick := g.onWorkerSampleCounter.Add(1)
+	sampleTick := g.spinnerState.onWorkerSampleCounter.Add(1)
 	if busyBefore == 0 || sampleTick%onWorkerSampleN == 0 {
 		g.emitWorkerEvent("worker_start",
 			slog.Int64("busy_before", busyBefore),
@@ -274,7 +274,7 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 	}
 
 	go func() {
-		defer g.workersWG.Done()
+		defer g.spinnerState.workersWG.Done()
 		defer func() {
 			endBusyAfter := g.busyDelta(-1)
 			endBusyBefore := endBusyAfter + 1
@@ -339,7 +339,7 @@ func (g *Gui) emitWorkerEvent(evt string, attrs ...slog.Attr) {
 // channel — kept simple here, callers wrap with their own timeout when
 // needed.
 func (g *Gui) WaitWorkers() {
-	g.workersWG.Wait()
+	g.spinnerState.workersWG.Wait()
 }
 
 // workersWGFields is a compile-time guard that the embedded fields used
@@ -349,7 +349,7 @@ func (g *Gui) WaitWorkers() {
 //nolint:unused
 var _ = func() error {
 	var g Gui
-	_ = &g.busy
-	_ = &g.workersWG
+	_ = &g.spinnerState.busy
+	_ = &g.spinnerState.workersWG
 	return fmt.Errorf("compile-time guard only")
 }
