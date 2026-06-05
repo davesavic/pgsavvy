@@ -210,7 +210,6 @@ type ActionTranslations struct {
 	// rendered inside the CONNECTION_MANAGER modal.
 	DeleteConnection string
 	EditConnection   string
-	EditField        string
 	ToggleField      string
 	NextField        string
 	PrevField        string
@@ -338,7 +337,6 @@ func EnglishTranslationSet() *TranslationSet {
 
 		Actions: ActionTranslations{
 			EditConnection: "Edit connection",
-			EditField:      "Edit field",
 			ToggleField:    "Toggle field",
 			NextField:      "Next field",
 			PrevField:      "Previous field",

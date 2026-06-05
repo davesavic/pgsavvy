@@ -287,14 +287,15 @@ func (c *ConnectionManagerContext) rowSuffix(conn *models.Connection) string {
 
 // OptionsBarFilter returns a predicate that selects which ShowInBar action IDs
 // are visible for the current internal mode. Each mode returns an explicit
-// allowlist so form-only bindings (e.g. ConnectionManagerFieldEdit) do not leak
-// into the list bar. The status bar renderer type-asserts to this method each
-// frame.
+// allowlist so list-only bindings (e.g. ConnectionManagerAdd/Delete) do not
+// leak into the form bar. ConnectionManagerEdit is the single `i` edit action,
+// advertised in both list and form mode (it routes by mode). The status bar
+// renderer type-asserts to this method each frame.
 func (c *ConnectionManagerContext) OptionsBarFilter() func(string) bool {
 	switch c.mode {
 	case ModeForm:
 		return func(id string) bool {
-			return id == commands.ConnectionManagerFieldEdit ||
+			return id == commands.ConnectionManagerEdit ||
 				id == commands.ConnectionManagerClose ||
 				id == commands.ConnectionManagerConfirm
 		}

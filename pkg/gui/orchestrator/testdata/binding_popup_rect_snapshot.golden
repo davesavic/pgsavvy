@@ -40,7 +40,6 @@ binding	scope=connection_manager	key=<tab>	mode=normal
 binding	scope=connection_manager	key=G	mode=normal
 binding	scope=connection_manager	key=a	mode=normal
 binding	scope=connection_manager	key=d	mode=normal
-binding	scope=connection_manager	key=e	mode=normal
 binding	scope=connection_manager	key=gg	mode=normal
 binding	scope=connection_manager	key=i	mode=normal
 binding	scope=connection_manager	key=j	mode=normal
