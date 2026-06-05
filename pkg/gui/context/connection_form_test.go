@@ -389,3 +389,48 @@ func TestForm_ValidateAllSSHHostRequired(t *testing.T) {
 		t.Errorf("focus after SSH-host failure = %v, want fieldSSHHost", c.form.focusedSpec().id)
 	}
 }
+
+// colorSpec returns the static spec for the colour row.
+func colorSpec() connFieldSpec {
+	for _, s := range connFormSpecs {
+		if s.id == fieldColor {
+			return s
+		}
+	}
+	panic("color spec missing")
+}
+
+// TestForm_ColorValueTintedWhenRecognized asserts the colour field's value is
+// wrapped in the matching ANSI escape when the name is a standard colour, and
+// (or 24-bit truecolor for hex codes), and left untinted for unknown names /
+// empty.
+func TestForm_ColorValueTintedWhenRecognized(t *testing.T) {
+	c := newTestConnectionManager(&captureDriver{}, nil, nil)
+	c.OpenAddForm(nil, testDrivers)
+	spec := colorSpec()
+
+	c.form.conn.Color = "red"
+	if got, want := c.form.displayValue(spec), "\x1b[31mred\x1b[0m"; got != want {
+		t.Errorf("red display = %q, want %q", got, want)
+	}
+
+	c.form.conn.Color = "#ff4d4d"
+	if got, want := c.form.displayValue(spec), "\x1b[38;2;255;77;77m#ff4d4d\x1b[0m"; got != want {
+		t.Errorf("hex display = %q, want %q", got, want)
+	}
+
+	c.form.conn.Color = "#abc"
+	if got, want := c.form.displayValue(spec), "\x1b[38;2;170;187;204m#abc\x1b[0m"; got != want {
+		t.Errorf("short-hex display = %q, want %q", got, want)
+	}
+
+	c.form.conn.Color = "notacolour"
+	if got := c.form.displayValue(spec); got != "notacolour" {
+		t.Errorf("unknown display = %q, want untinted %q", got, "notacolour")
+	}
+
+	c.form.conn.Color = ""
+	if got := c.form.displayValue(spec); got != "(empty)" {
+		t.Errorf("empty display = %q, want %q", got, "(empty)")
+	}
+}
