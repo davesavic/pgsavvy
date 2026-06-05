@@ -245,9 +245,10 @@ func TestExportMenu_Path_PrefillAndAccessors(t *testing.T) {
 	if m.Path() != "/tmp/a.csv" {
 		t.Errorf("after Prefill, Path = %q; want /tmp/a.csv", m.Path())
 	}
-	m.SetPath("/tmp/custom.json")
-	if m.Path() != "/tmp/custom.json" {
-		t.Errorf("after SetPath, Path = %q; want /tmp/custom.json", m.Path())
+	// Format is CSV (default), so a .csv path is stored verbatim.
+	m.SetPath("/tmp/custom.csv")
+	if m.Path() != "/tmp/custom.csv" {
+		t.Errorf("after SetPath, Path = %q; want /tmp/custom.csv", m.Path())
 	}
 }
 
@@ -267,13 +268,36 @@ func TestExportMenu_Path_SyncsExtensionWithFormat(t *testing.T) {
 	}
 }
 
-func TestExportMenu_Path_FrozenAfterSetPath(t *testing.T) {
+// After the user edits the path, cycling the format must keep their
+// basename but track the extension to the selected format — the file's
+// extension never lies about its contents. dbsavvy-5tq0.
+func TestExportMenu_Path_ExtensionFollowsFormatAfterSetPath(t *testing.T) {
 	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
 	m.Prefill("/tmp/a.csv")
 	m.SetPath("/tmp/keep.csv")
-	m.MoveValue(+1) // cycle format off CSV
-	if m.Path() != "/tmp/keep.csv" {
-		t.Errorf("Path after SetPath+format cycle = %q; want frozen /tmp/keep.csv", m.Path())
+	for range 2 {
+		m.MoveValue(+1) // CSV → TSV → NDJSON
+	}
+	if m.FormatLabel() != "NDJSON" {
+		t.Fatalf("setup: FormatLabel = %q; want NDJSON", m.FormatLabel())
+	}
+	if m.Path() != "/tmp/keep.ndjson" {
+		t.Errorf("Path after SetPath+format cycle = %q; want /tmp/keep.ndjson (basename kept, ext follows format)", m.Path())
+	}
+}
+
+// Editing the path to a mismatched extension while a non-default format is
+// selected normalises the extension immediately to the current format.
+// dbsavvy-5tq0.
+func TestExportMenu_Path_SetPathNormalisesExtensionToFormat(t *testing.T) {
+	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
+	m.Prefill("/tmp/a.csv")
+	for range 2 {
+		m.MoveValue(+1) // → NDJSON
+	}
+	m.SetPath("/tmp/wstestexport.csv") // user types a stale .csv
+	if m.Path() != "/tmp/wstestexport.ndjson" {
+		t.Errorf("Path after SetPath = %q; want /tmp/wstestexport.ndjson (ext normalised to NDJSON)", m.Path())
 	}
 }
 
