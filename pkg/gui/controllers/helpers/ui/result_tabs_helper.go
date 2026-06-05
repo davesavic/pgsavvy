@@ -291,6 +291,13 @@ type ResultTabsHelperDeps struct {
 	// clipboard. 0 means "use the shipped default (16 MiB)". dbsavvy-uv0.9.
 	ExportClipboardMaxBytes int64
 
+	// ExportClipboard is the transport a clipboard export pushes its final
+	// serialized payload to on Close. nil falls back to the real system
+	// clipboard (clipboard.NewSystemClipboard — the same transport grid yank
+	// uses), so production needs no explicit wiring; tests inject a fake.
+	// dbsavvy-rggk.
+	ExportClipboard exporter.ClipboardWriter
+
 	// IntrospectEditability decides whether a completed result is inline-
 	// editable. Wired by the orchestrator to a closure that acquires a
 	// session and runs the driver-specific introspection
@@ -3013,7 +3020,7 @@ func (h *ResultTabsHelper) PromptExport() {
 	}
 	bufferedThresholdExceeded := estimated > threshold
 
-	destinations := []string{"File", "Clipboard", "stdout"}
+	destinations := []string{"File", "Clipboard"}
 	scopes := []string{"Visible", "Loaded", "Full"}
 
 	// dbsavvy-bwq.11 (A8): when SQL-INSERTs is in the format list, gate
@@ -3249,12 +3256,13 @@ func (h *ResultTabsHelper) buildDestination(t *Tab, destLabel, formatLabel strin
 		if maxBytes <= 0 {
 			maxBytes = defaultExportClipboardMaxBytes
 		}
-		// ClipboardWriter is intentionally nil for v1 — clipboard payloads
-		// are buffered and discarded on Close. A full wiring lands in a
-		// follow-up that surfaces the grid clipboard adapter through Deps.
-		return exporter.NewClipboardDest(nil, maxBytes), nil
-	case "stdout":
-		return exporter.NewStdoutDest(), nil
+		cb := h.deps.ExportClipboard
+		if cb == nil {
+			// Production fallback: same system-clipboard transport grid
+			// yank publishes through (see SetClipboard wiring). dbsavvy-rggk.
+			cb = clipboard.NewSystemClipboard()
+		}
+		return exporter.NewClipboardDest(cb, maxBytes), nil
 	}
 	return nil, fmt.Errorf("unknown destination: %s", destLabel)
 }
