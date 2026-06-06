@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -112,8 +113,8 @@ func assertPromptCursorAt(t *testing.T, g *orchestrator.Gui, rec *serializedDriv
 		t.Fatalf("RunLayout: %v", err)
 	}
 	calls := rec.AllSetViewCursorCalls()
-	for i := len(calls) - 1; i >= 0; i-- {
-		c := calls[i]
+	for _, c := range slices.Backward(calls) {
+
 		if c.View != string(types.PROMPT) {
 			continue
 		}

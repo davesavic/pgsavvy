@@ -101,7 +101,7 @@ func TestOpen_PrunesOldestBeyondRetention(t *testing.T) {
 	}
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		name := filepath.Join(sessionsDir, sessionFilePrefix+
 			base.Add(time.Duration(i)*time.Hour).Format("20060102-150405")+
 			"-0000-000000000"+sessionFileSuffix)
@@ -140,7 +140,7 @@ func TestOpen_RetentionSkipsSymlink(t *testing.T) {
 	}
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		name := filepath.Join(sessionsDir, sessionFilePrefix+
 			base.Add(time.Duration(i)*time.Hour).Format("20060102-150405")+
 			"-0000-000000000"+sessionFileSuffix)
@@ -356,7 +356,7 @@ func TestOpen_StartupMarker_FirstLine(t *testing.T) {
 	defer func() { _ = f.Close() }()
 	content, _ := io.ReadAll(f)
 
-	firstLine := strings.SplitN(strings.TrimSpace(string(content)), "\n", 2)[0]
+	firstLine, _, _ := strings.Cut(strings.TrimSpace(string(content)), "\n")
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(firstLine), &obj); err != nil {
 		t.Fatalf("first line is not JSON: %q (%v)", firstLine, err)
@@ -488,7 +488,7 @@ func TestOpen_ReplaysPruneWarnings(t *testing.T) {
 	}
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		name := filepath.Join(sessionsDir, sessionFilePrefix+
 			base.Add(time.Duration(i)*time.Hour).Format("20060102-150405")+
 			"-0000-000000000"+sessionFileSuffix)

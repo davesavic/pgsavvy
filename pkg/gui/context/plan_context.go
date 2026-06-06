@@ -177,10 +177,7 @@ func (p *PlanContext) CursorNode() *models.PlanNode {
 	if len(vis) == 0 {
 		return nil
 	}
-	idx := p.cursor
-	if idx < 0 {
-		idx = 0
-	}
+	idx := max(p.cursor, 0)
 	if idx >= len(vis) {
 		idx = len(vis) - 1
 	}
@@ -195,10 +192,7 @@ func (p *PlanContext) MoveCursor(delta int) {
 		p.cursor = 0
 		return
 	}
-	next := p.cursor + delta
-	if next < 0 {
-		next = 0
-	}
+	next := max(p.cursor+delta, 0)
 	if next >= len(vis) {
 		next = len(vis) - 1
 	}
@@ -352,10 +346,7 @@ func (p *PlanContext) MoveInsightCursor(delta int) {
 		p.insightCursor = 0
 		return
 	}
-	next := p.insightCursor + delta
-	if next < 0 {
-		next = 0
-	}
+	next := max(p.insightCursor+delta, 0)
 	if next >= len(p.findings) {
 		next = len(p.findings) - 1
 	}
@@ -607,10 +598,7 @@ func costThresholds(vis []VisibleNode, analyzed bool) [4]float64 {
 	}
 	sort.Float64s(costs)
 	pick := func(p float64) float64 {
-		idx := int(p * float64(len(costs)-1))
-		if idx < 0 {
-			idx = 0
-		}
+		idx := max(int(p*float64(len(costs)-1)), 0)
 		if idx >= len(costs) {
 			idx = len(costs) - 1
 		}

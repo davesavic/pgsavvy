@@ -61,7 +61,7 @@ func (f *fakeCancelHook) OnCancel() { f.calls++ }
 // compile without reaching into pkg/gui/context internals.
 func stagedSet(schema, table string, n int) *models.PendingEditSet {
 	s := &models.PendingEditSet{Table: models.Ref{Schema: schema, Table: table}}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		_ = s.Add(models.PendingEdit{
 			PrimaryKey: []any{int64(i + 1)},
 			Column:     "name",
@@ -678,7 +678,7 @@ func TestDefaultCommitDialogRender_WideValueTruncates(t *testing.T) {
 		t.Errorf("body missing ellipsis for wide value:\n%s", body)
 	}
 	// And the rendered line stays under 80 cols.
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if len(line) > 120 {
 			// 120 col budget — some lines (header, SqlPreview) may
 			// run wider than 80, but a single rendered Literal value

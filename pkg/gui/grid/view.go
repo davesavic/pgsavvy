@@ -490,17 +490,8 @@ func (v *View) VisibleRows() []models.Row {
 	if len(v.rows) == 0 || v.viewHeight <= 0 {
 		return []models.Row{}
 	}
-	start := v.rowOffset
-	if start < 0 {
-		start = 0
-	}
-	if start > len(v.rows) {
-		start = len(v.rows)
-	}
-	end := start + v.viewHeight
-	if end > len(v.rows) {
-		end = len(v.rows)
-	}
+	start := min(max(v.rowOffset, 0), len(v.rows))
+	end := min(start+v.viewHeight, len(v.rows))
 	out := make([]models.Row, end-start)
 	copy(out, v.rows[start:end])
 	return out
@@ -812,10 +803,7 @@ func (v *View) Render(target *gocui.View) {
 // write mode at the end.
 func (v *View) clampOffsetsLocked(snap viewSnapshot, innerW, innerH int) (rowOffset, colOffset int) {
 	// Reserve one line for the header.
-	dataRows := innerH - 1
-	if dataRows < 1 {
-		dataRows = 1
-	}
+	dataRows := max(innerH-1, 1)
 
 	// cursorRow is a raw-buffer index, but the viewport scrolls over the
 	// projected (filter -> sort -> hide) row order. Translate the cursor
@@ -827,14 +815,8 @@ func (v *View) clampOffsetsLocked(snap viewSnapshot, innerW, innerH int) (rowOff
 	// dbsavvy-dr6.
 	proj := project(snap)
 	projectedCount := len(proj)
-	cursorPos := projectedPos(proj, snap.cursorRow)
-	if cursorPos < 0 {
-		cursorPos = 0
-	}
-	rowOffset = snap.rowOffset
-	if cursorPos < rowOffset {
-		rowOffset = cursorPos
-	}
+	cursorPos := max(projectedPos(proj, snap.cursorRow), 0)
+	rowOffset = min(cursorPos, snap.rowOffset)
 	if cursorPos >= rowOffset+dataRows {
 		rowOffset = cursorPos - dataRows + 1
 	}
@@ -853,10 +835,7 @@ func (v *View) clampOffsetsLocked(snap viewSnapshot, innerW, innerH int) (rowOff
 	// either consumed innerW cells or reached cursorCol. If cursorCol
 	// is left of colOffset, snap colOffset to cursorCol. If it's off
 	// the right edge, advance colOffset until cursorCol fits.
-	colOffset = snap.colOffset
-	if snap.cursorCol < colOffset {
-		colOffset = snap.cursorCol
-	}
+	colOffset = min(snap.cursorCol, snap.colOffset)
 	for colOffset < snap.cursorCol {
 		// Sum widths from colOffset through cursorCol; if total
 		// exceeds innerW, advance colOffset by one.

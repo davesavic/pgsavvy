@@ -71,8 +71,8 @@ func TestWrapSorted_TrailingCommentSurvives(t *testing.T) {
 	}
 
 	// ORDER BY must live on its own line, not appended to the comment line.
-	lines := strings.Split(got, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(got, "\n")
+	for line := range lines {
 		if strings.Contains(line, "-- note") && strings.Contains(line, "ORDER BY") {
 			t.Fatalf("ORDER BY is on the same line as the trailing comment: %q", line)
 		}

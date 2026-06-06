@@ -14,7 +14,7 @@ func TestBuildCheatsheetTabsHumanLabels(t *testing.T) {
 	render := func(scope types.ContextKey) string { return "body:" + string(scope) }
 
 	popup := BuildCheatsheetTabs(types.QUERY_EDITOR, render)
-	header := strings.SplitN(popup.Body(), "\n", 2)[0]
+	header, _, _ := strings.Cut(popup.Body(), "\n")
 
 	if strings.Contains(header, "query_editor") {
 		t.Errorf("tab header still shows raw slug: %q", header)

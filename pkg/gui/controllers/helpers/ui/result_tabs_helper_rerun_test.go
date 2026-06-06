@@ -274,7 +274,7 @@ func TestReRun_CursorResetToTop(t *testing.T) {
 		more[i] = models.Row{Values: []any{i + 2, "x"}}
 	}
 	runner.appendRows(more)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		g.MoveCursorDown()
 		g.Render(nil)
 	}

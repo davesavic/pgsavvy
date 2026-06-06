@@ -1925,10 +1925,7 @@ func identifierStartCol(buf *editor.Buffer, pos editor.Position) int {
 		return pos.Col
 	}
 	runes := lines[pos.Line].Runes
-	end := pos.Col
-	if end > len(runes) {
-		end = len(runes)
-	}
+	end := min(pos.Col, len(runes))
 	start := end
 	for start > 0 && isIdentRune(runes[start-1]) {
 		start--

@@ -451,15 +451,11 @@ func deepCopyAppState(a *AppState) *AppState {
 	}
 	if a.LastBufferUUIDs != nil {
 		cp.LastBufferUUIDs = make(map[string]string, len(a.LastBufferUUIDs))
-		for k, v := range a.LastBufferUUIDs {
-			cp.LastBufferUUIDs[k] = v
-		}
+		maps.Copy(cp.LastBufferUUIDs, a.LastBufferUUIDs)
 	}
 	if a.StatementTimeoutOverride != nil {
 		cp.StatementTimeoutOverride = make(map[string]string, len(a.StatementTimeoutOverride))
-		for k, v := range a.StatementTimeoutOverride {
-			cp.StatementTimeoutOverride[k] = v
-		}
+		maps.Copy(cp.StatementTimeoutOverride, a.StatementTimeoutOverride)
 	}
 	if a.HiddenSchemas != nil {
 		cp.HiddenSchemas = make(map[string][]string, len(a.HiddenSchemas))
@@ -485,23 +481,17 @@ func deepCopyAppState(a *AppState) *AppState {
 		cp.LastSessionSettings = make(map[string]map[string]string, len(a.LastSessionSettings))
 		for k, inner := range a.LastSessionSettings {
 			cpInner := make(map[string]string, len(inner))
-			for ik, iv := range inner {
-				cpInner[ik] = iv
-			}
+			maps.Copy(cpInner, inner)
 			cp.LastSessionSettings[k] = cpInner
 		}
 	}
 	if a.LastSchemaName != nil {
 		cp.LastSchemaName = make(map[string]string, len(a.LastSchemaName))
-		for k, v := range a.LastSchemaName {
-			cp.LastSchemaName[k] = v
-		}
+		maps.Copy(cp.LastSchemaName, a.LastSchemaName)
 	}
 	if a.LastTableName != nil {
 		cp.LastTableName = make(map[string]string, len(a.LastTableName))
-		for k, v := range a.LastTableName {
-			cp.LastTableName[k] = v
-		}
+		maps.Copy(cp.LastTableName, a.LastTableName)
 	}
 	return cp
 }

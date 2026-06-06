@@ -335,7 +335,7 @@ func TestBufferConcurrentAccessRace(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		wg.Add(2)
 		go writer()
 		go reader()
@@ -344,7 +344,7 @@ func TestBufferConcurrentAccessRace(t *testing.T) {
 	// Brief stress window — long enough that -race actually
 	// interleaves the goroutines but short enough to keep the suite
 	// fast.
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		_ = b.String()
 	}
 	close(stop)

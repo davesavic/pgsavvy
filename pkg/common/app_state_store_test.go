@@ -99,7 +99,7 @@ func TestStoreRapidMashCoalesces(t *testing.T) {
 	// 50 mutations in a tight loop, all within "100ms" of fake time. Advance
 	// clock 1ms between each so timers don't all share an identical deadline
 	// (production usage spaces these via real keystrokes).
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		idx := i
 		s.MutateAndSave(func(a *AppState) {
 			if a.HiddenSchemas == nil {
@@ -111,7 +111,7 @@ func TestStoreRapidMashCoalesces(t *testing.T) {
 	}
 	// Total elapsed so far: 50ms. No save should have fired yet (debounce is
 	// 500ms after the LAST mutation).
-	require.Equal(t, int32(0), atomic.LoadInt32(&rec.renames), "no save expected before debounce window elapses")
+	require.Equal(t, int32(0), rec.renames.Load(), "no save expected before debounce window elapses")
 
 	// Advance past the 500ms debounce window.
 	clk.Advance(DebounceWindow + 10*time.Millisecond)
@@ -120,7 +120,7 @@ func TestStoreRapidMashCoalesces(t *testing.T) {
 	// our fake clock so this is effectively a no-op, but assert the contract).
 	require.NoError(t, s.Flush())
 
-	require.Equal(t, int32(1), atomic.LoadInt32(&rec.renames), "exactly one Save expected after debounce")
+	require.Equal(t, int32(1), rec.renames.Load(), "exactly one Save expected after debounce")
 
 	// On-disk state reflects the LAST mutation.
 	b := &AppState{}
@@ -172,7 +172,7 @@ func TestSaveSnapshotIsolation(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for i := range iters {
 			idx := i
 			s.MutateAndSave(func(a *AppState) {
 				if a.HiddenSchemas == nil {
@@ -184,7 +184,7 @@ func TestSaveSnapshotIsolation(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for range iters {
 			_ = s.Save()
 		}
 	}()
@@ -389,11 +389,11 @@ func TestMutateAfterCloseReturnsErr(t *testing.T) {
 // the embedded base.
 type recordingFs struct {
 	afero.Fs
-	renames int32
+	renames atomic.Int32
 }
 
 func (r *recordingFs) Rename(oldname, newname string) error {
-	atomic.AddInt32(&r.renames, 1)
+	r.renames.Add(1)
 	return r.Fs.Rename(oldname, newname)
 }
 

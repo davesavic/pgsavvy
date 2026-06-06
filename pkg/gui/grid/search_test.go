@@ -278,7 +278,7 @@ func TestSetSearch_NoDeadlockWithAppendRows(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines * 2)
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func() {
 			defer wg.Done()
 			batch := make([]models.Row, perGoroutine)

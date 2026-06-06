@@ -91,13 +91,13 @@ func TestMarksSurviveNonOverlappingApply(t *testing.T) {
 
 func TestJumpListPushBelowCap(t *testing.T) {
 	j := newJumpList()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		j.Push(Position{Line: i})
 	}
 	if got := j.Len(); got != 5 {
 		t.Fatalf("Len = %d, want 5", got)
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if got := j.At(i); got.Line != i {
 			t.Errorf("At(%d).Line = %d, want %d", i, got.Line, i)
 		}
@@ -106,7 +106,7 @@ func TestJumpListPushBelowCap(t *testing.T) {
 
 func TestJumpListCapExact100(t *testing.T) {
 	j := newJumpList()
-	for i := 0; i < jumpListCap; i++ {
+	for i := range jumpListCap {
 		j.Push(Position{Line: i})
 	}
 	if got := j.Len(); got != jumpListCap {
@@ -116,7 +116,7 @@ func TestJumpListCapExact100(t *testing.T) {
 
 func TestJumpListRingEvictionAt101(t *testing.T) {
 	j := newJumpList()
-	for i := 0; i < jumpListCap+1; i++ {
+	for i := range jumpListCap + 1 {
 		j.Push(Position{Line: i})
 	}
 	if got := j.Len(); got != jumpListCap {
@@ -133,7 +133,7 @@ func TestJumpListRingEvictionAt101(t *testing.T) {
 
 func TestJumpListLenStableAt100ThroughManyPushes(t *testing.T) {
 	j := newJumpList()
-	for i := 0; i < 250; i++ {
+	for i := range 250 {
 		j.Push(Position{Line: i})
 	}
 	if got := j.Len(); got != jumpListCap {

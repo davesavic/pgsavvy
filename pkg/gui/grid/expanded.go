@@ -65,10 +65,9 @@ func renderExpanded(snap viewSnapshot, innerW, innerH int) string {
 	// unused here.
 	_ = innerH
 	gutter := expandedGutterWidth(snap)
-	valueWidth := innerW - gutter - 3 // "gutter | value"
-	if valueWidth < 4 {
-		valueWidth = 4
-	}
+	valueWidth := max(
+		// "gutter | value"
+		innerW-gutter-3, 4)
 
 	// Determine the active record from the cursor. cursorRow is a raw-
 	// buffer index; the displayed record is its position within the
@@ -82,24 +81,17 @@ func renderExpanded(snap viewSnapshot, innerW, innerH int) string {
 	if len(indices) == 0 {
 		return expandedSeparator(0, snap.estimatedRows, innerW)
 	}
-	cursorIdx := projectedPos(indices, snap.cursorRow)
-	if cursorIdx < 0 {
-		cursorIdx = 0
-	}
+	cursorIdx := max(projectedPos(indices, snap.cursorRow), 0)
 
 	// Overscan: format from cursor-1 to as many records as fit in the
 	// viewport, plus one record past the bottom edge. We bias around
 	// the cursor rather than the rowOffset because in expanded mode the
 	// "viewport" is one record at a time — extra records are pre-formatted
 	// so j/k feels instantaneous.
-	start := cursorIdx - 1
-	if start < 0 {
-		start = 0
-	}
-	end := cursorIdx + 2 // include one record after cursor
-	if end > len(indices) {
-		end = len(indices)
-	}
+	start := max(cursorIdx-1, 0)
+	end := min(
+		// include one record after cursor
+		cursorIdx+2, len(indices))
 
 	var sb strings.Builder
 	for i := start; i < end; i++ {

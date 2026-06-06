@@ -23,7 +23,7 @@ func TestCursorColumnVisibleAfterHorizontalScroll(t *testing.T) {
 	v := NewView()
 	cols := make([]models.ColumnMeta, 0, 6)
 	vals := make([]any, 0, 6)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		cols = append(cols, models.ColumnMeta{Name: fmt.Sprintf("c%d", i), TypeName: "text"})
 		// "valN_" + 9 'x' == 14 visible columns each.
 		vals = append(vals, fmt.Sprintf("val%d_%s", i, strings.Repeat("x", 9)))
@@ -54,7 +54,7 @@ func TestColumnScrollHints(t *testing.T) {
 	v := NewView()
 	cols := make([]models.ColumnMeta, 0, 6)
 	vals := make([]any, 0, 6)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		cols = append(cols, models.ColumnMeta{Name: fmt.Sprintf("c%d", i), TypeName: "text"})
 		vals = append(vals, fmt.Sprintf("val%d_%s", i, strings.Repeat("x", 9)))
 	}
@@ -111,14 +111,14 @@ func TestMoveCursorClampsAtEdges(t *testing.T) {
 	require.Equal(t, 0, c)
 
 	// MoveCursorDown past last row stays at last row.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		v.MoveCursorDown()
 	}
 	r, _ = v.CursorPosition()
 	require.Equal(t, 1, r, "cursor row must clamp to len(rows)-1")
 
 	// MoveCursorRight past last col stays at last col.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		v.MoveCursorRight()
 	}
 	_, c = v.CursorPosition()
@@ -276,7 +276,7 @@ func TestRender_VerticalScroll_FollowsCursor(t *testing.T) {
 	}
 	v.AppendRows(rows)
 
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		v.MoveCursorDown()
 	}
 
@@ -310,7 +310,7 @@ func TestVisibleColumnOrder_FrozenFirstCol(t *testing.T) {
 	require.True(t, v.FrozenFirstColumn())
 
 	// Scroll right several columns.
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		v.MoveCursorRight()
 	}
 
@@ -334,9 +334,9 @@ func TestMaybeFireNearTail_FiresOncePerCrossing(t *testing.T) {
 	v := NewView()
 	v.SetColumns(makeSingleCol("c1", "text"))
 
-	var fires int64
+	var fires atomic.Int64
 	v.SetOnNearTail(func(n int) {
-		atomic.AddInt64(&fires, 1)
+		fires.Add(1)
 	})
 
 	// Append 30 rows. With PrefetchThreshold=25, the near-tail zone is
@@ -350,11 +350,11 @@ func TestMaybeFireNearTail_FiresOncePerCrossing(t *testing.T) {
 	target := newTallTestView("nt", 5)
 	// Step cursor into the near-tail zone and beyond, calling Render
 	// after each step so maybeFireNearTail is checked.
-	for i := 0; i < 28; i++ {
+	for range 28 {
 		v.MoveCursorDown()
 		v.Render(target)
 	}
-	require.Equal(t, int64(1), atomic.LoadInt64(&fires),
+	require.Equal(t, int64(1), fires.Load(),
 		"onNearTail should fire exactly once per crossing while rowsLen is unchanged")
 
 	// Now extend the buffer past lastNearTailFireAt; the next render
@@ -367,7 +367,7 @@ func TestMaybeFireNearTail_FiresOncePerCrossing(t *testing.T) {
 	// JumpLast lands cursor at row 39, deep in the near-tail zone.
 	v.JumpLast()
 	v.Render(target)
-	require.Equal(t, int64(2), atomic.LoadInt64(&fires),
+	require.Equal(t, int64(2), fires.Load(),
 		"onNearTail should re-fire after the buffer grows past the last fire point")
 }
 
@@ -436,7 +436,7 @@ func newTallTestView(name string, rows int) *gocui.View {
 // non-whitespace character. Used to find the rendered header without
 // depending on the exact number of blank padding lines.
 func firstNonEmptyLine(s string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.TrimSpace(line) != "" {
 			return line
 		}

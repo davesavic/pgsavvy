@@ -333,7 +333,7 @@ func TestRunHandleCancel_AfterDoneIsIdempotent(t *testing.T) {
 
 	// Cancel after Done must be a nil-returning no-op and MUST NOT call
 	// conn.Cancel.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := rh.Cancel(); err != nil {
 			t.Errorf("Cancel #%d after Done returned %v, want nil", i, err)
 		}

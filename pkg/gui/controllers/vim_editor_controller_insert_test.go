@@ -256,10 +256,7 @@ func prefixLeftOf(buf *editor.Buffer, pos editor.Position) string {
 		return ""
 	}
 	runes := lines[pos.Line].Runes
-	end := pos.Col
-	if end > len(runes) {
-		end = len(runes)
-	}
+	end := min(pos.Col, len(runes))
 	start := end
 	for start > 0 {
 		r := runes[start-1]

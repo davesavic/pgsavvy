@@ -7,6 +7,7 @@ package testfake
 
 import (
 	"errors"
+	"maps"
 	"sync"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
@@ -198,9 +199,7 @@ func (r *RecorderGuiDriver) InstalledEditors() map[string]gocui.Editor {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make(map[string]gocui.Editor, len(r.editors))
-	for k, v := range r.editors {
-		out[k] = v
-	}
+	maps.Copy(out, r.editors)
 	return out
 }
 

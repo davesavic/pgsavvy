@@ -27,7 +27,7 @@ func newTestConflictDialog(drv types.GuiDriver) *ConflictDialogContext {
 // NOT fire by default.
 func conflictBatch(n int) []models.ConflictedEdit {
 	out := make([]models.ConflictedEdit, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		out = append(out, models.ConflictedEdit{
 			Edit: models.PendingEdit{
 				PrimaryKey: []any{int64(i + 1)},

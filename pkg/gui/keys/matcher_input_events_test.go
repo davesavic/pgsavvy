@@ -23,7 +23,7 @@ func newCapturingLogger(buf *bytes.Buffer) *slog.Logger {
 func findEvents(t *testing.T, buf *bytes.Buffer, name string) []map[string]any {
 	t.Helper()
 	out := []map[string]any{}
-	for _, line := range strings.Split(buf.String(), "\n") {
+	for line := range strings.SplitSeq(buf.String(), "\n") {
 		if line == "" {
 			continue
 		}

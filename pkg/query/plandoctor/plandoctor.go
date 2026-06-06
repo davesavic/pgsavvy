@@ -149,10 +149,7 @@ func material(n *models.PlanNode, p *models.Plan) bool {
 // actualRows returns ActualRows corrected for loop count (PG reports per-loop
 // averages), with a floor of the raw ActualRows when Loops is unset.
 func actualRows(n *models.PlanNode) int64 {
-	loops := n.Loops
-	if loops < 1 {
-		loops = 1
-	}
+	loops := max(n.Loops, 1)
 	return n.ActualRows * loops
 }
 

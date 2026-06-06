@@ -99,14 +99,14 @@ func TestUndoTreeRedoAfterBranchPicksNewBranch(t *testing.T) {
 func TestUndoTreeCapEvictsOldestBranchOnOverflow(t *testing.T) {
 	const capN = 5
 	tr := NewUndoTree(capN)
-	for i := 0; i < capN+1; i++ {
+	for i := range capN + 1 {
 		tr.Apply(Edit{Kind: EditKindInsert, Text: fmt.Sprintf("e%d", i)})
 	}
 	if got, want := tr.NodeCount(), capN; got != want {
 		t.Fatalf("NodeCount after %d applies = %d, want %d", capN+1, got, want)
 	}
 	// Undo capN times succeeds.
-	for i := 0; i < capN; i++ {
+	for i := range capN {
 		if _, ok := tr.Undo(); !ok {
 			t.Fatalf("Undo iteration %d returned ok=false", i)
 		}
@@ -119,7 +119,7 @@ func TestUndoTreeCapEvictsOldestBranchOnOverflow(t *testing.T) {
 
 func TestUndoTreeCap1000(t *testing.T) {
 	tr := NewUndoTree(1000)
-	for i := 0; i < 1001; i++ {
+	for range 1001 {
 		tr.Apply(Edit{Kind: EditKindInsert, Text: "x"})
 	}
 	if got := tr.NodeCount(); got != 1000 {
@@ -135,7 +135,7 @@ func TestUndoTreeBufferRemainsOperationalAfterEviction(t *testing.T) {
 	b := bufFromLines("")
 	// Force an UndoTree with a small cap by initialising History directly.
 	b.History = NewUndoTree(3)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		// Insert at start of line 0 so each iteration is a valid edit
 		// regardless of accumulated length.
 		mustApply(t, b, mkInsert(0, 0, fmt.Sprintf("%d", i)))
@@ -146,7 +146,7 @@ func TestUndoTreeBufferRemainsOperationalAfterEviction(t *testing.T) {
 		t.Fatalf("post-eviction Buffer empty, expected content")
 	}
 	// Undo should run cap times (3), no more.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := b.Undo(); err != nil {
 			t.Fatalf("Undo %d: %v", i, err)
 		}

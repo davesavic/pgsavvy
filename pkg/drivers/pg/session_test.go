@@ -216,12 +216,10 @@ func captureStderr(t *testing.T, fn func()) string {
 	os.Stderr = w
 	done := make(chan string, 1)
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		b, _ := io.ReadAll(r)
 		done <- string(b)
-	}()
+	})
 
 	defer func() {
 		os.Stderr = orig

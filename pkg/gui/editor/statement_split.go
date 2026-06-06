@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -75,13 +76,7 @@ func StatementRangeAt(buf string, runeOff int) (start, end int) {
 
 	// If runeOff lands exactly on a semicolon, treat it as belonging
 	// to the preceding statement (adjust to look left).
-	onSemi := false
-	for _, s := range semis {
-		if s == runeOff {
-			onSemi = true
-			break
-		}
-	}
+	onSemi := slices.Contains(semis, runeOff)
 
 	if onSemi {
 		// Statement is from the previous semicolon (exclusive) to this one (exclusive).

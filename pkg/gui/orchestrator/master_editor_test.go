@@ -213,15 +213,13 @@ func TestMasterEditor_ConcurrentDispatchAndFlushNoRace(t *testing.T) {
 	rig := newRig(t, ts, types.QUERY_EDITOR, types.ModeInsert, 5*time.Millisecond, 2*time.Millisecond)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 50; j++ {
+	for range 4 {
+		wg.Go(func() {
+			for range 50 {
 				_, _ = rig.disp.Dispatch(nil, gocui.NewKeyRune('j'))
 				time.Sleep(time.Microsecond)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	// Give the timer one last chance to fire so the goroutine exits

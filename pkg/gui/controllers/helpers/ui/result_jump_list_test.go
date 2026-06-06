@@ -157,11 +157,10 @@ func TestResultJumpList_ConcurrentSafe(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
-		g := g
+	for g := range goroutines {
 		go func() {
 			defer wg.Done()
-			for i := 0; i < ops; i++ {
+			for i := range ops {
 				switch i % 4 {
 				case 0:
 					l.Push(je(fmt.Sprintf("tab%d", g%4), i))

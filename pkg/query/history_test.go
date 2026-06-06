@@ -88,7 +88,7 @@ func TestHistory_DropOldestOnOverflow(t *testing.T) {
 	h.pauseWriter()
 
 	const n = 200
-	for i := 0; i < n; i++ {
+	for range n {
 		h.Record("SELECT 1", 1, 1, true, "c1")
 	}
 
@@ -263,7 +263,7 @@ func TestHistory_SearchByPrefix_LimitRespected(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		h.Record(fmt.Sprintf("SELECT %d FROM t", i), 1, 1, true, "c1")
 	}
 	waitForHistoryFlush(t, h, 10)
@@ -360,7 +360,7 @@ func insertN(t *testing.T, db *sql.DB, n int) {
 	stmt, err := tx.Prepare(`INSERT INTO history(executed_at, sql, duration_ms, rows_affected, succeeded, connection_id) VALUES (?,?,?,?,?,?)`)
 	require.NoError(t, err)
 	now := time.Now().UnixMilli()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		sql := fmt.Sprintf("SELECT col_%d FROM tbl_%d WHERE id = %d", i%500, i%50, i)
 		_, err := stmt.Exec(now+int64(i), sql, 1, 1, 1, "c1")
 		require.NoError(t, err)
@@ -494,7 +494,7 @@ func TestHistory_RecordNonBlockingLatency(t *testing.T) {
 	defer h.resumeWriter()
 
 	start := time.Now()
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		h.Record("SELECT 1", 1, 1, true, "c1")
 	}
 	elapsed := time.Since(start)

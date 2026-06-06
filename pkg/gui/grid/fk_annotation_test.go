@@ -220,10 +220,7 @@ func TestHeaderWidth_AccommodatesGlyph(t *testing.T) {
 
 	snap := v.snapshot()
 	w := effectiveWidth(snap.widths, 0)
-	wantMin := len([]rune(fkHeaderPrefix + longName))
-	if wantMin > MaxColumnWidth {
-		wantMin = MaxColumnWidth
-	}
+	wantMin := min(len([]rune(fkHeaderPrefix+longName)), MaxColumnWidth)
 	require.GreaterOrEqualf(t, w, wantMin,
 		"locked width %d must accommodate `→ ` + name (%d runes)", w, wantMin)
 

@@ -10,6 +10,7 @@
 package cheatsheet
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
@@ -219,7 +220,7 @@ func buildModeViews(byMode map[types.Mode][]Row) []ModeView {
 		}
 		modes = append(modes, m)
 	}
-	sort.Slice(modes, func(i, j int) bool { return modes[i] < modes[j] })
+	slices.Sort(modes)
 	out := make([]ModeView, 0, len(modes))
 	for _, m := range modes {
 		out = append(out, ModeView{

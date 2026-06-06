@@ -24,7 +24,7 @@ func newLoggerWithBuf() (*slog.Logger, *bytes.Buffer) {
 // linesContaining returns every line in buf that contains all of subs.
 func linesContaining(buf *bytes.Buffer, subs ...string) []string {
 	var out []string
-	for _, ln := range strings.Split(buf.String(), "\n") {
+	for ln := range strings.SplitSeq(buf.String(), "\n") {
 		hit := true
 		for _, s := range subs {
 			if !strings.Contains(ln, s) {

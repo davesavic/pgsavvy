@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -354,13 +355,7 @@ func TestRunLayoutCheatsheetFocusedAfterPush(t *testing.T) {
 	if !rec.HasSetView(string(types.CHEATSHEET)) {
 		t.Fatal("CHEATSHEET SetView not invoked after Push")
 	}
-	found := false
-	for _, vn := range rec.SetCurrentViewLog {
-		if vn == string(types.CHEATSHEET) {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(rec.SetCurrentViewLog, string(types.CHEATSHEET))
 	if !found {
 		t.Fatalf("SetCurrentView(%q) never invoked; SetCurrentViewLog = %v", types.CHEATSHEET, rec.SetCurrentViewLog)
 	}
@@ -530,13 +525,7 @@ func TestRunLayoutWhichKeyOverlayEmptyRowsHidesPopup(t *testing.T) {
 		t.Error("notifier still visible after empty-rows layout pass; Hide() not called")
 	}
 	// View must be DeleteView'd so no empty rect persists.
-	found := false
-	for _, name := range rec.DeleteViews {
-		if name == string(types.WHICH_KEY) {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(rec.DeleteViews, string(types.WHICH_KEY))
 	if !found {
 		t.Errorf("WHICH_KEY DeleteView not invoked; DeleteViews = %v", rec.DeleteViews)
 	}
@@ -573,13 +562,7 @@ func TestRunLayoutCreatesPopupOnStack(t *testing.T) {
 	if err := g.RunLayout(120, 40); err != nil {
 		t.Fatalf("RunLayout post-pop: %v", err)
 	}
-	found := false
-	for _, name := range rec.DeleteViews {
-		if name == string(types.MENU) {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(rec.DeleteViews, string(types.MENU))
 	if !found {
 		t.Fatal("MENU DeleteView not invoked after Pop")
 	}

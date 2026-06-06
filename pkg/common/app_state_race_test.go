@@ -28,7 +28,7 @@ func TestAppState_Save_SafeCallerPattern(t *testing.T) {
 	// Writer: mutates the receiver under the lock.
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for range iters {
 			mu.Lock()
 			a.HiddenSchemas["x"] = []string{"y"}
 			mu.Unlock()
@@ -38,7 +38,7 @@ func TestAppState_Save_SafeCallerPattern(t *testing.T) {
 	// snapshot of the map fields.
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for range iters {
 			mu.Lock()
 			err := a.Save(fs, path)
 			mu.Unlock()

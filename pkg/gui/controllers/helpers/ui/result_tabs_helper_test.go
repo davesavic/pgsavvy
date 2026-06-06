@@ -510,7 +510,7 @@ func TestEvictionDisposesOldestNonPinned(t *testing.T) {
 
 func TestAllPinnedAtCapRejectsOpen(t *testing.T) {
 	h, toaster := newTestHelper(t, nil)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		_ = h.openTab(fmt.Sprintf("t%d", i), nil)
 	}
 	for _, tab := range h.Tabs() {
@@ -1309,7 +1309,7 @@ func TestSetOnNearTailWiringFiresReadRowsOnCursorCross(t *testing.T) {
 	g.AppendRows(rows)
 
 	// Drive cursor into the near-tail zone via Render-triggered checks.
-	for i := 0; i < 28; i++ {
+	for range 28 {
 		g.MoveCursorDown()
 		g.Render(nil) // nil target is allowed
 	}
@@ -1345,16 +1345,16 @@ func TestPrefetchDoesNotDoubleFireForSameRowsLen(t *testing.T) {
 	g.AppendRows(rows)
 
 	// Cross the threshold the first time.
-	for i := 0; i < 28; i++ {
+	for range 28 {
 		g.MoveCursorDown()
 		g.Render(nil)
 	}
 	// Bounce out and back in WITHOUT growing rows.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		g.MoveCursorUp()
 	}
 	g.Render(nil)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		g.MoveCursorDown()
 		g.Render(nil)
 	}
@@ -1455,7 +1455,7 @@ func TestPageMinusOneRewindsCursor(t *testing.T) {
 	}
 	g.AppendRows(rows)
 	// Park cursor near the tail.
-	for i := 0; i < 240; i++ {
+	for range 240 {
 		g.MoveCursorDown()
 	}
 	startRow, _ := g.CursorPosition()

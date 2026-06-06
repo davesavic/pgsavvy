@@ -67,7 +67,7 @@ func stripSGR(s string) string {
 }
 
 func rowFor(body, name string) string {
-	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(body, "\n"), "\n") {
 		if strings.Contains(stripSGR(line), name) {
 			return line
 		}
@@ -186,11 +186,11 @@ func TestRailHighlight_DisconnectedDimComposition(t *testing.T) {
 
 	// Find the span's reset, then assert trailing bytes are re-dimmed and
 	// carry no background SGR.
-	resetIdx := strings.Index(row, "pub"+railAnsiReset)
-	if resetIdx < 0 {
+	_, after0, ok := strings.Cut(row, "pub"+railAnsiReset)
+	if !ok {
 		t.Fatalf("no 'pub'+reset in row %q", row)
 	}
-	after := row[resetIdx+len("pub"+railAnsiReset):]
+	after := after0
 	if !strings.Contains(after, railAnsiDim) {
 		t.Errorf("trailing bytes %q not re-dimmed", after)
 	}

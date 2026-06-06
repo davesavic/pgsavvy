@@ -204,7 +204,7 @@ func TestDefaultRedactor_EnvAddedAfterStart_StillRedacted(t *testing.T) {
 
 func TestDefaultRedactor_InterfaceUnwrap(t *testing.T) {
 	r := DefaultRedactor()
-	var iface interface{} = &models.Connection{Password: "x", Name: "n"}
+	var iface any = &models.Connection{Password: "x", Name: "n"}
 	rec := redactRecord(t, r, "noop", slog.Any("any", iface))
 	out := flattenAttrs(t, rec)
 	if !strings.Contains(out, `"password":"[REDACTED]"`) {
@@ -267,11 +267,11 @@ func TestDefaultRedactor_Idempotent(t *testing.T) {
 func TestDefaultRedactor_RaceFree(t *testing.T) {
 	r := DefaultRedactor()
 	var wg sync.WaitGroup
-	for g := 0; g < 50; g++ {
+	for g := range 50 {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				c := models.Connection{
 					Name:     fmt.Sprintf("g%d-%d", g, i),
 					Password: "hunter2",

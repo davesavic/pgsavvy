@@ -34,7 +34,7 @@ func TestAppendRows_ConcurrentSafe(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
 			batch := make([]models.Row, perGoroutine)

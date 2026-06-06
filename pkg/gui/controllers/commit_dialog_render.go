@@ -113,11 +113,8 @@ func writeCommitDialogPreview(b *strings.Builder, v guicontext.CommitDialogView)
 	}
 	groups := groupEditsByPK(v.Set.Edits())
 	total := len(groups)
-	shown := total
-	if shown > commitDialogMaxRows {
-		shown = commitDialogMaxRows
-	}
-	for i := 0; i < shown; i++ {
+	shown := min(total, commitDialogMaxRows)
+	for i := range shown {
 		g := groups[i]
 		fmt.Fprintf(b, "row %s:\n", formatPK(g.pk))
 		for _, e := range g.edits {
@@ -236,11 +233,8 @@ func writeCommitDialogSQL(b *strings.Builder, v guicontext.CommitDialogView) {
 	}
 	stmts := BuildCommitDialogSQL(v.Set, connectionPassword(v.Conn))
 	b.WriteString("BEGIN;\n")
-	shown := len(stmts)
-	if shown > commitDialogMaxStmts {
-		shown = commitDialogMaxStmts
-	}
-	for i := 0; i < shown; i++ {
+	shown := min(len(stmts), commitDialogMaxStmts)
+	for i := range shown {
 		b.WriteString(stmts[i])
 		b.WriteByte('\n')
 	}
@@ -263,11 +257,8 @@ func writeCommitDialogDryRun(b *strings.Builder, v guicontext.CommitDialogView) 
 		return
 	}
 	total := len(v.DryRunResult)
-	shown := total
-	if shown > commitDialogMaxStmts {
-		shown = commitDialogMaxStmts
-	}
-	for i := 0; i < shown; i++ {
+	shown := min(total, commitDialogMaxStmts)
+	for i := range shown {
 		r := v.DryRunResult[i]
 		switch {
 		case r.Err != nil:

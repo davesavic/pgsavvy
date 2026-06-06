@@ -304,7 +304,7 @@ func TestPlanContext_WholeRowHeatColored(t *testing.T) {
 	body := pc.RenderBody()
 
 	var line string
-	for _, ln := range strings.Split(body, "\n") {
+	for ln := range strings.SplitSeq(body, "\n") {
 		if strings.Contains(ln, "DeepLeaf") {
 			line = ln
 			break
@@ -401,15 +401,15 @@ func TestPlanContext_Toggle_CursorStaysPut(t *testing.T) {
 func boldRedOps(body string) map[string]bool {
 	const bred = "\x1b[1;31m"
 	out := map[string]bool{}
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if !strings.Contains(line, bred) {
 			continue
 		}
 		for _, g := range []string{presentation.GlyphLeaf, presentation.GlyphExpanded, presentation.GlyphCollapsed} {
-			if i := strings.Index(line, g); i >= 0 {
-				rest := strings.TrimSpace(line[i+len(g):])
-				if j := strings.Index(rest, "  cost="); j >= 0 {
-					out[strings.TrimSpace(rest[:j])] = true
+			if _, after, ok := strings.Cut(line, g); ok {
+				rest := strings.TrimSpace(after)
+				if before, _, ok := strings.Cut(rest, "  cost="); ok {
+					out[strings.TrimSpace(before)] = true
 				}
 				break
 			}
@@ -701,7 +701,7 @@ func TestPlanContext_InsightsStrip_WrapsToViewport(t *testing.T) {
 
 	ansi := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	var explanationLines int
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		plain := ansi.ReplaceAllString(line, "")
 		if w := len([]rune(plain)); w > width {
 			t.Errorf("strip line exceeds viewport width %d: %q (%d cols)", width, plain, w)
@@ -721,7 +721,7 @@ func TestPlanContext_Badge_OnFlaggedNodeOnly(t *testing.T) {
 	pc := newTestPlanContext(findingPlan())
 	body := pc.RenderBody() // tree mode; badges render regardless of strip toggle
 	var flaggedRow, rootRow string
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if strings.Contains(line, "Seq Scan flagged") {
 			flaggedRow = line
 		}

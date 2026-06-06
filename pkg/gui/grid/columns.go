@@ -31,16 +31,13 @@ func (v *View) autoSizeFromSampleLocked() {
 			v.widths[i] = -1
 		}
 	}
-	sample := len(v.rows)
-	if sample > AutoSizeSampleRowCount {
-		sample = AutoSizeSampleRowCount
-	}
+	sample := min(len(v.rows), AutoSizeSampleRowCount)
 	for c, col := range v.cols {
 		// Seed against the rendered header label (col.Name plus the FK
 		// `→ ` prefix when IsForeignKey) so the locked width accommodates
 		// the glyph and the header never overflows. dbsavvy-bwq.14 (B3).
 		best := displayWidth(headerLabel(col))
-		for r := 0; r < sample; r++ {
+		for r := range sample {
 			row := v.rows[r]
 			var cell any
 			if c < len(row.Values) {

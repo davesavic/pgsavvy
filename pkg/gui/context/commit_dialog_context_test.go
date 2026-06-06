@@ -25,7 +25,7 @@ func newTestCommitDialog(drv types.GuiDriver) *CommitDialogContext {
 // row Literal edits on (schema, table). PK values are int64 i+1.
 func stagedSet(schema, table string, n int) *models.PendingEditSet {
 	s := &models.PendingEditSet{Table: models.Ref{Schema: schema, Table: table}}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		_ = s.Add(models.PendingEdit{
 			PrimaryKey: []any{int64(i + 1)},
 			Column:     "name",

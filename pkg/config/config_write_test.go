@@ -100,7 +100,7 @@ func runConcurrent(t *testing.T, fs afero.Fs, dir string) {
 	var wg sync.WaitGroup
 	var ok atomic.Int32
 	wg.Add(N)
-	for i := 0; i < N; i++ {
+	for range N {
 		go func() {
 			defer wg.Done()
 			if err := EnsureInitialConfig(fs, dir); err == nil {
