@@ -16,7 +16,7 @@ func bufFrom(text string) *editor.Buffer {
 		b.Lines = []editor.Line{{Runes: []rune("")}}
 		return b
 	}
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		b.Lines = append(b.Lines, editor.Line{Runes: []rune(line)})
 	}
 	return b

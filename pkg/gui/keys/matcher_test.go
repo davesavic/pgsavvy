@@ -821,7 +821,7 @@ func TestMatcher_CountOverflowClamped(t *testing.T) {
 	m := shortMatcher(t, ts, types.QUERY_EDITOR, types.ModeNormal)
 
 	// 50 nines (overflow if unclamped).
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		if _, err := m.Dispatch(types.QUERY_EDITOR, keyOf('9')); err != nil {
 			t.Fatalf("Dispatch 9: %v", err)
 		}

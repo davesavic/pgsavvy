@@ -126,15 +126,15 @@ func TestOnWorker_TenConcurrent_NoLeaks(t *testing.T) {
 	g, _ := buildTestGui(t)
 
 	const n = 10
-	var ran int32
+	var ran atomic.Int32
 	var wg sync.WaitGroup
 	wg.Add(n)
 
-	for i := 0; i < n; i++ {
+	for range n {
 		g.OnWorker(func(_ gocui.Task) error {
 			defer wg.Done()
 			time.Sleep(5 * time.Millisecond)
-			atomic.AddInt32(&ran, 1)
+			ran.Add(1)
 			return nil
 		})
 	}
@@ -142,7 +142,7 @@ func TestOnWorker_TenConcurrent_NoLeaks(t *testing.T) {
 	wg.Wait()
 	g.WaitWorkers()
 
-	if got := atomic.LoadInt32(&ran); got != n {
+	if got := ran.Load(); got != n {
 		t.Fatalf("workers run=%d, want %d", got, n)
 	}
 	if got := g.BusyCount(); got != 0 {

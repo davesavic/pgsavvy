@@ -168,7 +168,7 @@ func TestSpinnerTicker_ExactlyOneWhileBusy(t *testing.T) {
 	const n = 5
 	var started sync.WaitGroup
 	started.Add(n)
-	for i := 0; i < n; i++ {
+	for range n {
 		g.OnWorker(func(_ gocui.Task) error {
 			started.Done()
 			<-release
@@ -201,7 +201,7 @@ func TestSpinnerTicker_NoLeak_RapidStress(t *testing.T) {
 	const n = 200
 	var wg sync.WaitGroup
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for range n {
 		g.OnWorker(func(_ gocui.Task) error {
 			defer wg.Done()
 			return nil

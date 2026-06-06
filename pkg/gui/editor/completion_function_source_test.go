@@ -77,7 +77,7 @@ func TestFunctionSource_CachesAcrossRepeatedCalls(t *testing.T) {
 	sess := &funcFakeSession{names: []string{"f1", "f2"}}
 	src := NewFunctionSource(func() drivers.Session { return sess })
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		got := src.Suggest(context.Background(), nil, Position{})
 		if len(got) != 2 {
 			t.Fatalf("iter %d: len(got) = %d; want 2", i, len(got))

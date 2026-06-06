@@ -185,11 +185,10 @@ func TestPendingEditSet_ConcurrentRace(t *testing.T) {
 	const perG = 200
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
-		g := g
+	for g := range goroutines {
 		go func() {
 			defer wg.Done()
-			for i := 0; i < perG; i++ {
+			for i := range perG {
 				pk := []any{g, i}
 				_ = s.Add(PendingEdit{
 					PrimaryKey: pk,

@@ -137,7 +137,7 @@ func TestExRegistry_Concurrent(t *testing.T) {
 	const N = 64
 	var wg sync.WaitGroup
 	wg.Add(2 * N)
-	for i := 0; i < N; i++ {
+	for i := range N {
 		name := fmt.Sprintf("cmd-%d", i)
 		go func(n string) {
 			defer wg.Done()

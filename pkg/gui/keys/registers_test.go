@@ -55,19 +55,19 @@ func TestRegisterStore_ConcurrentSetGet(t *testing.T) {
 	var wg sync.WaitGroup
 	const goroutines = 16
 	const iterations = 500
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		wg.Add(2)
 		go func(i int) {
 			defer wg.Done()
 			reg := rune('a' + i)
-			for n := 0; n < iterations; n++ {
+			for range iterations {
 				r.Set(reg, "v")
 			}
 		}(i)
 		go func(i int) {
 			defer wg.Done()
 			reg := rune('a' + i)
-			for n := 0; n < iterations; n++ {
+			for range iterations {
 				_ = r.Get(reg)
 			}
 		}(i)

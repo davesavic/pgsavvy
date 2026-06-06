@@ -192,7 +192,7 @@ func TestWhichKeyContext_TruncatesLongRows(t *testing.T) {
 	// Per-line truncation: every non-empty row must fit within
 	// whichKeyMaxRowWidth (the padding added in dbsavvy-tro.11 emits
 	// empty trailing newlines, so we measure the first content row).
-	firstLine := strings.SplitN(drv.lastContent, "\n", 2)[0]
+	firstLine, _, _ := strings.Cut(drv.lastContent, "\n")
 	if got := len(firstLine); got > whichKeyMaxRowWidth {
 		t.Errorf("first-line length = %d, want <= %d", got, whichKeyMaxRowWidth)
 	}

@@ -16,7 +16,7 @@ func TestBuildStatusLine_SpinnerAdvancesByFrameNotBusyCount(t *testing.T) {
 	const busy = int64(1) // one worker the whole time
 
 	seen := make(map[string]int)
-	for frame := int64(0); frame < int64(len(spinnerGlyphs)); frame++ {
+	for frame := range int64(len(spinnerGlyphs)) {
 		line := BuildStatusLine("", nil, nil, tr, busy, frame, "", nil, nil)
 		glyph := string(spinnerGlyphs[frame%int64(len(spinnerGlyphs))])
 		if !containsRune(line, glyph) {

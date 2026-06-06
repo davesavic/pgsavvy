@@ -434,13 +434,7 @@ func lineUpToCursor(buf *Buffer, pos Position) string {
 		return ""
 	}
 	runes := lines[pos.Line].Runes
-	col := pos.Col
-	if col < 0 {
-		col = 0
-	}
-	if col > len(runes) {
-		col = len(runes)
-	}
+	col := min(max(pos.Col, 0), len(runes))
 	return string(runes[:col])
 }
 

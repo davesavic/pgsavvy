@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"slices"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -139,15 +140,13 @@ func (h *SchemasHelper) HideSchema(connID, schemaName string) error {
 			s.HiddenSchemas = map[string][]string{}
 		}
 		existing := s.HiddenSchemas[connID]
-		for _, n := range existing {
-			if n == schemaName {
-				// Idempotent: same connection ID + same schema name twice in
-				// a row is a no-op. Crucially we still arm the debounce
-				// timer (MutateAndSave does) so an empty mutation still
-				// touches disk eventually — that's fine; AppState content
-				// is unchanged.
-				return
-			}
+		if slices.Contains(existing, schemaName) {
+			// Idempotent: same connection ID + same schema name twice in
+			// a row is a no-op. Crucially we still arm the debounce
+			// timer (MutateAndSave does) so an empty mutation still
+			// touches disk eventually — that's fine; AppState content
+			// is unchanged.
+			return
 		}
 		s.HiddenSchemas[connID] = append(existing, schemaName)
 	})

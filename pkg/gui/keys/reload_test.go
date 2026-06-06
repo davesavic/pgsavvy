@@ -284,7 +284,7 @@ func TestReloadCommand_ConcurrentSupersede(t *testing.T) {
 	var started atomic.Int32
 	// Pre-arm a barrier so all 3 goroutines hit Handler nearly together.
 	barrier := make(chan struct{})
-	for i := 0; i < N; i++ {
+	for range N {
 		go func() {
 			defer doneWg.Done()
 			startWg.Done()
@@ -362,7 +362,7 @@ func TestReloadCommand_SerialSuccessions(t *testing.T) {
 		Matcher: mat,
 		Toaster: toaster.toast,
 	})
-	for i := 0; i < len(cfgs); i++ {
+	for i := range cfgs {
 		if err := cmd.Handler(nil, commands.ExecCtx{}); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
 		}

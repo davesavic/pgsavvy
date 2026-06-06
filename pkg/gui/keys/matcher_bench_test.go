@@ -56,7 +56,7 @@ func benchMatcherNormal(tb testing.TB, ts *TrieSet) (*Matcher, types.ContextKey)
 func idleTrieSet(tb testing.TB) *TrieSet {
 	tb.Helper()
 	entries := make([]trieEntry, 0, 50)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		r := rune('A' + i%26)
 		entries = append(entries, trieEntry{
 			mode:  types.ModeNormal,
@@ -120,12 +120,12 @@ func BenchmarkMatcher_PasteInsertMode(b *testing.B) {
 	m, scope := benchMatcherInsert(b, ts)
 	const n = 4000
 	keys := make([]Key, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		keys[i] = Key{Code: 'a' + rune(i%26)}
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for j := 0; j < n; j++ {
+		for j := range n {
 			res, err := m.Dispatch(scope, keys[j])
 			if err != nil {
 				b.Fatalf("Dispatch err: %v", err)
@@ -142,13 +142,13 @@ func BenchmarkMatcher_ChordIdle(b *testing.B) {
 	m, scope := benchMatcherNormal(b, ts)
 	const n = 1000
 	keys := make([]Key, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		// runes 'a'..'z' — disjoint from the trie alphabet ('A'..'Z').
 		keys[i] = Key{Code: 'a' + rune(i%26)}
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for j := 0; j < n; j++ {
+		for j := range n {
 			res, err := m.Dispatch(scope, keys[j])
 			if err != nil {
 				b.Fatalf("Dispatch err: %v", err)
@@ -168,7 +168,7 @@ func BenchmarkMatcher_ChordPartial(b *testing.B) {
 	// fall-through keys. We feed the chord pair adjacent so the second
 	// 'g' resolves the leaf.
 	keys := make([]Key, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		switch i % 5 {
 		case 0, 1:
 			keys[i] = Key{Code: 'g'}
@@ -178,7 +178,7 @@ func BenchmarkMatcher_ChordPartial(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for j := 0; j < n; j++ {
+		for j := range n {
 			if _, err := m.Dispatch(scope, keys[j]); err != nil {
 				b.Fatalf("Dispatch err at j=%d: %v", j, err)
 			}
@@ -216,12 +216,12 @@ func TestMatcher_PasteLatencyUnder20ms(t *testing.T) {
 
 	const n = 4000
 	keys := make([]Key, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		keys[i] = Key{Code: 'a' + rune(i%26)}
 	}
 
 	start := time.Now()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		r, err := m.Dispatch(scope, keys[i])
 		if err != nil {
 			t.Fatalf("Dispatch err at i=%d: %v", i, err)

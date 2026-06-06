@@ -24,7 +24,7 @@ func bufLogger() (*slog.Logger, *bytes.Buffer) {
 // countLines counts lines in buf containing all of subs.
 func countLines(buf *bytes.Buffer, subs ...string) int {
 	n := 0
-	for _, ln := range strings.Split(buf.String(), "\n") {
+	for ln := range strings.SplitSeq(buf.String(), "\n") {
 		ok := true
 		for _, s := range subs {
 			if !strings.Contains(ln, s) {
@@ -42,7 +42,7 @@ func countLines(buf *bytes.Buffer, subs ...string) int {
 // grepLines returns every line in buf containing all of subs.
 func grepLines(buf *bytes.Buffer, subs ...string) []string {
 	var out []string
-	for _, ln := range strings.Split(buf.String(), "\n") {
+	for ln := range strings.SplitSeq(buf.String(), "\n") {
 		ok := true
 		for _, s := range subs {
 			if !strings.Contains(ln, s) {
@@ -109,7 +109,7 @@ func TestOnWorker_SamplesBurstAt_2plus100(t *testing.T) {
 	var started sync.WaitGroup
 	started.Add(n)
 
-	for i := 0; i < n; i++ {
+	for range n {
 		g.OnWorker(func(_ gocui.Task) error {
 			started.Done()
 			<-release

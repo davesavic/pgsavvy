@@ -105,13 +105,11 @@ func TestRegisterGetNames_ConcurrentNoRace(t *testing.T) {
 			Register(name, newStubFactory())
 		}(n)
 	}
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			_, _ = Get("a")
 			_ = Names()
-		}()
+		})
 	}
 	wg.Wait()
 }

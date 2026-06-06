@@ -234,12 +234,11 @@ func TestFKCache_ConcurrentGetsAreSafe(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for i := 0; i < workers; i++ {
-		i := i
+	for i := range workers {
 		go func() {
 			defer wg.Done()
 			ctx := context.Background()
-			for j := 0; j < iters; j++ {
+			for j := range iters {
 				schema, table := "app", "orders"
 				if (i+j)%2 == 0 {
 					table = "items"

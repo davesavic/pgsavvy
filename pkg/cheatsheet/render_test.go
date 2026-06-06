@@ -58,7 +58,7 @@ func TestRender_Deterministic(t *testing.T) {
 	out := Generate(GenerateInput{Trie: ts, Scope: types.TABLES})
 
 	first := Render(out, tr, "tables")
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if next := Render(out, tr, "tables"); next != first {
 			t.Fatalf("Render not deterministic at iter %d", i)
 		}

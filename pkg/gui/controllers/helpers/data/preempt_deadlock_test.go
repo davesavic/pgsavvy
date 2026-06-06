@@ -229,11 +229,9 @@ func newParkedStreamFixture(t *testing.T) *parkedStreamFixture {
 
 	var workers sync.WaitGroup
 	onWorker := func(fn func(gocui.Task) error) {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			_ = fn(nil)
-		}()
+		})
 	}
 	// RBM marshals appendRows / completion flips through onUIThread; running
 	// them synchronously is safe here (no gocui main loop) and keeps the test
@@ -418,11 +416,9 @@ func newAbandonFixture(t *testing.T) (*parkedStreamFixture, *blockingRowStream) 
 
 	var workers sync.WaitGroup
 	onWorker := func(fn func(gocui.Task) error) {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			_ = fn(nil)
-		}()
+		})
 	}
 	onUIThread := func(fn func() error) { _ = fn() }
 

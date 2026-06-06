@@ -443,7 +443,7 @@ func pruneSessions(fs afero.Fs, sessionsDir string, retention int) []string {
 
 	sort.Slice(files, func(i, j int) bool { return files[i].mtime < files[j].mtime })
 	excess := len(files) - retention
-	for i := 0; i < excess; i++ {
+	for i := range excess {
 		_ = fs.Remove(files[i].path)
 	}
 	return warnings

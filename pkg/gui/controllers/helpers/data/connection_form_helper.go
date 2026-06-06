@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/spf13/afero"
@@ -229,12 +230,7 @@ func (h *ConnectionFormHelper) tr() *i18n.TranslationSet {
 }
 
 func containsString(xs []string, v string) bool {
-	for _, x := range xs {
-		if x == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(xs, v)
 }
 
 // NewEmptyStateHook returns a closure matching the

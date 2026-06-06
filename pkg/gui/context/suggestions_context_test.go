@@ -259,7 +259,7 @@ func TestSuggestionsContext_HandleRender_WindowSlides(t *testing.T) {
 		}
 	}
 	c.Show(items, editor.Position{})
-	for i := 0; i < 9; i++ {
+	for range 9 {
 		c.Next()
 	}
 	if err := c.HandleRender(); err != nil {

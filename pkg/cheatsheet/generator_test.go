@@ -344,7 +344,7 @@ func TestGenerate_DeterministicForSameInput(t *testing.T) {
 	ts.Set(types.ModeNormal, types.TABLES, trie)
 
 	first := Generate(GenerateInput{Trie: ts, Scope: types.TABLES})
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		next := Generate(GenerateInput{Trie: ts, Scope: types.TABLES})
 		if len(first.CurrentScope) != len(next.CurrentScope) {
 			t.Fatalf("non-determinism in Generate")

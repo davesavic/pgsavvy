@@ -128,24 +128,15 @@ func (v *View) HalfPageDown() {
 		v.expandedLineOffset += step
 		return
 	}
-	step := ResultPageSize / 2
-	if step < 1 {
-		step = 1
-	}
+	step := max(ResultPageSize/2, 1)
 	// Step half a page through the projected order so the move tracks
 	// what's on screen under an active sort/filter. dbsavvy-dr6.
 	proj := v.projectionLocked()
 	if len(proj) == 0 {
 		return
 	}
-	pos := projectedPos(proj, v.cursorRow)
-	if pos < 0 {
-		pos = 0
-	}
-	target := pos + step
-	if target > len(proj)-1 {
-		target = len(proj) - 1
-	}
+	pos := max(projectedPos(proj, v.cursorRow), 0)
+	target := min(pos+step, len(proj)-1)
 	v.cursorRow = proj[target]
 }
 
@@ -161,22 +152,13 @@ func (v *View) HalfPageUp() {
 		}
 		return
 	}
-	step := ResultPageSize / 2
-	if step < 1 {
-		step = 1
-	}
+	step := max(ResultPageSize/2, 1)
 	proj := v.projectionLocked()
 	if len(proj) == 0 {
 		return
 	}
-	pos := projectedPos(proj, v.cursorRow)
-	if pos < 0 {
-		pos = 0
-	}
-	target := pos - step
-	if target < 0 {
-		target = 0
-	}
+	pos := max(projectedPos(proj, v.cursorRow), 0)
+	target := max(pos-step, 0)
 	v.cursorRow = proj[target]
 }
 
@@ -362,10 +344,7 @@ func renderBody(snap viewSnapshot, innerW, innerH int) string {
 	if len(snap.cols) == 0 {
 		return emptyResultText(snap)
 	}
-	dataRows := innerH - 1
-	if dataRows < 1 {
-		dataRows = 1
-	}
+	dataRows := max(innerH-1, 1)
 
 	var sb strings.Builder
 	moreLeft, moreRight := columnScrollHints(snap, innerW)
@@ -378,10 +357,7 @@ func renderBody(snap viewSnapshot, innerW, innerH int) string {
 	// (not into the projection) so j/k still walks raw rows; only the
 	// visible rendering honors the filter. dbsavvy-uv0.4.
 	indices := project(snap)
-	end := snap.rowOffset + dataRows
-	if end > len(indices) {
-		end = len(indices)
-	}
+	end := min(snap.rowOffset+dataRows, len(indices))
 	for i := snap.rowOffset; i < end; i++ {
 		sb.WriteString(renderDataLine(snap, indices[i], innerW))
 		if i != end-1 {
@@ -601,10 +577,7 @@ func visibleColumnOrder(snap viewSnapshot) []int {
 	out := make([]int, 0, len(snap.cols))
 	if snap.frozenFirstCol {
 		out = append(out, 0)
-		start := snap.colOffset
-		if start < 1 {
-			start = 1
-		}
+		start := max(snap.colOffset, 1)
 		for c := start; c < len(snap.cols); c++ {
 			if c == 0 {
 				continue
@@ -613,10 +586,7 @@ func visibleColumnOrder(snap viewSnapshot) []int {
 		}
 		return filterHidden(out, snap.hidden)
 	}
-	start := snap.colOffset
-	if start < 0 {
-		start = 0
-	}
+	start := max(snap.colOffset, 0)
 	for c := start; c < len(snap.cols); c++ {
 		out = append(out, c)
 	}

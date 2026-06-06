@@ -3,6 +3,7 @@ package gui
 import (
 	"errors"
 	"log/slog"
+	"slices"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/logs"
@@ -250,8 +251,8 @@ func (t *ContextTree) peek() types.IBaseContext {
 // ends up empty.
 func (t *ContextTree) wipeStack() {
 	depthBefore := len(t.stack)
-	for i := len(t.stack) - 1; i >= 0; i-- {
-		_ = t.stack[i].HandleFocusLost(types.OnFocusLostOpts{})
+	for _, v := range slices.Backward(t.stack) {
+		_ = v.HandleFocusLost(types.OnFocusLostOpts{})
 	}
 	t.stack = t.stack[:0]
 	logs.Event(t.sessionLog, "input", "ctx_wipe",

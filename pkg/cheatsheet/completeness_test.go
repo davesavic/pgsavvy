@@ -2,6 +2,7 @@ package cheatsheet
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -45,7 +46,7 @@ func scopesFromTrieSet(trieSet *keys.TrieSet) []types.ContextKey {
 	for sc := range seen {
 		out = append(out, sc)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	slices.Sort(out)
 	return out
 }
 

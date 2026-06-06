@@ -599,8 +599,8 @@ func (a *fkCurrentTabAdapter) ID() int64 { return a.tab.ID() }
 func (a *fkCurrentTabAdapter) BaseTable() (string, string) {
 	_, ri := a.tab.Identity()
 	bt := ri.BaseTable
-	if i := strings.IndexByte(bt, '.'); i >= 0 {
-		return bt[:i], bt[i+1:]
+	if before, after, ok := strings.Cut(bt, "."); ok {
+		return before, after
 	}
 	return "", bt
 }

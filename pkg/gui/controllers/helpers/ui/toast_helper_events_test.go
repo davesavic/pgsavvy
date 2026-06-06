@@ -20,7 +20,7 @@ func newBufLogger() (*slog.Logger, *bytes.Buffer) {
 
 func linesContainingAll(buf *bytes.Buffer, subs ...string) []string {
 	var out []string
-	for _, ln := range strings.Split(buf.String(), "\n") {
+	for ln := range strings.SplitSeq(buf.String(), "\n") {
 		ok := true
 		for _, s := range subs {
 			if !strings.Contains(ln, s) {

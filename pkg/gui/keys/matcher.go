@@ -376,10 +376,7 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 				// If the digit is itself a leaf in scope or global for
 				// this mode, prefer the binding over count collection.
 				if !bindingExistsAt(ts, mode, scope, k) && !bindingExistsAt(ts, mode, types.GLOBAL, k) {
-					next := m.count*10 + int(k.Code-'0')
-					if next > countMax {
-						next = countMax
-					}
+					next := min(m.count*10+int(k.Code-'0'), countMax)
 					m.count = next
 					m.mu.Unlock()
 					return Pending, nil

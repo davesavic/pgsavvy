@@ -17,7 +17,7 @@ type keybindingProvider interface {
 	GetKeybindings(types.KeybindingsOpts) []*types.ChordBinding
 }
 
-var keybindingProviderType = reflect.TypeOf((*keybindingProvider)(nil)).Elem()
+var keybindingProviderType = reflect.TypeFor[keybindingProvider]()
 
 // TestAllDefaultBindingsIncludesEveryProviderController guards the
 // registry-derived AllDefaultBindings against omission. Now that
@@ -44,7 +44,7 @@ func TestAllDefaultBindingsIncludesEveryProviderController(t *testing.T) {
 	providerAllowlist := map[string]string{}
 
 	// 1. Reflect: every Controllers field whose type is a keybinding provider.
-	ctrlType := reflect.TypeOf(Controllers{})
+	ctrlType := reflect.TypeFor[Controllers]()
 	providerFields := map[string]bool{}
 	for i := 0; i < ctrlType.NumField(); i++ {
 		f := ctrlType.Field(i)

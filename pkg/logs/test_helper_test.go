@@ -36,11 +36,11 @@ func TestRecordingHandler_RaceFree(t *testing.T) {
 	ctx := context.Background()
 
 	var wg sync.WaitGroup
-	for g := 0; g < 50; g++ {
+	for g := range 50 {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				r := slog.NewRecord(time.Now(), slog.LevelDebug, "msg", 0)
 				r.AddAttrs(slog.Int("g", g), slog.Int("i", i))
 				_ = h.Handle(ctx, r)
@@ -48,14 +48,12 @@ func TestRecordingHandler_RaceFree(t *testing.T) {
 		}(g)
 	}
 	// Concurrent readers.
-	for r := 0; r < 10; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 50; i++ {
+	for range 10 {
+		wg.Go(func() {
+			for range 50 {
 				_ = h.Records()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

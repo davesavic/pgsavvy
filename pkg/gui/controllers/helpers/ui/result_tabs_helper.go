@@ -978,10 +978,7 @@ func (h *ResultTabsHelper) Close(t *Tab) error {
 	var newActive int64
 	if len(h.tabs) > 0 {
 		// Find tab at slot closedSlot-1 if it exists.
-		target := closedSlot - 1
-		if target < 0 {
-			target = 0
-		}
+		target := max(closedSlot-1, 0)
 		var best *Tab
 		for _, tab := range h.tabs {
 			if tab.slot == target {
@@ -1214,7 +1211,7 @@ func (h *ResultTabsHelper) Page(dir int) {
 	// window. Implementation: step HalfPageUp twice for now (mirrors
 	// the existing scroll verbs). Note: this is the minimum-viable
 	// surface; a dedicated PageUp verb is a follow-up.
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		g.HalfPageUp()
 	}
 }
@@ -2965,7 +2962,7 @@ func (h *ResultTabsHelper) seedHiddenColsForIdentity(t *Tab, connID string, ri q
 		nameSet[n] = struct{}{}
 	}
 	n := g.ColumnCount()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if _, ok := nameSet[g.ColumnName(i)]; ok {
 			idx[i] = true
 		}
@@ -3614,7 +3611,7 @@ func (h *ResultTabsHelper) gridColumnNames(g *grid.View) []string {
 		return nil
 	}
 	names := make([]string, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		names = append(names, g.ColumnName(i))
 	}
 	return names

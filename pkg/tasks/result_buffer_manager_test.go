@@ -116,11 +116,9 @@ func newTestHarness() *testHarness {
 	}()
 
 	onWorker := func(fn func(gocui.Task) error) {
-		h.workersWG.Add(1)
-		go func() {
-			defer h.workersWG.Done()
+		h.workersWG.Go(func() {
 			_ = fn(nil)
-		}()
+		})
 	}
 
 	onUIThread := func(fn func() error) {
@@ -390,12 +388,10 @@ func TestNewQueryTaskStopBeforeStreamFnStillClosesStream(t *testing.T) {
 	gate := make(chan struct{})
 	var workersWG sync.WaitGroup
 	onWorker := func(fn func(gocui.Task) error) {
-		workersWG.Add(1)
-		go func() {
-			defer workersWG.Done()
+		workersWG.Go(func() {
 			<-gate // do not start until the test has Stopped the task
 			_ = fn(nil)
-		}()
+		})
 	}
 	onUIThread := func(fn func() error) { _ = fn() }
 	mgr := tasks.New(onWorker, onUIThread)

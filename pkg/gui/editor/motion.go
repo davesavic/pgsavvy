@@ -135,7 +135,7 @@ func CharLeft(b *Buffer, pos Position, count int) (Position, bool) {
 	}
 	line, col := pos.Line, pos.Col
 	moved := false
-	for i := 0; i < n; i++ {
+	for range n {
 		nl, nc, ok := stepLeft(b, line, col)
 		if !ok {
 			break
@@ -157,7 +157,7 @@ func CharRight(b *Buffer, pos Position, count int) (Position, bool) {
 	}
 	line, col := pos.Line, pos.Col
 	moved := false
-	for i := 0; i < n; i++ {
+	for range n {
 		nl, nc, ok := stepRight(b, line, col)
 		if !ok {
 			break
@@ -200,10 +200,7 @@ func LineUp(b *Buffer, pos Position, count int) (Position, bool) {
 	if !ok || empty(b) {
 		return Position{}, false
 	}
-	dst := pos.Line - n
-	if dst < 0 {
-		dst = 0
-	}
+	dst := max(pos.Line-n, 0)
 	if dst == pos.Line {
 		return Position{}, false
 	}
@@ -306,10 +303,7 @@ func BufferEnd(b *Buffer, pos Position, count int) (Position, bool) {
 	last := len(b.Lines) - 1
 	dst := last
 	if count >= 2 {
-		dst = count - 1
-		if dst > last {
-			dst = last
-		}
+		dst = min(count-1, last)
 	}
 	if pos.Line == dst && pos.Col == 0 {
 		return Position{}, false
@@ -340,7 +334,7 @@ func wordNext(b *Buffer, pos Position, count int, classify func(rune) runeClass)
 	}
 	line, col := pos.Line, pos.Col
 	moved := false
-	for i := 0; i < n; i++ {
+	for range n {
 		nl, nc, ok := stepWordForward(b, line, col, classify)
 		if !ok {
 			break
@@ -412,7 +406,7 @@ func wordPrev(b *Buffer, pos Position, count int, classify func(rune) runeClass)
 	}
 	line, col := pos.Line, pos.Col
 	moved := false
-	for i := 0; i < n; i++ {
+	for range n {
 		nl, nc, ok := stepWordBackward(b, line, col, classify)
 		if !ok {
 			break
@@ -491,7 +485,7 @@ func wordEnd(b *Buffer, pos Position, count int, classify func(rune) runeClass) 
 	}
 	line, col := pos.Line, pos.Col
 	moved := false
-	for i := 0; i < n; i++ {
+	for range n {
 		nl, nc, ok := stepWordEnd(b, line, col, classify)
 		if !ok {
 			break
@@ -575,7 +569,7 @@ func ParagraphPrev(b *Buffer, pos Position, count int) (Position, bool) {
 	}
 	line := pos.Line
 	moved := false
-	for i := 0; i < n; i++ {
+	for range n {
 		nl, ok := paragraphBackwardOne(b, line)
 		if !ok {
 			break
@@ -617,7 +611,7 @@ func ParagraphNext(b *Buffer, pos Position, count int) (Position, bool) {
 	}
 	line := pos.Line
 	moved := false
-	for i := 0; i < n; i++ {
+	for range n {
 		nl, ok := paragraphForwardOne(b, line)
 		if !ok {
 			break
@@ -671,7 +665,7 @@ func SentenceNext(b *Buffer, pos Position, count int) (Position, bool) {
 	}
 	line, col := pos.Line, pos.Col
 	moved := false
-	for i := 0; i < n; i++ {
+	for range n {
 		nl, nc, ok := sentenceForwardOne(b, line, col)
 		if !ok {
 			break
@@ -750,7 +744,7 @@ func SentencePrev(b *Buffer, pos Position, count int) (Position, bool) {
 	}
 	line, col := pos.Line, pos.Col
 	moved := false
-	for i := 0; i < n; i++ {
+	for range n {
 		nl, nc, ok := sentenceBackwardOne(b, line, col)
 		if !ok {
 			break

@@ -100,7 +100,7 @@ func TestSchemasContextShowHiddenModeConcurrentToggle(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(n * 2)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		v := i%2 == 0
 		go func(v bool) {
 			defer wg.Done()

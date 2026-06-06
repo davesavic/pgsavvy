@@ -49,7 +49,7 @@ func TestFlashYankRow_ArmsWholeRow(t *testing.T) {
 	require.NotZero(t, epoch)
 
 	snap := v.snapshot()
-	for c := 0; c < 3; c++ {
+	for c := range 3 {
 		require.True(t, inYankFlash(snap, 0, c), "every column of the focused row is flashed (col %d)", c)
 	}
 	require.False(t, inYankFlash(snap, 1, 0), "the other row is not flashed")

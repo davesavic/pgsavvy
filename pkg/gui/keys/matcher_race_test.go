@@ -41,7 +41,7 @@ func TestMatcher_RaceDispatchCancelSwap(t *testing.T) {
 	var stop atomic.Bool
 
 	// Dispatch goroutines.
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		wg.Add(1)
 		go func(seed int) {
 			defer wg.Done()
@@ -54,24 +54,20 @@ func TestMatcher_RaceDispatchCancelSwap(t *testing.T) {
 	}
 
 	// Cancel goroutine.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for n := 0; n < iterations*5 && !stop.Load(); n++ {
 			m.Cancel()
 			time.Sleep(50 * time.Microsecond)
 		}
-	}()
+	})
 
 	// SwapTrieSet goroutine.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for n := 0; n < 20 && !stop.Load(); n++ {
 			m.SwapTrieSet(build())
 			time.Sleep(500 * time.Microsecond)
 		}
-	}()
+	})
 
 	// Bail-out timer in case some path deadlocks under the race detector.
 	go func() {
@@ -102,7 +98,7 @@ func TestMatcher_RaceTimerFireVsCancel(t *testing.T) {
 		t.Fatalf("NewMatcher: %v", err)
 	}
 
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		if _, err := m.Dispatch(types.QUERY_EDITOR, keyOf('z')); err != nil {
 			t.Fatalf("Dispatch: %v", err)
 		}
@@ -133,19 +129,19 @@ func TestMatcher_RaceInsertPendingFlushRegister(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		for n := 0; n < 500; n++ {
+		for range 500 {
 			m.OnInsertPendingFlush(types.QUERY_EDITOR, func(types.ContextKey, []rune) {})
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for n := 0; n < 500; n++ {
+		for range 500 {
 			m.OnInsertPendingFlush(types.QUERY_EDITOR, nil)
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for n := 0; n < 500; n++ {
+		for range 500 {
 			_, _ = m.Dispatch(types.QUERY_EDITOR, keyOf('j'))
 			time.Sleep(50 * time.Microsecond)
 		}

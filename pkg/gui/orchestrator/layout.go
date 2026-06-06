@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/gdamore/tcell/v3"
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -672,16 +671,16 @@ func (g *Gui) RunLayout(w, h int) error {
 			case types.SIDE_CONTEXT, types.MAIN_CONTEXT, types.EXTRAS_CONTEXT:
 				enabled := top.GetKey() == types.QUERY_EDITOR
 				g.driver.SetCaretEnabled(enabled)
-				// Force a steady (non-blinking) block cursor while the
-				// QUERY_EDITOR has focus. The terminal default is a
-				// blinking bar/block on most emulators, which is
-				// distracting in the editor. tcell deduplicates the
-				// escape sequence internally — safe to call every frame.
-				// Per-mode shapes (normal/visual/insert distinction) is
-				// future work; for now any focused editor frame stays
-				// steady-block.
+				// Drive the caret shape from the editor's current mode so
+				// the user sees a neovim-style distinction: a blinking bar
+				// while inserting, a steady block in normal/visual. The
+				// terminal default is a blinking bar/block on most
+				// emulators, which is distracting in normal mode. tcell
+				// deduplicates the escape sequence internally — safe to
+				// call every frame.
 				if enabled && gocui.Screen != nil {
-					gocui.Screen.SetCursorStyle(tcell.CursorStyleSteadyBlock)
+					mode := g.keybindingSystem.matcher.CurrentMode(types.QUERY_EDITOR)
+					gocui.Screen.SetCursorStyle(cursorStyleForMode(mode))
 				}
 			default:
 				// Non-tiled top context (a focus-stack popup). Editable
@@ -950,14 +949,8 @@ func (g *Gui) anchoredPopupRect(ctx types.IBaseContext, dims map[string]ui.Dimen
 	ox, oy := view.Origin()
 
 	suggestions := prov.Suggestions()
-	rows := len(suggestions)
-	if rows > suggestionsRowsMax {
-		rows = suggestionsRowsMax
-	}
-	contentW := longestDisplayWidth(suggestions)
-	if contentW > suggestionsColsMax {
-		contentW = suggestionsColsMax
-	}
+	rows := min(len(suggestions), suggestionsRowsMax)
+	contentW := min(longestDisplayWidth(suggestions), suggestionsColsMax)
 	return anchoredRect(vx0, vy0, vx1, vy1, ox, oy, prov.Anchor(), contentW, rows), true
 }
 
@@ -1065,13 +1058,7 @@ func promptPopupCols(labelRunes, bufferRunes, canvasCols int) int {
 	if w := 2 + bufferRunes; w > content {
 		content = w
 	}
-	cols := content + 3
-	if cols < promptMaxCols {
-		cols = promptMaxCols
-	}
-	if cols > canvasCols {
-		cols = canvasCols
-	}
+	cols := min(max(content+3, promptMaxCols), canvasCols)
 	return cols
 }
 
@@ -1098,7 +1085,7 @@ func promptBufferOf(ctx types.IBaseContext) string {
 // line in s (labels may carry multi-line validator-error text).
 func longestLineRunes(s string) int {
 	max := 0
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if n := len([]rune(line)); n > max {
 			max = n
 		}
@@ -1199,20 +1186,8 @@ func centeredRectMaxSize(canvas ui.Dimensions, maxCols, maxRows int) rect {
 	if cw < 2 || ch < 2 {
 		return rect{X0: canvas.X0, Y0: canvas.Y0, X1: canvas.X1, Y1: canvas.Y1}
 	}
-	w := maxCols
-	if w > cw {
-		w = cw
-	}
-	if w < 1 {
-		w = 1
-	}
-	h := maxRows
-	if h > ch {
-		h = ch
-	}
-	if h < 1 {
-		h = 1
-	}
+	w := max(min(maxCols, cw), 1)
+	h := max(min(maxRows, ch), 1)
 	x0 := canvas.X0 + (cw-w)/2
 	y0 := canvas.Y0 + (ch-h)/2
 	return rect{X0: x0, Y0: y0, X1: x0 + w, Y1: y0 + h}
@@ -1226,20 +1201,8 @@ func bottomRightRect(canvas ui.Dimensions, maxCols, maxRows int) rect {
 	if cw < 2 || ch < 2 {
 		return rect{X0: canvas.X0, Y0: canvas.Y0, X1: canvas.X1, Y1: canvas.Y1}
 	}
-	w := maxCols
-	if w > cw {
-		w = cw
-	}
-	if w < 1 {
-		w = 1
-	}
-	h := maxRows
-	if h > ch {
-		h = ch
-	}
-	if h < 1 {
-		h = 1
-	}
+	w := max(min(maxCols, cw), 1)
+	h := max(min(maxRows, ch), 1)
 	return rect{
 		X0: canvas.X1 - w,
 		Y0: canvas.Y1 - h,
@@ -1313,10 +1276,7 @@ func applyCheatsheetScroll(view *gocui.View, ctx types.IBaseContext) {
 	if !ok {
 		return
 	}
-	maxOY := view.LinesHeight() - view.InnerHeight()
-	if maxOY < 0 {
-		maxOY = 0
-	}
+	maxOY := max(view.LinesHeight()-view.InnerHeight(), 0)
 	oy := sc.ScrollY()
 	if oy > maxOY {
 		oy = maxOY

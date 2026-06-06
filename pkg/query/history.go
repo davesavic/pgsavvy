@@ -373,10 +373,7 @@ func (h *History) SearchByPrefix(ctx context.Context, prefix string, limit int) 
 	// (e.g. every row starts with SELECT) doesn't force us to read the
 	// whole table just to dedupe.
 	const scanMultiplier = 8
-	scanCap := limit * scanMultiplier
-	if scanCap < 64 {
-		scanCap = 64
-	}
+	scanCap := max(limit*scanMultiplier, 64)
 
 	// Subquery returns matching rowids newest-first (rowid == history.id);
 	// the outer SELECT does a covered PK lookup. Avoiding the JOIN+ORDER BY

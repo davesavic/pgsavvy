@@ -70,7 +70,7 @@ func (f *fakeDiscardToast) Show(msg string, ttl time.Duration) {
 func newSet(t *testing.T, ref models.Ref, n int) *models.PendingEditSet {
 	t.Helper()
 	s := &models.PendingEditSet{Table: ref}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		err := s.Add(models.PendingEdit{
 			PrimaryKey: []any{i + 1},
 			Column:     "name",

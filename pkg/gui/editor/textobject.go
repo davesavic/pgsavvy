@@ -161,10 +161,7 @@ func findEnclosingOpen(b *Buffer, pos Position, open, close rune) (int, int, boo
 		runes := b.Lines[l].Runes
 		end := len(runes)
 		if l == line {
-			end = col
-			if end > len(runes) {
-				end = len(runes)
-			}
+			end = min(col, len(runes))
 		}
 		for i := end - 1; i >= 0; i-- {
 			switch runes[i] {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -78,12 +79,7 @@ func nodeHasActuals(n *models.PlanNode) bool {
 	if n.ActualCost != 0 || n.ActualRows != 0 || n.Loops != 0 || n.ActualTotalTime != 0 {
 		return true
 	}
-	for _, c := range n.Children {
-		if nodeHasActuals(c) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(n.Children, nodeHasActuals)
 }
 
 // buildPlanNode recursively transforms a decoded EXPLAIN-JSON object into a

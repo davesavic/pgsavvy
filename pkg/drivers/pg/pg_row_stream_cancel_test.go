@@ -52,8 +52,8 @@ var _ pgx.Rows = (*fakeStreamRows)(nil)
 // statement-timeout lifecycle (dbsavvy-fow.7 U15): a leaked CancelFunc
 // would strand the deadline timer goroutine past release.
 func TestPgRowStreamReleaseInvokesCancelOnce(t *testing.T) {
-	var cancelCalls int32
-	cancel := func() { atomic.AddInt32(&cancelCalls, 1) }
+	var cancelCalls atomic.Int32
+	cancel := func() { cancelCalls.Add(1) }
 
 	rows := &fakeStreamRows{}
 	stream := newPgRowStream(rows, models.QueryID{}, func() {}, cancel)
@@ -67,7 +67,7 @@ func TestPgRowStreamReleaseInvokesCancelOnce(t *testing.T) {
 		t.Fatalf("second Close: %v", err)
 	}
 
-	if got := atomic.LoadInt32(&cancelCalls); got != 1 {
+	if got := cancelCalls.Load(); got != 1 {
 		t.Fatalf("cancel invoked %d times, want exactly 1", got)
 	}
 	if got := atomic.LoadInt32(&rows.closed); got != 1 {
@@ -79,8 +79,8 @@ func TestPgRowStreamReleaseInvokesCancelOnce(t *testing.T) {
 // (Next observing clean end-of-result) fires the cancel exactly once, and a
 // follow-up explicit Close does not fire it again.
 func TestPgRowStreamReleaseCancelViaEOFThenClose(t *testing.T) {
-	var cancelCalls int32
-	cancel := func() { atomic.AddInt32(&cancelCalls, 1) }
+	var cancelCalls atomic.Int32
+	cancel := func() { cancelCalls.Add(1) }
 
 	rows := &fakeStreamRows{remaining: 0} // immediate EOF
 	stream := newPgRowStream(rows, models.QueryID{}, func() {}, cancel)
@@ -92,7 +92,7 @@ func TestPgRowStreamReleaseCancelViaEOFThenClose(t *testing.T) {
 		t.Fatalf("Close after EOF: %v", err)
 	}
 
-	if got := atomic.LoadInt32(&cancelCalls); got != 1 {
+	if got := cancelCalls.Load(); got != 1 {
 		t.Fatalf("cancel invoked %d times, want exactly 1 (EOF path + idempotent Close)", got)
 	}
 }
@@ -111,23 +111,21 @@ func TestPgRowStreamNilCancelIsSafe(t *testing.T) {
 // goroutines and asserts the cancel still fires exactly once — the CAS
 // guard must be race-safe.
 func TestPgRowStreamReleaseConcurrentCancelOnce(t *testing.T) {
-	var cancelCalls int32
-	cancel := func() { atomic.AddInt32(&cancelCalls, 1) }
+	var cancelCalls atomic.Int32
+	cancel := func() { cancelCalls.Add(1) }
 
 	rows := &fakeStreamRows{}
 	stream := newPgRowStream(rows, models.QueryID{}, func() {}, cancel)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 32 {
+		wg.Go(func() {
 			_ = stream.Close()
-		}()
+		})
 	}
 	wg.Wait()
 
-	if got := atomic.LoadInt32(&cancelCalls); got != 1 {
+	if got := cancelCalls.Load(); got != 1 {
 		t.Fatalf("cancel invoked %d times under concurrency, want exactly 1", got)
 	}
 }

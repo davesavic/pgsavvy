@@ -162,9 +162,7 @@ func (g *Gui) armSpinner() {
 	stop := make(chan struct{})
 	g.spinnerState.spinnerTicker = ticker
 	g.spinnerState.spinnerStop = stop
-	g.spinnerState.workersWG.Add(1)
-	go func() {
-		defer g.spinnerState.workersWG.Done()
+	g.spinnerState.workersWG.Go(func() {
 		ch := ticker.Chan()
 		for {
 			select {
@@ -174,7 +172,7 @@ func (g *Gui) armSpinner() {
 				g.OnUIThreadContentOnly(func() error { return nil })
 			}
 		}
-	}()
+	})
 }
 
 // stopSpinner stops the spinner ticker on the busy ->0 transition (and is

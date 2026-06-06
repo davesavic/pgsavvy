@@ -1007,7 +1007,7 @@ func TestQueryEditorVisualRunOverCapAbortsBeforeAnyRun(t *testing.T) {
 
 	// 33 statements (one over the 32 cap).
 	var sb strings.Builder
-	for i := 0; i < 33; i++ {
+	for range 33 {
 		sb.WriteString("SELECT 1;")
 	}
 	base := newBag()

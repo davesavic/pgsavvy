@@ -440,7 +440,7 @@ func TestToggleShowHidden_SerialPressesAreRaceClean(t *testing.T) {
 	ctx := newSchemasContext(t)
 
 	const N = 100
-	for i := 0; i < N; i++ {
+	for range N {
 		h.ToggleShowHidden(ctx)
 	}
 	// Final parity: 100 toggles from "off" → off.

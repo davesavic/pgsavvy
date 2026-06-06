@@ -89,10 +89,7 @@ func selectionRange(snap viewSnapshot) (rowStart, colStart, rowEnd, colEnd int, 
 		r0, r1 := orderInts(snap.anchorRow, snap.cursorRow)
 		// Column span is the entire row.
 		c0 := 0
-		c1 := len(snap.cols) - 1
-		if c1 < 0 {
-			c1 = 0
-		}
+		c1 := max(len(snap.cols)-1, 0)
 		return r0, c0, r1, c1, true
 	default:
 		return 0, 0, 0, 0, false

@@ -61,7 +61,7 @@ func (b *syncBuf) String() string {
 func findEvents(t *testing.T, buf *syncBuf, want string) []map[string]any {
 	t.Helper()
 	var out []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
 		if line == "" {
 			continue
 		}
@@ -151,12 +151,10 @@ func TestCancel_ConcurrentEmitsOnce(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 4 {
+		wg.Go(func() {
 			_ = s.Cancel(rh.QueryID())
-		}()
+		})
 	}
 	wg.Wait()
 

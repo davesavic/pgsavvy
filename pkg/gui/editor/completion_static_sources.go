@@ -144,10 +144,7 @@ func identifierPrefixAt(buf *Buffer, pos Position) string {
 		return ""
 	}
 	runes := lines[pos.Line].Runes
-	end := pos.Col
-	if end > len(runes) {
-		end = len(runes)
-	}
+	end := min(pos.Col, len(runes))
 	if end <= 0 {
 		return ""
 	}

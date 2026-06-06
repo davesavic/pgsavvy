@@ -189,10 +189,7 @@ func formatSuggestionsBody(suggestions []editor.Suggestion, selected, visibleMax
 			start = 0
 		}
 	}
-	end := start + visibleMax
-	if end > n {
-		end = n
-	}
+	end := min(start+visibleMax, n)
 	var sb strings.Builder
 	for i := start; i < end; i++ {
 		if i > start {
