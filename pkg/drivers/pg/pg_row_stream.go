@@ -148,6 +148,11 @@ func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 		if err != nil {
 			return models.Row{}, false, wrapPgError(err)
 		}
+		// Clip oversized cell values at the stream boundary so a
+		// wide-payload query can't accumulate hundreds of MB of heap
+		// across the buffered rows and stall the process under GC
+		// pressure (dbsavvy-fspu).
+		capRowValues(vals, s.columns)
 		return models.Row{Values: vals}, true, nil
 
 	case <-ctx.Done():

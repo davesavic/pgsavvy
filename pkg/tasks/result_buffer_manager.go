@@ -13,6 +13,13 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
+// initialFillChunkRows is the sub-batch size for the synchronous initial
+// fill. The first page (initialRows) is drained and dispatched to the UI
+// in chunks of this size so the grid paints progressively rather than
+// staying blank until the entire page is read — important for wide-payload
+// queries whose per-row decode is slow (dbsavvy-fspu).
+const initialFillChunkRows = 50
+
 // ResultBufferManager is the SQL-row analogue of lazygit's
 // ViewBufferManager (pkg/tasks/tasks.go:31-149 in the vendored fork).
 // It owns the lifecycle of a single in-flight streaming query: starts
@@ -395,23 +402,42 @@ func (m *ResultBufferManager) runTask(
 
 	// --- Initial fill ---
 	//
-	// Pull up to initialRows rows synchronously and dispatch them
-	// in a single appendRows batch on the UI thread. Lazygit
-	// pre-paints lines from the scanner the same way (tasks.go:262;
-	// the InitialRefreshAfter knob) — the "first page is on screen
-	// before the chan loop starts" property is what AC scenario
-	// "Initial fill pre-paints rows" requires.
+	// Pull up to initialRows rows synchronously and dispatch them in
+	// chunks on the UI thread so the grid paints progressively instead
+	// of staying blank until the whole initial page is drained. With
+	// wide-payload rows a single 200-row drain can take tens of seconds,
+	// during which the UI looks frozen (dbsavvy-fspu). Chunking also
+	// bounds the peak un-dispatched batch held in memory. The "first
+	// page is on screen before the chan loop starts" property required by
+	// AC scenario "Initial fill pre-paints rows" still holds.
 	if initialRows > 0 {
-		initial, eof := m.drainRows(ctx, stream, initialRows, stopCh)
-		if len(initial) > 0 {
-			m.dispatchRows(initial, appendRows)
-		}
-		if eof {
-			// Whole result fit within the initial fill: the stream
-			// is exhausted, so exit now. The deferred cleanup fires
-			// onDone → markCompleteOnUI (StateComplete) without
-			// needing a Stop / preempt (Gap 1).
-			return
+		remaining := initialRows
+		for remaining > 0 {
+			select {
+			case <-stopCh:
+				return
+			default:
+			}
+			want := min(remaining, initialFillChunkRows)
+			batch, eof := m.drainRows(ctx, stream, want, stopCh)
+			if len(batch) > 0 {
+				m.dispatchRows(batch, appendRows)
+			}
+			if eof {
+				// Whole result fit within the initial fill: the stream
+				// is exhausted, so exit now. The deferred cleanup fires
+				// onDone → markCompleteOnUI (StateComplete) without
+				// needing a Stop / preempt (Gap 1).
+				return
+			}
+			remaining -= len(batch)
+			if len(batch) < want {
+				// Short read without EOF: a Stop or a mid-stream error.
+				// Hand off to the chan loop, which exits on Stop and
+				// otherwise stays alive until Stop (preserving the
+				// mid-stream-error contract).
+				break
+			}
 		}
 	}
 
