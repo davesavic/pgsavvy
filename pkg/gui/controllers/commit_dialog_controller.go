@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"strconv"
+
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
@@ -13,13 +15,12 @@ import (
 // dbsavvy-bwq.23). Aliases retain the controllers.CommitDialog* names
 // so existing callers (notably this package's tests) keep compiling.
 const (
-	CommitDialogOpen      = commands.CommitDialogOpen
-	CommitDialogApply     = commands.CommitDialogApply
-	CommitDialogDryRun    = commands.CommitDialogDryRun
-	CommitDialogShowSql   = commands.CommitDialogShowSql
-	CommitDialogCancel    = commands.CommitDialogCancel
-	CommitDialogTypeChar  = commands.CommitDialogTypeChar
-	CommitDialogBackspace = commands.CommitDialogBackspace
+	CommitDialogOpen     = commands.CommitDialogOpen
+	CommitDialogApply    = commands.CommitDialogApply
+	CommitDialogDryRun   = commands.CommitDialogDryRun
+	CommitDialogShowSql  = commands.CommitDialogShowSql
+	CommitDialogCancel   = commands.CommitDialogCancel
+	CommitDialogTypeName = commands.CommitDialogTypeName
 )
 
 // CommitDialogApplyHook is invoked when `[a]` is pressed on a default
@@ -204,6 +205,52 @@ func (e *CommitDialogController) ShowSql(_ commands.ExecCtx) error {
 	return nil
 }
 
+// TypeName is the `[t]` handler. Opens the single-line PROMPT popup
+// seeded with the current typed-name buffer; submit writes the value
+// back via SetTypedName and repaints so the apply gate re-evaluates.
+// The dialog's bare-letter commands stay reachable because the typed
+// text lives in the PROMPT scope, not this one (dbsavvy-p8cv —
+// replaces the never-wired per-rune input).
+//
+// PROMPT and COMMIT_DIALOG are both TEMPORARY_POPUP, so pushing the
+// prompt evicts the dialog from the focus stack (ContextTree
+// popup-replaces-popup). The context snapshot stays Active() the whole
+// time; both callbacks re-push it so the dialog returns to focus.
+func (e *CommitDialogController) TypeName(_ commands.ExecCtx) error {
+	if e.ctx == nil || !e.ctx.Active() || e.helpers.Prompt == nil {
+		return nil
+	}
+	conn := e.ctx.Connection()
+	if conn == nil || !conn.ConfirmWrites {
+		return nil
+	}
+	label := "type " + strconv.Quote(conn.Name) + " to enable apply"
+	onSubmit := func(value string) error {
+		if e.ctx == nil || !e.ctx.Active() {
+			return nil
+		}
+		e.ctx.SetTypedName(value)
+		if err := e.repushDialog(); err != nil {
+			return err
+		}
+		return e.ctx.HandleRender()
+	}
+	onCancel := func() error {
+		return e.repushDialog()
+	}
+	return e.wrapErr("commit.dialog.type_name", e.helpers.Prompt.Prompt(label, e.ctx.TypedName(), onSubmit, onCancel))
+}
+
+// repushDialog restores the dialog to the top of the focus stack after
+// the typed-name prompt pops. No-op when the tree is unwired or the
+// dialog was closed in the interim.
+func (e *CommitDialogController) repushDialog() error {
+	if e.tree == nil || e.ctx == nil || !e.ctx.Active() {
+		return nil
+	}
+	return e.wrapErr("commit.dialog.repush", e.tree.Push(e.ctx))
+}
+
 // Cancel is the `[Esc]` / `[c]` handler. Pops the dialog without
 // modifying the PendingEditSet. Invokes the OnCancel hook (if wired)
 // BEFORE the pop so audit / cleanup runs against the live state.
@@ -296,7 +343,24 @@ func (e *CommitDialogController) applyDisabled() (string, bool) {
 		return "read-only connection", true
 	}
 	if conn.ConfirmWrites && e.ctx.TypedName() != conn.Name {
-		return "type the connection name to enable apply", true
+		return "press [t] and type the connection name to enable apply", true
+	}
+	return "", false
+}
+
+// typeNameDisabled returns the user-facing reason `[t]` should be
+// disabled on COMMIT_DIALOG, or ("", false) when the typed-name prompt
+// is available.
+func (e *CommitDialogController) typeNameDisabled() (string, bool) {
+	if e.ctx == nil || !e.ctx.Active() {
+		return "no commit dialog active", true
+	}
+	conn := e.ctx.Connection()
+	if conn == nil {
+		return "no active connection", true
+	}
+	if !conn.ConfirmWrites {
+		return "typed confirmation not required on this connection", true
 	}
 	return "", false
 }
@@ -306,16 +370,15 @@ func (e *CommitDialogController) applyDisabled() (string, bool) {
 //   - `[a]` on COMMIT_DIALOG (ModeNormal): Apply.
 //   - `[d]` on COMMIT_DIALOG (ModeNormal): DryRun.
 //   - `[s]` on COMMIT_DIALOG (ModeNormal): ShowSql.
+//   - `[t]` on COMMIT_DIALOG (ModeNormal): TypeName.
 //   - `[Esc]` on COMMIT_DIALOG (ModeNormal): Cancel.
 //   - `[c]` on COMMIT_DIALOG (ModeNormal): Cancel.
 //
-// COMMIT_DIALOG is a TEMPORARY_POPUP scope; the dialog is non-editable
-// (the typed-name input is driven via a dedicated input view Z1 wires,
-// NOT by the dialog body). Mode is ModeNormal because the [a]/[d]/[s]
-// keys MUST be reachable as bare letters — confirm_writes connections
-// route printable runes into the typed-name input via a separate
-// scope Z1 wires post-task (currently the rune buffer is driven via
-// SetTypedName for tests).
+// COMMIT_DIALOG is a TEMPORARY_POPUP scope; the dialog body is
+// non-editable. Mode is ModeNormal because the [a]/[d]/[s]/[t] keys
+// MUST be reachable as bare letters — the typed-name input happens in
+// the PROMPT popup [t] pushes on top, so typing the connection name
+// never collides with this scope's bindings (dbsavvy-p8cv).
 func (e *CommitDialogController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	scope := guicontext.CommitDialogKey()
 	return []*types.ChordBinding{
@@ -339,6 +402,13 @@ func (e *CommitDialogController) GetKeybindings(_ types.KeybindingsOpts) []*type
 			Scope:       scope,
 			ActionID:    CommitDialogShowSql,
 			Description: "Toggle SQL preview",
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 't'}},
+			Mode:        types.ModeNormal,
+			Scope:       scope,
+			ActionID:    CommitDialogTypeName,
+			Description: "Type connection name to enable apply",
 		},
 		{
 			Sequence:    []types.ChordKey{{Code: 'c'}},
@@ -397,19 +467,15 @@ func (e *CommitDialogController) RegisterActions(reg *commands.Registry) {
 		Tag:         "Commit",
 		Handler:     e.Cancel,
 	})
-
-	// Typed-name input no-ops — Z1 will replace these with the
-	// real per-rune / backspace handlers once the editable view is
-	// wired. Registered here so the Matcher resolves the IDs.
-	noop := func(commands.ExecCtx) error { return nil }
-	for _, id := range []string{CommitDialogTypeChar, CommitDialogBackspace} {
-		_ = reg.Register(&commands.Command{
-			ID:          id,
-			Description: id + " (pending Z1)",
-			Tag:         "Commit",
-			Handler:     noop,
-		})
-	}
+	_ = reg.Register(&commands.Command{
+		ID:          CommitDialogTypeName,
+		Description: "Type connection name to enable apply",
+		Tag:         "Commit",
+		Handler:     e.TypeName,
+		GetDisabled: func(_ commands.ExecCtx) (string, bool) {
+			return e.typeNameDisabled()
+		},
+	})
 }
 
 // AttachToContext registers GetKeybindings on the COMMIT_DIALOG
