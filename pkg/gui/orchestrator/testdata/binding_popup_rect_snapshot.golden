@@ -26,6 +26,7 @@ binding	scope=commit_dialog	key=a	mode=normal
 binding	scope=commit_dialog	key=c	mode=normal
 binding	scope=commit_dialog	key=d	mode=normal
 binding	scope=commit_dialog	key=s	mode=normal
+binding	scope=commit_dialog	key=t	mode=normal
 binding	scope=confirmation	key=<cr>	mode=normal
 binding	scope=confirmation	key=<esc>	mode=normal
 binding	scope=confirmation	key=n	mode=normal

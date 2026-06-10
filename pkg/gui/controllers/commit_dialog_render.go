@@ -305,13 +305,14 @@ func truncateSQL(s string) string {
 
 // writeCommitDialogGate renders the apply-enable hint. On default
 // connections this is a one-liner "[a] apply  [d] dry-run  [s] sql
-// [Esc] cancel". On confirm_writes connections the hint is replaced
-// with the typed-name input until TypedName == Conn.Name, at which
-// point the apply-allowed banner replaces it.
+// [Esc] cancel". On confirm_writes connections a typed-name line
+// precedes it: until TypedName == Conn.Name it points at the [t]
+// prompt (echoing any prior attempt), then the apply-allowed banner
+// replaces it.
 func writeCommitDialogGate(b *strings.Builder, v guicontext.CommitDialogView) {
 	if v.Conn != nil && v.Conn.ConfirmWrites {
 		if v.TypedName != v.Conn.Name {
-			fmt.Fprintf(b, "type %q to enable [a]: %s_\n", v.Conn.Name, v.TypedName)
+			fmt.Fprintf(b, "[t] type %q to enable [a]: %s\n", v.Conn.Name, v.TypedName)
 		} else {
 			b.WriteString("typed-name match — [a] to apply\n")
 		}

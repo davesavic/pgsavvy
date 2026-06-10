@@ -480,15 +480,14 @@ const (
 
 	// Commit-dialog family — owned by CommitDialogController (dbsavvy-bwq A4/A5/Z1).
 	// `:w`/`<leader>cw` open; `[a]` apply (gated); `[d]` dry-run; `[s]` SQL
-	// preview toggle; `[Esc]`/`[c]` cancel; TypeChar/Backspace drive the
-	// typed-name input.
-	CommitDialogOpen      = "commit.dialog.open"
-	CommitDialogApply     = "commit.dialog.apply"
-	CommitDialogDryRun    = "commit.dialog.dryrun"
-	CommitDialogShowSql   = "commit.dialog.show_sql"
-	CommitDialogCancel    = "commit.dialog.cancel"
-	CommitDialogTypeChar  = "commit.dialog.type_char"
-	CommitDialogBackspace = "commit.dialog.backspace"
+	// preview toggle; `[Esc]`/`[c]` cancel; `[t]` opens the typed-name
+	// prompt that drives the confirm_writes apply gate (dbsavvy-p8cv).
+	CommitDialogOpen     = "commit.dialog.open"
+	CommitDialogApply    = "commit.dialog.apply"
+	CommitDialogDryRun   = "commit.dialog.dryrun"
+	CommitDialogShowSql  = "commit.dialog.show_sql"
+	CommitDialogCancel   = "commit.dialog.cancel"
+	CommitDialogTypeName = "commit.dialog.type_name"
 
 	// Conflict-dialog family — owned by ConflictDialogController (dbsavvy-bwq A6/Z1).
 	// `[r]` refresh; `[o]` overwrite (omitted on confirm_writes); `[Esc]` cancel.
@@ -790,8 +789,7 @@ func AllActionIDs() []string {
 		CommitDialogDryRun,
 		CommitDialogShowSql,
 		CommitDialogCancel,
-		CommitDialogTypeChar,
-		CommitDialogBackspace,
+		CommitDialogTypeName,
 		ConflictDialogRefresh,
 		ConflictDialogOverwrite,
 		ConflictDialogCancel,

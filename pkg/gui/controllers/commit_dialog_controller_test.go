@@ -104,6 +104,7 @@ func TestCommitDialogController_Keybindings(t *testing.T) {
 		{controllers.CommitDialogDryRun, scope, types.ModeNormal},
 		{controllers.CommitDialogShowSql, scope, types.ModeNormal},
 		{controllers.CommitDialogCancel, scope, types.ModeNormal},
+		{controllers.CommitDialogTypeName, scope, types.ModeNormal},
 	}
 	for _, w := range want {
 		if !have[w] {
@@ -229,7 +230,7 @@ func TestCommitDialogController_ApplyDisabledReasons(t *testing.T) {
 				c.Open(stagedSet("s", "t", 1), &models.Connection{Name: "prod", ConfirmWrites: true})
 				return c
 			},
-			reason: "type the connection name to enable apply",
+			reason: "press [t] and type the connection name to enable apply",
 		},
 	}
 	for _, tc := range cases {
@@ -730,6 +731,9 @@ func TestDefaultCommitDialogRender_TypedNamePrompt(t *testing.T) {
 	if !strings.Contains(body, "pro") {
 		t.Errorf("body missing typed-name buffer:\n%s", body)
 	}
+	if !strings.Contains(body, "[t]") {
+		t.Errorf("body missing [t] hint for the typed-name prompt:\n%s", body)
+	}
 }
 
 // AC: Typed-name match shows the "type match — [a] to apply" banner.
@@ -812,5 +816,181 @@ func TestCommitDialogController_ShowSqlPreservesTypedName(t *testing.T) {
 	_ = ctrl.DryRun(commands.ExecCtx{})
 	if ctx.TypedName() != "pro" {
 		t.Errorf("TypedName lost after [d]: %q", ctx.TypedName())
+	}
+}
+
+// capturingPromptHelper records the Prompt invocation (label, initial,
+// callbacks) so tests can drive the submit/cancel path directly.
+type capturingPromptHelper struct {
+	label    string
+	initial  string
+	onSubmit func(value string) error
+	onCancel func() error
+	calls    int
+}
+
+func (f *capturingPromptHelper) Prompt(label, initial string, onSubmit func(string) error, onCancel func() error) error {
+	f.calls++
+	f.label = label
+	f.initial = initial
+	f.onSubmit = onSubmit
+	f.onCancel = onCancel
+	return nil
+}
+
+func (f *capturingPromptHelper) Submit(value string) error {
+	if f.onSubmit == nil {
+		return nil
+	}
+	return f.onSubmit(value)
+}
+
+func (f *capturingPromptHelper) Cancel() error {
+	if f.onCancel == nil {
+		return nil
+	}
+	return f.onCancel()
+}
+
+func (f *capturingPromptHelper) SetResetHandler(func(initial string)) {}
+
+// AC: [t] opens the typed-name prompt (label names the connection,
+// initial seeds the current buffer); submit fills the gate so [a]
+// becomes enabled AND re-pushes the dialog — PROMPT is a
+// TEMPORARY_POPUP, so pushing it evicted the dialog from the focus
+// stack (ContextTree popup-replaces-popup semantics).
+func TestCommitDialogController_TypeNamePromptFillsGate(t *testing.T) {
+	ctx := newCommitDialogTestCtx()
+	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "prod", ConfirmWrites: true})
+
+	prompt := &capturingPromptHelper{}
+	tree := &fakeFocusTree{}
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{Prompt: prompt}, controllers.EditDeps{}, ctx, tree)
+
+	if err := ctrl.TypeName(commands.ExecCtx{}); err != nil {
+		t.Fatalf("TypeName: %v", err)
+	}
+	if prompt.calls != 1 {
+		t.Fatalf("prompt.calls = %d, want 1", prompt.calls)
+	}
+	if !strings.Contains(prompt.label, "prod") {
+		t.Errorf("prompt label %q does not name the connection", prompt.label)
+	}
+	if prompt.initial != "" {
+		t.Errorf("prompt initial = %q, want empty (no prior buffer)", prompt.initial)
+	}
+
+	if err := prompt.Submit("prod"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if ctx.TypedName() != "prod" {
+		t.Errorf("TypedName = %q after submit, want %q", ctx.TypedName(), "prod")
+	}
+	if !ctx.ApplyEnabled() {
+		t.Error("ApplyEnabled() = false after matching submit; want true")
+	}
+	if tree.pushes != 1 || tree.pushedCtx != types.IBaseContext(ctx) {
+		t.Errorf("dialog not re-pushed after submit: pushes=%d pushedCtx=%v", tree.pushes, tree.pushedCtx)
+	}
+}
+
+// AC: cancelling the typed-name prompt restores the dialog (re-push)
+// without touching the buffer.
+func TestCommitDialogController_TypeNameCancelRestoresDialog(t *testing.T) {
+	ctx := newCommitDialogTestCtx()
+	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "prod", ConfirmWrites: true})
+	ctx.SetTypedName("pro")
+
+	prompt := &capturingPromptHelper{}
+	tree := &fakeFocusTree{}
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{Prompt: prompt}, controllers.EditDeps{}, ctx, tree)
+
+	if err := ctrl.TypeName(commands.ExecCtx{}); err != nil {
+		t.Fatalf("TypeName: %v", err)
+	}
+	if err := prompt.Cancel(); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if ctx.TypedName() != "pro" {
+		t.Errorf("TypedName = %q after cancel, want untouched %q", ctx.TypedName(), "pro")
+	}
+	if tree.pushes != 1 || tree.pushedCtx != types.IBaseContext(ctx) {
+		t.Errorf("dialog not re-pushed after cancel: pushes=%d pushedCtx=%v", tree.pushes, tree.pushedCtx)
+	}
+}
+
+// AC: re-invoking [t] seeds the prompt with the previous attempt so the
+// user can fix a typo instead of retyping from scratch.
+func TestCommitDialogController_TypeNameReseedsPriorAttempt(t *testing.T) {
+	ctx := newCommitDialogTestCtx()
+	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "prod", ConfirmWrites: true})
+	ctx.SetTypedName("prdo")
+
+	prompt := &capturingPromptHelper{}
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{Prompt: prompt}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
+
+	if err := ctrl.TypeName(commands.ExecCtx{}); err != nil {
+		t.Fatalf("TypeName: %v", err)
+	}
+	if prompt.initial != "prdo" {
+		t.Errorf("prompt initial = %q, want prior attempt %q", prompt.initial, "prdo")
+	}
+}
+
+// AC: TypeName is registered with a GetDisabled predicate covering the
+// inactive-dialog and confirmation-not-required states.
+func TestCommitDialogController_TypeNameDisabledReasons(t *testing.T) {
+	cases := []struct {
+		name   string
+		setup  func() *guicontext.CommitDialogContext
+		reason string
+	}{
+		{
+			name: "no dialog active",
+			setup: func() *guicontext.CommitDialogContext {
+				return newCommitDialogTestCtx()
+			},
+			reason: "no commit dialog active",
+		},
+		{
+			name: "typed confirmation not required",
+			setup: func() *guicontext.CommitDialogContext {
+				c := newCommitDialogTestCtx()
+				c.Open(stagedSet("s", "t", 1), &models.Connection{Name: "dev"})
+				return c
+			},
+			reason: "typed confirmation not required on this connection",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := tc.setup()
+			ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
+			reg := commands.NewRegistry()
+			ctrl.RegisterActions(reg)
+
+			cmd, ok := reg.Get(controllers.CommitDialogTypeName)
+			if !ok || cmd == nil {
+				t.Fatal("CommitDialogTypeName not registered")
+			}
+			reason, disabled := cmd.Disabled(commands.ExecCtx{})
+			if !disabled {
+				t.Fatalf("Disabled = false; want true (%s)", tc.name)
+			}
+			if reason != tc.reason {
+				t.Errorf("reason = %q, want %q", reason, tc.reason)
+			}
+		})
+	}
+}
+
+// AC: TypeName with no Prompt helper wired is a safe no-op.
+func TestCommitDialogController_TypeNameNilPromptIsSafe(t *testing.T) {
+	ctx := newCommitDialogTestCtx()
+	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "prod", ConfirmWrites: true})
+
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
+	if err := ctrl.TypeName(commands.ExecCtx{}); err != nil {
+		t.Fatalf("TypeName with nil prompt: %v", err)
 	}
 }
