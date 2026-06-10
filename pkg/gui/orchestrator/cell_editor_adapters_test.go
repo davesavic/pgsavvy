@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
 // TestFormatForEdit_JSONObject asserts the cell-editor seed for a
@@ -14,8 +15,25 @@ import (
 // have to hand-correct. Mirrors the grid renderer so seed and display
 // agree. dbsavvy json-cell-format.
 func TestFormatForEdit_JSONObject(t *testing.T) {
-	got := cellEditorPicker{}.FormatForEdit(map[string]any{"plan": "pro", "active": true})
+	got := cellEditorPicker{}.FormatForEdit(
+		map[string]any{"plan": "pro", "active": true},
+		models.ColumnMeta{TypeName: "jsonb"},
+	)
 	require.Equal(t, `{"active":true,"plan":"pro"}`, got)
+}
+
+// TestFormatForEdit_JSONBytes pins the fix for dbsavvy-2ij6: pgx decodes a
+// json/jsonb column whose value arrives as raw text into a Go []byte, which
+// the shape-based fallbacks miss (not a map, and FormatArrayLiteral rejects
+// []byte), so the editor used to seed Go's byte-slice form "[123 34 ...]".
+// With the column meta threaded, a json column routes through FormatJSONValue
+// and seeds the raw JSON text the user actually wants to edit.
+func TestFormatForEdit_JSONBytes(t *testing.T) {
+	got := cellEditorPicker{}.FormatForEdit(
+		[]byte(`{"a":1}`),
+		models.ColumnMeta{TypeName: "json"},
+	)
+	require.Equal(t, `{"a":1}`, got)
 }
 
 // TestStreamBlocksEdit pins the edit-gate state policy: inline edits are

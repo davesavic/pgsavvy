@@ -37,6 +37,14 @@ const (
 	kindBytes
 )
 
+// IsJSONColumn reports whether col is a json/jsonb column, using the same
+// type classification as the grid renderer. The cell editor uses this to
+// seed json/jsonb cells with JSON text via FormatJSONValue, since pgx may
+// decode such a value into a []byte that the Go-shape fallbacks miss.
+func IsJSONColumn(col models.ColumnMeta) bool {
+	return classifyColumn(col) == kindJSON
+}
+
 // classifyColumn maps a ColumnMeta to its display kind. Lowercased
 // TypeName lookup; unrecognised types collapse to kindUnknown which
 // renders with the default foreground.

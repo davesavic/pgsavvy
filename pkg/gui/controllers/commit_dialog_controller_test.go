@@ -541,6 +541,33 @@ func TestDefaultCommitDialogRender_RowDiffPreview(t *testing.T) {
 	}
 }
 
+// AC (dbsavvy-2ij6 follow-up): a json/jsonb column whose OldValue pgx
+// decoded as []byte renders as JSON text in the preview — matching the
+// cell-editor seed and the new value — not Go's byte-slice form
+// "[123 34 ...]".
+func TestDefaultCommitDialogRender_JSONOldValue(t *testing.T) {
+	set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "events"}}
+	_ = set.Add(models.PendingEdit{
+		PrimaryKey: []any{int64(7)},
+		Column:     "payload",
+		ColumnType: "jsonb",
+		OldValue:   []byte(`{"a":1}`),
+		NewValue:   `{"a":2}`,
+		Kind:       models.Literal,
+	})
+	view := guicontext.CommitDialogView{
+		Set:  set,
+		Conn: &models.Connection{Name: "dev"},
+	}
+	body := controllers.DefaultCommitDialogRender(view)
+	if !strings.Contains(body, `{"a":1}`) {
+		t.Errorf("body should render old json as text, got: %s", body)
+	}
+	if strings.Contains(body, "[123") {
+		t.Errorf("body should not render old json as a byte slice, got: %s", body)
+	}
+}
+
 // AC: Expression edits render with `(SQL expression)` suffix.
 func TestDefaultCommitDialogRender_ExpressionSuffix(t *testing.T) {
 	set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "users"}}

@@ -419,6 +419,36 @@ func TestDefaultConflictDialogRender_PerRowLines(t *testing.T) {
 	}
 }
 
+// AC (dbsavvy-2ij6 follow-up): a json/jsonb conflict renders the server
+// value as JSON text — matching the grid and commit preview — not Go's
+// byte-slice form for a []byte the server returned.
+func TestDefaultConflictDialogRender_JSONValues(t *testing.T) {
+	view := guicontext.ConflictDialogView{
+		Conflicts: []models.ConflictedEdit{
+			{
+				Edit: models.PendingEdit{
+					PrimaryKey: []any{int64(7)},
+					Column:     "payload",
+					ColumnType: "jsonb",
+					OldValue:   []byte(`{"a":1}`),
+					NewValue:   `{"a":2}`,
+					Kind:       models.Literal,
+				},
+				ServerValue: []byte(`{"a":3}`),
+				LoadedAt:    time.Date(2026, 5, 23, 12, 34, 56, 0, time.UTC),
+			},
+		},
+		Conn: &models.Connection{Name: "dev"},
+	}
+	body := controllers.DefaultConflictDialogRender(view)
+	if !strings.Contains(body, `{"a":3}`) {
+		t.Errorf("server value should render as json text, got:\n%s", body)
+	}
+	if strings.Contains(body, "[123") {
+		t.Errorf("server value should not render as a byte slice, got:\n%s", body)
+	}
+}
+
 // AC: When ServerValue == staged NewValue, the row renders
 // "already applied by another session".
 func TestDefaultConflictDialogRender_AlreadyAppliedAnnotation(t *testing.T) {
