@@ -90,7 +90,7 @@ func NewConnectHelper() *ConnectHelper {
 //
 // Errors from drivers.Get (e.g. ErrUnknownDriver) propagate verbatim; errors
 // from Open / AcquireSession propagate wrapped.
-func (h *ConnectHelper) Connect(ctx context.Context, profile *models.Connection) (drivers.Connection, drivers.Session, error) {
+func (h *ConnectHelper) Connect(ctx context.Context, profile *models.Connection, reporter drivers.ProgressReporter) (drivers.Connection, drivers.Session, error) {
 	if profile == nil {
 		return nil, nil, errors.New("data: nil profile")
 	}
@@ -113,7 +113,7 @@ func (h *ConnectHelper) Connect(ctx context.Context, profile *models.Connection)
 	if err != nil {
 		return nil, nil, fmt.Errorf("data: driver factory: %w", err)
 	}
-	conn, err := drv.Open(ctx, *profile)
+	conn, err := drv.Open(ctx, *profile, reporter)
 	if err != nil {
 		return nil, nil, err
 	}

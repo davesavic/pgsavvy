@@ -53,7 +53,7 @@ func requirePGConnAndSession(t *testing.T) (drivers.Connection, drivers.Session)
 		Name:   "cancel-test",
 		Driver: "postgres",
 		DSN:    dsn,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("driver open: %v", err)
 	}

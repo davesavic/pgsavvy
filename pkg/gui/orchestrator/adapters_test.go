@@ -246,7 +246,7 @@ func TestConnectInvokerStaleDialErrorDroppedNotRendered(t *testing.T) {
 	// CONNECTION_MANAGER is already the startup root. Set its connecting
 	// state so we can verify the stale error is not painted.
 	cm := g.Registry().ConnectionManager
-	cm.ConnectingState().SetConnecting("stale")
+	cm.ConnectingState().SetConnectingStaged("stale", nil)
 
 	bag := g.HelperBagForTest()
 	profile := &models.Connection{Name: "stale", Driver: driverName, DSN: "postgres://stub"}

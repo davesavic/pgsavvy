@@ -142,7 +142,9 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	if c.g != nil {
 		gen = c.g.connectionState.connectGen.Add(1)
 	}
-	return c.connectWithGen(ctx, profile, gen)
+	// T3 AD8: the direct / reconnect path passes a NIL reporter — no modal is
+	// open to render a staged checklist, so no stage writes happen here.
+	return c.connectWithGen(ctx, profile, gen, nil)
 }
 
 // startAttempt is the single shared UI dial path. It MUST be invoked on the
@@ -165,19 +167,173 @@ func (c *connectInvoker) startAttempt(profile *models.Connection) {
 	c.current = profile
 	c.mu.Unlock()
 	// Plain setter, MainLoop-safe; also clears any prior error so a retry
-	// re-enters the connecting state. Always writes the modal's
-	// ConnectingState sink (dbsavvy-bsh: standalone CONNECTING retired).
+	// re-enters the connecting state. Seeds the staged checklist (Tunnel only
+	// when the profile carries one; Auth + Objects always) with the first
+	// stage Active so a retry starts fresh — no stale ✓/✗ rows (T3). Always
+	// writes the modal's ConnectingState sink (dbsavvy-bsh: standalone
+	// CONNECTING retired).
 	if sink := c.connectingSink(true); sink != nil {
-		sink.SetConnecting(profile.Name)
+		sink.SetConnectingStaged(profile.Name, buildStages(profile))
 	}
+	// T3 AD8: build a LIVE reporter ONLY on the modal/Retry path. It holds c +
+	// gen and marshals every stage transition onto the MainLoop with a
+	// stale-gen recheck (see connectReporter.Report). The direct/reconnect
+	// path (connectInvoker.Connect → connectWithGen) passes a nil reporter, so
+	// no stage writes happen there.
+	reporter := &connectReporter{c: c, gen: gen}
 	c.g.OnWorker(func(_ gocui.Task) error {
 		// Release the timeout ctx when the attempt finishes. Idempotent
 		// with Cancel (calling a CancelFunc twice is a no-op).
 		defer cancel()
 		// OnWorker logs a returned error, so the worker-lane breadcrumb is
 		// preserved without a separate sink here.
-		return c.connectWithGen(ctx, profile, gen)
+		return c.connectWithGen(ctx, profile, gen, reporter)
 	})
+}
+
+// buildStages returns the connect-lifecycle checklist for profile: the Tunnel
+// row only when the profile carries an SSH tunnel (the driver emits StageTunnel
+// only in that case), then Auth, then Objects. The list is all-Pending with the
+// FIRST stage flipped Active so the initial render already shows progress (T3).
+// Labels are constant English (the modal does not thread i18n); the Objects
+// row is relabelled to "Loaded" on success so its done line reads
+// "✓ Loaded N schemas".
+func buildStages(profile *models.Connection) []guicontext.Stage {
+	var stages []guicontext.Stage
+	if profile != nil && profile.SSHTunnel != nil {
+		stages = append(stages, guicontext.Stage{ID: guicontext.StageTunnel, Label: "SSH tunnel"})
+	}
+	stages = append(stages,
+		guicontext.Stage{ID: guicontext.StageAuth, Label: "Authenticated"},
+		guicontext.Stage{ID: guicontext.StageObjects, Label: "Loading objects…"},
+	)
+	stages[0].Status = guicontext.StageActive
+	return stages
+}
+
+// connectReporter is the LIVE drivers.ProgressReporter handed to
+// helper.Connect on the modal/Retry path (T3 AD8). Report runs on the WORKER
+// goroutine that drives Driver.Open, so it MUST NOT touch ConnectingState
+// directly: it marshals every transition onto the MainLoop via
+// runOnUIThread and re-checks isStaleConnect(gen) INSIDE the closure — the
+// same double-guard routeConnectError uses — so a superseded attempt's late
+// Report never writes a newer attempt's modal (T3 AD4). The gen is captured at
+// construction; a nil c/sink collapses to a no-op.
+type connectReporter struct {
+	c   *connectInvoker
+	gen uint64
+}
+
+// Report maps a driver ConnectStage onto the modal checklist, performing each
+// stage's Done+Active transition atomically in ONE marshalled, gen-guarded
+// closure (T3 AD4):
+//   - StageTunnel       → Tunnel Done, Auth Active.
+//   - StageAuthenticated → Auth Done ONLY. Objects is activated LATE, just
+//     before loadSchemaItems (T3 AD3), so a wireQueryRuntimeIO/AcquireSession
+//     failure in the gap is not mis-rendered as "✗ Loading objects".
+func (r *connectReporter) Report(stage drivers.ConnectStage) {
+	if r == nil || r.c == nil {
+		return
+	}
+	r.c.runOnUIThread(func() error {
+		if r.c.isStaleConnect(r.gen) {
+			return nil
+		}
+		sink := r.c.connectingSink(true)
+		if sink == nil {
+			return nil
+		}
+		r.apply(sink, stage)
+		return nil
+	})
+}
+
+// apply performs the stage's transitions on sink. Runs INSIDE Report's
+// gen-guarded UI closure. A guard clause per known stage keeps the dispatch
+// flat (no if/else chain); an unknown stage is a no-op.
+func (r *connectReporter) apply(sink connectingStateSink, stage drivers.ConnectStage) {
+	switch stage {
+	case drivers.StageTunnel:
+		sink.MarkStageDone(guicontext.StageTunnel, "")
+		sink.MarkStageActive(guicontext.StageAuth)
+	case drivers.StageAuthenticated:
+		sink.MarkStageDone(guicontext.StageAuth, "")
+	}
+}
+
+// schemaLoadTimeout caps the schema load that backs the Objects stage (T3
+// AD7). It is intentionally separate from the pg driver's connectTimeout: a
+// hung ListSchemas must fail into the Objects-✗ path rather than leave the
+// modal stuck on "Loading objects…" forever. The attempt ctx is its parent so
+// Esc cancel still propagates. A package var (not const) so the staged-progress
+// test can shrink it to exercise the timeout path deterministically.
+var schemaLoadTimeout = 15 * time.Second
+
+// markStageActiveStaged marshals a single stage-Active transition onto the
+// MainLoop with a stale-gen recheck INSIDE the closure (T3 AD3/AD4). A nil
+// reporter (direct / reconnect path) is a no-op: those paths have no modal
+// checklist to drive (AD8). Mirrors connectReporter.Report's marshalling.
+func (c *connectInvoker) markStageActiveStaged(gen uint64, reporter drivers.ProgressReporter, id guicontext.StageID) {
+	if reporter == nil {
+		return
+	}
+	c.runOnUIThread(func() error {
+		if c.isStaleConnect(gen) {
+			return nil
+		}
+		sink := c.connectingSink(true)
+		if sink == nil {
+			return nil
+		}
+		sink.MarkStageActive(id)
+		return nil
+	})
+}
+
+// markObjectsTerminalStaged emits the terminal Objects row (T3 AD6b/AD7) in its
+// OWN gen-guarded closure, submitted BEFORE the later publish closure that pops
+// the modal. OnUIThread is FIFO, so the terminal row is applied to the sink
+// before popModalOnSuccess — ordering is guaranteed. Whether it gets its own
+// PAINT is best-effort: gocui batches queued UI events into a single flush, so
+// on a fast connect (little worker work between the two submissions) the
+// "✓ Loaded N schemas" frame may collapse into the same flush as the pop. On a
+// slow/remote connect (the case this feature targets) the worker latency
+// between submissions makes the terminal frame observable. Either way the state
+// is never wrong — at worst a cosmetic frame is skipped.
+// On success the Objects row is relabelled "Loaded" and marked Done with the
+// "N schemas" detail so it reads "✓ Loaded N schemas"; on failure/timeout it is
+// marked Failed (✗) while the connect itself still succeeds with an empty rail.
+// A nil reporter is a no-op (direct / reconnect path, AD8).
+func (c *connectInvoker) markObjectsTerminalStaged(gen uint64, reporter drivers.ProgressReporter, schemaItems []any, schemaOK bool) {
+	if reporter == nil {
+		return
+	}
+	c.runOnUIThread(func() error {
+		if c.isStaleConnect(gen) {
+			return nil
+		}
+		sink := c.connectingSink(true)
+		if sink == nil {
+			return nil
+		}
+		if !schemaOK {
+			sink.MarkStageFailed(guicontext.StageObjects)
+			return nil
+		}
+		sink.SetStageLabel(guicontext.StageObjects, "Loaded")
+		sink.MarkStageDone(guicontext.StageObjects, schemaCountLabel(len(schemaItems)))
+		return nil
+	})
+}
+
+// schemaCountLabel renders the count suffix for the Objects done row:
+// "1 schema" (singular) or "N schemas" (plural / zero), so the line reads
+// "✓ Loaded 0 schemas" for an empty list (T3 success criteria).
+func schemaCountLabel(n int) string {
+	if n == 1 {
+		return "1 schema"
+	}
+	return fmt.Sprintf("%d schemas", n)
 }
 
 // startModalAttempt is the CONNECTION_MANAGER modal's connect entry point
@@ -199,7 +355,19 @@ func (c *connectInvoker) startModalAttempt(profile *models.Connection) {
 // the standalone CONNECTING screen and the modal's ConnectingState
 // (dbsavvy-1rf).
 type connectingStateSink interface {
-	SetConnecting(name string)
+	// SetConnectingStaged enters the connecting phase for name and REPLACES
+	// the stage checklist so a retry starts fresh (no stale ✓/✗ rows). T3
+	// migrated the modal off the zero-arg SetConnecting shim.
+	SetConnectingStaged(name string, stages []guicontext.Stage)
+	// MarkStageActive / MarkStageDone / MarkStageFailed transition a single
+	// checklist row. Driven by the live ProgressReporter and the schema-load
+	// boundary, all marshalled onto the MainLoop with a stale-gen recheck
+	// (T3 AD4/AD7). SetStageLabel relabels the Objects row to its terminal
+	// text ("Loaded") so the done line reads "✓ Loaded N schemas".
+	MarkStageActive(id guicontext.StageID)
+	MarkStageDone(id guicontext.StageID, detail string)
+	MarkStageFailed(id guicontext.StageID)
+	SetStageLabel(id guicontext.StageID, label string)
 	SetError(msg string)
 }
 
@@ -276,7 +444,7 @@ func (c *connectInvoker) teardownForSwitch(profile *models.Connection) {
 	c.helper.Disconnect()
 }
 
-func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Connection, gen uint64) error {
+func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Connection, gen uint64, reporter drivers.ProgressReporter) error {
 	// --- WORKER PHASE: all blocking I/O runs here (Connect itself runs on
 	// the worker goroutine — connections_controller.go schedules it via
 	// OnWorker). Nothing in this phase writes GUI state the MainLoop reads;
@@ -289,7 +457,10 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 	// connected" while a Session is open. No-op on a first connect or a
 	// same-profile re-select.
 	c.teardownForSwitch(profile)
-	conn, _, err := c.helper.Connect(ctx, profile)
+	// T3 AD8: thread the live reporter (modal/Retry path) or nil (direct /
+	// reconnect) through to the driver. The driver emits StageTunnel /
+	// StageAuthenticated which the reporter marshals onto the modal checklist.
+	conn, _, err := c.helper.Connect(ctx, profile, reporter)
 	if err != nil {
 		c.routeConnectError(gen, err)
 		return err
@@ -324,11 +495,33 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		}
 		return err
 	}
-	// Load + filter the schema list (I/O+compute part of populateSchemasRail)
-	// and resolve the persistent query-editor buffer (disk read part of
-	// hydrateQueryEditorBuffer). Both run on the worker; the results are
-	// published below.
-	schemaItems, schemaOK := c.loadSchemaItems(ctx)
+	// T3 AD3: Objects is activated LATE — here, immediately before the schema
+	// load — NOT on the auth boundary. A wireQueryRuntimeIO/AcquireSession
+	// failure in the gap above would otherwise be mis-rendered as
+	// "✗ Loading objects". Gen-guarded + marshalled like every stage write
+	// (no ConnectingState mutation off the MainLoop); a nil reporter (direct /
+	// reconnect path) skips it entirely (AD8).
+	c.markStageActiveStaged(gen, reporter, guicontext.StageObjects)
+
+	// T3 AD7: give the schema load its OWN timeout budget, separate from the
+	// pg driver's connectTimeout, so a hung ListSchemas fails into the
+	// Objects-✗ path instead of an infinite "Loading objects…". Derived from
+	// the attempt ctx so Esc cancel still propagates.
+	schemaCtx, cancelSchema := context.WithTimeout(ctx, schemaLoadTimeout)
+	schemaItems, schemaOK := c.loadSchemaItems(schemaCtx)
+	cancelSchema()
+
+	// T3 AD6b + AD7: emit the TERMINAL Objects row in its OWN gen-guarded
+	// closure submitted BEFORE the LATER publish closure that runs
+	// popModalOnSuccess. FIFO ordering guarantees the terminal row is applied
+	// before the pop; a separate paint of the "✓ Loaded N schemas" / "✗" frame
+	// is best-effort (gocui may batch both closures into one flush on a fast
+	// connect — see markObjectsTerminalStaged). On success the row reads
+	// "✓ Loaded N schemas" (N = visible/filtered count); on failure/timeout it
+	// goes ✗ but the connect still SUCCEEDS with an empty rail (no errMsg set).
+	// nil reporter → no-op (AD8).
+	c.markObjectsTerminalStaged(gen, reporter, schemaItems, schemaOK)
+
 	editorBuf, editorOK := c.loadQueryEditorBuffer(profile)
 
 	// dbsavvy-dl7.4: direct-load saved schema/table state on worker.

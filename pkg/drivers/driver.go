@@ -21,7 +21,7 @@ type Factory func(ctx context.Context) (Driver, error)
 type Driver interface {
 	Name() string
 	Capabilities() Capabilities
-	Open(ctx context.Context, profile ConnectionProfile) (Connection, error)
+	Open(ctx context.Context, profile ConnectionProfile, reporter ProgressReporter) (Connection, error)
 }
 
 // Connection is a live handle to a database server. A Connection owns a

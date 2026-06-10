@@ -50,7 +50,7 @@ func requirePGSession(t *testing.T) drivers.Session {
 		Name:   "execute-test",
 		Driver: "postgres",
 		DSN:    dsn,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("driver open: %v", err)
 	}

@@ -9,8 +9,10 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"go.uber.org/goleak"
 
+	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
+	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
 // contentOnlySignalDriver wraps the recorder and signals a buffered
@@ -255,5 +257,143 @@ func TestSpinnerTicker_CloseWithBusyStopsTicker(t *testing.T) {
 
 	if got := clk.liveTickers(); got != 0 {
 		t.Fatalf("after Close: liveTickers=%d, want 0", got)
+	}
+}
+
+// modalRepaintDriver wraps the recorder and counts SetContent writes to the
+// CONNECTION_MANAGER view, so the T4 test can observe the modal's render path
+// (HandleRender → SetContent) being re-invoked per spinner tick.
+type modalRepaintDriver struct {
+	*testfake.RecorderGuiDriver
+	modalWrites atomic.Int64
+}
+
+func (d *modalRepaintDriver) SetContent(viewName, str string) error {
+	if viewName == string(types.CONNECTION_MANAGER) {
+		d.modalWrites.Add(1)
+	}
+	return d.RecorderGuiDriver.SetContent(viewName, str)
+}
+
+// TestSpinnerTicker_RepaintsConnectingModal proves T4: while the
+// CONNECTION_MANAGER modal is in ModeConnecting and the ticker is armed
+// (busy>0), each spinner tick re-invokes the modal's render path
+// (HandleRender → SetContent), so a frame-dependent body (T3) animates without
+// a keypress or worker completion. It also covers the negatives: in ModeList a
+// tick does NOT force the connecting-modal repaint, and busy==0 (ticker not
+// armed) is a safe no-op.
+func TestSpinnerTicker_RepaintsConnectingModal(t *testing.T) {
+	clk := newFakeClock()
+	drv := &modalRepaintDriver{RecorderGuiDriver: testfake.NewRecorderGuiDriver()}
+	g := buildTestGuiWithDriverAndClock(t, drv, clk)
+	defer func() { _ = g.Close() }()
+
+	// Register the modal view so the recorder's SetContent path resolves it
+	// (the live layout pass would do this; the recorder doesn't run layout).
+	if _, err := drv.SetView(string(types.CONNECTION_MANAGER), 0, 0, 10, 10, 0); err != nil &&
+		err != gocui.ErrUnknownView {
+		t.Fatalf("SetView(connection_manager): %v", err)
+	}
+
+	cm := g.Registry().ConnectionManager
+	if cm == nil {
+		t.Fatal("ConnectionManager modal not wired")
+	}
+
+	// --- busy==0 / ticker-not-armed: repaint helper path must be a safe no-op.
+	// No ticker exists yet, so driving ticks does nothing; assert no panic and
+	// no modal writes accumulate from a stray tick.
+	clk.tickAll()
+	if got := drv.modalWrites.Load(); got != 0 {
+		t.Fatalf("pre-arm: modal writes=%d, want 0", got)
+	}
+
+	// --- Negative: armed but in ModeList — a tick must NOT repaint the modal.
+	cm.SetMode(guicontext.ModeList)
+	releaseList := make(chan struct{})
+	startedList := make(chan struct{})
+	g.OnWorker(func(_ gocui.Task) error {
+		close(startedList)
+		<-releaseList
+		return nil
+	})
+	<-startedList
+
+	const listTicks = 3
+	for range listTicks {
+		clk.tickAll()
+	}
+	// Give the drain goroutine a beat to forward any tick. We expect ZERO
+	// modal writes in ModeList, so any nonzero value within the settle window
+	// is a failure; a short window keeps the test fast.
+	settleNoModalWrites(drv, 50*time.Millisecond)
+	if got := drv.modalWrites.Load(); got != 0 {
+		t.Fatalf("ModeList: modal writes=%d after %d ticks, want 0", got, listTicks)
+	}
+	close(releaseList)
+	g.WaitWorkers()
+
+	// --- Positive: ModeConnecting — each tick re-invokes HandleRender.
+	cm.ConnectingState().SetConnectingStaged("prod", nil)
+	cm.SetMode(guicontext.ModeConnecting)
+	drv.modalWrites.Store(0)
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+	g.OnWorker(func(_ gocui.Task) error {
+		close(started)
+		<-release
+		return nil
+	})
+	<-started
+
+	const ticks = 4
+	for i := range ticks {
+		clk.tickAll()
+		// Wait for THIS tick's repaint to land before firing the next, so the
+		// 1-slot ticker channel never drops a tick (each tick adds one write).
+		waitModalWrites(t, drv, int64(i+1))
+	}
+
+	if got := drv.modalWrites.Load(); got < int64(ticks) {
+		t.Fatalf("ModeConnecting: modal writes=%d after %d ticks, want >= %d", got, ticks, ticks)
+	}
+
+	close(release)
+	g.WaitWorkers()
+}
+
+// waitModalWrites polls until the modal write counter reaches want or a 1s
+// deadline elapses — the drain goroutine schedules the repaint asynchronously
+// onto the (inline) driver, so the counter lands shortly after tickAll.
+func waitModalWrites(t *testing.T, drv *modalRepaintDriver, want int64) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		if drv.modalWrites.Load() >= want {
+			return
+		}
+		select {
+		case <-deadline:
+			return
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+// settleNoModalWrites lets the drain goroutine run for d, returning early the
+// moment a modal write appears (so a regression fails fast rather than after
+// the full window). Used by the negative ModeList case.
+func settleNoModalWrites(drv *modalRepaintDriver, d time.Duration) {
+	deadline := time.After(d)
+	for {
+		if drv.modalWrites.Load() > 0 {
+			return
+		}
+		select {
+		case <-deadline:
+			return
+		case <-time.After(time.Millisecond):
+		}
 	}
 }

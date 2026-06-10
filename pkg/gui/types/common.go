@@ -140,6 +140,14 @@ type ContextTreeDeps struct {
 	// connection-dead. When true, schema/table/column/index rails render
 	// their items dimmed. Nil-safe: nil → not disconnected. hq5.6.
 	IsDisconnected func() bool
+
+	// SpinnerFrame returns the live wall-clock spinner frame index used to
+	// animate the Active connect-stage row in the CONNECTION_MANAGER modal
+	// (T3 AD5/AD6a). The orchestrator binds it to Gui.SpinnerFrame so the
+	// staged checklist's "⠙ Loading objects…" glyph cycles in lock-step with
+	// the status-bar spinner. Nil-safe: ConnectionManagerContext.body falls
+	// back to a static glyph (test fixtures leave it unset).
+	SpinnerFrame func() int64
 }
 
 // ModeSetter is the minimal surface contexts use to flip / reset modal

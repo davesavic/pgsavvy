@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/dbsavvy/pkg/gui/status"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -162,7 +163,7 @@ func TestConnectionManagerContext_ConnectingMode(t *testing.T) {
 	c := newTestConnectionManager(drv, nil, nil)
 	c.SetItems([]any{&models.Connection{Name: "alpha"}})
 
-	c.ConnectingState().SetConnecting("alpha")
+	c.ConnectingState().SetConnectingStaged("alpha", nil)
 	c.SetMode(ModeConnecting)
 	if err := c.HandleRender(); err != nil {
 		t.Fatalf("HandleRender connecting: %v", err)
@@ -179,6 +180,58 @@ func TestConnectionManagerContext_ConnectingMode(t *testing.T) {
 		if !strings.Contains(drv.lastContent, want) {
 			t.Errorf("error body missing %q: %q", want, drv.lastContent)
 		}
+	}
+}
+
+// TestConnectionManagerContext_ConnectingGlyphFromSpinnerFrame asserts body()
+// resolves the Active-stage glyph from the injected SpinnerFrame accessor and
+// renders it via BodyGlyph (T3 AD5/AD6a). The seeded Active first stage must
+// draw status.SpinnerGlyph(frame) for the live frame value.
+func TestConnectionManagerContext_ConnectingGlyphFromSpinnerFrame(t *testing.T) {
+	drv := &captureDriver{}
+	base := NewBaseContext(BaseContextOpts{
+		Key:      types.CONNECTION_MANAGER,
+		ViewName: string(types.CONNECTION_MANAGER),
+		Kind:     types.MAIN_CONTEXT,
+		Title:    "Connection Manager",
+	})
+	const frame = int64(3)
+	deps := types.ContextTreeDeps{GuiDriver: drv, SpinnerFrame: func() int64 { return frame }}
+	c := NewConnectionManagerContext(base, deps)
+
+	c.ConnectingState().SetConnectingStaged("alpha", []Stage{
+		{ID: StageAuth, Label: "Authenticated", Status: StageActive},
+	})
+	c.SetMode(ModeConnecting)
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+
+	wantGlyph := string(status.SpinnerGlyph(frame))
+	wantLine := wantGlyph + " Authenticated"
+	if !strings.Contains(drv.lastContent, wantLine) {
+		t.Errorf("Active row = %q; want it to contain %q (glyph from SpinnerFrame)", drv.lastContent, wantLine)
+	}
+}
+
+// TestConnectionManagerContext_ConnectingGlyphNilAccessor asserts a nil
+// SpinnerFrame accessor (test fixtures / partial bootstrap) falls back to the
+// frame-0 glyph without panicking (T3 AD5/AD6a).
+func TestConnectionManagerContext_ConnectingGlyphNilAccessor(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestConnectionManager(drv, nil, nil) // SpinnerFrame left nil
+
+	c.ConnectingState().SetConnectingStaged("alpha", []Stage{
+		{ID: StageAuth, Label: "Authenticated", Status: StageActive},
+	})
+	c.SetMode(ModeConnecting)
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+
+	wantLine := string(status.SpinnerGlyph(0)) + " Authenticated"
+	if !strings.Contains(drv.lastContent, wantLine) {
+		t.Errorf("Active row = %q; want frame-0 glyph fallback line %q", drv.lastContent, wantLine)
 	}
 }
 
@@ -212,7 +265,7 @@ func TestConnectionManagerContext_HandleFocusPreservesConnectingMode(t *testing.
 	drv := &captureDriver{}
 	c := newTestConnectionManager(drv, nil, nil)
 	c.SetItems([]any{&models.Connection{Name: "alpha"}})
-	c.ConnectingState().SetConnecting("alpha")
+	c.ConnectingState().SetConnectingStaged("alpha", nil)
 	c.SetMode(ModeConnecting)
 	shown := 0
 	c.SetOnShow(func() { shown++ })

@@ -12,9 +12,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/davesavic/dbsavvy/pkg/drivers"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/session/sshtunnel"
 )
+
+// recordStages is a ProgressReporter that captures the stages Open emits, in
+// order, so the real emit sites in Driver.Open are verifiable without a live DB.
+type recordStages struct {
+	stages []drivers.ConnectStage
+}
+
+func (r *recordStages) Report(stage drivers.ConnectStage) {
+	r.stages = append(r.stages, stage)
+}
 
 // fakeTunnel is a recording sshTunnel used to verify the SSH-tunnel wiring in
 // Driver.Open without a live SSH server. dialCalls records every DialContext
@@ -101,7 +112,8 @@ func TestDriverOpenTunnelRoutesDialThroughFake(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	conn, err := d.Open(ctx, tunnelProfile())
+	rec := &recordStages{}
+	conn, err := d.Open(ctx, tunnelProfile(), rec)
 	// Open fails at Ping (the fake dial returns an error), so no Connection is
 	// returned — but the fake's DialContext MUST have been invoked, proving the
 	// DialFunc wiring routed the DB dial through the tunnel.
@@ -109,6 +121,10 @@ func TestDriverOpenTunnelRoutesDialThroughFake(t *testing.T) {
 	require.Nil(t, conn)
 	require.GreaterOrEqual(t, fake.dialCalls.Load(), int32(1),
 		"the DB dial must route through the fake tunnel's DialContext")
+	// The real Open emit site fired StageTunnel once the tunnel was established;
+	// StageAuthenticated is NOT emitted because the dial fails at Ping.
+	require.Equal(t, []drivers.ConnectStage{drivers.StageTunnel}, rec.stages,
+		"a tunnelled Open emits StageTunnel and, on ping failure, no StageAuthenticated")
 }
 
 // TestDriverOpenExcludesPromptFromConnectDeadline confirms epic dbsavvy-t60w:
@@ -131,7 +147,7 @@ func TestDriverOpenExcludesPromptFromConnectDeadline(t *testing.T) {
 	})
 
 	d := &Driver{prompter: stubPrompter{}}
-	_, err := d.Open(context.Background(), tunnelProfile())
+	_, err := d.Open(context.Background(), tunnelProfile(), nil)
 	require.Error(t, err)
 
 	require.False(t, promptHasDeadline,
@@ -194,7 +210,7 @@ func TestDriverOpenTunnelOpenFailureReturnsSSHError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	conn, err := d.Open(ctx, prof)
+	conn, err := d.Open(ctx, prof, nil)
 	require.Error(t, err)
 	require.Nil(t, conn, "no Connection (and therefore no pool) on tunnel-open failure")
 	require.True(t, sshtunnel.IsDialError(err),

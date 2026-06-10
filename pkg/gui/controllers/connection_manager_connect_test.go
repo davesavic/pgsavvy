@@ -175,7 +175,7 @@ func TestConnectionManagerController_ActiveDialIgnoresRetry(t *testing.T) {
 	ctx := newModalCtx()
 	ctx.SetItems([]any{&models.Connection{Name: "alpha"}})
 	ctx.SetMode(guicontext.ModeConnecting)
-	ctx.ConnectingState().SetConnecting("alpha") // active-dial phase: no error
+	ctx.ConnectingState().SetConnectingStaged("alpha", nil) // active-dial phase: no error
 
 	retries, cancels := 0, 0
 	ctrl := controllers.NewConnectionManagerController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, func() {})

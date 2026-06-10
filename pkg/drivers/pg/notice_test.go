@@ -52,7 +52,7 @@ func openPGConn(t *testing.T) drivers.Connection {
 		Name:   "notice-test",
 		Driver: "postgres",
 		DSN:    dsn,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("driver open: %v", err)
 	}
