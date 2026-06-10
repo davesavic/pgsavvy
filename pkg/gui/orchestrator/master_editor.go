@@ -53,6 +53,18 @@ func WithOnPassthroughEdit(fn func(content string)) MasterEditorOption {
 	}
 }
 
+// WithEmergencyQuit injects the un-rebindable Ctrl-C escape hatch (R5).
+// When set, masterEditor.Edit / Dispatch intercept Ctrl-C BEFORE matcher
+// dispatch and route it straight to the clean-quit path, so editable views
+// (CELL_EDITOR, SEARCH_LINE, …) that capture every key via this editor
+// still always quit on Ctrl-C regardless of user keybinding config. nil
+// disables the intercept (Ctrl-C falls through to normal trie dispatch).
+func WithEmergencyQuit(fn func() error) MasterEditorOption {
+	return func(e *masterEditor) {
+		e.emergencyQuit = fn
+	}
+}
+
 // Dispatcher is the side-channel a master Editor exposes so test
 // harnesses (testfake.RecorderGuiDriver.FeedChord) can drive a chord
 // sequence through the editor and observe the raw keys.DispatchResult
@@ -109,6 +121,9 @@ type masterEditor struct {
 	// synchronously after a Passthrough keystroke writes into v.TextArea,
 	// with the post-edit content. Scope-gated: only SEARCH_LINE invokes it.
 	onPassthroughEdit func(content string)
+	// emergencyQuit is the un-rebindable Ctrl-C escape hatch (R5). Invoked
+	// before matcher dispatch when the decoded key is Ctrl-C; nil disables.
+	emergencyQuit func() error
 
 	mu           sync.Mutex
 	pendingRunes []rune
@@ -122,6 +137,14 @@ func (e *masterEditor) Edit(v *gocui.View, key gocui.Key) bool {
 		return false
 	}
 	k := keys.KeyFromGocui(key)
+	// R5: un-rebindable emergency Ctrl-C exit. Intercept before matcher
+	// dispatch so editable views always quit on Ctrl-C regardless of config.
+	if isEmergencyQuitKey(k) && e.emergencyQuit != nil {
+		if errors.Is(e.emergencyQuit(), gocui.ErrQuit) && e.gui != nil {
+			e.gui.Update(func(*gocui.Gui) error { return gocui.ErrQuit })
+		}
+		return true
+	}
 	start := time.Now()
 	result, err := e.matcher.Dispatch(e.scope, k)
 	// gocui.Editor.Edit returns only bool, so a Dispatched handler
@@ -145,11 +168,24 @@ func (e *masterEditor) Dispatch(v *gocui.View, key gocui.Key) (keys.DispatchResu
 		return keys.FellThrough, nil
 	}
 	k := keys.KeyFromGocui(key)
+	// R5: emergency Ctrl-C — same intercept as Edit, surfaced as a
+	// Dispatched result carrying the quit error so the recorder harness
+	// (FeedChord) observes gocui.ErrQuit at the dispatch layer.
+	if isEmergencyQuitKey(k) && e.emergencyQuit != nil {
+		return keys.Dispatched, e.emergencyQuit()
+	}
 	start := time.Now()
 	result, err := e.matcher.Dispatch(e.scope, k)
 	e.applyResult(v, key, k, result)
 	e.emitInputEvents(k, result, time.Since(start))
 	return result, err
+}
+
+// isEmergencyQuitKey reports whether k is the Ctrl-C chord. Under tcell
+// raw mode ISIG is cleared, so keyboard Ctrl-C arrives as a KeyCtrlC KEY
+// event decoded by KeyFromGocui into Key{Code:'c', Mod:ModCtrl} (R5).
+func isEmergencyQuitKey(k keys.Key) bool {
+	return k == ctrlCKey
 }
 
 // emitInputEvents emits the cat=input key + dispatch_result pair for a

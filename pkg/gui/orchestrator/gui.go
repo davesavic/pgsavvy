@@ -1052,7 +1052,7 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 			switch key {
 			case types.QUERY_EDITOR:
 				if g.registry.QueryEditor != nil {
-					ve := editor.NewVimEditor(g.registry.QueryEditor, g.keybindingSystem.matcher, key, editor.WithSessionLog(g.deps.Common.Logger()), editor.WithGuiDriver(g.driver))
+					ve := editor.NewVimEditor(g.registry.QueryEditor, g.keybindingSystem.matcher, key, editor.WithSessionLog(g.deps.Common.Logger()), editor.WithGuiDriver(g.driver), editor.WithEmergencyQuit(g.emergencyQuit))
 					// dbsavvy-etp.1: wire the Tab/Enter popup-navigation seam
 					// to the controller so the insert path can drive the
 					// completion popup.
@@ -1073,13 +1073,13 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 				// dbsavvy-2ttm: the SEARCH_LINE editor fires the
 				// per-keystroke onChange seam so SearchPrompt's OnChange
 				// drives live grid.SetSearch as the user types.
-				opts := []MasterEditorOption{WithSessionLog(g.deps.Common.Logger())}
+				opts := []MasterEditorOption{WithSessionLog(g.deps.Common.Logger()), WithEmergencyQuit(g.emergencyQuit)}
 				if g.searchLineHelp != nil {
 					opts = append(opts, WithOnPassthroughEdit(g.searchLineHelp.OnChange))
 				}
 				g.keybindingSystem.masterEditors[key] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, key, opts...)
 			default:
-				g.keybindingSystem.masterEditors[key] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, key, WithSessionLog(g.deps.Common.Logger()))
+				g.keybindingSystem.masterEditors[key] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, key, WithSessionLog(g.deps.Common.Logger()), WithEmergencyQuit(g.emergencyQuit))
 			}
 			continue
 		}
@@ -1104,12 +1104,25 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 		if err := g.installEscAbortShim(key, view); err != nil {
 			return err
 		}
+		// R5: un-rebindable emergency Ctrl-C exit. A non-editable view
+		// only receives keys it has a shim for; if the user removed/moved
+		// the app.quit <c-c> binding, gocui would otherwise drop Ctrl-C
+		// here. This unconditional shim guarantees Ctrl-C always reaches
+		// the clean-quit path regardless of config.
+		if err := g.installEmergencyQuitShim(view); err != nil {
+			return err
+		}
 	}
 
 	// GLOBAL trie's root keys: install with empty viewname so they
 	// fire regardless of which view holds focus. gocui treats viewname
 	// == "" as a global binding.
 	if err := g.installShimsForScope(trieSet, types.GLOBAL, ""); err != nil {
+		return err
+	}
+	// R5: global emergency Ctrl-C shim (view==""). Fires from any focused
+	// view that has no view-specific Ctrl-C shim — config-independent.
+	if err := g.installEmergencyQuitShim(""); err != nil {
 		return err
 	}
 
@@ -1121,14 +1134,14 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 	// cheap, and re-pushes between tabs do not strand a stale editor on
 	// the prior view (gocui's per-view Editor pointer is replaced on
 	// attach, and result_tab views never become editable text targets).
-	g.keybindingSystem.masterEditors[types.RESULT_GRID] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, types.RESULT_GRID, WithSessionLog(g.deps.Common.Logger()))
+	g.keybindingSystem.masterEditors[types.RESULT_GRID] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, types.RESULT_GRID, WithSessionLog(g.deps.Common.Logger()), WithEmergencyQuit(g.emergencyQuit))
 	// PLAN master editor (dbsavvy-s7gn). Plan tabs share the dynamic
 	// result_tab_<slot> view with grid tabs, but their PLAN-scoped bindings
 	// (o/H/<CR>/j/k/i) must dispatch under PLAN, not RESULT_GRID. Like
 	// RESULT_GRID this context has no static view, so the Flatten loop skips
 	// it; build the editor here and let RunLayout's Tier-1.5 pass pick it for
 	// plan tabs by the active tab's context key.
-	g.keybindingSystem.masterEditors[types.PLAN] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, types.PLAN, WithSessionLog(g.deps.Common.Logger()))
+	g.keybindingSystem.masterEditors[types.PLAN] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, types.PLAN, WithSessionLog(g.deps.Common.Logger()), WithEmergencyQuit(g.emergencyQuit))
 	return nil
 }
 
@@ -1164,6 +1177,16 @@ func (g *Gui) installShimsForScope(trieSet *keys.TrieSet, scope types.ContextKey
 		for _, k := range trie.ReachableKeys() {
 			gk, gmod, err := keys.ChordKeyToGocui(k)
 			if err != nil {
+				continue
+			}
+			// R5: RESERVE Ctrl-C. Never install a trie shim for Ctrl-C, even
+			// if a user bound <c-c> to some action in this non-editable
+			// scope. installEmergencyQuitShim is then the SOLE Ctrl-C handler
+			// per view, so the un-rebindable emergency quit wins regardless of
+			// gocui's registration order (first-registered-wins, gocui
+			// gui.go:1546). A competing user <c-c> handler is simply never
+			// registered at this seam.
+			if gk == ctrlCGocuiKey && gmod == ctrlCGocuiMod {
 				continue
 			}
 			sk := shimKey{view: view, gk: gk, gmod: gmod}
@@ -1209,6 +1232,61 @@ func (g *Gui) installEscAbortShim(scope types.ContextKey, view string) error {
 		return derr
 	}
 	return g.driver.SetKeybinding(view, gk, gmod, handler)
+}
+
+// ctrlCKey is the decoded chord-trie Key for Ctrl-C. Under tcell raw mode
+// ISIG is cleared, so keyboard Ctrl-C arrives as a KeyCtrlC KEY event
+// (not SIGINT) and is decoded by KeyFromGocui into this exact value.
+var ctrlCKey = keys.Key{Code: 'c', Mod: keys.ModCtrl}
+
+// ctrlCGocuiKey / ctrlCGocuiMod are the gocui (Key, Modifier) encoding of
+// Ctrl-C, used to RESERVE Ctrl-C at the non-editable shim layer
+// (installShimsForScope skips it) so installEmergencyQuitShim is the single
+// Ctrl-C handler per view. Computed once from ctrlCKey via the same
+// ChordKeyToGocui path installEmergencyQuitShim uses.
+var ctrlCGocuiKey, ctrlCGocuiMod, _ = keys.ChordKeyToGocui(types.ChordKey{Code: 'c', Mod: types.ChordModCtrl})
+
+// emergencyQuit is the un-rebindable Ctrl-C escape hatch (R5). It routes
+// straight to the existing clean-quit path (QuitController.Quit — the same
+// guarded flow the default app.quit binding fires), BYPASSING the
+// keybinding trie entirely. Because the interception lives in code (the
+// editor Ctrl-C guard + installEmergencyQuitShim) rather than in the
+// user-replaceable trie, a user config can neither remove nor shadow it:
+// pressing Ctrl-C always quits, so <c-c> is no longer user-remappable. The
+// pending-edit / open-transaction guards in QuitController.Quit still
+// apply — the emergency aspect is config-independence, not guard-bypass.
+//
+// Returns nil when no controller is wired (test rigs that never built
+// controllers), so the caller treats Ctrl-C as a harmless no-op rather
+// than panicking.
+func (g *Gui) emergencyQuit() error {
+	if g.controllers == nil || g.controllers.Quit == nil {
+		return nil
+	}
+	return g.controllers.Quit.Quit(commands.ExecCtx{})
+}
+
+// installEmergencyQuitShim registers an unconditional Ctrl-C SetKeybinding
+// on view whose handler is emergencyQuit. Mirrors installEscAbortShim:
+// Ctrl-C may or may not have a trie-reachable shim depending on user
+// config, so this guarantees gocui always has a handler for it on every
+// non-editable view (and globally with view=="") — independent of whether
+// the user kept, moved, or removed the app.quit binding. The handler
+// returns gocui.ErrQuit (or nil when a guard fires), which gocui's run
+// loop unwinds.
+//
+// This is the SOLE Ctrl-C handler per view: installShimsForScope RESERVES
+// Ctrl-C (early-continue, skipping any trie shim for it), so no competing
+// user <c-c> handler is ever registered on a non-editable view. The
+// emergency path therefore wins regardless of gocui's first-registered-wins
+// scan order (gocui gui.go:1546) — the guarantee no longer depends on
+// registration order.
+func (g *Gui) installEmergencyQuitShim(view string) error {
+	gk, gmod, err := keys.ChordKeyToGocui(types.ChordKey{Code: 'c', Mod: types.ChordModCtrl})
+	if err != nil {
+		return nil
+	}
+	return g.driver.SetKeybinding(view, gk, gmod, g.emergencyQuit)
 }
 
 // shimKey deduplicates (view, key, mod) tuples within a single

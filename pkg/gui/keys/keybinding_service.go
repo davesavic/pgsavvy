@@ -26,32 +26,12 @@ var nonPopupKinds = map[types.ContextKind]struct{}{
 	types.DISPLAY_CONTEXT: {},
 }
 
-// allKnownContexts is the snapshot of ContextKeys the service iterates
-// when expanding `scope: all`. It mirrors the ContextKey constants
-// declared in pkg/gui/types/context.go.
-//
-// Keeping this list local (rather than reading from a ContextTree) is
-// the simplest dependency-free implementation. New ContextKeys MUST be
-// appended here when added to types.context — the dlp.11 completeness
-// test will fail loudly if a kindOf-classified non-popup context is
-// missing.
-var allKnownContexts = []types.ContextKey{
-	types.SCHEMAS,
-	types.TABLES,
-	types.COLUMNS,
-	types.INDEXES,
-	types.QUERY_EDITOR,
-	types.TABLE_DATA_EDITOR,
-	types.RESULT_GRID,
-	types.PLAN,
-	types.MENU,
-	types.CONFIRMATION,
-	types.PROMPT,
-	types.SUGGESTIONS,
-	types.COMMAND_LINE,
-	types.HISTORY,
-	types.WHICH_KEY,
-	types.LIMIT,
+// overlayExclusions are DISPLAY_CONTEXT transient overlays that share a
+// kind with CHEATSHEET (which scope:all DOES reach) but must NOT receive
+// scope:all bindings. No structural kind/flag discriminator exists, so this
+// set is explicit. Keep in sync if new DISPLAY transient overlays land.
+var overlayExclusions = map[types.ContextKey]struct{}{
+	types.WHICH_KEY: {}, types.LIMIT: {}, types.HIDE_OVERLAY: {},
 }
 
 // WarnLevel / InfoLevel classify Warning severity.
@@ -216,13 +196,27 @@ func (s *TrieSet) Walk(fn func(key TrieSetKey, trie *ChordTrie)) {
 	}
 }
 
-// KeybindingService orchestrates Build. It is stateless today but is a
-// type (not a free function) so future epics can attach configuration
-// (timeout overrides, per-mode policy) without breaking the API.
-type KeybindingService struct{}
+// KeybindingService orchestrates Build. It carries the set of known
+// ContextKeys used to expand `scope: all`; the set is injected at
+// construction (from the live ContextTree in production) rather than
+// hand-maintained, so a new non-popup context is reached automatically.
+type KeybindingService struct {
+	// known is the snapshot of ContextKeys iterated when expanding
+	// `scope: all`. Each is filtered by kindOf ∈ nonPopupKinds minus
+	// overlayExclusions in fanOutBinding.
+	known []types.ContextKey
+}
 
-// NewKeybindingService constructs the service.
-func NewKeybindingService() *KeybindingService { return &KeybindingService{} }
+// NewKeybindingService constructs the service. The optional known set is
+// the list of ContextKeys `scope: all` expands over; production passes
+// the live registry keys (ContextTree.Flatten). When omitted it defaults
+// to types.AllContextKeys() so no-arg callers (tests, stubs) keep working.
+func NewKeybindingService(known ...types.ContextKey) *KeybindingService {
+	if len(known) == 0 {
+		known = types.AllContextKeys()
+	}
+	return &KeybindingService{known: known}
+}
 
 // Build constructs a TrieSet from controller-shipped defaults plus the
 // user's on-disk config.
@@ -278,6 +272,27 @@ func (s *KeybindingService) Build(
 		b := NewTrieBuilder()
 		builders[k] = b
 		return b
+	}
+
+	// shippedDefaults records, per (ActionID, Scope), the mode-mask a
+	// shipped default spanned plus the literal leaf sequences it used.
+	// Reconstructed purely from the defaults flowing through Build (AD2:
+	// no pkg/gui/controllers or pkg/gui/context import). T3 consumes it to
+	// auto-propagate a user motion remap across the action's shipped
+	// operator-pending / visual cells and to FREE the shipped-default key.
+	shippedDefaults := map[shippedKey]*shippedRecord{}
+	recordShipped := func(cb *ChordBinding) {
+		sk := shippedKey{ActionID: cb.ActionID, Scope: cb.Scope}
+		rec, ok := shippedDefaults[sk]
+		if !ok {
+			rec = &shippedRecord{}
+			shippedDefaults[sk] = rec
+		}
+		if cb.Mode == types.ModeNormal {
+			rec.hasNormal = true
+		} else {
+			rec.mask |= cb.Mode
+		}
 	}
 
 	insert := func(cb *ChordBinding, isUser bool) {
@@ -337,12 +352,13 @@ func (s *KeybindingService) Build(
 			builder.InsertUser(&copy, cmd)
 		} else {
 			builder.InsertDefault(&copy, cmd)
+			recordShipped(&copy)
 		}
 	}
 
 	// Defaults first.
 	for _, cb := range defaults {
-		expandedBindings, ws := fanOutBinding(cb, kindOf, ShippedDefault)
+		expandedBindings, ws := s.fanOutBinding(cb, kindOf, ShippedDefault)
 		warnings = append(warnings, ws...)
 		for _, b := range expandedBindings {
 			insert(b, false)
@@ -354,12 +370,34 @@ func (s *KeybindingService) Build(
 		kb := &cfg.Keybindings[i]
 		expandedBindings, ws := liftKeybindingConfig(kb)
 		warnings = append(warnings, ws...)
+
+		// T3: an override of a motion-family action whose shipped default
+		// spanned operator-pending / visual must auto-propagate so
+		// `d{newkey}` / `{count}{newkey}` / visual `{newkey}` compose. R4
+		// rejects reserved targets (count digits / register prefix) for
+		// the WHOLE remap. crossModeBindings returns the extra cells to
+		// fill plus the removal directives that FREE the shipped key (R3);
+		// reject == true means skip the user's literal insertion too.
+		extra, removals, reject, propWs := s.crossModeBindings(expandedBindings, shippedDefaults)
+		warnings = append(warnings, propWs...)
+		if reject {
+			continue
+		}
+		for _, rm := range removals {
+			if b := builders[rm.key]; b != nil {
+				b.RemoveLeafByAction(rm.actionID)
+			}
+		}
+
 		for _, b := range expandedBindings {
-			fanned, fanWs := fanOutBinding(b, kindOf, b.Source)
+			fanned, fanWs := s.fanOutBinding(b, kindOf, b.Source)
 			warnings = append(warnings, fanWs...)
 			for _, fb := range fanned {
 				insert(fb, true)
 			}
+		}
+		for _, fb := range extra {
+			insert(fb, true)
 		}
 	}
 
@@ -412,7 +450,7 @@ func singleRune(s string) (rune, bool) {
 //
 // The forced Source ensures the layering rule from D8 (defaults vs.
 // user) survives even if the caller passed inconsistent values.
-func fanOutBinding(cb *ChordBinding, kindOf ContextKindLookup, force Source) ([]*ChordBinding, []Warning) {
+func (s *KeybindingService) fanOutBinding(cb *ChordBinding, kindOf ContextKindLookup, force Source) ([]*ChordBinding, []Warning) {
 	if cb == nil {
 		return nil, nil
 	}
@@ -428,22 +466,16 @@ func fanOutBinding(cb *ChordBinding, kindOf ContextKindLookup, force Source) ([]
 	// Mode fan-out: every bit in cb.Mode becomes its own binding. The
 	// zero value (ModeNormal) is treated as a single bit too (it IS
 	// the trie key for Normal mode).
-	var modes []types.Mode
-	if cb.Mode == types.ModeNormal {
-		modes = []types.Mode{types.ModeNormal}
-	} else {
-		for bit := types.Mode(1); bit != 0 && bit <= cb.Mode; bit <<= 1 {
-			if cb.Mode&bit != 0 {
-				modes = append(modes, bit)
-			}
-		}
-	}
+	modes := modeBits(cb.Mode)
 
 	// Scope fan-out.
 	var scopes []types.ContextKey
 	switch cb.Scope {
 	case "all":
-		for _, ctx := range allKnownContexts {
+		for _, ctx := range s.known {
+			if _, excluded := overlayExclusions[ctx]; excluded {
+				continue
+			}
 			kind := kindOf(ctx)
 			if _, ok := nonPopupKinds[kind]; ok {
 				scopes = append(scopes, ctx)
@@ -470,6 +502,186 @@ func fanOutBinding(cb *ChordBinding, kindOf ContextKindLookup, force Source) ([]
 		}
 	}
 	return out, nil
+}
+
+// shippedKey indexes a shippedRecord by the ActionID + Scope a default
+// was registered under.
+type shippedKey struct {
+	ActionID string
+	Scope    types.ContextKey
+}
+
+// shippedRecord is the reconstructed shipped-default footprint for one
+// (ActionID, Scope): the set of mode bits its defaults spanned. T3 reads
+// it to know which operator-pending / visual cells an override must
+// propagate to and which cells to free the original key from. ModeNormal
+// is the zero sentinel (it vanishes from an OR), so it is tracked with an
+// explicit flag rather than folded into a bitmask.
+type shippedRecord struct {
+	mask      types.Mode
+	hasNormal bool
+}
+
+// modes returns every individual shipped mode bit, ModeNormal included
+// when present. mask holds only the non-Normal bits (Normal is tracked
+// via hasNormal), so a zero mask contributes nothing here.
+func (r *shippedRecord) modes() []types.Mode {
+	var out []types.Mode
+	if r.hasNormal {
+		out = append(out, types.ModeNormal)
+	}
+	if r.mask != types.ModeNormal {
+		out = append(out, modeBits(r.mask)...)
+	}
+	return out
+}
+
+// actionRemoval names one shipped-default leaf to free: the (Mode, Scope)
+// trie cell plus the ActionID whose leaf must be removed from it (R3).
+type actionRemoval struct {
+	key      TrieSetKey
+	actionID string
+}
+
+// crossModeMask is the set of non-Normal mode bits that make an action's
+// shipped default eligible for T3 cross-mode propagation: operator-pending
+// plus every visual variant. An action whose shipped mask intersects this
+// set is part of the motion / operator / text-object / visual grammar
+// whose Normal remap must auto-propagate; one whose mask does not (e.g. a
+// Normal-only or Normal+global command) is left to the plain overlay path.
+const crossModeMask = types.ModeOperatorPending |
+	types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
+
+// modeBits splits a (possibly multi-bit) mask into its individual bits.
+// ModeNormal (the zero sentinel) is its own bit.
+func modeBits(mask types.Mode) []types.Mode {
+	if mask == types.ModeNormal {
+		return []types.Mode{types.ModeNormal}
+	}
+	var out []types.Mode
+	for bit := types.Mode(1); bit != 0 && bit <= mask; bit <<= 1 {
+		if mask&bit != 0 {
+			out = append(out, bit)
+		}
+	}
+	return out
+}
+
+// reservedMotionTarget reports whether seq targets a key that motion
+// remaps must NOT shadow: a single bare digit 0-9 (count grammar) or the
+// single register prefix `"` (matcher.go count/register handling gates on
+// bindingExistsAt, so a leaf there silently breaks `d5j` / `5x` / `"ayy`).
+// Only single-key sequences are reserved; multi-key chords starting with a
+// digit are fine.
+func reservedMotionTarget(seq []Key) bool {
+	if len(seq) != 1 {
+		return false
+	}
+	k := seq[0]
+	if k.Special != types.KeyNone || k.Mod != 0 {
+		return false
+	}
+	if k.Code >= '0' && k.Code <= '9' {
+		return true
+	}
+	return k.Code == '"'
+}
+
+// crossModeBindings drives T3's auto-propagation. Given the lifted (pre-
+// fan-out) user bindings for ONE cfg entry and the reconstructed shipped
+// footprint, it returns:
+//
+//   - extra: additional UserOverride bindings to insert so the remap fills
+//     the operator-pending / visual cells the shipped default covered but
+//     the user's modes did not (preserving the action's shipped mask).
+//   - removals: the shipped-default leaves to free across the shipped mask
+//     so the original key (e.g. j / dj) goes inert (R3).
+//   - reject: true when the override targets a reserved key (R4) — the
+//     caller skips the literal insertion AND propagation for safety.
+//   - warnings: an R4 rejection diagnostic, mirroring orphan_action shape.
+//
+// Only UserOverride bindings whose ActionID has a recorded shipped mask
+// participate; everything else returns empty (no propagation, no removal).
+func (s *KeybindingService) crossModeBindings(
+	lifted []*ChordBinding,
+	shipped map[shippedKey]*shippedRecord,
+) (extra []*ChordBinding, removals []actionRemoval, reject bool, warnings []Warning) {
+	for _, b := range lifted {
+		if b.Source != UserOverride {
+			continue
+		}
+		sk := shippedKey{ActionID: b.ActionID, Scope: b.Scope}
+		rec, ok := shipped[sk]
+		if !ok {
+			continue
+		}
+
+		// Only cross-mode families participate: the action's shipped
+		// default must span operator-pending or a visual mode (the
+		// motion / operator / text-object / visual grammar). A Normal-only
+		// (or Normal+global) action like app.quit has no cross-mode cells
+		// to propagate to — leave it to the plain user-overlay path and do
+		// NOT free its shipped key.
+		if rec.mask&crossModeMask == 0 {
+			continue
+		}
+
+		if reservedMotionTarget(b.Sequence) {
+			warnings = append(warnings, Warning{
+				Level: WarnLevel,
+				Code:  "reserved_motion_target",
+				Message: fmt.Sprintf(
+					"binding %q remaps %q onto a reserved key (count digit or register prefix); skipping to preserve vim grammar",
+					SequenceString(b.Sequence), b.ActionID,
+				),
+				Origin: b.Origin,
+			})
+			return nil, nil, true, warnings
+		}
+
+		userModes := userTargetedModes(lifted, b.ActionID, b.Scope)
+
+		// Propagate the override into every shipped cell the user did NOT
+		// already target (preserving the action's shipped mode mask).
+		for _, m := range rec.modes() {
+			if _, targeted := userModes[m]; targeted {
+				continue
+			}
+			cp := *b
+			cp.Mode = m
+			extra = append(extra, &cp)
+		}
+
+		// Free the shipped-default key across EVERY shipped cell so the
+		// original key (and its operator-pending compositions) go inert
+		// post-remap (R3).
+		for _, m := range rec.modes() {
+			removals = append(removals, actionRemoval{
+				key:      TrieSetKey{Mode: m, Scope: b.Scope},
+				actionID: b.ActionID,
+			})
+		}
+		// One lifted binding per (action, scope) drives the whole remap;
+		// the rest share the same shipped record and would duplicate work.
+		break
+	}
+	return extra, removals, false, warnings
+}
+
+// userTargetedModes returns the set of individual mode bits the user's
+// lifted bindings explicitly targeted for (actionID, scope). Used so
+// propagation never re-injects a cell the user wrote by hand.
+func userTargetedModes(lifted []*ChordBinding, actionID string, scope types.ContextKey) map[types.Mode]struct{} {
+	out := map[types.Mode]struct{}{}
+	for _, b := range lifted {
+		if b.ActionID != actionID || b.Scope != scope {
+			continue
+		}
+		for _, m := range modeBits(b.Mode) {
+			out[m] = struct{}{}
+		}
+	}
+	return out
 }
 
 // liftKeybindingConfig parses one config.KeybindingConfig into one or

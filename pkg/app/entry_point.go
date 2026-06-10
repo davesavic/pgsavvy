@@ -84,6 +84,16 @@ func Start(build *BuildInfo, args []string) error {
 		return fmt.Errorf("app: load config: %w", err)
 	}
 
+	// dbsavvy-ivck.5 (T5, R5): require a key-driven exit BEFORE gocui.NewGui
+	// puts us on the alt-screen. A config that REPLACES keybindings wholesale
+	// (no element merge) can drop the default app.quit binding, leaving the
+	// app un-quittable. Validating after NewGui is useless: the stderr message
+	// would be wiped by tcell's Fini at g.Close. Returning here surfaces the
+	// error via main.go's log.Fatal AFTER the terminal is restored.
+	if err := requireQuitBinding(cfg, configPath); err != nil {
+		return err
+	}
+
 	store := common.NewAppStateStore(fs, statePath, common.DefaultClock())
 	_ = store.Load() // missing state file → defaults; not an error.
 
@@ -144,6 +154,22 @@ func Start(build *BuildInfo, args []string) error {
 	defer func() { _ = g.Close() }()
 
 	return g.RunAndHandleError()
+}
+
+// requireQuitBinding returns a hard, actionable error when cfg has no
+// keybinding bound to config.QuitAction (app.quit) — i.e. no key-driven
+// exit. The message NAMES the missing action and POINTS at configPath so a
+// locked-out user can fix or remove the file (dbsavvy-ivck.5, T5). Returns
+// nil when a quit binding is present.
+func requireQuitBinding(cfg *config.UserConfig, configPath string) error {
+	if config.HasQuitBinding(cfg) {
+		return nil
+	}
+	return fmt.Errorf(
+		"app: config %q has no %q keybinding; the app would have no key-driven exit. "+
+			"Add a keybinding with action %q (e.g. key \"<c-c>\" or \"<leader>q\") to %q, or remove the file to restore defaults: %w",
+		configPath, config.QuitAction, config.QuitAction, configPath, config.ErrNoQuitBinding,
+	)
 }
 
 // resolveLogDir applies the precedence flag > env > stateDir. Empty / whitespace

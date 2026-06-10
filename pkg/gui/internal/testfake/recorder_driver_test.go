@@ -47,6 +47,35 @@ func TestRecorder_InstalledEditors_DefensiveCopy(t *testing.T) {
 	}
 }
 
+// TestRecorder_FeedKey_FirstRegisteredWins asserts the recorder models real
+// gocui: when two handlers are registered for the SAME (view, key, mod),
+// FeedKey fires the FIRST-registered one. gocui's SetKeybinding appends
+// (gocui gui.go:551) and execKeybindings forward-scans + returns on the
+// first view match (gocui gui.go:1546) — first-registered-wins, NOT last.
+func TestRecorder_FeedKey_FirstRegisteredWins(t *testing.T) {
+	r := testfake.NewRecorderGuiDriver()
+	key := gocui.NewKeyRune('c')
+	mod := types.Modifier(gocui.ModCtrl)
+
+	fired := ""
+	first := func() error { fired = "first"; return nil }
+	second := func() error { fired = "second"; return nil }
+
+	if err := r.SetKeybinding("v", key, mod, first); err != nil {
+		t.Fatalf("SetKeybinding first: %v", err)
+	}
+	if err := r.SetKeybinding("v", key, mod, second); err != nil {
+		t.Fatalf("SetKeybinding second: %v", err)
+	}
+
+	if err := r.FeedKey("v", key, mod); err != nil {
+		t.Fatalf("FeedKey: %v", err)
+	}
+	if fired != "first" {
+		t.Fatalf("FeedKey fired %q handler, want %q (first-registered must win)", fired, "first")
+	}
+}
+
 func TestRecorder_FeedChord_DrivesThroughMasterEditor(t *testing.T) {
 	// Install a real master editor backed by a Matcher with [j,k] in normal mode.
 	cmd := &commands.Command{ID: "fire", Handler: func(commands.ExecCtx) error { return nil }}

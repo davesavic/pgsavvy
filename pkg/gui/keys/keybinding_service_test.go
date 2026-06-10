@@ -470,3 +470,231 @@ func TestBuild_Walk_VisitsBindings(t *testing.T) {
 		t.Errorf("walked %d leaves, want 1", seen)
 	}
 }
+
+// allContextKeyKinds is an INDEPENDENT classification of every
+// types.AllContextKeys() entry, transcribed from the contextSpecs()
+// declarations in pkg/gui/context/setup.go. It deliberately does NOT
+// reach into pkg/gui/context (which pkg/gui/keys must not import); it is
+// the oracle the completeness guard checks production against. Keep it in
+// sync with setup.go if a context's kind changes.
+func allContextKeyKinds() map[types.ContextKey]types.ContextKind {
+	return map[types.ContextKey]types.ContextKind{
+		types.SCHEMAS:            types.SIDE_CONTEXT,
+		types.TABLES:             types.SIDE_CONTEXT,
+		types.COLUMNS:            types.STUB,
+		types.INDEXES:            types.STUB,
+		types.QUERY_EDITOR:       types.MAIN_CONTEXT,
+		types.TABLE_DATA_EDITOR:  types.STUB,
+		types.RESULT_GRID:        types.STUB,
+		types.PLAN:               types.STUB,
+		types.MENU:               types.TEMPORARY_POPUP,
+		types.CONFIRMATION:       types.TEMPORARY_POPUP,
+		types.PROMPT:             types.TEMPORARY_POPUP,
+		types.SELECTION:          types.TEMPORARY_POPUP,
+		types.SUGGESTIONS:        types.TEMPORARY_POPUP,
+		types.COMMAND_LINE:       types.TEMPORARY_POPUP,
+		types.SEARCH_LINE:        types.TEMPORARY_POPUP,
+		types.HISTORY:            types.TEMPORARY_POPUP,
+		types.WHICH_KEY:          types.DISPLAY_CONTEXT,
+		types.GLOBAL:             types.GLOBAL_CONTEXT,
+		types.LIMIT:              types.DISPLAY_CONTEXT,
+		types.CHEATSHEET:         types.DISPLAY_CONTEXT,
+		types.HIDE_OVERLAY:       types.TEMPORARY_POPUP,
+		types.EXPORT_MENU:        types.TEMPORARY_POPUP,
+		types.FIRST_RUN_TIP:      types.PERSISTENT_POPUP,
+		types.TABLE_INSPECT:      types.TEMPORARY_POPUP,
+		types.CELL_EDITOR:        types.TEMPORARY_POPUP,
+		types.COMMIT_DIALOG:      types.TEMPORARY_POPUP,
+		types.CONFLICT_DIALOG:    types.TEMPORARY_POPUP,
+		types.FK_REVERSE_PICKER:  types.TEMPORARY_POPUP,
+		types.CONNECTION_MANAGER: types.MAIN_CONTEXT,
+	}
+}
+
+// scopeAllExpansion builds a service over `known`, expands a single
+// `scope: all` Normal-mode binding for key "k", and returns the set of
+// scopes that actually received a leaf for it.
+func scopeAllExpansion(t *testing.T, known []types.ContextKey, kindOf ContextKindLookup) map[types.ContextKey]struct{} {
+	t.Helper()
+	reg := testRegistry(t, "list.up")
+	svc := NewKeybindingService(known...)
+	cfg := minimalCfg()
+	cfg.Keybindings = []config.KeybindingConfig{
+		{Mode: "n", Scope: "all", Key: "k", Action: "list.up"},
+	}
+	ts, _, err := svc.Build(nil, cfg, reg, kindOf)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	got := map[types.ContextKey]struct{}{}
+	ts.Walk(func(key TrieSetKey, trie *ChordTrie) {
+		if key.Mode != types.ModeNormal {
+			return
+		}
+		if trie.Lookup([]Key{{Code: 'k'}}).IsLeaf {
+			got[key.Scope] = struct{}{}
+		}
+	})
+	return got
+}
+
+// TestAllKnownContextsCompleteness is the binding guard: scope:all must
+// reach EXACTLY the non-popup contexts (kindOf ∈ nonPopupKinds minus
+// overlayExclusions) plus GLOBAL. The expected set is derived from
+// types.AllContextKeys() via an independent oracle (allContextKeyKinds),
+// NOT from the list injected into production, so it fails loudly if any
+// non-popup context is ever absent from the expansion.
+func TestAllKnownContextsCompleteness(t *testing.T) {
+	kinds := allContextKeyKinds()
+	kindOf := staticKind(kinds)
+
+	// Independent oracle: same policy production applies, computed here
+	// in the test's own code over types.AllContextKeys().
+	expected := map[types.ContextKey]struct{}{types.GLOBAL: {}}
+	for _, k := range types.AllContextKeys() {
+		if _, overlay := overlayExclusions[k]; overlay {
+			continue
+		}
+		if _, ok := nonPopupKinds[kinds[k]]; ok {
+			expected[k] = struct{}{}
+		}
+	}
+
+	// Deliberate explicit fixture input (NOT the no-arg fallback).
+	got := scopeAllExpansion(t, types.AllContextKeys(), kindOf)
+
+	if !sameSet(got, expected) {
+		t.Errorf("scope:all expansion mismatch\n got: %v\nwant: %v", keysOf(got), keysOf(expected))
+	}
+
+	// Targeted membership assertions (the CONNECTION_MANAGER + CHEATSHEET gap).
+	for _, must := range []types.ContextKey{types.CONNECTION_MANAGER, types.CHEATSHEET} {
+		if _, ok := got[must]; !ok {
+			t.Errorf("scope:all must reach %s", must)
+		}
+	}
+	for _, mustNot := range []types.ContextKey{types.WHICH_KEY, types.LIMIT, types.HIDE_OVERLAY} {
+		if _, ok := got[mustNot]; ok {
+			t.Errorf("scope:all must NOT reach overlay %s", mustNot)
+		}
+	}
+
+	// No PERSISTENT/TEMPORARY popup may appear in the expansion.
+	for sc := range got {
+		switch kinds[sc] {
+		case types.PERSISTENT_POPUP, types.TEMPORARY_POPUP:
+			t.Errorf("scope:all reached popup %s (kind %v)", sc, kinds[sc])
+		}
+	}
+}
+
+// TestAllKnownContextsDelta asserts the migration's membership delta:
+// AFTER == BEFORE + {CONNECTION_MANAGER, CHEATSHEET} − {WHICH_KEY, LIMIT}.
+// BEFORE is the pre-change hand-list ∩ real kinds (+GLOBAL); AFTER is the
+// live full-set expansion. The delta property is what the constructor
+// injection buys.
+func TestAllKnownContextsDelta(t *testing.T) {
+	kindOf := staticKind(allContextKeyKinds())
+
+	// BEFORE: the legacy hand-list, intersected with real kinds (the old
+	// behaviour had no overlayExclusions, so WHICH_KEY/LIMIT were IN).
+	handList := []types.ContextKey{
+		types.SCHEMAS, types.TABLES, types.COLUMNS, types.INDEXES,
+		types.QUERY_EDITOR, types.TABLE_DATA_EDITOR, types.RESULT_GRID,
+		types.PLAN, types.MENU, types.CONFIRMATION, types.PROMPT,
+		types.SUGGESTIONS, types.COMMAND_LINE, types.HISTORY,
+		types.WHICH_KEY, types.LIMIT,
+	}
+	kinds := allContextKeyKinds()
+	before := map[types.ContextKey]struct{}{types.GLOBAL: {}}
+	for _, k := range handList {
+		if _, ok := nonPopupKinds[kinds[k]]; ok {
+			before[k] = struct{}{}
+		}
+	}
+
+	after := scopeAllExpansion(t, types.AllContextKeys(), kindOf)
+
+	// Compute expected AFTER from BEFORE via the stated delta.
+	wantAfter := map[types.ContextKey]struct{}{}
+	for k := range before {
+		wantAfter[k] = struct{}{}
+	}
+	wantAfter[types.CONNECTION_MANAGER] = struct{}{}
+	wantAfter[types.CHEATSHEET] = struct{}{}
+	delete(wantAfter, types.WHICH_KEY)
+	delete(wantAfter, types.LIMIT)
+
+	if !sameSet(after, wantAfter) {
+		t.Errorf("AFTER != BEFORE + {CONNECTION_MANAGER, CHEATSHEET} - {WHICH_KEY, LIMIT}\n after: %v\n want:  %v",
+			keysOf(after), keysOf(wantAfter))
+	}
+}
+
+// TestBuildWarnings_IdenticalBeforeAfter pins that the change does not
+// alter Build's diagnostics for a fixed config: orphan / collision /
+// ambiguous codes and counts are independent of the injected known set.
+func TestBuildWarnings_IdenticalBeforeAfter(t *testing.T) {
+	reg := testRegistry(t, "a.one", "a.two")
+	defaults := []*ChordBinding{
+		// orphan (unknown action)
+		{Sequence: []Key{{Code: 'z'}}, Mode: types.ModeNormal, Scope: types.GLOBAL, ActionID: "a.unknown", Origin: "o"},
+		// collision (same scope/seq)
+		{Sequence: []Key{{Code: 't'}, {Code: 'r'}}, Mode: types.ModeNormal, Scope: types.TABLES, ActionID: "a.one", Origin: "c1"},
+		{Sequence: []Key{{Code: 't'}, {Code: 'r'}}, Mode: types.ModeNormal, Scope: types.TABLES, ActionID: "a.two", Origin: "c2"},
+		// ambiguous prefix
+		{Sequence: []Key{{Code: 'g'}}, Mode: types.ModeNormal, Scope: types.GLOBAL, ActionID: "a.one", Origin: "g1"},
+		{Sequence: []Key{{Code: 'g'}, {Code: 'g'}}, Mode: types.ModeNormal, Scope: types.GLOBAL, ActionID: "a.two", Origin: "g2"},
+	}
+	codeCounts := func(known []types.ContextKey) map[string]int {
+		svc := NewKeybindingService(known...)
+		_, warns, err := svc.Build(defaults, minimalCfg(), reg, staticKind(allContextKeyKinds()))
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		out := map[string]int{}
+		for _, w := range warns {
+			out[w.Code]++
+		}
+		return out
+	}
+
+	// "before-like" small injected set vs. the full live set: warning
+	// codes/counts must be identical for this fixed config.
+	small := codeCounts([]types.ContextKey{types.SCHEMAS, types.TABLES, types.GLOBAL})
+	full := codeCounts(types.AllContextKeys())
+
+	if len(small) != len(full) {
+		t.Fatalf("warning code-set differs: %v vs %v", small, full)
+	}
+	for code, n := range full {
+		if small[code] != n {
+			t.Errorf("warning %q count differs: small=%d full=%d", code, small[code], n)
+		}
+	}
+	for _, code := range []string{"orphan_action", "collision", "ambiguous_prefix"} {
+		if full[code] == 0 {
+			t.Errorf("expected warning %q to be present", code)
+		}
+	}
+}
+
+func sameSet(a, b map[types.ContextKey]struct{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if _, ok := b[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func keysOf(m map[types.ContextKey]struct{}) []types.ContextKey {
+	out := make([]types.ContextKey, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

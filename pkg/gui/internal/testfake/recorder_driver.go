@@ -138,6 +138,12 @@ func (r *RecorderGuiDriver) SetSize(w, h int) error {
 func (r *RecorderGuiDriver) FeedKey(view string, key types.Key, mod types.Modifier) error {
 	r.mu.Lock()
 	var handler func() error
+	// Iterate in registration order so the FIRST registered handler for
+	// (view, key, mod) wins — faithful to real gocui. gocui's SetKeybinding
+	// APPENDS to g.keybindings (gocui gui.go:551) and execKeybindings
+	// forward-scans that slice (gocui gui.go:1546), firing the FIRST
+	// view-matching handler and returning. So gocui is FIRST-registered-wins
+	// for same-view bindings, NOT overwrite/last-wins.
 	for i := range r.bindings {
 		b := r.bindings[i]
 		if b.View == view && b.Key == key && b.Mod == mod {

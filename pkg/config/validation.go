@@ -1,9 +1,37 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// QuitAction is the action id that, when bound to a key, lets the user
+// exit the app. A config whose merged keybindings contain no entry with
+// this action leaves the app with no key-driven exit (dbsavvy-ivck.5).
+const QuitAction = "app.quit"
+
+// ErrNoQuitBinding is returned by ValidateUserConfig (and HasQuitBinding
+// callers) when the merged keybindings contain no entry bound to
+// QuitAction. Promoted from a warning to a hard error in dbsavvy-ivck.5
+// (T5) so startup aborts before the app enters an un-quittable state.
+var ErrNoQuitBinding = errors.New("no binding for " + QuitAction)
+
+// HasQuitBinding reports whether cfg has at least one keybinding whose
+// action is QuitAction. It performs no dependency-aware validation, so it
+// is safe to call before the gui registries exist (e.g. in entry_point.go
+// right after LoadUserConfig, before gocui.NewGui).
+func HasQuitBinding(cfg *UserConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, kb := range cfg.Keybindings {
+		if kb.Action == QuitAction {
+			return true
+		}
+	}
+	return false
+}
 
 // ValidationDeps lets callers inject domain knowledge into
 // ValidateUserConfig without pkg/config taking on a pkg/gui/* import.
@@ -104,7 +132,7 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 		if kb.Action == "help.cheatsheet" {
 			hasCheatsheet = true
 		}
-		if kb.Action == "app.quit" {
+		if kb.Action == QuitAction {
 			hasQuit = true
 		}
 
@@ -125,8 +153,12 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 	if !hasCheatsheet {
 		warns = append(warns, "no binding for help.cheatsheet")
 	}
+	// dbsavvy-ivck.5 (T5): a config with no app.quit binding leaves the
+	// app with no key-driven exit. Promote this from a warning to a hard
+	// error so startup aborts instead of entering a potentially
+	// un-quittable state. help.cheatsheet stays a warning by design.
 	if !hasQuit {
-		warns = append(warns, "no binding for app.quit")
+		errs = append(errs, ErrNoQuitBinding)
 	}
 
 	// Leader: a single bare digit 0..9 is invalid (would clash with vim

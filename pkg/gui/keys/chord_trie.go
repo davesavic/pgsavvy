@@ -268,6 +268,47 @@ func (b *TrieBuilder) InsertUser(cb *ChordBinding, cmd *commands.Command) {
 	b.insertUser(cb, cmd)
 }
 
+// RemoveLeafByAction deletes every leaf whose resolved Command.ID equals
+// actionID from this builder's node graph, pruning now-childless interior
+// nodes left behind. It is the inverse of insert and is ActionID-keyed so
+// a motion remap can FREE the shipped-default key (e.g. after j→n, the
+// j / dj leaves must go inert — R3). The trie is otherwise add-only;
+// this is the sole removal path.
+//
+// Returns true if at least one leaf was removed. Safe to call before
+// Build; no-op on an empty builder.
+func (b *TrieBuilder) RemoveLeafByAction(actionID string) bool {
+	if actionID == "" || b.root == nil {
+		return false
+	}
+	removed := removeLeafByAction(b.root, actionID)
+	return removed
+}
+
+// removeLeafByAction recursively clears any leaf action matching actionID
+// and prunes children that become empty (no action, no children).
+// Returns true if anything was removed in this subtree.
+func removeLeafByAction(node *trieNode, actionID string) bool {
+	removed := false
+	for k, child := range node.children {
+		if removeLeafByAction(child, actionID) {
+			removed = true
+		}
+		if child.action != nil && child.action.ID == actionID {
+			child.action = nil
+			child.source = 0
+			child.origin = ""
+			child.showInBar = false
+			child.opensMenu = false
+			removed = true
+		}
+		if child.action == nil && len(child.children) == 0 {
+			delete(node.children, k)
+		}
+	}
+	return removed
+}
+
 // Build finalises the trie. It walks the root looking for ambiguous
 // prefixes (an interior node that ALSO carries a leaf action) and emits
 // one Warning per finding. The returned ChordTrie and warning slice are

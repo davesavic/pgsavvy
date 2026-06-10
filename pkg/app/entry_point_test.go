@@ -12,6 +12,8 @@ import (
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+
+	"github.com/davesavic/dbsavvy/pkg/config"
 )
 
 func newBuildInfo() *BuildInfo {
@@ -197,6 +199,38 @@ func TestWireSessionLogger_DisableEnvWinsOverOverride(t *testing.T) {
 
 	exists, _ := afero.Exists(fs, "/custom/logs/sessions")
 	require.False(t, exists, "kill switch must not create the override sessions dir")
+}
+
+// TestRequireQuitBinding covers dbsavvy-ivck.5 (T5, R5): the pre-NewGui
+// guard returns a hard, actionable error naming app.quit and the config
+// path when no quit binding is present, and returns nil otherwise. This is
+// the seam Start() uses to abort BEFORE gocui.NewGui so the message
+// survives tcell's Fini.
+func TestRequireQuitBinding(t *testing.T) {
+	const configPath = "/home/user/.config/dbsavvy/config.yml"
+
+	t.Run("missing app.quit returns error naming action and path", func(t *testing.T) {
+		cfg := config.GetDefaultConfig()
+		cfg.Keybindings = []config.KeybindingConfig{
+			{Mode: "n", Scope: "global", Key: "?", Action: "help.cheatsheet"},
+		}
+		err := requireQuitBinding(cfg, configPath)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), config.QuitAction, "error must name the missing app.quit action")
+		require.Contains(t, err.Error(), "app.quit", "error must literally contain app.quit")
+		require.Contains(t, err.Error(), configPath, "error must point at the config file path")
+		require.ErrorIs(t, err, config.ErrNoQuitBinding)
+	})
+
+	t.Run("config that binds app.quit returns nil", func(t *testing.T) {
+		cfg := config.GetDefaultConfig() // defaults bind app.quit
+		require.NoError(t, requireQuitBinding(cfg, configPath))
+
+		cfg.Keybindings = []config.KeybindingConfig{
+			{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit"},
+		}
+		require.NoError(t, requireQuitBinding(cfg, configPath))
+	})
 }
 
 // withStderrCaptured redirects os.Stderr to a pipe for the duration of fn and
