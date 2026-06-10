@@ -28,6 +28,19 @@ var spinnerGlyphs = [...]rune{
 	'⠴', '⠦', '⠧', '⠇', '⠏',
 }
 
+// SpinnerGlyph returns the braille spinner glyph for the given wall-clock
+// frame index, cycling through the same 10-frame "dots" set BuildStatusLine
+// uses for the status bar. The frame is masked into range with the same
+// sign-safe modulo idiom (status_bar.go:87) so a wrapped/negative frame never
+// indexes out of bounds. Exported (T3 AD5/AD6a) so the CONNECTION_MANAGER
+// modal can render the Active connect-stage row with the SAME animated glyph
+// as the status-bar spinner.
+func SpinnerGlyph(frame int64) rune {
+	n := int64(len(spinnerGlyphs))
+	idx := (frame%n + n) % n
+	return spinnerGlyphs[idx]
+}
+
 // ANSI SGR pair used to tint the connection header (icon + label) with
 // the profile's `color:` field. dbsavvy-sgc: the header MUST be visibly
 // distinct after connect so the user can tell at a glance which

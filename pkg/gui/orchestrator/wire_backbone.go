@@ -182,6 +182,10 @@ func (g *Gui) wireContextRegistry(tr *i18n.TranslationSet, provider func() []mod
 		IsDisconnected: func() bool {
 			return g.queryState.queryRunner != nil && g.queryState.queryRunner.IsDisconnected()
 		},
+		// T3 AD5/AD6a: live spinner frame for the CONNECTION_MANAGER modal's
+		// Active connect-stage row, so "⠙ Loading objects…" animates in
+		// lock-step with the status-bar spinner.
+		SpinnerFrame: g.SpinnerFrame,
 		// dbsavvy-56u.2: first-run welcome tip copy. Nil-safe when tr is
 		// absent (test fixtures) — the context renders nothing.
 		FirstRunTipText: func() (string, string) {

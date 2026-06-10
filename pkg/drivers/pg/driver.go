@@ -155,7 +155,7 @@ func (d *Driver) Capabilities() drivers.Capabilities { return pgCapabilities }
 // through session.RedactDSN before being returned so inline credentials do
 // not leak into logs or the TUI. Errors from ResolvePassword and
 // BuildPgxConfig propagate unchanged (they never include the DSN literal).
-func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (drivers.Connection, error) {
+func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile, reporter drivers.ProgressReporter) (drivers.Connection, error) {
 	log := pkgLogger()
 	redactedDSN := session.RedactConnectionString(profile.DSN)
 	logs.Event(log, "db", "conn_open",
@@ -224,6 +224,7 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 	if tunnel != nil {
 		cfg.ConnConfig.DialFunc = tunnel.DialContext
 		cfg.ConnConfig.LookupFunc = identityLookup
+		drivers.ReportStage(reporter, drivers.StageTunnel)
 	}
 
 	pool, err := pgxpool.NewWithConfig(dialCtx, cfg)
@@ -241,6 +242,7 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile) (d
 		emitDone(wrapped)
 		return nil, wrapped
 	}
+	drivers.ReportStage(reporter, drivers.StageAuthenticated)
 
 	var version string
 	if err := pool.QueryRow(dialCtx, "SELECT version()").Scan(&version); err != nil {

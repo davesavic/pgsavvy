@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/dbsavvy/pkg/gui/status"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -123,7 +124,7 @@ func (c *ConnectionManagerContext) HandleRender() error {
 // hint).
 func (c *ConnectionManagerContext) body() string {
 	if c.mode == ModeConnecting {
-		return c.connecting.Body()
+		return c.connecting.BodyGlyph(c.activeStageGlyph())
 	}
 	if c.mode == ModeForm {
 		return c.form.render()
@@ -132,6 +133,19 @@ func (c *ConnectionManagerContext) body() string {
 		return "[a] add"
 	}
 	return c.renderRows()
+}
+
+// activeStageGlyph resolves the spinner glyph drawn for the Active connect
+// stage row (T3 AD5/AD6a). It reads the live wall-clock frame via the injected
+// SpinnerFrame accessor so the glyph animates in lock-step with the status-bar
+// spinner. The accessor is unset in test fixtures / partial bootstrap, so a nil
+// accessor falls back to the frame-0 glyph — a static (non-animated) but valid
+// spinner rune, never a panic.
+func (c *ConnectionManagerContext) activeStageGlyph() rune {
+	if c.deps.SpinnerFrame == nil {
+		return status.SpinnerGlyph(0)
+	}
+	return status.SpinnerGlyph(c.deps.SpinnerFrame())
 }
 
 // --- Form drive surface (dbsavvy-dyf) ---------------------------------------

@@ -225,7 +225,7 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 		h := data.NewConnectHelper()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _, err := h.Connect(ctx, &profile)
+		_, _, err := h.Connect(ctx, &profile, nil)
 		if err != nil {
 			t.Fatalf("Connect: %v", err)
 		}
@@ -262,7 +262,7 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 		h := data.NewConnectHelper()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if _, _, err := h.Connect(ctx, &profile); err != nil {
+		if _, _, err := h.Connect(ctx, &profile, nil); err != nil {
 			t.Fatalf("Connect: %v", err)
 		}
 		defer h.Disconnect()
@@ -314,7 +314,7 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 
 		// Load tables independently to seed the Tables rail selection.
 		h := data.NewConnectHelper()
-		if _, _, err := h.Connect(ctx, &profile); err != nil {
+		if _, _, err := h.Connect(ctx, &profile, nil); err != nil {
 			t.Fatalf("Connect (loader): %v", err)
 		}
 		defer h.Disconnect()

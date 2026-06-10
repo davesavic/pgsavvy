@@ -165,7 +165,7 @@ type fakeDriver struct {
 
 func (d *fakeDriver) Name() string                       { return "fake" }
 func (d *fakeDriver) Capabilities() drivers.Capabilities { return drivers.Capabilities{} }
-func (d *fakeDriver) Open(_ context.Context, _ drivers.ConnectionProfile) (drivers.Connection, error) {
+func (d *fakeDriver) Open(_ context.Context, _ drivers.ConnectionProfile, _ drivers.ProgressReporter) (drivers.Connection, error) {
 	if d.openErr != nil {
 		return nil, d.openErr
 	}
@@ -190,7 +190,7 @@ func TestConnectHelperConnectPropagatesUnknownDriver(t *testing.T) {
 	_, _, err := h.Connect(context.Background(), &models.Connection{
 		Name:   "p",
 		Driver: "definitely-not-registered-xyz",
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected error for unknown driver")
 	}
@@ -201,7 +201,7 @@ func TestConnectHelperConnectPropagatesUnknownDriver(t *testing.T) {
 
 func TestConnectHelperConnectNilProfile(t *testing.T) {
 	h := NewConnectHelper()
-	_, _, err := h.Connect(context.Background(), nil)
+	_, _, err := h.Connect(context.Background(), nil, nil)
 	if err == nil {
 		t.Fatal("expected error for nil profile")
 	}
@@ -217,7 +217,7 @@ func TestConnectHelperLoadXSerializesConcurrentCalls(t *testing.T) {
 	registerFake(t, "fake-serialize", drv)
 
 	h := NewConnectHelper()
-	_, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-serialize"})
+	_, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-serialize"}, nil)
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestConnectHelperDisconnectWaitsForInFlight(t *testing.T) {
 	registerFake(t, "fake-disconnect", drv)
 
 	h := NewConnectHelper()
-	_, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-disconnect"})
+	_, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-disconnect"}, nil)
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestConnectHelperReconnect(t *testing.T) {
 	registerFake(t, "fake-reconnect", drv)
 
 	h := NewConnectHelper()
-	if _, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-reconnect"}); err != nil {
+	if _, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-reconnect"}, nil); err != nil {
 		t.Fatalf("first Connect: %v", err)
 	}
 	if _, err := h.LoadSchemas(context.Background(), ""); err != nil {
@@ -369,7 +369,7 @@ func TestConnectHelperReconnect(t *testing.T) {
 	}
 
 	// Re-Connect with the same registered driver name.
-	if _, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-reconnect"}); err != nil {
+	if _, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-reconnect"}, nil); err != nil {
 		t.Fatalf("second Connect: %v", err)
 	}
 	if _, err := h.LoadSchemas(context.Background(), ""); err != nil {
@@ -388,7 +388,7 @@ func TestConnectHelperLoadXContextCancellation(t *testing.T) {
 	registerFake(t, "fake-cancel", drv)
 
 	h := NewConnectHelper()
-	_, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-cancel"})
+	_, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-cancel"}, nil)
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -436,7 +436,7 @@ func TestConnectHelperConnectionAndSessionAccessors(t *testing.T) {
 	if h.Connection() != nil || h.Session() != nil {
 		t.Fatal("accessors must return nil before Connect")
 	}
-	if _, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-accessors"}); err != nil {
+	if _, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-accessors"}, nil); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 	if h.Connection() != conn {

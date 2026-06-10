@@ -7,6 +7,7 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -169,7 +170,10 @@ func (g *Gui) armSpinner() {
 			case <-stop:
 				return
 			case <-ch:
-				g.OnUIThreadContentOnly(func() error { return nil })
+				g.OnUIThreadContentOnly(func() error {
+					g.repaintConnectingModal()
+					return nil
+				})
 			}
 		}
 	})
@@ -190,6 +194,26 @@ func (g *Gui) stopSpinner() {
 	close(g.spinnerState.spinnerStop)
 	g.spinnerState.spinnerTicker = nil
 	g.spinnerState.spinnerStop = nil
+}
+
+// repaintConnectingModal re-renders the CONNECTION_MANAGER modal body when it
+// is mid-connect, so the spinner-frame-dependent glyph (T3) animates between
+// full flushes — the spinner tick alone only redraws already-tainted views and
+// never re-runs the layout pass that drives the modal's HandleRender. Runs on
+// the MainLoop (Mode()/HandleRender are MainLoop-only, never the drain
+// goroutine) so reading Mode() here is race-free. HandleRender routes through
+// the driver's Update, which writes (and thereby taints) the modal view so the
+// next flush repaints it. No-op when the modal is absent (test fixtures) or not
+// connecting, so behavior outside ModeConnecting is unchanged.
+func (g *Gui) repaintConnectingModal() {
+	if g == nil || g.registry == nil || g.registry.ConnectionManager == nil {
+		return
+	}
+	cm := g.registry.ConnectionManager
+	if cm.Mode() != guicontext.ModeConnecting {
+		return
+	}
+	_ = cm.HandleRender()
 }
 
 // OnUIThread schedules fn for execution on the gocui MainLoop with a

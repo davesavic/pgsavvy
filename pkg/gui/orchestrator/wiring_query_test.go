@@ -31,10 +31,12 @@ import (
 // stub every other Session/Connection method with zero values.
 
 type wireFakeSession struct {
-	id      models.SessionID
-	schemas []models.Schema
-	indexes []models.Index
-	columns []models.Column
+	id           models.SessionID
+	schemas      []models.Schema
+	indexes      []models.Index
+	columns      []models.Column
+	schemasErr   error
+	schemasBlock chan struct{}
 }
 
 func (s *wireFakeSession) Close() error         { return nil }
@@ -43,7 +45,17 @@ func (s *wireFakeSession) ListDatabases(_ context.Context) ([]models.Database, e
 	return nil, nil
 }
 
-func (s *wireFakeSession) ListSchemas(_ context.Context, _ string) ([]models.Schema, error) {
+func (s *wireFakeSession) ListSchemas(ctx context.Context, _ string) ([]models.Schema, error) {
+	if s.schemasBlock != nil {
+		select {
+		case <-s.schemasBlock:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if s.schemasErr != nil {
+		return nil, s.schemasErr
+	}
 	return s.schemas, nil
 }
 
@@ -124,6 +136,17 @@ type wireFakeConn struct {
 	// the driver (epic dbsavvy-e53.5 cancel/teardown). Runs instead of
 	// openHook when both are set is avoided — set only one.
 	openHookCtx func(context.Context)
+	// emitStages, when set, is the sequence of driver ConnectStages the fake
+	// Open reports through the ProgressReporter — mirroring a real driver
+	// surfacing tunnel/auth milestones (T3 staged-progress wiring).
+	emitStages []drivers.ConnectStage
+	// schemasErr, when non-nil, makes the fake session's ListSchemas return it
+	// so the Objects stage fails (T3 AD7 schema-load-failure path).
+	schemasErr error
+	// schemasBlock, when set, blocks ListSchemas on it until the ctx is
+	// cancelled — used to exercise the Objects schema-load TIMEOUT path so the
+	// row fails into ✗ rather than hanging on "Loading objects…" (T3 AD7).
+	schemasBlock chan struct{}
 }
 
 func (c *wireFakeConn) Close() error                                     { return nil }
@@ -133,10 +156,12 @@ func (c *wireFakeConn) Cancel(_ context.Context, _ models.QueryID) error { retur
 func (c *wireFakeConn) AcquireSession(_ context.Context) (drivers.Session, error) {
 	n := c.acquired.Add(1)
 	return &wireFakeSession{
-		id:      models.SessionID(n),
-		schemas: c.schemas,
-		indexes: c.indexes,
-		columns: c.columns,
+		id:           models.SessionID(n),
+		schemas:      c.schemas,
+		indexes:      c.indexes,
+		columns:      c.columns,
+		schemasErr:   c.schemasErr,
+		schemasBlock: c.schemasBlock,
 	}, nil
 }
 
@@ -147,12 +172,17 @@ type wireFakeDriver struct {
 
 func (d *wireFakeDriver) Name() string                       { return "wire-fake" }
 func (d *wireFakeDriver) Capabilities() drivers.Capabilities { return d.caps }
-func (d *wireFakeDriver) Open(ctx context.Context, _ drivers.ConnectionProfile) (drivers.Connection, error) {
+func (d *wireFakeDriver) Open(ctx context.Context, _ drivers.ConnectionProfile, reporter drivers.ProgressReporter) (drivers.Connection, error) {
 	if d.conn != nil && d.conn.openHookCtx != nil {
 		d.conn.openHookCtx(ctx)
 	}
 	if d.conn != nil && d.conn.openHook != nil {
 		d.conn.openHook()
+	}
+	if d.conn != nil {
+		for _, st := range d.conn.emitStages {
+			drivers.ReportStage(reporter, st)
+		}
 	}
 	if d.conn != nil && d.conn.openErr != nil {
 		return nil, d.conn.openErr

@@ -95,7 +95,7 @@ func TestOpen_EmitsConnOpenEvents(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancel so any network attempt fails fast.
-	_, _ = d.Open(ctx, profile)
+	_, _ = d.Open(ctx, profile, nil)
 
 	opens := findEvents(t, buf, "conn_open")
 	dones := findEvents(t, buf, "conn_open_done")
@@ -134,7 +134,7 @@ func TestOpen_KVFormDSN_PasswordRedacted(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _ = d.Open(ctx, profile)
+	_, _ = d.Open(ctx, profile, nil)
 
 	if strings.Contains(buf.String(), "hunter2") {
 		t.Errorf("buf contains unredacted password: %s", buf.String())

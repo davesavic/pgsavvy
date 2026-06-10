@@ -246,7 +246,7 @@ func TestConnect_AsyncErrorPublish_NoRaceWithConnectingRender(t *testing.T) {
 	// state for the async error-publish path.
 	bag := g.HelperBagForTest()
 	cm := g.Registry().ConnectionManager
-	cm.ConnectingState().SetConnecting("async-err")
+	cm.ConnectingState().SetConnectingStaged("async-err", nil)
 	drv.drainPending()
 
 	profile := &models.Connection{Name: "async-err", Driver: driverName, DSN: "postgres://stub"}

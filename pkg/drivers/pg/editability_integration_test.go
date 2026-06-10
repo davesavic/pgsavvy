@@ -37,7 +37,7 @@ func openIntegrationSession(t *testing.T) *pg.Session {
 		Name:   "editability-test",
 		Driver: "postgres",
 		DSN:    dsn,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("driver open: %v", err)
 	}
