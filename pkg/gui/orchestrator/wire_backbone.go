@@ -699,8 +699,16 @@ func (g *Gui) wireTrie(cfg *config.UserConfig) (*keys.TrieSet, []*types.ChordBin
 		g.deps.Common.Logger().Info("config: validated", "warnings", len(cfgWarns), "cat", "app")
 	}
 
-	// Build the trie.
-	svc := keys.NewKeybindingService()
+	// Build the trie. `scope: all` expands over the live registry's
+	// context keys (filtered by kindOf inside the service), so a new
+	// non-popup context is reached without editing pkg/gui/keys.
+	knownContexts := make([]types.ContextKey, 0)
+	for _, ctx := range g.registry.Flatten() {
+		if ctx != nil {
+			knownContexts = append(knownContexts, ctx.GetKey())
+		}
+	}
+	svc := keys.NewKeybindingService(knownContexts...)
 	defaults := controllers.AllDefaultBindings(g.controllers)
 	trieSet, warnings, buildErr := svc.Build(defaults, cfg, g.keybindingSystem.cmdRegistry, g.kindOf)
 	if buildErr != nil {

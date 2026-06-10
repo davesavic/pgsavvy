@@ -71,7 +71,18 @@ type VimEditor struct {
 	// no-ops, matching the masterEditor convention). Wired via
 	// WithSessionLog.
 	sessionLog *slog.Logger
+
+	// emergencyQuit is the un-rebindable Ctrl-C escape hatch (R5). When
+	// non-nil, Edit / Dispatch intercept Ctrl-C BEFORE matcher dispatch and
+	// route it to the clean-quit path, so the focused QUERY_EDITOR always
+	// quits on Ctrl-C regardless of user keybinding config. nil disables.
+	emergencyQuit func() error
 }
+
+// ctrlCKey is the decoded chord-trie Key for Ctrl-C. Under tcell raw mode
+// ISIG is cleared, so keyboard Ctrl-C arrives as a KeyCtrlC KEY event (not
+// SIGINT) and KeyFromGocui decodes it into this exact value (R5).
+var ctrlCKey = keys.Key{Code: 'c', Mod: keys.ModCtrl}
 
 // VimEditorOption mutates a *VimEditor before NewVimEditor returns,
 // mirroring the orchestrator's MasterEditorOption pattern.
@@ -92,6 +103,15 @@ func WithSessionLog(l *slog.Logger) VimEditorOption {
 // the reschedule (the testfake-with-nil-driver path).
 func WithGuiDriver(d types.GuiDriver) VimEditorOption {
 	return func(e *VimEditor) { e.driver = d }
+}
+
+// WithEmergencyQuit injects the un-rebindable Ctrl-C escape hatch (R5).
+// When set, VimEditor.Edit / Dispatch intercept Ctrl-C before matcher
+// dispatch and route it to the clean-quit path, so the focused
+// QUERY_EDITOR always quits on Ctrl-C regardless of user keybinding
+// config. nil disables the intercept.
+func WithEmergencyQuit(fn func() error) VimEditorOption {
+	return func(e *VimEditor) { e.emergencyQuit = fn }
 }
 
 // NewVimEditor builds a VimEditor bound to qec / matcher / scope. Any
@@ -199,6 +219,15 @@ func (e *VimEditor) Edit(v *gocui.View, key gocui.Key) bool {
 		return false
 	}
 	k := keys.KeyFromGocui(key)
+	// R5: un-rebindable emergency Ctrl-C exit. Intercept before matcher
+	// dispatch so the focused QUERY_EDITOR always quits on Ctrl-C regardless
+	// of config. The GuiDriver reschedule mirrors the <leader>q quit path.
+	if k == ctrlCKey && e.emergencyQuit != nil {
+		if errors.Is(e.emergencyQuit(), gocui.ErrQuit) && e.driver != nil {
+			e.driver.Update(func() error { return gocui.ErrQuit })
+		}
+		return true
+	}
 	result, err := e.matcher.Dispatch(e.scope, k)
 	// gocui.Editor.Edit returns only a bool, so a handler returning
 	// gocui.ErrQuit (the GLOBAL `<leader>q` that falls through from this
@@ -218,6 +247,12 @@ func (e *VimEditor) Dispatch(v *gocui.View, key gocui.Key) (keys.DispatchResult,
 		return keys.FellThrough, nil
 	}
 	k := keys.KeyFromGocui(key)
+	// R5: emergency Ctrl-C — same intercept as Edit, surfaced as a
+	// Dispatched result carrying the quit error so the recorder harness
+	// (FeedChord) observes gocui.ErrQuit at the dispatch layer.
+	if k == ctrlCKey && e.emergencyQuit != nil {
+		return keys.Dispatched, e.emergencyQuit()
+	}
 	result, err := e.matcher.Dispatch(e.scope, k)
 	e.applyResult(v, k, result)
 	return result, err

@@ -63,6 +63,9 @@ func TestValidateUserConfig_MultipleErrors(t *testing.T) {
 		{Mode: "n", Scope: "global", Key: "<bogus", Action: "x"},
 		{Mode: "n", Scope: "global", Key: "j", Action: "y"},
 		{Mode: "n", Scope: "global", Key: "<f13>", Action: "z"},
+		// app.quit must be bound or its absence adds a (now-hard) error and
+		// throws off the count; this test targets key-parse errors only.
+		{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit"},
 	}
 	_, errs := ValidateUserConfig(cfg, fullDeps())
 	if len(errs) != 2 {
@@ -264,19 +267,63 @@ func TestValidateUserConfig_MissingCheatsheetWarning(t *testing.T) {
 	}
 }
 
-func TestValidateUserConfig_MissingQuitWarning(t *testing.T) {
-	cfg := GetDefaultConfig()
-	cfg.Keybindings = []KeybindingConfig{
-		{Mode: "n", Scope: "global", Key: "?", Action: "help.cheatsheet"},
-	}
+// TestQuitBindingRequired covers dbsavvy-ivck.5 (T5): a merged config with
+// no app.quit binding is a hard ERROR (not a warning), while a config that
+// does bind app.quit validates cleanly. help.cheatsheet must remain a
+// warning either way (the asymmetry is intentional).
+func TestQuitBindingRequired(t *testing.T) {
 	deps := ValidationDeps{
-		ActionExists: allowSet("help.cheatsheet"),
+		ActionExists: allowSet("app.quit", "help.cheatsheet"),
 		ScopeExists:  allowSet("global"),
 	}
-	warns, _ := ValidateUserConfig(cfg, deps)
-	if !containsSubstr(warns, "app.quit") {
-		t.Errorf("expected app.quit warning, got %v", warns)
-	}
+
+	t.Run("missing app.quit is an error, not a warning", func(t *testing.T) {
+		cfg := GetDefaultConfig()
+		cfg.Keybindings = []KeybindingConfig{
+			{Mode: "n", Scope: "global", Key: "?", Action: "help.cheatsheet"},
+		}
+		warns, errs := ValidateUserConfig(cfg, deps)
+		if !containsErrSubstr(errs, "app.quit") {
+			t.Errorf("expected an error naming app.quit, got errors %v", errs)
+		}
+		if containsSubstr(warns, "app.quit") {
+			t.Errorf("app.quit must be an error, not a warning; warns=%v", warns)
+		}
+		// help.cheatsheet stays a warning here only when it is itself
+		// missing; it is bound in this config, so assert it is NOT promoted
+		// to an error.
+		if containsErrSubstr(errs, "help.cheatsheet") {
+			t.Errorf("help.cheatsheet must never be promoted to an error; errs=%v", errs)
+		}
+	})
+
+	t.Run("help.cheatsheet remains a warning, never an error", func(t *testing.T) {
+		// Bind app.quit but not help.cheatsheet: the only advisory should be
+		// the help.cheatsheet warning, and there must be no errors.
+		cfg := GetDefaultConfig()
+		cfg.Keybindings = []KeybindingConfig{
+			{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit"},
+		}
+		warns, errs := ValidateUserConfig(cfg, deps)
+		if len(errs) != 0 {
+			t.Errorf("expected no errors when app.quit is bound, got %v", errs)
+		}
+		if !containsSubstr(warns, "help.cheatsheet") {
+			t.Errorf("expected help.cheatsheet warning, got %v", warns)
+		}
+	})
+
+	t.Run("config that binds app.quit validates cleanly", func(t *testing.T) {
+		cfg := GetDefaultConfig()
+		cfg.Keybindings = []KeybindingConfig{
+			{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit"},
+			{Mode: "n", Scope: "global", Key: "?", Action: "help.cheatsheet"},
+		}
+		_, errs := ValidateUserConfig(cfg, deps)
+		if len(errs) != 0 {
+			t.Errorf("expected clean validation, got errors %v", errs)
+		}
+	})
 }
 
 func TestValidateUserConfig_LeaderDigitRejected(t *testing.T) {
