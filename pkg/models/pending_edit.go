@@ -32,6 +32,12 @@ type PendingEdit struct {
 	PrimaryKey []any
 	// Column is the name of the column being edited.
 	Column string
+	// ColumnType is the column's SQL type name (e.g. "jsonb"), captured at
+	// staging time so the commit preview can render OldValue/NewValue with
+	// the same type-aware formatting as the grid and cell editor rather
+	// than guessing from the Go value's shape. Display-only; not used for
+	// SQL generation or conflict detection.
+	ColumnType string
 	// OldValue is the server-loaded value at the time of staging; used for
 	// optimistic-concurrency conflict detection.
 	OldValue any

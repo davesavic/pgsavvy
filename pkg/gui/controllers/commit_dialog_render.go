@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/dbsavvy/pkg/gui/grid"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -120,7 +121,7 @@ func writeCommitDialogPreview(b *strings.Builder, v guicontext.CommitDialogView)
 		for _, e := range g.edits {
 			fmt.Fprintf(b, "  %s: %s → %s\n",
 				e.Column,
-				truncateValue(formatValue(e.OldValue)),
+				truncateValue(formatEditValue(e.OldValue, e.ColumnType)),
 				formatNew(e),
 			)
 		}
@@ -199,6 +200,22 @@ func formatValue(v any) string {
 	return fmt.Sprintf("%v", v)
 }
 
+// formatEditValue renders a staged-edit value (old or new side) for the
+// row-diff preview, type-aware. json/jsonb columns render as JSON text —
+// the same form the grid and cell editor show — so both sides of the
+// arrow read as JSON rather than Go's byte-slice / map form for the old
+// value and an escaped-string for the new (dbsavvy-2ij6). NULL still
+// renders as the literal word; everything else falls back to formatValue.
+func formatEditValue(v any, columnType string) string {
+	if v == nil {
+		return "NULL"
+	}
+	if grid.IsJSONColumn(models.ColumnMeta{TypeName: columnType}) {
+		return grid.FormatJSONValue(v)
+	}
+	return formatValue(v)
+}
+
 // formatNew renders the right-hand side of a row-diff line: the new
 // value for Literal edits, the verbatim expression text (with a
 // "(SQL expression)" suffix) for Expression edits. Per the epic
@@ -208,7 +225,7 @@ func formatNew(e models.PendingEdit) string {
 	if e.Kind == models.Expression {
 		return e.NewExpr + " (SQL expression)"
 	}
-	return truncateValue(formatValue(e.NewValue))
+	return truncateValue(formatEditValue(e.NewValue, e.ColumnType))
 }
 
 // truncateValue caps a rendered cell value at commitDialogValueWidth.

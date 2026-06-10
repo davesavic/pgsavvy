@@ -100,7 +100,7 @@ func (p cellEditorPicker) CellSnapshot() (any, models.ColumnMeta, []any, bool) {
 	return values[col], cols[col], pk, true
 }
 
-func (p cellEditorPicker) FormatForEdit(v any) string {
+func (p cellEditorPicker) FormatForEdit(v any, col models.ColumnMeta) string {
 	if v == nil {
 		return ""
 	}
@@ -110,10 +110,18 @@ func (p cellEditorPicker) FormatForEdit(v any) string {
 	if t, ok := v.(time.Time); ok {
 		return t.Format("2006-01-02 15:04:05.999999-07:00")
 	}
-	// json/jsonb objects decode to a Go map; seed the editor with JSON
-	// text ({"k":"v"}) — the same string the grid shows — rather than
-	// Go's map[k:v] form (dbsavvy json-cell-format). No column meta is
-	// threaded here, so detect by Go shape: a map is always JSON.
+	// json/jsonb cells seed with JSON text — the same string the grid
+	// shows — rather than Go's default form. pgx decodes them into a Go
+	// map (objects/arrays), a []byte, or a string depending on shape;
+	// classify by column type so every form routes through
+	// FormatJSONValue rather than guessing from the Go value, which
+	// misses raw []byte json and prints "[123 34 ...]" (dbsavvy-2ij6,
+	// dbsavvy json-cell-format).
+	if grid.IsJSONColumn(col) {
+		return grid.FormatJSONValue(v)
+	}
+	// Fallback for cells with no column meta classification: a Go map is
+	// always JSON-shaped.
 	if reflect.ValueOf(v).Kind() == reflect.Map {
 		return grid.FormatJSONValue(v)
 	}

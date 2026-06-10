@@ -44,7 +44,7 @@ func (f *fakeGridPicker) CellSnapshot() (any, models.ColumnMeta, []any, bool) {
 	return f.cell, f.column, pk, f.cellOK
 }
 
-func (f *fakeGridPicker) FormatForEdit(v any) string {
+func (f *fakeGridPicker) FormatForEdit(v any, _ models.ColumnMeta) string {
 	if v == nil {
 		return ""
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/dbsavvy/pkg/gui/grid"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -315,8 +316,8 @@ func DefaultConflictDialogRender(v guicontext.ConflictDialogView) string {
 // this annotation).
 func writeConflictRow(b *strings.Builder, c models.ConflictedEdit) {
 	fmt.Fprintf(b, "row %s · column %s\n", formatConflictPK(c.Edit.PrimaryKey), c.Edit.Column)
-	fmt.Fprintf(b, "  your edit:  %s\n", formatConflictValue(stagedNewPayload(c.Edit)))
-	fmt.Fprintf(b, "  server now: %s\n", formatConflictValue(c.ServerValue))
+	fmt.Fprintf(b, "  your edit:  %s\n", formatConflictValue(stagedNewPayload(c.Edit), c.Edit.ColumnType))
+	fmt.Fprintf(b, "  server now: %s\n", formatConflictValue(c.ServerValue, c.Edit.ColumnType))
 	fmt.Fprintf(b, "  loaded at:  %s", c.LoadedAt.Format(time.RFC3339))
 	if isAlreadyApplied(c) {
 		b.WriteString("\n  (already applied by another session)")
@@ -373,12 +374,17 @@ func formatConflictPK(pk []any) string {
 	return "(" + strings.Join(parts, ", ") + ")"
 }
 
-// formatConflictValue renders an arbitrary value with NULL-safety. Nil
-// renders as the literal `NULL` so the user can distinguish a missing
-// row from an empty string.
-func formatConflictValue(v any) string {
+// formatConflictValue renders a value with NULL-safety, type-aware on the
+// column's SQL type. json/jsonb values render as JSON text — the same form
+// the grid and commit preview show — rather than Go's byte-slice form for a
+// []byte the server returned (dbsavvy-2ij6). Nil renders as the literal
+// `NULL` so the user can distinguish a missing row from an empty string.
+func formatConflictValue(v any, columnType string) string {
 	if v == nil {
 		return "NULL"
+	}
+	if grid.IsJSONColumn(models.ColumnMeta{TypeName: columnType}) {
+		return grid.FormatJSONValue(v)
 	}
 	return fmt.Sprintf("%v", v)
 }

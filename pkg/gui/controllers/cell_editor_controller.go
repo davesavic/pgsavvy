@@ -81,9 +81,12 @@ type GridStatePicker interface {
 
 	// FormatForEdit returns the string form of value the popup pre-
 	// seeds the buffer with. Mirrors the cell's on-screen rendering
-	// (so the user starts editing what they see). nil values render
-	// as "" so backspace doesn't have to skip "NULL".
-	FormatForEdit(value any) string
+	// (so the user starts editing what they see). column is threaded so
+	// the seed can classify json/jsonb (and other typed) cells the same
+	// way the grid renderer does, rather than guessing from the Go value
+	// shape alone. nil values render as "" so backspace doesn't have to
+	// skip "NULL".
+	FormatForEdit(value any, column models.ColumnMeta) string
 }
 
 // PendingEditStore is the narrow write surface CellEditorController
@@ -203,7 +206,7 @@ func (e *CellEditorController) Enter(_ commands.ExecCtx) error {
 	if !ok {
 		return nil
 	}
-	initial := e.picker.FormatForEdit(value)
+	initial := e.picker.FormatForEdit(value, col)
 	e.ctx.Open(value, col, pk, initial)
 	return e.wrapErr("cell.edit.enter", e.tree.Push(e.ctx))
 }
@@ -224,7 +227,7 @@ func (e *CellEditorController) Commit(_ commands.ExecCtx) error {
 	pk := e.ctx.PrimaryKey()
 	originalSeed := ""
 	if e.picker != nil {
-		originalSeed = e.picker.FormatForEdit(e.ctx.OriginalValue())
+		originalSeed = e.picker.FormatForEdit(e.ctx.OriginalValue(), col)
 	}
 	changed := typed != originalSeed
 	if changed && e.store != nil && len(pk) > 0 {
@@ -234,6 +237,7 @@ func (e *CellEditorController) Commit(_ commands.ExecCtx) error {
 		if err := e.store.Add(models.PendingEdit{
 			PrimaryKey: pk,
 			Column:     col.Name,
+			ColumnType: col.TypeName,
 			OldValue:   e.ctx.OriginalValue(),
 			NewValue:   typed,
 			Kind:       models.Literal,
