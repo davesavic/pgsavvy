@@ -5,87 +5,13 @@ import (
 	"testing"
 )
 
-func TestNewBufferInitsMarksAndJumps(t *testing.T) {
+func TestNewBufferInitsJumps(t *testing.T) {
 	b := NewBuffer()
-	if b.Marks == nil {
-		t.Fatal("NewBuffer().Marks is nil; want non-nil map")
-	}
 	if b.Jumps == nil {
 		t.Fatal("NewBuffer().Jumps is nil; want non-nil JumpList")
 	}
 	if got := b.Jumps.Len(); got != 0 {
 		t.Fatalf("fresh JumpList Len = %d, want 0", got)
-	}
-}
-
-func TestSetMarkLowercase(t *testing.T) {
-	b := NewBuffer()
-	pos := Position{Line: 3, Col: 7}
-	if err := SetMark(b, 'a', pos); err != nil {
-		t.Fatalf("SetMark('a') err = %v, want nil", err)
-	}
-	got, ok := GetMark(b, 'a')
-	if !ok {
-		t.Fatal("GetMark('a') ok = false, want true")
-	}
-	if got != pos {
-		t.Fatalf("GetMark('a') = %+v, want %+v", got, pos)
-	}
-}
-
-func TestSetMarkUppercaseRejected(t *testing.T) {
-	b := NewBuffer()
-	err := SetMark(b, 'A', Position{Line: 0, Col: 0})
-	if !errors.Is(err, ErrInvalidMark) {
-		t.Fatalf("SetMark('A') err = %v, want ErrInvalidMark", err)
-	}
-}
-
-func TestSetMarkNonLetterRejected(t *testing.T) {
-	b := NewBuffer()
-	for _, r := range []rune{'!', '0', '\'', ' ', '`', '{', '@'} {
-		if err := SetMark(b, r, Position{}); !errors.Is(err, ErrInvalidMark) {
-			t.Errorf("SetMark(%q) err = %v, want ErrInvalidMark", r, err)
-		}
-	}
-}
-
-func TestGetMarkMissing(t *testing.T) {
-	b := NewBuffer()
-	if _, ok := GetMark(b, 'z'); ok {
-		t.Fatal("GetMark on never-set mark returned ok=true")
-	}
-}
-
-func TestGetMarkInvalidRuneIsMiss(t *testing.T) {
-	b := NewBuffer()
-	if _, ok := GetMark(b, 'A'); ok {
-		t.Fatal("GetMark('A') ok = true, want false")
-	}
-}
-
-func TestMarksSurviveNonOverlappingApply(t *testing.T) {
-	b := NewBuffer()
-	b.Lines = []Line{
-		{Runes: []rune("line one")},
-		{Runes: []rune("line two")},
-		{Runes: []rune("line three")},
-	}
-	pos := Position{Line: 0, Col: 2}
-	if err := SetMark(b, 'a', pos); err != nil {
-		t.Fatalf("SetMark err = %v", err)
-	}
-	err := b.Apply(Edit{
-		Kind:  EditKindInsert,
-		Range: Range{Start: Position{Line: 2, Col: 4}, End: Position{Line: 2, Col: 4}},
-		Text:  "X",
-	})
-	if err != nil {
-		t.Fatalf("Apply err = %v", err)
-	}
-	got, ok := GetMark(b, 'a')
-	if !ok || got != pos {
-		t.Fatalf("mark after edit on different line: got=(%+v,%v), want=(%+v,true)", got, ok, pos)
 	}
 }
 

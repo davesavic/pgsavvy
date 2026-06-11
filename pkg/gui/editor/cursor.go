@@ -7,11 +7,6 @@ import "errors"
 // deferred to a successor epic.
 const jumpListCap = 100
 
-// ErrInvalidMark is returned by SetMark when the mark name is not in
-// `[a-z]`. Marks `[A-Z]` and `'0`..`'9` are deferred to a successor
-// epic per epic Architecture Decision 9.
-var ErrInvalidMark = errors.New("editor: mark name out of range (a-z required)")
-
 // ErrEmptyBuffer is returned by SetCursor when the buffer has no
 // lines — there is no valid cursor target until at least one line
 // (possibly empty) exists.
@@ -70,43 +65,13 @@ func (j *JumpList) At(i int) Position {
 	return j.entries[(j.head+i)%jumpListCap]
 }
 
-// NewBuffer returns a Buffer with Marks (cap 26) and Jumps (cap 100)
-// initialised. wwd.2 zero-valued Buffers (`&Buffer{}`) still work for
-// the legacy buffer_test.go path — Marks/Jumps are lazily allocated
-// by SetMark and Push respectively when nil.
+// NewBuffer returns a Buffer with Jumps (cap 100) initialised. wwd.2
+// zero-valued Buffers (`&Buffer{}`) still work for the legacy
+// buffer_test.go path — Jumps is lazily allocated by Push when nil.
 func NewBuffer() *Buffer {
 	return &Buffer{
-		Marks: make(map[rune]Position, 26),
 		Jumps: newJumpList(),
 	}
-}
-
-// SetMark records p under r on b. Only lowercase ASCII `[a-z]` is
-// accepted in MVP; uppercase (file-global) and digit (jumplist
-// recall) marks are deferred. ErrInvalidMark on any other rune.
-func SetMark(b *Buffer, r rune, p Position) error {
-	if r < 'a' || r > 'z' {
-		return ErrInvalidMark
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.Marks == nil {
-		b.Marks = make(map[rune]Position, 26)
-	}
-	b.Marks[r] = p
-	return nil
-}
-
-// GetMark looks up r. Returns (Position{}, false) when r is not in
-// `[a-z]` or has not been set on b.
-func GetMark(b *Buffer, r rune) (Position, bool) {
-	if r < 'a' || r > 'z' {
-		return Position{}, false
-	}
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	p, ok := b.Marks[r]
-	return p, ok
 }
 
 // SetCursor writes p to b.Cursor after validating Line and clamping

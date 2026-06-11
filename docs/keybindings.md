@@ -201,7 +201,6 @@ motion.sentence_next
 motion.screen_top
 motion.screen_middle
 motion.screen_bottom
-motion.mark_jump
 operator.delete
 operator.yank
 operator.change

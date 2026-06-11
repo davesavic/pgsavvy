@@ -42,9 +42,9 @@ var _ types.IBaseContext = (*QueryEditorContext)(nil)
 //
 // The *editor.Buffer / *editor.RepeatStore returned by Buffer() /
 // Repeat() are always non-nil — Buffer uses editor.NewBuffer so
-// Marks and Jumps are initialised before any wwd.5 motion handler
-// can call buf.Jumps.Push or editor.SetMark; RepeatStore stays a
-// zero-value shell until wwd.9 fills it.
+// Jumps is initialised before any wwd.5 motion handler can call
+// buf.Jumps.Push; RepeatStore stays a zero-value shell until wwd.9
+// fills it.
 func NewQueryEditorContext(
 	base BaseContext,
 	deps depsAlias,

@@ -266,7 +266,7 @@ type textObjectSpec struct {
 // motionSpec ties together a default key shorthand, an action ID, a
 // human description, and the pure motion function the handler invokes.
 // jump = true classifies the motion for JumpList recording (gg, G,
-// {, }, mark_jump per the wwd architecture decisions).
+// {, } per the wwd architecture decisions).
 type motionSpec struct {
 	shorthand   string
 	actionID    string
