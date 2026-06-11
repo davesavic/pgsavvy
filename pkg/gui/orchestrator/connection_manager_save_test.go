@@ -199,20 +199,20 @@ func TestConnectionManagerSaveSSHTunnelRoundTrip(t *testing.T) {
 	}
 	// Focus index after Add is 0. Functional order: name(0) driver(1) dsn(2)
 	// read_only(3) confirm_writes(4) confirm_ddl(5) statement_timeout(6)
-	// color(7) label(8) tags(9) ssh_host(10) ssh_user(11) ssh_port(12)
-	// identity_file(13) identity_from_agent(14) known_hosts(15). Move +1 at a
-	// time so the relative cursor stays predictable.
+	// color(7) label(8) icon(9) tags(10) ssh_host(11) ssh_user(12)
+	// ssh_port(13) identity_file(14) identity_from_agent(15) known_hosts(16).
+	// Move +1 at a time so the relative cursor stays predictable.
 	modal.FormSetFocusedValue("ssh-conn") // name @ 0
 	modal.FormMoveFocus(2)
 	modal.FormSetFocusedValue("postgres://localhost:5432/db") // dsn @ 2
-	modal.FormMoveFocus(8)
-	modal.FormSetFocusedValue("bastion.prod") // ssh_host @ 10
+	modal.FormMoveFocus(9)
+	modal.FormSetFocusedValue("bastion.prod") // ssh_host @ 11
 	modal.FormMoveFocus(1)
-	modal.FormSetFocusedValue("deploy") // ssh_user @ 11
+	modal.FormSetFocusedValue("deploy") // ssh_user @ 12
 	modal.FormMoveFocus(1)
-	modal.FormSetFocusedValue("2222") // ssh_port @ 12
+	modal.FormSetFocusedValue("2222") // ssh_port @ 13
 	modal.FormMoveFocus(2)
-	modal.FormToggleFocused() // identity_from_agent @ 14
+	modal.FormToggleFocused() // identity_from_agent @ 15
 
 	if err := g.Controllers().ConnectionManager.Confirm(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Confirm: %v", err)
