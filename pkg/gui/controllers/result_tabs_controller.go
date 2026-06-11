@@ -495,18 +495,16 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 		Handler:     r.yankHandler(true),
 	})
 
-	// dbsavvy-bwq.Z1: inline-edit + jump-list action handlers. Several of
-	// these are stub-toasts today because the underlying helper wiring
-	// (FKCache, active-grid cursor picker) lands in a follow-up; the
-	// chord registration itself is the Z1 deliverable.
+	// dbsavvy-bwq.Z1: inline-edit + jump-list action handlers and their
+	// chord registration.
 	r.registerBwqHandlers(reg)
 }
 
 // registerBwqHandlers wires the Z1 (dbsavvy-bwq.23) action handlers for
 // the new RESULT_GRID chords. Split out so the main RegisterActions body
-// stays readable. Each handler nil-checks the helper / collaborator and
-// surfaces a toast describing the missing wire when called pre-wiring
-// (the FK forward / reverse handlers exercise that path today).
+// stays readable. Each handler nil-checks its helper / collaborator and
+// surfaces a toast if one is absent; in production those collaborators are
+// wired, so the guard toasts do not fire.
 func (r *ResultTabsController) registerBwqHandlers(reg *commands.Registry) {
 	_ = reg.Register(&commands.Command{
 		ID:          commands.FKJumpForward,
