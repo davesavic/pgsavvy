@@ -420,7 +420,7 @@ func (q *QueryEditorController) runNeedsConfirm(stmts []string) bool {
 		return false
 	}
 	for _, s := range stmts {
-		kind := query.Classify(s)
+		kind := query.EffectiveKind(s)
 		if kind == query.KindDML && conn.ConfirmWrites {
 			return true
 		}

@@ -47,6 +47,26 @@ func Classify(sql string) StatementKind {
 	return KindOther
 }
 
+// EffectiveKind returns the StatementKind used for confirmation decisions.
+// It keeps Classify's leading-keyword result for plain statements (a plain
+// SELECT stays KindOther, a plain DELETE stays KindDML) but ELEVATES a
+// non-mutating leading keyword to KindDML when a whole-word DML token
+// (INSERT/UPDATE/DELETE/MERGE) appears anywhere in the statement. This closes
+// the writable-CTE confirm hole: WITH d AS (DELETE FROM t RETURNING *) SELECT …
+// leads with WITH (KindOther) yet performs a write, so ConfirmWrites must fire.
+//
+// The scan reuses dmlTokenRE (explain_gate.go) — a whole-word regex, not a SQL
+// parser. A DML keyword inside a string literal (e.g. 'DELETE' as a value) can
+// still falsely elevate; matching the existing gate's rigor, this is accepted
+// as a fail-closed bias (extra confirm prompts beat silent writes).
+func EffectiveKind(sql string) StatementKind {
+	kind := Classify(sql)
+	if kind == KindOther && dmlTokenRE.MatchString(sql) {
+		return KindDML
+	}
+	return kind
+}
+
 // leadingKeyword extracts and upper-cases the first SQL keyword, after
 // stripping leading whitespace and comments. Returns "" when none remains.
 func leadingKeyword(sql string) string {

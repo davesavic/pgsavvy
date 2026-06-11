@@ -66,6 +66,41 @@ func TestEffectiveAnalyze(t *testing.T) {
 			requested: true,
 			want:      false,
 		},
+		{
+			name:      "DDL CREATE in CTE on writable conn denied (fail closed)",
+			sql:       "WITH x AS (SELECT 1) CREATE TABLE t AS SELECT * FROM x",
+			readOnly:  false,
+			requested: true,
+			want:      false,
+		},
+		{
+			name:      "DDL DROP embedded denied (fail closed)",
+			sql:       "SELECT 1; DROP TABLE t",
+			readOnly:  false,
+			requested: true,
+			want:      false,
+		},
+		{
+			name:      "DDL TRUNCATE embedded denied (fail closed)",
+			sql:       "WITH x AS (SELECT 1) TRUNCATE t",
+			readOnly:  false,
+			requested: true,
+			want:      false,
+		},
+		{
+			name:      "DDL REFRESH embedded denied (fail closed)",
+			sql:       "REFRESH MATERIALIZED VIEW mv",
+			readOnly:  false,
+			requested: true,
+			want:      false,
+		},
+		{
+			name:      "DDL in CTE on read-only conn allowed (server rejects)",
+			sql:       "WITH x AS (SELECT 1) CREATE TABLE t AS SELECT * FROM x",
+			readOnly:  true,
+			requested: true,
+			want:      true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
