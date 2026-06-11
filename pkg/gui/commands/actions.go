@@ -39,9 +39,6 @@ const (
 	SchemaUnhide           = "schema.unhide"
 	SchemaToggleShowHidden = "schema.toggle_show_hidden"
 
-	// ConnectionAdd — owned by ConnectionsController. Maps to `a`.
-	ConnectionAdd = "connection.add"
-
 	// ListUp / ListDown / ListConfirm — published by ListControllerTrait
 	// (shared by every side-rail). `j`/`k`/`<cr>`.
 	ListUp      = "list.up"
@@ -94,10 +91,6 @@ const (
 	// per-rune action IDs no longer exist here.
 	PromptSubmit = "prompt.submit"
 	PromptCancel = "prompt.cancel"
-	// PromptBackspace is retained as a dangling alias for source
-	// compatibility with downstream pkgs that still reference the
-	// constant; no controller registers a handler under this ID.
-	PromptBackspace = "prompt.backspace"
 
 	// SelectionUp / SelectionDown / SelectionConfirm / SelectionCancel —
 	// owned by SelectionController. `<up>`/`k`, `<down>`/`j`, `<cr>`,
@@ -125,13 +118,6 @@ const (
 	// (AD-4).
 	ConfirmYes = "confirm.yes"
 	ConfirmNo  = "confirm.no"
-
-	// ConnectingRetry / ConnectingCancel — owned by ConnectingController
-	// (dbsavvy-e53.3). CONNECTING-scoped. r invokes the injected Retry
-	// callback; <esc> invokes the injected Cancel callback. Defaults are
-	// hardcoded, not user-overridable.
-	ConnectingRetry  = "connecting.retry"
-	ConnectingCancel = "connecting.cancel"
 
 	// ConnectionManagerQuitOrClose — owned by ConnectionManagerController
 	// (dbsavvy-bsh). q on the modal: quits when the modal is the startup root
@@ -502,13 +488,11 @@ const (
 	FKReverseSelect  = "fk_reverse_picker.select"
 	FKReverseClose   = "fk_reverse_picker.close"
 
-	// Pending-edit discard / force-quit family — owned by PendingDiscardHelper
+	// Pending-edit discard family — owned by PendingDiscardHelper
 	// + result_tabs_controller (dbsavvy-bwq A8/Z1). `<leader>cu` discards at
-	// cursor; `<leader>cU` discards all (with confirmation > threshold);
-	// `:q!` force-quits regardless of staged edits.
+	// cursor; `<leader>cU` discards all (with confirmation > threshold).
 	PendingDiscardAtCursor = "pending.discard.at_cursor"
 	PendingDiscardAll      = "pending.discard.all"
-	QuitForce              = "app.quit.force"
 
 	// FK forward-jump (dbsavvy-bwq B5/Z1). `gd` jumps to the referenced row.
 	FKJumpForward = "row.fk_forward"
@@ -582,7 +566,6 @@ func AllActionIDs() []string {
 		SchemaHide,
 		SchemaUnhide,
 		SchemaToggleShowHidden,
-		ConnectionAdd,
 		ListUp,
 		ListDown,
 		ListConfirm,
@@ -601,7 +584,6 @@ func AllActionIDs() []string {
 		MenuCancel,
 		PromptSubmit,
 		PromptCancel,
-		PromptBackspace,
 		SelectionUp,
 		SelectionDown,
 		SelectionConfirm,
@@ -755,8 +737,6 @@ func AllActionIDs() []string {
 		EditorRepeat,
 		ConfirmYes,
 		ConfirmNo,
-		ConnectingRetry,
-		ConnectingCancel,
 		ConnectionManagerQuitOrClose,
 		ConnectionManagerOpen,
 		ConnectionManagerClose,
@@ -797,7 +777,6 @@ func AllActionIDs() []string {
 		FKReverseClose,
 		PendingDiscardAtCursor,
 		PendingDiscardAll,
-		QuitForce,
 		FKJumpForward,
 		ResultJumpBack,
 		ResultJumpForward,
