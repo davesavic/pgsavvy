@@ -243,7 +243,9 @@ func (c *VimEditorController) mirrorYankToClipboard(actionID string, reg rune, t
 
 // motionFunc is the shared signature every motion in pkg/gui/editor
 // implements: pure (no Buffer mutation), pre-validated by the caller.
-type motionFunc func(b *editor.Buffer, pos editor.Position, count int) (editor.Position, bool)
+// frame carries the editor viewport for the view-relative motions
+// (H/M/L); all other motions ignore it.
+type motionFunc func(b *editor.Buffer, pos editor.Position, count int, frame editor.ViewFrame) (editor.Position, bool)
 
 // textObjectFunc resolves a Range from a cursor position. Bool=false
 // means "no surrounding object found" — the handler MUST NOT call
@@ -1013,7 +1015,7 @@ func (c *VimEditorController) repeatHandler() commands.Handler {
 			if replayCount == 0 {
 				replayCount = 1
 			}
-			newPos, motionOK := ms.fn(buf, from, replayCount)
+			newPos, motionOK := ms.fn(buf, from, replayCount, c.viewFrame())
 			if !motionOK {
 				// At boundary — operate over zero-length range so the
 				// applyPending state machine still resets cleanly.
@@ -1184,7 +1186,7 @@ func (c *VimEditorController) motionHandler(spec motionSpec) commands.Handler {
 			return nil
 		}
 		from := buf.CursorPos()
-		newPos, ok := spec.fn(buf, from, count)
+		newPos, ok := spec.fn(buf, from, count, c.viewFrame())
 		if !ok {
 			// Op-pending boundary: a motion at its target (G from last
 			// line, gg from {0,0}, 0 at col 0) returns ok=false. Vim's
@@ -1301,7 +1303,7 @@ func (c *VimEditorController) deleteEndOfLineHandler() commands.Handler {
 			return nil
 		}
 		from := buf.CursorPos()
-		end, ok := editor.LineEnd(buf, from, 1)
+		end, ok := editor.LineEnd(buf, from, 1, editor.ViewFrame{})
 		if !ok {
 			end = from
 		}
@@ -1656,6 +1658,17 @@ func (c *VimEditorController) buffer() *editor.Buffer {
 	return c.qec.Buffer()
 }
 
+// viewFrame returns the current editor viewport for the view-relative
+// motions (H/M/L). A nil qec or unwired view yields the zero ViewFrame,
+// which the motions treat as "viewport unavailable" (buffer-relative
+// fallback).
+func (c *VimEditorController) viewFrame() editor.ViewFrame {
+	if c.qec == nil {
+		return editor.ViewFrame{}
+	}
+	return c.qec.ViewFrame()
+}
+
 // setMode flips QUERY_EDITOR mode to m via the wired QueryEditorContext.
 // No-op when qec is nil (test wiring without modes setter).
 func (c *VimEditorController) setMode(m types.Mode) {
@@ -1762,7 +1775,7 @@ func (c *VimEditorController) insertFirstNonblankHandler() commands.Handler {
 			return nil
 		}
 		from := buf.CursorPos()
-		if next, ok := editor.LineFirstNonBlank(buf, from, 1); ok {
+		if next, ok := editor.LineFirstNonBlank(buf, from, 1, editor.ViewFrame{}); ok {
 			buf.SetCursor(next)
 		}
 		c.setMode(types.ModeInsert)

@@ -3,7 +3,9 @@ package editor
 // Motion functions compute a new cursor Position from a starting
 // position on a Buffer, without mutating the Buffer.
 //
-// Signature: every motion is `(b *Buffer, pos Position, count int) (Position, bool)`.
+// Signature: every motion is `(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool)`.
+// The frame carries the editor viewport (top visible line + height) for
+// the view-relative motions (H/M/L); every other motion ignores it.
 // The bool is false when the motion is rejected (negative count, empty
 // buffer, position already at the bounding edge for the motion). When
 // false, callers must NOT use the returned Position. A motion that
@@ -22,13 +24,39 @@ package editor
 // future epic dispatches motions off the main loop, callers must
 // arrange the lock themselves (e.g. snapshot b.LinesCopy() first).
 //
-// View-relative motions (H/M/L): these are vim "screen top/middle/bottom"
-// and require a *gocui.View frame to be meaningful. wwd.5 ships them as
-// buffer-relative (H = first line, M = middle line, L = last line).
-// TODO(dbsavvy-wwd-E11): re-implement view-relative once a ViewFrame
-// surface is plumbed into the controller.
+// View-relative motions (H/M/L): these are vim "screen top/middle/bottom".
+// They read the ViewFrame the controller threads in (top visible line +
+// height) to resolve the first/middle/last VISIBLE line, and fall back
+// to the whole-buffer first/middle/last line when no frame is supplied.
 
 import "unicode"
+
+// ViewFrame describes the editor viewport at the instant a motion is
+// dispatched: Top is the buffer line currently at the top of the
+// visible region and Height is the number of visible text rows. It is
+// threaded through every motion so the view-relative motions (H/M/L)
+// can resolve screen top/middle/bottom; all other motions ignore it.
+//
+// A zero-value ViewFrame (Height <= 0) means the viewport is
+// unavailable — H/M/L then fall back to buffer-relative behaviour
+// (first / middle / last line of the whole buffer) without panicking.
+type ViewFrame struct {
+	Top    int
+	Height int
+}
+
+// available reports whether the frame carries a usable viewport.
+func (f ViewFrame) available() bool { return f.Height > 0 }
+
+// lastVisible returns the buffer line at the bottom of the visible
+// region, clamped to the last addressable line of b.
+func (f ViewFrame) lastVisible(b *Buffer) int {
+	bottom := f.Top + f.Height - 1
+	if hi := len(b.Lines) - 1; bottom > hi {
+		return hi
+	}
+	return bottom
+}
 
 // classify is a 3-state classification of a rune for word motions.
 // vim's `word` (lowercase) treats keyword runes as one class and
@@ -128,7 +156,7 @@ func empty(b *Buffer) bool {
 // --- Character motions ---
 
 // CharLeft moves count characters left, wrapping over newlines.
-func CharLeft(b *Buffer, pos Position, count int) (Position, bool) {
+func CharLeft(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	n, ok := validCount(count)
 	if !ok || empty(b) {
 		return Position{}, false
@@ -150,7 +178,7 @@ func CharLeft(b *Buffer, pos Position, count int) (Position, bool) {
 }
 
 // CharRight moves count characters right, wrapping over newlines.
-func CharRight(b *Buffer, pos Position, count int) (Position, bool) {
+func CharRight(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	n, ok := validCount(count)
 	if !ok || empty(b) {
 		return Position{}, false
@@ -175,7 +203,7 @@ func CharRight(b *Buffer, pos Position, count int) (Position, bool) {
 
 // LineDown moves count lines down, clamping Col to the new line's
 // length (vim's "preferred column" tracking is not modelled in MVP).
-func LineDown(b *Buffer, pos Position, count int) (Position, bool) {
+func LineDown(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	n, ok := validCount(count)
 	if !ok || empty(b) {
 		return Position{}, false
@@ -195,7 +223,7 @@ func LineDown(b *Buffer, pos Position, count int) (Position, bool) {
 }
 
 // LineUp moves count lines up.
-func LineUp(b *Buffer, pos Position, count int) (Position, bool) {
+func LineUp(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	n, ok := validCount(count)
 	if !ok || empty(b) {
 		return Position{}, false
@@ -213,7 +241,7 @@ func LineUp(b *Buffer, pos Position, count int) (Position, bool) {
 
 // LineStart returns column 0 of the current line (vim `0`). Count is
 // accepted but ignored — `0` does not take a count in vim.
-func LineStart(b *Buffer, pos Position, count int) (Position, bool) {
+func LineStart(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	if _, ok := validCount(count); !ok {
 		return Position{}, false
 	}
@@ -229,7 +257,7 @@ func LineStart(b *Buffer, pos Position, count int) (Position, bool) {
 // LineFirstNonBlank returns the first non-whitespace column of the
 // current line (vim `^`). Falls back to column 0 on an all-blank
 // line.
-func LineFirstNonBlank(b *Buffer, pos Position, count int) (Position, bool) {
+func LineFirstNonBlank(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	if _, ok := validCount(count); !ok {
 		return Position{}, false
 	}
@@ -256,7 +284,7 @@ func LineFirstNonBlank(b *Buffer, pos Position, count int) (Position, bool) {
 // with vim's `$` putting the cursor on the final printable char in
 // Normal mode (callers in Normal mode should clamp by -1 if needed;
 // in OperatorPending the past-end position is the correct delete bound).
-func LineEnd(b *Buffer, pos Position, count int) (Position, bool) {
+func LineEnd(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	if _, ok := validCount(count); !ok {
 		return Position{}, false
 	}
@@ -275,7 +303,7 @@ func LineEnd(b *Buffer, pos Position, count int) (Position, bool) {
 // BufferStart returns the first line, first non-blank column (vim `gg`).
 // Count is accepted but ignored — vim `gg` with a count means
 // "jump to line N", which is a different operation (not in wwd.5 scope).
-func BufferStart(b *Buffer, pos Position, count int) (Position, bool) {
+func BufferStart(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	if _, ok := validCount(count); !ok {
 		return Position{}, false
 	}
@@ -293,7 +321,7 @@ func BufferStart(b *Buffer, pos Position, count int) (Position, bool) {
 // clamped to the last line. Bare `G` arrives here as count=1 (the
 // handler normalises 0 → 1), which preserves the legacy "go to last
 // line" behavior.
-func BufferEnd(b *Buffer, pos Position, count int) (Position, bool) {
+func BufferEnd(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	if _, ok := validCount(count); !ok {
 		return Position{}, false
 	}
@@ -317,13 +345,13 @@ func BufferEnd(b *Buffer, pos Position, count int) (Position, bool) {
 // fires on a transition between rune classes (word ↔ punct), and on
 // the first non-space rune after any run of whitespace (including
 // newlines).
-func WordNext(b *Buffer, pos Position, count int) (Position, bool) {
+func WordNext(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	return wordNext(b, pos, count, classifyWord)
 }
 
 // WORDNext moves count "WORD" steps forward (whitespace-delimited
 // only, no punct/word distinction). Used by `W`.
-func WORDNext(b *Buffer, pos Position, count int) (Position, bool) {
+func WORDNext(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	return wordNext(b, pos, count, classifyWORD)
 }
 
@@ -390,12 +418,12 @@ func stepWordForward(b *Buffer, line, col int, classify func(rune) runeClass) (i
 }
 
 // WordPrev moves count "word" steps backward (vim `b`).
-func WordPrev(b *Buffer, pos Position, count int) (Position, bool) {
+func WordPrev(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	return wordPrev(b, pos, count, classifyWord)
 }
 
 // WORDPrev moves count "WORD" steps backward (vim `B`).
-func WORDPrev(b *Buffer, pos Position, count int) (Position, bool) {
+func WORDPrev(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	return wordPrev(b, pos, count, classifyWORD)
 }
 
@@ -469,12 +497,12 @@ func stepWordBackward(b *Buffer, line, col int, classify func(rune) runeClass) (
 // WordEnd moves count word-ends forward (vim `e`). The destination
 // is the LAST rune of the next non-space class run (so it lands ON
 // the final char, not past it).
-func WordEnd(b *Buffer, pos Position, count int) (Position, bool) {
+func WordEnd(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	return wordEnd(b, pos, count, classifyWord)
 }
 
 // WORDEnd moves count WORD-ends forward (vim `E`).
-func WORDEnd(b *Buffer, pos Position, count int) (Position, bool) {
+func WORDEnd(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	return wordEnd(b, pos, count, classifyWORD)
 }
 
@@ -562,7 +590,7 @@ func isBlankLine(rs []rune) bool {
 }
 
 // ParagraphPrev jumps count paragraphs backward.
-func ParagraphPrev(b *Buffer, pos Position, count int) (Position, bool) {
+func ParagraphPrev(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	n, ok := validCount(count)
 	if !ok || empty(b) {
 		return Position{}, false
@@ -604,7 +632,7 @@ func paragraphBackwardOne(b *Buffer, line int) (int, bool) {
 }
 
 // ParagraphNext jumps count paragraphs forward.
-func ParagraphNext(b *Buffer, pos Position, count int) (Position, bool) {
+func ParagraphNext(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	n, ok := validCount(count)
 	if !ok || empty(b) {
 		return Position{}, false
@@ -658,7 +686,7 @@ func isSentenceEnd(r rune) bool {
 }
 
 // SentenceNext jumps count sentences forward (vim `)`).
-func SentenceNext(b *Buffer, pos Position, count int) (Position, bool) {
+func SentenceNext(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	n, ok := validCount(count)
 	if !ok || empty(b) {
 		return Position{}, false
@@ -737,7 +765,7 @@ func sentenceForwardOne(b *Buffer, line, col int) (int, int, bool) {
 }
 
 // SentencePrev jumps count sentences backward (vim `(`).
-func SentencePrev(b *Buffer, pos Position, count int) (Position, bool) {
+func SentencePrev(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	n, ok := validCount(count)
 	if !ok || empty(b) {
 		return Position{}, false
@@ -809,33 +837,73 @@ func sentenceBackwardOne(b *Buffer, line, col int) (int, int, bool) {
 	}
 }
 
-// --- Screen-relative motions (buffer-relative stubs) ---
+// --- Screen-relative motions (H / M / L) ---
 //
-// TODO(dbsavvy-wwd-E11): re-implement view-relative once a ViewFrame
-// surface is plumbed into the controller. wwd.5 falls back to
-// first-line / middle-line / last-line of the entire buffer.
+// These resolve the first / middle / last VISIBLE buffer line from the
+// ViewFrame the controller threads in. When the frame is unavailable
+// (zero value — headless test rigs, view not yet wired) they fall back
+// to the whole-buffer first / middle / last line, so behaviour is
+// unchanged when the buffer fits inside the viewport.
 
-// ScreenTop is `H` (buffer-relative stub: first line, col 0).
-func ScreenTop(b *Buffer, pos Position, count int) (Position, bool) {
-	return BufferStart(b, pos, count)
+// ScreenTop is `H`: the count-th line from the top of the viewport
+// (1H == top visible line). Falls back to the first buffer line.
+func ScreenTop(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
+	if !frame.available() {
+		return BufferStart(b, pos, count, frame)
+	}
+	n, ok := validCount(count)
+	if !ok || empty(b) {
+		return Position{}, false
+	}
+	return screenLand(b, pos, frame, frame.Top+n-1)
 }
 
-// ScreenMiddle is `M` (buffer-relative stub: middle line, col 0).
-func ScreenMiddle(b *Buffer, pos Position, count int) (Position, bool) {
+// ScreenMiddle is `M`: the middle visible line. Count is ignored (vim
+// semantics). Falls back to the middle line of the whole buffer.
+func ScreenMiddle(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	if _, ok := validCount(count); !ok {
 		return Position{}, false
 	}
 	if empty(b) {
 		return Position{}, false
 	}
-	mid := len(b.Lines) / 2
-	if mid == pos.Line && pos.Col == 0 {
-		return Position{}, false
+	if !frame.available() {
+		return landLine(pos, len(b.Lines)/2)
 	}
-	return Position{Line: mid, Col: 0}, true
+	return screenLand(b, pos, frame, frame.Top+(frame.lastVisible(b)-frame.Top)/2)
 }
 
-// ScreenBottom is `L` (buffer-relative stub: last line, col 0).
-func ScreenBottom(b *Buffer, pos Position, count int) (Position, bool) {
-	return BufferEnd(b, pos, count)
+// ScreenBottom is `L`: the count-th line from the bottom of the
+// viewport (1L == last visible line). Falls back to the last buffer line.
+func ScreenBottom(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
+	if !frame.available() {
+		return BufferEnd(b, pos, count, frame)
+	}
+	n, ok := validCount(count)
+	if !ok || empty(b) {
+		return Position{}, false
+	}
+	return screenLand(b, pos, frame, frame.lastVisible(b)-(n-1))
+}
+
+// screenLand clamps target into the visible [Top, lastVisible] range
+// and lands on column 0, returning ok=false when the cursor is already
+// there (the op-pending no-op convention shared with BufferStart/End).
+func screenLand(b *Buffer, pos Position, frame ViewFrame, target int) (Position, bool) {
+	if lo := frame.Top; target < lo {
+		target = lo
+	}
+	if hi := frame.lastVisible(b); target > hi {
+		target = hi
+	}
+	return landLine(pos, target)
+}
+
+// landLine returns line at column 0, or ok=false when pos already sits
+// at {line, 0}.
+func landLine(pos Position, line int) (Position, bool) {
+	if pos.Line == line && pos.Col == 0 {
+		return Position{}, false
+	}
+	return Position{Line: line, Col: 0}, true
 }
