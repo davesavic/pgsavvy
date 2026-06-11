@@ -67,7 +67,6 @@ type Buffer struct {
 
 	Lines     []Line
 	Cursor    Position
-	Marks     map[rune]Position
 	Jumps     *JumpList
 	History   *UndoTree
 	Selection *Range

@@ -51,7 +51,7 @@ func bufferPathFor(stateDir, connID, uuid string) string {
 
 // SaveBufferLines writes the supplied Lines snapshot to the per-connID
 // buffer file as raw `.sql` text (no struct serialization — Cursor /
-// Selection / History / Marks / Jumps are NOT persisted). The write is
+// Selection / History / Jumps are NOT persisted). The write is
 // atomic: a sibling `.tmp` is written at mode 0o600, then renamed to
 // the final path; a failed rename removes the tmp best-effort.
 //

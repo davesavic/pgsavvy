@@ -352,8 +352,7 @@ const (
 
 	// Motion family — owned by VimEditorController (dbsavvy-wwd.5).
 	// Defaults follow vim: w/b/e (word_*), W/B/E (WORD_*), 0/^/$,
-	// gg/G, {/}/(/), h/j/k/l, H/M/L. mark_jump backs the `'a..z'
-	// recall handler (wwd.3 mark recall surfaced to a binding by wwd.7).
+	// gg/G, {/}/(/), h/j/k/l, H/M/L.
 	MotionWordNext          = "motion.word_next"
 	MotionWordPrev          = "motion.word_prev"
 	MotionWordNextBig       = "motion.word_next_big"
@@ -376,7 +375,6 @@ const (
 	MotionScreenTop         = "motion.screen_top"
 	MotionScreenMiddle      = "motion.screen_middle"
 	MotionScreenBottom      = "motion.screen_bottom"
-	MotionMarkJump          = "motion.mark_jump"
 
 	// Operator family — owned by VimEditorController (dbsavvy-wwd.8).
 	// Defaults: d/y/c (delete/yank/change), gU/gu (upper/lower), >/< (indent
@@ -713,7 +711,6 @@ func AllActionIDs() []string {
 		MotionScreenTop,
 		MotionScreenMiddle,
 		MotionScreenBottom,
-		MotionMarkJump,
 		OperatorDelete,
 		OperatorYank,
 		OperatorChange,

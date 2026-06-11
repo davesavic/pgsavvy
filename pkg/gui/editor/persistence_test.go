@@ -122,9 +122,6 @@ func TestLoadBufferMissingFileReturnsEmpty(t *testing.T) {
 	if buf == nil {
 		t.Fatal("LoadBuffer returned nil buffer")
 	}
-	if buf.Marks == nil {
-		t.Error("LoadBuffer returned buffer with nil Marks")
-	}
 	if buf.Jumps == nil {
 		t.Error("LoadBuffer returned buffer with nil Jumps")
 	}
