@@ -63,7 +63,8 @@ func (c *capturingStreamRunner) ReadToEnd(fn func()) {
 		fn()
 	}
 }
-func (c *capturingStreamRunner) EstimatedRows() int64 { return 0 }
+func (c *capturingStreamRunner) EstimatedRows() int64   { return 0 }
+func (c *capturingStreamRunner) SetEstimatedRows(int64) {}
 
 // newReRunHelper builds a helper with an AppStateStore + a single shared
 // capturing StreamRunner so a re-run reuses the same tab's runner.

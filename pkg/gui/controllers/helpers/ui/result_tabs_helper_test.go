@@ -104,6 +104,7 @@ type fakeStreamRunner struct {
 	readToEndCalls int
 	lastOnDone     func(error)
 	estimatedRows  int64
+	setEstCalls    int
 }
 
 func (f *fakeStreamRunner) NewQueryTask(
@@ -153,6 +154,22 @@ func (f *fakeStreamRunner) setEstimatedRows(n int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.estimatedRows = n
+}
+
+// SetEstimatedRows satisfies the StreamRunner interface (dbsavvy-uly7.8 lazy
+// seed). Caches the estimate so EstimatedRows() reflects it, and counts writes
+// so a test can assert a repeat G short-circuits (no second cache write).
+func (f *fakeStreamRunner) SetEstimatedRows(n int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.estimatedRows = n
+	f.setEstCalls++
+}
+
+func (f *fakeStreamRunner) SetEstCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.setEstCalls
 }
 
 func (f *fakeStreamRunner) StartCount() int {
@@ -1650,6 +1667,175 @@ func TestReadToEndUnknownEstimatePrompts(t *testing.T) {
 	}
 	if runner.ReadToEndCount() != 0 {
 		t.Errorf("runner.ReadToEnd fired %d times before user accepts, want 0", runner.ReadToEndCount())
+	}
+}
+
+// --- dbsavvy-uly7.8: lazy planner estimate on G ---------------------------
+
+// fakeEstimator records EstimateRows invocations and returns a configurable
+// estimate / error so the lazy-seed decision can be driven deterministically.
+type fakeEstimator struct {
+	mu    sync.Mutex
+	calls int
+	est   int64
+	err   error
+}
+
+func (f *fakeEstimator) fn(_ context.Context, _, _ string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	return f.est, f.err
+}
+
+func (f *fakeEstimator) Calls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+// lazyEstimateDeps builds deps with a wired EstimateRows + Confirm and a
+// synchronous (no OnWorker/OnUIThread) path so the decision runs inline.
+func lazyEstimateDeps(runner *fakeStreamRunner, confirm *fakeConfirmer, est *fakeEstimator) ResultTabsHelperDeps {
+	return ResultTabsHelperDeps{
+		Toast:                  &fakeToaster{},
+		StreamFactory:          func() StreamRunner { return runner },
+		Now:                    time.Now,
+		Confirm:                confirm,
+		EstimateRows:           est.fn,
+		ReadToEndWarnThreshold: 1_000_000,
+	}
+}
+
+// TestReadToEndLazyEstimateSmallDrainsWithoutPrompt: est unknown (0) + a wired
+// estimator returning a small count -> EXPLAIN runs once, the estimate is
+// cached, and the drain fires WITHOUT a prompt. dbsavvy-uly7.8.
+func TestReadToEndLazyEstimateSmallDrainsWithoutPrompt(t *testing.T) {
+	runner := &fakeStreamRunner{} // EstimatedRows() == 0
+	confirm := &fakeConfirmer{}
+	est := &fakeEstimator{est: 500}
+	h := NewResultTabsHelper(lazyEstimateDeps(runner, confirm, est))
+	tab, _ := openAndReturnRH(t, h, "Q")
+	tab.SetOrigin("select * from t", nil, "public")
+
+	h.ReadToEnd()
+
+	if est.Calls() != 1 {
+		t.Errorf("EstimateRows calls = %d, want 1", est.Calls())
+	}
+	if confirm.Calls() != 0 {
+		t.Errorf("Confirm calls = %d, want 0 (small est drains silently)", confirm.Calls())
+	}
+	if runner.ReadToEndCount() != 1 {
+		t.Errorf("runner.ReadToEnd called %d times, want 1", runner.ReadToEndCount())
+	}
+	if runner.EstimatedRows() != 500 {
+		t.Errorf("cached estimate = %d, want 500", runner.EstimatedRows())
+	}
+}
+
+// TestReadToEndLazyEstimateLargePrompts: est unknown (0) + estimator returns a
+// count above the warn threshold -> prompt first. dbsavvy-uly7.8.
+func TestReadToEndLazyEstimateLargePrompts(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	confirm := &fakeConfirmer{} // no auto -> prompt opens, no drain
+	est := &fakeEstimator{est: 2_000_000}
+	h := NewResultTabsHelper(lazyEstimateDeps(runner, confirm, est))
+	tab, _ := openAndReturnRH(t, h, "Q")
+	tab.SetOrigin("select * from big", nil, "")
+
+	h.ReadToEnd()
+
+	if est.Calls() != 1 {
+		t.Errorf("EstimateRows calls = %d, want 1", est.Calls())
+	}
+	if confirm.Calls() != 1 {
+		t.Errorf("Confirm calls = %d, want 1 (large est prompts)", confirm.Calls())
+	}
+	if runner.ReadToEndCount() != 0 {
+		t.Errorf("runner.ReadToEnd fired %d times before accept, want 0", runner.ReadToEndCount())
+	}
+}
+
+// TestReadToEndLazyEstimateErrorFallsBackToPrompt: EXPLAIN error -> fall back
+// to the conservative prompt; the drain never fires unprompted, and no estimate
+// is cached. dbsavvy-uly7.8.
+func TestReadToEndLazyEstimateErrorFallsBackToPrompt(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	confirm := &fakeConfirmer{}
+	est := &fakeEstimator{err: errors.New("explain boom")}
+	h := NewResultTabsHelper(lazyEstimateDeps(runner, confirm, est))
+	tab, _ := openAndReturnRH(t, h, "Q")
+	tab.SetOrigin("select 1", nil, "")
+
+	h.ReadToEnd()
+
+	if est.Calls() != 1 {
+		t.Errorf("EstimateRows calls = %d, want 1", est.Calls())
+	}
+	if confirm.Calls() != 1 {
+		t.Errorf("Confirm calls = %d, want 1 (error => conservative prompt)", confirm.Calls())
+	}
+	if runner.ReadToEndCount() != 0 {
+		t.Errorf("runner.ReadToEnd fired %d times after explain error, want 0", runner.ReadToEndCount())
+	}
+	if runner.SetEstCalls() != 0 {
+		t.Errorf("SetEstimatedRows called %d times on error, want 0 (nothing cached)", runner.SetEstCalls())
+	}
+}
+
+// TestReadToEndLazyEstimateCachedSecondGNoReExplain: after a first G caches an
+// estimate, a second G short-circuits (est != 0) and does NOT re-EXPLAIN. Uses
+// a large estimate + auto-dismissed prompt so neither G drains the stream to
+// completion (which would otherwise no-op the second G before the cache check).
+// dbsavvy-uly7.8.
+func TestReadToEndLazyEstimateCachedSecondGNoReExplain(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	confirm := &fakeConfirmer{autoNo: true} // prompt opens, user dismisses
+	est := &fakeEstimator{est: 2_000_000}
+	h := NewResultTabsHelper(lazyEstimateDeps(runner, confirm, est))
+	tab, _ := openAndReturnRH(t, h, "Q")
+	tab.SetOrigin("select * from big", nil, "")
+
+	h.ReadToEnd() // first G: EXPLAIN runs, caches 2M, prompts, dismissed
+	h.ReadToEnd() // second G: est != 0 -> skip EXPLAIN, prompt straight away
+
+	if est.Calls() != 1 {
+		t.Errorf("EstimateRows calls = %d, want 1 (second G must not re-EXPLAIN)", est.Calls())
+	}
+	if confirm.Calls() != 2 {
+		t.Errorf("Confirm calls = %d, want 2 (both G presses prompt)", confirm.Calls())
+	}
+	if runner.SetEstCalls() != 1 {
+		t.Errorf("SetEstimatedRows calls = %d, want 1 (cached once)", runner.SetEstCalls())
+	}
+}
+
+// TestReadToEndNilEstimatorStillPrompts guards the fallback: with no
+// EstimateRows dep wired (production today before this change, and unit-test
+// default) an unknown estimate still shows the conservative prompt. dbsavvy-uly7.8.
+func TestReadToEndNilEstimatorStillPrompts(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	confirm := &fakeConfirmer{}
+	deps := ResultTabsHelperDeps{
+		Toast:                  &fakeToaster{},
+		StreamFactory:          func() StreamRunner { return runner },
+		Now:                    time.Now,
+		Confirm:                confirm,
+		ReadToEndWarnThreshold: 1_000_000,
+		// EstimateRows intentionally nil.
+	}
+	h := NewResultTabsHelper(deps)
+	tab, _ := openAndReturnRH(t, h, "Q")
+	tab.SetOrigin("select 1", nil, "")
+
+	h.ReadToEnd()
+
+	if confirm.Calls() != 1 {
+		t.Errorf("Confirm calls = %d, want 1 (nil estimator => prompt)", confirm.Calls())
+	}
+	if runner.ReadToEndCount() != 0 {
+		t.Errorf("runner.ReadToEnd fired %d times, want 0", runner.ReadToEndCount())
 	}
 }
 

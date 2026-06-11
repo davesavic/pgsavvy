@@ -141,6 +141,41 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		}
 		return pg.TableNamesFromOIDs(ctx, pgSess, oids)
 	}
+	// dbsavvy-uly7.8: lazy planner-row-estimate for the G (ReadToEnd) warn
+	// gate. Mirrors the editability closure: resolve the live connection at
+	// call time and acquire a FRESH pooled session so the planner-only EXPLAIN
+	// never blocks or preempts the in-flight result stream (which still holds
+	// its own session's inFlight guard). analyze=false is transaction-free /
+	// side-effect-free; we read the top-node "Plan Rows" estimate. Non-pg
+	// drivers / no connection yield (0, nil), leaving G on the conservative
+	// prompt path.
+	resultTabsDeps.EstimateRows = func(ctx context.Context, sql, defaultSchema string) (int64, error) {
+		if g.connectHelper == nil {
+			return 0, nil
+		}
+		conn := g.connectHelper.Connection()
+		if conn == nil {
+			return 0, nil
+		}
+		sess, err := conn.AcquireSession(ctx)
+		if err != nil {
+			return 0, err
+		}
+		defer func() { _ = sess.Close() }()
+
+		pgSess, ok := sess.(*pg.Session)
+		if !ok {
+			return 0, nil // non-pg driver: no planner estimate yet
+		}
+		plan, err := pgSess.Explain(ctx, models.Query{SQL: sql, DefaultSchema: defaultSchema}, false)
+		if err != nil {
+			return 0, err
+		}
+		if plan.Node == nil {
+			return 0, nil
+		}
+		return plan.Node.EstRows, nil
+	}
 	if tr != nil {
 		resultTabsDeps.SortPickLabel = tr.Actions.ResultSortPickLabel
 	}
