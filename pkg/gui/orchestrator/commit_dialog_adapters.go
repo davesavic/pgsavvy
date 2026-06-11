@@ -80,15 +80,32 @@ func (h commitApplyHook) Apply(set *models.PendingEditSet, conn *models.Connecti
 	// Write the post-commit server values back into the grid so the
 	// applied cells render fresh data instead of the original load
 	// snapshot. dbsavvy-5kto.
-	if tab := h.deps.tabs.Active(); tab != nil {
-		if g := tab.Grid(); g != nil {
-			g.UpdateRowsByPK(res.RefetchedColumns, res.RefetchedRows)
-		}
-	}
+	refreshGridRows(h.deps.tabs, res.RefetchedColumns, res.RefetchedRows)
 	if h.deps.toast != nil {
 		h.deps.toast.Show(fmt.Sprintf("%d row(s) committed", rows), 0)
 	}
 	return nil
+}
+
+// refreshGridRows writes refetched server rows back into the active
+// tab's grid via UpdateRowsByPK. Nil-safe at every hop — a missing tab
+// or grid degrades to "grid keeps its loaded values", never an error:
+// by the time callers reach here the server-side work has already
+// committed, so display refresh must not fail the operation.
+// dbsavvy-5kto / dbsavvy-py0n.
+func refreshGridRows(tabs *ui.ResultTabsHelper, cols []models.ColumnMeta, rows []models.Row) {
+	if tabs == nil {
+		return
+	}
+	tab := tabs.Active()
+	if tab == nil {
+		return
+	}
+	g := tab.Grid()
+	if g == nil {
+		return
+	}
+	g.UpdateRowsByPK(cols, rows)
 }
 
 // commitDryRunHook implements controllers.CommitDialogDryRunHook.
@@ -151,10 +168,10 @@ type conflictDialogDeps struct {
 }
 
 // conflictRefreshHook implements controllers.ConflictDialogRefreshHook.
-// Drops each conflicted edit from the active PendingEditSet and prompts
-// the user to re-run their query for fresh data. The grid is NOT
-// re-fetched in place — there is no grid UpdateRow API today (see
-// dbsavvy-bb6 notes), so the toast guides the user instead.
+// Drops each conflicted edit from the active PendingEditSet and writes
+// the conflict-time ServerValue into the grid cell, so the user sees the
+// server's current data instead of the stale load snapshot once the
+// dirty-cell substitution disappears with the dropped edit. dbsavvy-py0n.
 type conflictRefreshHook struct{ deps conflictDialogDeps }
 
 func (h conflictRefreshHook) Refresh(conflicts []models.ConflictedEdit, _ *models.Connection) error {
@@ -168,13 +185,43 @@ func (h conflictRefreshHook) Refresh(conflicts []models.ConflictedEdit, _ *model
 	for _, c := range conflicts {
 		set.Remove(c.Edit.PrimaryKey, c.Edit.Column)
 	}
+	writeServerValuesToGrid(h.deps.tabs, conflicts)
 	if h.deps.toast != nil {
 		h.deps.toast.Show(
-			fmt.Sprintf("%d conflicting edit(s) dropped — re-run query for fresh data", len(conflicts)),
+			fmt.Sprintf("%d conflicting edit(s) dropped — showing current server values", len(conflicts)),
 			0,
 		)
 	}
 	return nil
+}
+
+// writeServerValuesToGrid surfaces each conflict's captured ServerValue
+// in the active grid by synthesizing a one-row refetch projection
+// ([pk..., conflicted column]) per conflict. One UpdateRowsByPK call per
+// conflict — sequential calls compose when several conflicted columns
+// share a row, whereas batching same-PK rows into one call would let the
+// last row win. A failure to resolve the grid's PK columns degrades to
+// "grid keeps its loaded values" — the edits are already dropped and the
+// server was never written, so there is nothing to fail. dbsavvy-py0n.
+func writeServerValuesToGrid(tabs *ui.ResultTabsHelper, conflicts []models.ConflictedEdit) {
+	pkCols, err := pkColsFromActiveTab(tabs)
+	if err != nil {
+		return
+	}
+	for _, c := range conflicts {
+		if len(c.Edit.PrimaryKey) != len(pkCols) {
+			continue
+		}
+		cols := make([]models.ColumnMeta, 0, len(pkCols)+1)
+		vals := make([]any, 0, len(pkCols)+1)
+		for i, name := range pkCols {
+			cols = append(cols, models.ColumnMeta{Name: name})
+			vals = append(vals, c.Edit.PrimaryKey[i])
+		}
+		cols = append(cols, models.ColumnMeta{Name: c.Edit.Column})
+		vals = append(vals, c.ServerValue)
+		refreshGridRows(tabs, cols, []models.Row{{Values: vals}})
+	}
 }
 
 // conflictOverwriteHook implements controllers.ConflictDialogOverwriteHook.
@@ -218,9 +265,12 @@ func (h conflictOverwriteHook) Overwrite(conflicts []models.ConflictedEdit, _ *m
 	for _, c := range conflicts {
 		set.Remove(c.Edit.PrimaryKey, c.Edit.Column)
 	}
+	// Write the post-overwrite server rows back into the grid — same
+	// refetch contract as the apply path (dbsavvy-5kto). dbsavvy-py0n.
+	refreshGridRows(h.deps.tabs, res.RefetchedColumns, res.RefetchedRows)
 	if h.deps.toast != nil {
 		h.deps.toast.Show(
-			fmt.Sprintf("%d row(s) overwritten — re-run query for fresh data", len(res.RowsAffected)),
+			fmt.Sprintf("%d row(s) overwritten", len(res.RowsAffected)),
 			0,
 		)
 	}
