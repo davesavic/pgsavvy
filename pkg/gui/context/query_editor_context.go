@@ -65,6 +65,24 @@ func NewQueryEditorContext(
 // editor pane. Always non-nil. wwd.2 fills the body of *editor.Buffer.
 func (c *QueryEditorContext) Buffer() *editor.Buffer { return c.buf }
 
+// ViewFrame reports the editor viewport (top visible buffer line +
+// visible row count) for the view-relative motions (H/M/L). It reads
+// the live gocui view's vertical origin — pinned every frame by
+// layout.go's FocusPoint call, with Wrap=false keeping buffer line ==
+// view row — and its inner height. Returns a zero ViewFrame (which the
+// motions treat as "viewport unavailable") when the GuiDriver or view
+// is not yet wired, e.g. headless test rigs.
+func (c *QueryEditorContext) ViewFrame() editor.ViewFrame {
+	if c.deps.GuiDriver == nil {
+		return editor.ViewFrame{}
+	}
+	v, err := c.deps.GuiDriver.ViewByName(c.GetViewName())
+	if err != nil || v == nil {
+		return editor.ViewFrame{}
+	}
+	return editor.ViewFrame{Top: v.OriginY(), Height: v.InnerHeight()}
+}
+
 // SetBuffer replaces the live *editor.Buffer with the supplied one.
 // connectInvoker calls this post-Connect after LoadBuffer hydrates a
 // persisted buffer from disk; SetBuffer keeps the per-context
