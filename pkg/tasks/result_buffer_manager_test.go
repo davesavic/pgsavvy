@@ -186,7 +186,7 @@ func TestNewQueryTaskInitialFillPrePaintsRows(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
 		appendF,
 		200,
-		func() { close(doneCh) },
+		func(error) { close(doneCh) },
 	)
 	if err != nil {
 		t.Fatalf("NewQueryTask: %v", err)
@@ -253,7 +253,7 @@ func TestNewQueryTaskReadRowsDeliversInOrder(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
 		appendF,
 		200,
-		func() { close(doneCh) },
+		func(error) { close(doneCh) },
 	); err != nil {
 		t.Fatalf("NewQueryTask: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestNewQueryTaskReadToEndCallsThenOnce(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
 		appendF,
 		50,
-		func() { close(doneCh) },
+		func(error) { close(doneCh) },
 	); err != nil {
 		t.Fatalf("NewQueryTask: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestNewQueryTaskStopClosesStreamAndFiresOnDoneOnce(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
 		appendF,
 		100,
-		func() {
+		func(error) {
 			onDoneCalls.Add(1)
 			close(doneCh)
 		},
@@ -403,7 +403,7 @@ func TestNewQueryTaskStopBeforeStreamFnStillClosesStream(t *testing.T) {
 		return stream, nil
 	}
 
-	if err := mgr.NewQueryTask("k", streamFn, func([]models.Row) {}, 200, func() {
+	if err := mgr.NewQueryTask("k", streamFn, func([]models.Row) {}, 200, func(error) {
 		onDoneCalls.Add(1)
 	}); err != nil {
 		t.Fatalf("NewQueryTask: %v", err)
@@ -448,7 +448,7 @@ func TestNewQueryTaskPreemption(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return streamA, nil },
 		func(_ []models.Row) {},
 		50,
-		func() { close(doneA) },
+		func(error) { close(doneA) },
 	); err != nil {
 		t.Fatalf("NewQueryTask(A): %v", err)
 	}
@@ -472,7 +472,7 @@ func TestNewQueryTaskPreemption(t *testing.T) {
 			},
 			func(_ []models.Row) {},
 			5,
-			func() {},
+			func(error) {},
 		)
 		close(bStarted)
 	}()
@@ -518,7 +518,7 @@ func TestNewQueryTaskAppendRowsAlwaysOnUIThread(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
 		appendF,
 		100,
-		func() { close(doneCh) },
+		func(error) { close(doneCh) },
 	); err != nil {
 		t.Fatalf("NewQueryTask: %v", err)
 	}
@@ -552,7 +552,7 @@ func TestNewQueryTaskStreamFnErrorFiresOnDoneCleanly(t *testing.T) {
 		},
 		func(_ []models.Row) {},
 		100,
-		func() { close(doneCh) },
+		func(error) { close(doneCh) },
 	); err != nil {
 		t.Fatalf("NewQueryTask: %v", err)
 	}
@@ -571,12 +571,16 @@ func TestNewQueryTaskStreamFnErrorFiresOnDoneCleanly(t *testing.T) {
 }
 
 // TestNewQueryTaskNextErrorMidStream — Next returns an error after
-// some rows: rows up to the error are retained; onDone fires.
+// some rows: rows up to the error are retained; onDone fires
+// automatically with the propagated error (dbsavvy-uly7.1). Prior to
+// the fix the Next error was swallowed and onDone only fired on a manual
+// Stop, leaving the result indistinguishable from a clean completion.
 func TestNewQueryTaskNextErrorMidStream(t *testing.T) {
 	h := newTestHarness()
 	stream := newStubRowStream(100)
 	stream.errAt = 30 // Next yields rows 0..29 then errors at idx==30
 	doneCh := make(chan struct{})
+	var doneErr atomic.Value // stores the error handed to onDone
 
 	var (
 		mu      sync.Mutex
@@ -589,32 +593,121 @@ func TestNewQueryTaskNextErrorMidStream(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
 		appendF,
 		100, // initial fill larger than errAt — drains stop at error
-		func() { close(doneCh) },
+		func(err error) {
+			if err != nil {
+				doneErr.Store(err)
+			}
+			close(doneCh)
+		},
 	); err != nil {
 		t.Fatalf("NewQueryTask: %v", err)
 	}
 
-	// Drain UI; initial fill should have delivered exactly 30 rows.
-	waitForCount(t, &mu, &got, 30, 200*time.Millisecond)
-	time.Sleep(20 * time.Millisecond)
-	h.drainUI()
+	// onDone must fire on its own — no Stop required — because the
+	// mid-stream error now propagates through the done path.
+	select {
+	case <-doneCh:
+	case <-time.After(time.Second):
+		t.Fatal("onDone did not fire within 1s of mid-stream error")
+	}
 
+	// The propagated error must be non-nil so the UI can render an
+	// error state instead of a misleading "complete".
+	if doneErr.Load() == nil {
+		t.Fatal("onDone fired with nil error; want the mid-stream stream.Next error")
+	}
+
+	// Rows up to the error are retained: exactly 30 delivered.
+	waitForCount(t, &mu, &got, 30, 200*time.Millisecond)
+	h.drainUI()
 	mu.Lock()
 	if len(got) != 30 {
 		t.Fatalf("after mid-stream error: len(got)=%d, want 30", len(got))
 	}
 	mu.Unlock()
 
-	// onDone has NOT fired yet — the chan loop is still running
-	// (drainRows swallows the Next error). Stop the manager to wind
-	// it down; onDone must then fire.
-	h.mgr.Stop()
+	h.workersWG.Wait()
+	if k := h.mgr.TaskKey(); k != "" {
+		t.Fatalf("after mid-stream error: TaskKey=%q, want \"\" (idle)", k)
+	}
+	h.stopUI()
+}
+
+// TestNewQueryTaskReadToEndNextErrorMidStream — a mid-stream Next error
+// on the ReadToEnd (G / drain-to-end) path must NOT fire the ReadToEnd
+// `then` callback (clean completion) and must propagate the error through
+// onDone. Regression guard for dbsavvy-uly7.1: req.Then() previously fired
+// before the error check, so fireReadToEnd → markCompleteOnUI(nil) set
+// StateComplete first, and the later onDone(err) → markCompleteOnUI(err)
+// was skipped by its StateRunning/StateSorting guard — leaving the tab
+// "complete" despite the failure. The fix exits on err BEFORE Then(), so
+// the error flows solely through onDone → StateErrored.
+func TestNewQueryTaskReadToEndNextErrorMidStream(t *testing.T) {
+	h := newTestHarness()
+	stream := newStubRowStream(100)
+	stream.errAt = 30 // rows 0..29 then error at idx==30
+	doneCh := make(chan struct{})
+	var doneErr atomic.Value // error handed to onDone
+
+	var (
+		mu      sync.Mutex
+		got     []models.Row
+		appendF = h.makeAppendRows(&mu, &got)
+	)
+
+	if err := h.mgr.NewQueryTask(
+		"q1",
+		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
+		appendF,
+		10, // small initial fill (< errAt) so the error lands in the chan loop
+		func(err error) {
+			if err != nil {
+				doneErr.Store(err)
+			}
+			close(doneCh)
+		},
+	); err != nil {
+		t.Fatalf("NewQueryTask: %v", err)
+	}
+
+	// Initial fill delivers the first 10 rows cleanly, then the worker
+	// parks in the chan loop awaiting a pull request.
+	waitForCount(t, &mu, &got, 10, 200*time.Millisecond)
+
+	// ReadToEnd drains the rest; the stream errors at idx 30 mid-drain.
+	var thenCalls atomic.Int32
+	h.mgr.ReadToEnd(func() { thenCalls.Add(1) })
+
+	// onDone must fire on its own with the propagated error.
 	select {
 	case <-doneCh:
 	case <-time.After(time.Second):
-		t.Fatal("onDone did not fire within 1s of Stop after mid-stream error")
+		t.Fatal("onDone did not fire within 1s of mid-stream error on ReadToEnd path")
 	}
+	if doneErr.Load() == nil {
+		t.Fatal("onDone fired with nil error; want the mid-stream stream.Next error")
+	}
+
+	// The clean-completion callback must NOT have fired: a mid-stream
+	// error is not a clean drain. This is the core of the regression —
+	// firing Then() here would mislabel the tab StateComplete.
+	if n := thenCalls.Load(); n != 0 {
+		t.Fatalf("ReadToEnd `then` fired %d times on mid-stream error, want 0", n)
+	}
+
+	// Rows up to the error are retained: 10 (initial) + 20 (idx 10..29).
+	waitForCount(t, &mu, &got, 30, 200*time.Millisecond)
+	h.drainUI()
+	mu.Lock()
+	if len(got) != 30 {
+		t.Fatalf("after mid-stream error on ReadToEnd: len(got)=%d, want 30", len(got))
+	}
+	mu.Unlock()
+
 	h.workersWG.Wait()
+	if k := h.mgr.TaskKey(); k != "" {
+		t.Fatalf("after mid-stream error: TaskKey=%q, want \"\" (idle)", k)
+	}
 	h.stopUI()
 }
 
@@ -630,7 +723,7 @@ func TestNewQueryTaskStopTwiceNoop(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
 		func(_ []models.Row) {},
 		50,
-		func() { onDoneCalls.Add(1) },
+		func(error) { onDoneCalls.Add(1) },
 	); err != nil {
 		t.Fatalf("NewQueryTask: %v", err)
 	}
@@ -659,7 +752,7 @@ func TestNewQueryTaskSameKeyDuplicateIsNoop(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return streamA, nil },
 		func(_ []models.Row) {},
 		50,
-		func() { onDoneCallsA.Add(1) },
+		func(error) { onDoneCallsA.Add(1) },
 	); err != nil {
 		t.Fatalf("NewQueryTask(first): %v", err)
 	}
@@ -673,7 +766,7 @@ func TestNewQueryTaskSameKeyDuplicateIsNoop(t *testing.T) {
 		},
 		func(_ []models.Row) {},
 		5,
-		func() {},
+		func(error) {},
 	); err != nil {
 		t.Fatalf("NewQueryTask(dup): %v", err)
 	}
@@ -714,7 +807,7 @@ func TestResultBufferManagerGoleak(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
 		func(_ []models.Row) {},
 		100,
-		func() { close(doneCh) },
+		func(error) { close(doneCh) },
 	); err != nil {
 		t.Fatalf("NewQueryTask: %v", err)
 	}
@@ -748,7 +841,7 @@ func TestNewQueryTaskCompletesOnNaturalEOF(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
 		appendF,
 		50, // initialRows > 10 → initial fill observes clean EOF
-		func() { close(doneCh) },
+		func(error) { close(doneCh) },
 	); err != nil {
 		t.Fatalf("NewQueryTask: %v", err)
 	}
@@ -784,7 +877,7 @@ func TestNewQueryTaskCompletesOnEOFViaChanLoop(t *testing.T) {
 	if err := h.mgr.NewQueryTask(
 		"q1",
 		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
-		appendF, 50, func() { close(doneCh) },
+		appendF, 50, func(error) { close(doneCh) },
 	); err != nil {
 		t.Fatalf("NewQueryTask: %v", err)
 	}

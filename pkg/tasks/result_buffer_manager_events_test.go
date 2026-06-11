@@ -57,7 +57,7 @@ func TestLaunchAndCleanup_EmitEvents(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return stream, nil },
 		appendF,
 		5,
-		func() { close(doneCh) },
+		func(error) { close(doneCh) },
 	))
 
 	// Wait for done.
@@ -102,7 +102,7 @@ func TestRBMTaskLaunch_CapturesPreemptedBeforePriorStop(t *testing.T) {
 		func(_ context.Context) (drivers.RowStream, error) { return s1, nil },
 		appendF,
 		0, // skip initial fill so the worker enters the chan loop, parks on Next
-		func() { close(done1) },
+		func(error) { close(done1) },
 	))
 
 	// Give the worker a moment to enter Next and park.
@@ -119,7 +119,7 @@ func TestRBMTaskLaunch_CapturesPreemptedBeforePriorStop(t *testing.T) {
 			func(_ context.Context) (drivers.RowStream, error) { return s2, nil },
 			appendF,
 			3,
-			func() { close(done2) },
+			func(error) { close(done2) },
 		)
 	}()
 

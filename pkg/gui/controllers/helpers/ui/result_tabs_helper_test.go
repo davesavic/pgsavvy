@@ -102,7 +102,7 @@ type fakeStreamRunner struct {
 	lastInit       int
 	readRowsCalls  []int
 	readToEndCalls int
-	lastOnDone     func()
+	lastOnDone     func(error)
 	estimatedRows  int64
 }
 
@@ -111,7 +111,7 @@ func (f *fakeStreamRunner) NewQueryTask(
 	_ func(ctx context.Context) (drivers.RowStream, error),
 	_ func([]models.Row),
 	initialRows int,
-	onDone func(),
+	onDone func(error),
 ) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -186,7 +186,19 @@ func (f *fakeStreamRunner) fireOnDone() {
 	cb := f.lastOnDone
 	f.mu.Unlock()
 	if cb != nil {
-		cb()
+		cb(nil)
+	}
+}
+
+// fireOnDoneErr invokes the captured onDone with a non-nil error,
+// modelling a mid-stream stream.Next failure surfaced through the RBM
+// done path. dbsavvy-uly7.1.
+func (f *fakeStreamRunner) fireOnDoneErr(err error) {
+	f.mu.Lock()
+	cb := f.lastOnDone
+	f.mu.Unlock()
+	if cb != nil {
+		cb(err)
 	}
 }
 
@@ -1493,6 +1505,39 @@ func TestPagePlusOneOnCompleteStreamIsNoop(t *testing.T) {
 	h.Page(1)
 	if calls := runner.ReadRowsCalls(); len(calls) != 0 {
 		t.Errorf("Page(+1) on complete stream fired ReadRows %v; want no-op", calls)
+	}
+}
+
+// TestMidStreamErrorMarksTabErrored verifies a non-nil error surfaced
+// through the RBM done path finalises the tab to StateErrored (not the
+// misleading StateComplete), records the error, and surfaces a toast —
+// while preserving the rows delivered before the failure. dbsavvy-uly7.1.
+func TestMidStreamErrorMarksTabErrored(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	factory := func() StreamRunner { return runner }
+	h, toaster := newTestHelper(t, factory)
+
+	rh := newFakeRunHandle()
+	_ = h.openTab("Q", rh)
+	tab := h.Active()
+	if tab.State() != StateRunning {
+		t.Fatalf("pre-error state = %q, want StateRunning", tab.State())
+	}
+
+	streamErr := errors.New("read tcp: connection reset by peer")
+	runner.fireOnDoneErr(streamErr)
+
+	if got := tab.State(); got != StateErrored {
+		t.Fatalf("post-error state = %q, want StateErrored", got)
+	}
+	if !errors.Is(tab.Err(), streamErr) {
+		t.Fatalf("tab.Err() = %v, want %v", tab.Err(), streamErr)
+	}
+	if !tab.Complete() {
+		t.Fatal("tab not marked complete after mid-stream error")
+	}
+	if last := toaster.Last(); !strings.Contains(last, streamErr.Error()) {
+		t.Fatalf("toast %q does not surface the stream error %q", last, streamErr)
 	}
 }
 

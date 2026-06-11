@@ -139,7 +139,7 @@ type fkStopRunner struct {
 	onStop func()
 }
 
-func (r *fkStopRunner) NewQueryTask(string, func(context.Context) (drivers.RowStream, error), func([]models.Row), int, func()) error {
+func (r *fkStopRunner) NewQueryTask(string, func(context.Context) (drivers.RowStream, error), func([]models.Row), int, func(error)) error {
 	return nil
 }
 

@@ -116,7 +116,7 @@ type StreamRunner interface {
 		streamFn func(ctx context.Context) (drivers.RowStream, error),
 		appendRows func([]models.Row),
 		initialRows int,
-		onDone func(),
+		onDone func(err error),
 	) error
 	Stop()
 
@@ -1274,7 +1274,7 @@ func (h *ResultTabsHelper) fireReadToEnd(tab *Tab, runner StreamRunner) {
 		return
 	}
 	runner.ReadToEnd(func() {
-		h.markCompleteOnUI(tab)
+		h.markCompleteOnUI(tab, nil)
 	})
 }
 
@@ -1731,16 +1731,18 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		tab.mu.Unlock()
 	}
 	taskKey := fmt.Sprintf("result_tab_%d", id)
-	onDone := func() {
+	onDone := func(err error) {
 		// Finalise tab state from the worker goroutine. The state +
 		// complete flip is marshalled onto the UI thread so the next
 		// Render reads a consistent snapshot. Idempotent — dispose()
-		// may have already set Cancelled / etc.
+		// may have already set Cancelled / etc. A non-nil err is a
+		// mid-stream failure (dbsavvy-uly7.1): the tab finalises to
+		// StateErrored with the already-delivered rows preserved.
 		//
 		// Editability is introspected at stream start (above), not here:
 		// it is column-driven and the columns are known before the first
 		// row, so Editable() flips true during StateRunning. dbsavvy-1po.
-		h.markCompleteOnUI(tab)
+		h.markCompleteOnUI(tab, err)
 	}
 	_ = runner.NewQueryTask(taskKey, streamFn, appendRows, resultTabInitialRows, onDone)
 }
@@ -1748,7 +1750,13 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 // markCompleteOnUI schedules the Tab.complete + state finalisation flip
 // onto the UI thread. When deps.OnUIThread is nil the flip runs
 // synchronously (test path). dbsavvy-uv0.3.
-func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab) {
+//
+// streamErr is the terminal error from the RBM done path: nil for a
+// clean EOF / Stop, non-nil for a mid-stream stream.Next failure. On a
+// non-nil error the tab finalises to StateErrored with the error stored
+// for the title/error panel, and a toast surfaces the failure — the
+// already-delivered rows are preserved (dbsavvy-uly7.1).
+func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab, streamErr error) {
 	flip := func() error {
 		tab.mu.Lock()
 		// StateSorting is treated like StateRunning here: a re-run that
@@ -1756,9 +1764,16 @@ func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab) {
 		// reach a terminal state rather than stay stuck on "sorting…".
 		// dbsavvy-72k.3.
 		if tab.state == StateRunning || tab.state == StateSorting {
-			if tab.cancelled {
+			switch {
+			case tab.cancelled:
 				tab.state = StateCancelled
-			} else {
+			case streamErr != nil:
+				// Mid-stream failure: keep the rows received so far but
+				// mark the tab errored so the user sees the failure
+				// instead of a misleading "complete" (dbsavvy-uly7.1).
+				tab.state = StateErrored
+				tab.err = streamErr
+			default:
 				tab.state = StateComplete
 			}
 		}
@@ -1778,6 +1793,11 @@ func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab) {
 			}
 		}
 		tab.mu.Unlock()
+		// Surface the mid-stream failure so it is not silently dropped
+		// (dbsavvy-uly7.1). Toast outside the tab mutex.
+		if streamErr != nil {
+			h.toast(fmt.Sprintf("query failed mid-stream: %v", streamErr))
+		}
 		return nil
 	}
 	if h.deps.OnUIThread != nil {
