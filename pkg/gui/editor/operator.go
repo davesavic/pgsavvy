@@ -23,6 +23,9 @@ func Delete(b *Buffer, r Range) (string, error) {
 	if b == nil {
 		return "", nil
 	}
+	if r.BlockWise {
+		return deleteBlock(b, r)
+	}
 	cut := b.TextInRange(r)
 	if cut == "" && r.Start == r.End && !r.LineWise {
 		return "", nil
@@ -47,6 +50,33 @@ func Delete(b *Buffer, r Range) (string, error) {
 			b.Cursor = Position{Line: 0, Col: 0}
 		}
 		b.mu.Unlock()
+	}
+	return cut, nil
+}
+
+// deleteBlock removes the column rectangle of a VisualBlock range and
+// returns the cut rectangle (rows joined by '\n'). The mutation is one
+// EditKindReplace over the full affected line-span [minLine..maxLine],
+// with each row rebuilt minus its [minCol, maxCol) slice — a single undo
+// step whose reverse the Apply machinery captures automatically. Ragged
+// rows (shorter than maxCol) lose only the columns they have.
+func deleteBlock(b *Buffer, r Range) (string, error) {
+	cut := b.TextInRange(r)
+	minLine, maxLine := minMax(r.Start.Line, r.End.Line)
+	minCol, maxCol := minMax(r.Start.Col, r.End.Col)
+	rows := make([]string, 0, maxLine-minLine+1)
+	for line := minLine; line <= maxLine; line++ {
+		runes := lineRunesSnapshot(b, line)
+		lo := min(minCol, len(runes))
+		hi := min(maxCol, len(runes))
+		rows = append(rows, string(runes[:lo])+string(runes[hi:]))
+	}
+	rng := Range{
+		Start: Position{Line: minLine, Col: 0},
+		End:   Position{Line: maxLine, Col: lineRuneLenSnapshot(b, maxLine)},
+	}
+	if err := b.Apply(Edit{Kind: EditKindReplace, Range: rng, Text: strings.Join(rows, "\n")}); err != nil {
+		return "", err
 	}
 	return cut, nil
 }

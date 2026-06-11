@@ -403,6 +403,50 @@ func TestVimEditorTextObjectInVisualSnapsSelection(t *testing.T) {
 	}
 }
 
+func TestVimEditorTextObjectInVisualBlockSnapsSelection(t *testing.T) {
+	qec := newVimQEC(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune(`SELECT "foo" FROM t`)}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 9})
+
+	ctrl := controllers.NewVimEditorController(qec, nil)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+
+	enter, _ := reg.Get(commands.VisualEnterBlock)
+	_ = enter.Handler(commands.ExecCtx{Mode: types.ModeNormal})
+
+	cmd, ok := reg.Get(commands.TextObjectInnerQuoteDouble)
+	if !ok {
+		t.Fatalf("registry missing TextObjectInnerQuoteDouble")
+	}
+	// dbsavvy-uly7.9: text objects must fire (and snap) in VisualBlock.
+	if err := cmd.Handler(commands.ExecCtx{Mode: types.ModeVisualBlock}); err != nil {
+		t.Fatalf("text-object handler err = %v", err)
+	}
+	if buf.Selection == nil {
+		t.Fatalf("Selection cleared by text-object in VisualBlock")
+	}
+	if buf.Selection.Start.Col != 8 || buf.Selection.End.Col != 11 {
+		t.Fatalf("Selection cols = (%d,%d), want (8,11)", buf.Selection.Start.Col, buf.Selection.End.Col)
+	}
+}
+
+func TestVimEditorTextObjectPublishedUnderVisualBlock(t *testing.T) {
+	ctrl := controllers.NewVimEditorController(newVimQEC(t), nil)
+	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
+	found := false
+	for _, kb := range kbs {
+		if kb.ActionID == commands.TextObjectInnerWord && kb.Mode.Has(types.ModeVisualBlock) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("iw text object not published under ModeVisualBlock (textObjectModeMask)")
+	}
+}
+
 func TestVimEditorPublishesVisualBindings(t *testing.T) {
 	ctrl := controllers.NewVimEditorController(newVimQEC(t), nil)
 	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
