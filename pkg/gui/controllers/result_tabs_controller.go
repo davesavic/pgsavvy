@@ -97,7 +97,7 @@ type ResultTabsManager interface {
 	Active() *ui.Tab
 	// SwitchToTabByID activates the tab whose ID stringifies to tabID
 	// and returns it. Returns nil for stale entries. Used by <c-o> /
-	// <c-i> jump navigation. dbsavvy-8oo stub #4.
+	// <c-i> jump navigation.
 	SwitchToTabByID(tabID string) *ui.Tab
 }
 
