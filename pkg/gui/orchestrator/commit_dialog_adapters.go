@@ -77,6 +77,14 @@ func (h commitApplyHook) Apply(set *models.PendingEditSet, conn *models.Connecti
 	}
 	rows := len(res.RowsAffected)
 	set.Clear()
+	// Write the post-commit server values back into the grid so the
+	// applied cells render fresh data instead of the original load
+	// snapshot. dbsavvy-5kto.
+	if tab := h.deps.tabs.Active(); tab != nil {
+		if g := tab.Grid(); g != nil {
+			g.UpdateRowsByPK(res.RefetchedColumns, res.RefetchedRows)
+		}
+	}
 	if h.deps.toast != nil {
 		h.deps.toast.Show(fmt.Sprintf("%d row(s) committed", rows), 0)
 	}
