@@ -290,9 +290,9 @@ func InjectCurrentDate(pk []any, col models.ColumnMeta, old any) models.PendingE
 // they were not warned. The warning is rendered every open — no
 // suppression flag.
 //
-// TODO(dbsavvy-bwq.23 / Z1): the prompt's border colour switches to
-// WarnBorder (new theme key in Z1) once that theme entry lands; this
-// helper supplies only the text.
+// The layout pass keys the prompt's WarnBorder colour off this exact
+// label (orchestrator.promptBorderStyle, dbsavvy-uly7.14), so this
+// constant is both the visible text and the warn-styling discriminator.
 const WarnExprPromptLabel = "expr (injected verbatim, no escaping): "
 
 // IsDeferredEditor reports whether col.TypeName falls into the

@@ -648,11 +648,9 @@ func (e *CellEditorController) injectExpression(
 // PromptContext concern wired by Z1.
 //
 // The warning text is helpers.WarnExprPromptLabel and asserts
-// "expressions are injected verbatim" per amendment.
-//
-// TODO(dbsavvy-bwq.23 / Z1): switch the prompt's border colour to
-// WarnBorder once the theme key lands. Until then the standard PROMPT
-// border is used and the warning text alone carries the message.
+// "expressions are injected verbatim" per amendment. The layout pass
+// paints this prompt's border with the theme WarnBorder colour, keyed
+// off that label (see orchestrator.promptBorderStyle, dbsavvy-uly7.14).
 func (e *CellEditorController) ExprPrompt(_ commands.ExecCtx) error {
 	if e.ctx == nil || !e.ctx.Active() {
 		return nil
