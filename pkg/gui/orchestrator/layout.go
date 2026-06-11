@@ -7,6 +7,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
@@ -404,15 +405,22 @@ func (g *Gui) RunLayout(w, h int) error {
 					}
 				}
 				// The prompt is always the focused modal while on top, so
-				// paint its border with the active-border colour (yellow;
-				// popups are skipped by the Tier-1 applyFocusFrameColors
-				// pass) and surface its title (set for the masked SSH
-				// credential prompt — see PromptContext.GetTitle). gocui
-				// resets FrameColor on each SetView, so this must run after
-				// SetView, every frame. Mirrors the CONFIRMATION path below.
+				// paint its border (popups are skipped by the Tier-1
+				// applyFocusFrameColors pass) and surface its title (set for
+				// the masked SSH credential prompt — see
+				// PromptContext.GetTitle). The free-form `<c-e>` expression
+				// prompt uses WarnBorder (dbsavvy-bwq.23) to flag that its
+				// input is injected verbatim; every other prompt keeps the
+				// active-border colour. gocui resets FrameColor on each
+				// SetView, so this must run after SetView, every frame.
+				// Mirrors the CONFIRMATION path below.
 				if view != nil {
 					view.Title = ctx.GetTitle()
-					view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+					label := ""
+					if g.promptHelp != nil {
+						label = g.promptHelp.Label()
+					}
+					view.FrameColor = frameAttr(promptBorderStyle(label))
 				}
 			}
 			// CELL_EDITOR view-plumb + seed + caret anchor (dbsavvy-tzi.2).
@@ -460,6 +468,15 @@ func (g *Gui) RunLayout(w, h int) error {
 					if cx, cy, active := cur.CursorXY(); active {
 						_ = g.driver.SetViewCursor(name, cx, cy)
 					}
+				}
+				// CELL_EDITOR is a focused editable popup like PROMPT but set
+				// no FrameColor previously, leaving it on gocui's per-SetView
+				// ColorDefault reset (dbsavvy-uly7.14). Paint the active-border
+				// colour to match PROMPT/CONFIRMATION/TABLE_INSPECT. gocui
+				// resets FrameColor on each SetView, so this runs after
+				// SetView, every frame.
+				if view != nil {
+					view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 				}
 			}
 			// SEARCH_LINE view-plumb + width + caret (dbsavvy-2ttm). Like
@@ -1336,6 +1353,19 @@ func frameAttr(s *theme.Style) gocui.Attribute {
 		return gocui.ColorDefault
 	}
 	return gocui.GetColor(s.Fg)
+}
+
+// promptBorderStyle picks the border colour for a PROMPT popup from its
+// label: the free-form `<c-e>` expression prompt
+// (helpers.WarnExprPromptLabel) gets WarnBorder to flag verbatim
+// injection (dbsavvy-bwq.23); every other prompt keeps ActiveBorder.
+// When WarnBorder is unset in the active theme frameAttr falls back to
+// ColorDefault, so an absent key degrades gracefully.
+func promptBorderStyle(label string) *theme.Style {
+	if label == helpers.WarnExprPromptLabel {
+		return theme.Current().WarnBorder
+	}
+	return theme.Current().ActiveBorder
 }
 
 // centeredRect returns the subrect occupying (frac w x frac h) of the

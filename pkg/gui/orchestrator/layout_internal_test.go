@@ -5,6 +5,7 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/theme"
 	"github.com/davesavic/dbsavvy/pkg/theme/builtin"
@@ -148,6 +149,42 @@ func TestApplyFocusFrameColorsNoFocusedMatch(t *testing.T) {
 
 	if a.FrameColor != inactive {
 		t.Errorf("with no focus match: FrameColor = %v, want inactive %v", a.FrameColor, inactive)
+	}
+}
+
+// TestPromptBorderStyleExprPromptUsesWarnBorder (dbsavvy-uly7.14 AC #1):
+// the free-form `<c-e>` expression prompt, keyed off its label, paints
+// the WarnBorder colour.
+func TestPromptBorderStyleExprPromptUsesWarnBorder(t *testing.T) {
+	resetThemeToDefaultDark(t)
+	if got := promptBorderStyle(helpers.WarnExprPromptLabel); got != theme.Current().WarnBorder {
+		t.Errorf("expr-prompt border = %v, want WarnBorder %v", got, theme.Current().WarnBorder)
+	}
+}
+
+// TestPromptBorderStyleOtherPromptUsesActiveBorder (dbsavvy-uly7.14
+// AC #3): every other prompt label keeps ActiveBorder.
+func TestPromptBorderStyleOtherPromptUsesActiveBorder(t *testing.T) {
+	resetThemeToDefaultDark(t)
+	if got := promptBorderStyle("Enter database name: "); got != theme.Current().ActiveBorder {
+		t.Errorf("non-expr prompt border = %v, want ActiveBorder %v", got, theme.Current().ActiveBorder)
+	}
+}
+
+// TestPromptBorderStyleWarnUnsetFallsBackToDefault (dbsavvy-uly7.14
+// invariant / edge path): a theme that leaves WarnBorder unset must not
+// crash — promptBorderStyle returns the nil style and frameAttr maps it
+// to ColorDefault.
+func TestPromptBorderStyleWarnUnsetFallsBackToDefault(t *testing.T) {
+	cfg := builtin.DefaultDark()
+	cfg.WarnBorder = ""
+	if err := theme.Apply(cfg); err != nil {
+		t.Fatalf("theme.Apply WarnBorder-unset: %v", err)
+	}
+	t.Cleanup(func() { resetThemeToDefaultDark(t) })
+
+	if got := frameAttr(promptBorderStyle(helpers.WarnExprPromptLabel)); got != gocui.ColorDefault {
+		t.Errorf("expr-prompt border with WarnBorder unset = %v, want ColorDefault %v", got, gocui.ColorDefault)
 	}
 }
 
