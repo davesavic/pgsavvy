@@ -267,6 +267,36 @@ func TestBufferTextInRangeLineWise(t *testing.T) {
 	}
 }
 
+func TestBufferTextInRangeBlockWise(t *testing.T) {
+	b := bufFromLines("abcdefg", "ABCDEFG", "1234567")
+	// Half-open columns [2,5) over all three rows -> the rectangle cde/CDE/345.
+	got := b.TextInRange(Range{Start: Position{0, 2}, End: Position{2, 5}, BlockWise: true})
+	if got != "cde\nCDE\n345" {
+		t.Fatalf("block-wise TextInRange = %q, want %q", got, "cde\nCDE\n345")
+	}
+}
+
+func TestBufferTextInRangeBlockWiseRaggedRow(t *testing.T) {
+	b := bufFromLines("abcdef", "AB", "123456")
+	// Middle row "AB" is shorter than maxCol=5; it must contribute an empty
+	// slice rather than panic.
+	got := b.TextInRange(Range{Start: Position{0, 2}, End: Position{2, 5}, BlockWise: true})
+	if got != "cde\n\n345" {
+		t.Fatalf("ragged block TextInRange = %q, want %q", got, "cde\n\n345")
+	}
+}
+
+func TestBufferTextInRangeBlockWiseColumnsMinMaxed(t *testing.T) {
+	b := bufFromLines("abcdefg", "ABCDEFG")
+	// Start top-right (0,5), End bottom-left (1,2): lex order keeps Start
+	// first, so the rectangle is only correct if columns are min/maxed
+	// independently of line order.
+	got := b.TextInRange(Range{Start: Position{0, 5}, End: Position{1, 2}, BlockWise: true})
+	if got != "cde\nCDE" {
+		t.Fatalf("min/maxed block TextInRange = %q, want %q", got, "cde\nCDE")
+	}
+}
+
 func TestBufferCursorByteOffset(t *testing.T) {
 	b := bufFromLines("héllo", "world")
 	b.Cursor = Position{Line: 0, Col: 2}

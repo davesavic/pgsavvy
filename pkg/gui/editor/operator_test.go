@@ -93,6 +93,104 @@ func TestYankLineWiseAppendsNewline(t *testing.T) {
 	}
 }
 
+func TestDeleteBlockWiseRemovesColumnRectangle(t *testing.T) {
+	b := bufFrom("abcdefg\nABCDEFG\n1234567")
+	r := editor.Range{
+		Start:     editor.Position{Line: 0, Col: 2},
+		End:       editor.Position{Line: 2, Col: 5},
+		BlockWise: true,
+	}
+	cut, err := editor.Delete(b, r)
+	if err != nil {
+		t.Fatalf("Delete err = %v", err)
+	}
+	if cut != "cde\nCDE\n345" {
+		t.Errorf("cut = %q, want %q", cut, "cde\nCDE\n345")
+	}
+	want := []string{"abfg", "ABFG", "1267"}
+	for i, w := range want {
+		if got := string(b.Lines[i].Runes); got != w {
+			t.Errorf("line %d = %q, want %q", i, got, w)
+		}
+	}
+}
+
+func TestDeleteBlockWiseRaggedRowNoPanic(t *testing.T) {
+	b := bufFrom("abcdef\nAB\n123456")
+	r := editor.Range{
+		Start:     editor.Position{Line: 0, Col: 2},
+		End:       editor.Position{Line: 2, Col: 5},
+		BlockWise: true,
+	}
+	cut, err := editor.Delete(b, r)
+	if err != nil {
+		t.Fatalf("Delete err = %v", err)
+	}
+	if cut != "cde\n\n345" {
+		t.Errorf("cut = %q, want %q", cut, "cde\n\n345")
+	}
+	want := []string{"abf", "AB", "126"}
+	for i, w := range want {
+		if got := string(b.Lines[i].Runes); got != w {
+			t.Errorf("line %d = %q, want %q", i, got, w)
+		}
+	}
+}
+
+func TestDeleteBlockWiseSingleRowMatchesCharwise(t *testing.T) {
+	b := bufFrom("hello world")
+	r := editor.Range{
+		Start:     editor.Position{Line: 0, Col: 0},
+		End:       editor.Position{Line: 0, Col: 5},
+		BlockWise: true,
+	}
+	cut, err := editor.Delete(b, r)
+	if err != nil {
+		t.Fatalf("Delete err = %v", err)
+	}
+	if cut != "hello" {
+		t.Errorf("cut = %q, want %q", cut, "hello")
+	}
+	if got := string(b.Lines[0].Runes); got != " world" {
+		t.Errorf("buffer = %q, want %q", got, " world")
+	}
+}
+
+func TestDeleteBlockWiseUndoRestoresInOneStep(t *testing.T) {
+	b := bufFrom("abcdefg\nABCDEFG\n1234567")
+	orig := b.String()
+	r := editor.Range{
+		Start:     editor.Position{Line: 0, Col: 2},
+		End:       editor.Position{Line: 2, Col: 5},
+		BlockWise: true,
+	}
+	if _, err := editor.Delete(b, r); err != nil {
+		t.Fatalf("Delete err = %v", err)
+	}
+	if err := b.Undo(); err != nil {
+		t.Fatalf("Undo err = %v", err)
+	}
+	if got := b.String(); got != orig {
+		t.Errorf("after one Undo = %q, want %q", got, orig)
+	}
+}
+
+func TestYankBlockWiseReturnsRectangleNoMutate(t *testing.T) {
+	b := bufFrom("abcdefg\nABCDEFG")
+	r := editor.Range{
+		Start:     editor.Position{Line: 0, Col: 2},
+		End:       editor.Position{Line: 1, Col: 5},
+		BlockWise: true,
+	}
+	got := editor.Yank(b, r)
+	if got != "cde\nCDE" {
+		t.Errorf("yank = %q, want %q", got, "cde\nCDE")
+	}
+	if l0 := string(b.Lines[0].Runes); l0 != "abcdefg" {
+		t.Errorf("buffer mutated to %q (yank must not mutate)", l0)
+	}
+}
+
 func TestUpperReplacesRuneCase(t *testing.T) {
 	b := bufFrom("hello")
 	r := editor.Range{

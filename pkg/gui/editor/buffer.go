@@ -221,6 +221,9 @@ func (b *Buffer) TextInRange(r Range) string {
 }
 
 func (b *Buffer) textInRangeLocked(r Range) string {
+	if r.BlockWise {
+		return b.blockTextLocked(r)
+	}
 	if !b.rangeInBoundsLocked(r) {
 		return ""
 	}
@@ -246,6 +249,41 @@ func (b *Buffer) textInRangeLocked(r Range) string {
 	}
 	sb.WriteString(string(b.Lines[r.End.Line].Runes[:r.End.Col]))
 	return sb.String()
+}
+
+// blockTextLocked extracts the column-rectangular text of a VisualBlock
+// range: for each row in [minLine, maxLine] the half-open column slice
+// [minCol, maxCol) is taken, joined by '\n'. Columns and lines are
+// min/maxed independently (lex NormaliseRange orders by position, which
+// does NOT give the rectangle's corners when the block runs bottom-left
+// to top-right). Each row's slice is clamped to its own length so a
+// ragged row shorter than maxCol contributes only what it has — no
+// panic. Caller holds b.mu.
+func (b *Buffer) blockTextLocked(r Range) string {
+	minLine, maxLine := minMax(r.Start.Line, r.End.Line)
+	minCol, maxCol := minMax(r.Start.Col, r.End.Col)
+	var sb strings.Builder
+	for line := minLine; line <= maxLine; line++ {
+		if line < 0 || line >= len(b.Lines) {
+			continue
+		}
+		if line > minLine {
+			sb.WriteByte('\n')
+		}
+		runes := b.Lines[line].Runes
+		lo := min(minCol, len(runes))
+		hi := min(maxCol, len(runes))
+		sb.WriteString(string(runes[lo:hi]))
+	}
+	return sb.String()
+}
+
+// minMax returns (a, b) ordered ascending.
+func minMax(a, b int) (int, int) {
+	if a > b {
+		return b, a
+	}
+	return a, b
 }
 
 // CursorByteOffset returns the byte offset of Cursor into String().

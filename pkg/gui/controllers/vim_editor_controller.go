@@ -326,10 +326,10 @@ const motionModeMask = types.ModeOperatorPending |
 // textObjectModeMask is the Mode mask under which text-object bindings
 // fire. OperatorPending is the original (wwd.6); wwd.7 extends to
 // Visual / VisualLine so `vi"`-style flows snap the Selection to the
-// resolved object. ModeVisualBlock is excluded — a vim corner case
-// left out of MVP.
+// resolved object. ModeVisualBlock is included (dbsavvy-uly7.9) so
+// `<c-v>iw`-style flows snap the Selection too.
 const textObjectModeMask = types.ModeOperatorPending |
-	types.ModeVisual | types.ModeVisualLine
+	types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 
 // visualEntryModeMask is the Mode mask under which the visual-enter
 // bindings (v / V / <c-v>) fire — Normal only. Re-pressing `v` in
@@ -1151,7 +1151,7 @@ func (c *VimEditorController) textObjectHandler(spec textObjectSpec) commands.Ha
 		if !ok {
 			return nil
 		}
-		if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine) {
+		if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
 			editor.SetSelection(buf, &r)
 			return nil
 		}
