@@ -126,6 +126,34 @@ func TestVimEditorRegisterActionsCoversAllMotions(t *testing.T) {
 	}
 }
 
+func TestVimEditorPublishesAndRegistersPasteBeforeAndToggleCase(t *testing.T) {
+	ctrl := controllers.NewVimEditorController(newVimQEC(t), nil)
+	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
+
+	wantBound := map[string]bool{
+		commands.EditorPasteBefore: false,
+		commands.EditorToggleCase:  false,
+	}
+	for _, kb := range kbs {
+		if _, ok := wantBound[kb.ActionID]; ok {
+			wantBound[kb.ActionID] = true
+		}
+	}
+	for id, seen := range wantBound {
+		if !seen {
+			t.Errorf("action %q not published in VimEditor bindings", id)
+		}
+	}
+
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	for id := range wantBound {
+		if _, ok := reg.Get(id); !ok {
+			t.Errorf("registry missing action %q", id)
+		}
+	}
+}
+
 func TestVimEditorMotionHandlerMovesCursor(t *testing.T) {
 	qec := newVimQEC(t)
 	buf := qec.Buffer()

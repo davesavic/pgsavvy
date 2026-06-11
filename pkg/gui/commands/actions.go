@@ -391,6 +391,17 @@ const (
 	// line below the cursor, matching vim semantics.
 	EditorPaste = "editor.paste"
 
+	// EditorPasteBefore — owned by VimEditorController. Bound to `P` in
+	// Normal + visual modes. Mirrors EditorPaste but inserts before the
+	// cursor (char-wise) / above the line (line-wise), matching vim `P`.
+	EditorPasteBefore = "editor.paste_before"
+
+	// EditorToggleCase — owned by VimEditorController. Bound to `~` in
+	// Normal + visual modes. Toggles the case of the char under the
+	// cursor (count chars) and advances, or the visual selection. With
+	// tildeop off (default) `~` is NOT an operator — it acts immediately.
+	EditorToggleCase = "editor.toggle_case"
+
 	// Text-object family — owned by VimEditorController (dbsavvy-wwd.6).
 	// Defaults follow vim: i"/a" (double quote), i'/a' (single quote),
 	// i(/a( (paren), i[/a[ (bracket), i{/a{ + iB/aB (brace),
@@ -702,6 +713,8 @@ func AllActionIDs() []string {
 		OperatorIndentLeft,
 		OperatorDeleteEndOfLine,
 		EditorPaste,
+		EditorPasteBefore,
+		EditorToggleCase,
 		TextObjectInnerWord,
 		TextObjectAroundWord,
 		TextObjectInnerWORD,

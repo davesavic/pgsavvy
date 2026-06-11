@@ -219,6 +219,20 @@ func TestLowerReplacesRuneCase(t *testing.T) {
 	}
 }
 
+func TestToggleCaseFlipsRuneCase(t *testing.T) {
+	b := bufFrom("HeLLo")
+	r := editor.Range{
+		Start: editor.Position{Line: 0, Col: 0},
+		End:   editor.Position{Line: 0, Col: 5},
+	}
+	if err := editor.ToggleCase(b, r); err != nil {
+		t.Fatalf("ToggleCase err = %v", err)
+	}
+	if got := string(b.Lines[0].Runes); got != "hEllO" {
+		t.Errorf("buffer = %q, want hEllO", got)
+	}
+}
+
 func TestIndentRightInsertsShiftWidthSpaces(t *testing.T) {
 	b := bufFrom("aaa\nbbb")
 	if err := editor.IndentRight(b, 0, 0); err != nil {

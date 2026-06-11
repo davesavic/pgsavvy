@@ -578,6 +578,36 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			})
 		}
 	}
+	// Paste-before binding: `P` mirrors `p` but inserts before the
+	// cursor (char-wise) / above the line (line-wise). Same Normal +
+	// visual mask split as `p`.
+	if seq, err := keys.SequenceFromShorthand("P"); err == nil {
+		for _, mode := range []types.Mode{types.ModeNormal, pasteModeMask} {
+			out = append(out, &types.ChordBinding{
+				Sequence:    seq,
+				Mode:        mode,
+				Scope:       types.QUERY_EDITOR,
+				ActionID:    commands.EditorPasteBefore,
+				Description: "paste before cursor",
+				Tag:         "Edit",
+			})
+		}
+	}
+	// Toggle-case binding: `~` in Normal + visual. With tildeop off
+	// (default) `~` is NOT an operator — it acts immediately, so it
+	// is bound standalone here rather than via operatorSpecs.
+	if seq, err := keys.SequenceFromShorthand("~"); err == nil {
+		for _, mode := range []types.Mode{types.ModeNormal, pasteModeMask} {
+			out = append(out, &types.ChordBinding{
+				Sequence:    seq,
+				Mode:        mode,
+				Scope:       types.QUERY_EDITOR,
+				ActionID:    commands.EditorToggleCase,
+				Description: "toggle case",
+				Tag:         "Edit",
+			})
+		}
+	}
 	// Repeat binding: `.` Normal-only (wwd.9).
 	if seq, err := keys.SequenceFromShorthand("."); err == nil {
 		out = append(out, &types.ChordBinding{
@@ -730,6 +760,7 @@ func (c *VimEditorController) editorHistorySpecs() []editorActionSpec {
 	return []editorActionSpec{
 		{"u", commands.EditorUndo, "undo", "Edit history", editorHistoryModeMask},
 		{"<c-r>", commands.EditorRedo, "redo", "Edit history", editorHistoryModeMask},
+		{"g+", commands.EditorRedo, "redo (g+)", "Edit history", editorHistoryModeMask},
 	}
 }
 
@@ -885,6 +916,18 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 		Description: "Paste after cursor",
 		Tag:         "Edit",
 		Handler:     c.pasteHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.EditorPasteBefore,
+		Description: "Paste before cursor",
+		Tag:         "Edit",
+		Handler:     c.pasteBeforeHandler(),
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.EditorToggleCase,
+		Description: "Toggle case under cursor / over selection",
+		Tag:         "Edit",
+		Handler:     c.toggleCaseHandler(),
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          commands.OperatorDeleteEndOfLine,
@@ -1595,6 +1638,107 @@ func (c *VimEditorController) visualPaste(buf *editor.Buffer, ec commands.ExecCt
 		return err
 	}
 	if err := c.putAt(buf, sel.Start, text); err != nil {
+		return err
+	}
+	editor.ExitVisual(buf)
+	c.setMode(types.ModeNormal)
+	return nil
+}
+
+// pasteBeforeHandler implements vim `P`: like pasteHandler but the
+// register lands before the cursor (char-wise) or above the current
+// line (line-wise). Visual mode delegates to visualPaste, identical to
+// `p`. An empty register is a no-op.
+func (c *VimEditorController) pasteBeforeHandler() commands.Handler {
+	return func(ec commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
+			return c.visualPaste(buf, ec)
+		}
+		text := c.readRegister(ec.Register)
+		if text == "" {
+			return nil
+		}
+		cur := buf.CursorPos()
+		// Line-wise: insert body + "\n" at col 0 of the current line so
+		// the pasted lines land ABOVE it; the cursor stays on col 0,
+		// which is now the first pasted line.
+		if text[len(text)-1] == '\n' {
+			body := text[:len(text)-1]
+			pos := editor.Position{Line: cur.Line, Col: 0}
+			if err := buf.Apply(editor.Edit{
+				Kind:  editor.EditKindInsert,
+				Range: editor.Range{Start: pos, End: pos},
+				Text:  body + "\n",
+			}); err != nil {
+				return err
+			}
+			buf.SetCursor(editor.Position{Line: cur.Line, Col: 0})
+			return nil
+		}
+		// Char-wise: insert before the cursor (vim `P`).
+		pos := editor.Position{Line: cur.Line, Col: cur.Col}
+		return buf.Apply(editor.Edit{
+			Kind:  editor.EditKindInsert,
+			Range: editor.Range{Start: pos, End: pos},
+			Text:  text,
+		})
+	}
+}
+
+// toggleCaseHandler implements vim `~` with tildeop off: in Normal mode
+// it flips the case of `count` chars starting under the cursor and
+// advances; in visual mode it flips the selection and exits to Normal.
+// Non-letters are left unchanged but the cursor still advances.
+func (c *VimEditorController) toggleCaseHandler() commands.Handler {
+	return func(ec commands.ExecCtx) error {
+		buf := c.buffer()
+		if buf == nil {
+			return nil
+		}
+		if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
+			return c.toggleCaseVisual(buf, ec)
+		}
+		cur := buf.CursorPos()
+		lineLen := buf.LineRuneLen(cur.Line)
+		if lineLen == 0 {
+			return nil
+		}
+		count := ec.Count
+		if count <= 0 {
+			count = 1
+		}
+		end := min(cur.Col+count, lineLen)
+		if err := editor.ToggleCase(buf, editor.Range{
+			Start: cur,
+			End:   editor.Position{Line: cur.Line, Col: end},
+		}); err != nil {
+			return err
+		}
+		buf.SetCursor(editor.Position{Line: cur.Line, Col: min(end, lineLen-1)})
+		return nil
+	}
+}
+
+// toggleCaseVisual flips the case of the active selection and exits
+// visual mode. No register write or flash — `~` is a pure in-place
+// mutation. The cursor lands at the selection start via ExitVisual.
+func (c *VimEditorController) toggleCaseVisual(buf *editor.Buffer, ec commands.ExecCtx) error {
+	if buf.Selection == nil {
+		editor.ExitVisual(buf)
+		c.setMode(types.ModeNormal)
+		return nil
+	}
+	sel := *buf.Selection
+	if ec.Mode.Has(types.ModeVisualLine) {
+		sel = editor.LineWiseFromVisualLine(buf, sel)
+	} else {
+		sel = editor.NormaliseRange(sel)
+	}
+	if err := editor.ToggleCase(buf, sel); err != nil {
 		return err
 	}
 	editor.ExitVisual(buf)

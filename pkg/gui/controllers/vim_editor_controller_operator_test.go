@@ -1367,3 +1367,107 @@ func TestYankFlashNilFlasherNoPanic(t *testing.T) {
 		t.Errorf("register \" = %q, want %q (yank must still write with nil flasher)", got, "only line\n")
 	}
 }
+
+// --- ~ toggle-case ------------------------------------------------------
+
+func TestToggleCaseNormalFlipsAndAdvances(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("abc")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	runHandler(t, reg, commands.EditorToggleCase, commands.ExecCtx{Mode: types.ModeNormal})
+
+	if got := string(buf.Lines[0].Runes); got != "Abc" {
+		t.Errorf("after ~ = %q, want %q", got, "Abc")
+	}
+	if got := buf.CursorPos().Col; got != 1 {
+		t.Errorf("cursor col after ~ = %d, want 1", got)
+	}
+}
+
+func TestToggleCaseNonLetterAdvancesUnchanged(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune(".bc")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+
+	runHandler(t, reg, commands.EditorToggleCase, commands.ExecCtx{Mode: types.ModeNormal})
+
+	if got := string(buf.Lines[0].Runes); got != ".bc" {
+		t.Errorf("after ~ on '.' = %q, want %q (unchanged)", got, ".bc")
+	}
+	if got := buf.CursorPos().Col; got != 1 {
+		t.Errorf("cursor col after ~ on '.' = %d, want 1 (still advances)", got)
+	}
+}
+
+func TestToggleCaseVisualFlipsSelection(t *testing.T) {
+	_, reg, qec, _, modes := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisual)
+	editor.ExtendSelection(buf, editor.Position{Line: 0, Col: 5})
+
+	runHandler(t, reg, commands.EditorToggleCase, commands.ExecCtx{Mode: types.ModeVisual})
+
+	if got := string(buf.Lines[0].Runes); got != "HELLO world" {
+		t.Errorf("after visual ~ = %q, want %q", got, "HELLO world")
+	}
+	if buf.Selection != nil {
+		t.Errorf("Selection still set after visual ~, want nil (ExitVisual)")
+	}
+	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeNormal {
+		t.Errorf("mode after visual ~ = %v, want Normal", got)
+	}
+}
+
+// --- P paste-before -----------------------------------------------------
+
+func TestPasteBeforeFromEmptyRegisterIsNoOp(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("aaa")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 1})
+
+	runHandler(t, reg, commands.EditorPasteBefore, commands.ExecCtx{Mode: types.ModeNormal, Register: 'a'})
+
+	if got := string(buf.Lines[0].Runes); got != "aaa" {
+		t.Errorf("P from empty register mutated buffer to %q", got)
+	}
+}
+
+func TestPasteBeforeCharwiseInsertsBeforeCursor(t *testing.T) {
+	_, reg, qec, matcher, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("aaa")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 1})
+	matcher.Registers().Set('a', "XX")
+
+	runHandler(t, reg, commands.EditorPasteBefore, commands.ExecCtx{Mode: types.ModeNormal, Register: 'a'})
+
+	if got := string(buf.Lines[0].Runes); got != "aXXaa" {
+		t.Errorf("after \"aP = %q, want %q (inserts before cursor)", got, "aXXaa")
+	}
+}
+
+func TestPasteBeforeLinewiseInsertsAbove(t *testing.T) {
+	_, reg, qec, matcher, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("aaa")}, {Runes: []rune("bbb")}}
+	buf.SetCursor(editor.Position{Line: 1, Col: 1})
+	matcher.Registers().Set('"', "XX\n") // line-wise (trailing \n)
+
+	runHandler(t, reg, commands.EditorPasteBefore, commands.ExecCtx{Mode: types.ModeNormal})
+
+	want := []string{"aaa", "XX", "bbb"}
+	if len(buf.Lines) != len(want) {
+		t.Fatalf("Lines after line-wise P = %d, want %d", len(buf.Lines), len(want))
+	}
+	for i, w := range want {
+		if got := string(buf.Lines[i].Runes); got != w {
+			t.Errorf("Line %d after line-wise P = %q, want %q", i, got, w)
+		}
+	}
+}

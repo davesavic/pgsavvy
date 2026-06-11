@@ -122,6 +122,23 @@ func Lower(b *Buffer, r Range) error {
 	return transformRange(b, r, unicode.ToLower)
 }
 
+// ToggleCase flips the case of every rune in the range covered by r:
+// upper→lower, lower→upper, non-letters untouched (vim `~`). See Upper
+// for range semantics; non-letters are a clean no-op via transformRange.
+func ToggleCase(b *Buffer, r Range) error {
+	return transformRange(b, r, toggleCaseRune)
+}
+
+func toggleCaseRune(r rune) rune {
+	if unicode.IsUpper(r) {
+		return unicode.ToLower(r)
+	}
+	if unicode.IsLower(r) {
+		return unicode.ToUpper(r)
+	}
+	return r
+}
+
 // IndentRight inserts ShiftWidth spaces at column 0 of every line in
 // [startLine, endLine] inclusive. Empty lines are indented too (vim's
 // behaviour). A nil buffer or out-of-range line is a no-op.
