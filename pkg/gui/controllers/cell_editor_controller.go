@@ -206,9 +206,48 @@ func (e *CellEditorController) Enter(_ commands.ExecCtx) error {
 	if !ok {
 		return nil
 	}
+	// Boolean cells open a true/false/NULL chooser instead of the plain
+	// text buffer (dbsavvy-uly7.6).
+	if helpers.CategoryOf(col) == helpers.CategoryBoolean {
+		return e.openBooleanChooser(col, pk, value)
+	}
+	// Deferred types still use the text buffer, but the value is validated
+	// on commit; surface that so the fallback isn't a silent mislabel.
+	if helpers.IsDeferredEditor(col) && e.helpers.Toast != nil {
+		e.helpers.Toast.Show(
+			fmt.Sprintf("%s: validated on commit (no dedicated editor yet)", col.TypeName),
+			cellEditDeferredNoteToastTTL,
+		)
+	}
 	initial := e.picker.FormatForEdit(value, col)
 	e.ctx.Open(value, col, pk, initial)
 	return e.wrapErr("cell.edit.enter", e.tree.Push(e.ctx))
+}
+
+// openBooleanChooser pushes the true/false/NULL selection popup for a
+// boolean cell and stages the chosen value as a Literal PendingEdit. NULL
+// is offered only when the column is nullable; choosing it writes SQL NULL
+// (NewValue=nil), never the string "null". No-ops when no Choice helper is
+// wired (unit-test path), mirroring ExprPrompt's nil-helper guard.
+func (e *CellEditorController) openBooleanChooser(col models.ColumnMeta, pk []any, old any) error {
+	if e.helpers.Choice == nil {
+		return nil
+	}
+	choices := []string{"true", "false"}
+	if col.Nullable {
+		choices = append(choices, "NULL")
+	}
+	onSubmit := func(idx int) error {
+		if e.store == nil || len(pk) == 0 {
+			return nil
+		}
+		// idx maps to BooleanChoice by position (0=true, 1=false,
+		// 2=NULL): the BooleanChoice enum order matches the chooser order.
+		edit := helpers.BuildBooleanEdit(helpers.BooleanChoice(idx), pk, col, old)
+		return e.wrapErr("cell.edit.boolean", e.store.Add(edit))
+	}
+	return e.wrapErr("cell.edit.boolean",
+		e.helpers.Choice.Choose("set boolean value:", choices, onSubmit, func() error { return nil }))
 }
 
 // Commit is the `<cr>` / `<esc>` handler on CELL_EDITOR. Reads the
@@ -222,14 +261,27 @@ func (e *CellEditorController) Commit(_ commands.ExecCtx) error {
 	if e.ctx == nil || !e.ctx.Active() {
 		return nil
 	}
-	typed := e.ctx.ReadAndClearBuffer()
 	col := e.ctx.Column()
 	pk := e.ctx.PrimaryKey()
+	// Peek (don't consume) so a validation failure can leave the popup
+	// open with the buffer intact for the user to fix.
+	buf := e.ctx.Buffer()
 	originalSeed := ""
 	if e.picker != nil {
 		originalSeed = e.picker.FormatForEdit(e.ctx.OriginalValue(), col)
 	}
-	changed := typed != originalSeed
+	changed := buf != originalSeed
+	if changed {
+		if err := helpers.ValidateForCommit(col, buf); err != nil {
+			// Reject: keep the popup open (buffer untouched) and toast the
+			// reason. Returning nil avoids popping the editor.
+			if e.helpers.Toast != nil {
+				e.helpers.Toast.Show(err.Error(), cellEditValidateToastTTL)
+			}
+			return nil
+		}
+	}
+	typed := e.ctx.ReadAndClearBuffer()
 	if changed && e.store != nil && len(pk) > 0 {
 		// OldValue carries the ORIGINAL value (not the seed string)
 		// so the eventual UPDATE WHERE clause uses the typed value
@@ -309,6 +361,17 @@ func (e *CellEditorController) popFocus() error {
 // edit" status toast. Matches the default ToastHelper TTL (1.5s) the
 // other controllers use for transient operation feedback.
 const cellEditDiscardToastTTL = 1500 * time.Millisecond
+
+// cellEditDeferredNoteToastTTL is the lifetime of the "validated on
+// commit" note shown when opening a deferred-type cell (json / jsonb /
+// bytea / array). Longer than the discard toast so the user has time to
+// read the type note before starting to type.
+const cellEditDeferredNoteToastTTL = 2500 * time.Millisecond
+
+// cellEditValidateToastTTL is the lifetime of the commit-time validation
+// rejection toast. Longest of the three so the user can read the failure
+// reason before retrying.
+const cellEditValidateToastTTL = 3 * time.Second
 
 // enterDisabled returns the user-facing reason `i` should be disabled
 // on RESULT_GRID, or ("", false) when all gates pass. Evaluation order

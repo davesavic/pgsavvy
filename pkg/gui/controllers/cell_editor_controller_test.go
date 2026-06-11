@@ -1,6 +1,7 @@
 package controllers_test
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -585,5 +586,254 @@ func TestCellEditorControllerCommitOnInactiveContextNoOps(t *testing.T) {
 	}
 	if len(store.adds) != 0 || tree.pops != 0 {
 		t.Errorf("stale Commit produced adds=%d pops=%d; want 0/0", len(store.adds), tree.pops)
+	}
+}
+
+// captureChoiceHelper is a controllers.ChoiceHelper fake that records the
+// label/choices and the submit callback so a test can drive a selection
+// (the package's other fake, fakeChoiceHelper, discards the callbacks).
+type captureChoiceHelper struct {
+	opened   bool
+	label    string
+	choices  []string
+	onSubmit func(int) error
+	onCancel func() error
+}
+
+func (c *captureChoiceHelper) Choose(label string, choices []string, onSubmit func(int) error, onCancel func() error) error {
+	c.opened = true
+	c.label = label
+	c.choices = choices
+	c.onSubmit = onSubmit
+	c.onCancel = onCancel
+	return nil
+}
+
+// invoke simulates the SelectionController pressing <cr> on row idx.
+func (c *captureChoiceHelper) invoke(idx int) error {
+	if c.onSubmit == nil {
+		return nil
+	}
+	return c.onSubmit(idx)
+}
+
+// Submit mirrors ui.ChoiceHelper.Submit: out-of-range idx returns an
+// error WITHOUT invoking the callback, so the fake doesn't silently
+// dispatch a selection the real helper would have rejected.
+func (c *captureChoiceHelper) Submit(idx int) error {
+	if idx < 0 || idx >= len(c.choices) {
+		return fmt.Errorf("captureChoiceHelper.Submit: index %d out of range [0,%d)", idx, len(c.choices))
+	}
+	return c.invoke(idx)
+}
+
+func (c *captureChoiceHelper) Cancel() error {
+	if c.onCancel == nil {
+		return nil
+	}
+	return c.onCancel()
+}
+
+// TestCellEditorEnterBooleanOpensChooser asserts the AC: Enter on a
+// boolean cell opens the true/false/NULL chooser (not the text editor),
+// and choosing NULL writes SQL NULL — NewValue=nil, not the string "null".
+func TestCellEditorEnterBooleanOpensChooser(t *testing.T) {
+	picker := &fakeGridPicker{
+		editable:           true,
+		supportsInlineEdit: true,
+		cell:               false,
+		column:             models.ColumnMeta{Name: "active", TypeName: "bool", Nullable: true},
+		pk:                 []any{int64(1)},
+		cellOK:             true,
+	}
+	ctx := newCellEditorTestCtx()
+	tree := &fakeFocusTree{}
+	store := &fakeEditStore{}
+	choice := &captureChoiceHelper{}
+	ctrl := controllers.NewCellEditorController(
+		nil, controllers.CoreDeps{}, controllers.UIDeps{Choice: choice}, ctx, tree, picker, store)
+
+	if err := ctrl.Enter(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Enter: %v", err)
+	}
+	if !choice.opened {
+		t.Fatal("boolean Enter did not open the chooser")
+	}
+	if tree.pushes != 0 {
+		t.Fatalf("boolean Enter should not push CELL_EDITOR, pushes=%d", tree.pushes)
+	}
+	if want := []string{"true", "false", "NULL"}; !reflect.DeepEqual(choice.choices, want) {
+		t.Fatalf("choices = %v, want %v", choice.choices, want)
+	}
+
+	// Choose NULL (idx 2): writes SQL NULL, not the string "null".
+	if err := choice.invoke(2); err != nil {
+		t.Fatalf("invoke NULL: %v", err)
+	}
+	if len(store.adds) != 1 {
+		t.Fatalf("store.adds = %d, want 1", len(store.adds))
+	}
+	got := store.adds[0]
+	if got.NewValue != nil {
+		t.Errorf("NULL choice NewValue = %#v, want nil (SQL NULL)", got.NewValue)
+	}
+	if got.Kind != models.Literal {
+		t.Errorf("NULL choice Kind = %v, want Literal", got.Kind)
+	}
+	if got.Column != "active" {
+		t.Errorf("edit Column = %q, want active", got.Column)
+	}
+}
+
+// TestCellEditorEnterBooleanTrue asserts choosing "true" (idx 0) stages a
+// literal bool true.
+func TestCellEditorEnterBooleanTrue(t *testing.T) {
+	picker := &fakeGridPicker{
+		editable:           true,
+		supportsInlineEdit: true,
+		cell:               false,
+		column:             models.ColumnMeta{Name: "active", TypeName: "boolean", Nullable: true},
+		pk:                 []any{int64(1)},
+		cellOK:             true,
+	}
+	ctx := newCellEditorTestCtx()
+	tree := &fakeFocusTree{}
+	store := &fakeEditStore{}
+	choice := &captureChoiceHelper{}
+	ctrl := controllers.NewCellEditorController(
+		nil, controllers.CoreDeps{}, controllers.UIDeps{Choice: choice}, ctx, tree, picker, store)
+
+	if err := ctrl.Enter(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Enter: %v", err)
+	}
+	if err := choice.invoke(0); err != nil {
+		t.Fatalf("invoke true: %v", err)
+	}
+	if len(store.adds) != 1 {
+		t.Fatalf("store.adds = %d, want 1", len(store.adds))
+	}
+	if got := store.adds[0].NewValue; got != true {
+		t.Errorf("true choice NewValue = %#v, want true", got)
+	}
+}
+
+// TestCellEditorEnterBooleanNotNullOmitsNull asserts a NOT NULL boolean
+// column offers only true/false — choosing NULL is impossible.
+func TestCellEditorEnterBooleanNotNullOmitsNull(t *testing.T) {
+	picker := &fakeGridPicker{
+		editable:           true,
+		supportsInlineEdit: true,
+		cell:               true,
+		column:             models.ColumnMeta{Name: "active", TypeName: "bool", Nullable: false},
+		pk:                 []any{int64(1)},
+		cellOK:             true,
+	}
+	ctx := newCellEditorTestCtx()
+	tree := &fakeFocusTree{}
+	store := &fakeEditStore{}
+	choice := &captureChoiceHelper{}
+	ctrl := controllers.NewCellEditorController(
+		nil, controllers.CoreDeps{}, controllers.UIDeps{Choice: choice}, ctx, tree, picker, store)
+
+	if err := ctrl.Enter(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Enter: %v", err)
+	}
+	if want := []string{"true", "false"}; !reflect.DeepEqual(choice.choices, want) {
+		t.Fatalf("choices = %v, want %v (NULL must be omitted)", choice.choices, want)
+	}
+}
+
+// TestCellEditorCommitRejectsInvalidJSON asserts the AC: a malformed JSON
+// value is rejected on commit — no edit staged, popup stays open with the
+// buffer intact, and the user gets a toast.
+func TestCellEditorCommitRejectsInvalidJSON(t *testing.T) {
+	picker := &fakeGridPicker{
+		editable:           true,
+		supportsInlineEdit: true,
+		column:             models.ColumnMeta{Name: "meta", TypeName: "jsonb"},
+		pk:                 []any{int64(1)},
+		cellOK:             true,
+	}
+	ctx := newCellEditorTestCtx()
+	tree := &fakeFocusTree{}
+	store := &fakeEditStore{}
+	toast := &fakeToast{}
+	ctrl := controllers.NewCellEditorController(
+		nil, controllers.CoreDeps{}, controllers.UIDeps{Toast: toast}, ctx, tree, picker, store)
+
+	ctx.Open(nil, picker.column, []any{int64(1)}, "")
+	ctx.SetBuffer("{bad")
+	if err := ctrl.Commit(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if len(store.adds) != 0 {
+		t.Errorf("invalid JSON staged %d edits, want 0", len(store.adds))
+	}
+	if tree.pops != 0 {
+		t.Errorf("invalid JSON popped the popup (%d); should stay open", tree.pops)
+	}
+	if len(toast.msgs) != 1 {
+		t.Fatalf("toast count = %d, want 1 rejection message", len(toast.msgs))
+	}
+	if ctx.Buffer() != "{bad" {
+		t.Errorf("buffer = %q, want it preserved as {bad", ctx.Buffer())
+	}
+}
+
+// TestCellEditorCommitValidJSON asserts a well-formed JSON value commits
+// normally (staged + popup popped).
+func TestCellEditorCommitValidJSON(t *testing.T) {
+	picker := &fakeGridPicker{
+		editable:           true,
+		supportsInlineEdit: true,
+		column:             models.ColumnMeta{Name: "meta", TypeName: "jsonb"},
+		pk:                 []any{int64(1)},
+		cellOK:             true,
+	}
+	ctx := newCellEditorTestCtx()
+	tree := &fakeFocusTree{}
+	store := &fakeEditStore{}
+	ctrl := controllers.NewCellEditorController(
+		nil, controllers.CoreDeps{}, controllers.UIDeps{}, ctx, tree, picker, store)
+
+	ctx.Open(nil, picker.column, []any{int64(1)}, "")
+	ctx.SetBuffer(`{"a":1}`)
+	if err := ctrl.Commit(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if len(store.adds) != 1 {
+		t.Fatalf("valid JSON staged %d edits, want 1", len(store.adds))
+	}
+	if tree.pops != 1 {
+		t.Errorf("valid JSON pops = %d, want 1", tree.pops)
+	}
+	if ctx.Active() {
+		t.Error("ctx still Active after a successful commit; want closed")
+	}
+}
+
+// TestCellEditorCommitEmptyArrayLiteral asserts the edge AC: an empty
+// array literal {} commits without error.
+func TestCellEditorCommitEmptyArrayLiteral(t *testing.T) {
+	picker := &fakeGridPicker{
+		editable:           true,
+		supportsInlineEdit: true,
+		column:             models.ColumnMeta{Name: "tags", TypeName: "_text"},
+		pk:                 []any{int64(1)},
+		cellOK:             true,
+	}
+	ctx := newCellEditorTestCtx()
+	tree := &fakeFocusTree{}
+	store := &fakeEditStore{}
+	ctrl := controllers.NewCellEditorController(
+		nil, controllers.CoreDeps{}, controllers.UIDeps{}, ctx, tree, picker, store)
+
+	ctx.Open(nil, picker.column, []any{int64(1)}, "")
+	ctx.SetBuffer("{}")
+	if err := ctrl.Commit(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if len(store.adds) != 1 {
+		t.Fatalf("empty array literal staged %d edits, want 1", len(store.adds))
 	}
 }

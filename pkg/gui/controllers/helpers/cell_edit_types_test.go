@@ -382,6 +382,45 @@ func TestCellEditTypes_IsDeferredEditor(t *testing.T) {
 	}
 }
 
+// TestCellEditTypes_ValidateForCommit asserts the commit-time validators
+// for the deferred types: json/jsonb parse, bytea hex form, and array
+// brace-wrapping. Non-deferred types (and enum, which is server-validated)
+// always pass.
+func TestCellEditTypes_ValidateForCommit(t *testing.T) {
+	cases := []struct {
+		name     string
+		typeName string
+		input    string
+		wantErr  bool
+	}{
+		{"valid json object", "json", `{"a":1}`, false},
+		{"valid jsonb array", "jsonb", `[1,2,3]`, false},
+		{"invalid json", "jsonb", "{bad", true},
+		{"empty json rejected", "json", "", true},
+		{"bytea hex valid", "bytea", `\x00ff`, false},
+		{"bytea hex odd length", "bytea", `\xa`, true},
+		{"bytea hex bad digit", "bytea", `\xzz`, true},
+		{"bytea escape form passes", "bytea", "abc", false},
+		{"array empty literal", "_int4", "{}", false},
+		{"array literal", "_text", "{a,b}", false},
+		{"array not wrapped", "_int4", "1,2,3", true},
+		{"non-deferred text passes", "text", "anything", false},
+		{"enum passes (server-validated)", "mood", "happy", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			col := models.ColumnMeta{TypeName: tc.typeName}
+			err := helpers.ValidateForCommit(col, tc.input)
+			if tc.wantErr && err == nil {
+				t.Errorf("ValidateForCommit(%q, %q) = nil, want error", tc.typeName, tc.input)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("ValidateForCommit(%q, %q) = %v, want nil", tc.typeName, tc.input, err)
+			}
+		})
+	}
+}
+
 // contains is a tiny zero-import substring check for the warning-label
 // assertion above. strings.Contains would do but pulling strings just
 // for one call is overkill in test code.

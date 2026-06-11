@@ -1,7 +1,9 @@
 package helpers
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -317,4 +319,70 @@ func IsDeferredEditor(col models.ColumnMeta) bool {
 	// scope for this helper; the controller falls back to default text
 	// and the user gets a generic editor with server-side validation.
 	return false
+}
+
+// ValidateForCommit checks typed against col's deferred-editor type and
+// returns a user-facing error when the value is malformed. Returns nil
+// for non-deferred types (no client-side rule) and for valid input. The
+// commit path calls this before staging a PendingEdit so malformed
+// json / bytea / array literals are rejected with a message instead of
+// being shipped to the server only to bounce back on apply.
+//
+// Enum is intentionally NOT validated here: the canonical labels require
+// a pg_type lookup (see IsDeferredEditor) so enum input keeps falling
+// through to server-side validation.
+func ValidateForCommit(col models.ColumnMeta, typed string) error {
+	name := normalizeTypeName(col.TypeName)
+	switch {
+	case name == "json" || name == "jsonb":
+		if !json.Valid([]byte(typed)) {
+			return fmt.Errorf("invalid JSON")
+		}
+		return nil
+	case name == "bytea":
+		return validateBytea(typed)
+	case strings.HasPrefix(name, "_"):
+		return validateArrayLiteral(typed)
+	}
+	return nil
+}
+
+// validateBytea accepts Postgres' hex form (`\x` followed by an even
+// number of hex digits) and treats the legacy escape form as valid (the
+// escape grammar is permissive enough that the server is the better
+// arbiter). Only the hex form is checked because it has a crisp, cheap
+// well-formedness rule the user can act on locally.
+func validateBytea(s string) error {
+	if !strings.HasPrefix(s, "\\x") && !strings.HasPrefix(s, "\\X") {
+		return nil
+	}
+	hexits := s[2:]
+	if len(hexits)%2 != 0 {
+		return fmt.Errorf("invalid bytea: hex form needs an even number of digits")
+	}
+	for _, r := range hexits {
+		if !isHexDigit(r) {
+			return fmt.Errorf("invalid bytea: %q is not a hex digit", r)
+		}
+	}
+	return nil
+}
+
+// validateArrayLiteral requires the curly-brace wrapping Postgres uses
+// for array literals. The empty array `{}` passes. Element-level
+// validation is left to the server — this only guards against a value
+// that is obviously not an array literal at all.
+func validateArrayLiteral(s string) error {
+	t := strings.TrimSpace(s)
+	if !strings.HasPrefix(t, "{") || !strings.HasSuffix(t, "}") {
+		return fmt.Errorf("invalid array literal: must be wrapped in { }")
+	}
+	return nil
+}
+
+// isHexDigit reports whether r is a hexadecimal digit (0-9, a-f, A-F).
+func isHexDigit(r rune) bool {
+	return (r >= '0' && r <= '9') ||
+		(r >= 'a' && r <= 'f') ||
+		(r >= 'A' && r <= 'F')
 }
