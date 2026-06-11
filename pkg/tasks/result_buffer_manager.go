@@ -213,14 +213,17 @@ func (m *ResultBufferManager) Stop() {
 //   - initialRows is the size of the synchronous initial-fill drain.
 //     A value of 0 skips the initial fill entirely (the worker starts
 //     the chan loop immediately).
-//   - onDone is invoked exactly once when the task completes (clean
-//     EOF, stream error, or Stop / preempt).
+//   - onDone is invoked exactly once when the task completes. Its
+//     argument is the terminal error: nil for a clean EOF or a Stop /
+//     preempt, non-nil for a mid-stream stream.Next failure
+//     (dbsavvy-uly7.1) so the caller can render an error state rather
+//     than a misleading "complete".
 func (m *ResultBufferManager) NewQueryTask(
 	taskKey string,
 	streamFn func(ctx context.Context) (drivers.RowStream, error),
 	appendRows func([]models.Row),
 	initialRows int,
-	onDone func(),
+	onDone func(err error),
 ) error {
 	m.mu.Lock()
 
@@ -319,7 +322,7 @@ func (m *ResultBufferManager) runTask(
 	streamFn func(ctx context.Context) (drivers.RowStream, error),
 	appendRows func([]models.Row),
 	initialRows int,
-	onDone func(),
+	onDone func(err error),
 	rowsToRead chan RowsToRead,
 	stopCh chan struct{},
 	doneCh chan struct{},
@@ -327,11 +330,16 @@ func (m *ResultBufferManager) runTask(
 	myStopFn func(),
 ) {
 	var (
-		stream     drivers.RowStream
+		stream drivers.RowStream
+		// taskErr is the terminal mid-stream error (nil on clean EOF,
+		// Stop, or streamFn failure handled separately). The deferred
+		// cleanup hands it to onDone so the UI can distinguish
+		// StateComplete from StateErrored (dbsavvy-uly7.1).
+		taskErr    error
 		onDoneOnce sync.Once
 		fireOnDone = func() {
 			if onDone != nil {
-				onDoneOnce.Do(onDone)
+				onDoneOnce.Do(func() { onDone(taskErr) })
 			}
 		}
 	)
@@ -419,9 +427,18 @@ func (m *ResultBufferManager) runTask(
 			default:
 			}
 			want := min(remaining, initialFillChunkRows)
-			batch, eof := m.drainRows(ctx, stream, want, stopCh)
+			batch, eof, err := m.drainRows(ctx, stream, want, stopCh)
 			if len(batch) > 0 {
 				m.dispatchRows(batch, appendRows)
+			}
+			if err != nil {
+				// Mid-stream failure during the initial fill: retain the
+				// rows already dispatched, record the error, and exit so
+				// the deferred cleanup fires onDone(err) → StateErrored
+				// (dbsavvy-uly7.1). Previously the error was swallowed and
+				// the tab finished as StateComplete.
+				taskErr = err
+				return
 			}
 			if eof {
 				// Whole result fit within the initial fill: the stream
@@ -432,10 +449,8 @@ func (m *ResultBufferManager) runTask(
 			}
 			remaining -= len(batch)
 			if len(batch) < want {
-				// Short read without EOF: a Stop or a mid-stream error.
-				// Hand off to the chan loop, which exits on Stop and
-				// otherwise stays alive until Stop (preserving the
-				// mid-stream-error contract).
+				// Short read without EOF or error: a Stop interrupted the
+				// drain. Hand off to the chan loop, which exits on Stop.
 				break
 			}
 		}
@@ -452,15 +467,25 @@ func (m *ResultBufferManager) runTask(
 				// closed it (we never do). Treat as stop.
 				return
 			}
-			eof := m.servicePullRequest(ctx, stream, req, appendRows, stopCh)
+			eof, err := m.servicePullRequest(ctx, stream, req, appendRows, stopCh)
+			if err != nil {
+				// Mid-stream failure while servicing a pull request:
+				// record it and exit BEFORE firing req.Then(). The clean-
+				// completion callback (e.g. fireReadToEnd → markCompleteOnUI
+				// with nil error) would otherwise set StateComplete first,
+				// causing the deferred onDone(err) → markCompleteOnUI(tab,
+				// err) to be skipped by its StateRunning/StateSorting guard.
+				// Exiting here routes the error solely through onDone(err) →
+				// StateErrored (dbsavvy-uly7.1).
+				taskErr = err
+				return
+			}
 			if req.Then != nil {
 				req.Then()
 			}
 			if eof {
 				// Stream exhausted by a clean EOF: exit so the
-				// deferred cleanup fires onDone → StateComplete
-				// (Gap 1). A mid-stream error returns eof=false
-				// and keeps looping until Stop / preempt.
+				// deferred cleanup fires onDone → StateComplete (Gap 1).
 				return
 			}
 		}
@@ -468,14 +493,15 @@ func (m *ResultBufferManager) runTask(
 }
 
 // drainRows pulls up to want rows from the stream, respecting stop.
-// Returns the slice of rows pulled (possibly empty, possibly < want
-// on EOF / error / stop) and a bool reporting whether a *clean* EOF
-// was observed. The clean-EOF flag is distinct from error: a mid-stream
-// error returns eof=false so the worker keeps looping until Stop /
-// preempt (preserving TestNewQueryTaskNextErrorMidStream); only an
-// orderly end-of-stream (Next reports ok=false, err=nil) returns
-// eof=true, which lets the caller exit and fire onDone. Stop also
-// returns eof=false — stopCh is not EOF.
+// Returns the slice of rows pulled (possibly empty, possibly < want on
+// EOF / error / stop), a bool reporting whether a *clean* EOF was
+// observed, and the stream.Next error (nil unless Next failed). The
+// three outcomes are mutually exclusive: a clean end-of-stream (Next
+// reports ok=false, err=nil) returns eof=true,err=nil; a mid-stream
+// failure returns eof=false,err!=nil; Stop returns eof=false,err=nil
+// (stopCh is not EOF). Already-pulled rows are always returned so the
+// caller can dispatch them before acting on the terminal condition
+// (dbsavvy-uly7.1: the Next error was previously swallowed).
 //
 // want=-1 means "drain to end".
 func (m *ResultBufferManager) drainRows(
@@ -483,43 +509,44 @@ func (m *ResultBufferManager) drainRows(
 	stream drivers.RowStream,
 	want int,
 	stopCh <-chan struct{},
-) ([]models.Row, bool) {
+) ([]models.Row, bool, error) {
 	out := make([]models.Row, 0, max(want, 0))
 	for i := 0; want == -1 || i < want; i++ {
 		select {
 		case <-stopCh:
-			return out, false // stop is not EOF
+			return out, false, nil // stop is not EOF
 		default:
 		}
 		row, ok, err := stream.Next(ctx)
 		if err != nil {
-			return out, false // error: NOT clean EOF (loop-until-Stop preserved)
+			return out, false, err // mid-stream failure: surface it
 		}
 		if !ok {
-			return out, true // clean EOF
+			return out, true, nil // clean EOF
 		}
 		out = append(out, row)
 	}
-	return out, false // filled `want` without observing the end
+	return out, false, nil // filled `want` without observing the end
 }
 
 // servicePullRequest handles a single RowsToRead from the chan loop.
 // Pulls up to req.Total rows (req.Total=-1 means drain), dispatches
 // them in a single batch on the UI thread, and returns whether a clean
-// EOF was observed. The batch is dispatched only if non-empty so the UI
-// side never sees a spurious zero-row append.
+// EOF was observed plus any mid-stream error. The batch is dispatched
+// only if non-empty so the UI side never sees a spurious zero-row
+// append; already-pulled rows are dispatched even when err is non-nil.
 func (m *ResultBufferManager) servicePullRequest(
 	ctx context.Context,
 	stream drivers.RowStream,
 	req RowsToRead,
 	appendRows func([]models.Row),
 	stopCh <-chan struct{},
-) bool {
-	batch, eof := m.drainRows(ctx, stream, req.Total, stopCh)
+) (bool, error) {
+	batch, eof, err := m.drainRows(ctx, stream, req.Total, stopCh)
 	if len(batch) > 0 {
 		m.dispatchRows(batch, appendRows)
 	}
-	return eof
+	return eof, err
 }
 
 // dispatchRows schedules a single appendRows call on the UI thread.

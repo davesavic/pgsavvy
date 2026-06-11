@@ -39,7 +39,7 @@ type capturingStreamRunner struct {
 	stops      int
 	lastKey    string
 	appendRows func([]models.Row)
-	onDone     func()
+	onDone     func(error)
 }
 
 func (c *capturingStreamRunner) NewQueryTask(
@@ -47,7 +47,7 @@ func (c *capturingStreamRunner) NewQueryTask(
 	_ func(ctx context.Context) (drivers.RowStream, error),
 	appendRows func([]models.Row),
 	_ int,
-	onDone func(),
+	onDone func(error),
 ) error {
 	c.starts++
 	c.lastKey = taskKey
@@ -237,7 +237,7 @@ func TestReRun_SortingAffordanceUntilFirstRow(t *testing.T) {
 		t.Errorf("state after first row = %q, want %q", got, StateRunning)
 	}
 
-	runner.onDone()
+	runner.onDone(nil)
 	if got := tab.State(); got != StateComplete {
 		t.Errorf("state after onDone = %q, want %q", got, StateComplete)
 	}
@@ -255,7 +255,7 @@ func TestReRun_ZeroRowCompletesNotStuckSorting(t *testing.T) {
 	tab := h.Active()
 	h.reattachActiveTab(rh, reRunWrappedSQL(), reRunOrigSQL)
 
-	runner.onDone() // no rows delivered
+	runner.onDone(nil) // no rows delivered
 	if got := tab.State(); got != StateComplete {
 		t.Errorf("zero-row re-run state = %q, want %q (not stuck on sorting)", got, StateComplete)
 	}
