@@ -148,9 +148,10 @@ func (r *fkStopRunner) Stop() {
 		r.onStop()
 	}
 }
-func (r *fkStopRunner) ReadRows(int)          {}
-func (r *fkStopRunner) ReadToEnd(then func()) {}
-func (r *fkStopRunner) EstimatedRows() int64  { return 0 }
+func (r *fkStopRunner) ReadRows(int)           {}
+func (r *fkStopRunner) ReadToEnd(then func())  {}
+func (r *fkStopRunner) EstimatedRows() int64   { return 0 }
+func (r *fkStopRunner) SetEstimatedRows(int64) {}
 
 var _ ui.StreamRunner = (*fkStopRunner)(nil)
 

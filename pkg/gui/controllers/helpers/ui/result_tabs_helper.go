@@ -132,6 +132,10 @@ type StreamRunner interface {
 	// EstimatedRows returns the optimiser's row-count estimate for the
 	// active stream, or 0 when unknown.
 	EstimatedRows() int64
+
+	// SetEstimatedRows caches a planner row-count estimate so a repeated
+	// ReadToEnd (G) doesn't re-EXPLAIN. dbsavvy-uly7.8 (lazy seed).
+	SetEstimatedRows(n int64)
 }
 
 // StreamRunnerFactory builds a StreamRunner per tab. Real production
@@ -319,6 +323,15 @@ type ResultTabsHelperDeps struct {
 	// SELECT was unqualified (dbsavvy-8q6). nil keeps editability off
 	// (unit-test default). dbsavvy-2b6.
 	IntrospectEditability func(ctx context.Context, cols []models.ColumnMeta) (bool, []int, string, string)
+
+	// EstimateRows runs a side-effect-free planner EXPLAIN for sql (resolved
+	// against defaultSchema) and returns the top-node estimated row count.
+	// Wired by the orchestrator to a closure that acquires a FRESH pooled
+	// session (NOT the in-flight stream's session) and runs the pg planner-only
+	// EXPLAIN, so it never blocks or preempts the active stream. Used lazily by
+	// ReadToEnd (G) when the estimate is unknown (== 0). nil keeps the prior
+	// conservative behaviour (unknown estimate => prompt). dbsavvy-uly7.8.
+	EstimateRows func(ctx context.Context, sql, defaultSchema string) (int64, error)
 
 	// ResolveTableNames maps the distinct source-table OIDs of a result's
 	// columns to their relation names. Wired by the orchestrator to a
@@ -1251,6 +1264,25 @@ func (h *ResultTabsHelper) ReadToEnd() {
 		return
 	}
 	est := runner.EstimatedRows()
+	// Lazy seed (dbsavvy-uly7.8): the estimate is unknown (== 0) in
+	// production until the first G. Pay a single side-effect-free planner
+	// EXPLAIN here — only when the dep is wired and the tab's source SQL is
+	// known — cache it on the runner so a repeat G short-circuits, then
+	// decide prompt-or-drain with the real number. Runs off the UI thread;
+	// the decision marshals back. Falls through to the prompt path below on
+	// any failure, so G never blocks and the prior behaviour is preserved.
+	if est == 0 && h.deps.EstimateRows != nil {
+		if sql, _, schema := t.Origin(); sql != "" {
+			h.lazyEstimateThenDecide(t, runner, sql, schema)
+			return
+		}
+	}
+	h.decideReadToEnd(t, runner, est)
+}
+
+// decideReadToEnd applies the prompt-or-drain decision for a known (or
+// unknowable) estimate. Must run on the UI thread. dbsavvy-uv0.3 / uly7.8.
+func (h *ResultTabsHelper) decideReadToEnd(t *Tab, runner StreamRunner, est int64) {
 	shouldPrompt := est == 0 || est > h.warnThreshold
 	if shouldPrompt && h.deps.Confirm != nil {
 		title := "Drain result to end?"
@@ -1265,6 +1297,37 @@ func (h *ResultTabsHelper) ReadToEnd() {
 		return
 	}
 	h.fireReadToEnd(t, runner)
+}
+
+// lazyEstimateThenDecide runs the planner EXPLAIN off the UI thread, caches
+// the result on the runner, and marshals the prompt-or-drain decision back
+// onto the UI thread. An EXPLAIN error (or still-unknown estimate) falls back
+// to decideReadToEnd with est=0 — i.e. the conservative prompt — so G never
+// blocks and never silently drains. dbsavvy-uly7.8.
+func (h *ResultTabsHelper) lazyEstimateThenDecide(t *Tab, runner StreamRunner, sql, schema string) {
+	run := func() {
+		est, err := h.deps.EstimateRows(context.Background(), sql, schema)
+		if err != nil || est < 0 {
+			est = 0
+		}
+		if est > 0 {
+			runner.SetEstimatedRows(est)
+		}
+		decide := func() error {
+			h.decideReadToEnd(t, runner, est)
+			return nil
+		}
+		if h.deps.OnUIThread != nil {
+			h.deps.OnUIThread(decide)
+			return
+		}
+		_ = decide()
+	}
+	if h.deps.OnWorker != nil {
+		h.deps.OnWorker(func(gocui.Task) error { run(); return nil })
+		return
+	}
+	run() // test path: synchronous
 }
 
 // fireReadToEnd issues the drain request and registers the
