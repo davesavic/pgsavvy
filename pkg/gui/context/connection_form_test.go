@@ -10,9 +10,10 @@ import (
 
 func testDrivers() []string { return []string{"postgres", "mysql"} }
 
-// TestForm_RendersAllFunctionalAndSoonRows asserts the form body shows every
-// functional field plus the greyed "(soon)" placeholders (AC1).
-func TestForm_RendersAllFunctionalAndSoonRows(t *testing.T) {
+// TestForm_RendersAllFunctionalRows asserts the form body shows every
+// functional field, including the now-editable icon/keyring/password_command
+// credential rows (AC1).
+func TestForm_RendersAllFunctionalRows(t *testing.T) {
 	drv := &captureDriver{}
 	c := newTestConnectionManager(drv, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
@@ -22,7 +23,7 @@ func TestForm_RendersAllFunctionalAndSoonRows(t *testing.T) {
 	body := drv.lastContent
 	for _, want := range []string{
 		"name:", "driver:", "dsn:", "read_only:", "confirm_writes:",
-		"confirm_ddl:", "statement_timeout:", "color:", "label:", "tags:",
+		"confirm_ddl:", "statement_timeout:", "color:", "label:", "icon:", "tags:",
 		"ssh_host:", "ssh_user:", "ssh_port:", "identity_file:",
 		"identity_from_agent:", "known_hosts:",
 		"keyring:", "pgpass:", "password_command:",
@@ -31,8 +32,9 @@ func TestForm_RendersAllFunctionalAndSoonRows(t *testing.T) {
 			t.Errorf("form body missing %q\n%s", want, body)
 		}
 	}
-	if !strings.Contains(body, "(soon)") {
-		t.Errorf("form body missing greyed (soon) marker\n%s", body)
+	// keyring/password_command are now editable text rows, not "(soon)".
+	if strings.Contains(body, "(soon)") {
+		t.Errorf("form body still renders a greyed (soon) marker\n%s", body)
 	}
 	// ssh_tunnel was reclassified from a "(soon)" placeholder into the six
 	// editable sub-rows above; its old label must no longer render.
@@ -51,22 +53,22 @@ func TestForm_AddSeedsFirstDriver(t *testing.T) {
 	}
 }
 
-// TestForm_FieldNavMovesFocusAndSkipsSoonRows asserts j/k/Tab move the field
-// cursor across the ten functional rows and never land on a "(soon)" row
-// (AC2).
-func TestForm_FieldNavMovesFocusAndSkipsSoonRows(t *testing.T) {
+// TestForm_FieldNavMovesFocus asserts j/k/Tab move the field cursor across
+// every functional row, with no rows skipped (AC2).
+func TestForm_FieldNavMovesFocus(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
-	// 10 base functional rows + 6 SSH rows + pgpass → focusable count is 17.
-	if got := len(c.form.focusableSpecs()); got != 17 {
-		t.Fatalf("focusable rows = %d, want 17", got)
+	// 11 base functional rows (now incl. icon) + 6 SSH rows + keyring + pgpass
+	// + password_command → focusable count is 20.
+	if got := len(c.form.focusableSpecs()); got != 20 {
+		t.Fatalf("focusable rows = %d, want 20", got)
 	}
-	// Move far past the end; clamps to the last functional row (pgpass).
+	// Move far past the end; clamps to the last functional row (password_command).
 	for range 50 {
 		c.FormMoveFocus(1)
 	}
-	if id := c.form.focusedSpec().id; id != fieldPgpass {
-		t.Fatalf("focus after over-move = %v, want fieldPgpass", id)
+	if id := c.form.focusedSpec().id; id != fieldPasswordCommand {
+		t.Fatalf("focus after over-move = %v, want fieldPasswordCommand", id)
 	}
 	// Move far up; clamps to name.
 	for range 50 {
@@ -208,8 +210,8 @@ func TestForm_ValidateAllSucceedsReturnsConn(t *testing.T) {
 func TestForm_TagsRoundTrip(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
-	// Focus tags row (last functional, index 9).
-	for range 9 {
+	// Focus tags row (index 10, after icon was inserted at 9).
+	for range 10 {
 		c.FormMoveFocus(1)
 	}
 	if c.form.focusedSpec().id != fieldTags {
@@ -412,6 +414,107 @@ func TestForm_PgpassValidator(t *testing.T) {
 	}
 	if err := v("/path/with\nnewline"); err == nil {
 		t.Error("path with newline accepted")
+	}
+}
+
+// focusable reports whether id is a focusable form row.
+func focusable(f *connForm, id connFieldID) bool {
+	for _, s := range f.focusableSpecs() {
+		if s.id == id {
+			return true
+		}
+	}
+	return false
+}
+
+// TestForm_CredentialRowsAreFocusable asserts icon/keyring/password_command are
+// editable (focusable) rows, not skipped "(soon)" placeholders (dbsavvy-uly7.3).
+func TestForm_CredentialRowsAreFocusable(t *testing.T) {
+	f := &connForm{}
+	for _, id := range []connFieldID{fieldIcon, fieldKeyring, fieldPasswordCommand} {
+		if !focusable(f, id) {
+			t.Errorf("field %v not focusable", id)
+		}
+	}
+}
+
+// TestForm_IconTextRoundTrip asserts the icon row reads/writes conn.Icon and
+// clearing it saves an empty value (dbsavvy-uly7.3).
+func TestForm_IconTextRoundTrip(t *testing.T) {
+	f := &connForm{}
+	f.setTextValue(fieldIcon, "ICON")
+	if f.conn.Icon != "ICON" {
+		t.Errorf("Icon = %q, want ICON", f.conn.Icon)
+	}
+	if got := f.textValue(fieldIcon); got != "ICON" {
+		t.Errorf("textValue(icon) = %q, want ICON", got)
+	}
+	f.setTextValue(fieldIcon, "")
+	if f.conn.Icon != "" {
+		t.Errorf("Icon after clear = %q, want empty", f.conn.Icon)
+	}
+}
+
+// TestForm_KeyringTextRoundTrip asserts the keyring row reads/writes
+// conn.KeyringRef (dbsavvy-uly7.3).
+func TestForm_KeyringTextRoundTrip(t *testing.T) {
+	f := &connForm{}
+	f.setTextValue(fieldKeyring, "prod/db")
+	if f.conn.KeyringRef != "prod/db" {
+		t.Errorf("KeyringRef = %q, want prod/db", f.conn.KeyringRef)
+	}
+	if got := f.textValue(fieldKeyring); got != "prod/db" {
+		t.Errorf("textValue(keyring) = %q, want prod/db", got)
+	}
+}
+
+// TestForm_PasswordCommandTextRoundTrip asserts the password_command row
+// reads/writes conn.PasswordCommand (dbsavvy-uly7.3).
+func TestForm_PasswordCommandTextRoundTrip(t *testing.T) {
+	f := &connForm{}
+	f.setTextValue(fieldPasswordCommand, "pass show db")
+	if f.conn.PasswordCommand != "pass show db" {
+		t.Errorf("PasswordCommand = %q, want 'pass show db'", f.conn.PasswordCommand)
+	}
+	if got := f.textValue(fieldPasswordCommand); got != "pass show db" {
+		t.Errorf("textValue(password_command) = %q, want 'pass show db'", got)
+	}
+}
+
+// TestForm_CredentialRowsDisplayValueNotSoon asserts displayValue renders the
+// stored value for the credential rows rather than "(soon)", and never returns
+// "(soon)" even when empty (dbsavvy-uly7.3).
+func TestForm_CredentialRowsDisplayValueNotSoon(t *testing.T) {
+	specByID := func(id connFieldID) connFieldSpec {
+		for _, s := range connFormSpecs {
+			if s.id == id {
+				return s
+			}
+		}
+		t.Fatalf("no spec for %v", id)
+		return connFieldSpec{}
+	}
+	f := &connForm{conn: models.Connection{
+		Icon:            "ICON",
+		KeyringRef:      "prod/db",
+		PasswordCommand: "pass show db",
+	}}
+	cases := map[connFieldID]string{
+		fieldIcon:            "ICON",
+		fieldKeyring:         "prod/db",
+		fieldPasswordCommand: "pass show db",
+	}
+	for id, want := range cases {
+		if got := f.displayValue(specByID(id)); got != want {
+			t.Errorf("displayValue(%v) = %q, want %q", id, got, want)
+		}
+	}
+	// Empty values render "(empty)", never "(soon)".
+	empty := &connForm{}
+	for id := range cases {
+		if got := empty.displayValue(specByID(id)); got == "(soon)" {
+			t.Errorf("displayValue(%v) still renders (soon)", id)
+		}
 	}
 }
 

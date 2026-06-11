@@ -42,6 +42,7 @@ const (
 	fieldStatementTimeout
 	fieldColor
 	fieldLabel
+	fieldIcon
 	fieldTags
 	// SSH tunnel rows — editable, mapping to Connection.SSHTunnel (T6).
 	fieldSSHHost
@@ -50,7 +51,8 @@ const (
 	fieldSSHIdentityFile
 	fieldSSHIdentityFromAgent
 	fieldSSHKnownHosts
-	// "(soon)" rows — rendered, never focusable.
+	// Credential rows — editable text mapping to the credential waterfall
+	// (pkg/session/credentials.go).
 	fieldKeyring
 	fieldPgpass
 	fieldPasswordCommand
@@ -75,6 +77,7 @@ var connFormSpecs = []connFieldSpec{
 	{fieldStatementTimeout, "statement_timeout", fieldText},
 	{fieldColor, "color", fieldText},
 	{fieldLabel, "label", fieldText},
+	{fieldIcon, "icon", fieldText},
 	{fieldTags, "tags", fieldText},
 	{fieldSSHHost, "ssh_host", fieldText},
 	{fieldSSHUser, "ssh_user", fieldText},
@@ -82,9 +85,9 @@ var connFormSpecs = []connFieldSpec{
 	{fieldSSHIdentityFile, "identity_file", fieldText},
 	{fieldSSHIdentityFromAgent, "identity_from_agent", fieldToggle},
 	{fieldSSHKnownHosts, "known_hosts", fieldText},
-	{fieldKeyring, "keyring", fieldSoon},
+	{fieldKeyring, "keyring", fieldText},
 	{fieldPgpass, "pgpass", fieldText},
-	{fieldPasswordCommand, "password_command", fieldSoon},
+	{fieldPasswordCommand, "password_command", fieldText},
 }
 
 // connForm is the in-memory add/edit form state (dbsavvy-dyf). It owns the
@@ -232,6 +235,12 @@ func (f *connForm) textValue(id connFieldID) string {
 		return f.conn.Color
 	case fieldLabel:
 		return f.conn.Label
+	case fieldIcon:
+		return f.conn.Icon
+	case fieldKeyring:
+		return f.conn.KeyringRef
+	case fieldPasswordCommand:
+		return f.conn.PasswordCommand
 	case fieldTags:
 		return strings.Join(f.conn.Tags, ", ")
 	case fieldSSHHost:
@@ -275,6 +284,12 @@ func (f *connForm) setTextValue(id connFieldID, v string) {
 		f.conn.Color = v
 	case fieldLabel:
 		f.conn.Label = v
+	case fieldIcon:
+		f.conn.Icon = v
+	case fieldKeyring:
+		f.conn.KeyringRef = v
+	case fieldPasswordCommand:
+		f.conn.PasswordCommand = v
 	case fieldTags:
 		f.conn.Tags = parseTags(v)
 	case fieldSSHHost:
