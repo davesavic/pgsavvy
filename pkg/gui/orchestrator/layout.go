@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
+	"github.com/mattn/go-runewidth"
 
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
@@ -552,6 +553,9 @@ func (g *Gui) RunLayout(w, h int) error {
 			_ = ctx.HandleRender()
 			if ctx.GetKey() == types.CHEATSHEET && view != nil {
 				applyCheatsheetScroll(view, ctx)
+			}
+			if ctx.GetKey() == types.TABLE_INSPECT && view != nil {
+				applyTableInspectScroll(view, ctx)
 			}
 			_, _ = g.driver.SetViewOnTop(name)
 			onStack[ctx.GetKey()] = struct{}{}
@@ -1285,6 +1289,54 @@ func applyCheatsheetScroll(view *gocui.View, ctx types.IBaseContext) {
 		sc.SetScrollY(oy)
 	}
 	view.SetOriginY(oy)
+}
+
+// tableInspectScroller is the scroll surface TableInspectContext exposes.
+// The layout owns the bottom/right clamp (it alone knows the rendered
+// content extent vs the viewport); the context owns the top/left clamp.
+type tableInspectScroller interface {
+	ScrollX() int
+	ScrollY() int
+	SetScrollX(int)
+	SetScrollY(int)
+}
+
+// applyTableInspectScroll pins the inspect view's origin to the context's
+// scroll offsets, clamping each axis to the content's last page / last
+// column. Called after HandleRender so view dimensions reflect the
+// freshly written body. Clamped values are written back so the `G` and
+// `l` sentinels settle exactly on the last page / column (dbsavvy-ep0k).
+func applyTableInspectScroll(view *gocui.View, ctx types.IBaseContext) {
+	sc, ok := ctx.(tableInspectScroller)
+	if !ok {
+		return
+	}
+	maxOY := max(view.LinesHeight()-view.InnerHeight(), 0)
+	oy := sc.ScrollY()
+	if oy > maxOY {
+		oy = maxOY
+		sc.SetScrollY(oy)
+	}
+	maxOX := max(maxLineWidth(view)-view.InnerWidth(), 0)
+	ox := sc.ScrollX()
+	if ox > maxOX {
+		ox = maxOX
+		sc.SetScrollX(ox)
+	}
+	view.SetOrigin(ox, oy)
+}
+
+// maxLineWidth returns the display width of the widest line in the view's
+// buffer. BufferLines reconstructs from cells (ANSI already consumed into
+// attributes), so the rune width is the exact on-screen width.
+func maxLineWidth(view *gocui.View) int {
+	w := 0
+	for _, l := range view.BufferLines() {
+		if lw := runewidth.StringWidth(l); lw > w {
+			w = lw
+		}
+	}
+	return w
 }
 
 func applyFocusFrameColors(rails map[string]*gocui.View, focusedName string, active, inactive gocui.Attribute) {

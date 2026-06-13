@@ -23,6 +23,13 @@ type TableInspectContext struct {
 	loading bool
 	schema  string
 	table   string
+
+	// scrollX / scrollY are the view origin offsets (columns / lines).
+	// The context owns only the top/left clamp (>= 0); the layout pass
+	// owns the bottom/right clamp against the rendered content extent
+	// (it alone knows LinesHeight / max line width vs the viewport).
+	scrollX int
+	scrollY int
 }
 
 // NewTableInspectContext builds a TableInspectContext bound to TABLE_INSPECT.
@@ -32,8 +39,45 @@ func NewTableInspectContext(base BaseContext, deps Deps) *TableInspectContext {
 
 // SetState installs the TabbedPopup that supplies the rendered body.
 // Nil is permitted: HandleRender emits an empty body when state is unset
-// and the context is not loading.
-func (c *TableInspectContext) SetState(s *popup.TabbedPopup) { c.state = s }
+// and the context is not loading. Installing fresh state resets the
+// scroll origin so the popup opens at the top-left.
+func (c *TableInspectContext) SetState(s *popup.TabbedPopup) {
+	c.state = s
+	c.scrollX = 0
+	c.scrollY = 0
+}
+
+// Scroll moves the view origin by (dx, dy) — columns and lines — clamping
+// at the top-left edge (never negative). The bottom/right bound is
+// enforced by the layout pass, which knows the rendered content extent.
+func (c *TableInspectContext) Scroll(dx, dy int) {
+	c.SetScrollX(c.scrollX + dx)
+	c.SetScrollY(c.scrollY + dy)
+}
+
+// SetScrollX sets the absolute horizontal origin, clamping at the left.
+func (c *TableInspectContext) SetScrollX(x int) {
+	if x < 0 {
+		x = 0
+	}
+	c.scrollX = x
+}
+
+// SetScrollY sets the absolute vertical origin, clamping at the top. The
+// layout pass calls this to write back the value it clamped to the
+// content's last page (so `G` / over-scroll settle on the last page).
+func (c *TableInspectContext) SetScrollY(y int) {
+	if y < 0 {
+		y = 0
+	}
+	c.scrollY = y
+}
+
+// ScrollX returns the current horizontal origin (columns).
+func (c *TableInspectContext) ScrollX() int { return c.scrollX }
+
+// ScrollY returns the current vertical origin (lines).
+func (c *TableInspectContext) ScrollY() int { return c.scrollY }
 
 // State returns the installed TabbedPopup or nil.
 func (c *TableInspectContext) State() *popup.TabbedPopup { return c.state }

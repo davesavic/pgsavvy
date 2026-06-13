@@ -40,10 +40,11 @@ func (f *fakeTree) Pop() error {
 	return nil
 }
 
-func TestTableInspectController_GetKeybindings_ExactlyFive(t *testing.T) {
+func TestTableInspectController_GetKeybindings_AllNormalScoped(t *testing.T) {
 	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, nil, nil)
 	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
-	if got, want := len(kbs), 5; got != want {
+	// 5 tab/close + 12 scroll (j/down, k/up, h/left, l/right, c-d, c-u, gg, G).
+	if got, want := len(kbs), 17; got != want {
 		t.Fatalf("len(GetKeybindings()) = %d, want %d", got, want)
 	}
 	for i, kb := range kbs {
@@ -53,6 +54,62 @@ func TestTableInspectController_GetKeybindings_ExactlyFive(t *testing.T) {
 		if kb.Mode != types.ModeNormal {
 			t.Errorf("kbs[%d].Mode = %v, want ModeNormal", i, kb.Mode)
 		}
+	}
+}
+
+func TestTableInspectController_VerticalScroll_MovesOrigin(t *testing.T) {
+	ic := newInspectContext(t, 2)
+	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, ic, nil)
+
+	if err := ctrl.ScrollDown(commands.ExecCtx{}); err != nil {
+		t.Fatalf("ScrollDown: %v", err)
+	}
+	if got := ic.ScrollY(); got != 1 {
+		t.Errorf("after ScrollDown ScrollY() = %d, want 1", got)
+	}
+	if err := ctrl.ScrollUp(commands.ExecCtx{}); err != nil {
+		t.Fatalf("ScrollUp: %v", err)
+	}
+	if got := ic.ScrollY(); got != 0 {
+		t.Errorf("after ScrollUp ScrollY() = %d, want 0", got)
+	}
+	// ScrollUp past the top clamps at 0, never negative.
+	if err := ctrl.ScrollUp(commands.ExecCtx{}); err != nil {
+		t.Fatalf("ScrollUp: %v", err)
+	}
+	if got := ic.ScrollY(); got != 0 {
+		t.Errorf("ScrollUp past top ScrollY() = %d, want 0 (clamped)", got)
+	}
+}
+
+func TestTableInspectController_HorizontalScroll_MovesOrigin(t *testing.T) {
+	ic := newInspectContext(t, 1)
+	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, ic, nil)
+
+	if err := ctrl.ScrollRight(commands.ExecCtx{}); err != nil {
+		t.Fatalf("ScrollRight: %v", err)
+	}
+	if got := ic.ScrollX(); got <= 0 {
+		t.Errorf("after ScrollRight ScrollX() = %d, want > 0", got)
+	}
+	if err := ctrl.ScrollLeft(commands.ExecCtx{}); err != nil {
+		t.Fatalf("ScrollLeft: %v", err)
+	}
+	if got := ic.ScrollX(); got != 0 {
+		t.Errorf("after ScrollLeft ScrollX() = %d, want 0", got)
+	}
+}
+
+func TestTableInspectController_TabChange_ResetsScroll(t *testing.T) {
+	ic := newInspectContext(t, 2)
+	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, ic, nil)
+	ic.SetScrollX(20)
+	ic.SetScrollY(5)
+	if err := ctrl.NextTab(commands.ExecCtx{}); err != nil {
+		t.Fatalf("NextTab: %v", err)
+	}
+	if x, y := ic.ScrollX(), ic.ScrollY(); x != 0 || y != 0 {
+		t.Errorf("after NextTab scroll = (%d,%d), want (0,0)", x, y)
 	}
 }
 
