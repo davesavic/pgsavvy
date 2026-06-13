@@ -3,6 +3,7 @@ package context
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/grid"
@@ -311,6 +312,66 @@ func TestFormatSuggestionsBody_ColumnRow(t *testing.T) {
 	// in both rows because the name column is padded to "owner_id".
 	if strings.Index(lines[0], "int4") != strings.Index(lines[1], "int4") {
 		t.Errorf("detail columns not aligned: %q vs %q", lines[0], lines[1])
+	}
+}
+
+func TestSuggestionsRenderWidth_MatchesRenderedRows(t *testing.T) {
+	// The width the popup layout reserves must equal the widest *rendered*
+	// row (SGR stripped), or the box clips suggestions horizontally
+	// (dbsavvy-ko4m clip bug: "> ! WHER" instead of "> ! WHERE").
+	cases := []struct {
+		name string
+		sugs []editor.Suggestion
+	}{
+		{
+			"keyword no detail",
+			[]editor.Suggestion{{Text: "WHERE", Display: "WHERE", Kind: editor.KindKeyword}},
+		},
+		{
+			"column with detail tokens",
+			[]editor.Suggestion{
+				{Text: "id", Display: "id · int4", Kind: editor.KindColumn, Detail: "int4", IsPrimaryKey: true, NotNull: true},
+				{Text: "owner_id", Display: "owner_id · int4", Kind: editor.KindColumn, Detail: "int4", FKRef: "public.users.id"},
+			},
+		},
+		{
+			"untyped fallback display",
+			[]editor.Suggestion{{Text: "raw", Display: "raw_display_text"}},
+		},
+		{
+			"mixed kinds",
+			[]editor.Suggestion{
+				{Text: "users", Display: "users", Kind: editor.KindTable},
+				{Text: "select", Display: "select", Kind: editor.KindKeyword, Detail: "kw"},
+				{Text: "really_long_column_name", Display: "really_long_column_name", Kind: editor.KindColumn, Detail: "timestamptz"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := SuggestionsRenderWidth(tc.sugs)
+			lines := strings.Split(stripSGR(formatSuggestionsBody(tc.sugs, 0, suggestionsVisibleMax)), "\n")
+			want := 0
+			for _, ln := range lines {
+				if w := utf8.RuneCountInString(ln); w > want {
+					want = w
+				}
+			}
+			if got != want {
+				t.Errorf("SuggestionsRenderWidth = %d; widest rendered row = %d\nlines: %q", got, want, lines)
+			}
+		})
+	}
+}
+
+func TestSuggestionsRenderWidth_KeywordScreenshotCase(t *testing.T) {
+	// "> " (2) + "!" (1) + " " (1) + "WHERE" (5) = 9. The old layout calc
+	// returned 7 (Display+marker only), clipping the trailing "RE".
+	got := SuggestionsRenderWidth([]editor.Suggestion{
+		{Text: "WHERE", Display: "WHERE", Kind: editor.KindKeyword},
+	})
+	if got != 9 {
+		t.Errorf("width = %d; want 9", got)
 	}
 }
 
