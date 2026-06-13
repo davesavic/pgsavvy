@@ -88,7 +88,7 @@ func TestConnectHelperPasswordCommandOpens(t *testing.T) {
 	profile.PasswordCommand = "printf " + shellQuote(password)
 
 	h := data.NewConnectHelper()
-	conn, sess, err := h.Connect(context.Background(), profile)
+	conn, sess, err := h.Connect(context.Background(), profile, nil)
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestConnectHelperNoCredsRefuses(t *testing.T) {
 	}
 
 	h := data.NewConnectHelper()
-	_, _, err := h.Connect(context.Background(), profile)
+	_, _, err := h.Connect(context.Background(), profile, nil)
 	if err == nil {
 		t.Fatal("expected error from Connect with no credentials")
 	}

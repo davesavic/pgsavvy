@@ -62,6 +62,14 @@ type RunHandle struct {
 	once         sync.Once
 	rowsObserved atomic.Int64
 
+	// termErr captures the terminal stream error observed at finish() (nil on
+	// clean EOF / successful close). Written exactly once inside finish() under
+	// the once.Do guard, BEFORE close(done); a reader that has observed Done()
+	// closing therefore sees the final value with a happens-before guarantee.
+	// Exposed via Err() so post-run consumers can success-gate side effects
+	// (e.g. metadata invalidation only on a clean DDL completion). dbsavvy-ko4m.2.4.
+	termErr error
+
 	// cancelLogged guards the SQLSession.Cancel emit so concurrent Cancel
 	// calls for the same qid produce exactly one `evt=query_cancel` log
 	// line (AC). Set via CompareAndSwap by SQLSession.Cancel.
@@ -101,6 +109,13 @@ func (r *RunHandle) Rows() drivers.RowStream { return r.rows }
 // Close is the only signal — there is no value sent.
 func (r *RunHandle) Done() <-chan struct{} { return r.done }
 
+// Err returns the terminal stream error observed when the run finished, or
+// nil for a clean EOF / successful close. Callers MUST first observe Done()
+// closing before reading Err(): finish() writes termErr then closes done under
+// a sync.Once, so a read after <-Done() is race-free. Reading before Done
+// closes returns nil (the zero value) and is not meaningful. dbsavvy-ko4m.2.4.
+func (r *RunHandle) Err() error { return r.termErr }
+
 // Notices returns the receive end of this run's notice channel. The channel
 // is closed by finish() after the run terminates, so a `for n := range
 // rh.Notices()` loop drains naturally to completion.
@@ -132,6 +147,9 @@ func (r *RunHandle) Cancel() error {
 // observed at termination, or nil for clean EOF / successful close.
 func (r *RunHandle) finish(err error) {
 	r.once.Do(func() {
+		// Record the terminal error BEFORE close(done) so Err() readers that
+		// gate on <-Done() observe it with a happens-before guarantee.
+		r.termErr = err
 		// Drain queued notices into this run (while it is still the active run)
 		// before onFinish clears runActive and before the channel closes.
 		if r.flush != nil {

@@ -40,7 +40,7 @@ func openIntegrationConn(t *testing.T) drivers.Connection {
 		Name:   "cell-apply-test",
 		Driver: "postgres",
 		DSN:    dsn,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("driver open: %v", err)
 	}

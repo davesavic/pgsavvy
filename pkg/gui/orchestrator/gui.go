@@ -168,6 +168,17 @@ type Gui struct {
 	formHelper    *data.ConnectionFormHelper
 	refreshHelper *data.RefreshHelper
 
+	// schemaWarmer owns the background-warmed completion metadata snapshot
+	// (dbsavvy-ko4m.2). Eager-loaded on connect + schema-select; lazily warmed
+	// per-table by the completion SchemaSource. Nil until wireEditorCompletion
+	// runs. The completion sources read its store synchronously.
+	schemaWarmer *data.SchemaWarmer
+
+	// lastWarmErrorToast throttles the user-visible warm-failure toast so a
+	// burst of failing completion warms does not spam the status line
+	// (dbsavvy-ko4m.2.3).
+	lastWarmErrorToast time.Time
+
 	// Built by wireWithDriver.
 	registry       *guicontext.ContextTree
 	controllers    *controllers.Controllers
@@ -957,6 +968,12 @@ func (g *Gui) deleteConnectionFromModal(connName string) error {
 		if g.connectHelper != nil {
 			g.connectHelper.Disconnect()
 		}
+		// dbsavvy-ko4m.2.4: drop warmed completion metadata for the now-closed
+		// connection so a later Connect to a different profile cannot read a
+		// prior connection's entries before its own warm lands.
+		if g.schemaWarmer != nil {
+			g.schemaWarmer.Reset()
+		}
 		g.connectionState.activeConnID = ""
 		g.connectionState.activeConnProfile = nil
 	}
@@ -1065,6 +1082,13 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 						// (it routes through RefilterOrTrigger, not this seam).
 						if cfg := g.deps.Common.Cfg(); cfg != nil && cfg.Editor.Autocomplete {
 							ve.SetAutoCompleter(g.controllers.VimEditor.AutoTrigger)
+						}
+						// dbsavvy-ko4m.6.2 (Finding K): table-accept alias insertion
+						// is DEFAULT-ON; opt out via `editor.autocomplete_alias:
+						// false`. The controller defaults the flag on, so we only
+						// need to flip it off here.
+						if cfg := g.deps.Common.Cfg(); cfg != nil && !cfg.Editor.AutocompleteAlias {
+							g.controllers.VimEditor.SetAliasOnAccept(false)
 						}
 					}
 					g.keybindingSystem.masterEditors[key] = ve
@@ -1509,6 +1533,20 @@ func (g *Gui) HelperBagForTest() controllers.HelperBag {
 			EditorBuffer: newEditorBufferAdapter(qec),
 		},
 	}
+}
+
+// CompletionSourcesForTest returns the source list of the completion engine
+// wired by wireEditorCompletion (dbsavvy-ko4m.7.3), or nil when the VimEditor
+// controller or its engine is unwired. Test-only.
+func (g *Gui) CompletionSourcesForTest() []editor.Source {
+	if g.controllers == nil || g.controllers.VimEditor == nil {
+		return nil
+	}
+	eng := g.controllers.VimEditor.CompletionEngineForTest()
+	if eng == nil {
+		return nil
+	}
+	return eng.Sources()
 }
 
 // ActiveSQLSessionForTest returns the SQLSession the most recent Connect

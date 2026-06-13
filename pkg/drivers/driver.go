@@ -59,7 +59,7 @@ type Session interface {
 	// (dbsavvy-bwq.17 / dbsavvy-8oo stub #2).
 	ListInboundForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error)
 	ListFunctions(ctx context.Context) ([]string, error)
-	DescribeFunction(ctx context.Context, schema, name string) (models.FunctionDetail, error)
+	DescribeFunction(ctx context.Context, schema, name string) ([]models.FunctionDetail, error)
 
 	Execute(ctx context.Context, q models.Query) (models.Result, error)
 	Stream(ctx context.Context, q models.Query) (RowStream, error)

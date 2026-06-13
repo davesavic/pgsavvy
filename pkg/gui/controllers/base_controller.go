@@ -168,6 +168,12 @@ type QueryDeps struct {
 	// Profile so the two embedded bundles don't collide in HelperBag.
 	// Nil-safe — a nil closure means "never confirm". dbsavvy-wxkf.
 	ConnProfile func() *models.Connection
+
+	// MetadataInvalidator drops background-warmed completion metadata after a
+	// local DDL succeeds (post-run, success-gated) or on a manual 'r' refresh.
+	// Wired by the orchestrator to *data.SchemaWarmer. Nil-safe: the controller
+	// no-ops when unwired. dbsavvy-ko4m.2.4.
+	MetadataInvalidator SchemaMetadataInvalidator
 }
 
 // ThreadingDeps carries the UI-thread / worker scheduling closures

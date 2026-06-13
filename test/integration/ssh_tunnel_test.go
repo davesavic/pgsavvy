@@ -93,7 +93,7 @@ func scalarThroughTunnel(t *testing.T, profile models.Connection) any {
 	if err != nil {
 		t.Fatalf("driver factory: %v", err)
 	}
-	conn, err := drv.Open(ctx, profile)
+	conn, err := drv.Open(ctx, profile, nil)
 	if err != nil {
 		t.Fatalf("driver open through tunnel: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestSSHTunnelCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver factory: %v", err)
 	}
-	conn, err := drv.Open(ctx, tunnelProfile(t))
+	conn, err := drv.Open(ctx, tunnelProfile(t), nil)
 	if err != nil {
 		t.Fatalf("driver open: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestSSHTunnelGoleak(t *testing.T) {
 		if err != nil {
 			t.Fatalf("driver factory: %v", err)
 		}
-		conn, err := drv.Open(ctx, tunnelProfile(t))
+		conn, err := drv.Open(ctx, tunnelProfile(t), nil)
 		if err != nil {
 			t.Fatalf("driver open: %v", err)
 		}
@@ -296,7 +296,7 @@ func TestSSHTunnelDialFailureTyped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver factory: %v", err)
 	}
-	conn, err := drv.Open(ctx, profile)
+	conn, err := drv.Open(ctx, profile, nil)
 	if conn != nil {
 		_ = conn.Close()
 	}

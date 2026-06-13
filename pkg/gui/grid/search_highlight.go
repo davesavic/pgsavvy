@@ -82,6 +82,48 @@ func applyMatchHighlights(visible, padded string, w int, spans []highlightSpan) 
 	return wrapRuneSpans(padded, runeSpans)
 }
 
+// HighlightRuneSpans wraps each [startRune,endRune) half-open RUNE span of s
+// in the Search highlight SGR (the same SearchHighlight style the grid search
+// path uses) and returns the result. spans index runes (not bytes) into s.
+//
+// It is robust to malformed input: spans are clamped to [0,len(runes)],
+// inverted or empty spans (start>=end after clamping) are dropped, and
+// wrapping happens strictly on rune boundaries so it never slices mid-rune or
+// panics. An empty spans slice returns s unchanged. Overlapping spans are
+// passed through to wrapRuneSpans, which opens/closes per rune index. There is
+// a single SGR implementation: this reuses wrapRuneSpans. dbsavvy-ko4m.4.2.
+func HighlightRuneSpans(s string, spans [][2]int) string {
+	if len(spans) == 0 {
+		return s
+	}
+
+	total := utf8.RuneCountInString(s)
+	rspans := make([]runeSpan, 0, len(spans))
+	for _, p := range spans {
+		start := clampRuneIndex(p[0], total)
+		end := clampRuneIndex(p[1], total)
+		if start >= end {
+			continue
+		}
+		rspans = append(rspans, runeSpan{startRune: start, endRune: end, current: false})
+	}
+	if len(rspans) == 0 {
+		return s
+	}
+	return wrapRuneSpans(s, rspans)
+}
+
+// clampRuneIndex constrains a rune index to [0,total].
+func clampRuneIndex(idx, total int) int {
+	if idx < 0 {
+		return 0
+	}
+	if idx > total {
+		return total
+	}
+	return idx
+}
+
 // runeSpan is a span translated to rune indices in the plain visible string,
 // carrying the current flag through.
 type runeSpan struct {

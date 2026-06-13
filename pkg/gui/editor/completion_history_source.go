@@ -34,8 +34,17 @@ type HistoryStore interface {
 // runs it through SanitizeText before applying) and Suggestion.Display is the
 // statement truncated to DisplayWidth with newlines collapsed to a glyph.
 //
-// HistorySource is the lowest-value source by design — it produces a low
-// fixed Score so a colliding keyword or schema suggestion wins the dedupe.
+// HistorySource is the lowest-value source by design — its Score carries the
+// smallest source bias (HistorySourceBias, ko4m.3.2) so a colliding keyword or
+// schema suggestion wins the dedupe.
+//
+// FTS5 (Store.SearchByPrefix) is the PRIMARY retrieval filter; editor.Match is
+// applied to the returned rows only to add a quality bump + highlight positions.
+// It is NOT a second filter — every FTS row is returned. Rows the matcher
+// rejects (ok=false; e.g. the prefix is an FTS token boundary but not a literal
+// subsequence of the rendered statement) keep the baseline Score =
+// HistorySourceBias with nil Matches; rows it accepts get Score = matchQuality +
+// HistorySourceBias and populated Matches.
 type HistorySource struct {
 	Store        HistoryStore
 	PriorityVal  int
@@ -60,8 +69,11 @@ func (h HistorySource) Suggest(ctx context.Context, buf *Buffer, pos Position) [
 	// History offers whole past statements — useful at a statement start,
 	// noise in a schema-completable position (FROM / JOIN / ON / <ident>. /
 	// column context) where the relevant tables/columns should lead. Defer
-	// to the schema source there and stay quiet.
-	if AutoTriggerFromContext(buf, pos) {
+	// to the schema source there and stay quiet. Uses the NARROW structured-
+	// context gate (not the broadened AutoTriggerFromContext, which fires on
+	// any >=2-rune prefix per dbsavvy-ko4m.6.1 and would suppress history
+	// everywhere, e.g. at a bare `SEL` statement start).
+	if IsSchemaCompletableContext(buf, pos) {
 		return []Suggestion{}
 	}
 	prefix := identifierPrefixAt(buf, pos)
@@ -84,11 +96,15 @@ func (h HistorySource) Suggest(ctx context.Context, buf *Buffer, pos Position) [
 
 	out := make([]Suggestion, 0, len(rows))
 	for _, stmt := range rows {
+		// Match decorates the FTS row; it never filters it. ok=false →
+		// quality 0, nil positions, leaving the baseline bias Score.
+		_, quality, positions := Match(prefix, stmt)
 		out = append(out, Suggestion{
 			Text:    stmt,
 			Display: truncateForPopup(stmt, width),
 			Source:  HistorySourceName,
-			Score:   1,
+			Score:   quality + HistorySourceBias,
+			Matches: positions,
 		})
 	}
 	return out

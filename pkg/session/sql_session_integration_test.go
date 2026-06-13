@@ -48,7 +48,7 @@ func requirePGSQLSession(t *testing.T) (*session.SQLSession, drivers.Connection)
 		Name:   "sql-session-test",
 		Driver: "postgres",
 		DSN:    dsn,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("driver open: %v", err)
 	}

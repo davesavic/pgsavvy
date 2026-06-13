@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/drivers"
@@ -15,6 +18,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/editor/format"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 	"github.com/davesavic/dbsavvy/pkg/query"
 	"github.com/davesavic/dbsavvy/pkg/session"
@@ -66,9 +70,11 @@ type QueryEditorController struct {
 // NewQueryEditorController constructs the controller. c may be nil
 // (tests inject without a Common). Helpers fields the controller uses
 // (QueryRunner, ResultTabs, EditorBuffer, Toast) may individually be
-// nil; every handler nil-checks at call time.
-func NewQueryEditorController(c *common.Common, core CoreDeps, nav NavDeps, ui UIDeps, query QueryDeps) *QueryEditorController {
-	q := &QueryEditorController{baseController: newBase(c, HelperBag{CoreDeps: core, NavDeps: nav, UIDeps: ui, QueryDeps: query})}
+// nil; every handler nil-checks at call time. threading supplies OnWorker,
+// used to wait on a DDL run's completion for post-run metadata invalidation
+// (dbsavvy-ko4m.2.4); a zero ThreadingDeps disables that path (nil OnWorker).
+func NewQueryEditorController(c *common.Common, core CoreDeps, nav NavDeps, ui UIDeps, query QueryDeps, threading ThreadingDeps) *QueryEditorController {
+	q := &QueryEditorController{baseController: newBase(c, HelperBag{CoreDeps: core, NavDeps: nav, UIDeps: ui, QueryDeps: query, ThreadingDeps: threading})}
 	// Wire the single sort sink both entry points (the <leader>s picker +
 	// the grid header double-click) route through. The optional-interface
 	// type-assert lets tests with a bare ResultTabs fake skip the wiring
@@ -529,7 +535,61 @@ func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) 
 		attached = true
 	}
 	q.openResultTab(stmt, rh)
+	if rh != nil {
+		q.scheduleDDLInvalidation(stmt, rh.Done(), rh.Err)
+	}
 	return attached
+}
+
+// scheduleDDLInvalidation drops the warmed completion metadata for the active
+// schema AFTER a local DDL statement completes SUCCESSFULLY (dbsavvy-ko4m.2.4,
+// epic decision B). It fires from the POST-run signal (RunHandle.Done — passed
+// as done), not the pre-run confirm gate, and is strictly gated on:
+//
+//   - EffectiveKind(stmt) == KindDDL — a plain SELECT/DML or a writable-CTE DML
+//     (which EffectiveKind classifies KindDML) is excluded, so it never
+//     invalidates.
+//   - errFn() == nil after done closes — a failed DDL (syntax error, conflict)
+//     leaves the metadata intact. errFn is RunHandle.Err, which is race-safe to
+//     read only after done has closed (the contract this method honours).
+//
+// done + errFn are passed (rather than the *session.RunHandle) so the gate is
+// unit-testable with fakes — no live session or RunHandle is needed to drive
+// the completion signal.
+//
+// Per decision B the invalidation is WHOLE-SCHEMA of the ACTIVE schema rather
+// than parsing the DDL's target table: the next WarmTable for any affected
+// table reloads fresh columns/FKs. This is also the fail-safe for an
+// unparseable target (we never parse, so the active-schema scope is always the
+// unit of invalidation) — noted in the AC. A no-op when the invalidator is
+// unwired, no schema is selected, done is nil, or no OnWorker is wired.
+func (q *QueryEditorController) scheduleDDLInvalidation(stmt string, done <-chan struct{}, errFn func() error) {
+	if done == nil || q.helpers.MetadataInvalidator == nil || q.helpers.OnWorker == nil {
+		return
+	}
+	if query.EffectiveKind(stmt) != query.KindDDL {
+		return
+	}
+	schema := ""
+	if q.helpers.Schemas != nil {
+		schema = q.helpers.Schemas.SelectedSchemaName()
+	}
+	if schema == "" {
+		return
+	}
+	inv := q.helpers.MetadataInvalidator
+	q.helpers.OnWorker(func(_ gocui.Task) error {
+		<-done
+		// Success-gate: a failed DDL must NOT invalidate (the on-disk shape did
+		// not change, and a stale-but-correct entry beats a spurious reload).
+		if errFn != nil && errFn() != nil {
+			return nil
+		}
+		logs.Event(q.Log(), "completion", "ddl_invalidate_schema",
+			slog.String("schema", schema))
+		inv.InvalidateSchema(schema)
+		return nil
+	})
 }
 
 // reRunActiveTab re-runs runSQL into the active result tab, reusing the same

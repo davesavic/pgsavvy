@@ -119,6 +119,23 @@ type TablePicker interface {
 	SelectedTable() *models.Table
 }
 
+// SchemaMetadataInvalidator is the narrow surface the QueryEditorController
+// calls to drop background-warmed completion metadata (T2/T3 store) after a
+// local DDL succeeds or on a manual 'r' force-refresh. The orchestrator wires
+// it to *data.SchemaWarmer (the store's single owner). Nil-safe: the controller
+// no-ops when unwired (unit tests that do not exercise invalidation).
+// dbsavvy-ko4m.2.4.
+type SchemaMetadataInvalidator interface {
+	// InvalidateSchema drops every lazy (column+FK) entry for schema so the
+	// next warm reloads fresh. Used on a successful local DDL (whole-schema
+	// invalidation, epic decision B) and as the fail-safe when a target table
+	// cannot be parsed.
+	InvalidateSchema(schema string)
+	// InvalidateTable drops the lazy entry for a single (schema,table). Used by
+	// the manual 'r' force-refresh of the selected table.
+	InvalidateTable(schema, table string)
+}
+
 // ActiveConnection returns the ID of the currently open connection
 // profile. SchemasHelper.HideSchema needs this to scope the
 // AppState.HiddenSchemas key.

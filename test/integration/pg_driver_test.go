@@ -39,7 +39,7 @@ import (
 
 const (
 	envDSN                 = "DBSAVVY_TEST_PG"
-	expectedFixtureVersion = 1
+	expectedFixtureVersion = 2
 	keyringPassphraseEnv   = "DBSAVVY_KEYRING_PASSPHRASE"
 )
 
@@ -47,43 +47,57 @@ const (
 // means every Test* may proceed; non-nil means t.Skipf with the reason.
 var pgProbeErr error
 
+// pgStaleErr is set once by TestMain when the DSN is reachable but the live
+// fixture's version stamp is OLDER than expectedFixtureVersion. This is a
+// developer misconfiguration (the fixture was bumped without re-applying it),
+// not an opt-out, so requirePG FAILS loudly on it rather than skipping —
+// mirroring internal/pgprobe's fail-loud contract.
+var pgStaleErr error
+
 func TestMain(m *testing.M) {
-	pgProbeErr = probePG(os.Getenv(envDSN))
+	pgProbeErr, pgStaleErr = probePG(os.Getenv(envDSN))
 	os.Exit(m.Run())
 }
 
 // probePG opens a one-shot pgx.Conn against dsn and confirms the fixture
-// version stamp matches expectedFixtureVersion. Any error here causes every
-// Test* to skip with a helpful message.
-func probePG(dsn string) error {
+// version stamp matches expectedFixtureVersion. It returns two errors: skipErr
+// (DSN unset / unreachable / fixture absent — integration tests are opt-in, so
+// these SKIP) and staleErr (DSN reachable but the fixture version is older than
+// the pinned constant — a fail-loud misconfiguration). At most one is non-nil.
+func probePG(dsn string) (skipErr, staleErr error) {
 	if dsn == "" {
-		return fmt.Errorf("%s is not set; bring up docker/postgres and set %s=postgres://...", envDSN, envDSN)
+		return fmt.Errorf("%s is not set; bring up docker/postgres and set %s=postgres://...", envDSN, envDSN), nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
-		return fmt.Errorf("connect %s: %w", redactDSNForLog(dsn), err)
+		return fmt.Errorf("connect %s: %w", redactDSNForLog(dsn), err), nil
 	}
 	defer func() { _ = conn.Close(ctx) }()
 	if err := conn.Ping(ctx); err != nil {
-		return fmt.Errorf("ping: %w", err)
+		return fmt.Errorf("ping: %w", err), nil
 	}
 	var v int
 	if err := conn.QueryRow(ctx, "SELECT version FROM app._fixture_meta").Scan(&v); err != nil {
-		return fmt.Errorf("fixture probe — did you apply docker/postgres/init/01_fixture.sql?: %w", err)
+		return fmt.Errorf("fixture probe — did you apply docker/postgres/init/01_fixture.sql?: %w", err), nil
+	}
+	if v < expectedFixtureVersion {
+		return nil, fmt.Errorf("fixture is stale: have version %d, want >= %d — re-apply docker/postgres/init/01_fixture.sql (task pg:down && task pg:up)", v, expectedFixtureVersion)
 	}
 	if v != expectedFixtureVersion {
-		return fmt.Errorf("fixture version mismatch: have %d want %d", v, expectedFixtureVersion)
+		return fmt.Errorf("fixture version mismatch: have %d want %d", v, expectedFixtureVersion), nil
 	}
-	return nil
+	return nil, nil
 }
 
-// requirePG is the gate every Test* calls first. When the TestMain probe
-// failed, the test is skipped with the captured reason rather than failing —
-// integration tests are opt-in.
+// requirePG is the gate every Test* calls first. A reachable-but-stale fixture
+// FAILS the test (fail-loud); an unreachable / unset DSN SKIPS (opt-in).
 func requirePG(t *testing.T) {
 	t.Helper()
+	if pgStaleErr != nil {
+		t.Fatalf("%s fixture out of date: %v", envDSN, pgStaleErr)
+	}
 	if pgProbeErr != nil {
 		t.Skipf("%s probe failed: %v", envDSN, pgProbeErr)
 	}
@@ -111,7 +125,7 @@ func openConnSession(t *testing.T, profile models.Connection, prompter session.P
 	if err != nil {
 		t.Fatalf("driver factory: %v", err)
 	}
-	conn, err := drv.Open(ctx, profile)
+	conn, err := drv.Open(ctx, profile, nil)
 	if err != nil {
 		t.Fatalf("driver open: %v", err)
 	}
@@ -883,7 +897,7 @@ func openAndPing(t *testing.T, profile models.Connection, prompter session.Promp
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
-	conn, err := drv.Open(ctx, profile)
+	conn, err := drv.Open(ctx, profile, nil)
 	if err != nil {
 		t.Fatalf("open (%s mechanism): %v", profile.Name, err)
 	}

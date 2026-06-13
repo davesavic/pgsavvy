@@ -20,7 +20,12 @@ func bufferFromLines(t *testing.T, lines ...string) (*Buffer, Position) {
 	return b, pos
 }
 
-func TestKeywordsSource_PrefixMatchSortedAscending(t *testing.T) {
+func TestKeywordsSource_FuzzyMatchSortedAscending(t *testing.T) {
+	// Under the fuzzy matcher (ko4m.3.4) "SE" is a subsequence of more than
+	// just SE-prefixed keywords (CASE, ELSE, …). What still holds: within-
+	// source order stays ascending and the obvious prefix hits are present.
+	// The Engine, not the source, floats the strongest matches to the top by
+	// Score — so SELECT/SET ordering is no longer the source's concern.
 	buf, pos := bufferFromLines(t, "SE")
 	got := KeywordsSource{}.Suggest(context.Background(), buf, pos)
 
@@ -37,14 +42,11 @@ func TestKeywordsSource_PrefixMatchSortedAscending(t *testing.T) {
 	if !sort.StringsAreSorted(texts) {
 		t.Errorf("Suggest result not sorted ascending: %v", texts)
 	}
-	// SELECT and SET both start with SE; make sure they're both present.
+	// SELECT and SET (the literal SE-prefix hits) must be present.
 	want := map[string]bool{"SELECT": false, "SET": false}
 	for _, txt := range texts {
 		if _, ok := want[txt]; ok {
 			want[txt] = true
-		}
-		if len(txt) < 2 || txt[:2] != "SE" {
-			t.Errorf("non-matching suggestion %q in SE-prefix result", txt)
 		}
 	}
 	for k, seen := range want {
@@ -52,17 +54,38 @@ func TestKeywordsSource_PrefixMatchSortedAscending(t *testing.T) {
 			t.Errorf("expected suggestion %q missing from result %v", k, texts)
 		}
 	}
+	// The strong prefix hit SELECT must outscore a scattered subsequence hit
+	// like CASE (boundary+prefix+contiguity bonuses beat a gapped match).
+	scoreOf := func(text string) int {
+		for _, s := range got {
+			if s.Text == text {
+				return s.Score
+			}
+		}
+		t.Fatalf("keyword %q not in result %v", text, texts)
+		return 0
+	}
+	if scoreOf("SELECT") <= scoreOf("CASE") {
+		t.Errorf("SELECT Score (%d) should beat CASE Score (%d) — prefix hit > scattered subsequence", scoreOf("SELECT"), scoreOf("CASE"))
+	}
 }
 
 func TestKeywordsSource_CaseInsensitivePrefix(t *testing.T) {
-	buf, pos := bufferFromLines(t, "se")
+	// Lowercase "select" must still surface the uppercase SELECT keyword
+	// (case-insensitive matching) as the highest-scoring keyword.
+	buf, pos := bufferFromLines(t, "select")
 	got := KeywordsSource{}.Suggest(context.Background(), buf, pos)
 	if len(got) == 0 {
-		t.Fatal("lowercase prefix produced 0 suggestions; want SELECT et al.")
+		t.Fatal("lowercase prefix produced 0 suggestions; want SELECT")
 	}
-	if got[0].Text != "SELECT" {
-		// Alphabetical: SELECT comes before SET.
-		t.Errorf("first suggestion = %q; want SELECT (alphabetical first SE* keyword)", got[0].Text)
+	best := got[0]
+	for _, s := range got[1:] {
+		if s.Score > best.Score {
+			best = s
+		}
+	}
+	if best.Text != "SELECT" {
+		t.Errorf("highest-scoring suggestion = %q; want SELECT (case-insensitive match)", best.Text)
 	}
 }
 
@@ -82,6 +105,43 @@ func TestKeywordsSource_EmptyPrefixReturnsAllSorted(t *testing.T) {
 	}
 }
 
+func TestKeywordsSource_SubsequenceMatch(t *testing.T) {
+	// "slt" is a non-prefix subsequence of SELECT (S-e-L-ec-T). The old
+	// strings.HasPrefix filter would miss it; editor.Match surfaces it.
+	buf, pos := bufferFromLines(t, "slt")
+	got := KeywordsSource{}.Suggest(context.Background(), buf, pos)
+
+	found := false
+	for _, s := range got {
+		if s.Text != "SELECT" {
+			continue
+		}
+		found = true
+		if s.Score <= KeywordSourceBias {
+			t.Errorf("SELECT Score = %d; want > KeywordSourceBias (%d) for a real match", s.Score, KeywordSourceBias)
+		}
+		if len(s.Matches) != 3 {
+			t.Errorf("SELECT Matches = %v; want 3 positions for subsequence 'slt'", s.Matches)
+		}
+	}
+	if !found {
+		t.Errorf("subsequence prefix 'slt' did not surface SELECT; got %d suggestions", len(got))
+	}
+}
+
+func TestKeywordsSource_EmptyPrefixScoreIsBias(t *testing.T) {
+	buf, pos := bufferFromLines(t, " ") // empty prefix
+	got := KeywordsSource{}.Suggest(context.Background(), buf, pos)
+	for _, s := range got {
+		if s.Score != KeywordSourceBias {
+			t.Errorf("%q Score = %d; want KeywordSourceBias (%d) on empty prefix", s.Text, s.Score, KeywordSourceBias)
+		}
+		if s.Matches != nil {
+			t.Errorf("%q Matches = %v; want nil on empty prefix", s.Text, s.Matches)
+		}
+	}
+}
+
 func TestKeywordsSource_NoMatchReturnsEmpty(t *testing.T) {
 	buf, pos := bufferFromLines(t, "ZZZZ_no_keyword_starts_with_this")
 	got := KeywordsSource{}.Suggest(context.Background(), buf, pos)
@@ -97,21 +157,6 @@ func TestKeywordsSource_NilBufferReturnsAll(t *testing.T) {
 	got := KeywordsSource{}.Suggest(context.Background(), nil, Position{})
 	if len(got) != len(sqlKeywords) {
 		t.Fatalf("nil buffer: len = %d; want full keyword list (%d)", len(got), len(sqlKeywords))
-	}
-}
-
-func TestSnippetsStubSource_AlwaysEmpty(t *testing.T) {
-	buf, pos := bufferFromLines(t, "anything")
-	got := SnippetsStubSource{}.Suggest(context.Background(), buf, pos)
-	if got == nil {
-		t.Fatal("Suggest returned nil; want empty non-nil slice")
-	}
-	if len(got) != 0 {
-		t.Fatalf("len = %d; want 0 (stub)", len(got))
-	}
-	stub := SnippetsStubSource{}
-	if stub.Name() != SnippetsStubSourceName {
-		t.Errorf("Name() = %q; want %q", stub.Name(), SnippetsStubSourceName)
 	}
 }
 

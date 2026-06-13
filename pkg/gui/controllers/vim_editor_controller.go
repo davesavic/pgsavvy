@@ -2,6 +2,8 @@ package controllers
 
 import (
 	stdctx "context"
+	"strconv"
+	"strings"
 	"time"
 	"unicode"
 
@@ -9,8 +11,10 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	"github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor/sqlcontext"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
 // VimEditorController owns the motion / operator / textobject
@@ -67,6 +71,37 @@ type VimEditorController struct {
 	// AutoTrigger consumes and clears it, then requires a fresh keystroke.
 	// dbsavvy-etp.4.
 	suppressNextAutoTrigger bool
+
+	// lastTriggerPos records the cursor position the controller last ran the
+	// completion engine at (RefilterOrTrigger). The async warm re-trigger
+	// bridge (OnWarmLanded) compares it against the live cursor to DROP a late
+	// warm whose result no longer matches where the user is — the stale-trigger
+	// guard. dbsavvy-ko4m.2.3.
+	lastTriggerPos editor.Position
+
+	// aliasOnAccept gates the auto-insert of an editable, deduped table
+	// alias when a table candidate is accepted in a table context (e.g.
+	// accepting `users` after `FROM ` inserts `users u`). DEFAULT ON
+	// (set true in NewVimEditorController); the orchestrator flips it off
+	// per `editor.autocomplete_alias: false`. When off, table accept inserts
+	// the bare candidate text. dbsavvy-ko4m.6.2 (Finding K).
+	aliasOnAccept bool
+
+	// schemaMeta is the synchronous, race-safe metadata reader used at
+	// accept time to count, across the in-scope tables, how many own the
+	// accepted column — the ambiguity signal that drives auto-qualification
+	// (dbsavvy-ko4m.6.3). Same warmed snapshot store the completion sources
+	// read; the (cols, ok) ok-return is the warmed-or-not signal. Wired
+	// post-construction via SetSchemaMetadata. Nil => no qualification (bare
+	// column accept).
+	schemaMeta editor.SchemaMetadata
+
+	// schemaProv resolves the active schema name for an in-scope table that
+	// carries no explicit schema qualifier (mirrors SchemaSource.schemaFor:
+	// TableRef.Schema when set, else this provider). Wired alongside
+	// schemaMeta via SetSchemaMetadata. Nil => active schema "".
+	// dbsavvy-ko4m.6.3.
+	schemaProv editor.SchemaProvider
 }
 
 // NewVimEditorController constructs the controller. Either argument
@@ -75,7 +110,27 @@ type VimEditorController struct {
 // may pass nil to exercise the GetKeybindings / RegisterActions
 // surface independently.
 func NewVimEditorController(qec *context.QueryEditorContext, matcher *keys.Matcher) *VimEditorController {
-	return &VimEditorController{qec: qec, matcher: matcher}
+	return &VimEditorController{qec: qec, matcher: matcher, aliasOnAccept: true}
+}
+
+// SetAliasOnAccept toggles the auto-insert of an editable table alias on
+// table-context accept (dbsavvy-ko4m.6.2, Finding K). Default ON; the
+// orchestrator calls this with false when `editor.autocomplete_alias` is
+// disabled. When off, accepting a table inserts the bare candidate text.
+func (c *VimEditorController) SetAliasOnAccept(on bool) {
+	c.aliasOnAccept = on
+}
+
+// SetSchemaMetadata wires the accept-time metadata reader + active-schema
+// provider used to auto-qualify an ambiguous column on accept
+// (dbsavvy-ko4m.6.3). meta is the same warmed snapshot store the completion
+// sources read (it satisfies editor.SchemaMetadata); schema resolves the
+// active schema for an unqualified in-scope table. A nil meta leaves the
+// controller qualification-free (accept inserts the bare column). The
+// orchestrator wires the live store + schema picker; tests inject a fake.
+func (c *VimEditorController) SetSchemaMetadata(meta editor.SchemaMetadata, schema editor.SchemaProvider) {
+	c.schemaMeta = meta
+	c.schemaProv = schema
 }
 
 // SetClipboard wires the OS-clipboard seam the controller mirrors yanks
@@ -121,6 +176,13 @@ func (c *VimEditorController) flashYank(actionID string, buf *editor.Buffer, r e
 // may pass their own engine.
 func (c *VimEditorController) SetCompletionEngine(e *editor.Engine) {
 	c.completionEngine = e
+}
+
+// CompletionEngineForTest exposes the wired completion engine so wiring
+// tests can assert which sources were registered (dbsavvy-ko4m.7.3). Returns
+// nil when no engine is wired.
+func (c *VimEditorController) CompletionEngineForTest() *editor.Engine {
+	return c.completionEngine
 }
 
 // SetSuggestionsContext wires the SuggestionsContext the controller
@@ -169,10 +231,38 @@ func (c *VimEditorController) RefilterOrTrigger(buf *editor.Buffer, pos editor.P
 	if buf == nil || c.completionEngine == nil || c.suggestions == nil {
 		return
 	}
+	// Record where we triggered so a late async warm landing can prove the
+	// cursor has not moved before re-triggering (OnWarmLanded stale guard).
+	c.lastTriggerPos = pos
 	got := c.completionEngine.Trigger(stdctx.Background(), buf, pos)
 	// Show with an empty set is a Hide (SuggestionsContext.Show contract),
 	// so the empty-candidate dismiss is handled here without a branch.
 	c.suggestions.Show(got, pos)
+}
+
+// OnWarmLanded is the re-trigger bridge the orchestrator wires into
+// SchemaWarmer.SetOnWarmed. It fires on the UI loop after a (schema,table)
+// warm completes, so the snapshot now holds the columns the in-flight Suggest
+// returned empty for. It re-runs completion at the position the user is still
+// at — but ONLY when the popup is still open AND the live cursor is exactly
+// where the warm was requested (lastTriggerPos). A warm that lands after the
+// user moved the cursor, dismissed the popup, or whose buffer is gone is
+// DROPPED — the stale-trigger guard (dbsavvy-ko4m.2.3). The schema/table args
+// are unused: the guard is purely positional, so a warm for any table the
+// current context references refreshes the popup, and an unrelated warm is a
+// harmless re-filter at the same position.
+func (c *VimEditorController) OnWarmLanded(_ /*schema*/, _ /*table*/ string) {
+	if c.suggestions == nil || !c.suggestions.IsVisible() {
+		return
+	}
+	buf := c.buffer()
+	if buf == nil {
+		return
+	}
+	if buf.CursorPos() != c.lastTriggerPos {
+		return
+	}
+	c.RefilterOrTrigger(buf, c.lastTriggerPos)
 }
 
 // AutoTrigger is the as-you-type callback installed via
@@ -2048,6 +2138,74 @@ func (c *VimEditorController) acceptSuggestion() {
 	if !ok {
 		return
 	}
+	// dbsavvy-ko4m.7.2: a snippet accept inserts the (already
+	// SanitizeSnippetText'd) Body as ONE undoable multi-line edit. Replace
+	// the typed partial [identStart, cur) with the Body via a single
+	// EditKindReplace (one undo node even for a multi-line body — Apply
+	// records exactly one reversible Edit), then land the cursor at
+	// EndOfInsert(at, body) so a multi-line body leaves the cursor on the
+	// final chunk, not at identStart+len(body). This short-circuits the
+	// alias/qualify smart-accept branches below — a snippet body is not a
+	// bare table/column identifier.
+	if s.Kind == editor.KindSnippet {
+		at := editor.Position{Line: cur.Line, Col: identStart}
+		if err := buf.Apply(editor.Edit{
+			Kind:  editor.EditKindReplace,
+			Range: editor.Range{Start: at, End: cur},
+			Text:  s.Body,
+		}); err != nil {
+			return
+		}
+		buf.SetCursor(editor.EndOfInsert(at, s.Body))
+		c.suppressNextAutoTrigger = true
+		return
+	}
+	// dbsavvy-ko4m.6.2 / .6.3: accept-time context analysis drives two
+	// SINGLE-EditKindReplace smart-accept branches (one undo step each):
+	//   - Expect==Tables → auto-insert an editable deduped alias ("<table> <alias>").
+	//   - Expect==Columns → auto-qualify an ambiguous column ("<alias>.<column>").
+	// The plain (non-smart) path keeps its Delete+Insert shape untouched.
+	ctx := editor.AnalyzeContextAt(buf, cur)
+	if c.aliasOnAccept && ctx.Expect == sqlcontext.ExpectTables {
+		text := composeTableAlias(s.Text, ctx.InScopeTables)
+		if err := buf.Apply(editor.Edit{
+			Kind:  editor.EditKindReplace,
+			Range: editor.Range{Start: editor.Position{Line: cur.Line, Col: identStart}, End: cur},
+			Text:  text,
+		}); err != nil {
+			return
+		}
+		buf.SetCursor(editor.Position{Line: cur.Line, Col: identStart + len([]rune(text))})
+		c.suppressNextAutoTrigger = true
+		return
+	}
+	// dbsavvy-ko4m.6.3: in a column context (Expect==Columns) that is NOT
+	// already dot-qualified, auto-qualify the accepted column with the
+	// first owning in-scope table's alias when the column is AMBIGUOUS —
+	// it appears in >=2 in-scope tables AND every consulted table is warmed.
+	// composeColumnQualifier returns the bare column ("<column>") when not
+	// ambiguous / unwarmed / no metadata / empty scope, so the single
+	// EditKindReplace below is uniform either way.
+	//
+	// "Already dot-qualified" is detected two ways: ctx.Qualifier.Present
+	// (cursor sits right after `alias.` with no partial), AND a dot
+	// immediately left of the live identifier run (the partial-after-dot
+	// case `alias.par|`, which the engine does not flag as a Qualifier
+	// because the dot no longer ends at the cursor). Either way the user has
+	// already chosen the table, so re-qualifying would emit `alias.alias.col`.
+	if ctx.Expect == sqlcontext.ExpectColumns && !ctx.Qualifier.Present && !dotPrecedesIdentStart(buf, editor.Position{Line: cur.Line, Col: identStart}) {
+		text := c.composeColumnQualifier(s.Text, ctx.InScopeTables)
+		if err := buf.Apply(editor.Edit{
+			Kind:  editor.EditKindReplace,
+			Range: editor.Range{Start: editor.Position{Line: cur.Line, Col: identStart}, End: cur},
+			Text:  text,
+		}); err != nil {
+			return
+		}
+		buf.SetCursor(editor.Position{Line: cur.Line, Col: identStart + len([]rune(text))})
+		c.suppressNextAutoTrigger = true
+		return
+	}
 	// Delete [identStart, cur) then insert the candidate at identStart.
 	if identStart < cur.Col {
 		if err := buf.Apply(editor.Edit{
@@ -2072,6 +2230,159 @@ func (c *VimEditorController) acceptSuggestion() {
 	c.suppressNextAutoTrigger = true
 }
 
+// composeTableAlias builds the "<table> <alias>" text inserted on a
+// table-context accept (dbsavvy-ko4m.6.2). The alias is the first letter
+// of the table name lowercased, deduped against the aliases already bound
+// by inScope by appending a numeric suffix (u, u2, u3, …; suffixes already
+// present are skipped). Both the table token and the alias are emitted in
+// their SQL-safe form (double-quoted when they would not round-trip bare)
+// so the inserted text is valid SQL (Finding Q). The table name fed in is
+// the raw candidate text; aliasBase derives off its unquoted form.
+func composeTableAlias(table string, inScope []sqlcontext.TableRef) string {
+	base := bareIdent(table)
+	alias := dedupedAlias(base, inScope)
+	return quoteIfNeeded(table) + " " + quoteIfNeeded(alias)
+}
+
+// composeColumnQualifier builds the text inserted on a column-context
+// accept (dbsavvy-ko4m.6.3). It returns the AUTO-QUALIFIED form
+// `"<alias>.<column>"` only when the accepted column is AMBIGUOUS — it
+// belongs to >=2 in-scope tables AND every consulted table's columns are
+// warmed (Store.Columns ok==true) — using the FIRST owning in-scope table's
+// alias (by InScopeTables order). Otherwise it returns the BARE column
+// (`"<column>"`): <2 owners, any consulted table not warmed, no metadata
+// reader, or empty scope. Both the alias and column are emitted SQL-safe via
+// quoteIfNeeded. The "first owning" table must have a non-empty Alias to be
+// usable as a qualifier; a column owned by an unaliased table still counts
+// toward ambiguity but cannot itself supply the qualifier — the first owner
+// WITH an alias wins.
+func (c *VimEditorController) composeColumnQualifier(column string, inScope []sqlcontext.TableRef) string {
+	if c.schemaMeta == nil || len(inScope) == 0 {
+		return quoteIfNeeded(column)
+	}
+	name := bareIdent(column)
+	owners := 0
+	firstAliased := ""
+	for _, t := range inScope {
+		if t.Name == "" {
+			continue
+		}
+		cols, ok := c.schemaMeta.Columns(c.schemaFor(t.Schema), t.Name)
+		if !ok {
+			// Unwarmed consulted table — cannot be sure of ambiguity, so
+			// never guess: insert the bare column.
+			return quoteIfNeeded(column)
+		}
+		if !columnsContain(cols, name) {
+			continue
+		}
+		owners++
+		if firstAliased == "" && t.Alias != "" {
+			firstAliased = t.Alias
+		}
+	}
+	if owners < 2 || firstAliased == "" {
+		return quoteIfNeeded(column)
+	}
+	return quoteIfNeeded(firstAliased) + "." + quoteIfNeeded(column)
+}
+
+// schemaFor resolves the schema for an in-scope table reference: the
+// reference's own schema qualifier when present, else the active schema from
+// the wired provider (mirrors editor.SchemaSource.schemaFor). Nil provider
+// yields "". dbsavvy-ko4m.6.3.
+func (c *VimEditorController) schemaFor(refSchema string) string {
+	if refSchema != "" {
+		return refSchema
+	}
+	if c.schemaProv == nil {
+		return ""
+	}
+	return c.schemaProv()
+}
+
+// columnsContain reports whether cols holds a column whose bare name equals
+// name, case-insensitively (Postgres folds unquoted identifiers to
+// lowercase; the snapshot stores names as the catalog reports them). The
+// accepted candidate name is the bare (unquoted) form. dbsavvy-ko4m.6.3.
+func columnsContain(cols []models.Column, name string) bool {
+	for _, col := range cols {
+		if strings.EqualFold(col.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// dedupedAlias derives the alias (first rune of the table's bare name,
+// lowercased) and resolves collisions against the aliases already in
+// scope by numeric suffix: the bare letter first, then letter+2,
+// letter+3, … skipping any already taken. An empty base yields no usable
+// first letter, so the alias falls back to "a". Comparison is
+// case-insensitive on the unquoted alias text.
+func dedupedAlias(base string, inScope []sqlcontext.TableRef) string {
+	letter := "a"
+	for _, r := range base {
+		letter = string(unicode.ToLower(r))
+		break
+	}
+	taken := make(map[string]bool, len(inScope))
+	for _, t := range inScope {
+		if t.Alias != "" {
+			taken[strings.ToLower(t.Alias)] = true
+		}
+	}
+	if !taken[letter] {
+		return letter
+	}
+	for n := 2; ; n++ {
+		cand := letter + strconv.Itoa(n)
+		if !taken[cand] {
+			return cand
+		}
+	}
+}
+
+// bareIdent strips a surrounding pair of double quotes from a candidate
+// identifier so alias derivation works off the unquoted name
+// (`"MyTable"` -> `MyTable`). Unquoted input is returned unchanged.
+func bareIdent(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return strings.ReplaceAll(s[1:len(s)-1], `""`, `"`)
+	}
+	return s
+}
+
+// quoteIfNeeded returns s double-quoted when it would not round-trip as a
+// bare SQL identifier — i.e. it is already quoted, empty, contains a rune
+// outside [a-z0-9_], or differs from its lowercased form (mixed-case)
+// (Finding Q). An already-quoted token is passed through unchanged. A bare
+// all-lowercase/digit/underscore identifier is returned as-is.
+func quoteIfNeeded(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s
+	}
+	if s == "" || s != strings.ToLower(s) || !isBareIdent(s) {
+		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	}
+	return s
+}
+
+// isBareIdent reports whether every rune of s lies in [a-z0-9_]; an empty
+// string is not a bare identifier.
+func isBareIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r == '_' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // identifierStartCol returns the column of the first identifier rune of
 // the run immediately left of pos on pos.Line, or pos.Col when no
 // identifier precedes the cursor. Mirrors editor.identifierPrefixAt's
@@ -2088,6 +2399,23 @@ func identifierStartCol(buf *editor.Buffer, pos editor.Position) int {
 		start--
 	}
 	return start
+}
+
+// dotPrecedesIdentStart reports whether the rune immediately left of pos on
+// pos.Line is a '.', i.e. the identifier run starting at pos is the member
+// part of a dot-qualified reference (`alias.col`). Used by the column
+// auto-qualify accept path to avoid double-qualifying a column the user has
+// already qualified with an explicit `alias.` prefix (dbsavvy-ko4m.6.3).
+func dotPrecedesIdentStart(buf *editor.Buffer, pos editor.Position) bool {
+	lines := buf.LinesCopy()
+	if pos.Line < 0 || pos.Line >= len(lines) {
+		return false
+	}
+	runes := lines[pos.Line].Runes
+	if pos.Col <= 0 || pos.Col > len(runes) {
+		return false
+	}
+	return runes[pos.Col-1] == '.'
 }
 
 // isIdentRune reports whether r is part of a SQL identifier (letters,

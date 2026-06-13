@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/logs"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -56,6 +58,36 @@ type ConnectHelper struct {
 	mu      sync.Mutex
 	state   *helperState // nil ⇔ not connected
 	stateMu sync.RWMutex // protects publish/unpublish of state pointer
+
+	// funcDetailMu guards the function-detail cache and the warm-in-flight set.
+	// Separate from stateMu so a cache read never contends with connect/disconnect
+	// state churn. dbsavvy-ko4m.5.2.
+	funcDetailMu       sync.Mutex
+	funcDetail         map[string][]models.FunctionDetail // schema+name -> details; nil until first populate
+	funcDetailInflight map[string]struct{}                // keys with a WarmFunctionDetail load in flight
+
+	// uiThread schedules onReady callbacks onto the gocui MainLoop. Optional:
+	// when nil (default / unit tests) callbacks run inline on the loading
+	// goroutine. Set via SetUIScheduler during gui wiring so WarmFunctionDetail
+	// honors the "onReady runs on the UI loop" contract.
+	uiThread func(func() error)
+	// log is the optional structured logger used for load-failure events. nil is
+	// tolerated (logs.Event is nil-safe).
+	log *slog.Logger
+}
+
+// SetUIScheduler injects the gocui MainLoop scheduler used by
+// WarmFunctionDetail to run its onReady callback on the UI loop. Wiring code
+// passes orchestrator.Gui.OnUIThread. Must be called before WarmFunctionDetail;
+// it is not safe to call concurrently with a warm in flight.
+func (h *ConnectHelper) SetUIScheduler(onUIThread func(func() error)) {
+	h.uiThread = onUIThread
+}
+
+// SetLogger injects the structured logger for load-failure events. nil is
+// tolerated. Not safe to call concurrently with loads in flight.
+func (h *ConnectHelper) SetLogger(l *slog.Logger) {
+	h.log = l
 }
 
 // helperState bundles every field that lives for the duration of a single
@@ -302,6 +334,188 @@ func (h *ConnectHelper) LoadForeignKeys(ctx context.Context, schema, table strin
 		return nil, err
 	}
 	return out, nil
+}
+
+// LoadFunctions wraps drivers.Session.ListFunctions (FUNCTION-routine names
+// only). Mirrors LoadColumns so the eager function-name warm routes through the
+// SAME serialized worker queue rather than calling sess.ListFunctions on a raw
+// Session pointer (which would race other queries on the pgx conn). Added for
+// the schema-warmer eager tier (dbsavvy-ko4m.2.3).
+func (h *ConnectHelper) LoadFunctions(ctx context.Context) ([]string, error) {
+	var out []string
+	err := h.submit(ctx, func(ctx context.Context) error {
+		sess, err := h.requireSession()
+		if err != nil {
+			return err
+		}
+		result, err := sess.ListFunctions(ctx)
+		if err != nil {
+			return err
+		}
+		out = result
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// LoadFunctionDetail wraps drivers.Session.DescribeFunction. Mirrors
+// LoadColumns: the DescribeFunction call runs ONLY inside submit() on the
+// per-Session worker queue (never on the calling goroutine), honoring the
+// per-Session serialization contract. On success the result is cached under
+// schema+name so the synchronous FunctionDetail read can serve completion
+// without blocking. A load error is logged via logs.Event and leaves the cache
+// entry unpopulated. dbsavvy-ko4m.5.2.
+func (h *ConnectHelper) LoadFunctionDetail(ctx context.Context, schema, name string) ([]models.FunctionDetail, error) {
+	var out []models.FunctionDetail
+	err := h.submit(ctx, func(ctx context.Context) error {
+		sess, err := h.requireSession()
+		if err != nil {
+			return err
+		}
+		result, err := sess.DescribeFunction(ctx, schema, name)
+		if err != nil {
+			return err
+		}
+		out = result
+		return nil
+	})
+	if err != nil {
+		logs.Event(h.log, "completion", "load_function_detail_err",
+			slog.String("schema", schema),
+			slog.String("name", name),
+			slog.String("err", err.Error()),
+		)
+		return nil, err
+	}
+	h.storeFunctionDetail(schema, name, out)
+	return out, nil
+}
+
+// FunctionDetail is the synchronous cache read for completion's sync path. It
+// returns the cached detail slice and found=true on a hit, or (nil, false) on a
+// miss. It never blocks, never touches the Session, and never returns an error —
+// a miss simply means LoadFunctionDetail / WarmFunctionDetail has not populated
+// the key yet. The returned value is an independent deep copy: both the outer
+// []FunctionDetail and each entry's Args slice have their own backing arrays, so
+// the caller may mutate or append to them without corrupting the cache or
+// aliasing a concurrent reader.
+func (h *ConnectHelper) FunctionDetail(schema, name string) ([]models.FunctionDetail, bool) {
+	key := funcDetailKey(schema, name)
+	h.funcDetailMu.Lock()
+	defer h.funcDetailMu.Unlock()
+	v, ok := h.funcDetail[key]
+	if !ok {
+		return nil, false
+	}
+	return cloneFunctionDetails(v), true
+}
+
+// WarmFunctionDetail ensures the function-detail cache holds an entry for
+// schema+name, invoking onReady exactly once after the cache is populated. On a
+// cache hit it schedules onReady immediately (on the UI loop). On a miss it
+// loads asynchronously through the per-Session worker (LoadFunctionDetail) and
+// fires onReady on the UI loop once the cache is populated. The load is
+// idempotent per key: a second WarmFunctionDetail for a key whose load is
+// already in flight does not issue a second DescribeFunction round-trip (its
+// onReady still fires when that single load completes). A load failure does NOT
+// invoke onReady (the cache stays empty); the error is logged inside
+// LoadFunctionDetail. A nil onReady is safe (the load still warms the cache).
+// dbsavvy-ko4m.5.2.
+func (h *ConnectHelper) WarmFunctionDetail(schema, name string, onReady func()) {
+	if _, ok := h.FunctionDetail(schema, name); ok {
+		h.fireOnReady(onReady)
+		return
+	}
+
+	key := funcDetailKey(schema, name)
+	h.funcDetailMu.Lock()
+	if h.funcDetailInflight == nil {
+		h.funcDetailInflight = make(map[string]struct{})
+	}
+	if _, inflight := h.funcDetailInflight[key]; inflight {
+		// A load for this key is already running; that load's onReady will fire.
+		// We could chain additional callbacks here, but the contract only
+		// requires at-most-one round-trip and that *an* onReady fires once. The
+		// caller that started the in-flight load owns the callback.
+		h.funcDetailMu.Unlock()
+		return
+	}
+	h.funcDetailInflight[key] = struct{}{}
+	h.funcDetailMu.Unlock()
+
+	go func() {
+		_, err := h.LoadFunctionDetail(context.Background(), schema, name)
+
+		h.funcDetailMu.Lock()
+		delete(h.funcDetailInflight, key)
+		h.funcDetailMu.Unlock()
+
+		// A failed load leaves the cache unpopulated and does NOT signal ready.
+		if err != nil {
+			return
+		}
+		h.fireOnReady(onReady)
+	}()
+}
+
+// fireOnReady runs onReady on the UI loop when a scheduler is wired, else
+// inline. nil onReady is a no-op.
+func (h *ConnectHelper) fireOnReady(onReady func()) {
+	if onReady == nil {
+		return
+	}
+	if h.uiThread == nil {
+		onReady()
+		return
+	}
+	h.uiThread(func() error {
+		onReady()
+		return nil
+	})
+}
+
+// storeFunctionDetail populates the cache for schema+name. A nil/empty detail
+// slice still records the key as populated (a function with no rows described is
+// a legitimate empty result, distinct from a miss). The stored value is a deep
+// copy (outer slice + each entry's Args), so the cache shares no mutable backing
+// array with the caller-supplied slice nor with any value later returned by
+// FunctionDetail.
+func (h *ConnectHelper) storeFunctionDetail(schema, name string, details []models.FunctionDetail) {
+	key := funcDetailKey(schema, name)
+	cp := cloneFunctionDetails(details)
+	h.funcDetailMu.Lock()
+	defer h.funcDetailMu.Unlock()
+	if h.funcDetail == nil {
+		h.funcDetail = make(map[string][]models.FunctionDetail)
+	}
+	h.funcDetail[key] = cp
+}
+
+// cloneFunctionDetails returns a deep copy of details: a fresh outer slice and,
+// for each entry, a fresh Args backing array. FunctionArg fields are all strings,
+// so an element copy fully isolates them. A nil input yields an empty (non-nil)
+// slice so a stored empty result reads back as a non-nil hit.
+func cloneFunctionDetails(details []models.FunctionDetail) []models.FunctionDetail {
+	cp := make([]models.FunctionDetail, len(details))
+	copy(cp, details)
+	for i := range cp {
+		if cp[i].Args == nil {
+			continue
+		}
+		args := make([]models.FunctionArg, len(cp[i].Args))
+		copy(args, cp[i].Args)
+		cp[i].Args = args
+	}
+	return cp
+}
+
+// funcDetailKey builds the cache key from a schema + function name. Schema and
+// name cannot contain a NUL byte, so it is an unambiguous separator.
+func funcDetailKey(schema, name string) string {
+	return schema + "\x00" + name
 }
 
 // requireSession returns the current Session or errNotConnected. It must be

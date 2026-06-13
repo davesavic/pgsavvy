@@ -1,9 +1,12 @@
 package orchestrator
 
 import (
+	"time"
+
 	"github.com/davesavic/dbsavvy/pkg/drivers"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
+	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -244,17 +247,55 @@ func (g *Gui) wireEditorCompletion() {
 	// earlier in wireWithDriver. Every source no-ops on nil deps so the
 	// popup degrades cleanly before the first Connect.
 	if g.controllers != nil && g.controllers.VimEditor != nil && g.registry != nil && g.registry.Suggestions != nil {
-		sessionProv := func() drivers.Session {
-			if g.connectHelper == nil {
-				return nil
-			}
-			return g.connectHelper.Session()
-		}
+		// dbsavvy-ko4m.2.3: completion reads a background-warmed metadata
+		// snapshot synchronously instead of the live session — no data race, no
+		// UI block. The SchemaWarmer owns the store (eager table+function names,
+		// lazy per-table columns+FKs), routing every driver call through the
+		// ConnectHelper serialized worker. SchemaSource/FunctionSource read the
+		// store; SchemaSource fires reactive WarmTable on a column miss; the
+		// warm landing re-triggers completion at the cursor (stale-guarded).
+		g.schemaWarmer = data.NewConnectSchemaWarmer(
+			g.connectHelper,
+			g.OnWorker,
+			g.OnUIThreadContentOnly,
+			g.deps.Common.Logger(),
+		)
+		// Re-trigger bridge: onWarmed fires on the UI loop; the controller drops
+		// it unless the cursor is unchanged and the popup is still open.
+		g.schemaWarmer.SetOnWarmed(g.controllers.VimEditor.OnWarmLanded)
+		// Surface a THROTTLED toast on warm failure (review Finding: the user
+		// should see a metadata-load failure, not only a debug log).
+		g.schemaWarmer.SetOnWarmError(func(_, table string, _ error) {
+			g.toastWarmError(table)
+		})
+
+		store := g.schemaWarmer.Store()
 		schemaPicker := schemasPickerAdapter{registry: g.registry.Schemas}
 		schemaProv := func() string { return schemaPicker.SelectedSchemaName() }
+		// dbsavvy-ko4m.5.3: inject the function-signature-help provider seam into
+		// the FunctionSource, mirroring the SchemaMetadata/SessionProvider wiring.
+		// The editor declares the FunctionDetailProvider interface; the concrete
+		// ConnectHelper satisfies it structurally (FunctionDetail sync read +
+		// WarmFunctionDetail async warm), so no helpers/data import leaks into the
+		// editor. The warm callback must land on the UI loop, so wire the
+		// ConnectHelper's UI scheduler + logger here (ko4m.5.2 handoff). Signature
+		// population/render is ko4m.5.4 — this only supplies the seam, so the
+		// emitted function-name candidates are unchanged.
+		fnSource := editor.NewFunctionSource(store)
+		if g.connectHelper != nil {
+			g.connectHelper.SetUIScheduler(g.OnUIThread)
+			g.connectHelper.SetLogger(g.deps.Common.Logger())
+			fnSource.SetDetailProvider(g.connectHelper)
+		}
 		sources := []editor.Source{
-			editor.NewSchemaSource(sessionProv, schemaProv),
-			editor.NewFunctionSource(sessionProv),
+			editor.NewSchemaSource(store, g.schemaWarmer, schemaProv),
+			fnSource,
+			// dbsavvy-ko4m.7.3: register the real SnippetSource backed by the
+			// built-in starter set (BuiltinSnippetProvider) — replacing the
+			// removed placeholder source. NewSnippetSource defaults Priority() to
+			// SnippetSourcePriority (the SnippetSourceBias rank const, 50), so the
+			// source ranks below schema/function and above keyword/history.
+			editor.NewSnippetSource(editor.BuiltinSnippetProvider{}),
 			editor.KeywordsSource{PriorityVal: 20},
 		}
 		if g.queryState.history != nil {
@@ -265,5 +306,38 @@ func (g *Gui) wireEditorCompletion() {
 		}
 		g.controllers.VimEditor.SetCompletionEngine(editor.NewEngine(sources))
 		g.controllers.VimEditor.SetSuggestionsContext(g.registry.Suggestions)
+		// dbsavvy-ko4m.5.4: feed the SAME signature-help provider + active-schema
+		// source into the SUGGESTIONS popup context so the selected function's
+		// signature renders as a dedicated help footer with re-render-on-warm.
+		// The ConnectHelper's SetUIScheduler (wired above) guarantees the
+		// WarmFunctionDetail onReady lands on the UI loop, so the popup's
+		// HandleRender re-render is race-free. nil connectHelper => no help line.
+		if g.connectHelper != nil {
+			g.registry.Suggestions.SetFunctionDetailProvider(g.connectHelper, schemaProv)
+		}
+		// dbsavvy-ko4m.6.3: the SAME warmed store + active-schema provider feed
+		// the accept-time ambiguous-column qualifier (it satisfies
+		// editor.SchemaMetadata). The store's Columns ok-return is the
+		// warmed-or-not signal the qualifier requires before guessing.
+		g.controllers.VimEditor.SetSchemaMetadata(store, schemaProv)
 	}
+}
+
+// warmErrorToastThrottle is the minimum gap between consecutive warm-failure
+// toasts, so a burst of failing completion warms does not spam the status line.
+const warmErrorToastThrottle = 5 * time.Second
+
+// toastWarmError shows a throttled, user-visible toast when a completion
+// metadata warm fails. The error itself is already logged by the warmer; this
+// only surfaces a brief hint. No-op when the toast helper is unwired.
+func (g *Gui) toastWarmError(table string) {
+	if g.toastHelp == nil {
+		return
+	}
+	now := time.Now()
+	if !g.lastWarmErrorToast.IsZero() && now.Sub(g.lastWarmErrorToast) < warmErrorToastThrottle {
+		return
+	}
+	g.lastWarmErrorToast = now
+	g.toastHelp.Show("completion: could not load metadata for "+table, 3*time.Second)
 }

@@ -110,3 +110,27 @@ func TestParseYAML_EditorAutocomplete_Enabled(t *testing.T) {
 		t.Errorf("Editor.Autocomplete = false after parsing %q; want true", string(src))
 	}
 }
+
+// TestGetDefaultConfigEditorAutocompleteAliasDefault pins dbsavvy-ko4m.6.2
+// (Finding K): table-accept alias auto-insert is on by default on fresh
+// install. Users opt out via `editor.autocomplete_alias: false`.
+func TestGetDefaultConfigEditorAutocompleteAliasDefault(t *testing.T) {
+	cfg := GetDefaultConfig()
+	if !cfg.Editor.AutocompleteAlias {
+		t.Fatal("GetDefaultConfig().Editor.AutocompleteAlias = false; want true (default per ko4m.6.2)")
+	}
+}
+
+// TestParseYAML_EditorAutocompleteAlias_Disabled asserts the top-level
+// `editor.autocomplete_alias` YAML path decodes onto
+// UserConfig.Editor.AutocompleteAlias (dbsavvy-ko4m.6.2, Finding K).
+func TestParseYAML_EditorAutocompleteAlias_Disabled(t *testing.T) {
+	src := []byte("editor:\n  autocomplete_alias: false\n")
+	var cfg UserConfig
+	if err := yaml.Unmarshal(src, &cfg); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if cfg.Editor.AutocompleteAlias {
+		t.Errorf("Editor.AutocompleteAlias = true after parsing %q; want false", string(src))
+	}
+}

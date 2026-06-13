@@ -2,8 +2,6 @@ package editor
 
 import (
 	"context"
-	"sort"
-	"strings"
 	"unicode"
 )
 
@@ -74,14 +72,14 @@ var sqlKeywords = []string{
 // exported so tests and other sources can reference it without hard-coding.
 const KeywordsSourceName = "keywords"
 
-// SnippetsStubSourceName is the registered Source.Name() for SnippetsStubSource.
-const SnippetsStubSourceName = "snippets"
-
-// KeywordsSource emits SQL keywords whose uppercase form starts with the
-// identifier prefix immediately to the left of the cursor. An empty prefix
-// returns every keyword (sorted ascending). Suggestion.Source is always set
-// to KeywordsSourceName. Score is fixed (low) so keywords lose to richer
-// sources (schema, history) when texts collide.
+// KeywordsSource emits SQL keywords whose uppercase form fuzzily matches the
+// identifier prefix immediately to the left of the cursor (editor.Match,
+// ko4m.3.1 — a non-prefix subsequence still surfaces a keyword). An empty
+// prefix returns every keyword (Match("",x) contract). Suggestion.Source is
+// always set to KeywordsSourceName. Score = matchQuality + KeywordSourceBias so
+// keywords lose to richer sources (schema, function) but beat history when
+// texts collide (ko4m.3.2 rank order). Suggestion.Matches carries the matched
+// rune offsets for popup highlighting.
 type KeywordsSource struct {
 	// PriorityVal controls the Source.Priority() tiebreak. Zero is fine —
 	// callers can leave it default for the lowest priority slot.
@@ -96,40 +94,30 @@ func (k KeywordsSource) Priority() int { return k.PriorityVal }
 
 // Suggest implements Source. Walks back from pos.Col on pos.Line collecting
 // identifier-class runes (letters, digits, underscore) to form the prefix.
-// Match is case-insensitive against the keyword list; output is the uppercase
-// keyword, sorted ascending.
+// Matching is the fzf-style subsequence matcher (editor.Match), case-
+// insensitive against the keyword list; output is the uppercase keyword.
+// sqlKeywords is maintained in ascending order, so iterating it and keeping
+// matches preserves the sorted output the popup expects. An empty prefix keeps
+// every keyword at Score = KeywordSourceBias (Match("",x) → quality 0).
 func (k KeywordsSource) Suggest(_ context.Context, buf *Buffer, pos Position) []Suggestion {
 	prefix := identifierPrefixAt(buf, pos)
-	matches := filterKeywordsByPrefix(sqlKeywords, prefix)
-	out := make([]Suggestion, 0, len(matches))
-	for _, kw := range matches {
+	out := make([]Suggestion, 0, len(sqlKeywords))
+	for _, kw := range sqlKeywords {
+		ok, quality, positions := Match(prefix, kw)
+		if !ok {
+			continue
+		}
 		out = append(out, Suggestion{
 			Text:    kw,
 			Display: kw,
 			Source:  KeywordsSourceName,
-			Score:   1,
+			Score:   quality + KeywordSourceBias,
+			Matches: positions,
+			Kind:    KindKeyword,
+			Detail:  "kw",
 		})
 	}
 	return out
-}
-
-// SnippetsStubSource is the placeholder for the snippets epic (dbsavvy-ktt).
-// It satisfies the Source interface but returns no Suggestions, allowing C5
-// (auto-trigger) and Z1 (wiring) to register it now without an implementation.
-type SnippetsStubSource struct {
-	PriorityVal int
-}
-
-// Name implements Source.
-func (SnippetsStubSource) Name() string { return SnippetsStubSourceName }
-
-// Priority implements Source.
-func (s SnippetsStubSource) Priority() int { return s.PriorityVal }
-
-// Suggest implements Source. Always returns an empty (non-nil) slice — the
-// snippet body is delivered by epic dbsavvy-ktt.
-func (SnippetsStubSource) Suggest(_ context.Context, _ *Buffer, _ Position) []Suggestion {
-	return []Suggestion{}
 }
 
 // identifierPrefixAt collects the run of identifier-class runes immediately
@@ -159,19 +147,4 @@ func identifierPrefixAt(buf *Buffer, pos Position) string {
 // digits, and underscore. Tabs/spaces/punctuation terminate the prefix walk.
 func isIdentRune(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
-}
-
-// filterKeywordsByPrefix returns the subset of kws whose uppercase form starts
-// with the uppercase of prefix, sorted ascending. An empty prefix returns the
-// full set (also sorted). The input slice is never mutated.
-func filterKeywordsByPrefix(kws []string, prefix string) []string {
-	up := strings.ToUpper(prefix)
-	out := make([]string, 0, len(kws))
-	for _, kw := range kws {
-		if up == "" || strings.HasPrefix(kw, up) {
-			out = append(out, kw)
-		}
-	}
-	sort.Strings(out)
-	return out
 }

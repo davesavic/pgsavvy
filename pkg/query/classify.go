@@ -59,6 +59,16 @@ func Classify(sql string) StatementKind {
 // parser. A DML keyword inside a string literal (e.g. 'DELETE' as a value) can
 // still falsely elevate; matching the existing gate's rigor, this is accepted
 // as a fail-closed bias (extra confirm prompts beat silent writes).
+//
+// DDL-CTE note (dbsavvy-ko4m.2 decision B verdict): there is deliberately NO
+// "DDL elevation" here. Postgres CTEs may contain only SELECT/INSERT/UPDATE/
+// DELETE — never DDL — so a real WITH-led statement can never execute DDL; a
+// plain DDL statement leads with its own keyword (CREATE/ALTER/DROP/…), which
+// Classify already returns as KindDDL. Adding a ddlTokenRE elevation would
+// over-fire: a benign read-only SELECT with a column named "comment" or "drop"
+// would whole-word-match and be misclassified KindDDL, spuriously tripping the
+// pre-run ConfirmDDL prompt. So EffectiveKind is already correct for the DDL
+// case; only the DML writable-CTE hole needs closing.
 func EffectiveKind(sql string) StatementKind {
 	kind := Classify(sql)
 	if kind == KindOther && dmlTokenRE.MatchString(sql) {

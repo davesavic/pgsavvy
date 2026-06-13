@@ -111,7 +111,7 @@ func (f *fakeSession) ListFunctions(context.Context) ([]string, error) {
 	panic("ListFunctions not used")
 }
 
-func (f *fakeSession) DescribeFunction(context.Context, string, string) (models.FunctionDetail, error) {
+func (f *fakeSession) DescribeFunction(context.Context, string, string) ([]models.FunctionDetail, error) {
 	panic("DescribeFunction not used")
 }
 

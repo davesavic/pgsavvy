@@ -234,3 +234,20 @@ func IsMonochrome() bool {
 	})
 	return monochrome
 }
+
+// SetMonochromeForTest forces the cached monochrome value to v, marking the
+// once as resolved so subsequent IsMonochrome() calls return v regardless of
+// the NO_COLOR env var. It returns a restore func that reverts the once + value
+// to their prior state. Test-only seam (dbsavvy-ko4m.4.6): the production
+// monochrome cache is a process-lifetime sync.Once with no env re-read, so a
+// no-color render test cannot otherwise drive IsMonochrome deterministically.
+// Do NOT call from production code.
+func SetMonochromeForTest(v bool) (restore func()) {
+	prevVal := monochrome
+	monochromeOnce = sync.Once{}
+	monochromeOnce.Do(func() { monochrome = v })
+	return func() {
+		monochromeOnce = sync.Once{}
+		monochromeOnce.Do(func() { monochrome = prevVal })
+	}
+}

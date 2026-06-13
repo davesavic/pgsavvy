@@ -574,6 +574,12 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		c.publishQueryEditorBuffer(editorBuf, editorOK)
 		c.publishSchemaItems(schemaItems, schemaOK)
 		c.setActiveConn(profile)
+		// dbsavvy-ko4m.2.3: eagerly warm the completion metadata snapshot for
+		// the active schema (table+view names + per-connection function names)
+		// off the UI thread, so the first FROM/function completion serves from
+		// the store without a driver round-trip. LoadEager is idempotent and
+		// routes through the ConnectHelper serialized worker.
+		c.warmEagerSchema()
 		// dbsavvy-1rf: a modal-origin connect renders its connecting body
 		// inside the CONNECTION_MANAGER modal. On success pop the modal (and
 		// reset it back to list mode for a later re-open) BEFORE pushing the
@@ -875,6 +881,28 @@ func (c *connectInvoker) publishSchemaItems(items []any, ok bool) {
 		return
 	}
 	c.g.registry.Schemas.SetItems(items)
+}
+
+// warmEagerSchema eagerly loads the completion metadata snapshot (table+view
+// names for the active schema + per-connection function names) on a worker
+// goroutine, so the first FROM / function completion after connect serves from
+// the store without a blocking driver call. The SchemaWarmer's LoadEager
+// already routes through the ConnectHelper serialized worker and is idempotent;
+// running it here off the UI thread keeps connect snappy. No-op when the warmer
+// is unwired or no schema is selected (dbsavvy-ko4m.2.3).
+func (c *connectInvoker) warmEagerSchema() {
+	if c == nil || c.g == nil || c.g.schemaWarmer == nil {
+		return
+	}
+	schema := schemasPickerAdapter{registry: c.g.registry.Schemas}.SelectedSchemaName()
+	if schema == "" {
+		return
+	}
+	warmer := c.g.schemaWarmer
+	c.g.OnWorker(func(_ gocui.Task) error {
+		warmer.LoadEager(schema)
+		return nil
+	})
 }
 
 // populateTablesRail loads the table list for schema via
@@ -1415,16 +1443,47 @@ func (r *reconnectInvoker) Reconnect(ctx context.Context, profile *models.Connec
 	// Tear down the schema-rail session + pool. This also satisfies the
 	// "data: already connected (call Disconnect first)" guard in Connect.
 	r.helper.Disconnect()
+	// dbsavvy-ko4m.2.4: drop ALL warmed completion metadata from the prior
+	// connection AND the warmer's per-key cooldown/in-flight bookkeeping, so no
+	// stale entry survives the reconnect and a table that was in cooldown at
+	// disconnect is not suppressed on the new connection. The following Connect
+	// re-runs LoadEager (warmEagerSchema) on the new session, repopulating the
+	// eager tier; lazy entries re-warm on demand.
+	if r.inv.g != nil && r.inv.g.schemaWarmer != nil {
+		r.inv.g.schemaWarmer.Reset()
+	}
 	return r.inv.Connect(ctx, profile)
+}
+
+// metadataInvalidatorAdapter satisfies controllers.SchemaMetadataInvalidator by
+// forwarding to the SchemaWarmer, resolved lazily because the warmer is
+// constructed (wireEditorCompletion) after the QueryDeps bundle this adapter
+// lives in is value-copied into the controllers. A nil warmer (pre-wire, or a
+// build that omits completion) makes every method a no-op. dbsavvy-ko4m.2.4.
+type metadataInvalidatorAdapter struct{ g *Gui }
+
+func (a *metadataInvalidatorAdapter) InvalidateSchema(schema string) {
+	if a == nil || a.g == nil || a.g.schemaWarmer == nil {
+		return
+	}
+	a.g.schemaWarmer.InvalidateSchema(schema)
+}
+
+func (a *metadataInvalidatorAdapter) InvalidateTable(schema, table string) {
+	if a == nil || a.g == nil || a.g.schemaWarmer == nil {
+		return
+	}
+	a.g.schemaWarmer.InvalidateTable(schema, table)
 }
 
 // Compile-time assertions: all adapters satisfy their target interfaces.
 var (
-	_ controllers.SchemaPicker          = schemasPickerAdapter{}
-	_ controllers.TablePicker           = tablesPickerAdapter{}
-	_ controllers.ActiveConnection      = (*activeConnAdapter)(nil)
-	_ controllers.ConnectInvoker        = (*connectInvoker)(nil)
-	_ controllers.ConnectionFormInvoker = (*connectionFormInvoker)(nil)
-	_ controllers.MenuPushHelper        = (*menuPushHelper)(nil)
-	_ controllers.ReconnectInvoker      = (*reconnectInvoker)(nil)
+	_ controllers.SchemaMetadataInvalidator = (*metadataInvalidatorAdapter)(nil)
+	_ controllers.SchemaPicker              = schemasPickerAdapter{}
+	_ controllers.TablePicker               = tablesPickerAdapter{}
+	_ controllers.ActiveConnection          = (*activeConnAdapter)(nil)
+	_ controllers.ConnectInvoker            = (*connectInvoker)(nil)
+	_ controllers.ConnectionFormInvoker     = (*connectionFormInvoker)(nil)
+	_ controllers.MenuPushHelper            = (*menuPushHelper)(nil)
+	_ controllers.ReconnectInvoker          = (*reconnectInvoker)(nil)
 )

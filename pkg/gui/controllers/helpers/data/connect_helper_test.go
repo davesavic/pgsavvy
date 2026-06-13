@@ -26,6 +26,10 @@ type fakeSession struct {
 	tablesBlock   chan struct{} // when non-nil, ListTables blocks on receive
 	tablesObserve chan struct{} // when non-nil, ListTables sends here on entry
 	listTablesErr error
+
+	describeFuncCalls atomic.Int32
+	describeFuncErr   error
+	describeFuncOut   []models.FunctionDetail
 }
 
 func (s *fakeSession) Close() error {
@@ -100,8 +104,12 @@ func (s *fakeSession) ListFunctions(_ context.Context) ([]string, error) {
 	return nil, nil
 }
 
-func (s *fakeSession) DescribeFunction(_ context.Context, _, _ string) (models.FunctionDetail, error) {
-	return models.FunctionDetail{}, nil
+func (s *fakeSession) DescribeFunction(_ context.Context, _, _ string) ([]models.FunctionDetail, error) {
+	s.describeFuncCalls.Add(1)
+	if s.describeFuncErr != nil {
+		return nil, s.describeFuncErr
+	}
+	return s.describeFuncOut, nil
 }
 
 func (s *fakeSession) Execute(_ context.Context, _ models.Query) (models.Result, error) {
@@ -449,4 +457,297 @@ func TestConnectHelperConnectionAndSessionAccessors(t *testing.T) {
 	if h.Connection() != nil || h.Session() != nil {
 		t.Fatal("accessors must return nil after Disconnect")
 	}
+}
+
+// --- LoadFunctionDetail / FunctionDetail / WarmFunctionDetail -------------
+
+func connectFakeFuncDetail(t *testing.T, name string, sess *fakeSession) *ConnectHelper {
+	t.Helper()
+	conn := &fakeConnection{sess: sess}
+	drv := &fakeDriver{conn: conn}
+	registerFake(t, name, drv)
+	h := NewConnectHelper()
+	if _, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: name}, nil); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(h.Disconnect)
+	return h
+}
+
+func TestConnectHelperLoadFunctionDetailPopulatesCache(t *testing.T) {
+	want := []models.FunctionDetail{{Schema: "public", Name: "f", ReturnType: "int4"}}
+	sess := &fakeSession{describeFuncOut: want}
+	h := connectFakeFuncDetail(t, "fake-fd-load", sess)
+
+	// Sync read before any load: miss, no block, no error.
+	if got, ok := h.FunctionDetail("public", "f"); ok || got != nil {
+		t.Fatalf("pre-load read = (%v,%v), want (nil,false)", got, ok)
+	}
+
+	got, err := h.LoadFunctionDetail(context.Background(), "public", "f")
+	if err != nil {
+		t.Fatalf("LoadFunctionDetail: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "f" {
+		t.Fatalf("LoadFunctionDetail returned %v, want %v", got, want)
+	}
+
+	cached, ok := h.FunctionDetail("public", "f")
+	if !ok {
+		t.Fatal("FunctionDetail miss after successful load")
+	}
+	if len(cached) != 1 || cached[0].ReturnType != "int4" {
+		t.Fatalf("cached = %v, want %v", cached, want)
+	}
+
+	// Defensive copy: mutating the returned slice must not corrupt the cache.
+	cached[0].ReturnType = "MUTATED"
+	again, _ := h.FunctionDetail("public", "f")
+	if again[0].ReturnType != "int4" {
+		t.Fatalf("cache mutated through returned slice: %q", again[0].ReturnType)
+	}
+}
+
+func TestConnectHelperLoadFunctionDetailErrorLeavesCacheEmpty(t *testing.T) {
+	sess := &fakeSession{describeFuncErr: errors.New("boom")}
+	h := connectFakeFuncDetail(t, "fake-fd-err", sess)
+
+	_, err := h.LoadFunctionDetail(context.Background(), "public", "f")
+	if err == nil {
+		t.Fatal("expected error from LoadFunctionDetail")
+	}
+	if _, ok := h.FunctionDetail("public", "f"); ok {
+		t.Fatal("cache populated despite load error")
+	}
+}
+
+func TestConnectHelperFunctionDetailDeepCopiesArgs(t *testing.T) {
+	want := []models.FunctionDetail{{
+		Schema: "public",
+		Name:   "f",
+		Args: []models.FunctionArg{
+			{Name: "a", Type: "int4", Mode: "IN"},
+		},
+	}}
+	sess := &fakeSession{describeFuncOut: want}
+	h := connectFakeFuncDetail(t, "fake-fd-deepcopy", sess)
+
+	if _, err := h.LoadFunctionDetail(context.Background(), "public", "f"); err != nil {
+		t.Fatalf("LoadFunctionDetail: %v", err)
+	}
+
+	first, ok := h.FunctionDetail("public", "f")
+	if !ok {
+		t.Fatal("FunctionDetail miss after successful load")
+	}
+	if len(first) != 1 || len(first[0].Args) != 1 {
+		t.Fatalf("unexpected shape: %+v", first)
+	}
+
+	// Mutate an element in place AND grow the Args slice via append. With a
+	// shallow copy the in-place write would alias the cache's backing array and
+	// the append (within capacity) would clobber a neighboring slot.
+	first[0].Args[0].Name = "MUTATED"
+	first[0].Args = append(first[0].Args, models.FunctionArg{Name: "extra"})
+
+	second, ok := h.FunctionDetail("public", "f")
+	if !ok {
+		t.Fatal("FunctionDetail miss on second read")
+	}
+	if len(second) != 1 || len(second[0].Args) != 1 {
+		t.Fatalf("cache Args length mutated through returned slice: %+v", second)
+	}
+	if second[0].Args[0].Name != "a" {
+		t.Fatalf("cache Args element mutated through returned slice: %q", second[0].Args[0].Name)
+	}
+}
+
+func TestConnectHelperLoadFunctionDetailEmptyResultPopulatesKey(t *testing.T) {
+	sess := &fakeSession{describeFuncOut: []models.FunctionDetail{}}
+	h := connectFakeFuncDetail(t, "fake-fd-empty", sess)
+
+	got, err := h.LoadFunctionDetail(context.Background(), "public", "f")
+	if err != nil {
+		t.Fatalf("LoadFunctionDetail: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("LoadFunctionDetail returned %v, want empty", got)
+	}
+
+	cached, ok := h.FunctionDetail("public", "f")
+	if !ok {
+		t.Fatal("empty successful load must populate the key (want found=true)")
+	}
+	if cached == nil {
+		t.Fatal("empty hit must return a non-nil slice")
+	}
+	if len(cached) != 0 {
+		t.Fatalf("cached = %v, want empty", cached)
+	}
+}
+
+func TestConnectHelperWarmFunctionDetailFiresOnReadyOnce(t *testing.T) {
+	want := []models.FunctionDetail{{Schema: "public", Name: "f"}}
+	sess := &fakeSession{describeFuncOut: want}
+	h := connectFakeFuncDetail(t, "fake-fd-warm", sess)
+
+	// Record UI-loop scheduling: onReady must run via the injected scheduler.
+	var uiCalls atomic.Int32
+	h.SetUIScheduler(func(fn func() error) {
+		uiCalls.Add(1)
+		_ = fn()
+	})
+
+	var ready atomic.Int32
+	done := make(chan struct{}, 1)
+	h.WarmFunctionDetail("public", "f", func() {
+		ready.Add(1)
+		select {
+		case done <- struct{}{}:
+		default:
+		}
+	})
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("onReady never fired after warm")
+	}
+
+	// Give any erroneous second invocation a chance to land.
+	time.Sleep(20 * time.Millisecond)
+	if got := ready.Load(); got != 1 {
+		t.Fatalf("onReady fired %d times, want 1", got)
+	}
+	if got := uiCalls.Load(); got != 1 {
+		t.Fatalf("UI scheduler invoked %d times, want 1", got)
+	}
+	if _, ok := h.FunctionDetail("public", "f"); !ok {
+		t.Fatal("warm did not populate the cache")
+	}
+}
+
+func TestConnectHelperWarmFunctionDetailNilOnReadySafe(t *testing.T) {
+	sess := &fakeSession{describeFuncOut: []models.FunctionDetail{{Name: "f"}}}
+	h := connectFakeFuncDetail(t, "fake-fd-warm-nil", sess)
+
+	h.WarmFunctionDetail("public", "f", nil)
+
+	// Poll for cache population — the warm runs async.
+	deadline := time.After(2 * time.Second)
+	for {
+		if _, ok := h.FunctionDetail("public", "f"); ok {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("warm with nil onReady never populated cache")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+func TestConnectHelperWarmFunctionDetailConcurrentSingleRoundTrip(t *testing.T) {
+	// Block DescribeFunction until released so all warms pile up while one load
+	// is in flight, exercising the in-flight dedup.
+	release := make(chan struct{})
+	sess := &fakeSession{describeFuncOut: []models.FunctionDetail{{Name: "f"}}}
+	blocking := &blockingDescribeSession{fakeSession: sess, release: release}
+
+	h := connectBlockingDescribe(t, "fake-fd-warm-conc", blocking)
+
+	var ready atomic.Int32
+	const n = 8
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for range n {
+		go func() {
+			defer wg.Done()
+			h.WarmFunctionDetail("public", "f", func() { ready.Add(1) })
+		}()
+	}
+
+	// Let all warms race to claim the in-flight slot.
+	time.Sleep(30 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	// Allow the single load + its onReady to settle.
+	deadline := time.After(2 * time.Second)
+	for {
+		if _, ok := h.FunctionDetail("public", "f"); ok {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("cache never populated")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	if got := blocking.describeCalls.Load(); got != 1 {
+		t.Fatalf("DescribeFunction round-trips = %d, want 1 (dedup broken)", got)
+	}
+	if got := ready.Load(); got != 1 {
+		t.Fatalf("onReady fired %d times, want exactly 1", got)
+	}
+}
+
+// blockingDescribeSession wraps fakeSession to block DescribeFunction on a
+// channel and count round-trips independently, so the in-flight dedup test can
+// hold a single load open while concurrent warms pile up.
+type blockingDescribeSession struct {
+	*fakeSession
+	release       chan struct{}
+	describeCalls atomic.Int32
+}
+
+func (s *blockingDescribeSession) DescribeFunction(ctx context.Context, _, _ string) ([]models.FunctionDetail, error) {
+	s.describeCalls.Add(1)
+	select {
+	case <-s.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return s.describeFuncOut, nil
+}
+
+func connectBlockingDescribe(t *testing.T, name string, sess drivers.Session) *ConnectHelper {
+	t.Helper()
+	bc := &blockingConnection{sess: sess}
+	drv := &blockingDriver{conn: bc}
+	drivers.Register(name, func(_ context.Context) (drivers.Driver, error) {
+		return drv, nil
+	})
+	h := NewConnectHelper()
+	if _, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: name}, nil); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(h.Disconnect)
+	return h
+}
+
+// blockingConnection / blockingDriver return the blocking session wrapper from
+// AcquireSession so DescribeFunction goes through the wrapper, not the embedded
+// fakeSession.
+type blockingConnection struct {
+	sess   drivers.Session
+	closed atomic.Bool
+}
+
+func (c *blockingConnection) Close() error                 { c.closed.Store(true); return nil }
+func (c *blockingConnection) Ping(_ context.Context) error { return nil }
+func (c *blockingConnection) ServerVersion() string        { return "fake-1.0" }
+func (c *blockingConnection) AcquireSession(_ context.Context) (drivers.Session, error) {
+	return c.sess, nil
+}
+func (c *blockingConnection) Cancel(_ context.Context, _ models.QueryID) error { return nil }
+
+type blockingDriver struct{ conn *blockingConnection }
+
+func (d *blockingDriver) Name() string                       { return "fake" }
+func (d *blockingDriver) Capabilities() drivers.Capabilities { return drivers.Capabilities{} }
+func (d *blockingDriver) Open(_ context.Context, _ drivers.ConnectionProfile, _ drivers.ProgressReporter) (drivers.Connection, error) {
+	return d.conn, nil
 }

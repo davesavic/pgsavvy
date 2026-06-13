@@ -87,8 +87,8 @@ func (s *wireFakeSession) ListFunctions(_ context.Context) ([]string, error) {
 	return nil, nil
 }
 
-func (s *wireFakeSession) DescribeFunction(_ context.Context, _, _ string) (models.FunctionDetail, error) {
-	return models.FunctionDetail{}, nil
+func (s *wireFakeSession) DescribeFunction(_ context.Context, _, _ string) ([]models.FunctionDetail, error) {
+	return nil, nil
 }
 
 func (s *wireFakeSession) Execute(_ context.Context, _ models.Query) (models.Result, error) {
@@ -494,5 +494,54 @@ func TestEditorBufferAdapterInsertAtCursorMultiLineOneUndo(t *testing.T) {
 	}
 	if got, want := buf.String(), "a"; got != want {
 		t.Fatalf("after single Undo String() = %q, want %q (multi-line insert is one undo step)", got, want)
+	}
+}
+
+// TestWireEditorCompletionRegistersSnippetSource asserts that after the GUI
+// wires the completion engine (wireEditorCompletion, run during
+// wireWithDriver), the engine's Sources() contains exactly one source named
+// "snippets" and it is the real *editor.SnippetSource — not the removed
+// placeholder stub source (dbsavvy-ko4m.7.3).
+func TestWireEditorCompletionRegistersSnippetSource(t *testing.T) {
+	g, _ := buildTestGuiWithHistory(t)
+
+	sources := g.CompletionSourcesForTest()
+	if len(sources) == 0 {
+		t.Fatal("CompletionSourcesForTest() returned no sources; wireEditorCompletion did not wire the engine")
+	}
+
+	var snippetSources []editor.Source
+	for _, s := range sources {
+		if s.Name() == editor.SnippetSourceName {
+			snippetSources = append(snippetSources, s)
+		}
+	}
+	if len(snippetSources) != 1 {
+		t.Fatalf("found %d sources named %q; want exactly 1", len(snippetSources), editor.SnippetSourceName)
+	}
+	if _, ok := snippetSources[0].(*editor.SnippetSource); !ok {
+		t.Fatalf("snippet source has type %T; want *editor.SnippetSource (not the removed stub)", snippetSources[0])
+	}
+
+	// The wired source must be backed by the built-in provider, so Trigger on
+	// an empty prefix surfaces built-in snippets (e.g. select_all) with a
+	// non-empty Body — proving it is not an empty provider.
+	buf := &editor.Buffer{Lines: []editor.Line{{Runes: []rune("select_al")}}}
+	pos := editor.Position{Line: 0, Col: len([]rune("select_al"))}
+	got := snippetSources[0].Suggest(context.Background(), buf, pos)
+	found := false
+	for _, sug := range got {
+		if sug.Source != editor.SnippetSourceName {
+			t.Errorf("suggestion Source = %q; want %q", sug.Source, editor.SnippetSourceName)
+		}
+		if sug.Text == "select_all" {
+			found = true
+			if sug.Body == "" {
+				t.Error("built-in snippet select_all has empty Body; want the multi-line expansion")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("wired SnippetSource did not surface built-in snippet select_all; got %d suggestions (provider may be empty)", len(got))
 	}
 }
