@@ -967,7 +967,7 @@ func (g *Gui) anchoredPopupRect(ctx types.IBaseContext, dims map[string]ui.Dimen
 
 	suggestions := prov.Suggestions()
 	rows := min(len(suggestions), suggestionsRowsMax)
-	contentW := min(longestDisplayWidth(suggestions), suggestionsColsMax)
+	contentW := min(guicontext.SuggestionsRenderWidth(suggestions), suggestionsColsMax)
 	return anchoredRect(vx0, vy0, vx1, vy1, ox, oy, prov.Anchor(), contentW, rows), true
 }
 
@@ -981,21 +981,6 @@ func popupRectFallbackCentered(key types.ContextKey, dims map[string]ui.Dimensio
 	}
 	spec := guicontext.PopupRectSpecFor(key)
 	return centeredRect(canvas, spec.WidthFrac, spec.HeightFrac), true
-}
-
-// longestDisplayWidth returns the widest suggestion Display in runes,
-// including the 2-cell "> " selection marker the renderer prefixes to
-// every row. Rune count is a best-effort cell width (wide-char correction
-// is out of scope for v1).
-func longestDisplayWidth(suggestions []editor.Suggestion) int {
-	const markerCols = 2
-	max := 0
-	for _, s := range suggestions {
-		if n := len([]rune(s.Display)); n > max {
-			max = n
-		}
-	}
-	return max + markerCols
 }
 
 // renderLimitOverlay sizes a single LIMIT view to the full canvas and

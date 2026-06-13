@@ -369,6 +369,56 @@ func formatSuggestionsBody(suggestions []editor.Suggestion, selected, visibleMax
 	return sb.String()
 }
 
+// SuggestionsRenderWidth returns the widest *rendered* row width in runes for
+// the given suggestions — the content width the anchored completion popup must
+// reserve so no row is clipped horizontally. It mirrors
+// formatSuggestionsBody/composeSuggestionRow exactly: the 2-col "> " selection
+// marker, the glyph + space prefix, the name column padded to the widest name,
+// the 2-col detail gutter, and the detail tokens. The layout previously sized
+// the box from len(Display)+marker alone, which omitted the glyph/space/detail
+// columns and clipped wide rows (dbsavvy-ko4m: "> ! WHER" instead of "WHERE").
+func SuggestionsRenderWidth(suggestions []editor.Suggestion) int {
+	const markerCols = 2
+	// First pass mirrors formatSuggestionsBody: sanitize each name and find
+	// the widest (rune count) so typed rows' detail column aligns.
+	names := make([]string, len(suggestions))
+	nameWidth := 0
+	for i, s := range suggestions {
+		names[i] = grid.SanitizeCellEscapes(suggestionName(s))
+		if w := utf8.RuneCountInString(names[i]); w > nameWidth {
+			nameWidth = w
+		}
+	}
+	maxBody := 0
+	for i, s := range suggestions {
+		if w := suggestionRowBodyWidth(s, names[i], nameWidth); w > maxBody {
+			maxBody = w
+		}
+	}
+	return markerCols + maxBody
+}
+
+// suggestionRowBodyWidth is the rune width of composeSuggestionRow's output
+// with styling stripped. It MUST stay in lockstep with composeSuggestionRow.
+func suggestionRowBodyWidth(s editor.Suggestion, sanitizedName string, nameWidth int) int {
+	if isUntyped(s) {
+		return utf8.RuneCountInString(grid.SanitizeCellEscapes(s.Display))
+	}
+	// glyph + space + name
+	w := 2 + utf8.RuneCountInString(sanitizedName)
+	detail := suggestionDetail(s)
+	if detail == "" {
+		return w
+	}
+	pad := nameWidth - utf8.RuneCountInString(sanitizedName)
+	if pad < 0 {
+		pad = 0
+	}
+	// pad + 2-col gutter + detail (suggestionDetail already sanitized its
+	// tokens, so its rune count is the visible width composeSuggestionRow draws)
+	return w + pad + 2 + utf8.RuneCountInString(detail)
+}
+
 // suggestionName returns the bare name to render for a suggestion: the
 // insert Text when set (typed rows carry the bare identifier in Text
 // and metadata in the typed fields), otherwise the Display. The caller
