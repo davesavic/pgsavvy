@@ -916,6 +916,14 @@ func (q *QueryEditorController) openResultTab(stmt string, rh *session.RunHandle
 		}
 		attacher.AttachActiveTabOrigin(stmt, nil, defaultSchema)
 	}
+	// dbsavvy-r9oy: move focus to the results pane now that a tab is open,
+	// so the user can navigate results without a manual pane switch. Fires
+	// for every run path (run-one / run-all / visual-run) since they all
+	// converge here. Nil-safe — unwired in unit tests that don't exercise
+	// the focus stack.
+	if q.helpers.FocusResults != nil {
+		q.logErr("focus_results", q.helpers.FocusResults())
+	}
 }
 
 func (q *QueryEditorController) openPlanTab(stmt string, plan models.Plan) {
@@ -923,6 +931,12 @@ func (q *QueryEditorController) openPlanTab(stmt string, plan models.Plan) {
 		return
 	}
 	_ = q.helpers.ResultTabs.OpenPlanTab(tabLabel(stmt), plan)
+	// dbsavvy-zwp6: move focus to the results pane (now the plan tab) so the
+	// user can navigate the plan tree without a manual pane switch, matching
+	// the grid run path (dbsavvy-r9oy). Nil-safe — unwired in unit tests.
+	if q.helpers.FocusResults != nil {
+		q.logErr("focus_results", q.helpers.FocusResults())
+	}
 }
 
 // tabLabel produces the result-tab title from sql. Whitespace is

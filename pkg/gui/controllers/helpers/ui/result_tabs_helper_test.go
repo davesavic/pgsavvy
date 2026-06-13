@@ -450,6 +450,84 @@ func TestEvictionDoesNotFireOnActiveClosed(t *testing.T) {
 	}
 }
 
+// --- CloseAll (connection switch) -----------------------------------------
+
+// TestCloseAllRemovesEveryTab verifies CloseAll empties the tab list and
+// clears the active selection — the connection-switch path: results from
+// the prior connection must not survive into the new one.
+func TestCloseAllRemovesEveryTab(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	for _, sql := range []string{"q1", "q2", "q3"} {
+		_ = h.openTab(sql, nil)
+	}
+	if h.Count() != 3 {
+		t.Fatalf("Count before CloseAll = %d, want 3", h.Count())
+	}
+
+	h.CloseAll()
+
+	if h.Count() != 0 {
+		t.Errorf("Count after CloseAll = %d, want 0", h.Count())
+	}
+	if active := h.Active(); active != nil {
+		t.Errorf("Active after CloseAll = %v, want nil", active)
+	}
+}
+
+// TestCloseAllDisposesRunningStreams verifies CloseAll disposes every
+// tab's stream — switching connections must not leak goroutines bound to
+// the now-dead session. The first tab runs (its RunHandle is cancelled);
+// the second queues (only one stream in flight at a time) so its waiter
+// is aborted rather than cancelled. Both runners are stopped.
+func TestCloseAllDisposesRunningStreams(t *testing.T) {
+	factory := func() StreamRunner { return &fakeStreamRunner{} }
+	h, _ := newTestHelper(t, factory)
+	rh1, rh2 := newFakeRunHandle(), newFakeRunHandle()
+	_ = h.openTab("A", rh1)
+	_ = h.openTab("B", rh2)
+	tabs := h.Tabs()
+
+	h.CloseAll()
+
+	if !rh1.wasCancelled() {
+		t.Error("running tab's rh.Cancel not called by CloseAll")
+	}
+	for i, tab := range tabs {
+		r := tab.runner.(*fakeStreamRunner)
+		if r.StopCount() != 1 {
+			t.Errorf("tab[%d] runner.Stop count = %d, want 1", i, r.StopCount())
+		}
+	}
+}
+
+// TestCloseAllFiresOnTabRemovedPerTab verifies CloseAll fires the
+// onTabRemoved hook for every closed tab so collaborators (jump list)
+// drop their stale references.
+func TestCloseAllFiresOnTabRemovedPerTab(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	var removed int
+	h.SetOnTabRemoved(func(string) { removed++ })
+	for _, sql := range []string{"q1", "q2", "q3"} {
+		_ = h.openTab(sql, nil)
+	}
+
+	h.CloseAll()
+
+	if removed != 3 {
+		t.Errorf("onTabRemoved fired %d times, want 3", removed)
+	}
+}
+
+// TestCloseAllOnEmptyIsNoOp verifies CloseAll is safe with no open tabs
+// (the first-connect / startup case).
+func TestCloseAllOnEmptyIsNoOp(t *testing.T) {
+	h, _ := newTestHelper(t, nil)
+	h.CloseAll()
+	if h.Count() != 0 {
+		t.Errorf("Count = %d, want 0", h.Count())
+	}
+}
+
 // --- Pin ------------------------------------------------------------------
 
 func TestPinTogglesAndProtectsFromEviction(t *testing.T) {

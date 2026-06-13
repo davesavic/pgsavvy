@@ -277,6 +277,11 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		if active == nil {
 			t.Fatal("Active() = nil after <leader>r")
 		}
+		// dbsavvy-r9oy: <leader>r moves focus onto the results pane so the
+		// user can navigate the grid without a manual pane switch.
+		if got := s.g.ContextTree().Current().GetKey(); got != types.RESULT_GRID {
+			t.Fatalf("focus key after <leader>r = %q, want RESULT_GRID", got)
+		}
 		// The ResultBufferManager's initial-fill drains up to
 		// resultTabInitialRows synchronously before parking on the
 		// chan loop. The tab stays in StateRunning post-EOF (D-13 /
@@ -657,6 +662,11 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		// Plan tabs go straight to StatePlan synchronously.
 		if active.State() != ui.StatePlan {
 			t.Fatalf("EXPLAIN tab state = %v, want StatePlan", active.State())
+		}
+		// dbsavvy-zwp6: <leader>e moves focus onto the results pane (plan
+		// tab) so the user can navigate the plan tree without a manual switch.
+		if got := s.g.ContextTree().Current().GetKey(); got != types.PLAN {
+			t.Fatalf("focus key after <leader>e = %q, want PLAN", got)
 		}
 		plan := active.Plan()
 		if strings.TrimSpace(plan.RawText) == "" {

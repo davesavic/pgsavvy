@@ -1022,6 +1022,38 @@ func (h *ResultTabsHelper) Close(t *Tab) error {
 	return nil
 }
 
+// CloseAll disposes every tab and removes them all, leaving the helper
+// empty with no active selection. Used on a connection switch (dbsavvy
+// <leader>C → pick another connection): result tabs are bound to the
+// outgoing connection's session, so they must not survive into the new
+// one. Disposes each tab's stream (cancel + stop), deletes its gocui
+// view, and fires onTabRemoved per tab so collaborators (jump list) drop
+// their stale references. No-op when empty (the first-connect case).
+//
+// Focus-stack reconciliation is the caller's job: the connect publish
+// phase re-pushes the schemas/tables rails and the query editor right
+// after, which displaces the dangling result-tab MAIN_CONTEXT. CloseAll
+// fires no onActiveClosed (that is the user-initiated <leader>X path).
+func (h *ResultTabsHelper) CloseAll() {
+	h.mu.Lock()
+	tabs := h.tabs
+	h.tabs = nil
+	h.activeID = 0
+	cb := h.onTabRemoved
+	driver := h.deps.Driver
+	h.mu.Unlock()
+
+	for _, t := range tabs {
+		t.dispose()
+		if driver != nil {
+			_ = driver.DeleteView(t.ViewName())
+		}
+		if cb != nil {
+			cb(fmt.Sprintf("%d", t.id))
+		}
+	}
+}
+
 // SetOnTabRemoved registers a callback fired after a tab is removed
 // (via Close OR the eviction path in allocTab, which itself calls Close
 // on the victim). The callback receives the closed tab's stringified ID

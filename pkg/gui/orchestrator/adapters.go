@@ -570,6 +570,14 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 			}
 			return nil
 		}
+		// Clear result tabs from the outgoing connection: they are bound
+		// to the old session and would otherwise display stale results
+		// after the switch to a different database. Runs before the rail/
+		// editor pushes below, which displace the dangling result-tab
+		// MAIN_CONTEXT off the focus stack. No-op on a first connect.
+		if c.g != nil && c.g.resultTabsH != nil {
+			c.g.resultTabsH.CloseAll()
+		}
 		c.publishQueryRuntime(rt)
 		c.publishQueryEditorBuffer(editorBuf, editorOK)
 		c.publishSchemaItems(schemaItems, schemaOK)

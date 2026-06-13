@@ -174,6 +174,15 @@ type QueryDeps struct {
 	// Wired by the orchestrator to *data.SchemaWarmer. Nil-safe: the controller
 	// no-ops when unwired. dbsavvy-ko4m.2.4.
 	MetadataInvalidator SchemaMetadataInvalidator
+
+	// FocusResults pushes the active result tab onto the focus stack so the
+	// results pane takes focus after a query opens a tab. Wired by the
+	// orchestrator to a closure over tree.Push(resultTabsH.ActiveContext()),
+	// mirroring the OnTableActivate focus-push. Push is a no-op when the
+	// result context is already top, so the table-activate path's own push
+	// stays idempotent. Nil-safe: the controller no-ops when unwired
+	// (dbsavvy-r9oy).
+	FocusResults func() error
 }
 
 // ThreadingDeps carries the UI-thread / worker scheduling closures

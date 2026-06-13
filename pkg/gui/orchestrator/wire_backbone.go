@@ -435,6 +435,20 @@ func (g *Gui) wireHelperDeps() (controllers.UIDeps, controllers.QueryDeps, contr
 		// controllers), so the adapter resolves g.schemaWarmer lazily at
 		// call time rather than capturing it here. dbsavvy-ko4m.2.4.
 		MetadataInvalidator: &metadataInvalidatorAdapter{g: g},
+		// FocusResults pushes the active result tab onto the focus stack so
+		// the results pane takes focus after a query opens a tab. Mirrors the
+		// OnTableActivate push (buildOnTableActivate); Push no-ops when the
+		// context is already top. Nil-safe at the call site. dbsavvy-r9oy.
+		FocusResults: func() error {
+			if g.tree == nil || g.resultTabsH == nil {
+				return nil
+			}
+			target := g.resultTabsH.ActiveContext()
+			if target == nil {
+				return nil
+			}
+			return g.tree.Push(target)
+		},
 	}
 
 	// ThreadingDeps (DESIGN.md §17 / dbsavvy-66p.1) — all three closures
