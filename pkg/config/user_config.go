@@ -42,6 +42,14 @@ type EditorConfig struct {
 	// the manual omni-complete chord remains available. (ADR-16)
 	Autocomplete bool `yaml:"autocomplete"`
 
+	// AutocompleteAlias enables auto-inserting an editable, deduped table
+	// alias when a table candidate is accepted in a table context (e.g.
+	// accepting `users` after `FROM ` inserts `users u`). Default true on
+	// fresh install. Setting `editor.autocomplete_alias: false` makes table
+	// accept insert the bare table name (no alias); column qualification and
+	// non-table accepts are unaffected. dbsavvy-ko4m.6.2 (Finding K).
+	AutocompleteAlias bool `yaml:"autocomplete_alias"`
+
 	// FKForwardLimit caps the row count of the parameterized SELECT
 	// issued by the `gd` forward foreign-key navigation. Default 1000.
 	// Must be > 0. dbsavvy-bwq.16 (B5).
@@ -233,8 +241,9 @@ func GetDefaultConfig() *UserConfig {
 			},
 		},
 		Editor: EditorConfig{
-			Autocomplete:   true,
-			FKForwardLimit: 1000,
+			Autocomplete:      true,
+			AutocompleteAlias: true,
+			FKForwardLimit:    1000,
 		},
 	}
 }

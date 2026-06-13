@@ -65,6 +65,36 @@ func TestListFunctions_ReturnsSortedAndIncludesSeeded(t *testing.T) {
 	}
 }
 
+func TestListFunctions_OverloadedNameCollapsesToOneEntry(t *testing.T) {
+	sess := openIntegrationSession(t)
+	ctx := context.Background()
+
+	// The fixture seeds app.fn_overload with two distinct signatures
+	// (dbsavvy-ko4m.5.1). ListFunctions projects routine_name alone, so the
+	// overloaded pair must collapse to exactly one entry — DescribeFunction is
+	// the surface that fans the overloads back out.
+	if _, err := sess.Execute(ctx, models.Query{SQL: `SET search_path TO app, public`}); err != nil {
+		t.Fatalf("set search_path: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = sess.Execute(ctx, models.Query{SQL: `RESET search_path`})
+	})
+
+	names, err := sess.ListFunctions(ctx)
+	if err != nil {
+		t.Fatalf("ListFunctions: %v", err)
+	}
+	count := 0
+	for _, n := range names {
+		if n == "fn_overload" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected fn_overload exactly once (overloads de-duped), got %d in %v", count, names)
+	}
+}
+
 func TestListFunctions_EmptyWhenSearchPathHasNoFunctions(t *testing.T) {
 	sess := openIntegrationSession(t)
 	ctx := context.Background()

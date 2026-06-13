@@ -134,8 +134,8 @@ func (s *fakeSess) ListFunctions(context.Context) ([]string, error) {
 	return nil, nil
 }
 
-func (s *fakeSess) DescribeFunction(context.Context, string, string) (models.FunctionDetail, error) {
-	return models.FunctionDetail{}, nil
+func (s *fakeSess) DescribeFunction(context.Context, string, string) ([]models.FunctionDetail, error) {
+	return nil, nil
 }
 
 func (s *fakeSess) Execute(context.Context, models.Query) (models.Result, error) {

@@ -105,7 +105,7 @@ func newQueryBag(t *testing.T, caps drivers.Capabilities) *queryBag {
 
 func TestQueryEditorControllerPublishesSixBindings(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
 
 	wantActions := map[string]bool{
@@ -168,7 +168,7 @@ func TestResultTabsControllerLeaderBindingsExcludeInsertMode(t *testing.T) {
 // ModeInsert cleared from its Mode mask.
 func TestQueryEditorControllerLeaderBindingsExcludeInsertMode(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
 	leaderCount := 0
 	for _, kb := range kbs {
@@ -200,7 +200,7 @@ func TestQueryEditorControllerLeaderBindingsExcludeInsertMode(t *testing.T) {
 // visual-selection fan-out must be preserved).
 func TestQueryEditorControllerRunBindingFiresInNormalMode(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	kbs := ctrl.GetKeybindings(types.KeybindingsOpts{})
 
 	normalRun := false
@@ -226,7 +226,7 @@ func TestQueryEditorControllerRunBindingFiresInNormalMode(t *testing.T) {
 
 func TestQueryEditorControllerRegisterActionsRegistersAllSix(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -250,7 +250,7 @@ func TestQueryEditorControllerRegisterActionsRegistersAllSix(t *testing.T) {
 
 func TestQueryEditorCancelDisabledWhenDriverLacksLiveCancel(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: false})
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -270,7 +270,7 @@ func TestQueryEditorCancelDisabledWhenDriverLacksLiveCancel(t *testing.T) {
 
 func TestQueryEditorCancelEnabledWhenDriverSupportsLiveCancel(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -289,7 +289,7 @@ func TestQueryEditorCancelEnabledWhenDriverSupportsLiveCancel(t *testing.T) {
 // without re-registration.
 func TestQueryEditorController_CancelDisabled_RecomputesAfterBind(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: false})
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -329,7 +329,7 @@ func TestQueryEditorController_CancelDisabled_RecomputesAfterBind(t *testing.T) 
 
 func TestQueryEditorHandleCancelToastsWhenDisabled(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: false})
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -350,7 +350,7 @@ func TestQueryEditorRunWithEmptyBufferToasts(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
 	b.Buffer.Text = ""
 	b.Buffer.Off = 0
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -369,7 +369,7 @@ func TestQueryEditorRunWithEmptyBufferToasts(t *testing.T) {
 func TestQueryEditorRunAllWithOnlySemicolonsToasts(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
 	b.Buffer.Text = "  ;  ;"
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -386,7 +386,7 @@ func TestQueryEditorRunNoSessionToasts(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
 	b.Buffer.Text = "SELECT 1;"
 	b.Buffer.Off = 3 // cursor inside "SELECT 1"
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -407,7 +407,7 @@ func TestQueryEditorRunNoSessionToasts(t *testing.T) {
 
 func TestQueryEditorAttachToContextNilSafe(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	// Must not panic.
 	ctrl.AttachToContext(nil)
 }
@@ -505,7 +505,7 @@ func TestQueryEditorRunOnSecondLineRoutesCorrectStatement(t *testing.T) {
 	base.HelperBag.EditorBuffer = buf
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -536,7 +536,7 @@ func runEditorWith(t *testing.T, bufText string, conn *models.Connection) (*reco
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 	base.HelperBag.ConnProfile = func() *models.Connection { return conn }
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	cmd, _ := reg.Get(commands.QueryRun)
@@ -634,7 +634,7 @@ func TestQueryEditorRunAppliesConfigDefaultTimeout(t *testing.T) {
 	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1;", Off: 3}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(c, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(c, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -664,7 +664,7 @@ func TestQueryEditorRunNoTimeoutWhenConfigOff(t *testing.T) {
 	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1;", Off: 3}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(c, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(c, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -691,7 +691,7 @@ func TestQueryEditorRunNilCommonNoTimeout(t *testing.T) {
 	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1;", Off: 3}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -716,7 +716,7 @@ func TestQueryEditorRunAllDispatchesEverySegmentSequentially(t *testing.T) {
 	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1; SELECT 2; SELECT 3;"}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -741,7 +741,7 @@ func TestQueryEditorRunAllDispatchesEverySegmentSequentially(t *testing.T) {
 // focusing an empty results panel.
 func TestQueryEditorRunSQLNoSessionReturnsFalse(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 
 	if ctrl.RunSQL("SELECT 1") {
 		t.Fatal("RunSQL returned true with no active session, want false")
@@ -758,7 +758,7 @@ func TestQueryEditorRunSQLNoSessionReturnsFalse(t *testing.T) {
 // short-circuits before touching the runner.
 func TestQueryEditorRunSQLBlankReturnsFalse(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 
 	if ctrl.RunSQL("   ") {
 		t.Fatal("RunSQL returned true for a blank statement, want false")
@@ -780,7 +780,7 @@ func TestQueryEditorRunSQLDispatchesStatement(t *testing.T) {
 	base.HelperBag.QueryRunner = runner
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 
 	const sql = `SELECT * FROM "public"."users" LIMIT 100`
 	if !ctrl.RunSQL(sql) {
@@ -805,7 +805,7 @@ func TestSurfaceErrPreemptPendingShowsToastNotErrorTab(t *testing.T) {
 	b.Buffer.Text = "SELECT 1"
 	b.HelperBag.ConnProfile = func() *models.Connection { return &models.Connection{} }
 
-	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, b.HelperBag.CoreDeps, b.HelperBag.NavDeps, b.HelperBag.UIDeps, b.HelperBag.QueryDeps, b.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 	cmd, _ := reg.Get(commands.QueryRun)
@@ -853,7 +853,7 @@ func TestQueryEditorRunAllPreemptsBeforeEachStream(t *testing.T) {
 	base.HelperBag.QueryRunner = runner
 	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1; SELECT 2;"}
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -885,7 +885,7 @@ func TestQueryEditorRunInNewTxIssuesBeginBeforeStream(t *testing.T) {
 	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1;", Off: 3}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -914,7 +914,7 @@ func TestQueryEditorExplainAnalyzeWrapsInBeginRollback(t *testing.T) {
 	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT * FROM t;", Off: 3}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -948,7 +948,7 @@ func TestQueryEditorExplainNoticeToasts(t *testing.T) {
 	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT 1;", Off: 3}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -978,7 +978,7 @@ func TestQueryEditorVisualRunFansOutEachStatement(t *testing.T) {
 	}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -1019,7 +1019,7 @@ func TestQueryEditorVisualRunOverCapAbortsBeforeAnyRun(t *testing.T) {
 	}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 
@@ -1051,7 +1051,7 @@ func TestQueryEditorVisualRunEmptySelectionToasts(t *testing.T) {
 	}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
-	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps)
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()
 	ctrl.RegisterActions(reg)
 

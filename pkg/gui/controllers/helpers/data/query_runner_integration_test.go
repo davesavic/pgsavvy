@@ -56,7 +56,7 @@ func requirePGRunner(t *testing.T) (*data.QueryRunner, *session.SQLSession) {
 		Name:   "query-runner-integration",
 		Driver: "postgres",
 		DSN:    dsn,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("driver open: %v", err)
 	}

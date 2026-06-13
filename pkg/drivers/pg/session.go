@@ -2,7 +2,9 @@ package pg
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync/atomic"
@@ -360,11 +362,116 @@ func (s *Session) ListConstraints(ctx context.Context, schema, table string) ([]
 	return out, nil
 }
 
-// DescribeFunction returns drivers.ErrNotImplemented in v1; the pg_proc
-// introspection lands in a later epic.
-func (s *Session) DescribeFunction(_ context.Context, _, _ string) (models.FunctionDetail, error) {
+// volatilityFromChar maps pg_proc.provolatile (i/s/v) to the human-readable
+// volatility label stored on models.FunctionDetail. Unknown chars pass through
+// unchanged so a future Postgres value is visible rather than silently dropped.
+func volatilityFromChar(c string) string {
+	switch c {
+	case "i":
+		return "IMMUTABLE"
+	case "s":
+		return "STABLE"
+	case "v":
+		return "VOLATILE"
+	default:
+		return c
+	}
+}
+
+// argModeFromChar maps a pg_proc.proargmodes element to the FunctionArg.Mode
+// label. The fallback (used when proargmodes is NULL, encoded as 'i' by the
+// SQL) is IN. Unknown chars pass through unchanged.
+func argModeFromChar(c string) string {
+	switch c {
+	case "i":
+		return "IN"
+	case "o":
+		return "OUT"
+	case "b":
+		return "INOUT"
+	case "v":
+		return "VARIADIC"
+	case "t":
+		return "TABLE"
+	default:
+		return c
+	}
+}
+
+// describeFunctionArg is the per-element shape of the JSON args column produced
+// by sql/describe_function.sql. mode carries the raw pg_proc char.
+type describeFunctionArg struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Mode string `json:"mode"`
+}
+
+// DescribeFunction returns one models.FunctionDetail per overload of
+// (schema, name) — Postgres permits many pg_proc rows sharing schema+name with
+// distinct argument types. A non-existent (schema, name) yields an empty slice
+// and a nil error. schema + name are bound as query params ($1/$2); no
+// identifier interpolation. Every query/scan error is wrapped via wrapPgError
+// and logged through logs.Event.
+func (s *Session) DescribeFunction(ctx context.Context, schema, name string) ([]models.FunctionDetail, error) {
 	defer s.guard()()
-	return models.FunctionDetail{}, drivers.ErrNotImplemented
+	s.parent.warnIfPostgresGE18()
+	rows, err := s.conn.Query(ctx, sqlDescribeFunction, schema, name)
+	if err != nil {
+		werr := wrapPgError(err)
+		logs.Event(pkgLogger(), "db", "describe_function_error",
+			slog.String("schema", schema),
+			slog.String("name", name),
+			slog.String("err", werr.Error()),
+		)
+		return nil, werr
+	}
+	defer rows.Close()
+	var out []models.FunctionDetail
+	for rows.Next() {
+		var (
+			fd       models.FunctionDetail
+			vol      string
+			argsJSON []byte
+		)
+		if err := rows.Scan(&fd.Schema, &fd.Name, &fd.ReturnType, &vol, &fd.Language, &argsJSON); err != nil {
+			werr := wrapPgError(err)
+			logs.Event(pkgLogger(), "db", "describe_function_error",
+				slog.String("schema", schema),
+				slog.String("name", name),
+				slog.String("err", werr.Error()),
+			)
+			return nil, werr
+		}
+		fd.Volatility = volatilityFromChar(vol)
+		var raw []describeFunctionArg
+		if err := json.Unmarshal(argsJSON, &raw); err != nil {
+			logs.Event(pkgLogger(), "db", "describe_function_error",
+				slog.String("schema", schema),
+				slog.String("name", name),
+				slog.String("err", err.Error()),
+			)
+			return nil, fmt.Errorf("describe_function: decode args for %s.%s: %w", schema, name, err)
+		}
+		fd.Args = make([]models.FunctionArg, 0, len(raw))
+		for _, a := range raw {
+			fd.Args = append(fd.Args, models.FunctionArg{
+				Name: a.Name,
+				Type: a.Type,
+				Mode: argModeFromChar(a.Mode),
+			})
+		}
+		out = append(out, fd)
+	}
+	if err := rows.Err(); err != nil {
+		werr := wrapPgError(err)
+		logs.Event(pkgLogger(), "db", "describe_function_error",
+			slog.String("schema", schema),
+			slog.String("name", name),
+			slog.String("err", werr.Error()),
+		)
+		return nil, werr
+	}
+	return out, nil
 }
 
 // Execute runs q.SQL with q.Args and materializes the entire result set into

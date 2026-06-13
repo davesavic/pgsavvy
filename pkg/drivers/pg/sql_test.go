@@ -121,6 +121,20 @@ func TestEmbeddedSQL_ContainsExpectedIdentifiers(t *testing.T) {
 			},
 		},
 		{
+			name:  "describe_function",
+			query: sqlDescribeFunction,
+			contains: []string{
+				"pg_proc",
+				"pg_namespace",
+				"pg_language",
+				"pg_get_function_result",
+				"provolatile",
+				"proargmodes",
+				"$1",
+				"$2",
+			},
+		},
+		{
 			name:  "editability_introspect",
 			query: sqlEditabilityIntrospect,
 			contains: []string{
@@ -163,7 +177,7 @@ func TestEmbeddedSQL_ContainsExpectedIdentifiers(t *testing.T) {
 	}
 }
 
-func TestEmbeddedSQL_FilesystemHasExactlyTwelveSQLFiles(t *testing.T) {
+func TestEmbeddedSQL_FilesystemHasExactlyThirteenSQLFiles(t *testing.T) {
 	entries, err := sqlFS.ReadDir("sql")
 	require.NoError(t, err)
 
@@ -180,8 +194,23 @@ func TestEmbeddedSQL_FilesystemHasExactlyTwelveSQLFiles(t *testing.T) {
 	require.Len(
 		t,
 		sqlFiles,
-		12,
-		"expected exactly 12 embedded .sql files (got %v); add the new file's //go:embed directive in embed.go",
+		13,
+		"expected exactly 13 embedded .sql files (got %v); add the new file's //go:embed directive in embed.go",
 		sqlFiles,
 	)
+}
+
+// TestDescribeFunctionSQLIsParameterized is the SQLi-mandate guard: schema and
+// function name MUST be bound as $1/$2 (mirrors list_columns.sql), never
+// string-interpolated. A function name containing a single quote is therefore
+// inert — it can only ever arrive as a bound parameter value, so this asserts
+// the query has no string-concatenation seam an attacker could exploit.
+func TestDescribeFunctionSQLIsParameterized(t *testing.T) {
+	const maliciousName = "foo'); DROP TABLE app.users; --"
+	require.Contains(t, sqlDescribeFunction, "$1", "schema must be a bound param")
+	require.Contains(t, sqlDescribeFunction, "$2", "name must be a bound param")
+	// The embedded SQL must not embed the attacker-controlled value: it is a
+	// static string with no fmt verbs or the malicious literal.
+	require.NotContains(t, sqlDescribeFunction, maliciousName)
+	require.NotContains(t, sqlDescribeFunction, "%s", "no printf interpolation seam")
 }

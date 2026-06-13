@@ -42,6 +42,9 @@ var sqlListInboundForeignKeys string
 //go:embed sql/list_functions.sql
 var sqlListFunctions string
 
+//go:embed sql/describe_function.sql
+var sqlDescribeFunction string
+
 //go:embed sql/editability_introspect.sql
 var sqlEditabilityIntrospect string
 

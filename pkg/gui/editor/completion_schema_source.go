@@ -2,11 +2,8 @@ package editor
 
 import (
 	"context"
-	"regexp"
-	"strings"
-	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor/sqlcontext"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
@@ -16,87 +13,53 @@ import (
 const SchemaSourceName = "schema"
 
 // SchemaSourcePriority is the default Priority() the schema source
-// declares. Higher than keywords/history (C4 wires those lower) so
-// schema-driven hits win ties in Engine dedupe. The exact value is
-// not load-bearing for C2 — Z1 may rewire from a central registry.
-const SchemaSourcePriority = 80
-
-// SchemaSourceScore is the Score every schema table/column suggestion
-// carries. Engine.Trigger sorts by Score DESCENDING (priority is only a
-// within-equal-score tiebreak), so this must sit ABOVE the keyword /
-// history fixed Score of 1 — otherwise schema hits, the most relevant
-// completion in a FROM / `<ident>.` context, sort below every keyword
-// and fall outside the visible window. dbsavvy-ybi.
-const SchemaSourceScore = 3
-
-// SessionProvider returns the live drivers.Session backing the
-// active query editor. Returns nil when there is no live session —
-// SchemaSource then returns an empty slice (epic ADR for "active-
-// session-required empty state": Suggestions popup shows "no active
-// connection" rather than triggering the source).
-type SessionProvider func() drivers.Session
+// declares — the SECONDARY tiebreak in Engine dedupe when two
+// Suggestions share the composite Score. It derives from the central
+// SchemaSourceBias (completion_source.go) so the schema rank lives in
+// ONE place (dbsavvy-ko4m.3, Finding B4) — do not redeclare a separate
+// 80 here. Mirrors FunctionSourcePriority = FunctionSourceBias.
+const SchemaSourcePriority = SchemaSourceBias
 
 // SchemaProvider returns the current schema name used to resolve
 // unqualified `FROM` / `JOIN` table lookups. Empty string is treated
 // as "no schema selected" — the source returns empty for table-context
-// matches in that case (column-context still works when the user types
-// `schema.table.` because ListColumns takes the schema verbatim from
-// the matched prefix... v1 does not yet support that — see scope note).
+// matches in that case. A schema-qualified reference (`public.users.`)
+// carries its own schema in the engine's TableRef/Qualifier and overrides
+// this default.
 type SchemaProvider func() string
 
-// SchemaSource implements Source by translating cursor-context regex
-// matches on the line-up-to-cursor into table / column suggestions
-// from the live drivers.Session.
+// SchemaSource implements Source by translating the sqlcontext engine's
+// cursor-context analysis into table / column suggestions read SYNCHRONOUSLY
+// from a background-warmed metadata snapshot (SchemaMetadata). It owns NO
+// cache of its own — the store is the single source of truth (ko4m.2 §FROZEN
+// DECISION 6). On a column miss it fires a reactive, non-blocking warm via
+// TableWarmer and returns immediately with whatever is currently cached
+// (possibly empty); when the warm lands, the controller re-triggers completion
+// (ko4m.2.3 re-trigger bridge), so the columns appear without an extra
+// keystroke.
 //
-// Detection scope (v1):
-//   - trailing FROM / JOIN / INNER JOIN / LEFT JOIN / RIGHT JOIN /
-//     CROSS JOIN / UPDATE / INTO  (case-insensitive) → tables of the
-//     current schema
-//   - trailing <ident>.  (no whitespace before the dot)             → columns of <ident>
-//
-// Stripping (single-line, applied to line-up-to-cursor BEFORE regex
-// match so a keyword inside a string literal or comment does NOT
-// trigger):
-//   - single-quoted strings 'foo' with ” escape
-//   - dollar-quoted strings $$...$$ and $tag$...$tag$
-//   - line comments  -- ... end of line
-//   - block comments /* ... */  (single-line only)
-//
-// Multi-line constructs (a string or block comment that opens on a
-// previous line and is still open at the cursor) are a known v1
-// limitation: the regex may false-positive trigger. The tracking
-// epic for tree-sitter-grade parsing is dbsavvy-ktt.
-//
-// Identifier case is preserved verbatim when passed to ListColumns;
-// Postgres resolves unquoted identifiers case-folded (lowercase)
-// which matches the typical user expectation. Quoted identifiers
-// are not handled in v1 — a typed `"MyTable".` will be matched as
-// the literal `"MyTable"` and ListColumns will be called with that
-// string, which will fail server-side; the source then returns
-// empty (no error propagation).
+// Detection is entirely engine-backed (sqlcontext.Analyze, ko4m.1.x): no
+// regexes, no line stripping. A cursor inside a string/comment yields the zero
+// ContextResult, so noise returns empty.
 type SchemaSource struct {
 	priority int
-	session  SessionProvider
+	meta     SchemaMetadata
+	warmer   TableWarmer
 	schema   SchemaProvider
-
-	mu         sync.Mutex
-	cachedSess drivers.Session // identity the caches were built against
-
-	tablesCache    []Suggestion // full (unfiltered) table list, per (session,schema)
-	tablesCacheKey string       // schema the table cache was built for
-	hasTables      bool
-	columnsCache   map[string][]Suggestion // full column lists keyed by schema\x00table
 }
 
-// NewSchemaSource constructs a SchemaSource. Either provider may be
-// nil — a nil provider is treated as if it returned the zero value
-// (nil session / empty schema), which causes Suggest to return an
-// empty slice. The defaults exist so the source can be unit-tested
-// in isolation and wired post-construction by Z1.
-func NewSchemaSource(session SessionProvider, schema SchemaProvider) *SchemaSource {
+// NewSchemaSource constructs a SchemaSource over the synchronous metadata
+// snapshot (meta), the reactive table warmer (warmer), and the active-schema
+// provider (schema). Any argument may be nil — a nil meta/schema causes Suggest
+// to return an empty slice, and a nil warmer disables reactive warming (Suggest
+// still serves whatever is already cached). The defaults exist so the source
+// can be unit-tested in isolation and wired post-construction by the
+// orchestrator.
+func NewSchemaSource(meta SchemaMetadata, warmer TableWarmer, schema SchemaProvider) *SchemaSource {
 	return &SchemaSource{
 		priority: SchemaSourcePriority,
-		session:  session,
+		meta:     meta,
+		warmer:   warmer,
 		schema:   schema,
 	}
 }
@@ -107,160 +70,126 @@ func (s *SchemaSource) Name() string { return SchemaSourceName }
 // Priority returns the source's tiebreak rank for the Engine.
 func (s *SchemaSource) Priority() int { return s.priority }
 
-// reKeywordTable matches a trailing keyword that means "next token
-// is a table name", optionally followed by a partial identifier the
-// user has begun typing. Case-insensitive; requires terminal
-// whitespace after the keyword. Word boundary at the start prevents
-// `XFROM ` from matching. The trailing capture is the partial (empty
-// when the user has only typed the keyword + space); a COMPLETE table
-// name followed by a space (`FROM users `) does NOT match because the
-// keyword no longer abuts the cursor token.
-var reKeywordTable = regexp.MustCompile(`(?i)(?:^|\s|[(,;])(?:FROM|JOIN|INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|CROSS\s+JOIN|UPDATE|INTO)\s+([A-Za-z_][A-Za-z0-9_]*)?$`)
-
-// reIdentDot matches a trailing `<ident>.` with no whitespace
-// between the identifier and the dot, optionally followed by a partial
-// column identifier. Captures the identifier (group 1) and the partial
-// column prefix (group 2, possibly empty).
-var reIdentDot = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)?$`)
-
-// reColumnContext matches a trailing position where an UNQUALIFIED
-// column is expected: right after SELECT / WHERE / AND / OR (each
-// requiring a following space and a word boundary before it), or right
-// after a comparison operator (=, <>, !=, <=, >=, <, >). The single
-// capture group is the partial column identifier the user has begun
-// typing (empty when only the keyword/operator + space was typed). A
-// completed token followed by a space does NOT match, mirroring
-// reKeywordTable.
-var reColumnContext = regexp.MustCompile(`(?i)(?:(?:^|[\s(,])(?:SELECT|WHERE|AND|OR)\s+|(?:<>|!=|<=|>=|=|<|>)\s*)([A-Za-z_][A-Za-z0-9_]*)?$`)
-
-// reJoinCondition matches a trailing join-condition position: right
-// after `ON` or `USING` (case-insensitive, requiring following
-// whitespace and a word boundary before). The single capture is the
-// partial identifier the user has begun typing (empty when only the
-// keyword + space was typed). This is where a join predicate like
-// `posts.id = posts_summary.post_id` goes, so the source offers the
-// in-scope tables (to qualify a column via `posts.`) plus their columns.
-var reJoinCondition = regexp.MustCompile(`(?i)(?:^|\s|[(,])(?:ON|USING)\s+([A-Za-z_][A-Za-z0-9_]*)?$`)
-
-// reFromJoinTables matches every `FROM <table>` / `JOIN <table>` in a
-// statement (global), capturing the table identifier. Word boundary at
-// the start prevents matching inside larger identifiers. Schema-qualified
-// names and aliases are not resolved (v1) — the first identifier after
-// the keyword is captured verbatim.
-var reFromJoinTables = regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)`)
-
-// Suggest returns table or column suggestions based on the cursor
-// context. Returns an empty slice for any failure (no providers, no
-// session, no match, driver error). Never returns nil — callers
-// can range freely.
+// Suggest returns table or column suggestions based on the cursor context,
+// detected by the sqlcontext engine. Reads are SYNCHRONOUS against the snapshot
+// store — no driver round-trip, no blocking. Returns an empty slice for any
+// failure (no store, no schema, no context, no match, unloaded). Never returns
+// nil — callers can range freely.
+//
+// The engine's ContextResult maps to a suggest helper:
+//   - Qualifier.Present              → columns of the resolved table (the
+//     `alias.`/`table.` dot context); the resolved Qualifier.Table is
+//     preferred, falling back to the raw typed Ident when unresolved.
+//   - Expect == ExpectTables         → tables of the current schema (FROM/JOIN).
+//   - Expect == ExpectBoth           → ON/USING join condition: in-scope tables
+//     plus their columns.
+//   - Expect == ExpectColumns        → columns of every in-scope table
+//     (SELECT/WHERE), unioned and deduped.
 func (s *SchemaSource) Suggest(ctx context.Context, buf *Buffer, pos Position) []Suggestion {
-	if buf == nil {
+	if buf == nil || s.meta == nil {
 		return []Suggestion{}
 	}
-	line := lineUpToCursor(buf, pos)
-	if line == "" {
+	res, ok := schemaContextAt(buf, pos)
+	if !ok {
 		return []Suggestion{}
 	}
-	stripped, open := stripNoiseEx(line)
-	if open {
-		// Cursor sits inside an unterminated string / comment — no
-		// completion (the trailing keyword/operator the regexes would
-		// match is blanked content, not a real clause position).
-		return []Suggestion{}
+	prefix := identifierPrefixAt(buf, pos)
+
+	// Dot-qualifier wins: `<ident>.` is an unambiguous single-table column
+	// lookup. Prefer the resolved table; fall back to the typed ident so an
+	// as-yet-unresolved name is still keyed verbatim into the store. The
+	// qualifier carries its own schema (schema-qualified `public.users.`),
+	// preferred over the active-schema default.
+	if res.Qualifier.Present {
+		schema := s.schemaFor(res.Qualifier.Schema)
+		table := res.Qualifier.Table
+		if table == "" {
+			table = res.Qualifier.Ident
+		}
+		cols := s.suggestColumns(schema, table, prefix)
+		// FK-first ranking (ko4m.1.4): in an ON clause (Expect==ExpectBoth),
+		// a qualified `o.` column that participates in an FK to another
+		// in-scope table ranks first. Outside an ON clause this is a no-op.
+		if res.Expect == sqlcontext.ExpectBoth {
+			cols = s.fkColumnsFirst(schema, table, res.InScopeTables, cols)
+		}
+		return cols
 	}
 
-	// Column context wins over keyword context: `users.` matches the
-	// dot rule and is unambiguous; a `FROM users.` line is treated
-	// as a column lookup on `users` (which will likely return empty
-	// — `FROM table.` is not valid SQL anyway).
-	if m := reIdentDot.FindStringSubmatch(stripped); m != nil {
-		return s.suggestColumns(ctx, m[1], m[2])
-	}
-	if m := reKeywordTable.FindStringSubmatch(stripped); m != nil {
-		return s.suggestTables(ctx, m[1])
-	}
-	if m := reJoinCondition.FindStringSubmatch(stripped); m != nil {
-		return s.suggestJoinCondition(ctx, buf, m[1])
-	}
-	if m := reColumnContext.FindStringSubmatch(stripped); m != nil {
-		tables := s.scopeTables(buf)
-		if len(tables) == 0 {
+	switch res.Expect {
+	case sqlcontext.ExpectTables:
+		return s.suggestTables(prefix)
+	case sqlcontext.ExpectBoth:
+		return s.suggestJoinCondition(res.InScopeTables, prefix)
+	case sqlcontext.ExpectColumns:
+		if len(res.InScopeTables) == 0 {
 			return []Suggestion{}
 		}
-		return s.suggestColumnsMulti(ctx, tables, m[1])
-	}
-	return []Suggestion{}
-}
-
-// scopeTables returns the distinct table names referenced by FROM /
-// JOIN clauses anywhere in the buffer, in first-seen order. The whole
-// buffer is scanned (not just text up to the cursor) so a column
-// position before the FROM clause — e.g. inside the SELECT list — still
-// resolves its tables. Each line is noise-stripped independently before
-// matching. Multi-statement buffers may over-collect (v1 limitation).
-func (s *SchemaSource) scopeTables(buf *Buffer) []string {
-	var sb strings.Builder
-	for _, ln := range buf.LinesCopy() {
-		clean, _ := stripNoiseEx(string(ln.Runes))
-		sb.WriteString(clean)
-		sb.WriteByte(' ')
-	}
-	matches := reFromJoinTables.FindAllStringSubmatch(sb.String(), -1)
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(matches))
-	for _, m := range matches {
-		name := m[1]
-		if name == "" {
-			continue
-		}
-		if _, dup := seen[name]; dup {
-			continue
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
-	}
-	return out
-}
-
-// suggestJoinCondition serves the JOIN ... ON / USING position. It offers
-// the tables already referenced by FROM/JOIN (so the user can qualify a
-// column via `posts.`) followed by those tables' columns, all filtered by
-// the typed prefix. Returns empty when no tables are in scope. Duplicate
-// Text across the table and column sets is left for Engine dedupe.
-func (s *SchemaSource) suggestJoinCondition(ctx context.Context, buf *Buffer, prefix string) []Suggestion {
-	tables := s.scopeTables(buf)
-	if len(tables) == 0 {
+		return s.suggestColumnsMulti(res.InScopeTables, prefix)
+	default:
 		return []Suggestion{}
 	}
-	out := make([]Suggestion, 0, len(tables))
-	for _, t := range tables {
-		out = append(out, Suggestion{Text: t, Display: t, Source: SchemaSourceName, Score: SchemaSourceScore})
-	}
-	out = filterByPrefix(out, prefix)
-	return append(out, s.suggestColumnsMulti(ctx, tables, prefix)...)
 }
 
-// suggestColumnsMulti returns the union of the named tables' columns,
-// deduplicated by column name in scope order (a column shared by two
-// tables appears once, attributed to the first), then filtered by
-// prefix. Returns empty when there is no session or schema.
-func (s *SchemaSource) suggestColumnsMulti(ctx context.Context, tables []string, prefix string) []Suggestion {
-	sess := s.activeSession()
-	if sess == nil {
-		return []Suggestion{}
-	}
+// suggestTables returns the current schema's tables whose name fuzzily matches
+// prefix via editor.Match (empty prefix → all), read synchronously from the
+// snapshot. Returns empty when no schema is selected or the schema's table
+// names have not been eager-loaded yet.
+func (s *SchemaSource) suggestTables(prefix string) []Suggestion {
 	schema := s.activeSchema()
 	if schema == "" {
 		return []Suggestion{}
 	}
+	names := s.meta.TableNames(schema)
+	out := make([]Suggestion, 0, len(names))
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		out = append(out, s.tableSuggestion(schema, n))
+	}
+	return filterByMatch(out, prefix)
+}
+
+// suggestColumns returns columns of (schema,table) whose name fuzzily matches
+// prefix via editor.Match (empty → all), read synchronously from the snapshot.
+// On a miss (table not warmed) it fires exactly one reactive, non-blocking warm
+// and returns empty — the re-trigger bridge re-runs completion when the warm
+// lands.
+func (s *SchemaSource) suggestColumns(schema, table, prefix string) []Suggestion {
+	if schema == "" {
+		return []Suggestion{}
+	}
+	cols, ok := s.meta.Columns(schema, table)
+	if !ok {
+		s.warm(schema, table)
+		return []Suggestion{}
+	}
+	return filterByMatch(columnSuggestions(cols, s.fkRefs(schema, table)), prefix)
+}
+
+// suggestColumnsMulti returns the union of the in-scope tables' columns,
+// deduplicated by column name in scope order (a column shared by two tables
+// appears once, attributed to the first), then filtered by prefix. Each
+// unloaded table fires one reactive warm. Returns empty when no schema is
+// selected.
+func (s *SchemaSource) suggestColumnsMulti(tables []sqlcontext.TableRef, prefix string) []Suggestion {
 	seen := map[string]struct{}{}
 	out := []Suggestion{}
 	for _, t := range tables {
-		full, ok := s.cachedColumns(ctx, sess, schema, t)
-		if !ok {
+		if t.Name == "" {
 			continue
 		}
-		for _, sg := range full {
+		schema := s.schemaFor(t.Schema)
+		if schema == "" {
+			continue
+		}
+		cols, ok := s.meta.Columns(schema, t.Name)
+		if !ok {
+			s.warm(schema, t.Name)
+			continue
+		}
+		for _, sg := range columnSuggestions(cols, s.fkRefs(schema, t.Name)) {
 			if _, dup := seen[sg.Text]; dup {
 				continue
 			}
@@ -268,139 +197,341 @@ func (s *SchemaSource) suggestColumnsMulti(ctx context.Context, tables []string,
 			out = append(out, sg)
 		}
 	}
-	return filterByPrefix(out, prefix)
+	return filterByMatch(out, prefix)
 }
 
-// suggestTables returns the current schema's tables whose name starts
-// with prefix (case-insensitive; empty prefix → all). The full list is
-// cached per (session,schema); only the prefix filter runs per call.
-// Returns empty when no session, no schema, or the driver call fails.
-func (s *SchemaSource) suggestTables(ctx context.Context, prefix string) []Suggestion {
-	sess := s.activeSession()
-	if sess == nil {
+// suggestJoinCondition serves the JOIN ... ON / USING position. It offers the
+// in-scope tables (so the user can qualify a column via `posts.`) followed by
+// those tables' columns, all filtered by the typed prefix. Columns
+// participating in an FK between two in-scope tables are ranked first (a small
+// Score boost; see fkColumnsFirst). Returns empty when no tables are in scope.
+// Duplicate Text across the table and column sets is left for Engine dedupe.
+func (s *SchemaSource) suggestJoinCondition(tables []sqlcontext.TableRef, prefix string) []Suggestion {
+	if len(tables) == 0 {
 		return []Suggestion{}
-	}
-	schema := s.activeSchema()
-	if schema == "" {
-		return []Suggestion{}
-	}
-	full, ok := s.cachedTables(ctx, sess, schema)
-	if !ok {
-		return []Suggestion{}
-	}
-	return filterByPrefix(full, prefix)
-}
-
-// suggestColumns returns columns of the named table in the current
-// schema whose name starts with prefix (case-insensitive; empty →
-// all). The full column list is cached per (schema,table). The table
-// identifier is passed verbatim to the driver — Postgres case-folding
-// semantics apply.
-func (s *SchemaSource) suggestColumns(ctx context.Context, table, prefix string) []Suggestion {
-	sess := s.activeSession()
-	if sess == nil {
-		return []Suggestion{}
-	}
-	schema := s.activeSchema()
-	if schema == "" {
-		return []Suggestion{}
-	}
-	full, ok := s.cachedColumns(ctx, sess, schema, table)
-	if !ok {
-		return []Suggestion{}
-	}
-	return filterByPrefix(full, prefix)
-}
-
-// cachedTables returns the full table-suggestion list for (sess,schema),
-// fetching and caching it on a miss. The bool is false on driver error
-// or empty result (neither is cached, so the next call retries).
-func (s *SchemaSource) cachedTables(ctx context.Context, sess drivers.Session, schema string) ([]Suggestion, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.invalidateIfStale(sess)
-	if s.hasTables && s.tablesCacheKey == schema {
-		return s.tablesCache, true
-	}
-	tables, err := sess.ListTables(ctx, schema)
-	if err != nil || len(tables) == 0 {
-		return nil, false
 	}
 	out := make([]Suggestion, 0, len(tables))
 	for _, t := range tables {
-		if t == nil || t.Name == "" {
+		if t.Name == "" {
 			continue
 		}
-		out = append(out, Suggestion{Text: t.Name, Display: t.Name, Source: SchemaSourceName, Score: SchemaSourceScore})
+		out = append(out, s.tableSuggestion(s.schemaFor(t.Schema), t.Name))
 	}
-	s.tablesCache = out
-	s.tablesCacheKey = schema
-	s.hasTables = true
-	return out, true
+	out = filterByMatch(out, prefix)
+
+	cols := s.suggestColumnsMulti(tables, prefix)
+	cols = s.fkColumnsFirstMulti(tables, cols)
+	return append(out, cols...)
 }
 
-// cachedColumns returns the full column-suggestion list for
-// (schema,table), fetching and caching it on a miss. The bool is false
-// on driver error or empty result (neither is cached).
-func (s *SchemaSource) cachedColumns(ctx context.Context, sess drivers.Session, schema, table string) ([]Suggestion, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.invalidateIfStale(sess)
-	key := schema + "\x00" + table
-	if cached, ok := s.columnsCache[key]; ok {
-		return cached, true
+// fkColumnBoost is the additive Score bump given to a column that participates
+// in an FK between two in-scope tables, so it sorts before sibling non-FK
+// columns. The Engine sorts by Score descending, so a positive, fixed boost is
+// what makes "FK column first" survive the merge sort — input-position ordering
+// alone would not, because the table-name suggestions and column suggestions
+// from the same schema source otherwise share Score (matchQuality +
+// SchemaSourceBias). The boost is intentionally small and additive: it leaves
+// the fuzzy matchQuality mechanism (ko4m.3) untouched and only breaks ties
+// among schema columns. It is smaller than SchemaSourceBias so FK ranking never
+// reorders across sources.
+const fkColumnBoost = 5
+
+// fkColumnsFirst boosts the Score of every column of (schema,table) that
+// participates in an FK edge with another in-scope table — whether table is the
+// referencing side (forward FK: a column of table referencing an in-scope
+// RefTable) or the referenced side (reverse FK: another in-scope table's FK
+// whose RefTable is table). Boosted columns keep their fuzzy matchQuality and
+// remain prefix-filtered (they were already filtered in cols); we only raise
+// their Score so the Engine sorts them first among schema columns.
+//
+// Finding N (cross-schema FK fallback): FK edges are read synchronously via
+// s.meta.ForeignKeys. When an edge's owning table is not yet in the snapshot
+// (ForeignKeys returns ok==false), it is simply skipped — no FK column is
+// promoted for that edge and the normal column list stands. No crash, no
+// dropped completion.
+//
+// Composite FK: every column in ForeignKey.Columns (referencing side) or
+// ForeignKey.RefColumns (referenced side) is collected, so all participating
+// columns rank first without any positional index assumption.
+func (s *SchemaSource) fkColumnsFirst(schema, table string, inScope []sqlcontext.TableRef, cols []Suggestion) []Suggestion {
+	if len(cols) == 0 {
+		return cols
 	}
-	cols, err := sess.ListColumns(ctx, schema, table)
-	if err != nil || len(cols) == 0 {
-		return nil, false
+	fkCols := s.fkColumnSet(schema, table, inScope)
+	if len(fkCols) == 0 {
+		return cols
 	}
-	out := make([]Suggestion, 0, len(cols))
-	for _, c := range cols {
-		if c.Name == "" {
+	for i := range cols {
+		if _, isFK := fkCols[cols[i].Text]; isFK {
+			cols[i].Score += fkColumnBoost
+		}
+	}
+	return cols
+}
+
+// fkColumnsFirstMulti applies fkColumnsFirst across the unioned column list of
+// the in-scope tables (the unqualified ON/USING path). A column is boosted if it
+// participates in an FK for ANY in-scope table whose own name matches the
+// suggestion's table. Since suggestColumnsMulti dedupes by column name (first
+// table wins), we union the FK column sets of all in-scope tables and boost any
+// suggestion whose Text is in that union.
+func (s *SchemaSource) fkColumnsFirstMulti(tables []sqlcontext.TableRef, cols []Suggestion) []Suggestion {
+	if len(cols) == 0 || len(tables) == 0 {
+		return cols
+	}
+	fkCols := map[string]struct{}{}
+	for _, t := range tables {
+		if t.Name == "" {
 			continue
 		}
-		out = append(out, Suggestion{Text: c.Name, Display: formatColumnDisplay(c), Source: SchemaSourceName, Score: SchemaSourceScore})
+		schema := s.schemaFor(t.Schema)
+		if schema == "" {
+			continue
+		}
+		for name := range s.fkColumnSet(schema, t.Name, tables) {
+			fkCols[name] = struct{}{}
+		}
 	}
-	if s.columnsCache == nil {
-		s.columnsCache = map[string][]Suggestion{}
+	if len(fkCols) == 0 {
+		return cols
 	}
-	s.columnsCache[key] = out
-	return out, true
+	for i := range cols {
+		if _, isFK := fkCols[cols[i].Text]; isFK {
+			cols[i].Score += fkColumnBoost
+		}
+	}
+	return cols
 }
 
-// invalidateIfStale drops all caches when the active session pointer
-// differs from the one the caches were built against (reconnect).
-// Caller must hold s.mu.
-func (s *SchemaSource) invalidateIfStale(sess drivers.Session) {
-	if s.cachedSess == sess {
-		return
-	}
-	s.cachedSess = sess
-	s.tablesCache = nil
-	s.tablesCacheKey = ""
-	s.hasTables = false
-	s.columnsCache = nil
-}
+// fkColumnSet returns the set of column names of (schema,table) that take part
+// in an FK linking table to another in-scope table — forward (table references
+// an in-scope table) and reverse (an in-scope table references table). Reads FK
+// edges synchronously from the snapshot via s.meta.ForeignKeys. An edge whose
+// owning table is unloaded (ok==false) is skipped (Finding N fallback). Returns
+// an empty set when no in-scope FK edge exists, which makes fkColumnsFirst a
+// no-op (normal column list stands).
+func (s *SchemaSource) fkColumnSet(schema, table string, inScope []sqlcontext.TableRef) map[string]struct{} {
+	out := map[string]struct{}{}
 
-// filterByPrefix returns the subset of sugs whose Text starts with
-// prefix (case-insensitive). Empty prefix returns the input unchanged.
-// Order is preserved.
-func filterByPrefix(sugs []Suggestion, prefix string) []Suggestion {
-	if prefix == "" {
-		return sugs
+	// Forward: this table's FKs whose RefTable is another in-scope table.
+	if fks, ok := s.meta.ForeignKeys(schema, table); ok {
+		for _, fk := range fks {
+			if !s.refTableInScope(fk.RefSchema, fk.RefTable, schema, inScope) {
+				continue
+			}
+			for _, c := range fk.Columns {
+				out[c] = struct{}{}
+			}
+		}
 	}
-	up := strings.ToUpper(prefix)
-	out := make([]Suggestion, 0, len(sugs))
-	for _, sg := range sugs {
-		if strings.HasPrefix(strings.ToUpper(sg.Text), up) {
-			out = append(out, sg)
+
+	// Reverse: another in-scope table's FK whose RefTable is THIS table. The
+	// participating columns of THIS table are the FK's RefColumns.
+	for _, other := range inScope {
+		if other.Name == "" || (other.Name == table && s.schemaFor(other.Schema) == schema) {
+			continue
+		}
+		otherSchema := s.schemaFor(other.Schema)
+		if otherSchema == "" {
+			continue
+		}
+		fks, ok := s.meta.ForeignKeys(otherSchema, other.Name)
+		if !ok {
+			continue
+		}
+		for _, fk := range fks {
+			if !s.sameTable(fk.RefSchema, fk.RefTable, schema, table) {
+				continue
+			}
+			for _, c := range fk.RefColumns {
+				out[c] = struct{}{}
+			}
 		}
 	}
 	return out
 }
 
-// formatColumnDisplay renders a Column as `<name> · <type>` when
-// DataType is non-empty, falling back to just `<name>`.
+// refTableInScope reports whether an FK's referenced (refSchema,refTable) names
+// a table that is in scope. An empty refSchema on the edge is resolved against
+// ownerSchema (the referencing table's schema) — matching how an unqualified
+// in-scope TableRef.Schema resolves to the active schema.
+func (s *SchemaSource) refTableInScope(refSchema, refTable, ownerSchema string, inScope []sqlcontext.TableRef) bool {
+	for _, t := range inScope {
+		if t.Name == "" {
+			continue
+		}
+		if s.sameTable(refSchema, refTable, s.schemaForOwner(t.Schema, ownerSchema), t.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameTable compares two (schema,table) pairs, resolving an empty edge schema
+// against fallbackSchema so an unqualified FK edge matches an in-scope table in
+// the same (active) schema.
+func (s *SchemaSource) sameTable(aSchema, aTable, bSchema, bTable string) bool {
+	if aTable != bTable {
+		return false
+	}
+	as := aSchema
+	if as == "" {
+		as = bSchema
+	}
+	return as == bSchema
+}
+
+// schemaForOwner resolves an in-scope table's schema: its own qualifier if
+// present, else the owner (referencing table) schema as the active-schema
+// stand-in.
+func (s *SchemaSource) schemaForOwner(refSchema, ownerSchema string) string {
+	if refSchema != "" {
+		return refSchema
+	}
+	return ownerSchema
+}
+
+// warm fires a reactive, non-blocking table warm. No-op when no warmer is
+// wired.
+func (s *SchemaSource) warm(schema, table string) {
+	if s.warmer == nil {
+		return
+	}
+	s.warmer.WarmTable(schema, table)
+}
+
+// columnSuggestions projects a column list into suggestions, populating the
+// typed presentation fields (ko4m.4.3, Design D1) from the warmed snapshot:
+// Kind=KindColumn, Detail=DataType, IsPrimaryKey/NotNull from the column, and
+// FKRef from fkRefs (a column-name → "refschema.reftable.refcol" map for the
+// owning table). Text stays the bare column name; Display retains the legacy
+// `<name> · <type>` form for the render fallback (Design D6). A column absent
+// from fkRefs gets FKRef=="".
+func columnSuggestions(cols []models.Column, fkRefs map[string]string) []Suggestion {
+	out := make([]Suggestion, 0, len(cols))
+	for _, c := range cols {
+		if c.Name == "" {
+			continue
+		}
+		out = append(out, Suggestion{
+			Text:         c.Name,
+			Display:      formatColumnDisplay(c),
+			Source:       SchemaSourceName,
+			Kind:         KindColumn,
+			Detail:       c.DataType,
+			IsPrimaryKey: c.IsPrimaryKey,
+			NotNull:      !c.Nullable,
+			FKRef:        fkRefs[c.Name],
+		})
+	}
+	return out
+}
+
+// tableSuggestion builds a table-context suggestion for the bare name n in
+// schema. The eager snapshot now carries the relation Kind (ko4m.2 TableEntry),
+// so a view/materialized view is marked Kind=KindView; everything else (plain
+// table, partitioned table, or an unloaded/absent name with kind "") falls back
+// to KindTable. Detail is left empty (a table needs no type detail).
+func (s *SchemaSource) tableSuggestion(schema, n string) Suggestion {
+	return Suggestion{
+		Text:    n,
+		Display: n,
+		Source:  SchemaSourceName,
+		Kind:    mapTableKind(s.meta.TableKind(schema, n)),
+	}
+}
+
+// mapTableKind maps a models.Table.Kind string (from list_tables.sql's relkind
+// CASE) to a completion SuggestionKind. There is no KindMatview, so a
+// materialized view is surfaced as KindView (the closest semantic match — both
+// are read-only relations). A plain table, a partitioned table, and the ""
+// unloaded/unknown sentinel all map to KindTable.
+//
+//	relkind 'v' -> "view"               -> KindView
+//	relkind 'm' -> "materialized_view"  -> KindView
+//	relkind 'r' -> "table"              -> KindTable
+//	relkind 'p' -> "partitioned_table"  -> KindTable
+//	""          (unloaded / absent)     -> KindTable
+func mapTableKind(kind string) SuggestionKind {
+	switch kind {
+	case "view", "materialized_view":
+		return KindView
+	default:
+		return KindTable
+	}
+}
+
+// fkRefs builds a column-name → "refschema.reftable.refcol" map for (schema,
+// table) from the snapshot's FK edges. Composite FKs pair Columns[i] with
+// RefColumns[i] positionally (Design: composite FK references the
+// positionally-paired ref column). An edge's RefSchema falls back to the
+// owning table's schema when the store reports it empty, mirroring how
+// fkColumnSet resolves unqualified edges. Returns an empty map when the table
+// is unwarmed (ForeignKeys ok==false) so columns get FKRef=="" — never blocks,
+// never calls drivers.Session.
+func (s *SchemaSource) fkRefs(schema, table string) map[string]string {
+	fks, ok := s.meta.ForeignKeys(schema, table)
+	if !ok {
+		return map[string]string{}
+	}
+	out := map[string]string{}
+	for _, fk := range fks {
+		refSchema := fk.RefSchema
+		if refSchema == "" {
+			refSchema = schema
+		}
+		for i, col := range fk.Columns {
+			if i >= len(fk.RefColumns) {
+				break
+			}
+			if col == "" {
+				continue
+			}
+			if _, dup := out[col]; dup {
+				continue
+			}
+			out[col] = refSchema + "." + fk.RefTable + "." + fk.RefColumns[i]
+		}
+	}
+	return out
+}
+
+// schemaFor returns refSchema when the reference carried its own schema
+// qualifier (e.g. `public.users.`), else the active-schema default.
+func (s *SchemaSource) schemaFor(refSchema string) string {
+	if refSchema != "" {
+		return refSchema
+	}
+	return s.activeSchema()
+}
+
+// filterByMatch runs editor.Match (fzf-style subsequence matcher, ko4m.3.1)
+// against each suggestion's Text. A suggestion is kept iff Match reports ok
+// (subsequence that clears the quality floor); a 1-char-overlap junk candidate
+// is dropped automatically via ok=false. The composite ranking contract
+// (ko4m.3.2) is applied: Score = matchQuality + SchemaSourceBias and Matches =
+// the rune offsets into Text that Match flagged.
+//
+// An empty prefix yields Match("", x) == (true, 0, nil), so every suggestion is
+// kept with Score = SchemaSourceBias and Matches = nil — preserving the full
+// in-scope list. Input order is preserved; the Engine performs the final
+// Score-descending sort.
+func filterByMatch(sugs []Suggestion, prefix string) []Suggestion {
+	out := make([]Suggestion, 0, len(sugs))
+	for _, sg := range sugs {
+		ok, quality, positions := Match(prefix, sg.Text)
+		if !ok {
+			continue
+		}
+		sg.Score = quality + SchemaSourceBias
+		sg.Matches = positions
+		out = append(out, sg)
+	}
+	return out
+}
+
+// formatColumnDisplay renders a Column as `<name> · <type>` when DataType is
+// non-empty, falling back to just `<name>`.
 func formatColumnDisplay(c models.Column) string {
 	if c.DataType == "" {
 		return c.Name
@@ -408,166 +539,10 @@ func formatColumnDisplay(c models.Column) string {
 	return c.Name + " · " + c.DataType
 }
 
-// activeSession safely calls the SessionProvider; nil provider
-// returns nil.
-func (s *SchemaSource) activeSession() drivers.Session {
-	if s.session == nil {
-		return nil
-	}
-	return s.session()
-}
-
-// activeSchema safely calls the SchemaProvider; nil provider
-// returns "".
+// activeSchema safely calls the SchemaProvider; nil provider returns "".
 func (s *SchemaSource) activeSchema() string {
 	if s.schema == nil {
 		return ""
 	}
 	return s.schema()
-}
-
-// lineUpToCursor returns the line text from column 0 up to (but not
-// including) pos.Col. Returns empty when pos is out of range.
-func lineUpToCursor(buf *Buffer, pos Position) string {
-	lines := buf.LinesCopy()
-	if pos.Line < 0 || pos.Line >= len(lines) {
-		return ""
-	}
-	runes := lines[pos.Line].Runes
-	col := min(max(pos.Col, 0), len(runes))
-	return string(runes[:col])
-}
-
-// stripNoise removes string literals, dollar-quoted strings, and
-// comments from s by replacing their characters with spaces. Using
-// spaces (rather than deleting) preserves column offsets so trailing
-// `\s+$` anchors keep working naturally.
-//
-// Multi-line constructs are NOT supported — a string or block comment
-// that opens on a previous line is not detected; v1 limitation.
-func stripNoise(s string) string {
-	out, _ := stripNoiseEx(s)
-	return out
-}
-
-// stripNoiseEx is stripNoise plus a flag reporting whether the scan
-// ended INSIDE an unterminated construct (open string, dollar-quote,
-// block comment, or a line comment running to the end). Callers use the
-// flag to suppress completion when the cursor sits inside a literal or
-// comment: blanking alone cannot distinguish `SELECT <space>` (a real
-// column position) from `SELECT '<blanked string>` (inside a literal).
-func stripNoiseEx(s string) (string, bool) {
-	if s == "" {
-		return s, false
-	}
-	out := []byte(s)
-	n := len(out)
-	i := 0
-	open := false
-	for i < n {
-		c := out[i]
-		switch {
-		case c == '\'':
-			// Single-quoted string with '' escape.
-			j := i + 1
-			closed := false
-			for j < n {
-				if out[j] == '\'' {
-					if j+1 < n && out[j+1] == '\'' {
-						j += 2
-						continue
-					}
-					j++
-					closed = true
-					break
-				}
-				j++
-			}
-			fillSpaces(out, i, j)
-			if !closed {
-				open = true
-			}
-			i = j
-		case c == '-' && i+1 < n && out[i+1] == '-':
-			// Line comment to end of string.
-			fillSpaces(out, i, n)
-			open = true
-			i = n
-		case c == '/' && i+1 < n && out[i+1] == '*':
-			// Block comment; close at first */ (single-line only).
-			j := i + 2
-			for j+1 < n && (out[j] != '*' || out[j+1] != '/') {
-				j++
-			}
-			if j+1 < n {
-				j += 2 // include the closing */
-				fillSpaces(out, i, j)
-			} else {
-				j = n
-				fillSpaces(out, i, j)
-				open = true
-			}
-			i = j
-		case c == '$':
-			// Dollar-quoted string: $tag$ ... $tag$ (tag may be empty
-			// for `$$ ... $$`). Tag is [A-Za-z_][A-Za-z0-9_]*.
-			tagEnd := i + 1
-			for tagEnd < n && isDollarTagByte(out[tagEnd]) {
-				tagEnd++
-			}
-			if tagEnd >= n || out[tagEnd] != '$' {
-				i++
-				continue
-			}
-			tag := string(out[i : tagEnd+1]) // includes leading and trailing $
-			j := tagEnd + 1
-			closeIdx := indexOf(out, j, tag)
-			if closeIdx < 0 {
-				fillSpaces(out, i, n)
-				open = true
-				i = n
-			} else {
-				j = closeIdx + len(tag)
-				fillSpaces(out, i, j)
-				i = j
-			}
-		default:
-			i++
-		}
-	}
-	return string(out), open
-}
-
-// fillSpaces replaces out[start:end] with spaces in place.
-func fillSpaces(out []byte, start, end int) {
-	if start < 0 {
-		start = 0
-	}
-	if end > len(out) {
-		end = len(out)
-	}
-	for k := start; k < end; k++ {
-		out[k] = ' '
-	}
-}
-
-// isDollarTagByte reports whether b is allowed inside a dollar-quote
-// tag (letters, digits, underscore — first char must be a letter or
-// underscore but we accept digits everywhere; a leading-digit tag is
-// invalid SQL and just won't match a closer, falling through safely).
-func isDollarTagByte(b byte) bool {
-	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '_'
-}
-
-// indexOf returns the index of needle starting at from in out, or
-// -1 when absent. Simple wrapper around strings.Index for byte slices.
-func indexOf(out []byte, from int, needle string) int {
-	if from >= len(out) {
-		return -1
-	}
-	rel := strings.Index(string(out[from:]), needle)
-	if rel < 0 {
-		return -1
-	}
-	return from + rel
 }

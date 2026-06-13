@@ -92,8 +92,8 @@ func (s *fkGuardSession) ListConstraints(context.Context, string, string) ([]mod
 
 func (s *fkGuardSession) ListFunctions(context.Context) ([]string, error) { return nil, nil }
 
-func (s *fkGuardSession) DescribeFunction(context.Context, string, string) (models.FunctionDetail, error) {
-	return models.FunctionDetail{}, nil
+func (s *fkGuardSession) DescribeFunction(context.Context, string, string) ([]models.FunctionDetail, error) {
+	return nil, nil
 }
 
 func (s *fkGuardSession) Execute(context.Context, models.Query) (models.Result, error) {

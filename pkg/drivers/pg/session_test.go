@@ -78,11 +78,20 @@ func TestSessionReleaseInFlightIdempotent(t *testing.T) {
 	s.releaseInFlight()
 }
 
-func TestSessionDescribeFunctionReturnsErrNotImplemented(t *testing.T) {
-	s := newStubSession()
-	fd, err := s.DescribeFunction(context.Background(), "public", "foo")
-	require.ErrorIs(t, err, drivers.ErrNotImplemented)
-	require.Equal(t, models.FunctionDetail{}, fd)
+func TestSessionDescribeFunctionVolatilityFromChar(t *testing.T) {
+	require.Equal(t, "IMMUTABLE", volatilityFromChar("i"))
+	require.Equal(t, "STABLE", volatilityFromChar("s"))
+	require.Equal(t, "VOLATILE", volatilityFromChar("v"))
+	require.Equal(t, "x", volatilityFromChar("x"), "unknown char passes through")
+}
+
+func TestSessionDescribeFunctionArgModeFromChar(t *testing.T) {
+	require.Equal(t, "IN", argModeFromChar("i"))
+	require.Equal(t, "OUT", argModeFromChar("o"))
+	require.Equal(t, "INOUT", argModeFromChar("b"))
+	require.Equal(t, "VARIADIC", argModeFromChar("v"))
+	require.Equal(t, "TABLE", argModeFromChar("t"))
+	require.Equal(t, "z", argModeFromChar("z"), "unknown char passes through")
 }
 
 func TestSessionInTransactionFalseCurrentTransactionNil(t *testing.T) {

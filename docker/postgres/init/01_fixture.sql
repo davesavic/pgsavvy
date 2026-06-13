@@ -108,9 +108,21 @@ INSERT INTO app.posts (id, user_id, title, body, published, published_at) VALUES
 REFRESH MATERIALIZED VIEW app.posts_summary;
 
 -- ---------------------------------------------------------------------------
+-- Overloaded function pair for DescribeFunction introspection (dbsavvy-ko4m.5.1)
+-- Same schema+name, distinct argument types -> two pg_proc rows. Name is new
+-- and not used by ListFunctions de-dup assertions (which use *_marker names).
+-- ---------------------------------------------------------------------------
+
+CREATE FUNCTION app.fn_overload(a int) RETURNS int
+    LANGUAGE sql IMMUTABLE AS $$ SELECT a $$;
+
+CREATE FUNCTION app.fn_overload(a text, b text) RETURNS text
+    LANGUAGE sql STABLE AS $$ SELECT a || b $$;
+
+-- ---------------------------------------------------------------------------
 -- Fixture version stamp (read by test/integration TestMain)
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE app._fixture_meta (version INT NOT NULL);
-INSERT INTO app._fixture_meta (version) VALUES (1);
+INSERT INTO app._fixture_meta (version) VALUES (2);
 COMMENT ON TABLE app._fixture_meta IS 'Fixture schema version; bump in lockstep with test constants.';

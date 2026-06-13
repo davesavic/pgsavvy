@@ -44,7 +44,7 @@ func openIntegrationSQLSession(t *testing.T) *session.SQLSession {
 		Name:   "fk-forward-test",
 		Driver: "postgres",
 		DSN:    dsn,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("driver open: %v", err)
 	}

@@ -267,6 +267,17 @@ func (g *Gui) wireRefreshHelperDeps(connectInv *connectInvoker) {
 				return nil
 			}
 		}
+		// dbsavvy-ko4m.2.4: a manual 'r' on the COLUMNS rail is the user's
+		// signal that the selected table's shape may have changed externally.
+		// Drop its warmed lazy (column+FK) entry and re-warm the schema's eager
+		// tier so completion serves fresh metadata. InvalidateTable + LoadEager
+		// are idempotent and run on this worker goroutine.
+		if g.schemaWarmer != nil && schema != "" {
+			if table != "" {
+				g.schemaWarmer.InvalidateTable(schema, table)
+			}
+			g.schemaWarmer.LoadEager(schema)
+		}
 		connectInv.populateColumnsRail(ctx, schema, table)
 		return nil
 	})
@@ -359,6 +370,14 @@ func (g *Gui) wireNavDeps(connectInv *connectInvoker, tablePicker tablesPickerAd
 
 			connectInv.populateTablesRail(context.Background(), schema)
 
+			// dbsavvy-ko4m.2.3: re-warm the completion metadata snapshot for the
+			// newly selected schema (table+view + function names) so FROM /
+			// function completion in the new schema serves from the store.
+			// Already on a worker; LoadEager is synchronous + idempotent.
+			if g.schemaWarmer != nil {
+				g.schemaWarmer.LoadEager(schema)
+			}
+
 			// Push the refreshed TABLES context onto the focus stack so the
 			// user lands there after picking a schema.
 			return connectInv.g.tree.Push(g.registry.Tables)
@@ -410,6 +429,12 @@ func (g *Gui) wireHelperDeps() (controllers.UIDeps, controllers.QueryDeps, contr
 		ConnProfile: func() *models.Connection {
 			return g.connectionState.activeConnProfile
 		},
+		// MetadataInvalidator routes post-run DDL + manual-'r' metadata
+		// invalidation to the SchemaWarmer. The warmer is built later in
+		// wireEditorCompletion (after this bundle is value-copied into the
+		// controllers), so the adapter resolves g.schemaWarmer lazily at
+		// call time rather than capturing it here. dbsavvy-ko4m.2.4.
+		MetadataInvalidator: &metadataInvalidatorAdapter{g: g},
 	}
 
 	// ThreadingDeps (DESIGN.md §17 / dbsavvy-66p.1) — all three closures

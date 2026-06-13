@@ -50,6 +50,53 @@ func TestHistorySource_PrefixPassThroughAndSource(t *testing.T) {
 	}
 }
 
+func TestHistorySource_MatchIsDecorativeNotASecondFilter(t *testing.T) {
+	// FTS returns two rows for prefix "sel": one where "sel" IS a literal
+	// subsequence (composite Score + Matches) and one where it is NOT (the
+	// FTS token boundary matched but the rendered statement has no s-e-l
+	// subsequence). Both rows must survive — Match never filters history.
+	matching := "SELECT 1"     // contains s-e-l
+	nonMatching := "VACUUM pg" // no s-e-l subsequence at all
+	store := &fakeHistoryStore{rows: []string{matching, nonMatching}}
+	src := HistorySource{Store: store}
+	buf, pos := bufferFromLines(t, "sel")
+	got := src.Suggest(context.Background(), buf, pos)
+
+	if len(got) != 2 {
+		t.Fatalf("len = %d; want 2 (every FTS row, no second filter)", len(got))
+	}
+
+	// Sanity: confirm the test fixtures behave as assumed by Match.
+	okMatch, quality, positions := Match("sel", matching)
+	if !okMatch {
+		t.Fatalf("fixture assumption broken: Match(sel, %q) should be ok", matching)
+	}
+	okNon, _, _ := Match("sel", nonMatching)
+	if okNon {
+		t.Fatalf("fixture assumption broken: Match(sel, %q) should be ok=false", nonMatching)
+	}
+
+	if got[0].Text != matching {
+		t.Fatalf("got[0].Text = %q; want %q", got[0].Text, matching)
+	}
+	if got[0].Score != quality+HistorySourceBias {
+		t.Errorf("matching row Score = %d; want %d (quality %d + bias %d)", got[0].Score, quality+HistorySourceBias, quality, HistorySourceBias)
+	}
+	if len(got[0].Matches) != len(positions) {
+		t.Errorf("matching row Matches = %v; want %v", got[0].Matches, positions)
+	}
+
+	if got[1].Text != nonMatching {
+		t.Fatalf("got[1].Text = %q; want %q", got[1].Text, nonMatching)
+	}
+	if got[1].Score != HistorySourceBias {
+		t.Errorf("non-matching row Score = %d; want baseline HistorySourceBias (%d)", got[1].Score, HistorySourceBias)
+	}
+	if got[1].Matches != nil {
+		t.Errorf("non-matching row Matches = %v; want nil", got[1].Matches)
+	}
+}
+
 func TestHistorySource_NilStoreReturnsEmpty(t *testing.T) {
 	src := HistorySource{Store: nil}
 	buf, pos := bufferFromLines(t, "SEL")

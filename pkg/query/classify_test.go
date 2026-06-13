@@ -60,6 +60,14 @@ func TestEffectiveKind(t *testing.T) {
 		// Known limitation: a DML keyword inside a string literal falsely
 		// elevates (fail-closed bias). Documents actual behavior.
 		{"delete inside string literal falsely elevates", "SELECT 'DELETE' AS note", KindDML},
+		// DDL-CTE verdict (dbsavvy-ko4m.2 decision B): NO ddlTokenRE elevation.
+		// A WITH-led statement cannot execute DDL in Postgres, and a benign
+		// read-only SELECT with a DDL-keyword-named column (e.g. "comment") must
+		// NOT be elevated to KindDDL (else the pre-run ConfirmDDL prompt spuri-
+		// ously fires). These pin that EffectiveKind leaves them KindOther.
+		{"refresh matview stays other (leads with REFRESH, not in keyword table)", "REFRESH MATERIALIZED VIEW mv", KindOther},
+		{"column named comment stays other", "SELECT id, comment FROM posts", KindOther},
+		{"column named drop stays other", "SELECT drop FROM measurements", KindOther},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

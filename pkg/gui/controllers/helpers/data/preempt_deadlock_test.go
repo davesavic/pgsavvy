@@ -161,8 +161,8 @@ func (b *blockingSession) ListInboundForeignKeys(context.Context, string, string
 
 func (b *blockingSession) ListFunctions(context.Context) ([]string, error) { return nil, nil }
 
-func (b *blockingSession) DescribeFunction(context.Context, string, string) (models.FunctionDetail, error) {
-	return models.FunctionDetail{}, nil
+func (b *blockingSession) DescribeFunction(context.Context, string, string) ([]models.FunctionDetail, error) {
+	return nil, nil
 }
 
 func (b *blockingSession) Execute(context.Context, models.Query) (models.Result, error) {
