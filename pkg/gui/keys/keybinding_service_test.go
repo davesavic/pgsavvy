@@ -508,6 +508,7 @@ func allContextKeyKinds() map[types.ContextKey]types.ContextKind {
 		types.CONFLICT_DIALOG:    types.TEMPORARY_POPUP,
 		types.FK_REVERSE_PICKER:  types.TEMPORARY_POPUP,
 		types.CONNECTION_MANAGER: types.MAIN_CONTEXT,
+		types.RELATIONSHIP_PANEL: types.DISPLAY_CONTEXT,
 	}
 }
 
@@ -573,7 +574,7 @@ func TestAllKnownContextsCompleteness(t *testing.T) {
 			t.Errorf("scope:all must reach %s", must)
 		}
 	}
-	for _, mustNot := range []types.ContextKey{types.WHICH_KEY, types.LIMIT, types.HIDE_OVERLAY} {
+	for _, mustNot := range []types.ContextKey{types.WHICH_KEY, types.LIMIT, types.HIDE_OVERLAY, types.RELATIONSHIP_PANEL} {
 		if _, ok := got[mustNot]; ok {
 			t.Errorf("scope:all must NOT reach overlay %s", mustNot)
 		}

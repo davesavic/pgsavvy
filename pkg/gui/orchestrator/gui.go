@@ -969,6 +969,11 @@ func (g *Gui) deleteConnectionFromModal(connName string) error {
 		if g.schemaWarmer != nil {
 			g.schemaWarmer.Reset()
 		}
+		// Drop the relationship panel's per-row preview + estimate caches so a
+		// later Connect cannot read a prior connection's values.
+		if g.controllers != nil && g.controllers.RelationshipPanel != nil {
+			g.controllers.RelationshipPanel.ClearCaches()
+		}
 		g.connectionState.activeConnID = ""
 		g.connectionState.activeConnProfile = nil
 	}

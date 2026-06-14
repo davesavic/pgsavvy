@@ -674,6 +674,29 @@ func (g *Gui) RunLayout(w, h int) error {
 	// SetCurrentView via driver.Update and fought the SetViewOnTop pass.
 	if g.tree != nil {
 		if top := g.tree.Current(); top != nil {
+			// RELATIONSHIP_PANEL is a focus-retaining DISPLAY_CONTEXT in
+			// FOLLOW mode: it renders right-docked over the grid but must NOT
+			// steal keyboard input — the grid keeps j/k so it can drive the
+			// panel's live-follow. Re-point the gocui current view at the
+			// underlying active result-tab view instead of the panel view.
+			// When the user ENTERS the panel (focused), input mode flips: the
+			// panel view becomes gocui current so its RELATIONSHIP_PANEL-scoped
+			// j/k/<cr>/<esc> shims fire. (Other stacked DISPLAY_CONTEXTs — e.g.
+			// CHEATSHEET — DO own input, so this is keyed on the specific panel
+			// key, not the kind.)
+			if top.GetKey() == types.RELATIONSHIP_PANEL {
+				if g.controllers != nil && g.controllers.RelationshipPanel != nil &&
+					g.controllers.RelationshipPanel.IsFocused() {
+					if vn := top.GetViewName(); vn != "" {
+						_, _ = g.driver.SetCurrentView(vn)
+					}
+				} else if activeTabView != "" {
+					_, _ = g.driver.SetCurrentView(activeTabView)
+				}
+				g.resyncOnViewTeardown()
+				g.resyncOnModalContentChange()
+				return nil
+			}
 			if vn := top.GetViewName(); vn != "" {
 				_, _ = g.driver.SetCurrentView(vn)
 			}
@@ -878,6 +901,22 @@ func popupRectFor(key types.ContextKey, dims map[string]ui.Dimensions, w, h int)
 			return rect{}, false
 		}
 		return centeredRectMaxSize(canvas, promptMaxCols, promptMaxRows), true
+	case types.PopupSizeDocked:
+		// Right-anchored, full-height overlay covering the rightmost
+		// spec.WidthFrac of the result-grid area (dims["secondary"]). The
+		// grid keeps its own width underneath; the right columns are
+		// temporarily occluded while the panel is open. Falls back to the
+		// full terminal canvas's right slice when the secondary canvas is
+		// absent (pre-layout / tests with a representative dims map).
+		canvas, ok := dims["secondary"]
+		if !ok {
+			canvas = ui.Dimensions{X0: 0, Y0: 0, X1: w - 1, Y1: h - 1}
+		}
+		r := dockedRightRect(canvas, spec.WidthFrac)
+		if r == (rect{}) {
+			return rect{}, false
+		}
+		return r, true
 	default:
 		// PopupSizeNone: non-popup contexts plus LIMIT/WHICH_KEY (which
 		// render via renderLimitOverlay / the which-key overlay, not this
@@ -1423,6 +1462,26 @@ func centeredRect(canvas ui.Dimensions, fracW, fracH float64) rect {
 	x0 := canvas.X0 + (w-pw)/2
 	y0 := canvas.Y0 + (h-ph)/2
 	return rect{X0: x0, Y0: y0, X1: x0 + pw, Y1: y0 + ph}
+}
+
+// dockedRightRect returns a right-anchored, full-height rectangle covering
+// the rightmost fracW of canvas. Used by the RELATIONSHIP_PANEL docked
+// overlay. Returns the zero rect when the canvas is degenerate so
+// popupRectFor reports ok=false rather than drawing a 0-width box.
+func dockedRightRect(canvas ui.Dimensions, fracW float64) rect {
+	w := canvas.X1 - canvas.X0
+	h := canvas.Y1 - canvas.Y0
+	if w < 2 || h < 1 {
+		return rect{}
+	}
+	if fracW <= 0 || fracW > 1 {
+		fracW = 0.4
+	}
+	pw := int(float64(w) * fracW)
+	if pw < 1 {
+		pw = 1
+	}
+	return rect{X0: canvas.X1 - pw, Y0: canvas.Y0, X1: canvas.X1, Y1: canvas.Y1}
 }
 
 // suggestionsFrame is the per-side frame cost (gocui draws a 1-cell

@@ -78,6 +78,13 @@ const (
 	// editor's bottom edge), falling back to a centred rect when the
 	// editor view handle is unavailable.
 	PopupSizeAnchored
+	// PopupSizeDocked: a right-anchored, full-height sidebar overlay
+	// covering the rightmost fraction of the result-grid area
+	// (dims["secondary"]). Used by the RELATIONSHIP_PANEL. WidthFrac gives
+	// the fraction of the secondary canvas width the panel occupies; the
+	// panel always spans the full secondary height. Falls back to no rect
+	// when the secondary canvas is absent.
+	PopupSizeDocked
 )
 
 // PopupRectSpec is the per-context popup-rect descriptor carried as data
@@ -146,6 +153,13 @@ const (
 	// renders a centered bordered box over a blank background, suppressing
 	// both the side rails and the QUERY_EDITOR for the frame.
 	CONNECTION_MANAGER ContextKey = "connection_manager"
+	// RELATIONSHIP_PANEL is the <leader>gr right-docked FK-exploration
+	// sidebar. DISPLAY_CONTEXT kind: it renders a right-anchored overlay
+	// over the result grid (PopupSizeDocked) and live-follows the focused
+	// grid row WITHOUT stealing input focus (the grid keeps j/k); the
+	// orchestrator's Tier-4 focus pass retains the underlying tab view
+	// while this key is top of the stack.
+	RELATIONSHIP_PANEL ContextKey = "relationship_panel"
 )
 
 // AllContextKeys returns every ContextKey constant declared above.
@@ -187,6 +201,7 @@ func AllContextKeys() []ContextKey {
 		CONFLICT_DIALOG,
 		FK_REVERSE_PICKER,
 		CONNECTION_MANAGER,
+		RELATIONSHIP_PANEL,
 	}
 }
 

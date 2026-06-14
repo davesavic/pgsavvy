@@ -13,8 +13,9 @@ func TestNewContextTreeReturnsAllContexts(t *testing.T) {
 	}
 	flat := tree.Flatten()
 	// SEARCH_LINE (TEMPORARY_POPUP) takes the count 26→27.
-	if len(flat) != 27 {
-		t.Fatalf("Flatten() len = %d, want 27 (20 live + 4 stub + 2 main + 1 persistent)", len(flat))
+	// RELATIONSHIP_PANEL (DISPLAY_CONTEXT) takes it 27→28.
+	if len(flat) != 28 {
+		t.Fatalf("Flatten() len = %d, want 28 (21 live + 4 stub + 2 main + 1 persistent)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -118,7 +119,8 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		types.TEMPORARY_POPUP: 15,
 		types.EXTRAS_CONTEXT:  0,
 		types.GLOBAL_CONTEXT:  1,
-		types.DISPLAY_CONTEXT: 3,
+		// RELATIONSHIP_PANEL takes DISPLAY_CONTEXT 3→4.
+		types.DISPLAY_CONTEXT: 4,
 		// QUERY_EDITOR was promoted from STUB to a real
 		// MAIN_CONTEXT, so STUB drops 5→4 and MAIN_CONTEXT rises 0→1.
 		// CONNECTING was added (MAIN_CONTEXT), so MAIN_CONTEXT is 2.

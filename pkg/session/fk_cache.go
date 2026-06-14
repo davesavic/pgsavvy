@@ -137,10 +137,23 @@ func (c *FKCache) GetReverse(ctx context.Context, schema, table string) ([]model
 
 // Invalidate drops the cached entry for (schema, table) if present.
 // Invalidating an absent key is a no-op. Only touches forward entries;
-// reverse entries are dropped via InvalidateAll.
+// reverse entries are dropped via InvalidateReverse / InvalidateAll.
 func (c *FKCache) Invalidate(schema, table string) {
 	c.mu.Lock()
 	delete(c.entries, fkKey{Schema: schema, Table: table})
+	c.mu.Unlock()
+}
+
+// InvalidateReverse drops the cached INBOUND (reverse) entry for (schema,
+// table) if present — the list of FKs that reference this table. Invalidating
+// an absent key is a no-op. Sibling to Invalidate (which only touches forward
+// entries); the two directions invalidate independently so dropping one does
+// not nuke the other. Note this only evicts FK METADATA (which changes on DDL);
+// the relationship panel's cached exact counts are evicted separately on DML
+// commit since INSERT/UPDATE/DELETE do not change FK metadata.
+func (c *FKCache) InvalidateReverse(schema, table string) {
+	c.mu.Lock()
+	delete(c.reverseEntries, fkKey{Schema: schema, Table: table})
 	c.mu.Unlock()
 }
 

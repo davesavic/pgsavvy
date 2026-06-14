@@ -519,6 +519,7 @@ func (g *Gui) wireInlineEditControllers(helperBag controllers.HelperBag) {
 				toast:       g.toastHelp,
 				logger:      g.deps.Common.Logger(),
 				onUI:        g.OnUIThread,
+				evictCounts: g.evictRelationshipCounts,
 			}
 			commitCtrl.SetApplyHook(commitApplyHook{deps: cdDeps})
 			commitCtrl.SetDryRunHook(commitDryRunHook{deps: cdDeps})
@@ -539,6 +540,7 @@ func (g *Gui) wireInlineEditControllers(helperBag controllers.HelperBag) {
 				tabs:          g.resultTabsH,
 				toast:         g.toastHelp,
 				activeSetFunc: helperBag.ActivePendingEditSet,
+				evictCounts:   g.evictRelationshipCounts,
 			}
 			conflictCtrl.SetRefreshHook(conflictRefreshHook{deps: cfDeps})
 			conflictCtrl.SetOverwriteHook(conflictOverwriteHook{deps: cfDeps})

@@ -132,6 +132,20 @@ func TestResultIdentity_DetectFromQuery(t *testing.T) {
 			want: ResultIdentity{BaseTable: "MySchema.MyTable", HasRowIdentity: true},
 		},
 		{
+			// The relationship panel's reverse-drill emits exactly this
+			// quoted + predicated form (buildFKReverseSQL ->
+			// QuoteQualified/QuoteIdent). It must resolve to the base table so
+			// the panel can keep exploring the child rather than going blank.
+			name: "edge_quoted_predicated_reverse_sql",
+			sql:  `SELECT * FROM "app"."posts" WHERE "user_id"=$1`,
+			want: ResultIdentity{BaseTable: "app.posts", HasRowIdentity: true},
+		},
+		{
+			name: "edge_quoted_predicated_literal",
+			sql:  `SELECT * FROM "app"."posts" WHERE "user_id"=1`,
+			want: ResultIdentity{BaseTable: "app.posts", HasRowIdentity: true},
+		},
+		{
 			name: "edge_unquoted_uppercase_normalised",
 			sql:  "SELECT * FROM USERS",
 			want: ResultIdentity{BaseTable: "users", HasRowIdentity: true},

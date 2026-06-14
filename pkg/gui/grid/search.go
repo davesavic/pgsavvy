@@ -133,6 +133,9 @@ func (v *View) moveCursorToCurrentMatchLocked() {
 	}
 	v.cursorRow = m.row
 	v.cursorCol = m.col
+	// Search-jump is a cursor motion like j/k/G — drive the live-follow
+	// callback so the relationship panel follows search-jump and n/N too.
+	v.fireCursorChangeLocked()
 }
 
 // SearchStatus reports the search state for the status bar. cur is the

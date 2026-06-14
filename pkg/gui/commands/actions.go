@@ -163,6 +163,22 @@ const (
 	ConnectionManagerToggle    = "connection_manager.toggle"
 	ConnectionManagerDelete    = "connection_manager.delete"
 
+	// RelationshipPanel family — owned by RelationshipPanelController.
+	//   RelationshipPanelToggle - <leader>gr opens / closes the right-docked
+	//                             FK sidebar (RESULT_GRID scope).
+	//   RelationshipPanelEnter  - <cr> gives the panel input focus
+	//                             (RELATIONSHIP_PANEL scope; T1 stub).
+	//   RelationshipPanelExit   - <esc> returns focus to the grid with the
+	//                             panel still open (RELATIONSHIP_PANEL scope).
+	//   RelationshipPanelDown/Up - j/k move the in-panel selection cursor over
+	//                             the relationship lines (RELATIONSHIP_PANEL
+	//                             scope; only reachable while focused).
+	RelationshipPanelToggle = "relationship_panel.toggle"
+	RelationshipPanelEnter  = "relationship_panel.enter"
+	RelationshipPanelExit   = "relationship_panel.exit"
+	RelationshipPanelDown   = "relationship_panel.down"
+	RelationshipPanelUp     = "relationship_panel.up"
+
 	// TipDismiss — owned by the orchestrator's FirstRunTip wiring.
 	// FIRST_RUN_TIP-scoped. Pops the tip popup and
 	// stamps the seen-at timestamp via AppStateStore.StampStartupTips.

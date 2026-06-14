@@ -58,6 +58,10 @@ type ContextTree struct {
 	Limit      *LimitContext
 	WhichKey   *WhichKeyContext
 	Cheatsheet *CheatsheetContext
+	// RelationshipPanel is the <leader>gr right-docked FK-exploration
+	// sidebar. DISPLAY_CONTEXT kind; renders right-anchored over the
+	// result grid without stealing input focus.
+	RelationshipPanel *RelationshipPanelContext
 
 	// Live PERSISTENT_POPUP instances.
 	FirstRunTip *FirstRunTipContext
@@ -292,6 +296,19 @@ func contextSpecs() []contextSpec {
 				return NewCheatsheetContext(b, d, d.CheatsheetRender)
 			},
 			assign: func(t *ContextTree, c types.IBaseContext) { t.Cheatsheet = c.(*CheatsheetContext) },
+		},
+		{
+			// RELATIONSHIP_PANEL: the <leader>gr right-docked FK sidebar.
+			// DISPLAY_CONTEXT so it renders via the Tier-3 stack loop; the
+			// docked popup-rect anchors it over the rightmost slice of the
+			// result-grid area. The grid keeps input focus (Tier-4 retains
+			// the active tab view for this key).
+			key: types.RELATIONSHIP_PANEL, kind: types.DISPLAY_CONTEXT, title: "Relationships", inFlatten: true,
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeDocked, WidthFrac: 0.4},
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewRelationshipPanelContext(b, d)
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.RelationshipPanel = c.(*RelationshipPanelContext) },
 		},
 
 		// FirstRunTip is the welcome popup shown above CONNECTIONS on the

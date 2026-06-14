@@ -183,6 +183,19 @@ func (l *ResultJumpList) PruneByTab(tabID string) {
 	l.cursor = newCursor
 }
 
+// Snapshot returns a copy of the entries (oldest→newest) and the current
+// cursor (-1 = at most-recent). Read-only diagnostic accessor: the returned
+// slice is a defensive copy, so callers may read it without holding the lock
+// and without racing Push/Back/Forward/PruneByTab. Exposes the existing state
+// (entries + cursor) — it does NOT introduce a new structure.
+func (l *ResultJumpList) Snapshot() (entries []JumpEntry, cursor int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]JumpEntry, len(l.entries))
+	copy(out, l.entries)
+	return out, l.cursor
+}
+
 // Clear empties the list and resets the cursor to -1 (most-recent).
 func (l *ResultJumpList) Clear() {
 	l.mu.Lock()

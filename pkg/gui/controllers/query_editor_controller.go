@@ -63,6 +63,20 @@ const maxVisualRunBatch = 32
 //     known until Bind() runs post-Connect)
 type QueryEditorController struct {
 	baseController
+
+	// onDMLCommit fires (on the worker, after the statement completes
+	// successfully) when a query-editor statement is classified KindDML, so the
+	// relationship panel can evict its cached inbound counts. Coarse: the
+	// query-editor DML path carries no parsed target table, so the wired closure
+	// drops ALL cached counts. Nil-safe (no-op when unwired).
+	onDMLCommit func()
+}
+
+// SetOnDMLCommit wires the post-DML-commit hook (relationship-count eviction).
+// Wired post-construction so the constructor signature stays stable. Nil leaves
+// the path a no-op.
+func (q *QueryEditorController) SetOnDMLCommit(fn func()) {
+	q.onDMLCommit = fn
 }
 
 // NewQueryEditorController constructs the controller. c may be nil
@@ -533,6 +547,7 @@ func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) 
 	q.openResultTab(stmt, rh)
 	if rh != nil {
 		q.scheduleDDLInvalidation(stmt, rh.Done(), rh.Err)
+		q.scheduleDMLCacheEvict(stmt, rh.Done(), rh.Err)
 	}
 	return attached
 }
@@ -584,6 +599,36 @@ func (q *QueryEditorController) scheduleDDLInvalidation(stmt string, done <-chan
 		logs.Event(q.Log(), "completion", "ddl_invalidate_schema",
 			slog.String("schema", schema))
 		inv.InvalidateSchema(schema)
+		return nil
+	})
+}
+
+// scheduleDMLCacheEvict fires onDMLCommit AFTER a query-editor statement
+// classified KindDML completes SUCCESSFULLY, so the relationship panel evicts
+// its cached inbound counts (a committed INSERT/UPDATE/DELETE can change child
+// references). Mirrors scheduleDDLInvalidation's POST-run, success-gated shape
+// (done = RunHandle.Done, errFn = RunHandle.Err read only after done closes).
+//
+// Coarse by necessity: the query-editor DML path has no parsed target table
+// (parsing raw DML for the target is fragile), so the wired closure drops ALL
+// cached counts rather than a single table's. A no-op when the hook is unwired,
+// done is nil, or no OnWorker is wired.
+func (q *QueryEditorController) scheduleDMLCacheEvict(stmt string, done <-chan struct{}, errFn func() error) {
+	if done == nil || q.onDMLCommit == nil || q.helpers.OnWorker == nil {
+		return
+	}
+	if query.EffectiveKind(stmt) != query.KindDML {
+		return
+	}
+	evict := q.onDMLCommit
+	q.helpers.OnWorker(func(_ gocui.Task) error {
+		<-done
+		// Success-gate: a failed DML did not change the data, so the cached
+		// counts are still valid — leave them.
+		if errFn != nil && errFn() != nil {
+			return nil
+		}
+		evict()
 		return nil
 	})
 }

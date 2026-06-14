@@ -91,6 +91,43 @@ func TestSetSearch_CellMajorReadingOrder(t *testing.T) {
 	require.Equal(t, 1, c, "fourth match is row 1 col 1")
 }
 
+// TestSearchJumpFiresCursorChange pins the relationship-panel live-follow
+// gap: the cursor-change callback must fire on search-jump (initial
+// SetSearch jump) and on n/N navigation (NextMatch/PrevMatch), exactly as
+// it does for j/k/G. Without the fire in moveCursorToCurrentMatchLocked the
+// panel silently fails to follow search-driven cursor motion.
+func TestSearchJumpFiresCursorChange(t *testing.T) {
+	v := twoColView(t, [][]any{
+		{"x", "x"},
+		{"x", "x"},
+	})
+	var fired int
+	var lastRow, lastCol int
+	v.SetOnCursorChange(func(row, col int) {
+		fired++
+		lastRow, lastCol = row, col
+	})
+
+	// Initial search-jump lands the cursor on the first match (0,0) and
+	// must fire the callback.
+	v.SetSearch("x")
+	require.Equal(t, 1, fired, "SetSearch jump must fire the cursor-change callback")
+	require.Equal(t, 0, lastRow)
+	require.Equal(t, 0, lastCol)
+
+	// n -> second match (0,1): another fire with the new position.
+	v.NextMatch()
+	require.Equal(t, 2, fired, "NextMatch (n) must fire the cursor-change callback")
+	require.Equal(t, 0, lastRow)
+	require.Equal(t, 1, lastCol)
+
+	// N -> back to first match (0,0): another fire.
+	v.PrevMatch()
+	require.Equal(t, 3, fired, "PrevMatch (N) must fire the cursor-change callback")
+	require.Equal(t, 0, lastRow)
+	require.Equal(t, 0, lastCol)
+}
+
 // TestNextMatch_WrapsAround pins: NextMatch from the last match wraps to
 // the first.
 func TestNextMatch_WrapsAround(t *testing.T) {

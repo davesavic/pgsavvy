@@ -30,8 +30,13 @@ var nonPopupKinds = map[types.ContextKind]struct{}{
 // kind with CHEATSHEET (which scope:all DOES reach) but must NOT receive
 // scope:all bindings. No structural kind/flag discriminator exists, so this
 // set is explicit. Keep in sync if new DISPLAY transient overlays land.
+//
+// RELATIONSHIP_PANEL is a focus-retaining docked overlay (the grid keeps
+// input while it renders): it owns only its own RELATIONSHIP_PANEL-scoped
+// bindings, so scope:all must NOT fan out to it.
 var overlayExclusions = map[types.ContextKey]struct{}{
 	types.WHICH_KEY: {}, types.LIMIT: {}, types.HIDE_OVERLAY: {},
+	types.RELATIONSHIP_PANEL: {},
 }
 
 // WarnLevel / InfoLevel classify Warning severity.

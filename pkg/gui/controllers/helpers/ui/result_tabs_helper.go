@@ -404,6 +404,23 @@ type ResultTabsHelper struct {
 	// guards + asc→desc→clear cycle + DB re-run. Default no-op (sort is a
 	// no-op until wired); set via SetOnSortRequest.
 	onSortRequest func(col int)
+
+	// onActiveTabSet fires after ANY active-tab change — the OPEN path (a
+	// jump-opened child tab) and the <c-o>/<c-i> SwitchToTabByID jump-list path
+	// included, neither of which fires onActiveChanged (scoped to user
+	// Jump/Cycle focus reconciliation). The relationship panel wires it to
+	// repaint against the now-active tab without waiting for a grid cursor
+	// motion. Default no-op; set via SetOnActiveTabSet.
+	onActiveTabSet func()
+
+	// onGridCursorChange is installed on every tab's grid (via
+	// grid.View.SetOnCursorChange) at allocTab time so a row-change motion
+	// on the active tab notifies the relationship panel's live-follow.
+	// The grid invokes it WHILE the grid mutex is held, so the callback
+	// MUST only capture/schedule (the RelationshipPanelController bumps an
+	// epoch + arms a debounce timer). Default no-op; set via
+	// SetOnGridCursorChange.
+	onGridCursorChange func(row, col int)
 }
 
 // NewResultTabsHelper constructs a helper with deps. The returned value
@@ -1074,6 +1091,27 @@ func (h *ResultTabsHelper) SetOnActiveChanged(fn func()) {
 	h.mu.Unlock()
 }
 
+// SetOnActiveTabSet registers a callback fired after ANY active-tab change —
+// open, Jump, Cycle, and the <c-o>/<c-i> jump-list SwitchToTabByID path. The
+// relationship panel wires it to follow the active tab. Passing nil unhooks.
+func (h *ResultTabsHelper) SetOnActiveTabSet(fn func()) {
+	h.mu.Lock()
+	h.onActiveTabSet = fn
+	h.mu.Unlock()
+}
+
+// fireActiveTabSet invokes onActiveTabSet outside the helper mutex. Callers MUST
+// NOT hold h.mu (the callback may re-enter read-only helper methods like
+// Active). A nil callback is a no-op.
+func (h *ResultTabsHelper) fireActiveTabSet() {
+	h.mu.Lock()
+	cb := h.onActiveTabSet
+	h.mu.Unlock()
+	if cb != nil {
+		cb()
+	}
+}
+
 // SetOnSortRequest registers the callback both sort entry points route
 // through (<leader>s picker submit + grid header double-click). The
 // callback receives the RAW 0-based grid column index; the
@@ -1083,6 +1121,27 @@ func (h *ResultTabsHelper) SetOnSortRequest(fn func(col int)) {
 	h.mu.Lock()
 	h.onSortRequest = fn
 	h.mu.Unlock()
+}
+
+// SetOnGridCursorChange installs the per-tab grid cursor-change callback.
+// It is wired onto every existing tab's grid immediately and onto each
+// new tab's grid at allocTab time. The callback fires under the grid
+// mutex (see onGridCursorChange) so it must only capture/schedule. Passing
+// nil unhooks live-follow.
+func (h *ResultTabsHelper) SetOnGridCursorChange(fn func(row, col int)) {
+	h.mu.Lock()
+	h.onGridCursorChange = fn
+	tabs := make([]*Tab, len(h.tabs))
+	copy(tabs, h.tabs)
+	h.mu.Unlock()
+	// Install on already-open tabs so toggling the panel after tabs exist
+	// still live-follows. grid.View.SetOnCursorChange takes its own lock,
+	// so call it outside h.mu.
+	for _, t := range tabs {
+		if g := t.Grid(); g != nil {
+			g.SetOnCursorChange(fn)
+		}
+	}
 }
 
 // PinActive toggles the pinned flag on the active tab. Returns the new
@@ -1116,14 +1175,37 @@ func (h *ResultTabsHelper) Pin(t *Tab) bool {
 // switch.
 func (h *ResultTabsHelper) SwitchToTabByID(tabID string) *Tab {
 	h.mu.Lock()
+	var found *Tab
+	changed := false
+	for _, t := range h.tabs {
+		if fmt.Sprintf("%d", t.id) == tabID {
+			changed = h.activeID != t.id
+			h.activeID = t.id
+			found = t
+			break
+		}
+	}
+	h.mu.Unlock()
+	if changed {
+		h.fireActiveTabSet()
+	}
+	return found
+}
+
+// TabLabelByID returns the label of the tab whose ID stringifies to tabID,
+// and whether such a tab is still open. Read-only: it neither switches the
+// active tab nor mutates any state (unlike SwitchToTabByID). Used by the
+// relationship-panel breadcrumb to render a jump-list entry's tab name,
+// skipping entries whose tab has since closed.
+func (h *ResultTabsHelper) TabLabelByID(tabID string) (string, bool) {
+	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, t := range h.tabs {
 		if fmt.Sprintf("%d", t.id) == tabID {
-			h.activeID = t.id
-			return t
+			return t.label, true
 		}
 	}
-	return nil
+	return "", false
 }
 
 // Jump activates the tab at 1-based index i (i.e. <leader>1 → slot 0).
@@ -1156,6 +1238,9 @@ func (h *ResultTabsHelper) Jump(i int) {
 	h.mu.Unlock()
 	if changed && cb != nil {
 		cb()
+	}
+	if changed {
+		h.fireActiveTabSet()
 	}
 }
 
@@ -1195,6 +1280,9 @@ func (h *ResultTabsHelper) Cycle(dir int) {
 	h.mu.Unlock()
 	if changed && cb != nil {
 		cb()
+	}
+	if changed {
+		h.fireActiveTabSet()
 	}
 }
 
@@ -1665,6 +1753,12 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 	// Wire the shared system clipboard so `y` / `yy` yank publishes to the
 	// host clipboard through the common pkg/gui/clipboard transport. dbsavvy U4.
 	t.grid.SetClipboard(clipboard.NewSystemClipboard())
+	// Install the relationship-panel live-follow hook (no-op until the
+	// panel controller wires it). h.mu is held here; the callback only
+	// captures/schedules so it is safe to register on the fresh grid.
+	if h.onGridCursorChange != nil {
+		t.grid.SetOnCursorChange(h.onGridCursorChange)
+	}
 	// Propagate the configured double-click window onto the grid so the
 	// header mouse-debounce uses the user's tuned value.
 	t.grid.SetMouseDoubleClickMs(h.doubleClickMs)
@@ -1959,11 +2053,18 @@ func (h *ResultTabsHelper) queueBehind(tab *Tab, prior *Tab) {
 	}()
 }
 
-// setActive updates activeID under helper.mu.
+// setActive updates activeID under helper.mu and, when the active tab actually
+// changed, fires onActiveTabSet so the relationship panel can follow. Covers
+// the open / plan / error paths; Jump / Cycle / SwitchToTabByID set activeID
+// directly under their own lock and fire onActiveTabSet themselves.
 func (h *ResultTabsHelper) setActive(id int64) {
 	h.mu.Lock()
+	changed := h.activeID != id
 	h.activeID = id
 	h.mu.Unlock()
+	if changed {
+		h.fireActiveTabSet()
+	}
 }
 
 // materialiseView creates the gocui view for the tab at a placeholder

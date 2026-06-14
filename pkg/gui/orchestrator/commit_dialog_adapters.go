@@ -47,6 +47,12 @@ type commitDialogDeps struct {
 	// commit dialog's own Close + Pop that runs immediately after this
 	// hook returns, popping the conflict dialog instead of the commit one.
 	onUI func(fn func() error)
+	// evictCounts drops the relationship panel's cached inbound counts for a
+	// (schema, table) child table after a successful commit. Resolves the panel
+	// controller lazily (it is wired AFTER the commit dialog) and is nil-safe, so
+	// commit works whether or not the panel exists. Never nil once wired (a
+	// no-op closure stands in).
+	evictCounts func(schema, table string)
 }
 
 // commitApplyHook implements controllers.CommitDialogApplyHook.
@@ -77,6 +83,14 @@ func (h commitApplyHook) Apply(set *models.PendingEditSet, conn *models.Connecti
 	}
 	rows := len(res.RowsAffected)
 	set.Clear()
+	// A committed UPDATE on this table can change which child rows reference a
+	// given parent key, so the relationship panel's cached inbound counts keyed
+	// by this (child) table are now stale. Evict per-table so the next focus
+	// recomputes — even if the panel is currently closed (the cache survives
+	// close). FK metadata itself is unaffected by DML.
+	if h.deps.evictCounts != nil {
+		h.deps.evictCounts(set.Table.Schema, set.Table.Table)
+	}
 	// Write the post-commit server values back into the grid so the
 	// applied cells render fresh data instead of the original load
 	// snapshot.
@@ -164,6 +178,10 @@ type conflictDialogDeps struct {
 	tabs          *ui.ResultTabsHelper
 	toast         *ui.ToastHelper
 	activeSetFunc func() *models.PendingEditSet
+	// evictCounts drops the relationship panel's cached inbound counts for the
+	// overwritten (schema, table) child table after a forced overwrite commits.
+	// Same lazy-resolve + nil-safe contract as commitDialogDeps.evictCounts.
+	evictCounts func(schema, table string)
 }
 
 // conflictRefreshHook implements controllers.ConflictDialogRefreshHook.
@@ -263,6 +281,12 @@ func (h conflictOverwriteHook) Overwrite(conflicts []models.ConflictedEdit, _ *m
 	// Drop the overwritten edits from the live staged set.
 	for _, c := range conflicts {
 		set.Remove(c.Edit.PrimaryKey, c.Edit.Column)
+	}
+	// Evict the panel's cached inbound counts for the overwritten table — the
+	// committed overwrite may change child references. Same per-table eviction
+	// as the apply path.
+	if h.deps.evictCounts != nil {
+		h.deps.evictCounts(owSet.Table.Schema, owSet.Table.Table)
 	}
 	// Write the post-overwrite server rows back into the grid — same
 	// refetch contract as the apply path.

@@ -58,6 +58,14 @@ func (BuiltinSnippetProvider) Snippets() []Snippet {
 			Name: "insert_into",
 			Body: "INSERT INTO table_name (col1, col2)\nVALUES\n  (val1, val2);",
 		},
+		{
+			Name: "update",
+			Body: "UPDATE table_name\nSET col1 = val1,\n    col2 = val2\nWHERE condition;",
+		},
+		{
+			Name: "delete_from",
+			Body: "DELETE FROM table_name\nWHERE condition;",
+		},
 	}
 }
 

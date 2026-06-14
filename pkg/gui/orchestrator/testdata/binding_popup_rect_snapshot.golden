@@ -246,6 +246,10 @@ binding	scope=query_editor	key=}	mode=mode(0x3c)
 binding	scope=query_editor	key=}	mode=normal
 binding	scope=query_editor	key=~	mode=mode(0x1c)
 binding	scope=query_editor	key=~	mode=normal
+binding	scope=relationship_panel	key=<cr>	mode=normal
+binding	scope=relationship_panel	key=<esc>	mode=normal
+binding	scope=relationship_panel	key=j	mode=normal
+binding	scope=relationship_panel	key=k	mode=normal
 binding	scope=result_grid	key=$	mode=normal
 binding	scope=result_grid	key=/	mode=normal
 binding	scope=result_grid	key=0	mode=normal
@@ -260,6 +264,7 @@ binding	scope=result_grid	key=<c-k>	mode=normal
 binding	scope=result_grid	key=<c-o>	mode=normal
 binding	scope=result_grid	key=<c-u>	mode=normal
 binding	scope=result_grid	key=<c-v>	mode=normal
+binding	scope=result_grid	key=<cr>	mode=normal
 binding	scope=result_grid	key=<esc>	mode=normal
 binding	scope=result_grid	key=<leader>=	mode=normal
 binding	scope=result_grid	key=<leader>X	mode=normal
@@ -267,6 +272,7 @@ binding	scope=result_grid	key=<leader>cU	mode=normal
 binding	scope=result_grid	key=<leader>cu	mode=normal
 binding	scope=result_grid	key=<leader>cw	mode=normal
 binding	scope=result_grid	key=<leader>gH	mode=normal
+binding	scope=result_grid	key=<leader>gr	mode=normal
 binding	scope=result_grid	key=<leader>gx	mode=normal
 binding	scope=result_grid	key=<leader>oe	mode=normal
 binding	scope=result_grid	key=<leader>s	mode=normal
@@ -380,6 +386,7 @@ popuprect	key=menu	x0=25	y0=25	x1=75	y1=75
 popuprect	key=plan	none
 popuprect	key=prompt	x0=18	y0=46	x1=82	y1=54
 popuprect	key=query_editor	none
+popuprect	key=relationship_panel	x0=60	y0=0	x1=99	y1=99
 popuprect	key=result_grid	none
 popuprect	key=schemas	none
 popuprect	key=search_line	x0=0	y0=99	x1=100	y1=101

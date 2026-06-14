@@ -75,6 +75,12 @@ type Controllers struct {
 	// SearchLineHelper + SearchLineContext). It owns the <cr>/<esc>
 	// bindings on SEARCH_LINE scope.
 	SearchLine *SearchLineController
+
+	// RelationshipPanel is constructed by the orchestrator (it needs a
+	// focus-stack handle on *gui.ContextTree + the live panel context +
+	// threading hook). It owns the <leader>gr toggle (RESULT_GRID) and the
+	// <cr>/<esc> panel bindings (RELATIONSHIP_PANEL scope).
+	RelationshipPanel *RelationshipPanelController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -345,6 +351,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "History", ctrl: b.History, attach: true},
 		{name: "Cheatsheet", ctrl: b.Cheatsheet, attach: true},
 		{name: "SearchLine", ctrl: b.SearchLine, attach: true},
+		{name: "RelationshipPanel", ctrl: b.RelationshipPanel, attach: true},
 	}
 	out := make([]controllerEntry, 0, len(candidates))
 	for _, e := range candidates {

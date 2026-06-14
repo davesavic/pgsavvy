@@ -9,6 +9,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/jesseduffield/lazygit/pkg/gocui"
 )
 
 // wireEditDeps builds the EditDeps inline-edit helper bundle.
@@ -232,6 +233,74 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 		)
 		cheatCtrl.AttachToContext(&g.registry.Cheatsheet.BaseContext)
 		g.controllers.Cheatsheet = cheatCtrl
+	}
+
+	// build the RELATIONSHIP_PANEL controller and attach it
+	// to the panel context so the RELATIONSHIP_PANEL-scoped <cr>/<esc>
+	// bindings (plus the RESULT_GRID-scoped <leader>gr toggle) reach the
+	// trie via AllDefaultBindings. Constructed here — not in
+	// AttachControllers — because it needs a Push/Pop handle on the
+	// focus-stack (*gui.ContextTree). The result-tabs helper supplies the
+	// active-tab manager surface; the FK lookups route through the active
+	// session's FKCache (metadata only, zero data queries); the live-follow
+	// repaint marshals through OnUIThreadContentOnly. SetOnGridCursorChange
+	// installs the per-tab cursor hook that drives the debounced follow.
+	if g.registry != nil && g.registry.RelationshipPanel != nil && g.tree != nil {
+		var mgr controllers.ResultTabsManager
+		if g.resultTabsH != nil {
+			mgr = g.resultTabsH
+		}
+		panelCtrl := controllers.NewRelationshipPanelController(
+			g.deps.Common, helperBag.CoreDeps, g.registry.RelationshipPanel, g.tree,
+			mgr, g.lookupForwardFK, g.lookupReverseFK, g.OnUIThreadContentOnly,
+		)
+		// Outbound preview resolver: acquire a FRESH POOLED session and resolve
+		// the parent row's display-column value, mirroring the EstimateRows /
+		// IntrospectEditability wiring (wire_result_tabs.go). A fresh session
+		// never preempts the user's stream, so no ErrPreemptPending handling is
+		// needed; supersede is via the panel's own row-identity epoch.
+		panelCtrl.SetPreviewResolver(g.resolveRelationshipPreview)
+		// Inbound estimate resolver: acquire a FRESH POOLED session and run the
+		// predicated planner-only EXPLAIN, mirroring the preview resolver.
+		panelCtrl.SetEstimateResolver(g.resolveRelationshipEstimate)
+		// Inbound exact-count resolver: on-demand COUNT(*) for the FOCUSED inbound
+		// line, a fresh pooled session under a 750ms timeout. A timeout keeps the
+		// ~estimate; the result replaces the focused line's estimate.
+		panelCtrl.SetExactResolver(g.resolveRelationshipExact)
+		// Enter -> Jump (outbound) reuses the gd forward-FK helper; Enter ->
+		// open child tab (inbound) reuses the gD reverse-picker surfaces
+		// (runner / tabs / jumps) without touching the picker itself.
+		panelCtrl.SetFKForward(g.fkForwardH)
+		panelCtrl.SetReverseOpen(g.queryState.queryRunner, g.resultTabsH, g.jumpListH)
+		// Read-only exploration breadcrumb: projects the existing jump list +
+		// open-tab labels (no new trail). Reuses the same surfaces as the
+		// reverse-open path (jump list + tabs helper).
+		panelCtrl.SetBreadcrumb(g.jumpListH, g.resultTabsH)
+		// Sequential fill runs on the tracked worker pool. Adapt the panel's
+		// plain func() to the orchestrator's gocui.Task-shaped worker.
+		panelCtrl.SetOnWorker(func(fn func()) {
+			g.OnWorker(func(gocui.Task) error {
+				fn()
+				return nil
+			})
+		})
+		panelCtrl.AttachToContext(&g.registry.RelationshipPanel.BaseContext)
+		g.controllers.RelationshipPanel = panelCtrl
+		if g.resultTabsH != nil {
+			g.resultTabsH.SetOnGridCursorChange(panelCtrl.NotifyCursorChange)
+			// Repaint the panel on every active-tab change — a jump-opened child
+			// tab, a gt/gT cycle, a <leader>1..9 jump, or a <c-o>/<c-i> jump-list
+			// switch — so it follows the active tab without waiting for a grid
+			// cursor nudge. NotifyCursorChange only fires on row motion.
+			g.resultTabsH.SetOnActiveTabSet(panelCtrl.NotifyActiveTabChanged)
+		}
+		// Coarse cache eviction on a query-editor DML commit: that path carries
+		// no parsed target table, so a successful INSERT/UPDATE/DELETE drops ALL
+		// cached inbound counts (the cell-edit commit path evicts per-table).
+		// QueryEditor is populated by AttachControllers (run before this wiring).
+		if g.controllers.QueryEditor != nil {
+			g.controllers.QueryEditor.SetOnDMLCommit(panelCtrl.EvictAllExactCounts)
+		}
 	}
 }
 

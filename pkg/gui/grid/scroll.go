@@ -36,6 +36,7 @@ func (v *View) MoveCursorDown() {
 		return // already on the last projected row
 	}
 	v.expandedLineOffset = 0
+	v.fireCursorChangeLocked()
 }
 
 // MoveCursorUp moves the cursor up by one row, clamped to the first
@@ -57,6 +58,7 @@ func (v *View) MoveCursorUp() {
 		return // already on the first projected row
 	}
 	v.expandedLineOffset = 0
+	v.fireCursorChangeLocked()
 }
 
 // nextVisibleColLocked returns the nearest non-hidden column index
@@ -137,6 +139,7 @@ func (v *View) HalfPageDown() {
 	pos := max(projectedPos(proj, v.cursorRow), 0)
 	target := min(pos+step, len(proj)-1)
 	v.cursorRow = proj[target]
+	v.fireCursorChangeLocked()
 }
 
 // HalfPageUp is the symmetric counterpart of HalfPageDown.
@@ -159,6 +162,7 @@ func (v *View) HalfPageUp() {
 	pos := max(projectedPos(proj, v.cursorRow), 0)
 	target := max(pos-step, 0)
 	v.cursorRow = proj[target]
+	v.fireCursorChangeLocked()
 }
 
 // expandedHalfPageStep is the half-page distance in wrapped lines used
@@ -265,6 +269,7 @@ func (v *View) JumpFirst() {
 		v.cursorRow = 0
 	}
 	v.expandedLineOffset = 0
+	v.fireCursorChangeLocked()
 	v.mu.Unlock()
 }
 
@@ -280,6 +285,7 @@ func (v *View) JumpLast() {
 		v.cursorRow = proj[len(proj)-1]
 	}
 	v.expandedLineOffset = 0
+	v.fireCursorChangeLocked()
 	v.mu.Unlock()
 }
 
@@ -320,6 +326,7 @@ func (v *View) SetCursor(row, col int) {
 	// A stale/computed target may land on a hidden column; snap to the
 	// nearest visible one so the cursor never renders invisibly.
 	v.snapCursorOffHiddenLocked()
+	v.fireCursorChangeLocked()
 }
 
 // renderBody is the pure function that turns a snapshot into the

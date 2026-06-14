@@ -113,6 +113,16 @@ type View struct {
 	// callback once per movement.
 	lastNearTailFireAt int
 
+	// onCursorChange is invoked at the end of every cursor-row-mutating
+	// motion (MoveCursorDown/Up, JumpFirst/Last, HalfPageDown/Up,
+	// SetCursor) with the new (row, col). It fires WHILE v.mu is held, so
+	// the callback MUST only capture/schedule (e.g. bump an epoch + arm a
+	// timer) — it must NOT call back into grid methods or perform GUI I/O
+	// directly, or it would deadlock on the mutex. A nil callback means
+	// "cursor-change notification disabled" (tests + pre-wiring state).
+	// Used by the relationship panel's debounced live-follow.
+	onCursorChange func(row, col int)
+
 	// onSortRequest is invoked once each time a header double-click
 	// detects a qualifying sort request. The grid no longer owns the
 	// asc→desc→clear cycle; it just reports the RAW v.cols index and the
@@ -446,9 +456,18 @@ func (v *View) AppendRows(rows []models.Row) {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	wasEmpty := len(v.rows) == 0
 	v.rows = append(v.rows, rows...)
 	if !v.widthsLocked {
 		v.autoSizeFromSampleLocked()
+	}
+	// The first batch landing makes the focused row (cursor at 0) readable for
+	// the first time. Notify the cursor-change listener so a consumer that
+	// rendered against the empty grid (e.g. the relationship panel on a fresh
+	// tab activation) re-reads the now-populated row without a manual cursor
+	// nudge. Fired under v.mu per the callback contract (capture/schedule only).
+	if wasEmpty {
+		v.fireCursorChangeLocked()
 	}
 }
 
@@ -529,6 +548,25 @@ func (v *View) SetOnNearTail(fn func(n int)) {
 	v.mu.Lock()
 	v.onNearTail = fn
 	v.mu.Unlock()
+}
+
+// SetOnCursorChange wires the cursor-row-change callback fired at the end
+// of every row-mutating motion. The callback runs WHILE v.mu is held —
+// see the onCursorChange field doc — so it must only capture/schedule.
+// Pass nil to disable.
+func (v *View) SetOnCursorChange(fn func(row, col int)) {
+	v.mu.Lock()
+	v.onCursorChange = fn
+	v.mu.Unlock()
+}
+
+// fireCursorChangeLocked invokes the cursor-change callback with the
+// current cursor position. Caller MUST hold v.mu (the callback contract
+// requires it not to re-enter grid methods). No-op when unwired.
+func (v *View) fireCursorChangeLocked() {
+	if v.onCursorChange != nil {
+		v.onCursorChange(v.cursorRow, v.cursorCol)
+	}
 }
 
 // SetOnSortRequest wires the header double-click sort hook. The callback

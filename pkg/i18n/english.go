@@ -44,6 +44,37 @@ type TranslationSet struct {
 	EmptyColumnsHint string
 	EmptyIndexesHint string
 
+	// Relationship-panel (<leader>gr) body labels + empty states. The
+	// panel lists the focused row's foreign keys; these strings render the
+	// section headers and the various empty / degraded states.
+	RelationshipPanelOutboundHeader  string
+	RelationshipPanelInboundHeader   string
+	RelationshipPanelNoTab           string
+	RelationshipPanelNoRelationships string
+	RelationshipPanelMoreFmt         string
+	RelationshipPanelNull            string
+	// RelationshipPanelInboundNeedsPK is the muted note shown in place of the
+	// inbound section when the result has no row identity (join/view/PK-less);
+	// no inbound queries are issued in that case.
+	RelationshipPanelInboundNeedsPK string
+	// RelationshipPanelEstimatePending marks an inbound estimate that has not
+	// resolved yet.
+	RelationshipPanelEstimatePending string
+	// RelationshipPanelEstimateError marks an inbound estimate that failed
+	// (e.g. permission denied on the child table); the rest of the panel
+	// survives.
+	RelationshipPanelEstimateError string
+	// RelationshipPanelExactError marks a focused inbound line whose on-demand
+	// EXACT count failed for a non-timeout reason (e.g. permission denied on the
+	// child table). A timeout instead silently keeps the ~estimate.
+	RelationshipPanelExactError string
+	// RelationshipPanelBreadcrumbSep joins the breadcrumb segments (the walked
+	// jump path projected from the jump list + tab labels).
+	RelationshipPanelBreadcrumbSep string
+	// RelationshipPanelBreadcrumbEmpty is the muted breadcrumb line shown when
+	// no jumps have been made yet (just the current tab, no prior path).
+	RelationshipPanelBreadcrumbEmpty string
+
 	// Confirmation popup shown when unhiding a previously hidden schema.
 	UnhideConfirmationTitle string
 	UnhideConfirmationBody  string
@@ -184,6 +215,13 @@ type ActionTranslations struct {
 	// History popup.
 	HistoryOpen string
 
+	// Relationship panel (<leader>gr FK-exploration sidebar).
+	RelationshipPanelToggle string
+	RelationshipPanelEnter  string
+	RelationshipPanelExit   string
+	RelationshipPanelDown   string
+	RelationshipPanelUp     string
+
 	// Expanded view mode + result-grid motion.
 	ResultViewToggle      string
 	ResultCursorDown      string
@@ -295,6 +333,19 @@ func EnglishTranslationSet() *TranslationSet {
 		EmptyColumnsHint: "(select a table)",
 		EmptyIndexesHint: "(select a table)",
 
+		RelationshipPanelOutboundHeader:  "Outbound (parents)",
+		RelationshipPanelInboundHeader:   "Inbound (children)",
+		RelationshipPanelNoTab:           "(no active result)",
+		RelationshipPanelNoRelationships: "(no relationships)",
+		RelationshipPanelMoreFmt:         "(+%d more)",
+		RelationshipPanelNull:            "(null)",
+		RelationshipPanelInboundNeedsPK:  "inbound needs a primary key",
+		RelationshipPanelEstimatePending: "~…",
+		RelationshipPanelEstimateError:   "~?",
+		RelationshipPanelExactError:      "!?",
+		RelationshipPanelBreadcrumbSep:   " -> ",
+		RelationshipPanelBreadcrumbEmpty: "(no path)",
+
 		UnhideConfirmationTitle: "Unhide schema?",
 		UnhideConfirmationBody:  "⚠ This schema was previously hidden. Unhide and show it again?",
 
@@ -403,6 +454,12 @@ func EnglishTranslationSet() *TranslationSet {
 			TableInspectClose:   "Close",
 
 			HistoryOpen: "Open query history",
+
+			RelationshipPanelToggle: "Toggle relationship panel",
+			RelationshipPanelEnter:  "Focus relationship panel",
+			RelationshipPanelExit:   "Leave relationship panel",
+			RelationshipPanelDown:   "Select next relationship",
+			RelationshipPanelUp:     "Select previous relationship",
 
 			ResultViewToggle:      "Toggle expanded view",
 			ResultCursorDown:      "Cursor down",
