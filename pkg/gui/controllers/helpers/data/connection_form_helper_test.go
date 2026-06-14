@@ -394,7 +394,7 @@ func TestNewEmptyStateHook(t *testing.T) {
 			t.Errorf("hint = %q; want %q", hint, tr.EmptyConnectionsHint)
 		}
 		// Pin the exact copy so it can't accidentally regrow and re-truncate
-		// in the connections rail (dbsavvy-tro.8).
+		// in the connections rail.
 		const want = "No connections yet.\nPress a to add"
 		if hint != want {
 			t.Errorf("hint = %q; want %q", hint, want)

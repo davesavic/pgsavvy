@@ -4,7 +4,7 @@ A vim-style TUI database client built like [lazygit](https://github.com/jesseduf
 
 ## Status
 
-Active development. PostgreSQL is the only supported driver so far; breaking changes may occur. Work is tracked through `dbsavvy-*` epics in the beads issue tracker.
+Active development. PostgreSQL is the only supported driver so far; breaking changes may occur.
 
 ## Features
 

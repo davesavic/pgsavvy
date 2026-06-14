@@ -254,8 +254,8 @@ func TestIsStartupTipsSeenAndStamp(t *testing.T) {
 	require.False(t, b.StartupTipsSeenAt.IsZero(), "persisted timestamp non-zero")
 }
 
-// TestStoreGetOrCreateBufferUUID_PersistsAcrossLoad is the regression test
-// for dbsavvy-lrh: the editor buffer UUID must round-trip through disk so
+// TestStoreGetOrCreateBufferUUID_PersistsAcrossLoad is the regression test:
+// the editor buffer UUID must round-trip through disk so
 // the same .sql file is reused on the next run. Before the fix the UUID was
 // minted into Common.AppState (an unwired phantom) and never reached
 // last_buffer_uuids on disk, so each startup generated a fresh UUID and
@@ -284,7 +284,7 @@ func TestStoreGetOrCreateBufferUUID_PersistsAcrossLoad(t *testing.T) {
 	defer func() { _ = s2.Close() }()
 	require.NoError(t, s2.Load())
 	require.Equal(t, first, s2.GetOrCreateBufferUUID(connID),
-		"UUID must persist across store reload (dbsavvy-lrh)")
+		"UUID must persist across store reload")
 }
 
 func TestStoreGetOrCreateBufferUUID_EmptyConnID(t *testing.T) {

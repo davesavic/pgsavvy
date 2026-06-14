@@ -28,7 +28,7 @@ var ErrRowStreamClosed = errors.New("pg: row stream closed")
 // follow-on Close calls are no-ops. The EOF-release path exists so the
 // wrapping layer (pkg/session.SQLSession) can issue a fresh Stream on the
 // same session immediately after observing EOF, without first round-tripping
-// through an explicit consumer Close (dbsavvy-zzy).
+// through an explicit consumer Close.
 //
 // Allocation profile: Next reuses staging across iterations — pgx returns a
 // fresh []any from rows.Values() per row, which we copy into a stable buffer
@@ -51,7 +51,7 @@ type pgRowStream struct {
 	// CAS-guarded path as rows.Close + releaseGuard — no leaked timer
 	// goroutine or pooled-connection deadline past release. nil when the
 	// stream had no timeout (q.Timeout == 0 and no default ceiling), in
-	// which case release() skips it. dbsavvy-fow.7 (U15).
+	// which case release() skips it.
 	cancel context.CancelFunc
 
 	closed atomic.Bool
@@ -61,7 +61,7 @@ type pgRowStream struct {
 	// is read in release() AFTER s.rows.Close() — reading it earlier (e.g.
 	// in the EOF branch of Next before release) yields 0. Surfaced via
 	// RowsAffected() so the UI can report "N rows affected" for DML that
-	// returns no result rows (dbsavvy-tiu8).
+	// returns no result rows.
 	rowsAffected atomic.Int64
 }
 
@@ -91,7 +91,7 @@ func (s *pgRowStream) Columns() []models.ColumnMeta { return s.columns }
 // QueryID returns the QueryID stamped at Stream() time. Every field
 // (SessionID, BackendPID, Started, Nonce) is populated before the stream is
 // returned, so callers may read this BEFORE calling Next() to wire cancel
-// (task 66p.4) or result routing.
+// or result routing.
 func (s *pgRowStream) QueryID() models.QueryID { return s.queryID }
 
 // RowsAffected returns the command tag's affected-row count, captured in
@@ -104,7 +104,7 @@ func (s *pgRowStream) RowsAffected() int64 { return s.rowsAffected.Load() }
 //   - (zero, false, nil) — clean end-of-result
 //   - (zero, false, err) — pgx error, ctx cancellation, or use-after-Close
 //
-// hq5.6 watchdog: ctx is now observed. If ctx is cancelled while
+// watchdog: ctx is now observed. If ctx is cancelled while
 // pgx.Rows.Next is blocked on a dead socket, the watchdog goroutine
 // force-closes the rows so the read unblocks and streamMu is released
 // within a bounded window rather than hanging until TCP keepalive fires
@@ -140,7 +140,7 @@ func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 			}
 			// EOF or terminal stream error — drop the session inFlight
 			// guard now rather than stranding it until the consumer calls
-			// Close. CAS-guarded by `closed`. (dbsavvy-zzy)
+			// Close. CAS-guarded by `closed`.
 			s.release()
 			return models.Row{}, false, nextErr
 		}
@@ -151,7 +151,7 @@ func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 		// Clip oversized cell values at the stream boundary so a
 		// wide-payload query can't accumulate hundreds of MB of heap
 		// across the buffered rows and stall the process under GC
-		// pressure (dbsavvy-fspu).
+		// pressure.
 		capRowValues(vals, s.columns)
 		return models.Row{Values: vals}, true, nil
 
@@ -187,12 +187,12 @@ func (s *pgRowStream) release() {
 	s.rows.Close()
 	// pgx populates the command tag inside Rows.Close(), so capture the
 	// affected-row count here (after Close) rather than at the EOF branch
-	// of Next where it would still be zero. dbsavvy-tiu8.
+	// of Next where it would still be zero.
 	s.rowsAffected.Store(s.rows.CommandTag().RowsAffected())
 	// Stop the statement-timeout deadline timer (if any) on the same
 	// once-guarded path. Calling cancel after the deadline already fired is
 	// a documented no-op, so this is safe regardless of WHY we released
-	// (EOF, terminal error, timeout, or explicit Close). dbsavvy-fow.7.
+	// (EOF, terminal error, timeout, or explicit Close).
 	if s.cancel != nil {
 		s.cancel()
 	}

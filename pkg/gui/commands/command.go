@@ -4,7 +4,7 @@ import "reflect"
 
 // Handler is the universal handler signature for every action in the
 // CommandRegistry. All ~49 existing controller handlers migrate to
-// this shape during dlp.8c (per epic decision D2).
+// this shape (per epic decision D2).
 type Handler = func(ExecCtx) error
 
 // Command is one named, dispatchable action.

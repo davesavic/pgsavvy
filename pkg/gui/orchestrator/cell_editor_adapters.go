@@ -13,7 +13,7 @@ import (
 // cellEditorPicker satisfies controllers.GridStatePicker by resolving
 // the active result tab on every call. The active tab is mutable, so
 // capturing a snapshot at wire time would dangle once the user switches
-// tabs (dbsavvy-8oo #9 / dbsavvy-6lq).
+// tabs.
 //
 // Read-only / inline-edit / per-relation editability are already folded
 // into grid.View by F2's introspection pass (drivers/pg/editability.go
@@ -115,8 +115,7 @@ func (p cellEditorPicker) FormatForEdit(v any, col models.ColumnMeta) string {
 	// map (objects/arrays), a []byte, or a string depending on shape;
 	// classify by column type so every form routes through
 	// FormatJSONValue rather than guessing from the Go value, which
-	// misses raw []byte json and prints "[123 34 ...]" (dbsavvy-2ij6,
-	// dbsavvy json-cell-format).
+	// misses raw []byte json and prints "[123 34 ...]".
 	if grid.IsJSONColumn(col) {
 		return grid.FormatJSONValue(v)
 	}
@@ -128,7 +127,7 @@ func (p cellEditorPicker) FormatForEdit(v any, col models.ColumnMeta) string {
 	// Array columns (text[] etc.) decode to a Go slice; seed the editor
 	// with Postgres array syntax {a,b,c} — the same string the grid
 	// shows — so the edited value commits as a valid array literal rather
-	// than Go's "[a b c]" form Postgres rejects (dbsavvy-26i).
+	// than Go's "[a b c]" form Postgres rejects.
 	if lit, ok := grid.FormatArrayLiteral(v); ok {
 		return lit
 	}

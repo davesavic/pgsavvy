@@ -41,7 +41,7 @@ type LookupResult struct {
 
 	// ShowInBar / OpensMenu are leaf-only cosmetic flags lifted from the
 	// originating ChordBinding. Interior-node results carry the zero
-	// value. Consumed by the options-bar collector (dlp.12) and reserved
+	// value. Consumed by the options-bar collector and reserved
 	// for the menu-routing flow.
 	ShowInBar bool
 	OpensMenu bool
@@ -55,7 +55,7 @@ type ChordTrie struct {
 	root *trieNode
 }
 
-// Lookup walks seq from the root. Per AC dlp.4:
+// Lookup walks seq from the root. The contract is:
 //   - Lookup([]) returns Found=true on the root with IsLeaf=false and
 //     HasChildren reflecting whether the trie has any bindings.
 //   - Lookup of an unknown prefix returns Found=false (all other fields
@@ -86,7 +86,7 @@ func (t *ChordTrie) Lookup(seq []Key) LookupResult {
 }
 
 // RootKeys returns the set of top-level (root child) Keys in
-// deterministic order. The orchestrator (dlp.8c) uses this to install
+// deterministic order. The orchestrator uses this to install
 // one per-key SetKeybinding shim per top-level chord prefix on
 // non-editable views. Empty trie → empty slice.
 func (t *ChordTrie) RootKeys() []Key {
@@ -97,7 +97,7 @@ func (t *ChordTrie) RootKeys() []Key {
 }
 
 // ReachableKeys returns every distinct Key that appears at ANY depth in
-// the trie, in deterministic order. The orchestrator (dbsavvy-tro.7)
+// the trie, in deterministic order. The orchestrator
 // uses this to install one SetKeybinding shim per key reachable in any
 // chord — not just root keys. Without this, chord-trailing keys (e.g.
 // the `q` in `<leader>q`) are never delivered to the Matcher because
@@ -168,8 +168,8 @@ func (t *ChordTrie) ChildrenAt(prefix []Key) ([]ChildRow, bool) {
 // deterministic DFS order. fn is called with the resolved Sequence (a
 // fresh slice for each leaf) plus a LookupResult describing the leaf.
 //
-// Used by the cheatsheet generator (dlp.10) and the completeness test
-// (dlp.11). Walk on the empty trie is a no-op.
+// Used by the cheatsheet generator and the completeness test.
+// Walk on the empty trie is a no-op.
 func (t *ChordTrie) Walk(fn func(seq []Key, leaf LookupResult)) {
 	if t == nil || t.root == nil {
 		return

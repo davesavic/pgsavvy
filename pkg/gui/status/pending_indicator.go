@@ -12,7 +12,6 @@ import (
 // terminal narrower than the collapsing width still shows the count
 // without eating the rest of the status line. Z1 passes the actual
 // available width when wiring the indicator into the bar.
-// dbsavvy-bwq.6 (A3).
 const pendingIndicatorCollapseWidth = 40
 
 // BuildPendingIndicator returns the status-bar indicator for the staged
@@ -33,7 +32,7 @@ const pendingIndicatorCollapseWidth = 40
 // availableWidth is the budget the caller plans to give the indicator
 // (typically terminalWidth * 0.6 per the amendment). Pass 0 to force
 // the collapsed form unconditionally; pass any large positive number to
-// force the expanded form. dbsavvy-bwq.6 (A3).
+// force the expanded form.
 func BuildPendingIndicator(set *models.PendingEditSet, conn *models.Connection, availableWidth int) string {
 	if set == nil || set.IsEmpty() {
 		return ""
@@ -66,7 +65,7 @@ func BuildPendingIndicator(set *models.PendingEditSet, conn *models.Connection, 
 // BuildStatusLine.
 //
 // Returns "" when editable is true — the caller renders no segment in
-// that case. dbsavvy-bwq.6 (A3) ADR-24.
+// that case. ADR-24.
 func BuildDisabledEditCellOption(editable bool, reason string) string {
 	if editable {
 		return ""
@@ -80,7 +79,7 @@ func BuildDisabledEditCellOption(editable bool, reason string) string {
 
 // connHasDestructiveFlag reports whether conn carries any flag that
 // signals "writes against this connection deserve user attention" —
-// the same set the indicator tints. dbsavvy-bwq.6 (A3).
+// the same set the indicator tints.
 func connHasDestructiveFlag(conn *models.Connection) bool {
 	if conn == nil {
 		return false

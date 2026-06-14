@@ -7,9 +7,8 @@
 // registration is observable in test recorders and in production logs.
 //
 // Mouse bindings (RegisterMouseBinding) and the leader / colon next-key
-// dispatcher (oneshot_arm.go) are owned by sibling task dbsavvy-zro
-// (T7b). They live in the same package so consumers depend on a single
-// import for every binding-registration call.
+// dispatcher (oneshot_arm.go) also live in this package, so consumers
+// depend on a single import for every binding-registration call.
 //
 // Concurrency invariant (D8): Register MUST be called on the MainLoop
 // goroutine. The driver fans out into gocui internals that are not

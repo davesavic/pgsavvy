@@ -266,7 +266,7 @@ func renderWithSearchProvider(t *testing.T, focusKey types.ContextKey, searchSta
 
 // TestRenderStatusLine_SearchProviderConsultedAndRendered proves the
 // SearchStatus provider seam is consulted on the render pass and its
-// active output appears in the status line (dbsavvy-2ttm.5).
+// active output appears in the status line.
 func TestRenderStatusLine_SearchProviderConsultedAndRendered(t *testing.T) {
 	consulted := false
 	buf := renderWithSearchProvider(t, types.ResultTabKey(0), func() (string, int, int, bool) {

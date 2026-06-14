@@ -6,21 +6,19 @@ import (
 )
 
 // QueryEditorContext is the real top-right MAIN_CONTEXT pane that
-// hosts the vim-style SQL editor (epic dbsavvy-wwd). dbsavvy-wwd.1
-// promotes it from StubContext to a live BaseContext-embedding type
-// so subsequent child tasks (wwd.2..wwd.10) have a stable handoff:
+// hosts the vim-style SQL editor. It is a live BaseContext-embedding
+// type so subsequent child tasks have a stable handoff:
 // they read/write the *editor.Buffer + *editor.RepeatStore exposed
 // through Buffer() / Repeat() accessors.
 //
 // Focus wiring:
 //   - HandleFocus flips ModeStore[QUERY_EDITOR] to ModeNormal so the
 //     Matcher routes printable runes through Normal-mode dispatch
-//     until wwd.10 wires Insert-mode entries (i/a/o/...).
+//     before Insert-mode entries (i/a/o/...) take over.
 //   - HandleFocusLost is the inverse: clear Visual selection, reset
 //     ModeStore, cancel any half-built chord in the Matcher, and
-//     dispatch a buffer save when Dirty. wwd.1 ships call-site stubs
-//     for ExitVisual (wwd.7) and SaveBuffer (wwd.9); the order of the
-//     four operations is the wwd contract.
+//     dispatch a buffer save when Dirty. The order of the four
+//     operations is contractual.
 type QueryEditorContext struct {
 	BaseContext
 	deps    depsAlias
@@ -36,15 +34,14 @@ var _ types.IBaseContext = (*QueryEditorContext)(nil)
 
 // NewQueryEditorContext constructs the live QUERY_EDITOR context.
 // base supplies key/view/window/kind; deps is the standard context
-// dependency bag (carried for parity with sibling constructors —
-// wwd.4+ will consume GuiDriver from it). modes and matcher may be
+// dependency bag (carried for parity with sibling constructors, which
+// consume GuiDriver from it). modes and matcher may be
 // nil in test wiring; every focus hook nil-checks before calling.
 //
 // The *editor.Buffer / *editor.RepeatStore returned by Buffer() /
 // Repeat() are always non-nil — Buffer uses editor.NewBuffer so
-// Jumps is initialised before any wwd.5 motion handler can call
-// buf.Jumps.Push; RepeatStore stays a zero-value shell until wwd.9
-// fills it.
+// Jumps is initialised before any motion handler can call
+// buf.Jumps.Push.
 func NewQueryEditorContext(
 	base BaseContext,
 	deps depsAlias,
@@ -62,7 +59,7 @@ func NewQueryEditorContext(
 }
 
 // Buffer returns the canonical text/cursor/undo state for this query
-// editor pane. Always non-nil. wwd.2 fills the body of *editor.Buffer.
+// editor pane. Always non-nil.
 func (c *QueryEditorContext) Buffer() *editor.Buffer { return c.buf }
 
 // ViewFrame reports the editor viewport (top visible buffer line +
@@ -98,7 +95,6 @@ func (c *QueryEditorContext) SetBuffer(buf *editor.Buffer) {
 }
 
 // Repeat returns the per-context `.`-repeat state. Always non-nil.
-// wwd.9 fills the body of *editor.RepeatStore.
 func (c *QueryEditorContext) Repeat() *editor.RepeatStore { return c.repeat }
 
 // HandleFocus flips ModeStore[QUERY_EDITOR] to ModeNormal so the
@@ -111,18 +107,18 @@ func (c *QueryEditorContext) HandleFocus(_ types.OnFocusOpts) error {
 	return nil
 }
 
-// HandleFocusLost runs the four-step departure protocol the wwd epic
-// freezes (Architecture Decisions 3, 4, 6):
+// HandleFocusLost runs the four-step departure protocol
+// (Architecture Decisions 3, 4, 6):
 //
-//  1. exitVisualIfActive   — wwd.7 wires editor.ExitVisual(c.buf) so
+//  1. exitVisualIfActive   — editor.ExitVisual(c.buf) so
 //     Selection never persists across a focus change (and therefore
-//     never lands on disk in wwd.9).
+//     never lands on disk).
 //  2. modes.Reset            — drop the per-context Mode entry so a
 //     subsequent re-focus starts from ModeNormal.
 //  3. matcher.Cancel         — abort any half-built chord / pending
 //     count + register state and hide WhichKey.
-//  4. saveBufferIfDirty      — wwd.9 dispatches the SaveBuffer worker
-//     when Dirty; the stub here is a no-op and returns nil.
+//  4. saveBufferIfDirty      — dispatches the SaveBuffer worker
+//     when Dirty.
 //
 // Each step is nil-safe on its own; the sequence is idempotent across
 // repeated focus/blur cycles.
@@ -134,7 +130,7 @@ func (c *QueryEditorContext) HandleFocusLost(_ types.OnFocusLostOpts) error {
 	if c.matcher != nil {
 		c.matcher.Cancel()
 	}
-	// wwd.8 — drop any half-typed operator stash so a focus blur during
+	// drop any half-typed operator stash so a focus blur during
 	// op-pending can't strand the next refocus in OperatorPending.
 	// matcher.Cancel() above handles the Matcher's pending count/register
 	// state; RepeatStore.PendingOpID is the action-handler-owned slot.
@@ -155,7 +151,7 @@ func (c *QueryEditorContext) exitVisualIfActive() {
 }
 
 // SetMode flips ModeStore[QUERY_EDITOR] to m. VimEditorController calls
-// this from the v / V / <c-v> / <esc> handlers (dbsavvy-wwd.7) so the
+// this from the v / V / <c-v> / <esc> handlers so the
 // Matcher routes subsequent keys via the new mode mask. A nil modes
 // setter (test wiring) is a no-op so test fakes can omit it.
 func (c *QueryEditorContext) SetMode(m types.Mode) {

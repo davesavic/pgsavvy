@@ -18,7 +18,7 @@ const SnippetSourcePriority = SnippetSourceBias
 // Snippet is one named, expandable SQL template. Name is the token the user
 // types/matches against in the completion popup; Body is the (typically
 // multi-line) text inserted when the snippet is accepted. The accept/expand
-// insertion path is owned by ko4m.7.2 — this type only carries the data.
+// insertion path is owned elsewhere — this type only carries the data.
 type Snippet struct {
 	Name string
 	Body string
@@ -26,7 +26,7 @@ type Snippet struct {
 
 // SnippetProvider is the data seam SnippetSource reads from. Keeping the
 // snippet set behind an interface lets the built-in starter set
-// (BuiltinSnippetProvider) and, later, a config-file-backed provider (ktt)
+// (BuiltinSnippetProvider) and, later, a config-file-backed provider
 // swap in without touching SnippetSource. Mirrors the HistoryStore seam used
 // by HistorySource.
 type SnippetProvider interface {
@@ -35,7 +35,7 @@ type SnippetProvider interface {
 
 // BuiltinSnippetProvider is the hardcoded starter set shipped with the editor.
 // It satisfies SnippetProvider with a handful of common SQL templates so the
-// snippet source is useful out of the box before any user config (ktt) loads.
+// snippet source is useful out of the box before any user config loads.
 type BuiltinSnippetProvider struct{}
 
 // Snippets implements SnippetProvider. Each entry has a non-empty Name and a
@@ -62,13 +62,13 @@ func (BuiltinSnippetProvider) Snippets() []Snippet {
 }
 
 // SnippetSource emits Suggestions for snippets whose Name fuzzily matches the
-// identifier prefix immediately left of the cursor (editor.Match, ko4m.3.1).
+// identifier prefix immediately left of the cursor (editor.Match).
 // Suggestion.Source is always SnippetSourceName; Suggestion.Text and
 // Suggestion.Display are the snippet Name (the token the user is completing),
 // and Suggestion.Body carries the multi-line expansion body for the
-// accept/expand path (ko4m.7.2). Score = matchQuality + SnippetSourceBias so
+// accept/expand path. Score = matchQuality + SnippetSourceBias so
 // snippets sit below schema/function and above keyword/history in the rank
-// order (ko4m.3.2).
+// order.
 //
 // The snippet set comes from the injected SnippetProvider; a nil provider
 // yields an empty (non-nil) slice. SnippetSource adds no drivers.Session call —

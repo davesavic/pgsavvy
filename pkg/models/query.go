@@ -8,7 +8,7 @@ import "time"
 // in SQL should resolve against (qualified names like sales.orders always win).
 // It is a driver hint: the pg driver realises it as a SET search_path issued
 // before the statement; drivers that lack the concept ignore it. Empty means
-// "leave name resolution to the session's existing default" (dbsavvy-u1n).
+// "leave name resolution to the session's existing default".
 type Query struct {
 	SQL           string
 	Args          []any

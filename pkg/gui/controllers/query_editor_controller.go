@@ -44,7 +44,7 @@ const queryToastTTL = 4 * time.Second
 const resultTabLabelMax = 40
 
 // maxVisualRunBatch caps the number of statements <leader>r will fan
-// out in Visual mode (dbsavvy-wwd.7). Selections wider than this toast
+// out in Visual mode. Selections wider than this toast
 // + abort BEFORE any runner.Run fires so the user can narrow the range
 // rather than discovering 200 result tabs after the fact.
 const maxVisualRunBatch = 32
@@ -61,8 +61,6 @@ const maxVisualRunBatch = 32
 //   - wiring the <leader>x GetDisabled closure that consults the live
 //     QueryRunner.Capabilities at dispatch time (driver caps may not be
 //     known until Bind() runs post-Connect)
-//
-// dbsavvy-66p.11.
 type QueryEditorController struct {
 	baseController
 }
@@ -72,13 +70,13 @@ type QueryEditorController struct {
 // (QueryRunner, ResultTabs, EditorBuffer, Toast) may individually be
 // nil; every handler nil-checks at call time. threading supplies OnWorker,
 // used to wait on a DDL run's completion for post-run metadata invalidation
-// (dbsavvy-ko4m.2.4); a zero ThreadingDeps disables that path (nil OnWorker).
+// a zero ThreadingDeps disables that path (nil OnWorker).
 func NewQueryEditorController(c *common.Common, core CoreDeps, nav NavDeps, ui UIDeps, query QueryDeps, threading ThreadingDeps) *QueryEditorController {
 	q := &QueryEditorController{baseController: newBase(c, HelperBag{CoreDeps: core, NavDeps: nav, UIDeps: ui, QueryDeps: query, ThreadingDeps: threading})}
 	// Wire the single sort sink both entry points (the <leader>s picker +
 	// the grid header double-click) route through. The optional-interface
 	// type-assert lets tests with a bare ResultTabs fake skip the wiring
-	// (sort stays a no-op there). dbsavvy-72k.5.
+	// (sort stays a no-op there).
 	if hooker, ok := q.helpers.ResultTabs.(ResultTabSortHooker); ok {
 		hooker.SetOnSortRequest(q.sortActiveResult)
 	}
@@ -98,26 +96,25 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		description string
 		// mode is the Mode mask this binding fires under. Zero means
 		// fall back to defaultMode (Normal). INSERT is deliberately
-		// EXCLUDED (dbsavvy-1yb): with leader=<space>, an INSERT-mode
+		// EXCLUDED: with leader=<space>, an INSERT-mode
 		// mask makes the space rune a chord prefix, so the matcher
 		// buffers it until tlen — producing the "select*" → "select *"
 		// reordering bug. Normal + Visual coverage is published as two
 		// specs (never one OR'd mask) because ModeNormal is a zero
-		// sentinel that vanishes from a multi-bit mask (dbsavvy-8u4).
+		// sentinel that vanishes from a multi-bit mask.
 		mode types.Mode
-		// showInBar flags this binding for the status options bar
-		// (dbsavvy-fow.2). Only the top run/explain chords are flagged.
+		// showInBar flags this binding for the status options bar.
+		// Only the top run/explain chords are flagged.
 		showInBar bool
 	}
 	defaultMode := types.ModeNormal
 	// <leader>r runs the statement under cursor in Normal mode AND runs
-	// the selection in the Visual modes (wwd.7). It MUST be published as
+	// the selection in the Visual modes. It MUST be published as
 	// two separate specs: ModeNormal is the zero sentinel (types/mode.go),
 	// so `ModeNormal | ModeVisual | …` collapses to the Visual bits only
 	// (0 | X == X) and fanOutBinding — which only treats Normal specially
 	// when cb.Mode == ModeNormal exactly — would silently drop the Normal
-	// entry, leaving <leader>r dead in the very mode queries are run from
-	// (dbsavvy-8u4).
+	// entry, leaving <leader>r dead in the very mode queries are run from.
 	visualRunModes := types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 	specs := []bspec{
 		{"<leader>r", commands.QueryRun, tr.Actions.RunQuery, defaultMode, true},
@@ -288,7 +285,7 @@ func (q *QueryEditorController) runOne(ec commands.ExecCtx, newTx bool) error {
 // same path as <leader>r — open a run scope, dispatch via runStatement
 // (which streams rows into a result tab), close the scope — without
 // reading the editor buffer. Lets callers outside the QUERY_EDITOR
-// context (e.g. the TABLES <CR> "open table data" path, dbsavvy-gj8)
+// context (e.g. the TABLES <CR> "open table data" path)
 // reuse the full run/stream/tab machinery. Returns true when a run was
 // launched; false when stmt is blank or there is no active session, so
 // the caller can skip focusing an empty results panel.
@@ -323,7 +320,7 @@ func (q *QueryEditorController) RunSQL(stmt string) bool {
 // active. SelectionText -> SplitStatements -> per-statement runStatement
 // fan-out. The cap check fires BEFORE any runner.Run so over-cap
 // selections are rejected wholesale; partial runs are intentionally
-// avoided (dbsavvy-wwd.7).
+// avoided.
 func (q *QueryEditorController) runVisualSelection(newTx bool) error {
 	if q.helpers.EditorBuffer == nil {
 		q.toast("no selection")
@@ -390,7 +387,7 @@ func nonEmptyStatements(stmts []string) []string {
 // ConfirmDDL for DDL). When no confirmation is needed proceed runs
 // immediately; otherwise the popup's onYes invokes it, so each caller's
 // synchronous run-scope bookkeeping still runs — just after the user
-// confirms. Cancelling drops the run entirely. dbsavvy-wxkf.
+// confirms. Cancelling drops the run entirely.
 func (q *QueryEditorController) confirmRun(stmts []string, proceed func()) {
 	if q.helpers.Confirm == nil || !q.runNeedsConfirm(stmts) {
 		proceed()
@@ -508,7 +505,7 @@ func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) 
 	runner := q.helpers.QueryRunner
 	// Resolve unqualified object names against the currently selected schema
 	// (SCHEMAS rail). Empty when no schema is selected, leaving resolution to
-	// the session default (dbsavvy-u1n).
+	// the session default.
 	if q.helpers.Schemas != nil {
 		opts.DefaultSchema = q.helpers.Schemas.SelectedSchemaName()
 	}
@@ -516,14 +513,13 @@ func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) 
 	// caller already set a per-run override. 0 = off (no ceiling). The pg
 	// driver realises a non-zero Timeout as a context.WithTimeout deadline
 	// whose CancelFunc the row stream owns, so a runaway query is bounded
-	// without leaking a timer past the stream (dbsavvy-fow.7 U15).
+	// without leaking a timer past the stream.
 	if opts.Timeout == 0 {
 		opts.Timeout = q.defaultStatementTimeout()
 	}
 	// Last-wins preemption of any in-flight stream is centralized in the
 	// QueryRunner chokepoint (QueryRunner.Run preempts before acquiring the
-	// per-session queue lock), covering run / RunQuery / Explain uniformly
-	// (dbsavvy-lxn.1).
+	// per-session queue lock), covering run / RunQuery / Explain uniformly.
 	rh, err := runner.Run(context.Background(), stmt, opts)
 	if err != nil {
 		q.surfaceErr(stmt, err)
@@ -542,8 +538,8 @@ func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) 
 }
 
 // scheduleDDLInvalidation drops the warmed completion metadata for the active
-// schema AFTER a local DDL statement completes SUCCESSFULLY (dbsavvy-ko4m.2.4,
-// epic decision B). It fires from the POST-run signal (RunHandle.Done — passed
+// schema AFTER a local DDL statement completes SUCCESSFULLY (decision B). It
+// fires from the POST-run signal (RunHandle.Done — passed
 // as done), not the pre-run confirm gate, and is strictly gated on:
 //
 //   - EffectiveKind(stmt) == KindDDL — a plain SELECT/DML or a writable-CTE DML
@@ -593,8 +589,8 @@ func (q *QueryEditorController) scheduleDDLInvalidation(stmt string, done <-chan
 }
 
 // reRunActiveTab re-runs runSQL into the active result tab, reusing the same
-// tab + grid (sort cycle / clear, dbsavvy-72k.3). runSQL is supplied by the
-// caller (dbsavvy-72k.4): a wrapSorted(...) string for a sort, or the tab's
+// tab + grid (sort cycle / clear). runSQL is supplied by the
+// caller: a wrapSorted(...) string for a sort, or the tab's
 // original SQL for a clear. The tab's origin (origSQL, origArgs,
 // origDefaultSchema) is the write-once capture from .1 — origArgs +
 // origDefaultSchema rebuild the exact query; origSQL is handed to the helper
@@ -608,9 +604,8 @@ func (q *QueryEditorController) scheduleDDLInvalidation(stmt string, done <-chan
 // Returns true when the re-run was launched; false when no runner/session, no
 // reattacher surface, or RunQuery errored.
 //
-// Contract entry point for the sort-cycle driver (dbsavvy-72k.4); reached via
-// sortActiveResult, which the constructor wires to the sort entry points
-// (dbsavvy-72k.5).
+// Contract entry point for the sort-cycle driver; reached via
+// sortActiveResult, which the constructor wires to the sort entry points.
 func (q *QueryEditorController) reRunActiveTab(runSQL string) bool {
 	runner := q.helpers.QueryRunner
 	if runner == nil || !runner.HasSession() {
@@ -625,7 +620,7 @@ func (q *QueryEditorController) reRunActiveTab(runSQL string) bool {
 
 	// RunQuery preempts any in-flight stream for the tab before acquiring the
 	// per-session queue lock, so the prior stream is stopped/discarded and the
-	// new task is not deduped (dbsavvy-72k.3 AC#1).
+	// new task is not deduped.
 	rh, err := runner.RunQuery(context.Background(), models.Query{
 		SQL:           runSQL,
 		Args:          origArgs,
@@ -637,7 +632,7 @@ func (q *QueryEditorController) reRunActiveTab(runSQL string) bool {
 		// surfaceErr -> ShowError -> SetErrorSQL writes the canonical origSQL
 		// field with runSQL, which on a wrapped sort would clobber the
 		// original needed by a later clear. Pass origSQL (not runSQL) so the
-		// tab's write-once origin survives a failed re-run. dbsavvy-72k.3.
+		// tab's write-once origin survives a failed re-run.
 		q.surfaceErr(origSQL, err)
 		return false
 	}
@@ -651,14 +646,14 @@ func (q *QueryEditorController) reRunActiveTab(runSQL string) bool {
 // sortActiveResult drives the database-side sort FLOW for the active result
 // tab: it runs the helper's guards + asc→desc→clear cycle (ResultTabSorter),
 // surfaces any toast it returns (e.g. the pending-edits block), and on a
-// runnable result hands the built SQL to reRunActiveTab (dbsavvy-72k.3). col
+// runnable result hands the built SQL to reRunActiveTab. col
 // is a RAW 0-based grid column index supplied by the entry points.
 //
 // The single sort sink wired in NewQueryEditorController: both the <leader>s
 // picker submit and the grid header double-click route through it via
-// ResultTabsHelper.SetOnSortRequest (dbsavvy-72k.5). The active client-side
+// ResultTabsHelper.SetOnSortRequest. The active client-side
 // filter is dropped as a side effect — the re-run reset in ReattachActiveTab
-// (dbsavvy-72k.3) rebuilds the grid from scratch, so no explicit filter-clear
+// rebuilds the grid from scratch, so no explicit filter-clear
 // is needed here.
 func (q *QueryEditorController) sortActiveResult(col int) {
 	sorter, ok := q.helpers.ResultTabs.(ResultTabSorter)
@@ -677,8 +672,7 @@ func (q *QueryEditorController) sortActiveResult(col int) {
 
 // defaultStatementTimeout returns the configured default statement-timeout
 // ceiling (config.query.default_statement_timeout), or 0 (off) when no
-// Common / config is wired (test path) or the key is unset. dbsavvy-fow.7
-// (U15).
+// Common / config is wired (test path) or the key is unset.
 func (q *QueryEditorController) defaultStatementTimeout() time.Duration {
 	if q.c == nil {
 		return 0
@@ -711,13 +705,13 @@ func (q *QueryEditorController) explain(_ commands.ExecCtx, analyze bool) error 
 	}
 	// Fail-closed gate: ANALYZE executes the statement, so downgrade it to an
 	// estimate-only plan when the statement may write on a writable connection
-	// (covers writable CTEs that classify as KindOther). dbsavvy-u1n.
+	// (covers writable CTEs that classify as KindOther).
 	effectiveAnalyze := query.EffectiveAnalyze(stmt, q.connReadOnly(), analyze)
 	if analyze && !effectiveAnalyze {
 		q.toast("ANALYZE skipped — statement may execute writes/side effects")
 	}
 	// Resolve unqualified names against the selected schema, mirroring the run
-	// path so EXPLAIN reflects what Run would execute (dbsavvy-u1n).
+	// path so EXPLAIN reflects what Run would execute.
 	defaultSchema := ""
 	if q.helpers.Schemas != nil {
 		defaultSchema = q.helpers.Schemas.SelectedSchemaName()
@@ -750,7 +744,7 @@ func (q *QueryEditorController) handleCancel(_ commands.ExecCtx) error {
 	return nil
 }
 
-// --- Format handlers (dbsavvy-4y5.4.2) ---
+// --- Format handlers ---
 
 func (q *QueryEditorController) handleFormat(ec commands.ExecCtx) error {
 	if q.helpers.EditorBuffer == nil {
@@ -815,21 +809,21 @@ func (q *QueryEditorController) toast(msg string) {
 }
 
 func (q *QueryEditorController) surfaceErr(stmt string, err error) {
-	// gr7e.2: a preempt fence is transient — the prior query is still
+	// A preempt fence is transient — the prior query is still
 	// terminating. Surface a retry toast rather than a sticky error tab.
 	if errors.Is(err, session.ErrPreemptPending) {
 		q.toast("Previous query is still terminating — please retry in a moment.")
 		return
 	}
 
-	// hq5.6: detect connection-dead errors and trigger disconnect flow.
+	// Detect connection-dead errors and trigger disconnect flow.
 	if drivers.IsConnectionDead(err) {
 		q.handleConnectionDead(err)
 	}
 
 	if q.helpers.ResultTabs != nil {
 		q.helpers.ResultTabs.ShowError(tabLabel(stmt), err)
-		// dbsavvy-fow.3: record the full SQL on the now-active error tab so
+		// record the full SQL on the now-active error tab so
 		// the error panel can draw a position caret under the offending
 		// token. ShowError sets the error tab active; the attach is a no-op
 		// when the helper doesn't implement the optional surface.
@@ -843,7 +837,6 @@ func (q *QueryEditorController) surfaceErr(stmt string, err error) {
 
 // handleConnectionDead marks the session disconnected, emits a toast
 // (deduplicated — only fires once per session), and logs the event.
-// hq5.6.
 func (q *QueryEditorController) handleConnectionDead(err error) {
 	runner := q.helpers.QueryRunner
 	if runner == nil {
@@ -887,7 +880,7 @@ func (q *QueryEditorController) openResultTab(stmt string, rh *session.RunHandle
 		return
 	}
 	_ = q.helpers.ResultTabs.OpenResultTab(tabLabel(stmt), rh)
-	// dbsavvy-uv0.6: record (connID, ResultIdentity) on the now-active
+	// record (connID, ResultIdentity) on the now-active
 	// tab so the <leader>gH overlay can gate persistence and seed the
 	// grid's hidden-col set from AppState. Optional surface — fake test
 	// helpers don't implement it, so the type-assertion gates this off
@@ -901,7 +894,7 @@ func (q *QueryEditorController) openResultTab(stmt string, rh *session.RunHandle
 		}
 		attacher.AttachActiveTabIdentity(connID, query.DetectFromQuery(stmt))
 	}
-	// dbsavvy-72k.1: record the originating statement, its bound args, and
+	// record the originating statement, its bound args, and
 	// the DefaultSchema (search_path) on the now-active result tab so a
 	// later sort re-run can reissue the exact query. The editor run path
 	// carries no args (runner.Run takes none), so origArgs is nil here;
@@ -916,7 +909,7 @@ func (q *QueryEditorController) openResultTab(stmt string, rh *session.RunHandle
 		}
 		attacher.AttachActiveTabOrigin(stmt, nil, defaultSchema)
 	}
-	// dbsavvy-r9oy: move focus to the results pane now that a tab is open,
+	// move focus to the results pane now that a tab is open,
 	// so the user can navigate results without a manual pane switch. Fires
 	// for every run path (run-one / run-all / visual-run) since they all
 	// converge here. Nil-safe — unwired in unit tests that don't exercise
@@ -931,9 +924,9 @@ func (q *QueryEditorController) openPlanTab(stmt string, plan models.Plan) {
 		return
 	}
 	_ = q.helpers.ResultTabs.OpenPlanTab(tabLabel(stmt), plan)
-	// dbsavvy-zwp6: move focus to the results pane (now the plan tab) so the
+	// move focus to the results pane (now the plan tab) so the
 	// user can navigate the plan tree without a manual pane switch, matching
-	// the grid run path (dbsavvy-r9oy). Nil-safe — unwired in unit tests.
+	// the grid run path. Nil-safe — unwired in unit tests.
 	if q.helpers.FocusResults != nil {
 		q.logErr("focus_results", q.helpers.FocusResults())
 	}

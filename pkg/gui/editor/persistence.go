@@ -91,7 +91,7 @@ func SaveBufferContent(fs afero.Fs, stateDir, connID, uuid, content string) erro
 
 // LoadBuffer reads the buffer file for (connID, uuid) and returns a
 // hydrated *Buffer. A missing file is NOT an error — a fresh empty
-// Buffer is returned so HandleFocus can hand the same handle to wwd
+// Buffer is returned so HandleFocus can hand the same handle to the
 // motion code without distinguishing "no prior buffer" from "buffer
 // exists, body empty". ConnectionID / UUID / Path are always set;
 // Cursor lands at (0,0) and Dirty stays false.

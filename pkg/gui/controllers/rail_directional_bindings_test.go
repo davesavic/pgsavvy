@@ -8,7 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/i18n"
 )
 
-// dbsavvy-xs0: railDirectionalBindings publishes Ctrl+H/J/K/L on the
+// railDirectionalBindings publishes Ctrl+H/J/K/L on the
 // scope appropriate for each pane. Connections/Schemas get Up/Down/Right-
 // to-QueryEditor; Tables gets Up/Down/Right-to-Results (physically
 // adjacent); QueryEditor gets Left(=LastRail)/Down(=Results); result

@@ -84,7 +84,7 @@ func Start(build *BuildInfo, args []string) error {
 		return fmt.Errorf("app: load config: %w", err)
 	}
 
-	// dbsavvy-ivck.5 (T5, R5): require a key-driven exit BEFORE gocui.NewGui
+	// require a key-driven exit BEFORE gocui.NewGui
 	// puts us on the alt-screen. A config that REPLACES keybindings wholesale
 	// (no element merge) can drop the default app.quit binding, leaving the
 	// app un-quittable. Validating after NewGui is useless: the stderr message
@@ -102,7 +102,7 @@ func Start(build *BuildInfo, args []string) error {
 		return err
 	}
 
-	// dbsavvy-56u.3: detect host locale and merge any overlay JSON over the
+	// detect host locale and merge any overlay JSON over the
 	// English baseline. LoadAndMerge's contract guarantees a non-nil
 	// *TranslationSet even on error and only returns non-nil error in soft
 	// cases; we Warn-log and continue with whatever set LoadAndMerge returns.
@@ -116,10 +116,10 @@ func Start(build *BuildInfo, args []string) error {
 	c := common.NewCommon(log, tr, cfg, &common.AppState{}, fs)
 	c.StateDir = stateDir
 	c.LogCloser = logCloser
-	// dbsavvy-8s2.7: wire the per-session logger into the store so
+	// wire the per-session logger into the store so
 	// MutateAndSave / debouncedFire / Close emit cat=state events.
 	store.SetLogger(log)
-	// dbsavvy-8s2.6: hand the per-session logger to the pg driver package
+	// hand the per-session logger to the pg driver package
 	// so Driver.Open / Connection.Cancel / Session lifecycle emits land in
 	// the per-session log file. Invoked AFTER logs.Open and BEFORE
 	// g.RunAndHandleError() (AD-11 — preserves the init-time
@@ -159,7 +159,7 @@ func Start(build *BuildInfo, args []string) error {
 // requireQuitBinding returns a hard, actionable error when cfg has no
 // keybinding bound to config.QuitAction (app.quit) — i.e. no key-driven
 // exit. The message NAMES the missing action and POINTS at configPath so a
-// locked-out user can fix or remove the file (dbsavvy-ivck.5, T5). Returns
+// locked-out user can fix or remove the file. Returns
 // nil when a quit binding is present.
 func requireQuitBinding(cfg *config.UserConfig, configPath string) error {
 	if config.HasQuitBinding(cfg) {

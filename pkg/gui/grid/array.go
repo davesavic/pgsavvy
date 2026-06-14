@@ -50,7 +50,7 @@ func FormatJSONValue(v any) string {
 // so display and seed stay identical. It matters because the commit path
 // submits the edited string verbatim: Go's default "[a b c]" slice
 // formatting is rejected by Postgres ("malformed array literal"), whereas
-// the {a,b,c} form here parses cleanly (dbsavvy-26i).
+// the {a,b,c} form here parses cleanly.
 //
 // Elements needing it are double-quoted with embedded " and \ escaped;
 // a nil element renders as the unquoted NULL keyword. Nested slices

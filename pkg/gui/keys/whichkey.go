@@ -7,8 +7,8 @@ import (
 )
 
 // WhichKeyNotifier is the interface the Matcher uses to drive the
-// which-key popup. The concrete implementation ships in dlp.6; the
-// Matcher (dlp.5) only consumes this interface.
+// which-key popup. The Matcher only consumes this interface; the
+// concrete implementation lives elsewhere.
 //
 // ShowAfter is called when the Matcher enters a PARTIAL state. The
 // implementation typically schedules a timer that, on fire, renders a

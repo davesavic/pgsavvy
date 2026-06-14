@@ -51,7 +51,7 @@ func wrapSorted(orig string, ordinal1Based int, dir sortDir) string {
 	// Hoist a trailing LIMIT/OFFSET out of the inner query and re-apply it after
 	// the ORDER BY. If left inside the derived table, Postgres applies the LIMIT
 	// to the unordered inner scan first, so the outer ORDER BY would sort only an
-	// arbitrary subset of rows (dbsavvy-af3).
+	// arbitrary subset of rows.
 	var tail string
 	if loc := trailingLimitOffsetRE.FindStringSubmatchIndex(stripped); loc != nil {
 		tail = stripped[loc[2]:loc[3]]

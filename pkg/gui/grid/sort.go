@@ -4,7 +4,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// sortState carries the in-grid column sort (dbsavvy-uv0.5).
+// sortState carries the in-grid column sort.
 //
 // dir cycles 0 → +1 → -1 → 0 on successive SetSort calls against the same
 // column. A SetSort on a different column resets dir to +1 for that
@@ -54,7 +54,7 @@ func (v *View) SetSort(col int) {
 // SetSortIndicator sets the display-only sort indicator (title suffix). Unlike
 // SetSort it does not cycle: the caller passes the Tab's authoritative (col,
 // dir). dir==SortNone or col out of range clears it. The grid no longer
-// reorders rows; ordering is DB-side. dbsavvy-72k.6.
+// reorders rows; ordering is DB-side.
 func (v *View) SetSortIndicator(col, dir int) {
 	v.mu.Lock()
 	defer v.mu.Unlock()

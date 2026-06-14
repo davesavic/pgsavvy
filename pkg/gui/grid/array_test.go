@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestFormatArrayLiteral_SimpleStrings is the regression for dbsavvy-26i:
+// TestFormatArrayLiteral_SimpleStrings is the regression test:
 // pgx decodes a text[] column into a Go slice; rendering it with fmt's
 // "%v" yields "[admin founder editor]" (square brackets, space-joined),
 // which Postgres rejects as a "malformed array literal". The user sees

@@ -1,6 +1,6 @@
 //go:build integration
 
-// Integration test for FK-aware JOIN candidate ranking (ko4m.1.4) against the
+// Integration test for FK-aware JOIN candidate ranking against the
 // docker/postgres fixture. It loads REAL column + foreign-key metadata from the
 // live fixture (app.user_roles, which has FKs user_id->users(id) and
 // role_id->roles(id)), feeds them into the same synchronous SchemaMetadata the

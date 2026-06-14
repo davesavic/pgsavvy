@@ -69,7 +69,7 @@ func (c *TablesController) GetKeybindings(_ types.KeybindingsOpts) []*types.Chor
 		ActionID:    listActionID(commands.RailRefresh, view),
 		Description: tr.Actions.RefreshRail,
 	})
-	// dbsavvy-3vf.9: `i` opens the TABLE_INSPECT popup for the currently
+	// `i` opens the TABLE_INSPECT popup for the currently
 	// selected table. Handler is registered in the orchestrator
 	// (gui.go) because it needs the focus tree + connectInvoker.
 	out = append(out, &types.ChordBinding{
@@ -80,7 +80,7 @@ func (c *TablesController) GetKeybindings(_ types.KeybindingsOpts) []*types.Chor
 		Description: tr.Actions.TableInspectOpen,
 		ShowInBar:   true,
 	})
-	// dbsavvy-ioaj: rail highlight+jump search. Single action IDs bound
+	// rail highlight+jump search. Single action IDs bound
 	// on TABLES; the orchestrator handler resolves the focused rail from
 	// ctx.Scope. j/k/gg/G/<CR> (baseBindings) and r/i are untouched.
 	out = append(out,

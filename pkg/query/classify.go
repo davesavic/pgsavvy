@@ -4,8 +4,7 @@ import "strings"
 
 // StatementKind classifies a SQL statement by its leading keyword. It is a
 // coarse, parser-free classification used to decide whether a statement
-// needs a confirmation prompt before execution (dbsavvy-wxkf), not a full
-// SQL grammar.
+// needs a confirmation prompt before execution, not a full SQL grammar.
 type StatementKind int
 
 const (
@@ -60,7 +59,7 @@ func Classify(sql string) StatementKind {
 // still falsely elevate; matching the existing gate's rigor, this is accepted
 // as a fail-closed bias (extra confirm prompts beat silent writes).
 //
-// DDL-CTE note (dbsavvy-ko4m.2 decision B verdict): there is deliberately NO
+// DDL-CTE note: there is deliberately NO
 // "DDL elevation" here. Postgres CTEs may contain only SELECT/INSERT/UPDATE/
 // DELETE — never DDL — so a real WITH-led statement can never execute DDL; a
 // plain DDL statement leads with its own keyword (CREATE/ALTER/DROP/…), which

@@ -9,7 +9,7 @@ import (
 // TestHorizontalOriginFor exercises the pure horizontal scroll-into-view
 // math: given a caret column, the current origin, and the viewport width,
 // return the origin that keeps the caret just inside the nearer edge
-// (edge-anchored, like a text editor's horizontal scroll) — dbsavvy-jdyt.
+// (edge-anchored, like a text editor's horizontal scroll).
 func TestHorizontalOriginFor(t *testing.T) {
 	const width = 10
 	cases := []struct {
@@ -45,7 +45,7 @@ func TestHorizontalOriginFor(t *testing.T) {
 // TestScrollEditorColumnIntoView verifies the wiring against a real
 // *gocui.View: a caret past the right edge pins the horizontal origin and
 // rewrites the screen-relative cursor; scrolling back left then re-anchors
-// the origin to the caret — dbsavvy-jdyt.
+// the origin to the caret.
 func TestScrollEditorColumnIntoView(t *testing.T) {
 	// Width 12 => InnerWidth 10.
 	v := gocui.NewView("qe", 0, 0, 11, 5, gocui.OutputNormal)

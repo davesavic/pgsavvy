@@ -23,11 +23,11 @@ var getGOOS = func() string { return runtime.GOOS }
 // epic; downstream extensions require epic-level review. See DESIGN.md §5 and
 // §15.3.
 //
-// Exception: LogCloser is a field-only addition authorized by epic
-// dbsavvy-8s2 (AD-18) for per-session log file teardown in M15c.
+// Exception: LogCloser is a field-only addition for per-session log file
+// teardown in M15c.
 //
 // The structured logger is held in the private `log` field and accessed via
-// Logger(); see AMD-F2-1 (dbsavvy-962). Logger() is nil-safe by construction,
+// Logger(); see AMD-F2-1. Logger() is nil-safe by construction,
 // returning slog.New(slog.DiscardHandler) when c or c.log is nil, so consumer
 // code must NOT do its own nil checks.
 type Common struct {
@@ -41,7 +41,7 @@ type Common struct {
 	Fs         afero.Fs
 	// StateDir is the per-user state directory rooted at env.GetStateDir().
 	// Populated by entry_point.Start after NewCommon. Empty in tests that
-	// don't exercise persistence (dbsavvy-wwd.9).
+	// don't exercise persistence.
 	StateDir string
 	// LogCloser closes the per-session log file during M15c shutdown.
 	// Field-only addition (AD-18); NewCommon does not accept it.

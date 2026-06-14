@@ -284,7 +284,7 @@ A few keys are fixed by design and are not user-configurable:
   dismissed with Esc or Enter; this is hardcoded.
 - **Escape-as-abort** — Esc consistently aborts the current
   popup/chord/overlay. Transient overlays such as which-key are torn down on
-  Esc (decision `dbsavvy-xpj`), and this abort behavior is not remappable.
+  Esc, and this abort behavior is not remappable.
 - **The vim register prefix `"` and the count digits `0`–`9`** — these form
   the vim register and count grammar in the query editor. They are
   intentionally non-configurable, and remapping a motion onto them is

@@ -31,11 +31,11 @@ import (
 //   - raw (o toggle): plan.RawText is rendered verbatim through
 //     grid.SanitizeCellEscapes so server-side ANSI cannot bleed
 //     through. AC requires the call site to exist even when the
-//     sanitizer is an identity stub today (dbsavvy-uv0.8 AD-16).
+//     sanitizer is an identity stub today.
 //
 // PlanContext is NOT goroutine-safe; all mutators (toggle, MoveCursor,
 // ExpandAll, CollapseAllButRoot, JumpHeaviest, ToggleRaw) run on the
-// MainLoop, matching the other contexts. dbsavvy-uv0.8.
+// MainLoop, matching the other contexts.
 type PlanContext struct {
 	BaseContext
 
@@ -69,7 +69,6 @@ type PlanContext struct {
 // suppressed entirely. A single visible node is degenerate — it would
 // always land in the top percentile bucket and paint solid red — so the
 // floor is 2, the smallest plan where one node can be hotter than another.
-// dbsavvy-64b0.
 const MinVisibleForColoring = 2
 
 // NewPlanContext constructs a PlanContext bound to base's key/view. The
@@ -265,8 +264,8 @@ func (p *PlanContext) CollapseAllButRoot() {
 // keeps the H key, heat coloring, and (later) insights agreeing on one
 // "real bottleneck" definition. Tie-break: first child encountered in
 // depth-first iteration wins. No-op when the cursor is on a leaf.
-// dbsavvy-uv0.8 AC: "H jumps cursor to heaviest child of cursor's
-// subtree (DFS tie-break: first encountered)".
+// H jumps cursor to heaviest child of cursor's subtree
+// (DFS tie-break: first encountered).
 func (p *PlanContext) JumpHeaviest() {
 	root := p.CursorNode()
 	if root == nil || len(root.Children) == 0 {
@@ -382,7 +381,7 @@ func (p *PlanContext) JumpToSelectedFinding() {
 
 // HandleRender writes the current view body. Routes through the GuiDriver
 // using writeView so a nil driver (unit tests / pre-wire) is a silent
-// no-op. dbsavvy-uv0.8.
+// no-op.
 func (p *PlanContext) HandleRender() error {
 	deps := p.deps
 	viewName := p.GetViewName()
@@ -395,7 +394,7 @@ func (p *PlanContext) HandleRender() error {
 
 // RenderBody produces the rendered body string for the current state.
 // Exposed so the result-tabs LayoutPaint can invoke rendering without
-// needing the GuiDriver path. dbsavvy-uv0.8.
+// needing the GuiDriver path.
 func (p *PlanContext) RenderBody() string {
 	if p.showRaw {
 		// AC sanitization rule: raw text routes through SanitizeCellEscapes

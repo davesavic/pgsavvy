@@ -18,7 +18,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/tasks"
 )
 
-// These are end-to-end regression tests for dbsavvy-lxn: a parked >200-row
+// These are end-to-end regression tests: a parked >200-row
 // result holding the per-session streamMu must NOT freeze the UI when a
 // second UI-goroutine session op (explain / explain-analyze / fk-forward /
 // fk-reverse — all funnelled through QueryRunner.RunQuery) runs after it.
@@ -47,7 +47,7 @@ import (
 // initial-fill window: it yields rows without ever reaching EOF, so the RBM
 // worker drains the initial fill and then sits in its chan loop while
 // SQLSession.streamMu stays locked (RunHandle.finish never runs). This is the
-// exact dk6 parked-stream state — the lock is held by an in-flight stream that
+// exact parked-stream state — the lock is held by an in-flight stream that
 // will not release it on its own.
 //
 // parkedCh is closed once the stream has yielded signalAfter rows (== the
@@ -72,7 +72,7 @@ type blockingRowStream struct {
 	// the incident's driver behavior where rows.Close() drains until the
 	// server-side query finishes rather than aborting. It wedges the RBM
 	// worker inside release() so PreemptInFlight's Stop-wait cannot drain
-	// within its bound, exercising the gr7e.2 abandon path. Nil = instant
+	// within its bound, exercising the abandon path. Nil = instant
 	// Close (the default cancellable-worker behavior).
 	closeGate chan struct{}
 }
@@ -404,7 +404,7 @@ func TestParkedStreamThenFKReverseDoesNotDeadlock(t *testing.T) {
 // newAbandonFixture mirrors newParkedStreamFixture but (a) wedges the parked
 // stream's Close() so the RBM worker cannot finish when Stop fires, and (b)
 // injects a fire-immediately preempt Stop-wait timer. Together these force the
-// gr7e.2 abandon path deterministically: the cancel+Stop loop never drains, so
+// abandon path deterministically: the cancel+Stop loop never drains, so
 // PreemptInFlight expires its bound and the QueryRunner fences the session.
 func newAbandonFixture(t *testing.T) (*parkedStreamFixture, *blockingRowStream) {
 	t.Helper()
@@ -450,7 +450,7 @@ func newAbandonFixture(t *testing.T) (*parkedStreamFixture, *blockingRowStream) 
 	}, rs
 }
 
-// TestParkedStreamAbandonFencesSessionNoDeadlock is the gr7e.2/AD4 end-to-end
+// TestParkedStreamAbandonFencesSessionNoDeadlock is the AD4 end-to-end
 // guard for an UNcancellable worker: a parked stream whose Close() wedges (the
 // incident's drain-don't-abort behavior) cannot drain within the preempt
 // Stop-wait bound. The bound expires, the QueryRunner fences the session, and

@@ -1,4 +1,4 @@
-// Editability introspection — F2 / dbsavvy-bwq.2.
+// Editability introspection — F2.
 //
 // After a SELECT opens a row stream, the result tabs helper (Z1 scope) calls
 // EditabilityIntrospect with the column metadata harvested from pgx
@@ -7,8 +7,8 @@
 // indexes form the minimal row-identity set used by A5/B5/B6 to emit
 // UPDATE / DELETE / INSERT statements.
 //
-// The DisabledReason strings are part of the cross-task contract documented
-// in the bwq epic — do not change them without coordinating the consumers.
+// The DisabledReason strings are part of the cross-task contract —
+// do not change them without coordinating the consumers.
 
 package pg
 
@@ -21,8 +21,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// Frozen DisabledReason strings. Consumed verbatim by A5/B5/B6/Z1 — see
-// dbsavvy-bwq epic body.
+// Frozen DisabledReason strings. Consumed verbatim by A5/B5/B6/Z1.
 const (
 	disabledReasonMultiTable        = "result spans multiple tables"
 	disabledReasonComputed          = "result contains computed columns"

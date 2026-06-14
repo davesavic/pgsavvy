@@ -140,7 +140,7 @@ func TestApply_Concurrent_ReadersAndWriter(t *testing.T) {
 	}
 }
 
-// TestApply_PromptFg pins the dbsavvy-tro.12 PromptFg wiring: Apply
+// TestApply_PromptFg pins the PromptFg wiring: Apply
 // must parse cfg.PromptFg into the themeState's PromptFg field.
 func TestApply_PromptFg(t *testing.T) {
 	cfg := builtin.DefaultDark()

@@ -127,7 +127,7 @@ func TestDriverOpenTunnelRoutesDialThroughFake(t *testing.T) {
 		"a tunnelled Open emits StageTunnel and, on ping failure, no StageAuthenticated")
 }
 
-// TestDriverOpenExcludesPromptFromConnectDeadline confirms epic dbsavvy-t60w:
+// TestDriverOpenExcludesPromptFromConnectDeadline confirms that
 // Open derives the network deadline (connectTimeout) AFTER credential/prompt
 // resolution, so the prompt context carries NO deadline while the dial context
 // does. Regression guard for the bug where a ~4s interactive SSH prompt ate the

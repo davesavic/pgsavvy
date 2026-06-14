@@ -1,4 +1,4 @@
-// Untagged shim-level dispatch proofs (task dbsavvy-ivck.1 / T1).
+// Untagged shim-level dispatch proofs.
 //
 // Each of the 10 interactive AD3 contexts gets a test that:
 //

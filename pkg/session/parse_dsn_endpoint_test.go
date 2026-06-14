@@ -6,7 +6,7 @@ import (
 )
 
 // TestParseDSNEndpoint covers the display-only host/database extraction used
-// to enrich connection-picker rows (dbsavvy-e53.6). It asserts the happy
+// to enrich connection-picker rows. It asserts the happy
 // paths (URL-form and keyword/value-form) and the safe fallbacks, and — for
 // the URL-form case — that NEITHER the password NOR the user leaks into the
 // returned fields.

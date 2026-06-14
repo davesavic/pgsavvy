@@ -207,7 +207,7 @@ func TestRenderDataLine_HighlightsActiveSearch(t *testing.T) {
 
 // TestNextMatch_ScrollsOffscreenCellIntoView proves the scroll-into-view
 // contract: NextMatch moves the cursor onto an off-screen match cell and the
-// existing clamp brings that row into the rendered viewport. dbsavvy-2ttm.2
+// existing clamp brings that row into the rendered viewport
 // (verification of the existing clampOffsetsLocked path; no new clamp added).
 func TestNextMatch_ScrollsOffscreenCellIntoView(t *testing.T) {
 	v := NewView()

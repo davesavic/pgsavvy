@@ -16,7 +16,7 @@ import (
 )
 
 // TestWireWithDriver_ConfigValidation_RejectsInvalidConfig confirms the
-// dbsavvy-56u.3 validation hook runs inside wireWithDriver — an invalid
+// validation hook runs inside wireWithDriver — an invalid
 // UserConfig (duplicate binding) causes UseDriverForTest to return an
 // error, which RunAndHandleError would surface, and the deferred
 // idempotent g.Close() at entry_point.go:133 unwinds cleanly.

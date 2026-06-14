@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// TestConfirmSQLPreviewPreservesShortStatement locks the regression from
-// dbsavvy-u6p7: the confirmation popup must not chop a normal-length
+// TestConfirmSQLPreviewPreservesShortStatement locks the regression:
+// the confirmation popup must not chop a normal-length
 // statement at the dry-run table's 64-char cap.
 func TestConfirmSQLPreviewPreservesShortStatement(t *testing.T) {
 	sql := "update accounts set email = 'tash@test.com' where id = '019dd92a-7c1e-4f00-9b3a-aaaabbbbcccc'"

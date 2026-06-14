@@ -1,4 +1,4 @@
-// Un-rebindable emergency Ctrl-C exit proofs (task dbsavvy-ivck.5 / R5).
+// Un-rebindable emergency Ctrl-C exit proofs.
 //
 // Under tcell raw mode ISIG is cleared, so keyboard Ctrl-C is delivered as
 // a KeyCtrlC KEY event (not SIGINT) and flows through the keybinding

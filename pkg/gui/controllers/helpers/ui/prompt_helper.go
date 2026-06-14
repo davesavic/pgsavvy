@@ -56,8 +56,8 @@ func (h *PromptHelper) Prompt(label, initial string, onSubmit func(value string)
 	caret := h.caretToggler
 	h.mu.Unlock()
 	// Notify the PromptController so it re-seeds its line buffer with
-	// the new initial value BEFORE the popup is pushed. Per
-	// dbsavvy-m47.1 the controller subscribes via SetResetHandler;
+	// the new initial value BEFORE the popup is pushed.
+	// The controller subscribes via SetResetHandler;
 	// nil-safe when no subscriber is wired (tests, early bootstrap).
 	if reset != nil {
 		reset(initial)

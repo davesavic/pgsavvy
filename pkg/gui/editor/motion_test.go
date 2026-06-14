@@ -243,7 +243,7 @@ func bigBuf(n int) *Buffer {
 	return motionBuf(lines...)
 }
 
-// TestScreenMotionsAreViewRelative pins the dbsavvy-uly7.10 AC: H/M/L
+// TestScreenMotionsAreViewRelative pins the rule that H/M/L
 // resolve the first/middle/last VISIBLE line from the ViewFrame, not
 // the whole buffer. 1000-line buffer scrolled so lines 400-420 show.
 func TestScreenMotionsAreViewRelative(t *testing.T) {

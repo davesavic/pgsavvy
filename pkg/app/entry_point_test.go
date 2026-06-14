@@ -120,7 +120,7 @@ func TestWireSessionLogger_DisableEnvVar(t *testing.T) {
 	require.Contains(t, got, "***", "kill-switch path should mask the password with ***; got: %s", got)
 }
 
-// TestResolveLogDir_Precedence covers dbsavvy-qbe: flag > env > stateDir, with
+// TestResolveLogDir_Precedence covers flag > env > stateDir, with
 // empty/whitespace values falling through. The overridden bool MUST be true
 // only when flag or env supplied the value (so mkdir failure on that path
 // surfaces an error instead of falling back to stderr).
@@ -150,8 +150,8 @@ func TestResolveLogDir_Precedence(t *testing.T) {
 	}
 }
 
-// TestWireSessionLogger_OverrideMkdirFailureSurfacesError validates the
-// dbsavvy-qbe AC: "mkdir failure on override path returns clear error (not
+// TestWireSessionLogger_OverrideMkdirFailureSurfacesError validates:
+// "mkdir failure on override path returns clear error (not
 // silent fallback)". When the operator explicitly chose a log dir via flag or
 // env and logs.Open fails, the error MUST propagate so they see it.
 func TestWireSessionLogger_OverrideMkdirFailureSurfacesError(t *testing.T) {
@@ -201,7 +201,7 @@ func TestWireSessionLogger_DisableEnvWinsOverOverride(t *testing.T) {
 	require.False(t, exists, "kill switch must not create the override sessions dir")
 }
 
-// TestRequireQuitBinding covers dbsavvy-ivck.5 (T5, R5): the pre-NewGui
+// TestRequireQuitBinding covers the pre-NewGui
 // guard returns a hard, actionable error naming app.quit and the config
 // path when no quit binding is present, and returns nil otherwise. This is
 // the seam Start() uses to abort BEFORE gocui.NewGui so the message

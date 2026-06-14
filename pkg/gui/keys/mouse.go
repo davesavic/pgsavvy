@@ -21,8 +21,7 @@ var mouseWarnOnce sync.Once
 
 // RegisterMouseBinding wires (view, mouseKey, mod, handler) onto the
 // supplied GuiDriver using SetViewClickBinding. The handler executes on
-// the gocui MainLoop (gocui guarantees this for click bindings, per
-// dbsavvy-enn D8).
+// the gocui MainLoop (gocui guarantees this for click bindings).
 //
 // Defensive contract:
 //   - A nil driver is a silent no-op (mirrors keys.Register so the
@@ -37,7 +36,7 @@ var mouseWarnOnce sync.Once
 //     the signature for symmetry with keys.Register and for future
 //     opt-in instrumentation.
 //
-// Per dbsavvy-zro AC: no gocui import in this package — the binding is
+// No gocui import in this package — the binding is
 // constructed via the types-package aliases.
 func RegisterMouseBinding(
 	driver types.GuiDriver,

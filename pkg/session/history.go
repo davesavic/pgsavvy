@@ -2,7 +2,7 @@ package session
 
 // HistoryRecorder receives one Record call per terminated run on a SQLSession.
 // The concrete implementation that persists to the command log is wired in
-// task dbsavvy-66p.14; this package only defines the contract and a noop
+// elsewhere; this package only defines the contract and a noop
 // fallback. SQLSession wraps Record calls in a recover so a misbehaving
 // recorder cannot take down a session.
 type HistoryRecorder interface {

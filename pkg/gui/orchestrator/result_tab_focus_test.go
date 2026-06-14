@@ -7,7 +7,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// TestTabCycleRepointsFocusToActiveTab reproduces dbsavvy-pc4k: with a
+// TestTabCycleRepointsFocusToActiveTab: with a
 // grid "results" tab and a "plan analyzer" tab open, cycling between them
 // while the result pane holds focus must move gocui's current-view (driven
 // off tree.Current().GetViewName()) onto the now-active tab. Before the fix
@@ -43,8 +43,8 @@ func TestTabCycleRepointsFocusToActiveTab(t *testing.T) {
 	}
 }
 
-// TestTabJumpDoesNotStealFocusWhenPaneUnfocused guards the asymmetry in
-// dbsavvy-pc4k: <leader>1..9 jump bindings are GLOBAL-scoped and can fire
+// TestTabJumpDoesNotStealFocusWhenPaneUnfocused guards the asymmetry:
+// <leader>1..9 jump bindings are GLOBAL-scoped and can fire
 // from the query editor or a rail. A jump must switch the visible tab
 // (activeID) but must NOT hijack the focus stack onto the result pane.
 func TestTabJumpDoesNotStealFocusWhenPaneUnfocused(t *testing.T) {

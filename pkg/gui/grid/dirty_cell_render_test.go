@@ -23,7 +23,7 @@ func TestDecorateDirtyCell_NotDirtyReturnsValueUnchanged(t *testing.T) {
 
 // TestDecorateDirtyCell_DirtyZeroStyleUnchanged proves the dirty path with
 // the zero Style yields no ANSI escapes and no glyph — the value is returned
-// untouched (the edit is signalled by background colour alone). dbsavvy-kvk.
+// untouched (the edit is signalled by background colour alone).
 func TestDecorateDirtyCell_DirtyZeroStyleUnchanged(t *testing.T) {
 	got := DecorateDirtyCell("hello", true, theme.Style{})
 	if got != "hello" {
@@ -44,7 +44,7 @@ func TestDecorateDirtyCell_StyleAppliesAnsiEscape(t *testing.T) {
 
 // TestAnsiBgCode maps named background colours to their basic SGR codes and
 // `#RRGGBB` hex to truecolor (48;2;R;G;B); malformed/unknown tokens collapse
-// to "" — the same fallback policy as ansiFgCode. dbsavvy-kvk.
+// to "" — the same fallback policy as ansiFgCode.
 func TestAnsiBgCode(t *testing.T) {
 	cases := map[string]string{
 		"black":       "\x1b[40m",
@@ -67,14 +67,13 @@ func TestAnsiBgCode(t *testing.T) {
 
 // TestSgrPrefixEmitsBackground proves sgrPrefixForStyle now honors the Bg
 // field (previously ignored), so a dirty-cell tint can actually render.
-// dbsavvy-kvk.
 func TestSgrPrefixEmitsBackground(t *testing.T) {
 	if got := sgrPrefixForStyle(theme.Style{Bg: "brightblack"}); got != "\x1b[100m" {
 		t.Fatalf("Bg-only style: got %q, want %q", got, "\x1b[100m")
 	}
 }
 
-// TestDirtyCellRendersBackgroundTint is the regression for dbsavvy-kvk: an
+// TestDirtyCellRendersBackgroundTint is the regression test: an
 // edited cell under the real default theme must carry a background SGR that
 // a clean cell does not, so the whole cell reads as dirty even when the
 // trailing marker is truncated by an overflowing value.
@@ -229,7 +228,7 @@ func TestRenderCellWithDirty_NotDirtyMatchesRenderCell(t *testing.T) {
 
 // TestRenderCellWithDirty_DirtyTintsDecoratedOnly proves the dirty path
 // leaves the visible string unchanged (no glyph) while layering the
-// DirtyCellBg background tint onto the decorated string. dbsavvy-kvk.
+// DirtyCellBg background tint onto the decorated string.
 func TestRenderCellWithDirty_DirtyTintsDecoratedOnly(t *testing.T) {
 	col := models.ColumnMeta{Name: "name", TypeName: "text"}
 	visClean, _ := renderCell("hello", col)

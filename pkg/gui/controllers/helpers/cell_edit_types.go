@@ -10,8 +10,8 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// cell_edit_types.go: per-type entry helpers for the inline cell editor
-// (dbsavvy-bwq.5 / A2). Pure factories with no GUI dependencies so the
+// cell_edit_types.go: per-type entry helpers for the inline cell editor.
+// Pure factories with no GUI dependencies so the
 // CellEditorController can call them from any context. Unit tests drive
 // the helpers directly without spinning up the popup machinery.
 //
@@ -271,15 +271,15 @@ func BuildExprEdit(pk []any, col models.ColumnMeta, old any, expr string) models
 }
 
 // InjectNow returns the canonical `<C-d>` PendingEdit: Expression-kind
-// with NewExpr="now()". Per AC dbsavvy-bwq.5 ("<C-d> injects
-// PendingEdit{Kind:Expression, NewExpr:'now()'}").
+// with NewExpr="now()". <C-d> injects
+// PendingEdit{Kind:Expression, NewExpr:'now()'}.
 func InjectNow(pk []any, col models.ColumnMeta, old any) models.PendingEdit {
 	return BuildExprEdit(pk, col, old, "now()")
 }
 
 // InjectCurrentDate returns the canonical `<C-t>` PendingEdit:
-// Expression-kind with NewExpr="current_date". Per AC dbsavvy-bwq.5
-// ("<C-t> injects PendingEdit{Kind:Expression, NewExpr:'current_date'}").
+// Expression-kind with NewExpr="current_date". <C-t> injects
+// PendingEdit{Kind:Expression, NewExpr:'current_date'}.
 func InjectCurrentDate(pk []any, col models.ColumnMeta, old any) models.PendingEdit {
 	return BuildExprEdit(pk, col, old, "current_date")
 }
@@ -291,7 +291,7 @@ func InjectCurrentDate(pk []any, col models.ColumnMeta, old any) models.PendingE
 // suppression flag.
 //
 // The layout pass keys the prompt's WarnBorder colour off this exact
-// label (orchestrator.promptBorderStyle, dbsavvy-uly7.14), so this
+// label (orchestrator.promptBorderStyle), so this
 // constant is both the visible text and the warn-styling discriminator.
 const WarnExprPromptLabel = "expr (injected verbatim, no escaping): "
 

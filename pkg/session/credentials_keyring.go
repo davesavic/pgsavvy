@@ -97,7 +97,7 @@ func IsKeyringPassphraseRequiredInTUI(err error) bool {
 // TUIRefusePrompter, the function returns errKeyringPassphraseRequiredInTUI
 // instead of forwarding to the prompter's generic refusal. This lets the UI
 // layer render a remediation specific to the keyring path (G3-G(iii) from the
-// dbsavvy-enn review-plan resolutions).
+// review-plan resolutions).
 func passphraseFunc(ctx context.Context, prompter Prompter) keyring.PromptFunc {
 	return func(prompt string) (string, error) {
 		if v, ok := os.LookupEnv(keyringPassphraseEnv); ok && v != "" {

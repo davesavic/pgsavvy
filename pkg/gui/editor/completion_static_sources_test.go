@@ -21,7 +21,7 @@ func bufferFromLines(t *testing.T, lines ...string) (*Buffer, Position) {
 }
 
 func TestKeywordsSource_FuzzyMatchSortedAscending(t *testing.T) {
-	// Under the fuzzy matcher (ko4m.3.4) "SE" is a subsequence of more than
+	// Under the fuzzy matcher "SE" is a subsequence of more than
 	// just SE-prefixed keywords (CASE, ELSE, …). What still holds: within-
 	// source order stays ascending and the obvious prefix hits are present.
 	// The Engine, not the source, floats the strongest matches to the top by

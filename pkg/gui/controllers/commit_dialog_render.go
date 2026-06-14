@@ -204,7 +204,7 @@ func formatValue(v any) string {
 // row-diff preview, type-aware. json/jsonb columns render as JSON text —
 // the same form the grid and cell editor show — so both sides of the
 // arrow read as JSON rather than Go's byte-slice / map form for the old
-// value and an escaped-string for the new (dbsavvy-2ij6). NULL still
+// value and an escaped-string for the new. NULL still
 // renders as the literal word; everything else falls back to formatValue.
 func formatEditValue(v any, columnType string) string {
 	if v == nil {
@@ -332,7 +332,7 @@ func writeCommitDialogGate(b *strings.Builder, v guicontext.CommitDialogView) {
 //
 // NOTE: this is a local scrub stub. A5 (or a later cleanup) will likely
 // route through a shared helper; once that lands, replace this with
-// the canonical helper. Tracked under dbsavvy-bwq.23 / ADR-28.
+// the canonical helper. Tracked under ADR-28.
 func BuildCommitDialogSQL(set *models.PendingEditSet, password string) []string {
 	if set == nil || set.IsEmpty() {
 		return nil

@@ -8,7 +8,7 @@ package pg
 //
 // Source: DESIGN.md §15.9. Promotion plan: when a second engine lands this
 // will move behind drivers.Driver.BuiltinHiddenObjects() so the schemas
-// helper does not import a concrete driver package (epic dbsavvy-enn M11).
+// helper does not import a concrete driver package.
 var BuiltinHiddenSchemas = []string{
 	"pg_catalog",
 	"information_schema",

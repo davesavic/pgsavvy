@@ -20,7 +20,7 @@ func NewIndexesContext(base BaseContext, deps Deps) *IndexesContext {
 }
 
 // HandleRender writes the index rows into the INDEXES view. Mirrors
-// the other SIDE_CONTEXT renderers (dbsavvy-5iv).
+// the other SIDE_CONTEXT renderers.
 func (idx *IndexesContext) HandleRender() error {
 	deps := idx.deps
 	viewName := idx.GetViewName()
@@ -39,7 +39,7 @@ func (idx *IndexesContext) renderRows() string {
 	if len(idx.items) == 0 {
 		return ""
 	}
-	// hq5.6: dim items when the session is disconnected.
+	// dim items when the session is disconnected.
 	dim := idx.deps.IsDisconnected != nil && idx.deps.IsDisconnected()
 
 	var b strings.Builder

@@ -38,7 +38,7 @@ type TranslationSet struct {
 	EmptyConnectionsHint string
 
 	// Empty-state placeholders for the SCHEMAS/TABLES/COLUMNS/INDEXES side
-	// rails when their item list is empty (dbsavvy-fow.5 U7).
+	// rails when their item list is empty.
 	EmptySchemasHint string
 	EmptyTablesHint  string
 	EmptyColumnsHint string
@@ -52,7 +52,7 @@ type TranslationSet struct {
 	DuplicateConnectionName string
 	InvalidDSN              string
 	// SaveConnectionFailed is the inline form error stamped when persisting
-	// an add/edit form to connections.yml fails (dbsavvy-zod).
+	// an add/edit form to connections.yml fails.
 	SaveConnectionFailed string
 
 	// Inline visual tags.
@@ -93,7 +93,7 @@ type TranslationSet struct {
 	CheatsheetEmpty           string
 	CheatsheetScopeAllLabel   string
 
-	// NOTICE/WARNING UI strings (dbsavvy-66p.13). The toast format
+	// NOTICE/WARNING UI strings. The toast format
 	// strings accept a single %d argument (the per-run notice count);
 	// the "first" and "subsequent" variants exist so localisations can
 	// distinguish singular from plural phrasing if needed.
@@ -113,14 +113,14 @@ type ActionTranslations struct {
 	RunQuery    string
 	CancelQuery string
 
-	// Query editor family (dbsavvy-66p.11).
+	// Query editor family.
 	QueryRunAll         string
 	QueryExplain        string
 	QueryExplainAnalyze string
 	QueryRunInNewTx     string
 	QueryFormat         string
 
-	// Transaction submenu (hq5.3).
+	// Transaction submenu.
 	TxBegin               string
 	TxCommit              string
 	TxRollback            string
@@ -128,7 +128,7 @@ type ActionTranslations struct {
 	TxReleaseSavepoint    string
 	TxRollbackToSavepoint string
 
-	// Result-tab family (dbsavvy-66p.12).
+	// Result-tab family.
 	ResultTabJump   string
 	ResultTabNext   string
 	ResultTabPrev   string
@@ -136,13 +136,13 @@ type ActionTranslations struct {
 	ResultTabPin    string
 	ResultTabCancel string
 
-	// Result-grid pagination (dbsavvy-uv0.3).
+	// Result-grid pagination.
 	ResultPageNext       string
 	ResultPagePrev       string
 	ResultReadToEnd      string
 	ResultReadToEndForce string
 
-	// In-grid search (dbsavvy-2ttm). Struct field names keep the historical
+	// In-grid search. Struct field names keep the historical
 	// ResultFilter* form (the command-ID strings are unchanged); only the
 	// display VALUES carry search semantics.
 	ResultFilterPrompt string
@@ -152,20 +152,20 @@ type ActionTranslations struct {
 	ResultSearchAccept string
 	ResultSearchCancel string
 
-	// Left-rail (Schemas/Tables) highlight+jump search (dbsavvy-ioaj).
+	// Left-rail (Schemas/Tables) highlight+jump search.
 	RailSearchPrompt string
 	RailSearchNext   string
 	RailSearchPrev   string
 	RailSearchClear  string
 
-	// In-grid sort (dbsavvy-uv0.5).
+	// In-grid sort.
 	ResultSortPick      string
 	ResultSortPickLabel string
 
-	// In-grid hide-columns overlay (dbsavvy-uv0.6).
+	// In-grid hide-columns overlay.
 	ResultHideOverlay string
 
-	// Result-export menu (dbsavvy-uv0.9).
+	// Result-export menu.
 	ResultExportPrompt string
 	ExportMenuUp       string
 	ExportMenuDown     string
@@ -175,16 +175,16 @@ type ActionTranslations struct {
 	ExportMenuCancel   string
 	ExportMenuEditPath string
 
-	// Table-inspect popup (dbsavvy-3vf).
+	// Table-inspect popup.
 	TableInspectOpen    string
 	TableInspectNextTab string
 	TableInspectPrevTab string
 	TableInspectClose   string
 
-	// History popup (dbsavvy-o9k0).
+	// History popup.
 	HistoryOpen string
 
-	// Expanded view mode + result-grid motion (dbsavvy-uv0.7).
+	// Expanded view mode + result-grid motion.
 	ResultViewToggle      string
 	ResultCursorDown      string
 	ResultCursorUp        string
@@ -207,7 +207,7 @@ type ActionTranslations struct {
 	AddConnection  string
 	OpenConnection string
 
-	// Connection-manager form (dbsavvy-dyf). The in-place add/edit form
+	// Connection-manager form. The in-place add/edit form
 	// rendered inside the CONNECTION_MANAGER modal.
 	DeleteConnection string
 	EditConnection   string
@@ -220,13 +220,13 @@ type ActionTranslations struct {
 	UnhideSchema     string
 	ToggleShowHidden string
 
-	// Reconnect (hq5.7).
+	// Reconnect.
 	Reconnect string
 
-	// SearchPathQuickSet (hq5.10).
+	// SearchPathQuickSet.
 	SearchPathQuickSet string
 
-	// StatementTimeoutSet (hq5.11).
+	// StatementTimeoutSet.
 	StatementTimeoutSet string
 
 	// Global app commands.
@@ -240,7 +240,7 @@ type ActionTranslations struct {
 	RailQueryEditor string
 	RailResults     string
 
-	// Directional rail navigation (dbsavvy-xs0). RailUp/RailDown describe
+	// Directional rail navigation. RailUp/RailDown describe
 	// the Ctrl+K / Ctrl+J chords on the five side rails; RailLastRail
 	// describes the QueryEditor's Ctrl+H "return to last rail" jump.
 	RailUp       string
@@ -248,7 +248,7 @@ type ActionTranslations struct {
 	RailLastRail string
 
 	// Cursor movement and confirmation primitives used by every side
-	// rail controller. Added by T7a (enn.8) to satisfy the M11i rule
+	// rail controller. Added by T7a to satisfy the M11i rule
 	// that every KeyBinding.Description sources from Tr.Actions.*.
 	Down      string
 	Up        string
@@ -258,7 +258,7 @@ type ActionTranslations struct {
 	JumpLast  string
 
 	// RefreshRail is the description for the `r` per-rail refresh
-	// binding (dbsavvy-56u.1).
+	// binding.
 	RefreshRail string
 }
 

@@ -14,7 +14,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// T3 staged connect-progress wiring (bd dbsavvy-1oz3.3): the modal/Retry dial
+// T3 staged connect-progress wiring: the modal/Retry dial
 // path threads a LIVE ProgressReporter into the driver and renders a staged
 // checklist (Tunnel? → Auth → Objects) inside the CONNECTION_MANAGER modal.
 // These tests assert the rendered checklist for each acceptance criterion.

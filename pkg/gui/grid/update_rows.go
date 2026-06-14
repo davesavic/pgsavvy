@@ -13,7 +13,7 @@ import "github.com/davesavic/dbsavvy/pkg/models"
 // The row buffer is replaced wholesale (fresh backing array, fresh
 // Values slices for updated rows) rather than mutated in place, so an
 // in-flight Render holding a snapshot never observes a torn row — the
-// same discipline snapshot() documents for cols+widths. dbsavvy-5kto.
+// same discipline snapshot() documents for cols+widths.
 func (v *View) UpdateRowsByPK(refCols []models.ColumnMeta, refRows []models.Row) int {
 	if len(refCols) == 0 || len(refRows) == 0 {
 		return 0

@@ -160,7 +160,7 @@ func TestListForeignKeys_SelfReferenceAndCrossSchemaAndComposite(t *testing.T) {
 // TestFKReverse_InboundForFixtureUsers verifies that the inbound FK loader
 // returns both fixture-defined references to app.users
 // (app.posts.user_id and app.user_roles.user_id), both with ON DELETE
-// CASCADE per the fixture schema. dbsavvy-bwq.17 (B6).
+// CASCADE per the fixture schema. (B6).
 func TestFKReverse_InboundForFixtureUsers(t *testing.T) {
 	sess := openIntegrationSession(t)
 	fks, err := sess.ListInboundForeignKeys(context.Background(), "app", "users")
@@ -208,7 +208,7 @@ func TestFKReverse_InboundForFixtureUsers(t *testing.T) {
 
 // TestFKReverse_NoInboundReturnsEmpty confirms the empty-case contract
 // (non-nil empty slice). app.user_roles is a join table that no other
-// fixture table references. dbsavvy-bwq.17 (B6).
+// fixture table references. (B6).
 func TestFKReverse_NoInboundReturnsEmpty(t *testing.T) {
 	sess := openIntegrationSession(t)
 	fks, err := sess.ListInboundForeignKeys(context.Background(), "app", "user_roles")
@@ -225,7 +225,7 @@ func TestFKReverse_NoInboundReturnsEmpty(t *testing.T) {
 
 // TestFKReverse_SelfAndCompositeCrossSchema mirrors the outbound loader's
 // self-ref + composite + cross-schema coverage from the reverse side.
-// dbsavvy-bwq.17 (B6).
+// (B6).
 func TestFKReverse_SelfAndCompositeCrossSchema(t *testing.T) {
 	sess := openIntegrationSession(t)
 	ctx := context.Background()

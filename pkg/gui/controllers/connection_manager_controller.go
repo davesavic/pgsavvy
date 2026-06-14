@@ -13,7 +13,7 @@ import (
 )
 
 // ConnectionManagerController owns the CONNECTION_MANAGER modal's bindings
-// (dbsavvy-ig4 scaffold, dbsavvy-1rf list + in-modal connect):
+// (scaffold + list + in-modal connect):
 //
 //   - list mode: j/k move the cursor, <CR> connects the selected profile
 //     (switches the modal into connecting mode), <esc> closes the modal.
@@ -37,12 +37,12 @@ type ConnectionManagerController struct {
 
 	// deps carries the list/connect closures. Optional: an unset deps (the
 	// 4-arg constructor) leaves the modal a close-only screen, matching the
-	// ig4 scaffold contract.
+	// scaffold contract.
 	deps ConnectionManagerDeps
 }
 
 // ConnectionManagerDeps bundles the list + in-modal-connect closures the
-// orchestrator wires (dbsavvy-1rf). Every field is optional; nil fields make
+// orchestrator wires. Every field is optional; nil fields make
 // their handler a no-op.
 type ConnectionManagerDeps struct {
 	// Ctx is the live modal context — the controller reads its mode + cursor
@@ -57,8 +57,8 @@ type ConnectionManagerDeps struct {
 	// mode.
 	CancelConnecting func()
 
-	// Prompt pushes the single-line PROMPT popup for editing a text field
-	// (dbsavvy-dyf). It is the same helper the connection add-flow drives;
+	// Prompt pushes the single-line PROMPT popup for editing a text field.
+	// It is the same helper the connection add-flow drives;
 	// the popup stacks ON TOP of the modal and returns control to ModeForm on
 	// close. nil leaves text-field editing a no-op.
 	Prompt PromptHelper
@@ -70,14 +70,14 @@ type ConnectionManagerDeps struct {
 	// DriversFn supplies the driver-selector list. nil → drivers.Names.
 	DriversFn func() []string
 
-	// OnSaveConnection is the save seam zod populates (dbsavvy-dyf AC4: a
+	// OnSaveConnection is the save seam zod populates (a
 	// no-op stub here — no config write). It is invoked with the validated
 	// connection after Enter passes validate-all. isEdit + originalName let
 	// the writer distinguish append vs update + handle renames. A nil
 	// callback (or a non-nil one returning nil) returns the form to ModeList.
 	OnSaveConnection func(conn models.Connection, isEdit bool, originalName string) error
 
-	// OnDeleteConnection is the delete seam (dbsavvy-6ma). Invoked with the
+	// OnDeleteConnection is the delete seam. Invoked with the
 	// connection name after the user confirms deletion. The orchestrator
 	// callback tears down the active session if needed, calls
 	// config.DeleteConnection, and refreshes the modal list. A nil callback
@@ -93,7 +93,7 @@ type ConnectionManagerDeps struct {
 
 // QuitOrClose handles q on the CONNECTION_MANAGER modal. At startup root
 // (stack depth == 1) it quits the app; mid-session (stack depth > 1) it
-// closes the modal back to data. dbsavvy-bsh.
+// closes the modal back to data.
 func (cm *ConnectionManagerController) QuitOrClose(ec commands.ExecCtx) error {
 	depth := 1
 	if cm.deps.StackDepth != nil {
@@ -110,7 +110,7 @@ func (cm *ConnectionManagerController) QuitOrClose(ec commands.ExecCtx) error {
 // NewConnectionManagerController constructs the controller with an injected
 // Close callback. close may be nil — the handler no-ops when unwired. The
 // list/connect closures are wired separately via SetDeps so the scaffold's
-// 4-arg signature stays intact (dbsavvy-1rf).
+// 4-arg signature stays intact.
 func NewConnectionManagerController(c *common.Common, core CoreDeps, ui UIDeps, close func()) *ConnectionManagerController {
 	return &ConnectionManagerController{
 		baseController: newBase(c, HelperBag{CoreDeps: core, UIDeps: ui}),
@@ -118,7 +118,7 @@ func NewConnectionManagerController(c *common.Common, core CoreDeps, ui UIDeps, 
 	}
 }
 
-// SetDeps wires the list + in-modal-connect closures (dbsavvy-1rf). Called by
+// SetDeps wires the list + in-modal-connect closures. Called by
 // the orchestrator once the modal context + connectInvoker exist.
 func (cm *ConnectionManagerController) SetDeps(d ConnectionManagerDeps) { cm.deps = d }
 
@@ -132,7 +132,7 @@ func (cm *ConnectionManagerController) inConnectingMode() bool {
 // (a failed attempt awaiting retry/back). Retry is gated on this: during the
 // active-dial phase (connecting body, no error) only Esc is allowed, since
 // retrying mid-dial supersedes the in-flight attempt and re-prompts for
-// credentials (dbsavvy-f4fz).
+// credentials.
 func (cm *ConnectionManagerController) inErrorState() bool {
 	return cm.inConnectingMode() && cm.deps.Ctx.ConnectingState().IsError()
 }
@@ -232,7 +232,7 @@ func (cm *ConnectionManagerController) Last(_ commands.ExecCtx) error {
 func (cm *ConnectionManagerController) Confirm(_ commands.ExecCtx) error {
 	if cm.inConnectingMode() {
 		// Active dial: swallow Enter (only Esc cancels). Retry only from the
-		// error sub-phase — see inErrorState (dbsavvy-f4fz).
+		// error sub-phase — see inErrorState.
 		if cm.inErrorState() && cm.deps.Retry != nil {
 			cm.deps.Retry()
 		}
@@ -300,7 +300,7 @@ func (cm *ConnectionManagerController) Edit(ec commands.ExecCtx) error {
 
 // Delete opens a confirmation prompt for the selected connection (ModeList
 // only). On confirm: invokes OnDeleteConnection. No-op when unwired, in
-// form/connecting mode, or on an empty list (dbsavvy-6ma).
+// form/connecting mode, or on an empty list.
 func (cm *ConnectionManagerController) Delete(_ commands.ExecCtx) error {
 	if cm.deps.Ctx == nil || cm.inConnectingMode() || cm.inFormMode() {
 		return nil
@@ -392,7 +392,7 @@ func (cm *ConnectionManagerController) Toggle(_ commands.ExecCtx) error {
 
 // Retry handles r → re-attempt the most recent profile. Only fires from the
 // error sub-phase; inert during the active dial (where only Esc cancels) and
-// in list mode or when unwired (dbsavvy-f4fz).
+// in list mode or when unwired.
 func (cm *ConnectionManagerController) Retry(_ commands.ExecCtx) error {
 	if !cm.inErrorState() || cm.deps.Retry == nil {
 		return nil

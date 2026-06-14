@@ -6,8 +6,8 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 )
 
-// TestSetRunnerWiredToSetHandler guards the setExHandler triple-use
-// (dbsavvy-y5th.1.1): after wireWithDriver, the :set ex-command,
+// TestSetRunnerWiredToSetHandler guards the setExHandler triple-use:
+// after wireWithDriver, the :set ex-command,
 // SearchPath.SetRunner, and StatementTimeout.SetRunner must all be wired to
 // g.handleSetEx. Func values are not comparable, so we assert both runners are
 // non-nil and route through handleSetEx's empty-args guard path (which returns

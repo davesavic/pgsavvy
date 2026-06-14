@@ -116,7 +116,6 @@ func (v *View) writeClipboard(value string) error {
 // lines per record, with a blank line between records. Hidden columns
 // are skipped (same projection as renderExpanded). Cell values pass
 // through renderCellPlain so the sanitizer + truncation rules apply.
-// dbsavvy-uv0.7.
 func buildExpandedYank(snap viewSnapshot) string {
 	if len(snap.cols) == 0 || len(snap.rows) == 0 {
 		return ""

@@ -43,7 +43,7 @@ func (g *Gui) kindOf(k types.ContextKey) types.ContextKind {
 }
 
 // recognisedSettings are the settings whose successful SET updates the
-// SettingsSnapshot / AppState. Read by both :set and :reset. hq5.8.
+// SettingsSnapshot / AppState. Read by both :set and :reset.
 //
 //	search_path, role, time zone / timezone, application_name, statement_timeout.
 var recognisedSettings = map[string]bool{
@@ -91,7 +91,7 @@ func (g *Gui) registerReloadEx(defaults []*types.ChordBinding, svc *keys.Keybind
 // CommandSubmitCommand recognises ErrQuit specifically and skips its
 // default toast-and-swallow path.
 //
-// dbsavvy-bwq.Z1: `:q` consults the PendingDiscardHelper before returning
+// `:q` consults the PendingDiscardHelper before returning
 // ErrQuit. When the PendingEditSet is non-empty the guard surfaces an
 // instructional toast (`:w` / `:q!` / `<leader>cU`) and the quit is
 // aborted (return nil so submit doesn't propagate ErrQuit). `:q!` bypasses
@@ -129,7 +129,7 @@ func (g *Gui) handleWriteEx(_ []string, _ commands.ExecCtx) error {
 // handleSetEx is the :set handler. It executes SET on the live SQL
 // session, updates SettingsSnapshot, persists to
 // AppState.LastSessionSettings, and (for search_path) refreshes the schema
-// rail. Unrecognised settings pass through to normal SQL execution. hq5.8.
+// rail. Unrecognised settings pass through to normal SQL execution.
 func (g *Gui) handleSetEx(args []string, _ commands.ExecCtx) error {
 	if len(args) == 0 {
 		g.toaster("SET requires a setting name")
@@ -242,7 +242,7 @@ func (g *Gui) handleResetEx(args []string, _ commands.ExecCtx) error {
 	return nil
 }
 
-// handleCrossDBEx is the :c handler; cross-database attach is unsupported. hq5.8.
+// handleCrossDBEx is the :c handler; cross-database attach is unsupported.
 func (g *Gui) handleCrossDBEx(_ []string, _ commands.ExecCtx) error {
 	g.toaster("cross-database attach not supported — create a separate connection profile")
 	return nil

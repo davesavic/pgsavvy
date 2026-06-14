@@ -8,7 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// This file holds the dbsavvy-ko4m.6.4 cross-feature interaction tests: the
+// This file holds the cross-feature interaction tests: the
 // seam where 6.1 (broadened >=2-char trigger + post-accept suppression),
 // 6.2 (alias-on-table-accept, single Replace), and 6.3 (ambiguous-column
 // qualify, single Replace) compose. Every test drives the REAL

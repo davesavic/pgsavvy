@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestPromptPopupCols_FitsLongPath is the regression for dbsavvy-lcxe:
+// TestPromptPopupCols_FitsLongPath is the regression test:
 // a default export destination path (~64 chars) plus the "> " body
 // prefix must fit inside the popup's inner width with at least one
 // column to spare. gocui's draw() calls HideCursor() when the view

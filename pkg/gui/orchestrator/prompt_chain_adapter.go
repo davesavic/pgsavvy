@@ -42,11 +42,11 @@ type choicePopup interface {
 
 // chainedPrompterAdapter satisfies data.ChainedPrompter synchronously by
 // driving the async *ui.PromptHelper + *ui.ChoiceHelper popups over an
-// internal result channel. Per dbsavvy-m47 Architecture Decision #1, the
-// adapter blocks the caller goroutine (which the orchestrator wraps in
-// OnWorker per m47.4) while the user types/picks on the gocui MainLoop.
+// internal result channel. The adapter blocks the caller goroutine
+// (which the orchestrator wraps in OnWorker) while the user types/picks
+// on the gocui MainLoop.
 //
-// Concurrency model (AD #3):
+// Concurrency model:
 //   - Every helper mutation (Prompt/Submit/Cancel/Choose) is scheduled
 //     via onUIThread so it lands on the gocui MainLoop.
 //   - The result channel is buffered size 1; a Submit racing with a ctx
@@ -57,7 +57,7 @@ type choicePopup interface {
 //     ctx-cancel racing a successful Submit cannot pop a sibling
 //     popup/side-context off the focus tree.
 //
-// Validation loop (AD #2):
+// Validation loop:
 //   - On validate error, the adapter re-pushes the popup via onUIThread
 //     with initial=raw input (preserved across re-prompts) and a label
 //     that embeds the original label + the validation error message.
@@ -98,8 +98,8 @@ type chainedPrompterAdapter struct {
 }
 
 // newChainedPrompterAdapter constructs the adapter. All three fields are
-// required; nil onUIThread would deadlock the caller. m47.4 wires this
-// from gui.go with g.OnUIThread as the scheduler.
+// required; nil onUIThread would deadlock the caller. gui.go wires this
+// with g.OnUIThread as the scheduler.
 func newChainedPrompterAdapter(p *ui.PromptHelper, c *ui.ChoiceHelper, onUIThread func(func() error)) *chainedPrompterAdapter {
 	return &chainedPrompterAdapter{
 		promptHelp: p,
@@ -162,7 +162,7 @@ func (a *chainedPrompterAdapter) PromptString(ctx context.Context, title, label 
 							// The error lands on its own line so the
 							// popup body wraps cleanly instead of
 							// truncating long validator messages at
-							// the popup right edge (dbsavvy-8p5).
+							// the popup right edge.
 							schedule(fmt.Sprintf("%s: %s\n%s", title, label, err.Error()))
 							return nil
 						}

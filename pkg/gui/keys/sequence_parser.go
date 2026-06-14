@@ -130,7 +130,7 @@ func expandLeaderTokens(seq []Key, leader, localLeader rune) []Key {
 }
 
 // modeBitsFromTokens maps the comma-separated `mode:` tokens from a
-// KeybindingConfig into a slice of single-bit types.Mode values. dlp.3
+// KeybindingConfig into a slice of single-bit types.Mode values. Config
 // validation rejects unknown tokens; Build therefore can rely on the
 // input being well-formed but still falls back to skipping unknown
 // tokens defensively (returns nil + non-nil err so the caller can emit a

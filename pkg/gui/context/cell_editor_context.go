@@ -55,7 +55,6 @@ type CellEditorContext struct {
 	// initial is the value captured at Open() time, read back by the
 	// layout's freshView seed path (single seed source) via Initial().
 	// Independent of buf/view so seeding survives buf being cleared.
-	// dbsavvy-tzi.2.
 	initial string
 
 	// view is the live gocui view handle the orchestrator plumbs in
@@ -86,7 +85,7 @@ func (c *CellEditorContext) SetModes(m types.ModeSetter) { c.modes = m }
 // dispatches with no chord binding) through gocui.DefaultEditor into the
 // view's TextArea, and enables the terminal caret so the edit point is
 // visible. ModeInsert (not ModeCommand) is intentional: the commit/discard
-// chords bind under ModeInsert. nil modes / nil driver → no-op. dbsavvy-tzi.3.
+// chords bind under ModeInsert. nil modes / nil driver → no-op.
 func (c *CellEditorContext) HandleFocus(_ types.OnFocusOpts) error {
 	if c.modes != nil {
 		c.modes.Set(types.CELL_EDITOR, types.ModeInsert)
@@ -101,7 +100,7 @@ func (c *CellEditorContext) HandleFocus(_ types.OnFocusOpts) error {
 // drops the cached view + buffer. The orchestrator DeleteView's the popup
 // on pop and re-creates it on re-push, so a cached pointer would dangle;
 // clearing buf prevents a prior cell's value leaking into a re-open.
-// Mirrors PromptContext.HandleFocusLost. dbsavvy-tzi.3.
+// Mirrors PromptContext.HandleFocusLost.
 func (c *CellEditorContext) HandleFocusLost(_ types.OnFocusLostOpts) error {
 	if c.modes != nil {
 		c.modes.Reset(types.CELL_EDITOR)
@@ -123,7 +122,7 @@ func (c *CellEditorContext) SetView(v types.View) { c.view = v }
 // per-edit snapshot (original value, column metadata, row identity).
 // The seeded `initial` text is the value the user sees in the cell —
 // typically the string form of originalValue. The TextArea seed now
-// happens in the layout freshView path (dbsavvy-tzi.2); Open only
+// happens in the layout freshView path; Open only
 // captures `initial` (for the layout to read back via Initial()) and
 // `buf` (the test-mode fallback for tests that skip view wiring).
 func (c *CellEditorContext) Open(originalValue any, column models.ColumnMeta, primaryKey []any, initial string) {
@@ -177,7 +176,6 @@ func (c *CellEditorContext) Column() models.ColumnMeta { return c.column }
 // plumbed view. The layout's freshView path reads this to seed a fresh
 // view's TextArea exactly once (it must NOT route through Buffer(),
 // which returns the empty TextArea content once a view is plumbed).
-// dbsavvy-tzi.2.
 func (c *CellEditorContext) Initial() string { return c.initial }
 
 // PrimaryKey returns a defensive copy of the row identity captured at

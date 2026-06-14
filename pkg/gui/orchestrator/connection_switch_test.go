@@ -9,7 +9,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// TestConnectionManagerModalSwitchConnection reproduces dbsavvy-k70h: while
+// TestConnectionManagerModalSwitchConnection reproduces the bug: while
 // already connected, re-opening the CONNECTION_MANAGER modal (<leader>C) and
 // selecting a DIFFERENT profile must tear down the current connection and
 // connect to the new one. Before the fix, connectWithGen called

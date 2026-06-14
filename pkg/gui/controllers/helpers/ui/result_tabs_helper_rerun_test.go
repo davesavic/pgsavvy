@@ -108,7 +108,7 @@ func openRunningResultTab(t *testing.T, h *ResultTabsHelper, runner *capturingSt
 
 // TestReRun_WrappedReplacesRunningStreamNotNoOp verifies a re-run launches a
 // NEW task into the SAME tab (same taskKey) rather than being deduped, and
-// that the tab's row/state are reset for the fresh stream. dbsavvy-72k.3.
+// that the tab's row/state are reset for the fresh stream.
 func TestReRun_WrappedReplacesRunningStreamNotNoOp(t *testing.T) {
 	h, _, runner := newReRunHelper(t)
 	tab := openRunningResultTab(t, h, runner)
@@ -165,7 +165,7 @@ func TestReRun_WrappedReplacesRunningStreamNotNoOp(t *testing.T) {
 // TestReRun_OriginIsWriteOnce verifies a wrapped re-run never overwrites the
 // tab's origin: Origin() must still return the ORIGINAL statement so a later
 // clear-sort re-runs the original (not a wrap-of-wrap). This pins the
-// write-once invariant from dbsavvy-72k.1 that the re-run path must honour.
+// write-once invariant that the re-run path must honour.
 func TestReRun_OriginIsWriteOnce(t *testing.T) {
 	h, _, runner := newReRunHelper(t)
 	tab := openRunningResultTab(t, h, runner)
@@ -182,7 +182,7 @@ func TestReRun_OriginIsWriteOnce(t *testing.T) {
 
 // TestReRun_WrappedIsReadOnly_OriginalIsEditable verifies the gating identity
 // recomputed from the SQL actually run: wrapped -> HasRowIdentity=false
-// (read-only), original -> HasRowIdentity=true (editable). dbsavvy-72k.3.
+// (read-only), original -> HasRowIdentity=true (editable).
 func TestReRun_WrappedIsReadOnly_OriginalIsEditable(t *testing.T) {
 	h, _, runner := newReRunHelper(t)
 	tab := openRunningResultTab(t, h, runner)
@@ -214,7 +214,7 @@ func TestReRun_WrappedIsReadOnly_OriginalIsEditable(t *testing.T) {
 
 // TestReRun_SortingAffordanceUntilFirstRow verifies StateSorting shows until
 // the first re-streamed row flips it to StateRunning, and that a zero-row
-// re-run still reaches a terminal state. dbsavvy-72k.3.
+// re-run still reaches a terminal state.
 func TestReRun_SortingAffordanceUntilFirstRow(t *testing.T) {
 	h, _, runner := newReRunHelper(t)
 	_ = openRunningResultTab(t, h, runner)
@@ -263,7 +263,7 @@ func TestReRun_ZeroRowCompletesNotStuckSorting(t *testing.T) {
 }
 
 // TestReRun_CursorResetToTop verifies grid cursor/offset are reset to (0,0)
-// after a re-run (id=1 at top). dbsavvy-72k.3.
+// after a re-run (id=1 at top).
 func TestReRun_CursorResetToTop(t *testing.T) {
 	h, _, runner := newReRunHelper(t)
 	tab := openRunningResultTab(t, h, runner)
@@ -298,7 +298,7 @@ func TestReRun_CursorResetToTop(t *testing.T) {
 // the wrapped re-run attaches a read-only gating identity to the tab, but
 // hide-cols are re-seeded against the ORIGINAL identity (which has a BaseTable
 // matching the persisted set), so the user's hidden columns are restored even
-// though the gating identity has no BaseTable. dbsavvy-72k.3 AC#4.
+// though the gating identity has no BaseTable.
 func TestReRun_HideColsReseededAgainstOriginalIdentity(t *testing.T) {
 	h, store, runner := newReRunHelper(t)
 	tab := openRunningResultTab(t, h, runner)

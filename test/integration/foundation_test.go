@@ -19,7 +19,7 @@ import (
 
 // TestFoundationSmoke wires every foundation package together via its public
 // API and asserts the round-trip is healthy. It is the closing gate for the
-// dbsavvy-8pa foundation epic: downstream epics consume these exact surfaces.
+// the foundation epic: downstream epics consume these exact surfaces.
 func TestFoundationSmoke(t *testing.T) {
 	c := common.NewDummyCommon()
 	if c == nil {
@@ -56,7 +56,7 @@ func TestFoundationSmoke(t *testing.T) {
 	c.AppState.LastSessionSettings = map[string]map[string]string{"conn-1": {"search_path": "public"}}
 	c.AppState.LastSchemaName = map[string]string{"conn-1": "public"}
 	c.AppState.LastTableName = map[string]string{"conn-1": "users"}
-	// dbsavvy-uv0.7: populate the remaining scalar fields so the round-
+	// populate the remaining scalar fields so the round-
 	// trip exercises every AppState entry instead of only the maps.
 	c.AppState.LastTheme = "default-dark"
 	c.AppState.LastResultViewMode = "expanded"

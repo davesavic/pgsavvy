@@ -389,8 +389,8 @@ func TestFKForward_TabCapReached_ToastsAndPropagates(t *testing.T) {
 	}
 }
 
-// TestFKForward_BusyChecker_DoesNotEmitQueuedToast asserts last-wins
-// (dbsavvy-lxn.1/.3): even when the session reports busy, Jump preempts
+// TestFKForward_BusyChecker_DoesNotEmitQueuedToast asserts last-wins:
+// even when the session reports busy, Jump preempts
 // the parked stream rather than queueing, so the misleading
 // "queued behind active stream" toast is NEVER emitted.
 func TestFKForward_BusyChecker_DoesNotEmitQueuedToast(t *testing.T) {

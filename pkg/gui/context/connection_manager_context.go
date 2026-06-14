@@ -12,7 +12,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
-// ConnectionManagerMode is the modal's two-state render mode (dbsavvy-1rf).
+// ConnectionManagerMode is the modal's two-state render mode.
 // In ModeList the body draws the connection rows (or the empty-state hint);
 // in ModeConnecting it draws the 3-state connecting / error / retry body,
 // mirroring ConnectingContext so the connect lifecycle renders INSIDE the
@@ -24,14 +24,14 @@ const (
 	ModeList ConnectionManagerMode = iota
 	// ModeConnecting renders the connecting / error body.
 	ModeConnecting
-	// ModeForm renders the add/edit form — all connection fields at once
-	// (dbsavvy-dyf). Editing of text fields routes through the PROMPT popup;
+	// ModeForm renders the add/edit form — all connection fields at once.
+	// Editing of text fields routes through the PROMPT popup;
 	// toggles + the driver selector flip in place.
 	ModeForm
 )
 
 // ConnectionManagerContext is the centered modal connection-manager box
-// (dbsavvy-ig4 scaffold, dbsavvy-1rf list + in-modal connect). MAIN_CONTEXT
+// (connection list + in-modal connect). MAIN_CONTEXT
 // kind: when top of the focus stack the layout pass paints it as a centered
 // bordered box over a blank background, suppressing both the side rails and
 // the QUERY_EDITOR for that frame.
@@ -55,7 +55,7 @@ type ConnectionManagerContext struct {
 	form       connForm
 
 	// onShow populates the row slice + restores the last-used cursor when the
-	// modal gains focus (dbsavvy-1rf). The orchestrator owns the connection
+	// modal gains focus. The orchestrator owns the connection
 	// provider + last-id snapshot, so it injects this closure; nil leaves the
 	// list untouched (scaffold / test wiring that seeds items directly).
 	onShow func()
@@ -70,7 +70,7 @@ func NewConnectionManagerContext(base BaseContext, deps depsAlias) *ConnectionMa
 	return &ConnectionManagerContext{SideListContext: NewSideListContext(base, deps)}
 }
 
-// SetOnShow injects the populate-on-focus closure (dbsavvy-1rf). The
+// SetOnShow injects the populate-on-focus closure. The
 // orchestrator wires it to refresh the row slice + restore the last-used
 // cursor.
 func (c *ConnectionManagerContext) SetOnShow(fn func()) { c.onShow = fn }
@@ -78,12 +78,12 @@ func (c *ConnectionManagerContext) SetOnShow(fn func()) { c.onShow = fn }
 // HandleFocus fires when the modal gains focus — either a fresh push onto the
 // stack or when a child popup (PROMPT, CONFIRM) pops and returns focus here.
 // In ModeForm a child popup return must preserve the form; likewise ModeConnecting
-// must survive the SSH-secret PROMPT popup popping mid-connect (dbsavvy-308u) —
+// must survive the SSH-secret PROMPT popup popping mid-connect —
 // otherwise a reset to ModeList makes body() draw the row list and swallows a
 // subsequent dial error. In all other modes it resets to ModeList and refreshes
 // the row data. Both connecting-mode exits (success pop, Esc cancel) already
 // reset to ModeList, so the modal is never re-opened stranded in ModeConnecting.
-// Nil-safe (dbsavvy-1rf).
+// Nil-safe.
 func (c *ConnectionManagerContext) HandleFocus(_ types.OnFocusOpts) error {
 	if c.mode == ModeForm || c.mode == ModeConnecting {
 		return nil
@@ -148,7 +148,7 @@ func (c *ConnectionManagerContext) activeStageGlyph() rune {
 	return status.SpinnerGlyph(c.deps.SpinnerFrame())
 }
 
-// --- Form drive surface (dbsavvy-dyf) ---------------------------------------
+// --- Form drive surface -----------------------------------------------------
 //
 // The controller drives the in-place form through these exported methods
 // rather than the unexported connForm type. All run on the UI thread.

@@ -3,7 +3,7 @@ package keys
 import "sync"
 
 // RegisterStore is the mutex-protected map[rune]string that backs vim
-// registers. dlp.5 ships only the storage primitive (Get/Set); the
+// registers. This ships only the storage primitive (Get/Set); the
 // `q{reg}` / `@{reg}` record + replay flow ships in E9.
 //
 // Concurrency: every method takes the internal mutex. In production the

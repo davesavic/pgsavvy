@@ -1,4 +1,4 @@
--- editability_introspect — Postgres 17 catalog. F2 / dbsavvy-bwq.2.
+-- editability_introspect — Postgres 17 catalog. F2.
 --
 -- For each distinct pg_class OID supplied in $1, return:
 --   oid           — the input OID (so callers can correlate without reordering)

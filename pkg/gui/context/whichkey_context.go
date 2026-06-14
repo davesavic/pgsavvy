@@ -21,7 +21,7 @@ const whichKeyMaxRowWidth = 38
 // the popup-rect = popup-body equivalence regardless of downstream
 // changes.
 //
-// The popup rect height is now content-driven (dbsavvy-y5t): it grows to
+// The popup rect height is now content-driven: it grows to
 // fit len(rows) rows plus the gocui frame, so the body always covers the
 // interior (body lines = max(len(rows), whichKeyBodyRows) >= interior).
 // When len(rows) exceeds this floor every row is emitted, so a long
@@ -45,8 +45,8 @@ type WhichKeyContext struct {
 }
 
 // NewWhichKeyContext builds the context bound to WHICH_KEY. notifier
-// and rows may be nil at construction (the orchestrator wires them in
-// dlp.8c); HandleRender renders nothing in that case.
+// and rows may be nil at construction (the orchestrator wires them
+// in later); HandleRender renders nothing in that case.
 func NewWhichKeyContext(
 	base BaseContext,
 	deps depsAlias,
@@ -119,8 +119,7 @@ func (w *WhichKeyContext) HasRows(scope types.ContextKey, prefix []types.ChordKe
 // RowCount returns the number of children the wired resolver yields for
 // (scope, prefix), or 0 when the resolver is nil. The orchestrator's
 // layout pass uses it to size the popup rect to fit every binding
-// instead of a fixed height that clipped overflow with no scroll
-// (dbsavvy-y5t).
+// instead of a fixed height that clipped overflow with no scroll.
 func (w *WhichKeyContext) RowCount(scope types.ContextKey, prefix []types.ChordKey) int {
 	if w.rows == nil {
 		return 0
@@ -154,7 +153,7 @@ func formatWhichKeyRows(rows []types.ChildRow) string {
 		}
 		b.WriteString(line)
 	}
-	// Bleed-through fix (dbsavvy-tro.11): pad the body with blank lines
+	// Bleed-through fix: pad the body with blank lines
 	// so the SetContent payload always covers the popup's interior height.
 	// gocui's view.draw() / clearRunes() handles this at the cell level
 	// in the lazygit fork, but the buffer-level padding is what the

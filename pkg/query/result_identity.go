@@ -29,7 +29,7 @@ type ResultIdentity struct {
 	// AFTER pg_class+pg_index introspection runs (see
 	// pkg/drivers/pg.EditabilityIntrospect). DetectFromQuery leaves them
 	// zero — SQL parsing alone cannot distinguish a base table from a
-	// view, materialised view, or partition parent. dbsavvy-bwq.2 (F2).
+	// view, materialised view, or partition parent.
 	Editable       bool
 	RowIdentity    []int
 	DisabledReason string

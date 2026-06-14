@@ -223,7 +223,7 @@ func padRow(row []string, widths []int) string {
 	return b.String()
 }
 
-// Table-inspect scroll action IDs (dbsavvy-ep0k). Local to the
+// Table-inspect scroll action IDs. Local to the
 // controller — like the cheatsheet scroll IDs they only ever fire under
 // the TABLE_INSPECT scope and carry no user-facing config knob (the
 // bindings are shipped defaults).
@@ -249,8 +249,8 @@ const (
 	tableInspectScrollBottom = 1 << 20
 )
 
-// TableInspectController owns the TABLE_INSPECT popup bindings
-// (dbsavvy-3vf). All state lives on the supplied *context.TableInspectContext
+// TableInspectController owns the TABLE_INSPECT popup bindings.
+// All state lives on the supplied *context.TableInspectContext
 // and is mutated through its installed *popup.TabbedPopup.
 //
 //   - <tab> / ]               cycle to next tab

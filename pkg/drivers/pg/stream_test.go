@@ -50,7 +50,7 @@ func TestPgStreamQueryIDPopulatedBeforeFirstNext(t *testing.T) {
 // RETURNING — which yields no result rows — still surfaces its affected-row
 // count via RowStream.RowsAffected() after the stream is drained. The count
 // is captured in release() after pgx populates the command tag in
-// Rows.Close(). dbsavvy-tiu8.
+// Rows.Close().
 func TestPgStreamRowsAffectedForDML(t *testing.T) {
 	sess := requirePGSession(t)
 	ctx := context.Background()
@@ -343,7 +343,7 @@ func TestPgStreamLargeResultDoesNotAccumulate(t *testing.T) {
 	}
 }
 
-// TestPgStreamStatementTimeoutCancelsSlowQuery — dbsavvy-fow.7 (U15)
+// TestPgStreamStatementTimeoutCancelsSlowQuery
 // scenario: given a 2s statement-timeout (carried on Query.Timeout), a
 // SELECT pg_sleep(10) is cancelled at ~2s and the surfaced error
 // classifies as a statement timeout (context.DeadlineExceeded), distinct
@@ -398,7 +398,7 @@ func TestPgStreamStatementTimeoutCancelsSlowQuery(t *testing.T) {
 	}
 }
 
-// TestPgStreamUserCancelIsNotStatementTimeout — dbsavvy-fow.7 (U15)
+// TestPgStreamUserCancelIsNotStatementTimeout
 // companion: an explicit context cancellation (the user <leader>x /
 // preemption path) surfaces context.Canceled and must NOT classify as a
 // statement timeout, keeping the two distinguishable.
@@ -441,7 +441,7 @@ func TestPgStreamUserCancelIsNotStatementTimeout(t *testing.T) {
 	_ = stream.Close()
 }
 
-// TestPgStreamTimeoutLeavesNoGoroutineLeak — dbsavvy-fow.7 (U15) goleak
+// TestPgStreamTimeoutLeavesNoGoroutineLeak — goleak
 // verification: a timing-out stream's derived deadline CancelFunc is
 // invoked in release(), so no leaked timer/goroutine survives after the
 // stream is drained + closed. Mirrors the no-leak harness used by the
@@ -483,7 +483,7 @@ func TestPgStreamTimeoutLeavesNoGoroutineLeak(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
-// TestFieldDescriptionTableOIDPopulated — dbsavvy-bwq.1 F1.
+// TestFieldDescriptionTableOIDPopulated — F1.
 //
 // Verifies fieldDescriptionsToColumnMetas copies pgconn.FieldDescription's
 // TableOID through to models.ColumnMeta so later editability detection (B3+)
@@ -548,7 +548,7 @@ func TestFieldDescriptionTableOIDPopulated(t *testing.T) {
 	})
 }
 
-// TestPgStreamEOFReleasesGuardForReStream — dbsavvy-zzy regression.
+// TestPgStreamEOFReleasesGuardForReStream — regression.
 //
 // Draining a stream to clean EOF must release the parent Session's inFlight
 // guard without requiring an explicit Close, so the next Stream call on the
@@ -607,7 +607,7 @@ func TestPgStreamEOFReleasesGuardForReStream(t *testing.T) {
 	}
 }
 
-// TestPgStreamTerminalNextErrorReleasesGuard — dbsavvy-zzy companion.
+// TestPgStreamTerminalNextErrorReleasesGuard — companion.
 //
 // A Next that surfaces a terminal pgx error (e.g. a query that errors after
 // the first batch has been pulled) must release inFlight the same way clean

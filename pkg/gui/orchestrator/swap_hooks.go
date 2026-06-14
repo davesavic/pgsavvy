@@ -24,9 +24,8 @@ func isResultPaneKey(k types.ContextKey) bool {
 // tabs are NOT cancelled — they keep their queue slot. Within-pane
 // transitions (editor <-> result tab) are also a no-op.
 //
-// dbsavvy-66p §"Switching to schema rail mid-query preempts via
-// CancelRequest and marks tab (cancelled, N rows)" — this hook is the
-// preempt site.
+// Switching to a schema rail mid-query preempts via CancelRequest and
+// marks the tab (cancelled, N rows) — this hook is the preempt site.
 //
 // The hook is registered after the existing matcher.Cancel / whichkey.Hide
 // hooks so cancellation observably happens after the keystroke that

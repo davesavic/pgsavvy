@@ -6,8 +6,8 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// SelectionController owns the SELECTION TEMPORARY_POPUP keybindings
-// (dbsavvy-m47.2). Cursor + choices live on the ChoiceHelper; the
+// SelectionController owns the SELECTION TEMPORARY_POPUP keybindings.
+// Cursor + choices live on the ChoiceHelper; the
 // controller is a thin dispatcher that adjusts the cursor on j/k/up/down
 // and routes <cr>/<esc> to helper.Submit / helper.Cancel.
 //

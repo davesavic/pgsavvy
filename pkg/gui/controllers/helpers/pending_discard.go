@@ -12,7 +12,7 @@ import (
 // the user before clearing the PendingEditSet. At-or-below the
 // threshold the discard runs immediately.
 //
-// Per DESIGN.md §12.5.2 / dbsavvy-bwq.10 the value is 5.
+// Per DESIGN.md §12.5.2 the value is 5.
 const DiscardConfirmThreshold = 5
 
 // pendingDiscardToastTTL bounds the post-discard status toast.
@@ -155,7 +155,7 @@ func (h *PendingDiscardHelper) BlockQuitIfPending() error {
 // ShouldPromptOnTableSwitch reports whether a same-tab re-run that
 // changes the result's target table should trigger the discard prompt.
 //
-// Per ADR-27 (dbsavvy-bwq.10 amendment) the hook fires ONLY when the
+// Per ADR-27 the hook fires ONLY when the
 // active tab's target.Table changes via re-run; it does NOT fire when
 // OpenResultTab adds a NEW tab (e.g. gd jumps from B5/B6 which open
 // fresh tabs against a different parent table). The result_tabs_helper

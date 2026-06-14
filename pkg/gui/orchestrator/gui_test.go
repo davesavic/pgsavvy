@@ -122,8 +122,8 @@ func TestNewGuiAttachesControllers(t *testing.T) {
 
 func TestNewGuiPushesConnectionManagerContextInitially(t *testing.T) {
 	g, _ := buildTestGui(t)
-	// dbsavvy-bsh: startup pushes CONNECTION_MANAGER as root.
-	// dbsavvy-56u.2: with a fresh AppStateStore + empty profiles
+	// startup pushes CONNECTION_MANAGER as root.
+	// With a fresh AppStateStore + empty profiles
 	// provider, the first-run tip is pushed on top.
 	stack := g.ContextTree().Stack()
 	if len(stack) < 2 {
@@ -160,12 +160,12 @@ func TestNewGuiContextRegistryHasSelection(t *testing.T) {
 		t.Fatal("Registry() is nil after wireWithDriver")
 	}
 	if reg.Selection == nil {
-		t.Fatal("Registry().Selection is nil — m47.2 SelectionContext not wired")
+		t.Fatal("Registry().Selection is nil — SelectionContext not wired")
 	}
 }
 
 // buildTestGuiWithAutocomplete builds a wired Gui whose
-// editor.autocomplete flag is set to want. dbsavvy-etp.4.
+// editor.autocomplete flag is set to want.
 func buildTestGuiWithAutocomplete(t *testing.T, want bool) *orchestrator.Gui {
 	t.Helper()
 	fs := afero.NewMemMapFs()
@@ -190,7 +190,7 @@ func buildTestGuiWithAutocomplete(t *testing.T, want bool) *orchestrator.Gui {
 
 // queryEditorVimEditor extracts the QUERY_EDITOR VimEditor wired by
 // installKeyDispatch, failing the test if it is missing or not a
-// *editor.VimEditor. dbsavvy-etp.4.
+// *editor.VimEditor.
 func queryEditorVimEditor(t *testing.T, g *orchestrator.Gui) *editor.VimEditor {
 	t.Helper()
 	ed := g.MasterEditorForTest(types.QUERY_EDITOR)
@@ -204,7 +204,7 @@ func queryEditorVimEditor(t *testing.T, g *orchestrator.Gui) *editor.VimEditor {
 	return ve
 }
 
-// TestAutoCompleterInstalledWhenFlagTrue pins the dbsavvy-etp.4 boot gate:
+// TestAutoCompleterInstalledWhenFlagTrue pins the boot gate:
 // with editor.autocomplete true (the default), the QUERY_EDITOR VimEditor
 // has the as-you-type auto-completer wired.
 func TestAutoCompleterInstalledWhenFlagTrue(t *testing.T) {
@@ -218,7 +218,7 @@ func TestAutoCompleterInstalledWhenFlagTrue(t *testing.T) {
 // editor.autocomplete=false leaves the auto-completer uninstalled (no
 // as-you-type popup). The manual <c-x><c-o> path is unaffected — it
 // routes through the action registry / RefilterOrTrigger, not this seam
-// (covered by the controller-level completion tests). dbsavvy-etp.4.
+// (covered by the controller-level completion tests).
 func TestAutoCompleterNotInstalledWhenFlagFalse(t *testing.T) {
 	g := buildTestGuiWithAutocomplete(t, false)
 	if queryEditorVimEditor(t, g).HasAutoCompleter() {

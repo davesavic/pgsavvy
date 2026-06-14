@@ -13,7 +13,7 @@ import (
 
 // ToastLevel classifies a toast for styling purposes. The current
 // emission API (controllers.ToastHelper.Show) takes only (message, ttl)
-// — out-of-scope for dbsavvy-tro.3 to extend — so the level is derived
+// — out of scope to extend — so the level is derived
 // from the message content inside Show via classifyToastLevel. The
 // status-bar renderer (orchestrator.RenderStatusLine) reads it via
 // CurrentLevel() to apply a distinguishable foreground style.
@@ -83,7 +83,7 @@ type ToastHelper struct {
 	// fresh toast rather than silently replacing nothing.
 	key string
 
-	// log is the optional structured logger used by dbsavvy-8s2.7 for the
+	// log is the optional structured logger used for the
 	// cat=state toast_set instrumentation. Nil-tolerant.
 	log *slog.Logger
 }
@@ -151,7 +151,7 @@ func (h *ToastHelper) Show(message string, ttl time.Duration) {
 // Threading: same contract as Show — the message is redacted via
 // session.RedactDSN, stored under the mutex, and the auto-clear timer
 // is bumped via the gen counter so any in-flight clear becomes a
-// no-op. dbsavvy-66p.13.
+// no-op.
 func (h *ToastHelper) ShowOrUpdate(key, message string, ttl time.Duration) {
 	if key == "" {
 		h.Show(message, ttl)

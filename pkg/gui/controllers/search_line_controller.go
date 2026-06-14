@@ -9,7 +9,7 @@ import (
 )
 
 // SearchLineController owns the SEARCH_LINE TEMPORARY_POPUP <cr> / <esc>
-// wiring (dbsavvy-2ttm). The bottom-anchored search input is editable:
+// wiring. The bottom-anchored search input is editable:
 // printable runes flow through the master Editor's Passthrough branch
 // into v.TextArea (and the WithOnPassthroughEdit seam drives live
 // SetSearch). The controller's only roles are translating:

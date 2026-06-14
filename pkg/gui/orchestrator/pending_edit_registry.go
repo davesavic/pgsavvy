@@ -10,11 +10,11 @@ import (
 // Each distinct (connID, baseTable) gets its own set; repeated lookups
 // for the same key return the same instance (idempotent For).
 //
-// Replaces the single process-wide PendingEditSet that dbsavvy-bwq.py4
-// pinned on *Gui: result tabs for different tables / different
+// Replaces the single process-wide PendingEditSet pinned on *Gui:
+// result tabs for different tables / different
 // connections no longer share staged-edit state, so a commit dialog
 // scoped to one table cannot accidentally surface another table's
-// staged rows (dbsavvy-8oo stub #10).
+// staged rows.
 type pendingEditRegistry struct {
 	mu   sync.Mutex
 	sets map[pendingEditRegKey]*models.PendingEditSet

@@ -8,7 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// dbsavvy-56u.1: pressing `r` on the SCHEMAS rail dispatches through
+// pressing `r` on the SCHEMAS rail dispatches through
 // HelperBag.Refresh.RefreshSchemas. The binding pattern is symmetric
 // across the three side rails; SCHEMAS is exercised as the canonical
 // rail.
@@ -43,7 +43,7 @@ func TestSchemasControllerRBindingDispatchesRefresh(t *testing.T) {
 	}
 }
 
-// dbsavvy-56u.1: TablesController's `r` handler resolves the active
+// TablesController's `r` handler resolves the active
 // schema from HelperBag.Schemas and dispatches RefreshTables with it.
 func TestTablesControllerRBindingDispatchesRefreshWithSchema(t *testing.T) {
 	b := newBag()

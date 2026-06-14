@@ -1066,7 +1066,7 @@ func TestOperatorMotionAtBoundaryAppliesZeroRange(t *testing.T) {
 	}
 }
 
-// --- dbsavvy-5fxk: D (delete to end of line, vim `d$`) ---
+// --- D (delete to end of line, vim `d$`) ---
 
 // TestDeleteToEndOfLine drives the single-keystroke `D` action in Normal
 // mode: it deletes from the cursor to the end of the current line,
@@ -1205,7 +1205,7 @@ func TestChangeInnerWordSetsRepeatState(t *testing.T) {
 	}
 }
 
-// --- dbsavvy-o6da: post-yank flash fired only on the yank operator ---
+// --- post-yank flash fired only on the yank operator ---
 
 // fakeYankFlasher records the (buf, range) of the last Flash call so the
 // operator tests can assert the flash fires (and with the expected span) on

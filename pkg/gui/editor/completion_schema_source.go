@@ -16,7 +16,7 @@ const SchemaSourceName = "schema"
 // declares — the SECONDARY tiebreak in Engine dedupe when two
 // Suggestions share the composite Score. It derives from the central
 // SchemaSourceBias (completion_source.go) so the schema rank lives in
-// ONE place (dbsavvy-ko4m.3, Finding B4) — do not redeclare a separate
+// ONE place — do not redeclare a separate
 // 80 here. Mirrors FunctionSourcePriority = FunctionSourceBias.
 const SchemaSourcePriority = SchemaSourceBias
 
@@ -31,14 +31,14 @@ type SchemaProvider func() string
 // SchemaSource implements Source by translating the sqlcontext engine's
 // cursor-context analysis into table / column suggestions read SYNCHRONOUSLY
 // from a background-warmed metadata snapshot (SchemaMetadata). It owns NO
-// cache of its own — the store is the single source of truth (ko4m.2 §FROZEN
+// cache of its own — the store is the single source of truth (§FROZEN
 // DECISION 6). On a column miss it fires a reactive, non-blocking warm via
 // TableWarmer and returns immediately with whatever is currently cached
 // (possibly empty); when the warm lands, the controller re-triggers completion
-// (ko4m.2.3 re-trigger bridge), so the columns appear without an extra
+// (re-trigger bridge), so the columns appear without an extra
 // keystroke.
 //
-// Detection is entirely engine-backed (sqlcontext.Analyze, ko4m.1.x): no
+// Detection is entirely engine-backed (sqlcontext.Analyze): no
 // regexes, no line stripping. A cursor inside a string/comment yields the zero
 // ContextResult, so noise returns empty.
 type SchemaSource struct {
@@ -107,7 +107,7 @@ func (s *SchemaSource) Suggest(ctx context.Context, buf *Buffer, pos Position) [
 			table = res.Qualifier.Ident
 		}
 		cols := s.suggestColumns(schema, table, prefix)
-		// FK-first ranking (ko4m.1.4): in an ON clause (Expect==ExpectBoth),
+		// FK-first ranking: in an ON clause (Expect==ExpectBoth),
 		// a qualified `o.` column that participates in an FK to another
 		// in-scope table ranks first. Outside an ON clause this is a no-op.
 		if res.Expect == sqlcontext.ExpectBoth {
@@ -231,7 +231,7 @@ func (s *SchemaSource) suggestJoinCondition(tables []sqlcontext.TableRef, prefix
 // alone would not, because the table-name suggestions and column suggestions
 // from the same schema source otherwise share Score (matchQuality +
 // SchemaSourceBias). The boost is intentionally small and additive: it leaves
-// the fuzzy matchQuality mechanism (ko4m.3) untouched and only breaks ties
+// the fuzzy matchQuality mechanism untouched and only breaks ties
 // among schema columns. It is smaller than SchemaSourceBias so FK ranking never
 // reorders across sources.
 const fkColumnBoost = 5
@@ -401,7 +401,7 @@ func (s *SchemaSource) warm(schema, table string) {
 }
 
 // columnSuggestions projects a column list into suggestions, populating the
-// typed presentation fields (ko4m.4.3, Design D1) from the warmed snapshot:
+// typed presentation fields (Design D1) from the warmed snapshot:
 // Kind=KindColumn, Detail=DataType, IsPrimaryKey/NotNull from the column, and
 // FKRef from fkRefs (a column-name → "refschema.reftable.refcol" map for the
 // owning table). Text stays the bare column name; Display retains the legacy
@@ -428,7 +428,7 @@ func columnSuggestions(cols []models.Column, fkRefs map[string]string) []Suggest
 }
 
 // tableSuggestion builds a table-context suggestion for the bare name n in
-// schema. The eager snapshot now carries the relation Kind (ko4m.2 TableEntry),
+// schema. The eager snapshot now carries the relation Kind (TableEntry),
 // so a view/materialized view is marked Kind=KindView; everything else (plain
 // table, partitioned table, or an unloaded/absent name with kind "") falls back
 // to KindTable. Detail is left empty (a table needs no type detail).
@@ -505,11 +505,11 @@ func (s *SchemaSource) schemaFor(refSchema string) string {
 	return s.activeSchema()
 }
 
-// filterByMatch runs editor.Match (fzf-style subsequence matcher, ko4m.3.1)
+// filterByMatch runs editor.Match (fzf-style subsequence matcher)
 // against each suggestion's Text. A suggestion is kept iff Match reports ok
 // (subsequence that clears the quality floor); a 1-char-overlap junk candidate
 // is dropped automatically via ok=false. The composite ranking contract
-// (ko4m.3.2) is applied: Score = matchQuality + SchemaSourceBias and Matches =
+// is applied: Score = matchQuality + SchemaSourceBias and Matches =
 // the rune offsets into Text that Match flagged.
 //
 // An empty prefix yields Match("", x) == (true, 0, nil), so every suggestion is

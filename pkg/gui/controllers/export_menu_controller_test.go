@@ -81,7 +81,6 @@ func TestExportMenu_IsPathFieldActive(t *testing.T) {
 // disabled reason wired) the SQL-INSERTs entry behaves identically to
 // before A8: it is selectable, not annotated as disabled, and does not
 // block Confirm.
-// dbsavvy-bwq.11 (A8).
 func TestExportMenu_SQLInsertsGating_Editable(t *testing.T) {
 	formats := []string{"CSV", "TSV", "NDJSON", "JSON Array", "Markdown", "SQL INSERTs"}
 	destinations := []string{"File", "Clipboard", "stdout"}
@@ -115,7 +114,6 @@ func TestExportMenu_SQLInsertsGating_Editable(t *testing.T) {
 // (sqlInsertsIdx=pos, reason wired), the SQL-INSERTs entry is rendered
 // shown-but-disabled, the annotation echoes the grid's reason (single
 // source of truth), and Confirm is blocked with that same reason.
-// dbsavvy-bwq.11 (A8).
 func TestExportMenu_SQLInsertsGating_NotEditable(t *testing.T) {
 	formats := []string{"CSV", "TSV", "NDJSON", "JSON Array", "Markdown", "SQL INSERTs"}
 	destinations := []string{"File", "Clipboard", "stdout"}
@@ -171,7 +169,6 @@ func TestExportMenu_SQLInsertsGating_NotEditable(t *testing.T) {
 // non-editable one updates the gated state on the next menu open.
 // Modeled as: a fresh NewExportMenu call (the path PromptExport takes
 // on every open) installs the new sqlInsertsIdx + reason.
-// dbsavvy-bwq.11 (A8).
 func TestExportMenu_SQLInsertsGating_StateUpdatesOnReopen(t *testing.T) {
 	formats := []string{"CSV", "SQL INSERTs"}
 	destinations := []string{"File"}

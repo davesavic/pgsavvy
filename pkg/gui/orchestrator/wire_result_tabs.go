@@ -14,12 +14,12 @@ import (
 
 // wireResultTabs builds the ResultTabsHelper and the wiring that depends on it:
 // the QueryRunner preempter, the tab lifecycle callbacks, and the FK-forward
-// helper. Extracted from wireWithDriver (dbsavvy-y5th.1.2); it must run after
+// helper. Extracted from wireWithDriver; it must run after
 // g.queryRunner and g.jumpListH exist.
 func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 	// ResultTabsHelper owns the multi-tab pane in the secondary slot.
 	// Each tab gets its own ResultBufferManager built against the
-	// orchestrator's threading helpers. dbsavvy-66p.12.
+	// orchestrator's threading helpers.
 	resultTabsDeps := ui.ResultTabsHelperDeps{
 		Driver:     g.driver,
 		Toast:      g.toastHelp,
@@ -34,11 +34,11 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 			}
 			return rbm
 		},
-		// dbsavvy-uv0.6: AppStateStore drives the per-(connID, baseTable)
+		// AppStateStore drives the per-(connID, baseTable)
 		// hidden-column persistence used by the <leader>gH overlay.
 		Store: g.deps.Store,
 	}
-	// dbsavvy-uv0.6: focus-stack push/pop closures for the HIDE_OVERLAY
+	// focus-stack push/pop closures for the HIDE_OVERLAY
 	// popup. The helper holds the overlay state object; PushHideOverlay
 	// installs an adapter on the context (so HandleRender reads the
 	// helper's body) and pushes the popup; PopHideOverlay pops it.
@@ -51,7 +51,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 			return g.tree.Pop()
 		}
 	}
-	// dbsavvy-uv0.9: focus-stack push/pop closures for the EXPORT_MENU
+	// focus-stack push/pop closures for the EXPORT_MENU
 	// popup + OnWorker for the export pipeline.
 	if g.registry.ExportMenu != nil && g.tree != nil {
 		resultTabsDeps.PushExportMenu = func() error {
@@ -61,7 +61,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		resultTabsDeps.PopExportMenu = func() error {
 			return g.tree.Pop()
 		}
-		// dbsavvy-uv0.9: 'i' on the Path field opens the editable PROMPT
+		// 'i' on the Path field opens the editable PROMPT
 		// seeded with the current path. Pushing the PROMPT auto-pops the
 		// EXPORT_MENU; the helper's onSubmit/onCancel re-push it via
 		// PushExportMenu so focus returns to the menu.
@@ -76,7 +76,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		}
 	}
 	resultTabsDeps.OnWorker = g.OnWorker
-	// dbsavvy-s8y (Gap 2b): production editability introspection. Resolve
+	// production editability introspection. Resolve
 	// the live connection at call time (it is invalidated on Disconnect),
 	// acquire a fresh pooled session, and run the pg introspector. Non-pg
 	// drivers or no connection leave editability off.
@@ -114,7 +114,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		// baseRelation.Schema is the catalog-resolved schema (pg_namespace.
 		// nspname). Thread it out so the apply path can schema-qualify the
 		// UPDATE; the SQL-parsed base table is unqualified for a bare
-		// `SELECT ... FROM tbl` (dbsavvy-8q6).
+		// `SELECT ... FROM tbl`.
 		return editable, rowID, reason, baseRelation.Schema
 	}
 	// Lazy OID->relname resolution for the hide-cols overlay. Mirrors the
@@ -141,7 +141,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		}
 		return pg.TableNamesFromOIDs(ctx, pgSess, oids)
 	}
-	// dbsavvy-uly7.8: lazy planner-row-estimate for the G (ReadToEnd) warn
+	// lazy planner-row-estimate for the G (ReadToEnd) warn
 	// gate. Mirrors the editability closure: resolve the live connection at
 	// call time and acquire a FRESH pooled session so the planner-only EXPLAIN
 	// never blocks or preempts the in-flight result stream (which still holds
@@ -194,11 +194,11 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 	// Centralize last-wins preemption at the QueryRunner chokepoint: every
 	// Run / RunQuery / Explain stops any parked >200-row stream before it
 	// acquires the per-session queue lock, so no synchronous session op on
-	// the UI goroutine can freeze the TUI (dbsavvy-lxn.1). Set on the runner
+	// the UI goroutine can freeze the TUI. Set on the runner
 	// itself so it survives Bind / Unbind on reconnect.
 	g.queryState.queryRunner.SetPreempter(g.resultTabsH.PreemptInFlight)
 
-	// dbsavvy-bwq.15: prune jump entries belonging to a closed result
+	// prune jump entries belonging to a closed result
 	// tab so <c-o>/<c-i> never resurface stale references. Wired after
 	// both helpers exist; ResultTabsHelper invokes the callback during
 	// tab removal on the UI thread.
@@ -206,7 +206,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		g.resultTabsH.SetOnTabRemoved(func(tabID string) {
 			g.jumpListH.PruneByTab(tabID)
 		})
-		// dbsavvy-aqw: when the user closes the focused result tab
+		// when the user closes the focused result tab
 		// (<leader>X), its MAIN_CONTEXT is still on top of the focus
 		// stack pointing at a now-deleted view, so no panel renders as
 		// focused. Reconcile by shifting focus to the new active tab, or
@@ -225,7 +225,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 				_ = g.tree.Push(g.registry.QueryEditor)
 			}
 		})
-		// dbsavvy-pc4k: a user-initiated tab switch (gt/gT cycle, <leader>1..9
+		// a user-initiated tab switch (gt/gT cycle, <leader>1..9
 		// jump) moves the active tab but not the focus stack, so gocui's
 		// current-view (RunLayout reads tree.Current().GetViewName()) stays on
 		// the prior tab's view and leader chords dispatch under the stale scope
@@ -250,7 +250,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 	// FKForwardHelper drives `gd` forward FK navigation. Cache routes
 	// each Get through activeSessionFKCacheAdapter so per-Connect
 	// FKCache rotation is invisible to the helper. BusyChecker remains
-	// nil and is unused: with last-wins (dbsavvy-lxn.1) gd preempts any
+	// nil and is unused: with last-wins gd preempts any
 	// parked prior stream at the QueryRunner chokepoint rather than
 	// queueing, so the helper no longer branches on session busyness.
 	g.fkForwardH = helpers.NewFKForwardHelper(helpers.FKForwardDeps{

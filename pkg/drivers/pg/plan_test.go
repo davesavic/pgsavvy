@@ -136,7 +136,7 @@ func TestParsePlanJSON_OmitsEmptyDetailMap(t *testing.T) {
 	require.Empty(t, plan.Node.Detail, "Detail should be nil/empty when no unrecognized scalar keys exist")
 }
 
-// TestParsePlanJSON_ActualFieldsPopulated verifies that the post-uv0.8
+// TestParsePlanJSON_ActualFieldsPopulated verifies that the
 // switch arms (Actual Total Cost / Actual Rows / Actual Loops) lift
 // into typed fields and that Plan.Analyzed flips true.
 func TestParsePlanJSON_ActualFieldsPopulated(t *testing.T) {

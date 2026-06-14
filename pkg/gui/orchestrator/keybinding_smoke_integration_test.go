@@ -2,7 +2,7 @@
 
 // Package orchestrator_test (integration) drives the dbsavvy keybinding
 // subsystem end-to-end through the live wired graph, exercising every
-// acceptance-criterion item on the dbsavvy-dlp epic in one walkthrough.
+// acceptance-criterion item in one walkthrough.
 //
 // Unlike TestTUISmokeWalkthrough this test needs no Postgres fixture —
 // the keybinding system is purely in-memory. The recorder GuiDriver is
@@ -10,7 +10,7 @@
 // the assertions target the Matcher / TrieSet / WhichKey / ContextTree
 // observables rather than helper side effects.
 //
-// Step coverage mirrors the dlp.14 plan:
+// Step coverage:
 //
 //	step01_quit_via_ctrl_c
 //	step02_quit_via_leader_q
@@ -133,8 +133,8 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 	})
 
 	t.Run("step04_chord_gg_in_query_editor_scope", func(t *testing.T) {
-		// dbsavvy-wwd.9: QUERY_EDITOR is now the live MAIN_CONTEXT
-		// (promoted from STUB by wwd.1) and the VimEditorController
+		// QUERY_EDITOR is now the live MAIN_CONTEXT
+		// (promoted from STUB) and the VimEditorController
 		// publishes its motion bindings under QUERY_EDITOR scope. The
 		// `gg` binding maps to motion.buffer_start and its registered
 		// handler must move Buffer.Cursor to (0,0) regardless of where
@@ -178,7 +178,7 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 		// The published mask must at least cover the in-flight modes the
 		// editor uses (Visual / OperatorPending) — Normal mode is implicit
 		// via the controller's Normal-mode dispatch path. The mask is the
-		// wwd contract; bit-level fan-out is the keys-package contract.
+		// editor contract; bit-level fan-out is the keys-package contract.
 		if ggMode&types.ModeOperatorPending == 0 {
 			t.Errorf("motion.buffer_start mode mask = %v; expected ModeOperatorPending bit", ggMode)
 		}
@@ -218,11 +218,11 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 	})
 
 	t.Run("step05_chord_gd_in_result_grid_scope", func(t *testing.T) {
-		t.Skip("RESULT_GRID is STUB; controller for result-grid chords not yet shipped (E7 — dbsavvy-wwd)")
+		t.Skip("RESULT_GRID is STUB; controller for result-grid chords not yet shipped")
 	})
 
 	t.Run("step06_chord_cw_v_for_window_split", func(t *testing.T) {
-		t.Skip("window.split.vertical action / pane controllers not yet shipped (out of dbsavvy-dlp scope)")
+		t.Skip("window.split.vertical action / pane controllers not yet shipped")
 	})
 
 	t.Run("step07_count_5j", func(t *testing.T) {
@@ -367,7 +367,7 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 			t.Fatalf("toast history missing 'config reloaded'; history=%v", history)
 		}
 
-		// dbsavvy-tro.3: the toast must paint into the AppStatusViewName
+		// The toast must paint into the AppStatusViewName
 		// cells, not only land in the helper's History ring. Drive the
 		// production RunLayout path — it materialises the AppStatus view
 		// (Tier-4 status pass) and calls RenderStatusLine internally,
@@ -517,7 +517,7 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 			t.Fatalf("cheatsheet.Render returned empty string for live TrieSet")
 		}
 
-		// dbsavvy-bwq.Z1: every new (key, scope, mode, actionID) tuple
+		// Every new (key, scope, mode, actionID) tuple
 		// MUST be registered in the live TrieSet after wireWithDriver.
 		// Table-driven so a missing or moved binding surfaces a precise
 		// failure (which tuple) rather than a generic count mismatch.
@@ -617,7 +617,7 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 	})
 
 	t.Run("step17_help_cheatsheet_unbound_everywhere_warning", func(t *testing.T) {
-		// Unbinding `?` everywhere (the dlp-shipped default for
+		// Unbinding `?` everywhere (the default for
 		// help.cheatsheet) is an unusual config — Build does NOT emit a
 		// dedicated warning for it today. We assert the build succeeds
 		// and the `?` leaf is overwritten with <nop>, which is the
@@ -739,7 +739,7 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 	})
 
 	t.Run("step22_jk_insert_mode_escape_remap", func(t *testing.T) {
-		t.Skip("jk -> ESC insert-mode mapping is not yet shipped (out of dbsavvy-dlp scope)")
+		t.Skip("jk -> ESC insert-mode mapping is not yet shipped")
 	})
 
 	// Post-test invariants: the matcher must be idle, no Update
@@ -768,7 +768,7 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 }
 
 // TestMatcherToasterWired_HandlerErrorSurfaces proves the production Gui
-// wires a Toaster into the Matcher (dbsavvy-26i). The central error
+// wires a Toaster into the Matcher. The central error
 // boundary swallows a handler error so it never reaches gocui's MainLoop,
 // but without a Toaster the user saw nothing — apply/commit failures
 // looked like silent no-ops (only a debug-log breadcrumb). This drives a
@@ -814,7 +814,7 @@ func TestMatcherToasterWired_HandlerErrorSurfaces(t *testing.T) {
 }
 
 // TestCellEditorPushFlipsInsertModeAndCaret proves the gui.go SetModes
-// wiring end-to-end (dbsavvy-tzi.3): pushing the live CELL_EDITOR context
+// wiring end-to-end: pushing the live CELL_EDITOR context
 // onto the focus stack fires HandleFocus, which flips the per-scope mode
 // to ModeInsert (NOT ModeCommand) and enables the terminal caret. It also
 // confirms the commit chord is reachable in that exact (mode, scope)

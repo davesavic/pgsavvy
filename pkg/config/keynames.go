@@ -98,8 +98,8 @@ func ParseKeyLabel(label string) (KeyLabel, error) {
 }
 
 // maxSequenceTokens caps the number of tokens a single Key string may
-// expand into. The cap (32) is a security guardrail per the dbsavvy-dlp
-// review-plan amendment so a hostile config can't blow up the trie.
+// expand into. The cap (32) is a security guardrail so a hostile config
+// can't blow up the trie.
 const maxSequenceTokens = 32
 
 // ParseKeySequence splits s into raw key-label tokens and parses each one

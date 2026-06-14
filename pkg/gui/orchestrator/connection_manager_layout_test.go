@@ -7,7 +7,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// TestRunLayoutConnectionManagerOwnsMainPane (dbsavvy-ig4): when the
+// TestRunLayoutConnectionManagerOwnsMainPane: when the
 // CONNECTION_MANAGER MAIN_CONTEXT is top of the focus stack it renders a
 // centered bordered box over a blank background — the side rails AND the
 // QUERY_EDITOR paint must be suppressed for that frame so nothing renders

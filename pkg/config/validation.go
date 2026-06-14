@@ -8,13 +8,13 @@ import (
 
 // QuitAction is the action id that, when bound to a key, lets the user
 // exit the app. A config whose merged keybindings contain no entry with
-// this action leaves the app with no key-driven exit (dbsavvy-ivck.5).
+// this action leaves the app with no key-driven exit.
 const QuitAction = "app.quit"
 
 // ErrNoQuitBinding is returned by ValidateUserConfig (and HasQuitBinding
 // callers) when the merged keybindings contain no entry bound to
-// QuitAction. Promoted from a warning to a hard error in dbsavvy-ivck.5
-// (T5) so startup aborts before the app enters an un-quittable state.
+// QuitAction. Promoted from a warning to a hard error so startup aborts
+// before the app enters an un-quittable state.
 var ErrNoQuitBinding = errors.New("no binding for " + QuitAction)
 
 // HasQuitBinding reports whether cfg has at least one keybinding whose
@@ -50,12 +50,12 @@ const maxKeybindings = 10000
 
 // allowedModeTokens is the set of mode tokens accepted in
 // KeybindingConfig.Mode. The literal multi-char token "<c-v>" is allowed
-// for visual-block per the dbsavvy-dlp design.
+// for visual-block.
 var allowedModeTokens = map[string]struct{}{
 	"n": {}, "i": {}, "v": {}, "V": {}, "<c-v>": {}, "o": {}, "x": {}, "c": {},
 }
 
-// ValidateUserConfig validates cfg against the rules in dbsavvy-dlp.3.
+// ValidateUserConfig validates cfg against the configured rules.
 //
 // It returns two slices: warnings are non-fatal advisories (e.g. missing
 // help.cheatsheet binding); errors are hard failures the caller should
@@ -153,8 +153,8 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 	if !hasCheatsheet {
 		warns = append(warns, "no binding for help.cheatsheet")
 	}
-	// dbsavvy-ivck.5 (T5): a config with no app.quit binding leaves the
-	// app with no key-driven exit. Promote this from a warning to a hard
+	// A config with no app.quit binding leaves the app with no key-driven
+	// exit. Promote this from a warning to a hard
 	// error so startup aborts instead of entering a potentially
 	// un-quittable state. help.cheatsheet stays a warning by design.
 	if !hasQuit {
@@ -174,7 +174,7 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 		}
 	}
 
-	// UI pagination knobs (dbsavvy-uv0.3).
+	// UI pagination knobs.
 	if cfg.UI.ResultPageSize <= 0 {
 		errs = append(errs, fmt.Errorf("config: ui.result_page_size must be > 0, got %d", cfg.UI.ResultPageSize))
 	}
@@ -187,23 +187,23 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 	if cfg.UI.ReadToEndWarnThreshold <= 0 {
 		errs = append(errs, fmt.Errorf("config: ui.read_to_end_warn_threshold must be > 0, got %d", cfg.UI.ReadToEndWarnThreshold))
 	}
-	// Mouse double-click window (dbsavvy-uv0.5).
+	// Mouse double-click window.
 	if cfg.UI.Mouse.DoubleClickMs < 100 || cfg.UI.Mouse.DoubleClickMs > 2000 {
 		errs = append(errs, fmt.Errorf("config: ui.mouse.double_click_ms must be in [100, 2000], got %d", cfg.UI.Mouse.DoubleClickMs))
 	}
 
-	// Editor.FKForwardLimit (dbsavvy-bwq.16, B5).
+	// Editor.FKForwardLimit.
 	if cfg.Editor.FKForwardLimit <= 0 {
 		errs = append(errs, fmt.Errorf("config: editor.fk_forward_limit must be > 0, got %d", cfg.Editor.FKForwardLimit))
 	}
 
-	// Query.DefaultStatementTimeout (dbsavvy-fow.7, U15). 0 = off; any
-	// positive duration is a ceiling. A negative value is invalid.
+	// Query.DefaultStatementTimeout. 0 = off; any positive duration is a
+	// ceiling. A negative value is invalid.
 	if cfg.Query.DefaultStatementTimeout < 0 {
 		errs = append(errs, fmt.Errorf("config: query.default_statement_timeout must be >= 0 (0 = off), got %v", cfg.Query.DefaultStatementTimeout))
 	}
 
-	// Export bounds (dbsavvy-uv0.9).
+	// Export bounds.
 	if cfg.UI.Export.BufferedRowWarnThreshold <= 0 {
 		errs = append(errs, fmt.Errorf("config: ui.export.buffered_row_warn_threshold must be > 0, got %d", cfg.UI.Export.BufferedRowWarnThreshold))
 	}

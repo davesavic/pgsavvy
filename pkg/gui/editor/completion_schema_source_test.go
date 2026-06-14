@@ -266,8 +266,8 @@ func TestSchemaSource_TablesUnloaded_Empty(t *testing.T) {
 
 // TestSchemaSource_TableKind: a FROM-context table suggestion carries Kind=
 // KindView for a view / materialized view and Kind=KindTable for a plain or
-// partitioned table, read from the eager snapshot's per-name kind (ko4m.4.3
-// view AC). An eager name with no recorded kind ("" — e.g. older snapshot)
+// partitioned table, read from the eager snapshot's per-name kind.
+// An eager name with no recorded kind ("" — e.g. older snapshot)
 // falls back to KindTable.
 func TestSchemaSource_TableKind(t *testing.T) {
 	m := newFakeMeta()
@@ -925,7 +925,7 @@ func TestSchemaSource_NonASCIIColumnRuneOffsets(t *testing.T) {
 // keyword AT COMPARABLE MATCH QUALITY through the composite Score
 // (matchQuality + sourceBias, SchemaSourceBias 80 > KeywordSourceBias 40).
 //
-// Reconciled by dbsavvy-ko4m.3.6 from the OLD invariant — "schema constant
+// Reconciled from the OLD invariant — "schema constant
 // Score=3 always beats keyword" (a walkover that held even on an empty-prefix
 // match-all where every source scored identically) — to "schema outranks
 // keyword when both compete at the SAME match quality". The table name is
@@ -985,7 +985,7 @@ func TestEngine_SchemaTablesOutrankKeywords(t *testing.T) {
 }
 
 // TestEngine_SchemaColumnsOutrankKeywords mirrors the tables case for COLUMN
-// suggestions. Reconciled by dbsavvy-ko4m.3.6 from "schema constant Score=3
+// suggestions. Reconciled from "schema constant Score=3
 // always wins" to "schema column outranks keyword AT COMPARABLE match quality"
 // (SchemaSourceBias 80 > KeywordSourceBias 40). The dot-qualified prefix "se"
 // fuzzily matches both the column "session_token" and the keywords SELECT/SET

@@ -7,7 +7,7 @@ import (
 )
 
 // TestGetDownloadDir_RespectsXDGEnv pins the highest-priority branch:
-// XDG_DOWNLOAD_DIR wins over every other source when set. dbsavvy-uv0.9.
+// XDG_DOWNLOAD_DIR wins over every other source when set.
 func TestGetDownloadDir_RespectsXDGEnv(t *testing.T) {
 	t.Setenv("XDG_DOWNLOAD_DIR", "/tmp/dbsavvy-xdg-download-test")
 	if got := GetDownloadDir(); got != "/tmp/dbsavvy-xdg-download-test" {
@@ -17,7 +17,7 @@ func TestGetDownloadDir_RespectsXDGEnv(t *testing.T) {
 
 // TestGetDownloadDir_FallsBackToHomeDownloads verifies that when
 // XDG_DOWNLOAD_DIR is unset but $HOME/Downloads exists, that path is
-// chosen ahead of os.TempDir(). dbsavvy-uv0.9.
+// chosen ahead of os.TempDir().
 func TestGetDownloadDir_FallsBackToHomeDownloads(t *testing.T) {
 	t.Setenv("XDG_DOWNLOAD_DIR", "")
 	home := t.TempDir()
@@ -33,7 +33,7 @@ func TestGetDownloadDir_FallsBackToHomeDownloads(t *testing.T) {
 
 // TestGetDownloadDir_FallsBackToTempDir verifies the last-ditch branch:
 // XDG_DOWNLOAD_DIR unset and $HOME/Downloads missing returns
-// os.TempDir(). dbsavvy-uv0.9.
+// os.TempDir().
 func TestGetDownloadDir_FallsBackToTempDir(t *testing.T) {
 	t.Setenv("XDG_DOWNLOAD_DIR", "")
 	home := t.TempDir()

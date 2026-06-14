@@ -12,7 +12,7 @@ import (
 )
 
 // TestConnectionManagerModalConnectSuccessPopsModal asserts the in-modal
-// connect lifecycle (dbsavvy-1rf AC3): pushing the modal + <CR> on a row dials
+// connect lifecycle: pushing the modal + <CR> on a row dials
 // via connectInvoker (no standalone CONNECTING push), and on success the modal
 // is popped and the user lands in the restored schemas/tables navigation.
 func TestConnectionManagerModalConnectSuccessPopsModal(t *testing.T) {
@@ -54,7 +54,7 @@ func TestConnectionManagerModalConnectSuccessPopsModal(t *testing.T) {
 
 // TestConnectionManagerModalConnectErrorStaysInModal asserts a dial failure
 // keeps the modal top and routes the error into the modal's own connecting
-// state (dbsavvy-1rf AC3/AC6) — NOT the standalone CONNECTING screen — and
+// state — NOT the standalone CONNECTING screen — and
 // does NOT set the active connection.
 func TestConnectionManagerModalConnectErrorStaysInModal(t *testing.T) {
 	g, _ := buildTestGuiWithHistory(t)

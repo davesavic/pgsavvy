@@ -1,7 +1,7 @@
 -- list_functions — returns user-visible FUNCTION names from
 -- information_schema.routines limited to the session's current_schemas
 -- (non-implicit, i.e. excludes pg_catalog). Powers the completion
--- engine's function source (epic dbsavvy-bwq §13.3, child .20).
+-- engine's function source.
 -- Names are returned sorted alphabetically; overloaded signatures yield one
 -- information_schema.routines row each, so SELECT DISTINCT collapses them to a
 -- single entry per name.

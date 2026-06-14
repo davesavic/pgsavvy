@@ -22,8 +22,7 @@ type Controllers struct {
 	Prompt       *PromptController
 	Selection    *SelectionController
 	Confirmation *ConfirmationController
-	// ConnectionManager owns the CONNECTION_MANAGER modal's <esc> binding
-	// (epic dbsavvy-ig4).
+	// ConnectionManager owns the CONNECTION_MANAGER modal's <esc> binding.
 	ConnectionManager *ConnectionManagerController
 	Quit              *QuitController
 	QueryEditor       *QueryEditorController
@@ -51,31 +50,30 @@ type Controllers struct {
 	// History is constructed by the orchestrator alongside TableInspect:
 	// it takes a Pop-capable handle on the focus-stack (*gui.ContextTree)
 	// which this package cannot import. The bundle still owns it so
-	// RegisterActions + AllDefaultBindings include its bindings
-	// (dbsavvy-o9k0.5).
+	// RegisterActions + AllDefaultBindings include its bindings.
 	History *HistoryController
 
 	// Reconnect owns the <leader>R GLOBAL binding and the reconnect
-	// dialog (hq5.7).
+	// dialog.
 	Reconnect *ReconnectController
 
 	// SearchPath owns the <leader>p GLOBAL binding for the search_path
-	// quick-set prompt (hq5.10).
+	// quick-set prompt.
 	SearchPath *SearchPathController
 
 	// StatementTimeout owns the <leader>tt QUERY_EDITOR binding for the
-	// statement timeout prompt (hq5.11).
+	// statement timeout prompt.
 	StatementTimeout *StatementTimeoutController
 
 	// Cheatsheet is constructed by the orchestrator (it needs a Pop-
-	// capable focus-stack handle outside this package). dbsavvy-bwq.Z1
-	// promoted the help popup to TabbedPopup; the controller owns the
+	// capable focus-stack handle outside this package). The help popup
+	// was promoted to TabbedPopup; the controller owns the
 	// [, ], <tab>, <esc>, q bindings on CHEATSHEET scope.
 	Cheatsheet *CheatsheetController
 
 	// SearchLine is constructed by the orchestrator (it needs the concrete
 	// SearchLineHelper + SearchLineContext). It owns the <cr>/<esc>
-	// bindings on SEARCH_LINE scope. dbsavvy-2ttm.
+	// bindings on SEARCH_LINE scope.
 	SearchLine *SearchLineController
 }
 
@@ -119,7 +117,7 @@ func AttachControllers(
 	selection := NewSelectionController(c, helpers.CoreDeps, helpers.UIDeps)
 	confirmation := NewConfirmationController(c, helpers.CoreDeps, helpers.UIDeps)
 	// ConnectionManager <esc> close callback comes from the orchestrator's
-	// NavDeps (epic dbsavvy-ig4); a nil value leaves the handler no-op.
+	// NavDeps; a nil value leaves the handler no-op.
 	connectionManager := NewConnectionManagerController(c, helpers.CoreDeps, helpers.UIDeps, helpers.OnCloseConnectionManager)
 	quit := NewQuitController(c, helpers.CoreDeps, helpers.UIDeps, helpers.QueryDeps, helpers.EditDeps)
 	reconnect := NewReconnectController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, helpers.QueryDeps, helpers.ThreadingDeps, helpers.EditDeps)
@@ -142,7 +140,7 @@ func AttachControllers(
 	resultTabs := NewResultTabsController(c, helpers.CoreDeps, helpers.UIDeps, helpers.EditDeps, tabsMgr)
 
 	// HideOverlayController publishes HIDE_OVERLAY-scope bindings for the
-	// <leader>gH column-visibility overlay (dbsavvy-uv0.6). The manager
+	// <leader>gH column-visibility overlay. The manager
 	// surface is the same concrete *ui.ResultTabsHelper that backs
 	// ResultTabsManager — typed here through a narrower interface so the
 	// controller package stays free of helpers/ui.
@@ -155,7 +153,7 @@ func AttachControllers(
 	hideOverlay := NewHideOverlayController(c, helpers.CoreDeps, hideMgr)
 
 	// ExportMenuController publishes EXPORT_MENU-scope bindings for the
-	// <leader>oe export menu (dbsavvy-uv0.9). The manager surface is the
+	// <leader>oe export menu. The manager surface is the
 	// same concrete *ui.ResultTabsHelper that backs ResultTabsManager —
 	// typed through a narrower interface so the controller package stays
 	// free of helpers/ui.
@@ -168,10 +166,10 @@ func AttachControllers(
 	exportMenu := NewExportMenuController(c, helpers.CoreDeps, exportMgr)
 
 	// VimEditorController owns motion / operator / textobject bindings
-	// under QUERY_EDITOR scope (epic dbsavvy-wwd). It takes the live
+	// under QUERY_EDITOR scope. It takes the live
 	// *context.QueryEditorContext directly (tree.QueryEditor is the
-	// concrete pointer post-wwd.1) plus the keybinding Matcher
-	// (wwd.8 uses the Matcher to coordinate operator-pending state).
+	// concrete pointer) plus the keybinding Matcher
+	// (the Matcher coordinates operator-pending state).
 	// Either dep may be missing in test wiring: skip construction so
 	// AttachControllers stays nil-safe.
 	var vimEditor *VimEditorController
@@ -187,7 +185,7 @@ func AttachControllers(
 	}
 
 	// PlanController publishes PLAN-scoped tree-navigation bindings
-	// (dbsavvy-uv0.8). The plan tab's per-tab *context.PlanContext is
+	// The plan tab's per-tab *context.PlanContext is
 	// reached through helpers.ActivePlanContextFn (wired by the
 	// orchestrator to ResultTabsHelper.ActivePlanContext).
 	plan := NewPlanController(c, helpers.CoreDeps, helpers.ActivePlanContextFn)
@@ -364,7 +362,7 @@ func (b *Controllers) entries() []controllerEntry {
 // The trait actions (ListUp / ListDown / ListConfirm) are registered
 // per-rail — each rail's trait emits its own scope-suffixed ID
 // (`list.down:CONNECTIONS`, `list.down:SCHEMAS`, …) so j/k/<CR> on
-// rail X dispatch to rail X's cursor (dbsavvy-6m9). Pre-fix only the
+// rail X dispatch to rail X's cursor. Pre-fix only the
 // Connections trait registered handlers and every rail's j/k mutated
 // the Connections cursor.
 //

@@ -10,7 +10,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// Capstone tests (dbsavvy-cjl): gap coverage for the CONNECTION_MANAGER
+// Capstone tests: gap coverage for the CONNECTION_MANAGER
 // modal. Existing suites cover startup, connect lifecycle, CRUD, and root
 // exit. These tests fill four remaining gaps:
 //

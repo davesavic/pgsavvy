@@ -30,7 +30,6 @@ type highlightSpan struct {
 // with the Search / CurSearch SGR. When a span is clipped by truncation or
 // any offset is out of range the WHOLE rendered cell is highlighted instead
 // (whole-cell fallback) so we never slice out of range or mid-rune.
-// dbsavvy-2ttm.2.
 func renderCellPaddedHighlighted(value any, col models.ColumnMeta, w int, isDirty bool, spans []highlightSpan) string {
 	visible := renderCellPlain(value, col)
 	padded := padRight(visible, w)
@@ -91,7 +90,7 @@ func applyMatchHighlights(visible, padded string, w int, spans []highlightSpan) 
 // wrapping happens strictly on rune boundaries so it never slices mid-rune or
 // panics. An empty spans slice returns s unchanged. Overlapping spans are
 // passed through to wrapRuneSpans, which opens/closes per rune index. There is
-// a single SGR implementation: this reuses wrapRuneSpans. dbsavvy-ko4m.4.2.
+// a single SGR implementation: this reuses wrapRuneSpans.
 func HighlightRuneSpans(s string, spans [][2]int) string {
 	if len(spans) == 0 {
 		return s

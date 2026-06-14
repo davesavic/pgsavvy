@@ -37,7 +37,7 @@ func (v *View) EnterRowMode() {
 // at the current cursor position. Subsequent cursor moves grow the
 // block in any direction. In expanded mode the block model is
 // meaningless (one logical column of wrapped lines) so the call falls
-// back to SelectionRow per dbsavvy-uv0.7 AC.
+// back to SelectionRow.
 func (v *View) EnterBlockMode() {
 	v.mu.Lock()
 	if normaliseViewMode(v.viewMode) == ViewModeExpanded {

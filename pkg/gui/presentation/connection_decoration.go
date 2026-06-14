@@ -100,7 +100,7 @@ func NewPresentationHook() func(conn *models.Connection) (types.TextStyle, strin
 // to disambiguate profiles by handle; Profile.Label is reserved for the
 // status-bar / title-bar header decoration (see HeaderTextFor). Returning
 // Name here keeps two profiles with the same Label (e.g. both labelled
-// "localhost") visually distinct in the rail. Bug dbsavvy-2ox.
+// "localhost") visually distinct in the rail.
 //
 // activeID is a LIVE accessor for the currently-active connection's name
 // (g.activeConnID). It is called on every render so the marker tracks

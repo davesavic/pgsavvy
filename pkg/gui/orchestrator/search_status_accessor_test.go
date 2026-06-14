@@ -40,7 +40,7 @@ func newSearchAccessorFixture(t *testing.T, root types.ContextKey) (*Gui, *gui.C
 }
 
 // TestSearchStatusAccessorActiveOnResultGrid is the regression guard for
-// dbsavvy-2ttm.5: every result tab's focus-stack context carries
+// Every result tab's focus-stack context carries
 // GetKey() == RESULT_GRID (the per-slot result_tab_<slot> name lives on
 // the VIEW, not the key). The accessor must gate on the RESULT_GRID key,
 // not the result_tab_ view prefix — gating on the prefix made the

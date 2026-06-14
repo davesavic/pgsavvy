@@ -10,7 +10,7 @@ import (
 )
 
 // TestPopulateForeignKeyFlags is the table-driven AC matrix for B3. Each
-// case names an AC from dbsavvy-bwq.14 so a regression points straight at
+// case names an AC so a regression points straight at
 // the offending rule.
 func TestPopulateForeignKeyFlags(t *testing.T) {
 	publicUsers := models.Ref{Schema: "public", Table: "users"}

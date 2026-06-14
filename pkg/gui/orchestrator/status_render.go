@@ -18,14 +18,13 @@ import (
 // hands the same name to driver.SetView before calling RenderStatusLine.
 // Keeping the constant and the layout key in lock-step means the
 // renderer's SetContent target and the layout's SetView target can never
-// drift (dbsavvy-tro.3 wire-up).
+// drift.
 const AppStatusViewName = "status"
 
 // ResultTabBarViewName is the gocui view-name for the result-pane tab-bar
 // strip — a frameless 1-row view carved out of the top of the "secondary"
 // (result) region. It is created/sized directly in RunLayout (not a
 // boxlayout slot) and its content comes from ResultTabsHelper.RenderTabBar.
-// dbsavvy-85f.
 const ResultTabBarViewName = "result_tab_bar"
 
 // ResultEmptyViewName is the gocui view-name for the always-visible empty
@@ -39,7 +38,7 @@ const ResultEmptyViewName = "result_empty"
 // escape interpreter (escape.go in the vendored lazygit fork) parses
 // these inline and lifts them to per-cell Attribute values, so the
 // recorder driver's stored buffer carries the style as plain bytes —
-// which is exactly the observable the dbsavvy-tro.3 AC asserts.
+// which is exactly the observable the AC asserts.
 //
 // SafeText is applied to the user-supplied toast message BEFORE the
 // ANSI wrapper is prepended; SafeText would otherwise strip the \x1b
@@ -73,7 +72,7 @@ type StatusRenderDeps struct {
 	// back to default-line rendering on every pass.
 	Toast ToastSource
 	// BusyCount returns the live OnWorker in-flight counter for the
-	// status-bar spinner segment (dbsavvy-56u.4). Nil → no spinner
+	// status-bar spinner segment. Nil → no spinner
 	// rendered, which is the correct fallback for partial test wiring.
 	BusyCount func() int64
 	// SpinnerFrame returns the wall-clock frame index that selects the
@@ -90,7 +89,7 @@ type StatusRenderDeps struct {
 	// no settings section rendered (bootstrap safety / no session).
 	SessionSettings func() map[string]string
 	// SearchStatus reports the active-search state for the focused
-	// result tab's grid (dbsavvy-2ttm.5). It MUST read the live active
+	// result tab's grid. It MUST read the live active
 	// grid at call time (every frame) — not a captured pointer — so a
 	// tab switch reflects the new tab's count and clears when focus
 	// leaves a result tab. Returns active=false when focus is not a
@@ -119,8 +118,8 @@ type StatusRenderDeps struct {
 // as no options (BuildStatusLine still appends the "?: more" hint).
 //
 // Skips silently when (a) the driver is nil, (b) the KbRuntime or its
-// ModeStore is nil (defensive bootstrap-order guard per dlp.9 review
-// notes), or (c) the focus tree is nil/empty. Any driver SetContent
+// ModeStore is nil (defensive bootstrap-order guard), or (c) the
+// focus tree is nil/empty. Any driver SetContent
 // error is swallowed — the status bar is non-critical UI. The view is
 // materialised by RunLayout's Tier-4 status pass each frame before this
 // function is invoked, so SetContent normally finds its target buffer;
@@ -157,7 +156,7 @@ func RenderStatusLine(d StatusRenderDeps) {
 	if focused != nil {
 		key := focused.GetKey()
 		mode := d.KbRuntime.ModeStore.Get(key)
-		// dbsavvy-ppr: always show the mode label, regardless of whether
+		// Always show the mode label, regardless of whether
 		// the focused context is editable. The status bar's mode banner
 		// is part of the always-on baseline (QA 1.1 / 3.1 / 5.1) so the
 		// user can see at a glance which mode keystrokes will dispatch

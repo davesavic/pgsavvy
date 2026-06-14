@@ -9,7 +9,7 @@ import (
 
 // gutterModifiedMarker is the single-character glyph rendered in the row
 // gutter for any row that has at least one staged edit. Mirrors the vim
-// `:set list`-style modified marker. dbsavvy-bwq.6 (A3).
+// `:set list`-style modified marker.
 const gutterModifiedMarker = "M"
 
 // DecorateDirtyCell returns the cell's display string wrapped in the
@@ -22,7 +22,7 @@ const gutterModifiedMarker = "M"
 // untouched. The cell-style stack already applies type-aware foreground
 // colouring upstream; this decorator only layers the dirty-state
 // background tint on top of the already-styled value. The edit is signalled
-// by background colour alone — no per-cell glyph. dbsavvy-bwq.6 (A3).
+// by background colour alone — no per-cell glyph.
 func DecorateDirtyCell(value string, isDirty bool, style theme.Style) string {
 	if !isDirty {
 		return value
@@ -34,7 +34,7 @@ func DecorateDirtyCell(value string, isDirty bool, style theme.Style) string {
 // row primary key. A nil set or empty rowPK returns false; nil rowPK is
 // treated as "row identity unavailable" so the caller renders no gutter
 // marker rather than matching every edit with a zero-length PK (which Add
-// rejects, so this is defence-in-depth). dbsavvy-bwq.6 (A3).
+// rejects, so this is defence-in-depth).
 func RowHasPendingEdit(set *models.PendingEditSet, rowPK []any) bool {
 	if set == nil || len(rowPK) == 0 || set.IsEmpty() {
 		return false
@@ -50,7 +50,6 @@ func RowHasPendingEdit(set *models.PendingEditSet, rowPK []any) bool {
 // CellHasPendingEdit reports whether set carries a staged edit for the
 // (rowPK, column) pair. Used by the per-cell render path to decide
 // whether DecorateDirtyCell should apply the dirty tint + glyph.
-// dbsavvy-bwq.6 (A3).
 func CellHasPendingEdit(set *models.PendingEditSet, rowPK []any, column string) bool {
 	_, ok := cellPendingEdit(set, rowPK, column)
 	return ok
@@ -58,8 +57,8 @@ func CellHasPendingEdit(set *models.PendingEditSet, rowPK []any, column string) 
 
 // cellPendingEdit returns the staged edit for the (rowPK, column) pair and
 // true when one exists. The per-cell render path uses it to substitute the
-// staged NewValue for the stale DB value so an unsaved edit is visible
-// (dbsavvy-cyh). A nil/empty set, empty rowPK, or empty column yields
+// staged NewValue for the stale DB value so an unsaved edit is visible.
+// A nil/empty set, empty rowPK, or empty column yields
 // (zero, false).
 func cellPendingEdit(set *models.PendingEditSet, rowPK []any, column string) (models.PendingEdit, bool) {
 	if set == nil || len(rowPK) == 0 || column == "" || set.IsEmpty() {
@@ -76,7 +75,7 @@ func cellPendingEdit(set *models.PendingEditSet, rowPK []any, column string) (mo
 // rowPKValues extracts the primary-key value slice for a row using the
 // SELECT-order identity column indexes. Returns nil when any index is out
 // of range (treated as "row identity unavailable" — the caller then renders
-// no dirty decoration rather than risk a bad match). dbsavvy-cyh.
+// no dirty decoration rather than risk a bad match).
 func rowPKValues(row models.Row, rowIdentity []int) []any {
 	if len(rowIdentity) == 0 {
 		return nil
@@ -96,7 +95,6 @@ func rowPKValues(row models.Row, rowIdentity []int) []any {
 // marker ("M") is returned; otherwise the empty string. The rowIdx
 // parameter is reserved for callers that want to disambiguate by buffer
 // index in the future; the current implementation matches on rowPK only.
-// dbsavvy-bwq.6 (A3).
 func GutterMarker(rowIdx int, set *models.PendingEditSet, rowPK []any) string {
 	_ = rowIdx
 	if RowHasPendingEdit(set, rowPK) {
@@ -108,7 +106,6 @@ func GutterMarker(rowIdx int, set *models.PendingEditSet, rowPK []any) string {
 // pkSliceEqual compares two primary-key value slices for equality.
 // Mirrors models.pkEqual (which is unexported); duplicated here to keep
 // the grid package decoupled from internal model helpers.
-// dbsavvy-bwq.6 (A3).
 func pkSliceEqual(a, b []any) bool {
 	if len(a) != len(b) {
 		return false

@@ -13,12 +13,12 @@ import (
 )
 
 // The interfaces below capture only the methods T7a controllers actually
-// call. Concrete implementations land in sibling task dbsavvy-zro (T7b)
+// call. Concrete implementations land in sibling task T7b
 // under pkg/gui/controllers/helpers/ui/* and
 // pkg/gui/controllers/helpers/data/refresh_helper.go. Each interface
 // is intentionally narrow so that:
 //
-//   - Controllers in T7a build and test in isolation (no zro dependency).
+//   - Controllers in T7a build and test in isolation.
 //   - T7b's concrete types satisfy the interfaces structurally without
 //     needing to import this package.
 //   - Tests inject lightweight fakes.
@@ -45,7 +45,7 @@ type ConfirmHelper interface {
 // Submit / Cancel are the seams the PromptController calls from its
 // <cr> / <esc> handlers. SetResetHandler lets the controller subscribe
 // to fresh Prompt invocations so it can re-seed its line buffer with
-// the new `initial` value (dbsavvy-m47.1).
+// the new `initial` value.
 type PromptHelper interface {
 	Prompt(label string, initial string, onSubmit func(value string) error, onCancel func() error) error
 	Submit(value string) error
@@ -71,7 +71,7 @@ type ChoiceHelper interface {
 
 // ToastHelper writes a transient message to the status bar slot.
 // ShowOrUpdate replaces an in-place toast tagged with the given key
-// (used by the "connect" keyed Connecting… toast in dbsavvy-fow.1);
+// (used by the "connect" keyed Connecting… toast);
 // the concrete *ui.ToastHelper satisfies both methods.
 type ToastHelper interface {
 	Show(message string, ttl time.Duration)
@@ -79,7 +79,7 @@ type ToastHelper interface {
 }
 
 // RefreshHelper reloads side-rail data after a hide/unhide mutation or
-// the per-rail `r` keypress (dbsavvy-56u.1). Each method loads fresh
+// the per-rail `r` keypress. Each method loads fresh
 // data via the underlying driver AND pushes the result back into the
 // rail context's SetItems — the controllers only need to know which
 // rail to refresh.
@@ -124,7 +124,6 @@ type TablePicker interface {
 // local DDL succeeds or on a manual 'r' force-refresh. The orchestrator wires
 // it to *data.SchemaWarmer (the store's single owner). Nil-safe: the controller
 // no-ops when unwired (unit tests that do not exercise invalidation).
-// dbsavvy-ko4m.2.4.
 type SchemaMetadataInvalidator interface {
 	// InvalidateSchema drops every lazy (column+FK) entry for schema so the
 	// next warm reloads fresh. Used on a successful local DDL (whole-schema
@@ -145,9 +144,8 @@ type ActiveConnection interface {
 
 // ResultTabsHelper is the narrow surface the QueryEditorController calls
 // to hand each launched RunHandle (or Explain plan) to the multi-tab
-// result pane. The concrete implementation lands in dbsavvy-66p.12;
-// 66p.11 declares the interface so the controller compiles and is
-// testable today.
+// result pane. The interface is declared here so the controller compiles
+// and is testable today; the concrete implementation lands separately.
 //
 // OpenResultTab opens a new result tab for rh and starts streaming it.
 // label is the tab title (typically the first ~40 chars of the SQL).
@@ -165,7 +163,7 @@ type ResultTabsHelper interface {
 
 // ResultTabConnectionLostMarker is the optional surface QueryEditorController
 // uses to mark running/queued tabs as connection-lost when a dead-connection
-// error is detected. The concrete *ui.ResultTabsHelper satisfies it. hq5.6.
+// error is detected. The concrete *ui.ResultTabsHelper satisfies it.
 type ResultTabConnectionLostMarker interface {
 	MarkConnectionLost()
 }
@@ -176,7 +174,7 @@ type ResultTabConnectionLostMarker interface {
 // persistence and seeding the grid's hidden-col set from AppState. The
 // concrete *ui.ResultTabsHelper satisfies it; tests that don't implement
 // it cause the controller to skip identity attach (overlay then runs
-// session-only against any data those tests synthesise). dbsavvy-uv0.6.
+// session-only against any data those tests synthesise).
 type ResultTabIdentityAttacher interface {
 	AttachActiveTabIdentity(connID string, ri query.ResultIdentity)
 }
@@ -187,7 +185,7 @@ type ResultTabIdentityAttacher interface {
 // renderer reads it back to draw a position caret under the offending
 // token. The concrete *ui.ResultTabsHelper satisfies it; tests that don't
 // implement it cause the controller to skip the attach (the panel then
-// renders without a caret). dbsavvy-fow.3.
+// renders without a caret).
 type ResultTabErrorSQLAttacher interface {
 	AttachActiveTabErrorSQL(sql string)
 }
@@ -197,14 +195,14 @@ type ResultTabErrorSQLAttacher interface {
 // currently-active result tab right after OpenResultTab, so a later sort
 // re-run can reissue the exact query. The concrete *ui.ResultTabsHelper
 // satisfies it; tests that don't implement it cause the controller to skip
-// the attach. dbsavvy-72k.1.
+// the attach.
 type ResultTabOriginAttacher interface {
 	AttachActiveTabOrigin(sql string, args []any, defaultSchema string)
 }
 
 // ResultTabReattacher is the optional surface QueryEditorController uses to
 // re-stream the active result tab from a freshly-launched RunHandle, reusing
-// the same tab + grid (sort/clear re-run, dbsavvy-72k.3). The concrete
+// the same tab + grid (sort/clear re-run). The concrete
 // *ui.ResultTabsHelper satisfies it; tests that don't implement it cause the
 // controller to skip the reattach. runSQL is the SQL actually executed (a
 // wrapped sort or the original SQL on clear); origSQL is the tab's write-once
@@ -221,7 +219,7 @@ type ResultTabReattacher interface {
 // carries a non-empty message the caller must surface (e.g. the pending-edits
 // block). A silent no-op is (run=false, toast==""). The concrete
 // *ui.ResultTabsHelper satisfies it; tests that don't implement it cause the
-// controller to skip the sort. dbsavvy-72k.4.
+// controller to skip the sort.
 type ResultTabSorter interface {
 	SortActiveTab(col int) (runSQL string, run bool, toast string)
 }
@@ -233,14 +231,13 @@ type ResultTabSorter interface {
 // either entry point drives the one Tab-level flow (guards + cycle + DB
 // re-run). The concrete *ui.ResultTabsHelper satisfies it; tests that don't
 // implement it cause the controller to skip wiring (sort stays a no-op).
-// dbsavvy-72k.5.
 type ResultTabSortHooker interface {
 	SetOnSortRequest(fn func(col int))
 }
 
 // EditorBufferReader is the narrow surface the QueryEditorController
 // queries to learn what statement to run. It returns the full buffer
-// text, the cursor's byte offset into that buffer, and (post wwd.7)
+// text, the cursor's byte offset into that buffer, and
 // the currently selected text when Visual mode is active. The concrete
 // implementation reads from the QUERY_EDITOR view's *editor.Buffer;
 // tests inject a fake.
@@ -254,7 +251,7 @@ type ResultTabSortHooker interface {
 //
 // SelectionText returns the text covered by Buffer.Selection and true
 // when a Visual-mode selection is live; ("", false) when no selection
-// is active. dbsavvy-wwd.7's <leader>r-in-Visual fan-out reads through
+// is active. The <leader>r-in-Visual fan-out reads through
 // this method.
 type EditorBufferReader interface {
 	BufferText() string
@@ -270,7 +267,7 @@ type EditorBufferReader interface {
 // QueryEditorController calls OnRunStart before launching a run,
 // AttachStream for each RunHandle the run produces, and Finish once
 // no more streams will attach; OnRunEnd then fires automatically when
-// the last attached stream's notice channel drains. dbsavvy-66p.13.
+// the last attached stream's notice channel drains.
 type NoticeReporter interface {
 	OnRunStart(runID string)
 	OnRunEnd(runID string)
@@ -286,7 +283,6 @@ type NoticeReporter interface {
 // query session) and re-opens with the same profile, refreshing the schema
 // rail on success. The orchestrator wires a closure that routes through
 // connectInvoker.Connect and ConnectHelper.Disconnect/Connection.Ping.
-// hq5.7.
 type ReconnectInvoker interface {
 	PingConnection(ctx context.Context) error
 	Reconnect(ctx context.Context, profile *models.Connection) error

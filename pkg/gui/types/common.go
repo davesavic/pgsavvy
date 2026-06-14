@@ -28,14 +28,13 @@ type HelperCommon interface {
 // All fields are optional (zero value is safe). Concrete contexts MUST
 // nil-check every hook before invoking it. The GuiDriver field is the
 // sole seam through which contexts perform view writes — no pkg/gui/context
-// file is permitted to import gocui directly (see DESIGN.md §8 and the
-// AC fix in dbsavvy-enn.3).
+// file is permitted to import gocui directly (see DESIGN.md §8).
 //
 // Downstream tasks supply concrete implementations:
-//   - T6 (enn.7) provides EmptyStateHook (connections empty state hint).
-//   - T8 (enn.9) provides PresentationHook (confirmation popup styling),
+//   - T6 provides EmptyStateHook (connections empty state hint).
+//   - T8 provides PresentationHook (confirmation popup styling),
 //     PerRowDecorationHook (connection-picker rows), and LimitText.
-//   - T5 (enn.6) consumes the SchemasContext show-hidden accessors.
+//   - T5 consumes the SchemasContext show-hidden accessors.
 type ContextTreeDeps struct {
 	// GuiDriver is the runtime seam contexts use to schedule writes via
 	// Update / UpdateContentOnly. Nil-safe: contexts must nil-check.
@@ -46,7 +45,7 @@ type ContextTreeDeps struct {
 	EmptyStateHook func(common *common.Common) (renderEmpty bool, hint string)
 
 	// RailEmptyText is the rail-aware empty-state hook for the
-	// SCHEMAS/TABLES/COLUMNS/INDEXES side rails (dbsavvy-fow.5 U7). The
+	// SCHEMAS/TABLES/COLUMNS/INDEXES side rails. The
 	// CONNECTIONS rail keeps its dedicated EmptyStateHook (above) because
 	// its emptiness is decided by a live profile provider rather than the
 	// rendered item slice. These four rails instead already know they are
@@ -77,25 +76,25 @@ type ContextTreeDeps struct {
 	LimitText func() string
 
 	// FirstRunTipText returns the (title, body) pair rendered by
-	// FirstRunTipContext on first launch (dbsavvy-56u.2). The
+	// FirstRunTipContext on first launch. The
 	// orchestrator binds this to Tr.FirstRunTipTitle / Tr.FirstRunTipBody.
 	// Nil-safe: FirstRunTipContext.HandleRender is a no-op when nil.
 	FirstRunTipText func() (title, body string)
 
 	// WhichKey is the live which-key notifier consumed by WhichKeyContext
 	// to fetch visibility + snapshot. Nil at construction time before
-	// the orchestrator wires it (dlp.8c). Nil-safe: WhichKeyContext
+	// the orchestrator wires it. Nil-safe: WhichKeyContext
 	// renders a no-op when nil.
 	WhichKey WhichKeyState
 
 	// WhichKeyRows resolves the children rendered for a given (scope,
 	// prefix) when the popup is visible. Bound by the orchestrator
-	// (dlp.8c) to a closure over the live TrieSet + ModeStore. Nil-safe:
+	// to a closure over the live TrieSet + ModeStore. Nil-safe:
 	// nil → no rows rendered.
 	WhichKeyRows func(scope ContextKey, prefix []ChordKey) []ChildRow
 
 	// CheatsheetRender produces the rendered cheatsheet body for the
-	// supplied focused scope. Bound by the orchestrator (dlp.10) to a
+	// supplied focused scope. Bound by the orchestrator to a
 	// closure that captures the live TrieSet + commands.Registry +
 	// TranslationSet and calls into pkg/cheatsheet. Nil-safe:
 	// CheatsheetContext.HandleRender is a no-op when nil.
@@ -138,7 +137,7 @@ type ContextTreeDeps struct {
 
 	// IsDisconnected reports whether the active session has been marked
 	// connection-dead. When true, schema/table/column/index rails render
-	// their items dimmed. Nil-safe: nil → not disconnected. hq5.6.
+	// their items dimmed. Nil-safe: nil → not disconnected.
 	IsDisconnected func() bool
 
 	// SpinnerFrame returns the live wall-clock spinner frame index used to

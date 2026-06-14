@@ -10,7 +10,6 @@ import (
 // both the auto-size width computation (see columns.go::autoSizeFromSampleLocked)
 // and the rendered header line (see scroll.go::renderHeaderLine) so the
 // indicator never causes the header to overflow the locked column width.
-// dbsavvy-bwq.14 (B3).
 const fkHeaderPrefix = "→ "
 
 // PopulateForeignKeyFlags returns a copy of cols with ColumnMeta.IsForeignKey
@@ -30,7 +29,6 @@ const fkHeaderPrefix = "→ "
 //
 // The input slice is not mutated; a fresh []models.ColumnMeta is returned so
 // the caller can install it via View.SetColumns without aliasing concerns.
-// dbsavvy-bwq.14 (B3).
 func PopulateForeignKeyFlags(cols []models.ColumnMeta, fks []models.ForeignKey, baseTable models.Ref) []models.ColumnMeta {
 	out := make([]models.ColumnMeta, len(cols))
 	copy(out, cols)
@@ -65,7 +63,7 @@ func PopulateForeignKeyFlags(cols []models.ColumnMeta, fks []models.ForeignKey, 
 // headerLabel returns the string used to render col's header. For FK columns
 // the label is fkHeaderPrefix + col.Name; otherwise just col.Name. Used by
 // the auto-size seed (columns.go) and the header line renderer (scroll.go)
-// so width budget and visible text stay in lock-step. dbsavvy-bwq.14 (B3).
+// so width budget and visible text stay in lock-step.
 func headerLabel(col models.ColumnMeta) string {
 	if col.IsForeignKey {
 		return fkHeaderPrefix + col.Name

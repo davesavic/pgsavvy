@@ -9,8 +9,8 @@ import (
 // CancelRegistry maps an active session to its in-flight RunHandle so a
 // caller holding only a models.SessionID can locate the currently-running
 // stream and cancel it. Keyed by SessionID because the SQLSession queue
-// guarantees at most one run in flight per session at any moment (task
-// dbsavvy-66p.7). All methods are safe for concurrent use.
+// guarantees at most one run in flight per session at any moment. All
+// methods are safe for concurrent use.
 type CancelRegistry struct {
 	mu  sync.RWMutex
 	run map[models.SessionID]*RunHandle

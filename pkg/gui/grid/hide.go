@@ -2,7 +2,7 @@ package grid
 
 // Hide-cols helpers. Lives next to scroll.go so the visibleColumnOrder
 // composition (frozen-first → colOffset → hide-filter) stays local to
-// the grid package. dbsavvy-uv0.6.
+// the grid package.
 
 // filterHidden returns a new slice of column indices with any index in
 // hidden removed, preserving order. A nil / empty hidden map returns

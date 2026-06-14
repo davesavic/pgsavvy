@@ -65,13 +65,13 @@ type themeState struct {
 	CursorFg        *Style
 	MatchHighlight  *Style
 	SearchHighlight *Style
-	CurSearch       *Style // dbsavvy-2ttm.2 — current in-grid search match (stronger than SearchHighlight)
+	CurSearch       *Style // current in-grid search match (stronger than SearchHighlight)
 	DiffAddedFg     *Style
 	DiffRemovedFg   *Style
 	DiffChangedFg   *Style
 	PromptFg        *Style
-	DirtyCellBg     *Style // dbsavvy-bwq.6 (A3) — Z1 wires ThemeConfig + builtins
-	WarnBorder      *Style // dbsavvy-bwq A1 — Z1 Phase A wires ThemeConfig + builtins
+	DirtyCellBg     *Style // Z1 wires ThemeConfig + builtins
+	WarnBorder      *Style // Z1 Phase A wires ThemeConfig + builtins
 }
 
 var (
@@ -158,7 +158,7 @@ func Apply(cfg *config.ThemeConfig) error {
 // pointer being valid; the rendering layer decides what an unrecognised Fg
 // means in practice.
 //
-// Tokenization (AD-5, dbsavvy-56u.4): the value is split on whitespace and
+// Tokenization (AD-5): the value is split on whitespace and
 // each token is classified greedily:
 //   - "bold" / "underline" / "italic" set the matching flag (any position,
 //     order-insensitive);
@@ -214,7 +214,6 @@ func init() {
 // monochrome caches the result of reading the NO_COLOR env var. Resolved
 // lazily on first IsMonochrome() call (via monochromeOnce) so test code
 // that mutates the environment before reaching the call site is honored.
-// dbsavvy-uv0.8.
 var (
 	monochromeOnce sync.Once
 	monochrome     bool
@@ -227,7 +226,7 @@ var (
 //
 // The value is resolved once on first call and cached for the lifetime
 // of the process — subsequent calls are O(1). Production callers do not
-// need to invalidate; the variable is read at startup. dbsavvy-uv0.8.
+// need to invalidate; the variable is read at startup.
 func IsMonochrome() bool {
 	monochromeOnce.Do(func() {
 		monochrome = os.Getenv("NO_COLOR") != ""
@@ -238,7 +237,7 @@ func IsMonochrome() bool {
 // SetMonochromeForTest forces the cached monochrome value to v, marking the
 // once as resolved so subsequent IsMonochrome() calls return v regardless of
 // the NO_COLOR env var. It returns a restore func that reverts the once + value
-// to their prior state. Test-only seam (dbsavvy-ko4m.4.6): the production
+// to their prior state. Test-only seam: the production
 // monochrome cache is a process-lifetime sync.Once with no env re-read, so a
 // no-color render test cannot otherwise drive IsMonochrome deterministically.
 // Do NOT call from production code.

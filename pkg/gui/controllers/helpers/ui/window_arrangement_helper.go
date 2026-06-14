@@ -10,8 +10,8 @@ import (
 type Dimensions = boxlayout.Dimensions
 
 // requiredWindows is the canonical list of window keys the layout
-// promises to populate. The dbsavvy-zro AC names exactly these eleven;
-// future epics may extend the list (e.g. result-tabs N) but must NOT
+// promises to populate. There are exactly these eleven;
+// future work may extend the list (e.g. result-tabs N) but must NOT
 // drop any of these without a coordinated update of every consumer.
 var requiredWindows = []string{
 	"schemas",

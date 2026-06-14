@@ -4,13 +4,12 @@ package models
 // EXPLAIN output (lines joined by "\n"); Node is the parsed structured tree
 // derived from the engine's JSON-format EXPLAIN output. Either field may be
 // empty if the corresponding format was unavailable or unparseable; both being
-// populated is the expected happy-path. See epic dbsavvy-66p §66p.6.
+// populated is the expected happy-path.
 //
 // Analyzed is true when the parsed tree carries `EXPLAIN ANALYZE` actuals
 // (Actual Total Cost / Actual Rows / Actual Loops) on at least one node.
 // Drivers set this flag during parsing; UI rendering branches on it to add
-// actual-cost / actual-rows / loops columns to the tree view. See
-// dbsavvy-uv0.8.
+// actual-cost / actual-rows / loops columns to the tree view.
 // Notice, when non-empty, carries a user-facing degraded-mode message the UI
 // surfaces as a toast — e.g. the server rejected the enriched EXPLAIN option
 // set and the driver fell back to a bare EXPLAIN.
@@ -30,7 +29,7 @@ type Plan struct {
 //
 // ActualCost / ActualRows / Loops are zero unless the source was
 // `EXPLAIN ANALYZE`; Plan.Analyzed flags whether the tree carries actuals
-// anywhere. dbsavvy-uv0.8.
+// anywhere.
 type PlanNode struct {
 	Op         string
 	Cost       float64

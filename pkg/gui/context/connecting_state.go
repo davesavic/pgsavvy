@@ -2,7 +2,7 @@ package context
 
 // ConnectingState is the transient connecting/error state rendered while a
 // connection attempt is in flight. It is the tiny shared sink the in-modal
-// connect lifecycle writes (dbsavvy-1rf): connectInvoker drives
+// connect lifecycle writes: connectInvoker drives
 // SetConnectingStaged / MarkStage* / SetError on it, and
 // ConnectionManagerContext reads BodyGlyph(glyph) in
 // ModeConnecting. This keeps connectInvoker's gen/supersession/cancel/worker
@@ -136,7 +136,7 @@ func (s *ConnectingState) SetError(msg string) {
 // IsError reports whether the state is in the error phase (an error message is
 // set). False during the active-dial phase, where only Esc (cancel) is allowed
 // and retry must not fire — retrying mid-dial supersedes the in-flight attempt
-// and re-prompts for credentials (dbsavvy-f4fz).
+// and re-prompts for credentials.
 func (s *ConnectingState) IsError() bool { return s.errMsg != "" }
 
 // BodyGlyph renders the staged checklist (one line per stage) followed by the

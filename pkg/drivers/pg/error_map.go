@@ -13,7 +13,7 @@ import (
 // streamed query is cut off by the default-statement-timeout ceiling
 // (context.WithTimeout deadline). The result tab renders this string so the
 // user can tell a ceiling-induced stop apart from an explicit <leader>x
-// cancel, which keeps the plain "cancelled" state. dbsavvy-fow.7 (U15).
+// cancel, which keeps the plain "cancelled" state.
 const StatementTimeoutMessage = "cancelled: statement timeout"
 
 // IsStatementTimeout reports whether err was caused by a
@@ -27,7 +27,7 @@ const StatementTimeoutMessage = "cancelled: statement timeout"
 // <leader>x / preemption surfaces context.Canceled → the existing plain
 // user-cancel state. Both can ride inside the same pgx error wrapper, so
 // callers MUST consult IsStatementTimeout before falling back to the
-// generic cancel path. dbsavvy-fow.7 (U15).
+// generic cancel path.
 func IsStatementTimeout(err error) bool {
 	if err == nil {
 		return false
@@ -68,7 +68,7 @@ func wrapPgError(err error) error {
 }
 
 // IsConnectionDead delegates to drivers.IsConnectionDead. Kept here for
-// backwards compatibility with callers that already import pg. hq5.6.
+// backwards compatibility with callers that already import pg.
 func IsConnectionDead(err error) bool {
 	return drivers.IsConnectionDead(err)
 }

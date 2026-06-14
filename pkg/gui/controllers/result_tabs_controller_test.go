@@ -8,8 +8,8 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// TestResultTabsControllerGBindingJumpsLast guards the dbsavvy-6t9
-// regression: `G` in the result grid must dispatch ResultJumpLast (jump
+// TestResultTabsControllerGBindingJumpsLast guards the regression:
+// `G` in the result grid must dispatch ResultJumpLast (jump
 // cursor to the last loaded row, symmetric with gg=ResultJumpFirst). It
 // was previously bound to ResultReadToEnd, whose handler no-ops in the
 // default grid view once the stream is complete — so `G` appeared to do

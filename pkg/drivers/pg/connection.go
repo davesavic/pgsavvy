@@ -31,13 +31,12 @@ const cancelRequestCode uint32 = 80877102
 // Closed (counter-managed via sessions). Calling Close with outstanding
 // sessions is undefined behavior beyond the pool's own draining semantics —
 // a single stderr WARN is emitted and pool.Close is invoked regardless. See
-// epic dbsavvy-921 Arch-6 (review-plan resolutions).
+// Arch-6 (review-plan resolutions).
 //
 // cancelKeys maps each live session's BackendPID to its secret key so that
 // Connection.Cancel — given only a QueryID — can synthesize the wire-level
 // CancelRequest packet without touching the (busy) session's pgconn. Entries
-// are written by newSession and removed by Session.Close. See epic
-// dbsavvy-66p.4.
+// are written by newSession and removed by Session.Close.
 type Connection struct {
 	pool              *pgxpool.Pool
 	serverVersion     string
@@ -49,7 +48,7 @@ type Connection struct {
 	cancelMu   sync.RWMutex
 	cancelKeys map[uint32]uint32 // BackendPID -> SecretKey
 
-	// notices is the pool-level NOTICE/WARNING/INFO router (epic dbsavvy-66p.5).
+	// notices is the pool-level NOTICE/WARNING/INFO router.
 	// cfg.ConnConfig.OnNotice is set to notices.route exactly once at pool
 	// creation in Driver.Open. Per-session subscription and pgconn↔SessionID
 	// bookkeeping is performed by newSession / Session.Close.
@@ -112,8 +111,7 @@ func (c *Connection) AcquireSession(ctx context.Context) (drivers.Session, error
 // warnIfPostgresGE18 emits at most one stderr WARN per Connection when the
 // server reports PostgreSQL 18 or newer. Called by every Session list-method
 // so the operator learns about catalog drift the first time they browse
-// schema metadata, but is not spammed on every keystroke. See epic
-// dbsavvy-921.9 scope expansion #2.
+// schema metadata, but is not spammed on every keystroke.
 func (c *Connection) warnIfPostgresGE18() {
 	if c.majorVersion < 18 {
 		return
@@ -180,8 +178,8 @@ func (c *Connection) lookupCancelKey(backendPID uint32) (uint32, bool) {
 //     session's RowStream surfacing a 57014 error).
 //
 // Cancel is idempotent at the wire: two simultaneous calls each open their
-// own cancel dial; the server accepts duplicates without error. See epic
-// dbsavvy-66p.4 + DESIGN.md §12.4.
+// own cancel dial; the server accepts duplicates without error. See
+// DESIGN.md §12.4.
 func (c *Connection) Cancel(ctx context.Context, qid models.QueryID) error {
 	if qid.BackendPID == 0 {
 		return drivers.ErrInvalidQueryID

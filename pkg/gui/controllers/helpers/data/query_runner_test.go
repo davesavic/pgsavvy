@@ -300,7 +300,7 @@ func (c *countingRunnerSession) calls() int {
 // TestPreemptInFlightFiresBeforeSessionOp proves the chokepoint contract:
 // Run, RunQuery, and Explain each invoke the preempt hook BEFORE touching
 // the session, so a parked >200-row stream is stopped before the new op
-// locks the per-session queue (dbsavvy-lxn.1).
+// locks the per-session queue.
 func TestPreemptInFlightFiresBeforeSessionOp(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -357,7 +357,7 @@ func TestPreemptInFlightFiresBeforeSessionOp(t *testing.T) {
 	}
 }
 
-// TestPreemptExpiryMarksSessionFence is the gr7e.2/AD4 seam guard: when the
+// TestPreemptExpiryMarksSessionFence is the AD4 seam guard: when the
 // preempt hook reports expiry (worker still live, streamMu held), the
 // QueryRunner — the one layer holding the session — must mark the session
 // preemptPending so the subsequent op fails fast instead of deadlocking. A
@@ -387,7 +387,7 @@ func TestPreemptExpiryMarksSessionFence(t *testing.T) {
 // TestPreemptSurvivesUnbindRebind is the highest-risk regression guard:
 // the preempt hook lives on *QueryRunner, NOT on runnerBinding, so an
 // atomic Bind / Unbind swap on reconnect must not silently drop it and
-// reintroduce the UI freeze (dbsavvy-lxn.1). Bind is exercised via
+// reintroduce the UI freeze. Bind is exercised via
 // SetPreempter + NewQueryRunner here; the production swap is identical.
 func TestPreemptSurvivesUnbindRebind(t *testing.T) {
 	r := NewQueryRunner(&fakeRunnerSession{}, drivers.Capabilities{})

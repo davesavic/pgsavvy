@@ -113,7 +113,7 @@ func TestController_EditSeedsFromSelectedRow(t *testing.T) {
 	}
 }
 
-// TestController_EditBoundToIAndFieldEditUnbound locks the dbsavvy-j3wi rebind:
+// TestController_EditBoundToIAndFieldEditUnbound locks the rebind:
 // `i` is the single edit key (→ ConnectionManagerEdit), `e` is no longer bound,
 // and ConnectionManagerFieldEdit has no key of its own (reached via routing).
 func TestController_EditBoundToIAndFieldEditUnbound(t *testing.T) {
@@ -154,7 +154,7 @@ func TestController_EditBoundToIAndFieldEditUnbound(t *testing.T) {
 
 // TestController_EditKeyRoutesToFieldEditInFormMode asserts the single `i`
 // binding (ConnectionManagerEdit) edits the focused field when the modal is
-// already in form mode, instead of no-opping (dbsavvy-j3wi).
+// already in form mode, instead of no-opping.
 func TestController_EditKeyRoutesToFieldEditInFormMode(t *testing.T) {
 	ctx := newFormCtx()
 	prompt := &capturePrompt{}

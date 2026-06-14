@@ -11,7 +11,7 @@ import (
 const searchPrefix = "/"
 
 // SearchLineContext renders the bottom-anchored single-line in-grid
-// search input (epic dbsavvy-2ttm). Kind=TEMPORARY_POPUP — pushed when
+// search input. Kind=TEMPORARY_POPUP — pushed when
 // the user opens search and popped on <cr> / <esc>.
 //
 // It is the SearchLine analogue of CommandLineContext: same

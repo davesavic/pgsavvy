@@ -80,8 +80,8 @@ func TestConnectionManagerContext_RendersRowsWithHostDbAndMarker(t *testing.T) {
 
 // TestConnectionManagerContext_RendersRowColour asserts that when the
 // decoration hook returns a recognised colour name, the row's label is wrapped
-// in the matching ANSI foreground SGR + reset so the connection renders tinted
-// (dbsavvy-biak). Rows whose colour is empty stay bare.
+// in the matching ANSI foreground SGR + reset so the connection renders tinted.
+// Rows whose colour is empty stay bare.
 func TestConnectionManagerContext_RendersRowColour(t *testing.T) {
 	drv := &captureDriver{}
 	hook := func(c *models.Connection) (string, string, string) {
@@ -256,7 +256,7 @@ func TestConnectionManagerContext_HandleFocusRunsOnShowInListMode(t *testing.T) 
 }
 
 // TestConnectionManagerContext_HandleFocusPreservesConnectingMode reproduces
-// the SSH-connect bug (dbsavvy-308u): the SSH passphrase PROMPT popup pops
+// the SSH-connect bug: the SSH passphrase PROMPT popup pops
 // mid-connect and returns focus to the modal in ModeConnecting. HandleFocus
 // must NOT reset the mode — if it does, a subsequent dial error written to the
 // ConnectingState sink is swallowed because body() renders the row list
@@ -337,7 +337,7 @@ func TestConnectionManagerContext_Kind(t *testing.T) {
 }
 
 // TestConnectionManagerContext_OptionsBarFilterHidesFieldEditInListMode locks
-// the dbsavvy-4ndv fix plus the dbsavvy-j3wi rebind: in ModeList the status bar
+// the field-edit fix plus the rebind: in ModeList the status bar
 // must NOT advertise the now-unbound ConnectionManagerFieldEdit, while the
 // list-appropriate actions stay visible. After the `e`→`i` rebind the single
 // edit action is ConnectionManagerEdit, so ModeForm advertises it (the `i`

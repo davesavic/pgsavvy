@@ -211,7 +211,7 @@ func TestVimEditor_AutoCompleterFiresOnPrintableInsert(t *testing.T) {
 
 // TestVimEditor_AutoCompleterNotFiredOnEnter pins the rule that Enter is
 // never an auto-trigger candidate (Enter ending a statement is not a SQL
-// completion context). dbsavvy-etp.4 carved Backspace out of this rule —
+// completion context). Backspace was carved out of this rule —
 // see TestVimEditor_AutoCompleterFiresOnBackspace.
 func TestVimEditor_AutoCompleterNotFiredOnEnter(t *testing.T) {
 	rig := newVimRig(t, types.ModeInsert)
@@ -226,7 +226,7 @@ func TestVimEditor_AutoCompleterNotFiredOnEnter(t *testing.T) {
 	}
 }
 
-// TestVimEditor_AutoCompleterFiresOnBackspace pins the dbsavvy-etp.4
+// TestVimEditor_AutoCompleterFiresOnBackspace pins the
 // Backspace refilter hook: deleting a rune fires the callback with the
 // post-delete buffer + cursor so a backspace within an active completion
 // re-narrows the popup. The callback (controller.AutoTrigger) owns the
@@ -256,7 +256,7 @@ func TestVimEditor_AutoCompleterFiresOnBackspace(t *testing.T) {
 // TestVimEditor_AutoCompleterNotFiredOnNoOpBackspace pins the edge case:
 // Backspace at start-of-buffer deletes nothing, so the callback must not
 // fire (otherwise an empty-buffer backspace would spuriously re-evaluate
-// the trigger gate). dbsavvy-etp.4.
+// the trigger gate).
 func TestVimEditor_AutoCompleterNotFiredOnNoOpBackspace(t *testing.T) {
 	rig := newVimRig(t, types.ModeInsert)
 	v := newViewForVimTest()

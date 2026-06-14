@@ -5,20 +5,20 @@ import (
 )
 
 // Source identifies which layer produced a binding. The Matcher and the
-// cheatsheet glyph renderer (dlp.10) read this field; the trie itself
+// cheatsheet glyph renderer read this field; the trie itself
 // stores it per leaf.
 type Source uint8
 
 const (
 	// ShippedDefault is a binding contributed by a controller's
-	// AllDefaultBindings list (dlp.8c). Inserted FIRST during Build.
+	// AllDefaultBindings list. Inserted FIRST during Build.
 	ShippedDefault Source = iota
 	// UserOverride is a binding from cfg.Keybindings that names an
 	// existing Action via the `action:` shorthand. Overlays defaults.
 	UserOverride
 	// CustomCmd is a binding from cfg.Keybindings that runs a user-typed
-	// shell `command:` (machinery shipped by E11; dlp.4 only records the
-	// tag so the cheatsheet can paint the ★ glyph).
+	// shell `command:` (machinery shipped by E11; only the tag is
+	// recorded here so the cheatsheet can paint the ★ glyph).
 	CustomCmd
 )
 

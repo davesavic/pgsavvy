@@ -42,7 +42,7 @@ func SpinnerGlyph(frame int64) rune {
 }
 
 // ANSI SGR pair used to tint the connection header (icon + label) with
-// the profile's `color:` field. dbsavvy-sgc: the header MUST be visibly
+// the profile's `color:` field. The header MUST be visibly
 // distinct after connect so the user can tell at a glance which
 // connection is active. Recognised colour names map to the standard
 // 8-colour ANSI palette; hex / unknown tokens fall through to an
@@ -158,7 +158,7 @@ func txIndicator(st models.TxStatus, savepoints []string) string {
 }
 
 // SearchIndicator renders the active-search status segment for the
-// status bar (dbsavvy-2ttm.5). Returns "" when active is false, so the
+// status bar. Returns "" when active is false, so the
 // caller appends nothing when no search is live on the focused result
 // tab. Active searches render "search: <query> <cur>/<total>"; when
 // total == 0 the " · no matches" suffix is appended using the shared

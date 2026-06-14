@@ -18,7 +18,7 @@ package editor
 // calling here).
 //
 // Concurrency: motion functions read b.Lines directly without taking
-// b.mu. The wwd epic invariant is that motions run on the gocui
+// b.mu. The invariant is that motions run on the gocui
 // main-loop goroutine alongside every other Buffer mutator (Apply,
 // Undo, Redo); there is no concurrent reader/writer to fight. If a
 // future epic dispatches motions off the main loop, callers must
@@ -302,7 +302,7 @@ func LineEnd(b *Buffer, pos Position, count int, frame ViewFrame) (Position, boo
 
 // BufferStart returns the first line, first non-blank column (vim `gg`).
 // Count is accepted but ignored — vim `gg` with a count means
-// "jump to line N", which is a different operation (not in wwd.5 scope).
+// "jump to line N", which is a different operation (out of scope).
 func BufferStart(b *Buffer, pos Position, count int, frame ViewFrame) (Position, bool) {
 	if _, ok := validCount(count); !ok {
 		return Position{}, false
@@ -676,7 +676,7 @@ func paragraphForwardOne(b *Buffer, line int) (int, bool) {
 // --- Sentence motions ---
 //
 // vim's sentence is "a sequence of characters ending at . ! ? followed
-// by either EOL or whitespace, then any quotes/brackets". wwd.5 ships
+// by either EOL or whitespace, then any quotes/brackets". This ships
 // a simpler approximation: any of `.!?` followed by space or EOL is a
 // sentence boundary. The successor sentence starts at the first
 // non-space rune after that boundary.

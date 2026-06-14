@@ -67,7 +67,7 @@ type RunHandle struct {
 	// the once.Do guard, BEFORE close(done); a reader that has observed Done()
 	// closing therefore sees the final value with a happens-before guarantee.
 	// Exposed via Err() so post-run consumers can success-gate side effects
-	// (e.g. metadata invalidation only on a clean DDL completion). dbsavvy-ko4m.2.4.
+	// (e.g. metadata invalidation only on a clean DDL completion).
 	termErr error
 
 	// cancelLogged guards the SQLSession.Cancel emit so concurrent Cancel
@@ -113,7 +113,7 @@ func (r *RunHandle) Done() <-chan struct{} { return r.done }
 // nil for a clean EOF / successful close. Callers MUST first observe Done()
 // closing before reading Err(): finish() writes termErr then closes done under
 // a sync.Once, so a read after <-Done() is race-free. Reading before Done
-// closes returns nil (the zero value) and is not meaningful. dbsavvy-ko4m.2.4.
+// closes returns nil (the zero value) and is not meaningful.
 func (r *RunHandle) Err() error { return r.termErr }
 
 // Notices returns the receive end of this run's notice channel. The channel

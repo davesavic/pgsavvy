@@ -72,7 +72,7 @@ type warmKeyState struct {
 	// was in flight, so the (now-stale) result is DROPPED rather than written
 	// back into the store. This closes the invalidate-then-late-publish race
 	// where a same-table warm already in flight would otherwise repopulate the
-	// store with pre-ALTER columns. dbsavvy-ko4m.2.4 (concurrency AC).
+	// store with pre-ALTER columns.
 	gen uint64
 }
 
@@ -122,7 +122,6 @@ func NewSchemaWarmer(store *SchemaMetadataStore, deps warmDeps, log *slog.Logger
 // OnUIThreadContentOnly. It exists because warmDeps is unexported (the
 // func-field seam stays an implementation detail), so the orchestrator (a
 // different package) cannot assemble it directly. Returns nil if helper is nil.
-// dbsavvy-ko4m.2.3.
 func NewConnectSchemaWarmer(
 	helper *ConnectHelper,
 	onWorker func(func(gocui.Task) error),
@@ -147,7 +146,7 @@ func NewConnectSchemaWarmer(
 func (w *SchemaWarmer) Store() *SchemaMetadataStore { return w.store }
 
 // Reset drops all warmed metadata AND the warmer's per-key cooldown/in-flight
-// bookkeeping. Used on reconnect (dbsavvy-ko4m.2.4): without clearing the
+// bookkeeping. Used on reconnect: without clearing the
 // cooldown `state` map, a table that was in a post-failure cooldown window at
 // disconnect would stay suppressed for up to warmFailureCooldown after the new
 // connection lands, so its lazy entry would not re-warm. Resetting the store
@@ -172,7 +171,6 @@ func (w *SchemaWarmer) Reset() {
 // next WarmTable for an affected table issues a fresh load. The thin wrapper
 // exists so post-run / manual-refresh callers reach the store through the
 // warmer (its single owner) without also having to poke the cooldown map.
-// dbsavvy-ko4m.2.4.
 func (w *SchemaWarmer) InvalidateSchema(schema string) {
 	w.store.InvalidateSchema(schema)
 	prefix := schema + "\x00"
@@ -187,7 +185,7 @@ func (w *SchemaWarmer) InvalidateSchema(schema string) {
 
 // InvalidateTable drops the lazy (column+FK) entry for (schema,table) in the
 // store and clears its cooldown/in-flight bookkeeping, so the next WarmTable
-// re-loads it. Used by the manual 'r' force-refresh path. dbsavvy-ko4m.2.4.
+// re-loads it. Used by the manual 'r' force-refresh path.
 func (w *SchemaWarmer) InvalidateTable(schema, table string) {
 	w.store.InvalidateTable(schema, table)
 	key := tableKey(schema, table)
@@ -315,7 +313,7 @@ func (w *SchemaWarmer) claim(schema, table string) (*warmKeyState, uint64, bool)
 	// the key from w.state under w.mu, so any claimer that acquires w.mu after the
 	// winning warm's clearInflight() sees the store loaded here; any claimer that
 	// acquires it before sees inflight==true below. Together they guarantee
-	// exactly one round-trip per key. dbsavvy-ko4m.2.2.
+	// exactly one round-trip per key.
 	if _, loaded := w.store.Columns(schema, table); loaded {
 		return nil, 0, false
 	}
@@ -365,11 +363,11 @@ func (w *SchemaWarmer) runWarm(schema, table string, st *warmKeyState, gen uint6
 		// a claimer that wins the lock before the delete sees inflight==true; one
 		// that wins after the delete sees the store already loaded. Without that
 		// ordering two callers can both observe "not loaded, not in-flight" and
-		// each issue a round-trip. dbsavvy-ko4m.2.2.
+		// each issue a round-trip.
 		//
 		// If an invalidation superseded this warm while it was in flight, the
 		// publish is DROPPED (store left UNLOADED, onWarmed not fired) and the key
-		// is left re-warmable. dbsavvy-ko4m.2.4.
+		// is left re-warmable.
 		publish := func() {
 			logs.Event(w.log, "completion", "warm_table",
 				slog.String("schema", schema), slog.String("table", table),

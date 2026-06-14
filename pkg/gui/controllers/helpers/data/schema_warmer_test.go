@@ -98,7 +98,7 @@ func TestSchemaWarmEagerLoadsTablesThenFunctions(t *testing.T) {
 	require.Equal(t, int64(1), f.fnCalls.Load(), "exactly one LoadFunctions")
 	require.Equal(t, []string{"orders", "users"}, w.Store().TableNames("public"))
 	require.Equal(t, []string{"now", "lower"}, w.Store().FunctionNames())
-	// Kind is threaded through the eager projection (ko4m.4.3 view AC).
+	// Kind is threaded through the eager projection.
 	require.Equal(t, "table", w.Store().TableKind("public", "orders"))
 	require.Equal(t, "view", w.Store().TableKind("public", "users"))
 }

@@ -26,13 +26,13 @@ type BufferProvider interface {
 // routes every keystroke through keys.Matcher under its scope and, on
 // Insert-mode Passthrough, mutates the *Buffer directly rather than
 // delegating to gocui.DefaultEditor (the buffer is the canonical state;
-// the view is a mirror — Architecture Decision 2 of epic dbsavvy-wwd).
+// the view is a mirror — Architecture Decision 2).
 //
 // VimEditor carries an optional types.GuiDriver so that a chord
 // resolving to gocui.ErrQuit — e.g. the GLOBAL-scope `<leader>q` that
 // falls through from the focused QUERY_EDITOR — is rescheduled onto the
 // main loop. gocui.Editor.Edit can only return a bool, so without this
-// the quit would be silently dropped (dbsavvy-dg5). This mirrors
+// the quit would be silently dropped. This mirrors
 // masterEditor.Edit; the GuiDriver seam (not a raw *gocui.Gui) keeps the
 // reschedule observable to the recorder driver in tests, matching the
 // orchestrator's own driver.Update(ErrQuit) quit path.
@@ -51,7 +51,7 @@ type VimEditor struct {
 	// responsible for the config gate + popup-already-visible guard +
 	// AutoTriggerFromContext check + engine Trigger + popup Show.
 	// VimEditor only owns the seam; the closure is wired post-
-	// construction by Z1 (dbsavvy-bwq.22 / .23). Nil = no auto-trigger.
+	// construction by Z1. Nil = no auto-trigger.
 	autoCompleter func(buf *Buffer, pos Position)
 
 	// completionKey is the optional popup-navigation seam consulted at
@@ -62,7 +62,7 @@ type VimEditor struct {
 	// popup consumed the key (popup was visible), in which case insertKey
 	// re-syncs the view and skips its normal handling. Returns false to
 	// fall through to the key's normal Insert meaning (newline / drop).
-	// Nil = no popup; keys keep their default Insert behaviour. (etp.1)
+	// Nil = no popup; keys keep their default Insert behaviour.
 	completionKey func(k keys.Key) bool
 
 	// sessionLog is the optional per-session logger. When non-nil,
@@ -195,20 +195,20 @@ func (e *VimEditor) logApplyErr(kind string, cur Position, err error) {
 // buffer + post-insert cursor position; it owns the config gate,
 // popup-visibility check, AutoTriggerFromContext check, and the actual
 // engine Trigger / popup Show. Passing nil clears any previously-
-// installed callback. dbsavvy-bwq.22 (C5).
+// installed callback.
 func (e *VimEditor) SetAutoCompleter(fn func(buf *Buffer, pos Position)) {
 	e.autoCompleter = fn
 }
 
 // HasAutoCompleter reports whether an auto-completer callback is wired.
-// Test accessor — dbsavvy-etp.4 asserts boot wiring is gated by
+// Test accessor — asserts boot wiring is gated by
 // editor.autocomplete (installed when true, absent when false).
 func (e *VimEditor) HasAutoCompleter() bool { return e.autoCompleter != nil }
 
 // SetCompletionKey wires the popup-navigation seam invoked at the top
 // of insertKey for Tab / Enter while the completion popup is visible.
 // The callback returns true when it consumed the key (popup visible);
-// nil clears it. dbsavvy-etp.1.
+// nil clears it.
 func (e *VimEditor) SetCompletionKey(fn func(k keys.Key) bool) {
 	e.completionKey = fn
 }
@@ -233,7 +233,7 @@ func (e *VimEditor) Edit(v *gocui.View, key gocui.Key) bool {
 	// gocui.ErrQuit (the GLOBAL `<leader>q` that falls through from this
 	// focused editor) would otherwise be silently dropped. Reschedule the
 	// quit on the main loop via the GuiDriver so the run loop unwinds
-	// (dbsavvy-dg5; mirrors masterEditor.Edit).
+	// (mirrors masterEditor.Edit).
 	if errors.Is(err, gocui.ErrQuit) && e.driver != nil {
 		e.driver.Update(func() error { return gocui.ErrQuit })
 	}
@@ -287,7 +287,7 @@ func (e *VimEditor) applyResult(v *gocui.View, decoded keys.Key, result keys.Dis
 // insertKey routes one Insert-mode Passthrough key through the
 // *Buffer. Printable bare runes Insert at the cursor; KeyBs deletes
 // the rune before the cursor; KeyEnter inserts a newline. Other
-// specials are dropped (out of scope for wwd.4 — arrows / Home / End
+// specials are dropped (out of scope — arrows / Home / End
 // land with the motion epic). Returns true when handled.
 func (e *VimEditor) insertKey(v *gocui.View, k keys.Key) bool {
 	if e.qec == nil {
@@ -297,7 +297,7 @@ func (e *VimEditor) insertKey(v *gocui.View, k keys.Key) bool {
 	if buf == nil {
 		return false
 	}
-	// Popup-navigation seam (etp.1): while the completion popup is
+	// Popup-navigation seam: while the completion popup is
 	// visible, Tab advances the selection and Enter accepts it. The
 	// callback returns true only when the popup consumed the key; we
 	// re-sync the view (Accept mutated the buffer) and stop. When it
@@ -318,7 +318,7 @@ func (e *VimEditor) insertKey(v *gocui.View, k keys.Key) bool {
 			return true
 		}
 		buf.SetCursor(advancePos(cur, string(k.Code)))
-		// Auto-trigger completion (dbsavvy-bwq.22 / C5). The callback
+		// Auto-trigger completion. The callback
 		// is responsible for the config gate, popup-visible guard, and
 		// AutoTriggerFromContext check. Fired on printable runes and (for
 		// in-place refilter) on Backspace; Enter never auto-triggers.
@@ -350,7 +350,7 @@ func (e *VimEditor) insertKey(v *gocui.View, k keys.Key) bool {
 			return true
 		}
 		buf.SetCursor(prev)
-		// Backspace refilter (dbsavvy-etp.4). Fire the callback so a
+		// Backspace refilter. Fire the callback so a
 		// backspace WITHIN the partial identifier re-narrows the popup.
 		// The callback (controller.AutoTrigger) only acts while the popup
 		// is already visible (or at an AutoTriggerFromContext position),
@@ -366,7 +366,7 @@ func (e *VimEditor) insertKey(v *gocui.View, k keys.Key) bool {
 }
 
 // isCompletionNavKey reports whether k is a key the completion popup
-// overrides while visible: Tab (next) or Enter (accept). etp.1.
+// overrides while visible: Tab (next) or Enter (accept).
 func isCompletionNavKey(k keys.Key) bool {
 	if k.Mod != 0 {
 		return false

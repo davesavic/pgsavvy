@@ -21,11 +21,11 @@ import "context"
 // popup). It is zero-defaulted (nil) for sources that do not run the
 // matcher; a nil Matches sorts and renders identically to before (no
 // panic). Consumers MUST convert these rune offsets to byte offsets
-// before indexing the underlying string — ko4m.4 owns that rune->byte
-// conversion and the popup highlight rendering.
+// before indexing the underlying string — that rune->byte conversion
+// and the popup highlight rendering are owned elsewhere.
 //
-// The remaining fields are the typed presentation contract (ko4m.4,
-// Design D1/D2): metadata that used to be baked into Display is now
+// The remaining fields are the typed presentation contract
+// (Design D1/D2): metadata that used to be baked into Display is now
 // carried as discrete, typed fields so the renderer can lay out a
 // detail column, per-kind glyph, and PK/FK/NN annotations. They are all
 // additive and zero-defaulted, so a Suggestion that sets none of them
@@ -43,13 +43,13 @@ import "context"
 //   - FKRef, when non-empty, is a schema-qualified foreign-key target
 //     in "ref.table.col" form (empty otherwise). Like Detail it is
 //     server-derived and MUST be sanitized at render time (Design D4).
-//   - Signature is reserved for function signature help (ko4m.5.3);
+//   - Signature is reserved for function signature help;
 //     left unpopulated by this task.
-//   - Body is reserved for the snippet expansion body (ko4m.7.1); left
+//   - Body is reserved for the snippet expansion body; left
 //     unpopulated by this task.
 //
-// Populating these fields is owned by ko4m.4.3; rendering them is owned
-// by ko4m.4.4 — this task only defines the data contract.
+// Populating these fields and rendering them are owned elsewhere —
+// this task only defines the data contract.
 type Suggestion struct {
 	Text         string
 	Display      string
@@ -67,8 +67,7 @@ type Suggestion struct {
 
 // SuggestionKind classifies a Suggestion for per-kind rendering (glyph,
 // badges). The zero value ("") is "unkinded" and renders as a bare name
-// with no glyph (Design D6). Populated by ko4m.4.3, consumed by the
-// renderer in ko4m.4.4.
+// with no glyph (Design D6). Populated and consumed by the renderer.
 type SuggestionKind string
 
 const (
@@ -81,7 +80,7 @@ const (
 	KindSnippet  SuggestionKind = "snippet"
 )
 
-// Source-rank composite-ranking contract (dbsavvy-ko4m.3, Finding B4).
+// Source-rank composite-ranking contract.
 //
 // The completion ranking is source-weighted: a source's final
 // Suggestion.Score is computed as
@@ -89,7 +88,7 @@ const (
 //	Score = matchQuality + sourceBias
 //
 // where matchQuality is the per-candidate score the fuzzy matcher
-// (editor.Match, ko4m.3.1) returns, and sourceBias is the source's
+// (editor.Match) returns, and sourceBias is the source's
 // fixed bias from the const block below. Engine.Trigger sorts Score
 // descending; Source.Priority() remains the SECONDARY tiebreak when two
 // Suggestions share Score (then registration order). The biases below
@@ -99,7 +98,7 @@ const (
 //
 // These are the ONE source of truth for source rank — do not introduce
 // parallel bias/priority numbers elsewhere. Sources adopt this contract
-// in ko4m.3.3-3.5; this task only pins the constants and the contract.
+// later; this task only pins the constants and the contract.
 const (
 	SchemaSourceBias   = 80
 	FunctionSourceBias = 60
@@ -145,14 +144,14 @@ func SanitizeText(s string) string {
 // SanitizeSnippetText strips C0 control bytes (<0x20, plus 0x7F) from a
 // snippet Body so it is safe to splice into a Buffer, but PRESERVES '\n'
 // and '\t' — a snippet expansion is intentionally a multi-line,
-// indentation-bearing insertion (Design D3/D7 of dbsavvy-ko4m.7). Contrast
+// indentation-bearing insertion. Contrast
 // SanitizeText, which also strips '\n'/'\t' because a normal completion
 // insertion must stay a single contiguous token. The retained '\r' from a
 // CRLF body is dropped (only '\n' demarcates lines for splitTextOnNewline).
 //
 // Snippet bodies are trusted-local (built-in / user config), so the C0/0x7F
 // strip is a defence-in-depth guard against a stray ESC in a hand-edited
-// body reaching the editor; if dbsavvy-ktt later loads bodies from shared
+// body reaching the editor; if bodies are later loaded from shared
 // or untrusted sources, re-evaluate the trust boundary.
 func SanitizeSnippetText(s string) string {
 	if s == "" {

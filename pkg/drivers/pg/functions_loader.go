@@ -10,7 +10,7 @@ import (
 // session's current_schemas (excluding implicit pg_catalog). Names are
 // returned sorted alphabetically; duplicates from overloaded signatures
 // collapse to a single entry per name because routine_name alone is
-// projected. See epic dbsavvy-bwq §13.3 (child .20).
+// projected.
 func (s *Session) ListFunctions(ctx context.Context) ([]string, error) {
 	defer s.guard()()
 	rows, err := s.conn.Query(ctx, sqlListFunctions)

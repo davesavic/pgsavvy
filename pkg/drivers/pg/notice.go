@@ -20,13 +20,11 @@ import (
 // Sends are non-blocking: if the subscriber's channel buffer is full the
 // notice is dropped and a per-session counter (DroppedNotices) increments. The
 // buffer size is the caller's choice (cap=32 is the documented default for
-// pkg/session.SQLSession in epic dbsavvy-66p.7).
+// pkg/session.SQLSession).
 //
 // All operations are safe for concurrent use. The pgconn→SessionID map is a
 // sync.Map; the SessionID→channel map is RWMutex-guarded so route can take a
 // read lock for each dispatch.
-//
-// See epic dbsavvy-66p §D6 and the §Shared Artifacts Registry in dbsavvy-66p.
 type NoticeRouter struct {
 	mu          sync.RWMutex
 	subscribers map[models.SessionID]chan<- pgconn.Notice

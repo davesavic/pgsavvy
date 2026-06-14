@@ -8,7 +8,7 @@ import (
 )
 
 // TestBuildCheatsheetTabsHumanLabels asserts the tab bar shows readable
-// labels rather than raw snake_case context slugs (dbsavvy-quyg). The
+// labels rather than raw snake_case context slugs. The
 // rendered Body() carries the header row, so we assert on its contents.
 func TestBuildCheatsheetTabsHumanLabels(t *testing.T) {
 	render := func(scope types.ContextKey) string { return "body:" + string(scope) }

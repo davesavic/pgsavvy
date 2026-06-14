@@ -1,7 +1,7 @@
 //go:build integration
 
 // Package orchestrator_test (integration) exercises every acceptance-
-// criterion checkbox on the dbsavvy-66p epic in one walk-through. The
+// criterion checkbox in one walk-through. The
 // test wires a real *orchestrator.Gui via UseDriverForTest +
 // RecorderGuiDriver, opens a per-test history.sqlite under t.TempDir()
 // via Deps.HistoryProvider, drives bag.Connect.Connect against the
@@ -10,7 +10,7 @@
 // shipped command handlers directly through the CommandRegistry to
 // exercise the <leader>r / <leader>R / <leader>e / <leader>x semantics.
 //
-// Sub-step coverage maps 1:1 to dbsavvy-66p ACCEPTANCE CRITERIA bullets
+// Sub-step coverage maps 1:1 to ACCEPTANCE CRITERIA bullets
 // (each t.Run's leading comment quotes the AC line it covers). Steps
 // that exercise behaviour the current code base does not yet expose
 // (e.g. <esc> detach) call t.Skip with a quoted reason.
@@ -224,7 +224,7 @@ func waitForHistorySQL(t *testing.T, path, needle string, timeout time.Duration)
 }
 
 // TestQueryExecutionEpic_AC is the capstone walkthrough. Each t.Run
-// covers one acceptance-criterion bullet on the dbsavvy-66p epic; the
+// covers one acceptance-criterion bullet; the
 // step name encodes the AC index. Failures inside a sub-step DO NOT
 // poison subsequent sub-steps (each t.Run isolates).
 //
@@ -277,7 +277,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		if active == nil {
 			t.Fatal("Active() = nil after <leader>r")
 		}
-		// dbsavvy-r9oy: <leader>r moves focus onto the results pane so the
+		// <leader>r moves focus onto the results pane so the
 		// user can navigate the grid without a manual pane switch.
 		if got := s.g.ContextTree().Current().GetKey(); got != types.RESULT_GRID {
 			t.Fatalf("focus key after <leader>r = %q, want RESULT_GRID", got)
@@ -301,7 +301,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		// The slot number / label moved out of the frame title and onto the
 		// tab-bar strip (Title() now carries only non-redundant metadata —
 		// the row count). Assert the 1-indexed UI position via Slot()+1
-		// (dbsavvy-ipb resolved via option (a)) and the row count via Title().
+		// and the row count via Title().
 		if got := active.Slot() + 1; got != 1 {
 			t.Fatalf("first tab UI index = %d, want 1", got)
 		}
@@ -321,7 +321,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		// AC: "<leader>R on a 3-statement buffer opens 3 result tabs
 		// sequentially on the same session"
 		//
-		// dbsavvy-zzy fix: pgRowStream releases the Session inFlight
+		// pgRowStream releases the Session inFlight
 		// guard on observed EOF / terminal error (not only on explicit
 		// Close), so handleRunAll's synchronous per-statement loop is
 		// now reachable end-to-end. Iteration N's stream drains during
@@ -569,12 +569,12 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 	})
 
 	t.Run("step05_leader_x_enabled_on_pg", func(t *testing.T) {
-		// AC (dbsavvy-3tt): with a wired pg session reporting
+		// AC: with a wired pg session reporting
 		// Capabilities.HasLiveCancel=true, query.cancel must resolve to
 		// enabled with an empty DisabledReason in ExecCtx{Scope: QUERY_EDITOR}.
 		caps := bag.QueryRunner.Capabilities()
 		if !caps.HasLiveCancel {
-			t.Fatalf("pg driver Capabilities.HasLiveCancel = false; expected true after 66p.4")
+			t.Fatalf("pg driver Capabilities.HasLiveCancel = false; expected true")
 		}
 		cmd, ok := s.g.CommandRegistry().Get(commands.QueryCancel)
 		if !ok || cmd == nil {
@@ -592,17 +592,16 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 	t.Run("step06_esc_detaches_streaming_tab", func(t *testing.T) {
 		// AC: "<esc> on a streaming result tab detaches client-side and
 		// marks (detached, server still running)"
-		// The 66p.15 issue NOTES explicitly call this out as DEFERRED:
-		// no <esc>-detach path landed in 66p.11/12. Grep confirms no
-		// StateDetached transition is reachable via a user-facing
-		// binding today — the constant exists but the handler does not.
-		t.Skip("AC item deferred: <esc>-detach path not shipped in 66p.11/12 — see 66p.15 issue notes")
+		// This is explicitly DEFERRED: no <esc>-detach path landed.
+		// Grep confirms no StateDetached transition is reachable via a
+		// user-facing binding today — the constant exists but the handler does not.
+		t.Skip("AC item deferred: <esc>-detach path not shipped")
 	})
 
 	t.Run("step07_notice_toast", func(t *testing.T) {
 		// AC: "First server NOTICE/WARNING in a <leader>r run raises a
 		// toast; subsequent notices only update the toast counter."
-		// The messages-panel sink was removed (dbsavvy-fc2.1); the toast
+		// The messages-panel sink was removed; the toast
 		// is now the sole observable surface for server notices.
 		// The naive ';' splitter in editor.StatementAt / SplitStatements
 		// (D2: "string-literal awareness deferred to E9") chops any
@@ -623,7 +622,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		if s.g.ToastHelper() == nil {
 			t.Fatal("ToastHelper not wired into orchestrator.Gui")
 		}
-		t.Log("AC item adapted: messages-panel sink removed (dbsavvy-fc2.1); PL/pgSQL DO block round-trip blocked by D2-deferred naive splitter; notice toast plumbing unit-tested in notice_helper_test.go")
+		t.Log("AC item adapted: messages-panel sink removed; PL/pgSQL DO block round-trip blocked by D2-deferred naive splitter; notice toast plumbing unit-tested in notice_helper_test.go")
 	})
 
 	t.Run("step08_history_records_every_run", func(t *testing.T) {
@@ -663,7 +662,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		if active.State() != ui.StatePlan {
 			t.Fatalf("EXPLAIN tab state = %v, want StatePlan", active.State())
 		}
-		// dbsavvy-zwp6: <leader>e moves focus onto the results pane (plan
+		// <leader>e moves focus onto the results pane (plan
 		// tab) so the user can navigate the plan tree without a manual switch.
 		if got := s.g.ContextTree().Current().GetKey(); got != types.PLAN {
 			t.Fatalf("focus key after <leader>e = %q, want PLAN", got)
@@ -675,7 +674,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 	})
 
 	t.Run("step09b_leader_e_plan_tab_renders_tree_glyphs", func(t *testing.T) {
-		// dbsavvy-uv0.8 AC: "<leader>e end-to-end path renders the plan
+		// AC: "<leader>e end-to-end path renders the plan
 		// tab; body contains tree glyphs (▼/▶/─)". The plan tab from
 		// step09 stays active here; RunLayout paints the tab body via
 		// ResultTabsHelper.LayoutPaint which now routes through
@@ -714,7 +713,7 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		// AC: "One in-flight query per connection invariant: a <leader>r
 		// while a query is running queues or preempts per §12.2"
 		//
-		// dbsavvy-zzy fix: pgRowStream auto-releases inFlight on EOF,
+		// pgRowStream auto-releases inFlight on EOF,
 		// so a second <leader>r against the same session no longer
 		// panics on the second acquireInFlight. handleRun remains
 		// synchronous (handleRun returns after openResultTab, well

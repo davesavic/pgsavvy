@@ -219,7 +219,7 @@ func TestExportMenu_Body_RendersDisabledSQLInsertsAnnotation(t *testing.T) {
 // TestExportMenu_Body_RendersF2DisabledReason verifies that when
 // SetSQLInsertsDisabledReason is called (A8 wiring from GridView), the
 // disabled annotation reflects the caller-supplied reason instead of
-// the legacy default text. dbsavvy-bwq.11 (A8).
+// the legacy default text.
 func TestExportMenu_Body_RendersF2DisabledReason(t *testing.T) {
 	single := []string{"SQL INSERTs"}
 	m := NewExportMenu(single, defaultDestinations(), defaultScopes(), 0, false)
@@ -270,7 +270,7 @@ func TestExportMenu_Path_SyncsExtensionWithFormat(t *testing.T) {
 
 // After the user edits the path, cycling the format must keep their
 // basename but track the extension to the selected format — the file's
-// extension never lies about its contents. dbsavvy-5tq0.
+// extension never lies about its contents.
 func TestExportMenu_Path_ExtensionFollowsFormatAfterSetPath(t *testing.T) {
 	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
 	m.Prefill("/tmp/a.csv")
@@ -288,7 +288,6 @@ func TestExportMenu_Path_ExtensionFollowsFormatAfterSetPath(t *testing.T) {
 
 // Editing the path to a mismatched extension while a non-default format is
 // selected normalises the extension immediately to the current format.
-// dbsavvy-5tq0.
 func TestExportMenu_Path_SetPathNormalisesExtensionToFormat(t *testing.T) {
 	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
 	m.Prefill("/tmp/a.csv")

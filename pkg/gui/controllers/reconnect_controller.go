@@ -18,8 +18,8 @@ import (
 // reconnectToastTTL is the lifetime of toasts the ReconnectController surfaces.
 const reconnectToastTTL = 4 * time.Second
 
-// ReconnectController owns the <leader>R GLOBAL-scope reconnect binding
-// (hq5.7). When the session is disconnected it probes the wire via Ping
+// ReconnectController owns the <leader>R GLOBAL-scope reconnect binding.
+// When the session is disconnected it probes the wire via Ping
 // and, if the connection is truly dead, pushes a 3-choice dialog:
 // [r] Retry, [c] Pick another connection, [q] Quit. A successful Ping
 // silently clears the disconnected flag and reloads the schema rail.
@@ -99,7 +99,7 @@ func (rc *ReconnectController) doPingAndHandle() error {
 	// dead — Ping only verifies the pool can talk to the server, it does
 	// not heal the checked-out conn the session owns. Perform the full
 	// teardown+reopen via Reconnect so subsequent queries land on a live
-	// session. dbsavvy-txb.
+	// session.
 	profile := rc.activeProfile()
 	if profile == nil {
 		rc.toast("no active connection profile")

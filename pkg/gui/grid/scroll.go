@@ -4,7 +4,7 @@ import "strings"
 
 // Cursor motion + viewport scrolling. The View exposes imperative
 // per-step methods (MoveCursorDown / MoveCursorUp / etc) plus half-page
-// and jump variants. Keymap wiring lives in 66p.11/66p.12; this file
+// and jump variants. Keymap wiring lives elsewhere; this file
 // just ships the verbs.
 //
 // Selection follows the cursor: in any non-None mode the anchor stays
@@ -23,7 +23,6 @@ func (v *View) MoveCursorDown() {
 	// Walk the projected (visible) order, not the raw buffer, so j moves
 	// to the row rendered just below the cursor even when a sort/filter
 	// has reordered the buffer. cursorRow stays a raw-buffer index.
-	// dbsavvy-dr6.
 	proj := v.projectionLocked()
 	if len(proj) == 0 {
 		return
@@ -130,7 +129,7 @@ func (v *View) HalfPageDown() {
 	}
 	step := max(ResultPageSize/2, 1)
 	// Step half a page through the projected order so the move tracks
-	// what's on screen under an active sort/filter. dbsavvy-dr6.
+	// what's on screen under an active sort/filter.
 	proj := v.projectionLocked()
 	if len(proj) == 0 {
 		return
@@ -170,7 +169,7 @@ const expandedHalfPageStep = 12
 // WrappedLineDown advances the wrapped-line cursor inside the active
 // record by one line (J chord in expanded mode). In grid mode this is
 // a no-op so callers can wire the chord unconditionally without checking
-// viewMode at the dispatch site. dbsavvy-uv0.7.
+// viewMode at the dispatch site.
 func (v *View) WrappedLineDown() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -181,7 +180,7 @@ func (v *View) WrappedLineDown() {
 }
 
 // WrappedLineUp is the symmetric counterpart of WrappedLineDown. K
-// chord in expanded mode. dbsavvy-uv0.7.
+// chord in expanded mode.
 func (v *View) WrappedLineUp() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -197,7 +196,7 @@ func (v *View) WrappedLineUp() {
 // In expanded mode this shifts the value-column horizontal offset; in
 // grid mode it walks the cursor left (mirrors MoveCursorLeft). The
 // expanded-mode line offset is reused as a 1-D scroll because expanded
-// view only ever has one logical column of content. dbsavvy-uv0.7.
+// view only ever has one logical column of content.
 func (v *View) HorizScrollLeft() {
 	if v.ViewMode() == ViewModeGrid {
 		v.MoveCursorLeft()
@@ -211,7 +210,6 @@ func (v *View) HorizScrollLeft() {
 }
 
 // HorizScrollRight scrolls the viewport one column-step to the right.
-// dbsavvy-uv0.7.
 func (v *View) HorizScrollRight() {
 	if v.ViewMode() == ViewModeGrid {
 		v.MoveCursorRight()
@@ -224,7 +222,6 @@ func (v *View) HorizScrollRight() {
 
 // JumpColFirst moves the cursor to the first column (0). In expanded
 // mode it resets the 1-D horizontal scroll, mirroring HorizScrollLeft.
-// dbsavvy-2fq.
 func (v *View) JumpColFirst() {
 	if v.ViewMode() != ViewModeGrid {
 		v.mu.Lock()
@@ -242,7 +239,7 @@ func (v *View) JumpColFirst() {
 }
 
 // JumpColLast moves the cursor to the last visible column ($). It is
-// a no-op in expanded mode, which has a single logical column. dbsavvy-2fq.
+// a no-op in expanded mode, which has a single logical column.
 func (v *View) JumpColLast() {
 	if v.ViewMode() != ViewModeGrid {
 		return
@@ -261,7 +258,7 @@ func (v *View) JumpColLast() {
 func (v *View) JumpFirst() {
 	v.mu.Lock()
 	// Land on the first projected (visible) row so gg goes to the top of
-	// what's on screen, not raw row 0, under an active sort. dbsavvy-dr6.
+	// what's on screen, not raw row 0, under an active sort.
 	if proj := v.projectionLocked(); len(proj) > 0 {
 		v.cursorRow = proj[0]
 	} else {
@@ -279,7 +276,6 @@ func (v *View) JumpLast() {
 	v.mu.Lock()
 	// Land on the last projected (visible) row, not raw row len-1, so G
 	// goes to the bottom of what's on screen under an active sort.
-	// dbsavvy-dr6.
 	if proj := v.projectionLocked(); len(proj) > 0 {
 		v.cursorRow = proj[len(proj)-1]
 	}
@@ -355,7 +351,7 @@ func renderBody(snap viewSnapshot, innerW, innerH int) string {
 	// composition) rather than the raw buffer so non-matching rows are
 	// skipped during render. The cursor is a row-index into snap.rows
 	// (not into the projection) so j/k still walks raw rows; only the
-	// visible rendering honors the filter. dbsavvy-uv0.4.
+	// visible rendering honors the filter.
 	indices := project(snap)
 	end := min(snap.rowOffset+dataRows, len(indices))
 	for i := snap.rowOffset; i < end; i++ {
@@ -371,7 +367,7 @@ func renderBody(snap viewSnapshot, innerW, innerH int) string {
 	for filled := end - snap.rowOffset; filled < dataRows; filled++ {
 		sb.WriteByte('\n')
 	}
-	// Hide-cols footer (dbsavvy-uv0.6). When any column is hidden, append
+	// Hide-cols footer. When any column is hidden, append
 	// a `hidden: c1, c2` line so users have a visible cue. The line is
 	// wrapped in the dim SGR pair (\x1b[2m…\x1b[22m); themes without dim
 	// support degrade to plain text.
@@ -384,7 +380,6 @@ func renderBody(snap viewSnapshot, innerW, innerH int) string {
 
 // hideFooterLine renders the "hidden: c1, c2" footer in dim style when
 // any columns are hidden. Returns "" when nothing is hidden.
-// dbsavvy-uv0.6.
 func hideFooterLine(snap viewSnapshot) string {
 	if len(snap.hidden) == 0 {
 		return ""
@@ -412,7 +407,7 @@ func renderHeaderLine(snap viewSnapshot, innerW int, moreLeft, moreRight bool) s
 		w := effectiveWidth(snap.widths, c)
 		// headerLabel folds in the FK `→ ` prefix when col.IsForeignKey;
 		// padRight handles the truncation case if a narrow locked width
-		// can't accommodate the full label. dbsavvy-bwq.14 (B3).
+		// can't accommodate the full label.
 		name := padRight(headerLabel(snap.cols[c]), w)
 		if used+w > innerW {
 			break
@@ -519,8 +514,8 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 		}
 		// Dirty-cell substitution: if this (rowPK, column) carries a staged
 		// edit, render the staged NewValue (with the DirtyCellBg tint)
-		// instead of the stale DB value so an unsaved edit is visible
-		// (dbsavvy-cyh). renderCellPadded pads the plain visible string
+		// instead of the stale DB value so an unsaved edit is visible.
+		// renderCellPadded pads the plain visible string
 		// before wrapping, so a digit in the SGR prefix can never collide
 		// with a padded value.
 		isDirty := false
@@ -531,12 +526,12 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 			}
 		}
 		styled := renderCellPadded(value, snap.cols[c], w, isDirty)
-		// dbsavvy-2ttm.2: when an in-grid search is active and this cell
+		// When an in-grid search is active and this cell
 		// carries match spans, re-render it with the matched substrings
 		// highlighted. Cells without spans (and the no-search state) keep
 		// the byte-identical clean path above.
 		//
-		// dbsavvy-537j: a match-bearing cell paints its highlight with
+		// A match-bearing cell paints its highlight with
 		// explicit colors (CurSearch is black-on-yellow). The selection
 		// highlight is reverse-video, which would swap those into
 		// yellow-on-black — and n/N always parks the cursor on the current
@@ -545,7 +540,7 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 		if spans := cellHighlightSpans(snap, r, c); len(spans) > 0 {
 			styled = renderCellPaddedHighlighted(value, snap.cols[c], w, isDirty, spans)
 		} else if inYankFlash(snap, r, c) {
-			// dbsavvy-j8xr: the transient post-yank flash wins over the
+			// The transient post-yank flash wins over the
 			// selection highlight for its TTL so the just-yanked cell/row is
 			// unmistakably the one that landed on the clipboard.
 			styled = applyYankFlashHighlight(styled)
@@ -565,7 +560,7 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 // remainder starts at max(colOffset, 1). When off, the order is the
 // natural [colOffset, len(cols)) range.
 //
-// dbsavvy-uv0.6: indices in snap.hidden are filtered out via
+// Indices in snap.hidden are filtered out via
 // filterHidden (see hide.go). The filter runs AFTER the frozen-first /
 // colOffset composition so hiding column 0 still hides it even when
 // frozenFirstCol is on (consistent with user expectation: the overlay

@@ -4,7 +4,7 @@
 // docker/postgres fixture. Skipped (not failed) when DBSAVVY_TEST_PG
 // is unset. Mirrors the bootstrap pattern from pkg/drivers/pg tests.
 //
-// Covers acceptance scenario in dbsavvy-66p.11:
+// Covers acceptance scenario:
 //
 //	Given a docker pg session and a table app.notes with 0 rows
 //	When <leader>E runs on "INSERT INTO app.notes(body) VALUES('x') RETURNING id"

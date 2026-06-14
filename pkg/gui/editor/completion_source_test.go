@@ -3,7 +3,7 @@ package editor
 import "testing"
 
 // TestSuggestionZeroValue pins the additive presentation-field contract
-// (ko4m.4.1): a freshly constructed Suggestion has empty typed fields
+// a freshly constructed Suggestion has empty typed fields
 // and false flags, so a bare-name suggestion renders unchanged (D6).
 func TestSuggestionZeroValue(t *testing.T) {
 	var s Suggestion
@@ -32,7 +32,7 @@ func TestSuggestionZeroValue(t *testing.T) {
 }
 
 // TestSanitizeSnippetText pins the snippet-body sanitizer contract
-// (dbsavvy-ko4m.7.2): it PRESERVES '\n' and '\t' (a snippet expansion is a
+// it PRESERVES '\n' and '\t' (a snippet expansion is a
 // multi-line, indented insertion) while stripping every other C0 control
 // byte (<0x20) and 0x7F. Contrast SanitizeText, which also strips '\n'/'\t'.
 func TestSanitizeSnippetText(t *testing.T) {

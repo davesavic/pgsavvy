@@ -161,8 +161,7 @@ func TestBuildStatusLine_NilTrNoSpuriousNewline(t *testing.T) {
 }
 
 // TestBuildStatusLine_ModeLabelPrepended verifies modeLabel becomes the
-// FIRST section of the status line, ahead of the connection header. New
-// in dlp.9.
+// FIRST section of the status line, ahead of the connection header.
 func TestBuildStatusLine_ModeLabelPrepended(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	conn := &models.Connection{Icon: "⚠", Label: "PROD"}
@@ -183,8 +182,7 @@ func TestBuildStatusLine_ModeLabelPrepended(t *testing.T) {
 }
 
 // TestBuildStatusLine_EmptyModeLabelOmitsSlot verifies the mode banner
-// slot is omitted (no leading separator) when modeLabel is "". New in
-// dlp.9.
+// slot is omitted (no leading separator) when modeLabel is "".
 func TestBuildStatusLine_EmptyModeLabelOmitsSlot(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 
@@ -195,7 +193,7 @@ func TestBuildStatusLine_EmptyModeLabelOmitsSlot(t *testing.T) {
 	}
 }
 
-// AC dbsavvy-sgc: a connection with a named colour must produce an
+// A connection with a named colour must produce an
 // ANSI SGR foreground wrapper around its icon+label header so the
 // status bar surface visibly tints the active-connection slot. The
 // reset escape MUST follow the header so subsequent sections (options /
@@ -229,7 +227,7 @@ func TestBuildStatusLine_ConnHexColorIsNotTinted(t *testing.T) {
 }
 
 // TestBuildStatusLine_NilConnWithModeLabel covers the (nil conn,
-// non-empty modeLabel) edge listed in dlp.9 AC. New in dlp.9.
+// non-empty modeLabel) edge.
 func TestBuildStatusLine_NilConnWithModeLabel(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 
@@ -243,7 +241,7 @@ func TestBuildStatusLine_NilConnWithModeLabel(t *testing.T) {
 	}
 }
 
-// --- Transaction indicator tests (hq5.4) ---
+// --- Transaction indicator tests ---
 
 // TestBuildStatusLine_TxActiveNoSavepoints verifies [TX] rendered with
 // WarningFg (yellow ANSI) when tx is active with no savepoints.
@@ -329,7 +327,7 @@ func TestBuildStatusLine_NoTxIndicatorWhenRolledBack(t *testing.T) {
 	}
 }
 
-// --- Session settings tests (hq5.9) ---
+// --- Session settings tests ---
 
 // TestBuildStatusLine_SessionSettings_SearchPath verifies [search_path=…]
 // appears in the status line when the settings map contains search_path.

@@ -76,7 +76,7 @@ func (a *AppState) Load(fs afero.Fs, path string) error {
 
 // recentConnectionsCap is the maximum number of entries retained in
 // AppState.RecentConnectionIDs. Older entries fall off the tail on each
-// push. dbsavvy-56u.1.
+// push.
 const recentConnectionsCap = 10
 
 // PushRecentConnectionID inserts connID at the front of recent, dedupes
@@ -85,7 +85,7 @@ const recentConnectionsCap = 10
 // failures through without a guard. The returned slice is always a
 // freshly allocated value (never aliases recent) so callers may assign
 // it directly into AppState.RecentConnectionIDs under MutateAndSave
-// without further copying. dbsavvy-56u.1.
+// without further copying.
 func PushRecentConnectionID(recent []string, connID string) []string {
 	if connID == "" {
 		out := make([]string, len(recent))

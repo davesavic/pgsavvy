@@ -53,7 +53,7 @@ func (h *captureHandler) snapshot() []slog.Record {
 // TestConnectAndBind_PassesLoggerToSQLSession exercises the wireQueryRuntime
 // wiring: the SQLSession constructed inside Connect must receive
 // Common.Logger(). The bridge that previously converted a legacy logger
-// to *slog.Logger has been deleted (dbsavvy-962 F1); Common.Logger() is
+// to *slog.Logger has been deleted; Common.Logger() is
 // now native *slog.Logger and is passed straight through.
 //
 // We cannot reach the private logger field from this _test package, so we
@@ -125,7 +125,7 @@ func TestConnectAndBind_PassesLoggerToSQLSession(t *testing.T) {
 	}
 }
 
-// dbsavvy-56u.1: populateIndexesRail loads indexes via the live
+// populateIndexesRail loads indexes via the live
 // ConnectHelper and pushes them onto IndexesContext so the rail
 // renders rows on the next layout frame. Mirrors the SCHEMAS-rail
 // population AC.
@@ -157,7 +157,7 @@ func TestPopulateIndexesRailPopulatesRail(t *testing.T) {
 	}
 }
 
-// AC dbsavvy-fow.1: a connect that is superseded mid-dial (a newer
+// A connect that is superseded mid-dial (a newer
 // activation bumps connectGen while this one is still dialing) MUST NOT
 // mutate activeConn — the stale result is dropped. We simulate the newer
 // activation via openHook, which bumps connectGen during the dial; the
@@ -183,7 +183,7 @@ func TestConnectInvokerSupersededConnectDoesNotClobberActiveConn(t *testing.T) {
 	}
 }
 
-// AC epic dbsavvy-e53 (SECURITY): a dial error whose message embeds both a
+// (SECURITY): a dial error whose message embeds both a
 // URL-form DSN (postgres://u:secret@h/db) AND a kv-form password
 // (password=secret) MUST reach the CONNECTING screen with BOTH credential
 // forms redacted — neither "secret" may survive into the rendered body.
@@ -229,7 +229,7 @@ func TestConnectInvokerDialErrorRedactsCredsIntoConnectingScreen(t *testing.T) {
 	}
 }
 
-// AC epic dbsavvy-e53: a stale-gen worker (superseded mid-dial by a newer
+// A stale-gen worker (superseded mid-dial by a newer
 // activation) MUST NOT paint the error screen — its error result is
 // dropped. We bump connectGen during the dial via openHook so the returning
 // worker finds itself stale; the screen stays in its connecting state.
@@ -261,7 +261,7 @@ func TestConnectInvokerStaleDialErrorDroppedNotRendered(t *testing.T) {
 	}
 }
 
-// dbsavvy-56u.1: populateIndexesRail with an empty schema or table is
+// populateIndexesRail with an empty schema or table is
 // a silent no-op — the existing IndexesContext.items are left intact.
 func TestPopulateIndexesRailEmptyKeysIsNoop(t *testing.T) {
 	g, _ := buildTestGuiWithHistory(t)
@@ -286,7 +286,7 @@ func TestPopulateIndexesRailEmptyKeysIsNoop(t *testing.T) {
 	}
 }
 
-// dbsavvy-zt9: populateIndexesRail runs on a worker goroutine, so its
+// populateIndexesRail runs on a worker goroutine, so its
 // SetItems publish (a mutex-free items+cursor write the MainLoop reads
 // every render frame) MUST be marshaled onto the UI thread rather than
 // written raw on the worker. With a wired driver, runOnUIThread routes

@@ -10,7 +10,7 @@ import (
 
 // TestHideOverlayControllerCtrlNAndCtrlPBindings asserts <C-n> dispatches
 // HideOverlayDown and <C-p> dispatches HideOverlayUp, mirroring the
-// j/<down> and k/<up> bindings per AD-9 (dbsavvy-56u.2).
+// j/<down> and k/<up> bindings per AD-9.
 func TestHideOverlayControllerCtrlNAndCtrlPBindings(t *testing.T) {
 	b := newBag()
 	ctrl := controllers.NewHideOverlayController(nil, b.HelperBag.CoreDeps, nil)

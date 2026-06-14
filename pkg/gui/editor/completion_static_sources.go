@@ -74,11 +74,11 @@ const KeywordsSourceName = "keywords"
 
 // KeywordsSource emits SQL keywords whose uppercase form fuzzily matches the
 // identifier prefix immediately to the left of the cursor (editor.Match,
-// ko4m.3.1 — a non-prefix subsequence still surfaces a keyword). An empty
+// a non-prefix subsequence still surfaces a keyword). An empty
 // prefix returns every keyword (Match("",x) contract). Suggestion.Source is
 // always set to KeywordsSourceName. Score = matchQuality + KeywordSourceBias so
 // keywords lose to richer sources (schema, function) but beat history when
-// texts collide (ko4m.3.2 rank order). Suggestion.Matches carries the matched
+// texts collide (rank order). Suggestion.Matches carries the matched
 // rune offsets for popup highlighting.
 type KeywordsSource struct {
 	// PriorityVal controls the Source.Priority() tiebreak. Zero is fine —

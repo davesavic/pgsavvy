@@ -347,7 +347,7 @@ func TestCommandSubmitCommand_HandlerPushSkipsPop(t *testing.T) {
 	}
 }
 
-// --- CaretToggler wiring (dbsavvy-tro.2) -------------------------------
+// --- CaretToggler wiring -------------------------------
 
 // caretRecorder accumulates every CaretToggler call. The order matters
 // in the Cancel/Submit assertions (caret must flip false AFTER Pop).
@@ -520,7 +520,7 @@ func TestDefaultCommandLineBindings(t *testing.T) {
 	}
 }
 
-// --- dbsavvy-tro.6 integration: Backspace through the default bindings -
+// --- integration: Backspace through the default bindings -
 //
 // These tests pin the contract from the COMMAND_LINE feature's
 // perspective: with the real DefaultCommandLineBindings (colon/esc/cr)

@@ -10,7 +10,7 @@ import (
 // TestSortActiveTab_JoinResultIsSortable verifies the sortability guard passes
 // for ANY result with >=1 grid column (joins/aggregates/CTEs included): the
 // guard never consults DetectFromQuery. The mid-stream (StateRunning) tab is a
-// valid sort target. dbsavvy-72k.4 AC#2.
+// valid sort target.
 func TestSortActiveTab_JoinResultIsSortable(t *testing.T) {
 	h, _, runner := newReRunHelper(t)
 	tab := openRunningResultTab(t, h, runner)
@@ -34,7 +34,7 @@ func TestSortActiveTab_JoinResultIsSortable(t *testing.T) {
 }
 
 // TestSortActiveTab_PendingEditsBlocks verifies the pending-edits guard:
-// staged edits surface the toast and return run=false (no re-run). dbsavvy-72k.4 AC#3.
+// staged edits surface the toast and return run=false (no re-run).
 func TestSortActiveTab_PendingEditsBlocks(t *testing.T) {
 	h, _, runner := newReRunHelper(t)
 	tab := openRunningResultTab(t, h, runner)
@@ -69,7 +69,7 @@ func TestSortActiveTab_PendingEditsBlocks(t *testing.T) {
 
 // TestSortActiveTab_CycleAscDescClear verifies the asc→desc→clear cycle on one
 // column, the 4th-call restart at asc, and that a different column restarts at
-// asc. dbsavvy-72k.4 AC#1.
+// asc.
 func TestSortActiveTab_CycleAscDescClear(t *testing.T) {
 	h, _, runner := newReRunHelper(t)
 	tab := openRunningResultTab(t, h, runner)
@@ -112,7 +112,7 @@ func TestSortActiveTab_CycleAscDescClear(t *testing.T) {
 // TestSortActiveTab_ReentrancyBlockedWhileSorting verifies that a sort request
 // while a sort re-run is already in flight (StateSorting) is a silent no-op, so
 // two triggers launch exactly one re-run. A mid-stream sort (StateRunning) is
-// NOT blocked — covered by the other tests. dbsavvy-72k.4 AC#4.
+// NOT blocked — covered by the other tests.
 func TestSortActiveTab_ReentrancyBlockedWhileSorting(t *testing.T) {
 	h, _, runner := newReRunHelper(t)
 	tab := openRunningResultTab(t, h, runner)
@@ -144,7 +144,7 @@ func TestSortActiveTab_ReentrancyBlockedWhileSorting(t *testing.T) {
 }
 
 // TestSortActiveTab_NoActiveTabSilentNoOp verifies the silent no-op when no tab
-// is active. dbsavvy-72k.4 AC#2.
+// is active.
 func TestSortActiveTab_NoActiveTabSilentNoOp(t *testing.T) {
 	h, _, _ := newReRunHelper(t)
 	runSQL, run, toast := h.SortActiveTab(0)

@@ -41,14 +41,13 @@ var _ RunnerSession = (*session.SQLSession)(nil)
 // RunOptions tweaks a single Run call. NewTx wraps the statement in an
 // explicit BEGIN issued before the Stream; the surrounding transaction
 // is left open and rolled back when the session is closed (SQLSession
-// already rolls back any active tx in Close — dbsavvy-66p §D14).
+// already rolls back any active tx in Close).
 type RunOptions struct {
 	NewTx bool
 
 	// DefaultSchema is the currently selected schema; when non-empty it is
 	// forwarded on the streamed Query so unqualified object names resolve
-	// against it (pg: SET search_path). Empty leaves resolution unchanged
-	// (dbsavvy-u1n).
+	// against it (pg: SET search_path). Empty leaves resolution unchanged.
 	DefaultSchema string
 
 	// Timeout is the resolved statement-timeout ceiling forwarded onto the
@@ -56,7 +55,6 @@ type RunOptions struct {
 	// .default_statement_timeout (0 = off). The pg driver realises a
 	// non-zero value as a context.WithTimeout deadline whose CancelFunc the
 	// row stream owns; 0 leaves the caller's context untouched (no ceiling).
-	// dbsavvy-fow.7 (U15).
 	Timeout time.Duration
 }
 
@@ -75,8 +73,8 @@ type runnerBinding struct {
 // the last launched RunHandle.
 //
 // QueryRunner is intentionally narrow — it neither owns the result-tab
-// state nor tracks history. Tab routing is owned by ResultTabsHelper
-// (dbsavvy-66p.12); history is recorded transparently by SQLSession.
+// state nor tracks history. Tab routing is owned by ResultTabsHelper;
+// history is recorded transparently by SQLSession.
 //
 // Threading: every method delegates to SQLSession, which serialises
 // against the per-session queue. Concurrent calls into QueryRunner are
@@ -89,12 +87,12 @@ type runnerBinding struct {
 // its first action: a prior run whose result exceeds the initial-fill
 // window parks its worker holding SQLSession.streamMu indefinitely, so
 // the synchronous session op below would freeze the TUI without a
-// last-wins preempt first (dbsavvy-lxn). The preempt hook itself must be
+// last-wins preempt first. The preempt hook itself must be
 // safe to call from the UI goroutine.
 //
 // preempt lives directly on *QueryRunner (NOT on runnerBinding) so it
 // survives the atomic Bind / Unbind swap — a reconnect must not silently
-// drop the preempter and reintroduce the freeze (dbsavvy-lxn.1).
+// drop the preempter and reintroduce the freeze.
 type QueryRunner struct {
 	binding atomic.Pointer[runnerBinding]
 
@@ -106,7 +104,7 @@ type QueryRunner struct {
 	// preemption. Returns true when the bounded Stop-wait EXPIRED — the
 	// prior worker is still live and streamMu is still held — so the caller
 	// fences the session (MarkPreemptPending) and the guarded session op
-	// below fails fast with ErrPreemptPending. gr7e.2.
+	// below fails fast with ErrPreemptPending.
 	preempt func() bool
 }
 
@@ -120,7 +118,7 @@ type QueryRunner struct {
 // sess may be nil; every method nil-checks and returns ErrNoSession
 // (or, for Cancel, silently no-ops). The orchestrator builds an empty
 // QueryRunner at wireWithDriver time and later calls Bind from the
-// connectInvoker once the SQLSession is ready (dbsavvy-66p.16).
+// connectInvoker once the SQLSession is ready.
 func NewQueryRunner(sess RunnerSession, caps drivers.Capabilities) *QueryRunner {
 	r := &QueryRunner{}
 	if sess != nil {
@@ -189,7 +187,7 @@ func (r *QueryRunner) SetPreempter(fn func() bool) {
 // When the hook reports expiry (the bounded Stop-wait elapsed with the prior
 // worker still live and streamMu still held) it fences the bound session so
 // the guarded session op the caller runs next fails fast with
-// ErrPreemptPending rather than deadlocking on streamMu. gr7e.2.
+// ErrPreemptPending rather than deadlocking on streamMu.
 func (r *QueryRunner) preemptInFlight() {
 	if r == nil || r.preempt == nil {
 		return
@@ -231,7 +229,7 @@ func (r *QueryRunner) HasSession() bool {
 
 // MarkDisconnected sets the connection-dead flag on the underlying
 // session. Once set, new Execute/Stream/Begin attempts return
-// ErrDisconnected. Returns false when no session is wired. hq5.6.
+// ErrDisconnected. Returns false when no session is wired.
 func (r *QueryRunner) MarkDisconnected() bool {
 	b := r.load()
 	if b == nil || b.sess == nil {
@@ -244,7 +242,7 @@ func (r *QueryRunner) MarkDisconnected() bool {
 // ClearDisconnected resets the connection-dead flag on the underlying
 // session. Called by ReconnectController after a successful Ping or
 // reconnect proves the wire is alive again. No-op when no session is
-// wired. hq5.7.
+// wired.
 func (r *QueryRunner) ClearDisconnected() {
 	b := r.load()
 	if b == nil || b.sess == nil {
@@ -254,7 +252,7 @@ func (r *QueryRunner) ClearDisconnected() {
 }
 
 // IsDisconnected reports whether the underlying session has been marked
-// connection-dead. Returns false when no session is wired. hq5.6.
+// connection-dead. Returns false when no session is wired.
 func (r *QueryRunner) IsDisconnected() bool {
 	b := r.load()
 	if b == nil || b.sess == nil {
@@ -302,7 +300,7 @@ func (r *QueryRunner) SavepointNames() []string {
 
 // Begin opens a transaction on the underlying session. Calls
 // preemptInFlight first to stop any in-flight stream, mirroring the
-// Run / Explain chokepoint contract (hq5.3). Returns ErrNoSession when
+// Run / Explain chokepoint contract. Returns ErrNoSession when
 // no session is wired.
 func (r *QueryRunner) Begin(ctx context.Context, opts models.TxOptions) (drivers.Transaction, error) {
 	r.preemptInFlight()
@@ -343,7 +341,7 @@ func (r *QueryRunner) Run(ctx context.Context, sql string, opts RunOptions) (*se
 // RunQuery streams q (SQL + bound Args) via the SQLSession queue, mirroring
 // Run but allowing parameter placeholders ($1, $2, ...) to be bound at the
 // driver. The returned RunHandle is stashed for Cancel(). Used by the
-// FKForwardHelper (dbsavvy-bwq.16) to issue the parameterized parent-table
+// FKForwardHelper to issue the parameterized parent-table
 // SELECT for `gd`.
 func (r *QueryRunner) RunQuery(ctx context.Context, q models.Query) (*session.RunHandle, error) {
 	r.preemptInFlight()
@@ -367,7 +365,7 @@ func (r *QueryRunner) RunQuery(ctx context.Context, q models.Query) (*session.Ru
 //
 // defaultSchema, when non-empty, resolves unqualified object names against
 // that schema for the EXPLAIN'd statement (pg: SET search_path), matching the
-// run path so a plan reflects what Run would execute (dbsavvy-u1n).
+// run path so a plan reflects what Run would execute.
 func (r *QueryRunner) Explain(ctx context.Context, sql string, analyze bool, defaultSchema string) (models.Plan, error) {
 	r.preemptInFlight()
 	b := r.load()
@@ -413,8 +411,7 @@ func (r *QueryRunner) Cancel() error {
 // and blocks until its Done channel closes or 2 seconds elapse,
 // whichever comes first. This mirrors the cancel-then-wait pattern in
 // SQLSession.Close and ensures in-flight streams are fully drained
-// before a subsequent Commit or Rollback on the same connection
-// (hq5.5).
+// before a subsequent Commit or Rollback on the same connection.
 func (r *QueryRunner) CancelAndWaitActiveRun() {
 	rh := r.last.Load()
 	if rh == nil {

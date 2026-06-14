@@ -8,8 +8,8 @@ import (
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
 )
 
-// ChoiceHelper pushes the SELECTION popup (TEMPORARY_POPUP per
-// dbsavvy-m47.2). Mirrors PromptHelper's shape but for a list-style
+// ChoiceHelper pushes the SELECTION popup (TEMPORARY_POPUP).
+// Mirrors PromptHelper's shape but for a list-style
 // picker: instead of a label+initial pair the caller supplies a label +
 // a slice of choices, and onSubmit receives the selected index.
 //

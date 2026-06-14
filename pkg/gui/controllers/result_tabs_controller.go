@@ -16,7 +16,7 @@ import (
 )
 
 // ResultTabsManager is the narrow surface ResultTabsController dispatches
-// to. The concrete satisfier is ui.ResultTabsHelper (dbsavvy-66p.12); the
+// to. The concrete satisfier is ui.ResultTabsHelper; the
 // interface keeps the controller package free of the helpers/ui import
 // cycle.
 type ResultTabsManager interface {
@@ -26,14 +26,13 @@ type ResultTabsManager interface {
 	PinActive() bool
 	CancelActive() error
 	// Page advances (+1) / rewinds (-1) the active tab's grid by one
-	// page. dbsavvy-uv0.3.
+	// page.
 	Page(dir int)
 	// ReadToEnd drains the active tab's stream to completion (with a
 	// confirmation prompt above the configured warn threshold).
-	// dbsavvy-uv0.3.
 	ReadToEnd()
 
-	// In-grid search surface (dbsavvy-2ttm). SearchPrompt opens the
+	// In-grid search surface. SearchPrompt opens the
 	// bottom-anchored live search input; each keystroke drives the active
 	// tab's grid SetSearch (firing the once-per-tab caveat toast when the
 	// tab is incomplete). SearchNextMatch / SearchPrevMatch move the
@@ -49,30 +48,28 @@ type ResultTabsManager interface {
 	// SortPick opens the column-picker overlay for the active tab. On
 	// submit, SetSort(col) fires; cycling through asc/desc/clear per the
 	// AC. No-op when no tab is active or the picker dep is unwired.
-	// dbsavvy-uv0.5.
 	SortPick()
 
 	// HideOverlay opens the <leader>gH hide-cols overlay for the active
 	// tab. Persistence is gated on the tab's recorded ResultIdentity
-	// (HasRowIdentity). dbsavvy-uv0.6.
+	// (HasRowIdentity).
 	HideOverlay()
 
 	// PromptExport opens the <leader>oe export menu for the active tab.
-	// dbsavvy-uv0.9.
 	PromptExport()
 
 	// ToggleViewMode flips the active tab's grid between ViewModeGrid
 	// and ViewModeExpanded and persists the new value globally via
-	// AppState.LastResultViewMode. dbsavvy-uv0.7.
+	// AppState.LastResultViewMode.
 	ToggleViewMode()
 
 	// JumpLastOrReadToEnd dispatches `G`: in expanded mode jumps the
 	// cursor to the last loaded record; in grid mode triggers the
-	// ReadToEnd drain (with the existing >1M-row warn). dbsavvy-uv0.7.
+	// ReadToEnd drain (with the existing >1M-row warn).
 	JumpLastOrReadToEnd()
 
 	// Result-grid motion delegators. Dispatch is viewMode-aware inside
-	// the helper / grid.View. dbsavvy-uv0.7.
+	// the helper / grid.View.
 	CursorDown()
 	CursorUp()
 	CursorLeft()
@@ -91,7 +88,7 @@ type ResultTabsManager interface {
 	SelectionActive() bool
 
 	// Active returns the currently-active result tab, or nil when no
-	// tab exists. Wired by Z1 follow-up (dbsavvy-8oo) so handlers can
+	// tab exists. Wired by Z1 follow-up so handlers can
 	// resolve the tab + its grid for FK navigation, pending-edit
 	// dispatch, and jump-list glue. *ui.ResultTabsHelper satisfies it.
 	Active() *ui.Tab
@@ -111,8 +108,6 @@ type ResultTabsManager interface {
 //   - <leader>x — CancelActive (RESULT_GRID scope; mirrors the
 //     QueryEditor's <leader>x cancel binding so the user can cancel
 //     from either side of the pair)
-//
-// dbsavvy-66p.12.
 type ResultTabsController struct {
 	baseController
 	mgr ResultTabsManager
@@ -150,22 +145,22 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"<leader>X", commands.ResultTabClose, tr.Actions.ResultTabClose, types.RESULT_GRID},
 		{"<leader>=", commands.ResultTabPin, tr.Actions.ResultTabPin, types.RESULT_GRID},
 		{"<leader>x", commands.ResultTabCancel, tr.Actions.ResultTabCancel, types.RESULT_GRID},
-		// dbsavvy-uv0.3: pagination + read-to-end chords.
+		// pagination + read-to-end chords.
 		{"]p", commands.ResultPageNext, tr.Actions.ResultPageNext, types.RESULT_GRID},
 		{"[p", commands.ResultPagePrev, tr.Actions.ResultPagePrev, types.RESULT_GRID},
 		{"G", commands.ResultJumpLast, tr.Actions.ResultJumpLast, types.RESULT_GRID},
-		// dbsavvy-2ttm: in-grid search chords.
+		// in-grid search chords.
 		{"/", commands.ResultFilterPrompt, tr.Actions.ResultFilterPrompt, types.RESULT_GRID},
 		{"n", commands.ResultFilterNext, tr.Actions.ResultFilterNext, types.RESULT_GRID},
 		{"N", commands.ResultFilterPrev, tr.Actions.ResultFilterPrev, types.RESULT_GRID},
 		{"<esc>", commands.ResultFilterClear, tr.Actions.ResultFilterClear, types.RESULT_GRID},
-		// dbsavvy-uv0.5: <leader>s sort picker.
+		// <leader>s sort picker.
 		{"<leader>s", commands.ResultSortPick, tr.Actions.ResultSortPick, types.RESULT_GRID},
-		// dbsavvy-uv0.6: <leader>gH hide-cols overlay.
+		// <leader>gH hide-cols overlay.
 		{"<leader>gH", commands.ResultHideOverlay, tr.Actions.ResultHideOverlay, types.RESULT_GRID},
-		// dbsavvy-uv0.9: <leader>oe opens the export menu.
+		// <leader>oe opens the export menu.
 		{"<leader>oe", commands.ResultExportPrompt, tr.Actions.ResultExportPrompt, types.RESULT_GRID},
-		// dbsavvy-uv0.7: expanded view toggle + ]G force-ReadToEnd +
+		// expanded view toggle + ]G force-ReadToEnd +
 		// result-grid motion bindings (viewMode-aware via the helper).
 		{"<leader>gx", commands.ResultViewToggle, tr.Actions.ResultViewToggle, types.RESULT_GRID},
 		{"]G", commands.ResultReadToEndForce, tr.Actions.ResultReadToEndForce, types.RESULT_GRID},
@@ -173,7 +168,7 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"k", commands.ResultCursorUp, tr.Actions.ResultCursorUp, types.RESULT_GRID},
 		{"h", commands.ResultCursorLeft, tr.Actions.ResultCursorLeft, types.RESULT_GRID},
 		{"l", commands.ResultCursorRight, tr.Actions.ResultCursorRight, types.RESULT_GRID},
-		// dbsavvy-2fq: vim column motions. 0/$ jump to the first/last
+		// vim column motions. 0/$ jump to the first/last
 		// column; w/b are single-column aliases of l/h.
 		{"0", commands.ResultColFirst, tr.Actions.ResultColFirst, types.RESULT_GRID},
 		{"$", commands.ResultColLast, tr.Actions.ResultColLast, types.RESULT_GRID},
@@ -198,7 +193,7 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		}
 		out = append(out, &types.ChordBinding{
 			Sequence: seq,
-			// INSERT deliberately excluded (dbsavvy-1yb): leader-
+			// INSERT deliberately excluded: leader-
 			// prefixed bindings registered under (ModeInsert, GLOBAL)
 			// make the leader rune (<space>) a chord prefix when the
 			// editor is in INSERT mode, buffering it until tlen and
@@ -207,18 +202,18 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			Scope:       s.scope,
 			ActionID:    s.actionID,
 			Description: s.description,
-			// dbsavvy-fow.2: flag the y/yy clipboard yank chords for the
+			// flag the y/yy clipboard yank chords for the
 			// status options bar.
 			ShowInBar: s.actionID == commands.ResultYankCell || s.actionID == commands.ResultYankRow,
 		})
 	}
-	// dbsavvy-usj: rail-switch chords (1..6 + <tab>) under RESULT_GRID so
+	// rail-switch chords (1..6 + <tab>) under RESULT_GRID so
 	// the user can navigate back out of the result pane. Without these
 	// the master editor (scope=RESULT_GRID) dispatches FellThrough for
 	// every digit and Tab, leaving the user stranded on the active tab.
 	out = append(out, railSwitchBindings(string(types.RESULT_GRID), tr)...)
 
-	// dbsavvy-bwq.Z1: inline-edit + jump-list chords on RESULT_GRID. These
+	// Z1: inline-edit + jump-list chords on RESULT_GRID. These
 	// are registered AFTER railSwitchBindings so the trie's most-specific
 	// match wins for `<c-i>` (ResultJumpForward) over the bare `<tab>`
 	// RailSwitchNext binding above. CellEditEnter (`i`) is published by
@@ -326,7 +321,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 			return nil
 		},
 	})
-	// dbsavvy-uv0.3: ]p / [p / G handlers.
+	// ]p / [p / G handlers.
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ResultPageNext,
 		Description: tr.Actions.ResultPageNext,
@@ -354,7 +349,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 		Description: tr.Actions.ResultReadToEnd,
 		Tag:         "Result",
 		Handler: func(_ commands.ExecCtx) error {
-			// dbsavvy-uv0.7 AD-14: in expanded mode G means "last record";
+			// in expanded mode G means "last record";
 			// the helper dispatches based on the active grid's viewMode.
 			if r.mgr != nil {
 				r.mgr.JumpLastOrReadToEnd()
@@ -374,7 +369,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 			return nil
 		},
 	})
-	// dbsavvy-2ttm: in-grid search handlers.
+	// in-grid search handlers.
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ResultFilterPrompt,
 		Description: tr.Actions.ResultFilterPrompt,
@@ -428,7 +423,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 			return nil
 		},
 	})
-	// dbsavvy-uv0.5: <leader>s sort picker handler.
+	// <leader>s sort picker handler.
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ResultSortPick,
 		Description: tr.Actions.ResultSortPick,
@@ -440,7 +435,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 			return nil
 		},
 	})
-	// dbsavvy-uv0.6: <leader>gH hide-cols overlay handler.
+	// <leader>gH hide-cols overlay handler.
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ResultHideOverlay,
 		Description: tr.Actions.ResultHideOverlay,
@@ -452,7 +447,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 			return nil
 		},
 	})
-	// dbsavvy-uv0.9: <leader>oe export menu handler.
+	// <leader>oe export menu handler.
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ResultExportPrompt,
 		Description: tr.Actions.ResultExportPrompt,
@@ -464,7 +459,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 			return nil
 		},
 	})
-	// dbsavvy-uv0.7: expanded view toggle + motion handlers.
+	// expanded view toggle + motion handlers.
 	r.registerMotionHandler(reg, commands.ResultViewToggle, tr.Actions.ResultViewToggle, func() { r.mgr.ToggleViewMode() })
 	r.registerMotionHandler(reg, commands.ResultCursorDown, tr.Actions.ResultCursorDown, func() { r.mgr.CursorDown() })
 	r.registerMotionHandler(reg, commands.ResultCursorUp, tr.Actions.ResultCursorUp, func() { r.mgr.CursorUp() })
@@ -495,12 +490,12 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 		Handler:     r.yankHandler(true),
 	})
 
-	// dbsavvy-bwq.Z1: inline-edit + jump-list action handlers and their
+	// Z1: inline-edit + jump-list action handlers and their
 	// chord registration.
 	r.registerBwqHandlers(reg)
 }
 
-// registerBwqHandlers wires the Z1 (dbsavvy-bwq.23) action handlers for
+// registerBwqHandlers wires the Z1 action handlers for
 // the new RESULT_GRID chords. Split out so the main RegisterActions body
 // stays readable. Each handler nil-checks its helper / collaborator and
 // surfaces a toast if one is absent; in production those collaborators are
@@ -894,9 +889,9 @@ func (r *ResultTabsController) yankHandler(row bool) commands.Handler {
 // flashYank arms the grid's transient post-yank highlight over the just-
 // yanked cell (row=false) or row (row=true) and schedules its auto-clear
 // after yankFlashTTL — the same TTL and yellow tint the SQL editor uses for
-// its on_yank flash (dbsavvy-o6da parity). The epoch returned by FlashYank*
+// its on_yank flash. The epoch returned by FlashYank*
 // makes a later yank's clear supersede this one. A nil driver (test wiring)
-// or empty grid (epoch 0) skips the scheduled clear. dbsavvy-j8xr.
+// or empty grid (epoch 0) skips the scheduled clear.
 func (r *ResultTabsController) flashYank(g *grid.View, row bool) {
 	flash := g.FlashYankCell
 	if row {
@@ -927,7 +922,6 @@ func (r *ResultTabsController) toast(msg string) {
 // registerMotionHandler wires a no-arg manager call into the command
 // registry, nil-checking the manager so unit tests that build the
 // controller without a real helper don't crash on dispatch.
-// dbsavvy-uv0.7.
 func (r *ResultTabsController) registerMotionHandler(reg *commands.Registry, id, desc string, fn func()) {
 	_ = reg.Register(&commands.Command{
 		ID:          id,

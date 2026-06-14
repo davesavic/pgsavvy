@@ -30,7 +30,7 @@ type CoreDeps struct {
 // NewCoreDeps constructs the fail-fast core dependency bundle. It PANICS
 // if driver or logger is nil: a wiring site that fails to supply either
 // is a programmer error that must surface at construction, not as a
-// silently dead keybinding at dispatch (dbsavvy-fow.10 D2, Option C).
+// silently dead keybinding at dispatch.
 func NewCoreDeps(driver types.GuiDriver, logger DebugLogger) CoreDeps {
 	if driver == nil {
 		panic("controllers.NewCoreDeps: nil driver")
@@ -69,31 +69,29 @@ type NavDeps struct {
 	// ReconnectController calls when the session is disconnected. Wired
 	// by the orchestrator to a concrete adapter over ConnectHelper +
 	// connectInvoker. Nil-safe: the controller no-ops when unwired.
-	// hq5.7.
 	Reconnector ReconnectInvoker
 
 	// OnPickConnection pushes the CONNECTION_MANAGER modal so the user
-	// can choose a different profile. Wired by the orchestrator. hq5.7.
+	// can choose a different profile. Wired by the orchestrator.
 	OnPickConnection func() error
 
 	// OnCloseConnectionManager dismisses the CONNECTION_MANAGER modal on
 	// <esc>. The orchestrator owns the root-exit semantics in the wired
 	// closure: a no-op when the modal is the startup root (never pops at
-	// stack bottom), otherwise pops back to the active session. Nil-safe
-	// (epic dbsavvy-ig4).
+	// stack bottom), otherwise pops back to the active session. Nil-safe.
 	OnCloseConnectionManager func()
 
 	// OnSchemaActivate fires when <CR> is pressed in the SCHEMAS rail.
 	// The orchestrator wires this to a closure that reloads the TABLES
 	// rail for the supplied schema name on a worker goroutine
-	// (dbsavvy-04n). Nil-safe: SchemasController no-ops when unwired.
+	// Nil-safe: SchemasController no-ops when unwired.
 	OnSchemaActivate func(schema string)
 
 	// OnTableActivate fires when <CR> is pressed in the TABLES rail. The
 	// orchestrator wires this to a closure that runs a bounded
 	// "SELECT * FROM <table>" through the QueryEditorController run path
 	// and pushes the active result tab onto the focus stack so results
-	// take focus (dbsavvy-gj8). Nil-safe: TablesController no-ops when
+	// take focus. Nil-safe: TablesController no-ops when
 	// unwired.
 	OnTableActivate func(table *models.Table) error
 }
@@ -129,8 +127,8 @@ func NewUIDeps(confirm ConfirmHelper, toast ToastHelper) UIDeps {
 	return UIDeps{Confirm: confirm, Toast: toast}
 }
 
-// QueryDeps carries the query-editor + result-pane collaborators
-// (dbsavvy-66p.11). QueryRunner orchestrates SQLSession.Stream / Explain;
+// QueryDeps carries the query-editor + result-pane collaborators.
+// QueryRunner orchestrates SQLSession.Stream / Explain;
 // ResultTabs hands the launched RunHandle to the multi-tab pane;
 // EditorBuffer reports the buffer + cursor offset; Notice routes server
 // NOTICE/WARNING messages; ActivePlanContextFn resolves the focused plan
@@ -142,7 +140,7 @@ type QueryDeps struct {
 	EditorBuffer EditorBufferReader
 
 	// Notice routes server NOTICE/WARNING messages from streaming
-	// queries to a first-of-run toast (dbsavvy-66p.13). Nil-safe:
+	// queries to a first-of-run toast. Nil-safe:
 	// the controller no-ops when unwired.
 	Notice NoticeReporter
 
@@ -151,7 +149,6 @@ type QueryDeps struct {
 	// by the orchestrator to a closure over the result_tabs helper;
 	// PlanController handlers use it to find their target. Nil-safe:
 	// PlanController treats nil as "no active plan tab" and no-ops.
-	// dbsavvy-uv0.8.
 	ActivePlanContextFn PlanContextResolver
 
 	// KbRuntime is the aggregate that bundles every keybinding-system
@@ -166,13 +163,13 @@ type QueryDeps struct {
 	// ConfirmDDL off it to gate mutating-statement execution behind a
 	// confirmation prompt. Distinct name from EditDeps.ActiveConnection-
 	// Profile so the two embedded bundles don't collide in HelperBag.
-	// Nil-safe — a nil closure means "never confirm". dbsavvy-wxkf.
+	// Nil-safe — a nil closure means "never confirm".
 	ConnProfile func() *models.Connection
 
 	// MetadataInvalidator drops background-warmed completion metadata after a
 	// local DDL succeeds (post-run, success-gated) or on a manual 'r' refresh.
 	// Wired by the orchestrator to *data.SchemaWarmer. Nil-safe: the controller
-	// no-ops when unwired. dbsavvy-ko4m.2.4.
+	// no-ops when unwired.
 	MetadataInvalidator SchemaMetadataInvalidator
 
 	// FocusResults pushes the active result tab onto the focus stack so the
@@ -180,8 +177,7 @@ type QueryDeps struct {
 	// orchestrator to a closure over tree.Push(resultTabsH.ActiveContext()),
 	// mirroring the OnTableActivate focus-push. Push is a no-op when the
 	// result context is already top, so the table-activate path's own push
-	// stays idempotent. Nil-safe: the controller no-ops when unwired
-	// (dbsavvy-r9oy).
+	// stays idempotent. Nil-safe: the controller no-ops when unwired.
 	FocusResults func() error
 }
 
@@ -215,7 +211,7 @@ func NewThreadingDeps(
 	}
 }
 
-// EditDeps carries the inline-edit collaborators (epic dbsavvy-bwq).
+// EditDeps carries the inline-edit collaborators.
 // PendingDiscard drives the `<leader>cu` / `<leader>cU` discard flows +
 // table-switch guard. JumpList records originating-cell entries for
 // `<c-o>` / `<c-i>` jump navigation. FKForward owns `gd` forward FK
@@ -245,13 +241,13 @@ type EditDeps struct {
 	// ActivePendingEditSet returns the PendingEditSet for the currently-
 	// active result tab's (connID, baseTable), creating one on first
 	// access via the per-table registry. Returns nil when no editable
-	// tab is active. dbsavvy-8oo stub #10 / #3.
+	// tab is active.
 	ActivePendingEditSet func() *models.PendingEditSet
 
 	// ActiveConnectionProfile returns the currently-bound connection
 	// profile, or nil when no connection is active. CommitDialogOpen
 	// needs the full profile (Color, ConfirmWrites, ReadOnly) to drive
-	// the dialog's gates + styling. dbsavvy-8oo stub #5.
+	// the dialog's gates + styling.
 	ActiveConnectionProfile func() *models.Connection
 }
 
@@ -261,7 +257,7 @@ type EditDeps struct {
 // promote to the bag for backwards-compatible `helpers.Field` access.
 // Production wiring constructs each bundle via its constructor so
 // load-bearing deps are compile-time-required parameters and CoreDeps
-// fails fast on nil (dbsavvy-fow.10 D2, Option C). Unit tests that do not
+// fails fast on nil. Unit tests that do not
 // exercise a path leave the corresponding bundle zero-valued; the
 // controller code nil-checks on use for every optional field.
 type HelperBag struct {
@@ -289,7 +285,7 @@ type DebugLogger interface {
 // to open a connection. The shape is INTENTIONALLY error-only: the real
 // data.ConnectHelper.Connect returns (drivers.Connection, drivers.Session,
 // error), but the controller never touches the Connection / Session
-// directly. The T10 bootstrap (dbsavvy-enn.11) supplies a thin facade
+// directly. The T10 bootstrap supplies a thin facade
 // closure that calls the real Connect, stashes the returned Connection
 // and Session in shared helper state (so refresh/disconnect can reach
 // them), and surfaces only the error here.
@@ -308,7 +304,7 @@ type SchemasInvoker interface {
 // ConnectionFormInvoker is the narrow surface connections_controller
 // invokes from `a`. The real data.ConnectionFormHelper.WalkAddConnection
 // takes a ChainedPrompter and an onComplete callback; the T10 bootstrap
-// (dbsavvy-enn.11) closes over those collaborators (T7b's prompt helper
+// closes over those collaborators (T7b's prompt helper
 // drives the prompter, and onComplete reloads + reselects the new row)
 // and exposes the simpler WalkAdd(ctx) shape here.
 type ConnectionFormInvoker interface {

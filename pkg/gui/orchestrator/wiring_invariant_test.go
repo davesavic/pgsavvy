@@ -74,10 +74,10 @@ func TestWiringInvariant(t *testing.T) {
 		// COLUMNS/INDEXES retain ContextTree struct fields (Kind=STUB) but
 		// are intentionally absent from Flatten(): the standalone
 		// columns/indexes side rails were superseded by the TABLE_INSPECT
-		// tabbed popup (epic dbsavvy-3vf), so they are deferred and never
+		// tabbed popup, so they are deferred and never
 		// pushed/rendered on their own.
-		types.COLUMNS: "superseded by TABLE_INSPECT popup (epic dbsavvy-3vf); deferred, not flattened",
-		types.INDEXES: "superseded by TABLE_INSPECT popup (epic dbsavvy-3vf); deferred, not flattened",
+		types.COLUMNS: "superseded by TABLE_INSPECT popup; deferred, not flattened",
+		types.INDEXES: "superseded by TABLE_INSPECT popup; deferred, not flattened",
 	}
 
 	// popupRectAllowlist: popup-kind keys (TEMPORARY_POPUP/DISPLAY_CONTEXT)
@@ -89,8 +89,8 @@ func TestWiringInvariant(t *testing.T) {
 		// WHICH_KEY renders bottom-right via its dedicated which-key overlay
 		// path, not popupRectFor.
 		types.WHICH_KEY: "renders via dedicated which-key overlay path, not popupRectFor",
-		// SUGGESTIONS is the cursor-anchored completion dropdown
-		// (dbsavvy-etp.2): its rect is computed at the orchestrator call
+		// SUGGESTIONS is the cursor-anchored completion dropdown:
+		// its rect is computed at the orchestrator call
 		// site from the live editor view geometry + the context anchor,
 		// because popupRectFor lacks access to the view handle / anchor.
 		// popupRectFor returns no rect for the PopupSizeAnchored kind.
@@ -103,8 +103,7 @@ func TestWiringInvariant(t *testing.T) {
 	renderAllowlist := map[types.ContextKey]string{
 		// QUERY_EDITOR is the live MAIN pane but its content is painted via
 		// the editor.Buffer render path in Layout, not its own
-		// HandleRender; the concrete editor wiring is deferred (epic
-		// dbsavvy-wwd child tasks).
+		// HandleRender; the concrete editor wiring is deferred.
 		types.QUERY_EDITOR: "deferred; renders via editor.Buffer path in Layout, not HandleRender",
 		// MENU is a T2 lifecycle skeleton; popup body is populated by the
 		// menu helper in a later epic, not via HandleRender.
@@ -122,7 +121,7 @@ func TestWiringInvariant(t *testing.T) {
 		types.DISPLAY_CONTEXT:  true,
 	}
 
-	// Enumerate from the DERIVED context-spec table (dbsavvy-fow.11 D3a),
+	// Enumerate from the DERIVED context-spec table,
 	// observed via the live tree NewContextTree builds from contextSpecs —
 	// not from a hand-listed key slice. The flattened contexts give every
 	// spec row with inFlatten=true; the two named-only fields (Columns /

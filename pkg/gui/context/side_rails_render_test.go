@@ -8,7 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// TestTablesContext_HandleRenderWritesRows guards dbsavvy-5iv: the
+// TestTablesContext_HandleRenderWritesRows guards against regression: the
 // TABLES rail must paint its items into the TABLES view through the
 // layout pass. Until a populate path lands the rail stays empty by
 // content (current behavior), but once Items() is non-empty rendering

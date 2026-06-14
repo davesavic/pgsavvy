@@ -60,7 +60,7 @@ func dispatch(t *testing.T, reg *commands.Registry, id string) error {
 }
 
 func TestPromptControllerHasRequiredBindings(t *testing.T) {
-	// Post-dbsavvy-fq9 the PROMPT view is editable: printable runes,
+	// The PROMPT view is editable: printable runes,
 	// Backspace, arrow keys, and bracketed-paste are handled natively by
 	// gocui.DefaultEditor via the master Editor's Passthrough branch.
 	// The controller only owns <cr> (submit) and <esc> (cancel).

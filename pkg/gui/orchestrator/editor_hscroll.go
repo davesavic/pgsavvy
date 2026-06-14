@@ -12,8 +12,7 @@ import "github.com/jesseduffield/lazygit/pkg/gocui"
 // column, so a line wider than InnerWidth clips past the right border
 // and — because gui.go's ShowCursor guard requires cx < InnerWidth —
 // the caret is hidden once col reaches the edge. This restores the
-// missing horizontal axis: it scrolls ox like FocusPoint scrolls oy
-// (dbsavvy-jdyt).
+// missing horizontal axis: it scrolls ox like FocusPoint scrolls oy.
 func scrollEditorColumnIntoView(v *gocui.View, col int) {
 	inner := v.InnerWidth()
 	if inner <= 0 {

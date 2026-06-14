@@ -13,14 +13,14 @@ import (
 // searchPathToastTTL is the lifetime of toasts the SearchPathController surfaces.
 const searchPathToastTTL = 4 * time.Second
 
-// SearchPathController owns the <leader>p GLOBAL-scope binding (hq5.10)
+// SearchPathController owns the <leader>p GLOBAL-scope binding
 // that opens a prompt pre-filled with "SET search_path TO ". On submit
 // the full text is delegated to the existing SET handler via SetRunner.
 type SearchPathController struct {
 	baseController
 
 	// SetRunner is wired by the orchestrator to the setExHandler closure
-	// (hq5.8). The controller calls it with the tokenised args after "SET"
+	// The controller calls it with the tokenised args after "SET"
 	// (e.g. ["search_path", "TO", "public,myschema"]) and a zero ExecCtx.
 	SetRunner func(args []string, ctx commands.ExecCtx) error
 }
@@ -47,7 +47,7 @@ func NewSearchPathController(
 
 // handleSearchPath is the <leader>p handler. It opens a prompt pre-filled
 // with "SET search_path TO "; on submit the full text is split and
-// delegated to SetRunner (the existing SET handler from hq5.8).
+// delegated to SetRunner (the existing SET handler).
 func (sp *SearchPathController) handleSearchPath(_ commands.ExecCtx) error {
 	runner := sp.helpers.QueryRunner
 	if runner == nil || !runner.HasSession() {

@@ -8,11 +8,11 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// FK-aware JOIN ranking (ko4m.1.4). FK edges are read SYNCHRONOUSLY from the
+// FK-aware JOIN ranking. FK edges are read SYNCHRONOUSLY from the
 // snapshot fake (fakeMeta.ForeignKeys); no driver/session call is on this path.
 // "First" is enforced by a small additive Score boost (fkColumnBoost) applied to
 // FK-participating columns within the schema source, leaving the fuzzy
-// matchQuality mechanism (ko4m.3) untouched.
+// matchQuality mechanism untouched.
 
 // scoreOf returns the Score of the first suggestion whose Text == name, or -1.
 func scoreOf(sugs []Suggestion, name string) int {

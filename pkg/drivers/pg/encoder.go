@@ -29,8 +29,7 @@ const (
 //
 // The implementation is hand-rolled rather than delegating to pgx's
 // internal pgtype API because that API is unstable across pgx minor
-// versions (e.g. pgtype.Map.Encode does not exist in v5 — see epic
-// dbsavvy-uv0 AMENDMENTS).
+// versions (e.g. pgtype.Map.Encode does not exist in v5).
 type encoder struct{}
 
 // pgEncoder is the package singleton — encoder is stateless.

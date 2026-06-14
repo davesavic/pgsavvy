@@ -5,7 +5,7 @@ import (
 )
 
 // TableInspectContext renders the tabbed columns/indexes inspect popup
-// (epic dbsavvy-3vf). State is owned by a *popup.TabbedPopup installed
+// popup. State is owned by a *popup.TabbedPopup installed
 // via SetState; HandleRender writes its Body() into the gocui view.
 //
 // Unlike ExportMenuContext, this context does NOT gate on an Active()

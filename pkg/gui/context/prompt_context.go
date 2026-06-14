@@ -9,7 +9,7 @@ import (
 // PromptState is the renderer-facing surface PromptContext.HandleRender
 // reads each frame. *ui.PromptHelper supplies the label + active flag;
 // the typed buffer lives on the underlying gocui View's TextArea (the
-// PROMPT view is editable per dbsavvy-fq9 so paste / arrow-key editing
+// PROMPT view is editable so paste / arrow-key editing
 // from gocui.DefaultEditor lands directly there).
 type PromptState interface {
 	Active() bool
@@ -56,7 +56,7 @@ const secretMaskRune = "•"
 // We deliberately do NOT set the live gocui View.Mask: it masks EVERY cell of
 // the view at draw time (gocui view.go setCharacter), which would also mask the
 // prompt label that HandleRender writes into the same view content — rendering
-// the whole popup as bullets (dbsavvy-3ye.8). Content-level masking in
+// the whole popup as bullets. Content-level masking in
 // renderBuffer is sufficient because SetContent is the last writer to the
 // view's line buffer before every draw (the layout pass runs HandleRender ->
 // SetContent before gocui's draw, overwriting any plaintext the live TextArea
@@ -129,7 +129,7 @@ func (p *PromptContext) SetState(s PromptState) { p.state = s }
 
 // LabelText returns the current prompt label (empty when no state is
 // wired). The layout pass reads it to size the popup wide enough that
-// the label and input fit without horizontal scrolling (dbsavvy-lcxe).
+// the label and input fit without horizontal scrolling.
 func (p *PromptContext) LabelText() string {
 	if p.state == nil {
 		return ""
@@ -182,7 +182,7 @@ func (p *PromptContext) ReadAndClearBuffer() string {
 // The layout pass passes the live view width into the buffer line via
 // SetViewCursor; HandleRender uses LabelWrapWidth() (set by the layout
 // pass) to wrap the label so validator-error labels don't truncate at
-// the right edge (dbsavvy-8p5).
+// the right edge.
 func (p *PromptContext) HandleRender() error {
 	if p.state == nil || !p.state.Active() {
 		return nil

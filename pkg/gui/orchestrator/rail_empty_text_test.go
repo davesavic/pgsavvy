@@ -10,7 +10,7 @@ import (
 // TestRailEmptyText_ReturnsContextualPlaceholderPerRail proves the production
 // RailEmptyText hook (wired into ctxDeps in wireWithDriver) maps each side
 // rail to its contextual i18n placeholder, so the SCHEMAS/TABLES/COLUMNS/
-// INDEXES rails actually render text when empty (dbsavvy-fow.5 U7). The
+// INDEXES rails actually render text when empty. The
 // context-layer consumption is covered by side_rail_empty_state_test.go; this
 // closes the wiring gap between the hook and the TranslationSet.
 func TestRailEmptyText_ReturnsContextualPlaceholderPerRail(t *testing.T) {

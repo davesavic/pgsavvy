@@ -13,7 +13,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
-// connFieldKind classifies how a form row is edited (dbsavvy-dyf):
+// connFieldKind classifies how a form row is edited:
 //   - fieldText: edited through the single-line PROMPT popup.
 //   - fieldDriver: cycled through drivers.Names() in place.
 //   - fieldToggle: flipped in place.
@@ -90,7 +90,7 @@ var connFormSpecs = []connFieldSpec{
 	{fieldPasswordCommand, "password_command", fieldText},
 }
 
-// connForm is the in-memory add/edit form state (dbsavvy-dyf). It owns the
+// connForm is the in-memory add/edit form state. It owns the
 // edited models.Connection, the focused-field index, and the inline error
 // string. It performs NO persistence — the controller's save callback owns
 // that (the seam zod populates).

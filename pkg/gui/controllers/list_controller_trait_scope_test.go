@@ -8,7 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// TestListControllerTrait_PerRailDispatch guards dbsavvy-6m9: j/k on the
+// TestListControllerTrait_PerRailDispatch guards that j/k on the
 // SCHEMAS (or TABLES) rail must move THAT rail's cursor, not the
 // CONNECTIONS rail's cursor. Before the fix every rail emitted bindings
 // with a single shared ActionID (commands.ListDown / ListUp) and only

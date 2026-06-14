@@ -10,7 +10,7 @@ import (
 )
 
 // ToastFunc is the minimal toast surface :reload uses. The orchestrator
-// (dlp.8c) binds it to ui.ToastHelper; tests substitute a recording
+// binds it to ui.ToastHelper; tests substitute a recording
 // spy. nil is treated as "no toast".
 type ToastFunc func(message string)
 
@@ -34,7 +34,7 @@ type BuildService interface {
 }
 
 // ReloadDeps groups the dependencies the :reload ex-command needs.
-// Bootstrap (dlp.8c) supplies concrete closures + the live service /
+// Bootstrap supplies concrete closures + the live service /
 // matcher / registry / defaults; tests inject fakes.
 type ReloadDeps struct {
 	// LoadUserConfig reloads the user config from its canonical path.
@@ -45,7 +45,7 @@ type ReloadDeps struct {
 	LoadUserConfig func() (*config.UserConfig, error)
 
 	// Defaults are the controller-published shipped bindings (D8).
-	// dlp.8c populates this from AllDefaultBindings().
+	// Bootstrap populates this from AllDefaultBindings().
 	Defaults []*ChordBinding
 
 	// Registry is the commands.Registry used to resolve action IDs.

@@ -18,22 +18,20 @@ type UserConfig struct {
 	Query         QueryConfig        `yaml:"query"`
 }
 
-// QueryConfig groups settings that govern query execution. dbsavvy-fow.7
-// (U15) introduces the default statement-timeout ceiling applied to the
-// streaming run path.
+// QueryConfig groups settings that govern query execution. It carries the
+// default statement-timeout ceiling applied to the streaming run path.
 type QueryConfig struct {
 	// DefaultStatementTimeout is the default ceiling applied to a streamed
 	// query's context when the per-query models.Query.Timeout is zero.
 	// 0 (the default) means OFF — no ceiling, the run path passes the
 	// caller's context through unchanged. A non-zero per-query Timeout
-	// always overrides this default. Must be >= 0. dbsavvy-fow.7 (U15).
+	// always overrides this default. Must be >= 0.
 	DefaultStatementTimeout time.Duration `yaml:"default_statement_timeout"`
 }
 
-// EditorConfig groups settings that govern the SQL editor behaviour.
-// dbsavvy-bwq.22 (C5) introduces the Autocomplete toggle controlling
-// auto-trigger of the completion popup. Manual `<c-x><c-o>` is not
-// gated by this flag — it continues to fire regardless.
+// EditorConfig groups settings that govern the SQL editor behaviour. The
+// Autocomplete toggle controls auto-trigger of the completion popup. Manual
+// `<c-x><c-o>` is not gated by this flag — it continues to fire regardless.
 type EditorConfig struct {
 	// Autocomplete enables auto-triggering of the completion popup when
 	// the cursor sits after a recognised SQL context (e.g. trailing
@@ -47,19 +45,19 @@ type EditorConfig struct {
 	// accepting `users` after `FROM ` inserts `users u`). Default true on
 	// fresh install. Setting `editor.autocomplete_alias: false` makes table
 	// accept insert the bare table name (no alias); column qualification and
-	// non-table accepts are unaffected. dbsavvy-ko4m.6.2 (Finding K).
+	// non-table accepts are unaffected.
 	AutocompleteAlias bool `yaml:"autocomplete_alias"`
 
 	// FKForwardLimit caps the row count of the parameterized SELECT
 	// issued by the `gd` forward foreign-key navigation. Default 1000.
-	// Must be > 0. dbsavvy-bwq.16 (B5).
+	// Must be > 0.
 	FKForwardLimit int `yaml:"fk_forward_limit"`
 }
 
 // UIConfig groups settings that govern UI behaviour (vs. data /
-// connection settings). Today it carries the mouse-enabled toggle
-// (dbsavvy-zro T7b mouse wiring) and the result-grid pagination knobs
-// (dbsavvy-uv0.3). Future epics may add scrollback, double-click TTL, etc.
+// connection settings). Today it carries the mouse-enabled toggle and the
+// result-grid pagination knobs. Future epics may add scrollback,
+// double-click TTL, etc.
 type UIConfig struct {
 	Mouse MouseConfig `yaml:"mouse"`
 
@@ -83,13 +81,13 @@ type UIConfig struct {
 	ReadToEndWarnThreshold int64 `yaml:"read_to_end_warn_threshold"`
 
 	// Export carries the result-export knobs surfaced by the
-	// <leader>oe menu. dbsavvy-uv0.9.
+	// <leader>oe menu.
 	Export ExportConfig `yaml:"export"`
 }
 
 // ExportConfig groups the user-tunable bounds for the result-export
 // pipeline. The defaults are set in GetDefaultConfig and validated by
-// ValidateUserConfig. dbsavvy-uv0.9.
+// ValidateUserConfig.
 type ExportConfig struct {
 	// BufferedRowWarnThreshold is the buffered-row count above which
 	// the export menu surfaces a "this will copy/write a lot of rows"
@@ -104,14 +102,14 @@ type ExportConfig struct {
 
 // MouseConfig controls the optional mouse wiring registered by the
 // controllers at startup. When Enabled is false, the mouse-binding
-// registration block is skipped entirely (per dbsavvy-zro AC).
+// registration block is skipped entirely.
 type MouseConfig struct {
 	Enabled bool `yaml:"enabled"`
 
 	// DoubleClickMs is the maximum gap (in milliseconds) between two
 	// successive left-clicks on the same grid column header that still
 	// counts as a double-click → SetSort invocation. Default 400; range
-	// [100, 2000]. dbsavvy-uv0.5.
+	// [100, 2000].
 	DoubleClickMs int `yaml:"double_click_ms"`
 }
 
@@ -119,7 +117,7 @@ type MouseConfig struct {
 //
 // Mode is "n" or a comma-separated subset of "n,i,v,V,<c-v>,o,x,c"
 // (normal, insert, visual, visual-line, visual-block, operator-pending,
-// command-line variants per the dbsavvy-dlp design).
+// command-line variants).
 //
 // Scope is one of: a ContextKey value, "global", or "all".
 //
@@ -189,18 +187,17 @@ type ThemeConfig struct {
 	SearchHighlight string `yaml:"search_highlight"`
 	// CurSearch is the style for the CURRENT in-grid search match (the cell
 	// the cursor sits on). Stronger than SearchHighlight so the active match
-	// stands out from the others. dbsavvy-2ttm.2.
+	// stands out from the others.
 	CurSearch     string `yaml:"cur_search"`
 	DiffAddedFg   string `yaml:"diff_added_fg"`
 	DiffRemovedFg string `yaml:"diff_removed_fg"`
 	DiffChangedFg string `yaml:"diff_changed_fg"`
 	PromptFg      string `yaml:"prompt_fg"`
 	// DirtyCellBg is the background colour painted on grid cells that have
-	// a staged PendingEdit. dbsavvy-bwq A3 (Z1 Phase A upstream).
+	// a staged PendingEdit.
 	DirtyCellBg string `yaml:"dirty_cell_bg"`
 	// WarnBorder is the popup border colour used by warning-themed
-	// prompts (e.g. the free-form Expression prompt). dbsavvy-bwq A1 (Z1
-	// Phase A upstream).
+	// prompts (e.g. the free-form Expression prompt).
 	WarnBorder string `yaml:"warn_border"`
 }
 

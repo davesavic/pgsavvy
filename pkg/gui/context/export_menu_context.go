@@ -4,8 +4,6 @@ package context
 // each frame. *ui.ResultTabsHelper satisfies this through its
 // ExportMenuState accessor returning the menu's Body() string. Active()
 // reports whether the menu is currently waiting.
-//
-// dbsavvy-uv0.9.
 type ExportMenuState interface {
 	Active() bool
 	Body() string

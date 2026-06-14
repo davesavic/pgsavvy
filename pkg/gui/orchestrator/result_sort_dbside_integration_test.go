@@ -1,7 +1,7 @@
 //go:build integration
 
 // Package orchestrator_test (integration) end-to-end verifies the
-// database-side result-sort flow (epic dbsavvy-72k) against the live docker
+// database-side result-sort flow against the live docker
 // Postgres fixture. The unit tests (sort_sql_test.go,
 // result_tabs_helper_sort_flow_test.go, result_tabs_helper_rerun_test.go)
 // prove the cycle / guard / wrapSorted string-building logic in isolation;
@@ -25,7 +25,7 @@
 //	the SELECTION popup is out of scope — Submit invokes the identical onSubmit
 //	closure the SelectionController's <cr> handler would).
 //
-// How display order is read: sorting is DB-side (dbsavvy-72k.6: "The grid no
+// How display order is read: sorting is DB-side ("The grid no
 // longer reorders rows for sort; ordering is DB-side"), so the grid's row
 // buffer order IS the display order. tab.Grid().AllRows() returns that buffer
 // verbatim — no new accessor is needed.
@@ -39,8 +39,8 @@
 // exactly what scenario3 must open before sorting. Routing every scenario's tab
 // through the one openTabDirect seam keeps the harness uniform. (The earlier
 // seedEditor "no statement under cursor" breakage that first forced this is now
-// fixed — dbsavvy-72k.9 — but the Args-binding constraint stands.) The SORT
-// itself — the actual subject of .8 — still runs the full production command
+// fixed — but the Args-binding constraint stands.) The SORT
+// itself still runs the full production command
 // path (ResultSortPick -> SortPick -> Submit -> sortActiveResult ->
 // reRunActiveTab -> RunQuery).
 //
@@ -233,7 +233,7 @@ func waitRows(t *testing.T, tab *ui.Tab, want int) {
 }
 
 // TestResultSortDBSide_AC is the live-PG capstone for the database-side sort
-// flow. Each subtest exercises one PRIORITY scenario from dbsavvy-72k.8.
+// flow. Each subtest exercises one PRIORITY scenario.
 func TestResultSortDBSide_AC(t *testing.T) {
 	s := setupQuerySmoke(t)
 	conn := openSortScratch(t, s.dsn)
@@ -382,7 +382,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 	})
 
 	t.Run("scenario5_inner_limit_hoisted_sorts_full_set", func(t *testing.T) {
-		// Regression for dbsavvy-af3: a browse query carries its own LIMIT. If the
+		// A browse query carries its own LIMIT. If the
 		// LIMIT stays INSIDE the sort wrapper, Postgres applies it to the unordered
 		// inner scan and the outer ORDER BY sorts only an arbitrary subset — so the
 		// true minimum (here id=5) can be missing entirely. wrapSorted must hoist

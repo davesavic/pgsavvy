@@ -6,7 +6,7 @@ import (
 )
 
 // GetDownloadDir returns the user's download directory using the
-// fallback chain documented in dbsavvy-uv0.9 AD-15:
+// fallback chain documented in AD-15:
 //
 //  1. $XDG_DOWNLOAD_DIR when set and non-empty.
 //  2. $HOME/Downloads when the directory exists.

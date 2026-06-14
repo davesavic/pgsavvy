@@ -3,7 +3,7 @@ package grid
 // ansiYankFlashBg is the transient post-yank highlight background — yellow,
 // matching the editor's on_yank flash (selection_render.go ansiYankBgOn) so
 // a yank looks identical whether it fires in the SQL editor or the result
-// grid. dbsavvy-j8xr.
+// grid.
 const ansiYankFlashBg = "\x1b[43m"
 
 // yankFlashRange is the transient post-yank highlight rectangle in raw

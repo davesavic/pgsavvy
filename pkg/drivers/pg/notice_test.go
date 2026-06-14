@@ -3,7 +3,7 @@
 // Integration tests for the per-Session NoticeRouter against the
 // docker/postgres fixture. Skipped (not failed) when DBSAVVY_TEST_PG is unset.
 //
-// See epic dbsavvy-66p.5 — NOTICE / WARNING / INFO routing via
+// NOTICE / WARNING / INFO routing via
 // pgconn.Config.OnNotice → NoticeRouter → (*Session).AttachNotice channel.
 
 package pg_test

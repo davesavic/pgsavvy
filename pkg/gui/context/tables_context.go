@@ -27,7 +27,7 @@ func NewTablesContext(base BaseContext, deps Deps) *TablesContext {
 // HandleRender writes the table-row text into the TABLES view each
 // frame. Mirrors ConnectionsContext / SchemasContext. Items is empty
 // until a populate path lands (RefreshTables currently discards its
-// result — see dbsavvy-5iv notes); the empty branch produces a clean
+// result); the empty branch produces a clean
 // blank rail.
 func (t *TablesContext) HandleRender() error {
 	deps := t.deps
@@ -47,7 +47,7 @@ func (t *TablesContext) renderRows() string {
 	if len(t.items) == 0 {
 		return ""
 	}
-	// hq5.6: dim items when the session is disconnected.
+	// dim items when the session is disconnected.
 	dim := t.deps.IsDisconnected != nil && t.deps.IsDisconnected()
 
 	var b strings.Builder

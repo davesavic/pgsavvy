@@ -11,7 +11,7 @@ import (
 // owns the popup's pending onYes / onNo callbacks and the focus-stack
 // pop on dismissal; this controller is a thin dispatcher.
 //
-// Defaults are hardcoded (not user-overridable) per AD-4 of dbsavvy-56u —
+// Defaults are hardcoded (not user-overridable) per AD-4 —
 // confirmation popups must be dismissable through the standard
 // y/n/<cr>/<esc> keys regardless of the user's config.
 type ConfirmationController struct {

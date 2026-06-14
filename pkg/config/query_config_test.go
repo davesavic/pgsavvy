@@ -6,10 +6,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestGetDefaultConfigQueryDefaultStatementTimeout pins the dbsavvy-fow.7
-// (U15) default: the default statement timeout is 0, i.e. OFF on a fresh
-// install. 0 means "no ceiling" — the streaming run path passes the
-// caller's context through unchanged.
+// TestGetDefaultConfigQueryDefaultStatementTimeout pins the default: the
+// default statement timeout is 0, i.e. OFF on a fresh install. 0 means
+// "no ceiling" — the streaming run path passes the caller's context
+// through unchanged.
 func TestGetDefaultConfigQueryDefaultStatementTimeout(t *testing.T) {
 	cfg := GetDefaultConfig()
 	if cfg.Query.DefaultStatementTimeout != 0 {

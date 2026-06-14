@@ -156,7 +156,7 @@ func (f *fakeStreamRunner) setEstimatedRows(n int64) {
 	f.estimatedRows = n
 }
 
-// SetEstimatedRows satisfies the StreamRunner interface (dbsavvy-uly7.8 lazy
+// SetEstimatedRows satisfies the StreamRunner interface (lazy
 // seed). Caches the estimate so EstimatedRows() reflects it, and counts writes
 // so a test can assert a repeat G short-circuits (no second cache write).
 func (f *fakeStreamRunner) SetEstimatedRows(n int64) {
@@ -209,7 +209,7 @@ func (f *fakeStreamRunner) fireOnDone() {
 
 // fireOnDoneErr invokes the captured onDone with a non-nil error,
 // modelling a mid-stream stream.Next failure surfaced through the RBM
-// done path. dbsavvy-uly7.1.
+// done path.
 func (f *fakeStreamRunner) fireOnDoneErr(err error) {
 	f.mu.Lock()
 	cb := f.lastOnDone
@@ -308,7 +308,7 @@ func TestCycleWrapsAroundBoundaries(t *testing.T) {
 // onActiveChanged so the orchestrator can re-point the focus stack onto
 // the newly-active tab's view. Without this the gocui current-view stays
 // on the prior tab and leader chords dispatch under the stale scope
-// (e.g. PLAN instead of RESULT_GRID). dbsavvy-pc4k.
+// (e.g. PLAN instead of RESULT_GRID).
 func TestCycleFiresOnActiveChanged(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
 	var fired int
@@ -336,7 +336,7 @@ func TestCycleWithNoTabsDoesNotFireOnActiveChanged(t *testing.T) {
 }
 
 // TestJumpFiresOnActiveChanged: a digit jump (<leader>1..9) changes the
-// active tab and must re-point focus the same way Cycle does. dbsavvy-pc4k.
+// active tab and must re-point focus the same way Cycle does.
 func TestJumpFiresOnActiveChanged(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
 	var fired int
@@ -401,7 +401,7 @@ func TestCloseActiveOnEmptyToasts(t *testing.T) {
 
 // TestCloseActiveFiresOnActiveClosed: a user-initiated close of the
 // focused tab must fire onActiveClosed so the orchestrator can reconcile
-// the focus stack (dbsavvy-aqw). The closed tab's MAIN_CONTEXT is on top
+// the focus stack. The closed tab's MAIN_CONTEXT is on top
 // of the stack; without this hook it would dangle on a deleted view.
 func TestCloseActiveFiresOnActiveClosed(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
@@ -432,7 +432,7 @@ func TestCloseActiveOnEmptyDoesNotFireOnActiveClosed(t *testing.T) {
 // oldest tab through the Close path, but that is NOT a user-initiated
 // close of the focused tab. Reconciling focus there would steal it into
 // results while the user is typing in the editor, so onActiveClosed must
-// stay silent on eviction (dbsavvy-aqw).
+// stay silent on eviction.
 func TestEvictionDoesNotFireOnActiveClosed(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
 	var activeClosed, removed int
@@ -717,7 +717,7 @@ func TestCancelActiveRunningCallsRunHandleCancel(t *testing.T) {
 }
 
 // TestCancelActiveRunningStopsRunnerToReleaseLock is the cancel-then-run
-// deadlock guard (dbsavvy-dk6). Cancelling a Running tab must Stop() its
+// deadlock guard. Cancelling a Running tab must Stop() its
 // runner, not merely rh.Cancel() it: a parked >200-row worker never
 // observes the driver cancel, so only Stop() makes the worker return,
 // close its stream, and release the per-session streamMu. Without the
@@ -747,7 +747,7 @@ func TestCancelActiveRunningStopsRunnerToReleaseLock(t *testing.T) {
 	}
 }
 
-// --- Preempt-in-flight (dbsavvy-dk6) --------------------------------------
+// --- Preempt-in-flight --------------------------------------
 
 // TestPreemptInFlightStopsRunningTab is the deadlock regression guard: a
 // running stream parks its worker holding SQLSession.streamMu, so a new
@@ -859,7 +859,7 @@ func (r *recordingRunner) Stop() {
 	r.fakeStreamRunner.Stop()
 }
 
-// TestPreemptInFlightCancelsBeforeStop is the gr7e.1 ordering guard: a
+// TestPreemptInFlightCancelsBeforeStop is the ordering guard: a
 // running tab's RunHandle.Cancel() (which aborts a worker blocked in Next)
 // must fire BEFORE its runner.Stop(), mirroring cancelTab.
 func TestPreemptInFlightCancelsBeforeStop(t *testing.T) {
@@ -889,7 +889,7 @@ func TestPreemptInFlightCancelsBeforeStop(t *testing.T) {
 }
 
 // TestPreemptInFlightCancelErrStillStops asserts a non-nil Cancel error does
-// NOT skip runner.Stop() — Stop is what releases streamMu (dbsavvy-dk6).
+// NOT skip runner.Stop() — Stop is what releases streamMu.
 func TestPreemptInFlightCancelErrStillStops(t *testing.T) {
 	var runners []*fakeStreamRunner
 	factory := func() StreamRunner {
@@ -1024,7 +1024,7 @@ func newPreemptHelper(t *testing.T, factory StreamRunnerFactory, after func(time
 }
 
 // TestPreemptInFlightFastPathReturnsFalse: when the cancel+Stop loop drains
-// before the bound (the common post-gr7e.1 case), PreemptInFlight returns
+// before the bound (the common case), PreemptInFlight returns
 // false (not expired) and emits no timeout warning.
 func TestPreemptInFlightFastPathReturnsFalse(t *testing.T) {
 	h, cap := newPreemptHelper(t, func() StreamRunner { return &fakeStreamRunner{} }, nil)
@@ -1042,7 +1042,7 @@ func TestPreemptInFlightFastPathReturnsFalse(t *testing.T) {
 
 // TestPreemptInFlightTimeoutReturnsExpired: when Stop wedges past the bound,
 // PreemptInFlight returns expired=true and warn-logs preempt_stop_timeout —
-// the signal the QueryRunner uses to fence the session (gr7e.2/AD2/AD4).
+// the signal the QueryRunner uses to fence the session (AD2/AD4).
 func TestPreemptInFlightTimeoutReturnsExpired(t *testing.T) {
 	unblock := make(chan struct{})
 	factory := func() StreamRunner {
@@ -1107,7 +1107,7 @@ func TestShowErrorCreatesErrorStateTab(t *testing.T) {
 	}
 }
 
-// TestOpenPlanTabHasNilGrid is the regression test for dbsavvy-6pb. allocTab
+// TestOpenPlanTabHasNilGrid is the regression test. allocTab
 // eagerly creates a grid for every tab; OpenPlanTab must clear it so Tab.Grid()
 // honors its documented "nil for plan / error tabs" contract. Otherwise
 // LayoutPaint's "if g := t.Grid(); g != nil { g.Render }" branch wins over the
@@ -1127,7 +1127,7 @@ func TestOpenPlanTabHasNilGrid(t *testing.T) {
 	}
 }
 
-// TestShowErrorHasNilGrid is the regression test for dbsavvy-6pb (error-tab
+// TestShowErrorHasNilGrid is the regression test (error-tab
 // arm). ShowError must clear the eagerly-created grid so LayoutPaint reaches
 // the Err() branch instead of rendering the empty grid's "(0 rows)".
 func TestShowErrorHasNilGrid(t *testing.T) {
@@ -1142,7 +1142,7 @@ func TestShowErrorHasNilGrid(t *testing.T) {
 	}
 }
 
-// --- renderQueryErrorPanel (dbsavvy-fow.3) --------------------------------
+// --- renderQueryErrorPanel --------------------------------
 
 // TestRenderQueryErrorPanelWithCaret asserts the full panel for a
 // Position>0 syntax error: severity+code+message header, the offending
@@ -1350,7 +1350,7 @@ func TestCloseRunningTabDisposesStream(t *testing.T) {
 	}
 }
 
-// --- dbsavvy-uv0.3: prefetch wiring, paging, ReadToEnd, complete flag ----
+// --- prefetch wiring, paging, ReadToEnd, complete flag ----
 
 // fakeConfirmer records Confirm calls and lets the test drive the
 // onYes / onNo callbacks deterministically.
@@ -1393,8 +1393,6 @@ func (f *fakeConfirmer) Calls() int {
 // the grid cursor enters the near-tail prefetch window, the helper-
 // installed callback invokes runner.ReadRows exactly once with the
 // configured prefetch row count (grid.ResultPrefetchRows = 50).
-//
-// dbsavvy-uv0.3 AC #1.
 func TestSetOnNearTailWiringFiresReadRowsOnCursorCross(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
@@ -1433,7 +1431,7 @@ func TestSetOnNearTailWiringFiresReadRowsOnCursorCross(t *testing.T) {
 
 // TestPrefetchDoesNotDoubleFireForSameRowsLen verifies the
 // lastNearTailFireAt gate: scrolling around inside the near-tail window
-// fires exactly once per rows-length crossing. dbsavvy-uv0.3 AC #5.
+// fires exactly once per rows-length crossing.
 func TestPrefetchDoesNotDoubleFireForSameRowsLen(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
@@ -1473,7 +1471,7 @@ func TestPrefetchDoesNotDoubleFireForSameRowsLen(t *testing.T) {
 
 // TestPagePlusOneRequestsReadRowsAndJumpsLast verifies that ]p (Page(+1))
 // fires runner.ReadRows(pageSize) AND jumps the grid cursor to the
-// loaded tail. dbsavvy-uv0.3 AC #2.
+// loaded tail.
 func TestPagePlusOneRequestsReadRowsAndJumpsLast(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
@@ -1508,7 +1506,7 @@ func TestPagePlusOneRequestsReadRowsAndJumpsLast(t *testing.T) {
 	}
 }
 
-// TestJumpLastMovesCursorToLastRowInGridMode guards dbsavvy-6t9: in the
+// TestJumpLastMovesCursorToLastRowInGridMode guards: in the
 // default grid view, JumpLast (G) moves the cursor to the last loaded
 // row. The stream is marked complete first, so the old G->ReadToEnd
 // wiring would no-op and leave the cursor at row 0 — this test would
@@ -1545,7 +1543,6 @@ func TestJumpLastMovesCursorToLastRowInGridMode(t *testing.T) {
 
 // TestPageMinusOneRewindsCursor verifies [p (Page(-1)) rewinds the
 // cursor (anchored at the top) and does NOT fire ReadRows.
-// dbsavvy-uv0.3 AC #2.
 func TestPageMinusOneRewindsCursor(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
@@ -1580,7 +1577,7 @@ func TestPageMinusOneRewindsCursor(t *testing.T) {
 }
 
 // TestPagePlusOneOnCompleteStreamIsNoop verifies the AC "]p when stream
-// is already complete: no-op (no ReadRows)". dbsavvy-uv0.3.
+// is already complete: no-op (no ReadRows)".
 func TestPagePlusOneOnCompleteStreamIsNoop(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
@@ -1606,7 +1603,7 @@ func TestPagePlusOneOnCompleteStreamIsNoop(t *testing.T) {
 // TestMidStreamErrorMarksTabErrored verifies a non-nil error surfaced
 // through the RBM done path finalises the tab to StateErrored (not the
 // misleading StateComplete), records the error, and surfaces a toast —
-// while preserving the rows delivered before the failure. dbsavvy-uly7.1.
+// while preserving the rows delivered before the failure.
 func TestMidStreamErrorMarksTabErrored(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
@@ -1637,7 +1634,7 @@ func TestMidStreamErrorMarksTabErrored(t *testing.T) {
 }
 
 // TestReadToEndBelowThresholdFiresWithoutPrompt verifies the AC "G with
-// EstimatedRows ≤ threshold fires without prompt". dbsavvy-uv0.3 AC #3.
+// EstimatedRows ≤ threshold fires without prompt".
 func TestReadToEndBelowThresholdFiresWithoutPrompt(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	runner.setEstimatedRows(500)
@@ -1667,7 +1664,6 @@ func TestReadToEndBelowThresholdFiresWithoutPrompt(t *testing.T) {
 
 // TestReadToEndAboveThresholdPromptsThenFiresOnYes verifies the AC
 // "G above threshold: prompt first; only <CR> proceeds".
-// dbsavvy-uv0.3 AC #3.
 func TestReadToEndAboveThresholdPromptsThenFiresOnYes(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	runner.setEstimatedRows(2_000_000)
@@ -1695,7 +1691,6 @@ func TestReadToEndAboveThresholdPromptsThenFiresOnYes(t *testing.T) {
 
 // TestReadToEndAboveThresholdNoFireOnDismiss verifies the AC "User
 // dismisses G prompt with <esc>: incomplete state, no ReadRows fired".
-// dbsavvy-uv0.3 edge case.
 func TestReadToEndAboveThresholdNoFireOnDismiss(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	runner.setEstimatedRows(2_000_000)
@@ -1723,7 +1718,6 @@ func TestReadToEndAboveThresholdNoFireOnDismiss(t *testing.T) {
 
 // TestReadToEndUnknownEstimatePrompts verifies the tiebreaker:
 // "!complete && EstimatedRows.Load() == 0: G shows prompt".
-// dbsavvy-uv0.3.
 func TestReadToEndUnknownEstimatePrompts(t *testing.T) {
 	runner := &fakeStreamRunner{} // EstimatedRows() == 0
 	confirm := &fakeConfirmer{}
@@ -1748,7 +1742,7 @@ func TestReadToEndUnknownEstimatePrompts(t *testing.T) {
 	}
 }
 
-// --- dbsavvy-uly7.8: lazy planner estimate on G ---------------------------
+// --- lazy planner estimate on G ---------------------------
 
 // fakeEstimator records EstimateRows invocations and returns a configurable
 // estimate / error so the lazy-seed decision can be driven deterministically.
@@ -1787,7 +1781,7 @@ func lazyEstimateDeps(runner *fakeStreamRunner, confirm *fakeConfirmer, est *fak
 
 // TestReadToEndLazyEstimateSmallDrainsWithoutPrompt: est unknown (0) + a wired
 // estimator returning a small count -> EXPLAIN runs once, the estimate is
-// cached, and the drain fires WITHOUT a prompt. dbsavvy-uly7.8.
+// cached, and the drain fires WITHOUT a prompt.
 func TestReadToEndLazyEstimateSmallDrainsWithoutPrompt(t *testing.T) {
 	runner := &fakeStreamRunner{} // EstimatedRows() == 0
 	confirm := &fakeConfirmer{}
@@ -1813,7 +1807,7 @@ func TestReadToEndLazyEstimateSmallDrainsWithoutPrompt(t *testing.T) {
 }
 
 // TestReadToEndLazyEstimateLargePrompts: est unknown (0) + estimator returns a
-// count above the warn threshold -> prompt first. dbsavvy-uly7.8.
+// count above the warn threshold -> prompt first.
 func TestReadToEndLazyEstimateLargePrompts(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	confirm := &fakeConfirmer{} // no auto -> prompt opens, no drain
@@ -1837,7 +1831,7 @@ func TestReadToEndLazyEstimateLargePrompts(t *testing.T) {
 
 // TestReadToEndLazyEstimateErrorFallsBackToPrompt: EXPLAIN error -> fall back
 // to the conservative prompt; the drain never fires unprompted, and no estimate
-// is cached. dbsavvy-uly7.8.
+// is cached.
 func TestReadToEndLazyEstimateErrorFallsBackToPrompt(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	confirm := &fakeConfirmer{}
@@ -1866,7 +1860,6 @@ func TestReadToEndLazyEstimateErrorFallsBackToPrompt(t *testing.T) {
 // estimate, a second G short-circuits (est != 0) and does NOT re-EXPLAIN. Uses
 // a large estimate + auto-dismissed prompt so neither G drains the stream to
 // completion (which would otherwise no-op the second G before the cache check).
-// dbsavvy-uly7.8.
 func TestReadToEndLazyEstimateCachedSecondGNoReExplain(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	confirm := &fakeConfirmer{autoNo: true} // prompt opens, user dismisses
@@ -1891,7 +1884,7 @@ func TestReadToEndLazyEstimateCachedSecondGNoReExplain(t *testing.T) {
 
 // TestReadToEndNilEstimatorStillPrompts guards the fallback: with no
 // EstimateRows dep wired (production today before this change, and unit-test
-// default) an unknown estimate still shows the conservative prompt. dbsavvy-uly7.8.
+// default) an unknown estimate still shows the conservative prompt.
 func TestReadToEndNilEstimatorStillPrompts(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	confirm := &fakeConfirmer{}
@@ -1918,7 +1911,7 @@ func TestReadToEndNilEstimatorStillPrompts(t *testing.T) {
 }
 
 // TestReadToEndOnEmptyCompleteIsNoop verifies the AC "Empty result
-// (0 rows, complete=true): G is a no-op". dbsavvy-uv0.3.
+// (0 rows, complete=true): G is a no-op".
 func TestReadToEndOnEmptyCompleteIsNoop(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	confirm := &fakeConfirmer{}
@@ -1976,7 +1969,7 @@ func TestTabCompleteFlagDropsTilde(t *testing.T) {
 
 // TestCompleteFlipMarshalsThroughOnUIThread verifies the AC "complete
 // flip marshals through onUIThread (assert callback was invoked, no
-// direct write off-thread)". Race-test target. dbsavvy-uv0.3 AC #4.
+// direct write off-thread)". Race-test target.
 func TestCompleteFlipMarshalsThroughOnUIThread(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
@@ -2024,7 +2017,6 @@ func TestCompleteFlipMarshalsThroughOnUIThread(t *testing.T) {
 
 // TestPrefetchAtRow0WithBufferLargerThanThresholdNoFire verifies the AC
 // "Cursor at row 0 with 200 rows loaded: prefetch does NOT fire".
-// dbsavvy-uv0.3 edge case.
 func TestPrefetchAtRow0WithBufferLargerThanThresholdNoFire(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
@@ -2089,7 +2081,7 @@ func contains(s, substr string) bool {
 	return false
 }
 
-// --- dbsavvy-uv0.4 /regex filter tests -----------------------------------
+// --- /regex filter tests -----------------------------------
 
 // fakeSearcher captures the SearchLineOpts handed to Open so a test can
 // drive the OnChange / OnCancel seams directly (the live incremental
@@ -2280,7 +2272,7 @@ func TestSearchActive_FalseWithoutSearch(t *testing.T) {
 	}
 }
 
-// --- dbsavvy-uv0.5 sort picker tests -------------------------------------
+// --- sort picker tests -------------------------------------
 
 // fakeChooser captures Choose invocations and exposes hooks for the test
 // to submit / cancel a specific index.
@@ -2365,7 +2357,7 @@ func TestSortPick_OpensPickerWithGridColumns(t *testing.T) {
 	}
 }
 
-// TestSortPick_SubmitFiresOnSortRequest pins (dbsavvy-72k.5): submitting
+// TestSortPick_SubmitFiresOnSortRequest pins: submitting
 // an index from the picker routes the RAW column index into the wired
 // onSortRequest sink (the Tab-level flow) — it no longer calls
 // grid.SetSort directly, so the grid's own sort state stays untouched.
@@ -2504,7 +2496,7 @@ func TestSortPick_NoColumnsIsNoOp(t *testing.T) {
 
 // stubColumnStream is a minimal drivers.RowStream whose Columns() returns
 // the configured slice. Used to verify the helper installs the streamed
-// schema onto the tab's grid.View at attach time (dbsavvy-dqp).
+// schema onto the tab's grid.View at attach time.
 type stubColumnStream struct {
 	cols []models.ColumnMeta
 }
@@ -2518,7 +2510,7 @@ func (s *stubColumnStream) QueryID() models.QueryID { return models.QueryID{} }
 func (s *stubColumnStream) RowsAffected() int64     { return 0 }
 
 // TestOpenTab_InstallsStreamColumnsOnGrid is the regression test for
-// dbsavvy-dqp. Prior to the fix, the result grid stayed at zero columns
+// Prior to the fix, the result grid stayed at zero columns
 // for every streaming query because no path called grid.View.SetColumns
 // with the stream's schema — so the grid rendered the "(0 rows)"
 // EmptyResultIndicator regardless of how many rows were actually
@@ -2557,7 +2549,7 @@ func TestOpenTab_InstallsStreamColumnsOnGrid(t *testing.T) {
 // completion. Introspection is column-driven and runs on an isolated
 // session, so the grid is marked editable while the tab is still
 // StateRunning — letting inline edits work on buffered rows while a
-// no-LIMIT query keeps streaming. dbsavvy-2b6, dbsavvy-1po.
+// no-LIMIT query keeps streaming.
 func TestEditabilityIntrospectedAtStreamStart(t *testing.T) {
 	runner := &fakeStreamRunner{}
 	factory := func() StreamRunner { return runner }
@@ -2580,14 +2572,14 @@ func TestEditabilityIntrospectedAtStreamStart(t *testing.T) {
 		t.Fatalf("tab state = %q, want StateRunning (not yet complete)", tab.State())
 	}
 	if !tab.grid.Editable() {
-		t.Fatal("grid not editable at stream start; want editable during StateRunning (dbsavvy-1po)")
+		t.Fatal("grid not editable at stream start; want editable during StateRunning")
 	}
 	ri := tab.grid.RowIdentity()
 	if len(ri) != 1 || ri[0] != 0 {
 		t.Fatalf("row identity = %v, want [0]", ri)
 	}
 	// The catalog-resolved schema must be threaded onto the grid so the
-	// apply path can schema-qualify the UPDATE (dbsavvy-8q6).
+	// apply path can schema-qualify the UPDATE.
 	if got := tab.grid.IdentitySchema(); got != "myschema" {
 		t.Fatalf("grid IdentitySchema = %q, want %q", got, "myschema")
 	}
@@ -2599,11 +2591,11 @@ func TestEditabilityIntrospectedAtStreamStart(t *testing.T) {
 	}
 }
 
-// --- dbsavvy-usj: focus-stack IBaseContext for result tabs -----------------
+// --- focus-stack IBaseContext for result tabs -----------------
 
 // TestActiveContext_NilWhenNoTabs verifies that ActiveContext() returns
 // nil before any tab is opened. The rail-switch handler relies on this
-// to silently no-op digit 6 when no result tabs exist (dbsavvy-usj).
+// to silently no-op digit 6 when no result tabs exist.
 func TestActiveContext_NilWhenNoTabs(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
 	if got := h.ActiveContext(); got != nil {
@@ -2644,7 +2636,7 @@ func TestActiveContext_ResultTabReturnsResultGridKey(t *testing.T) {
 // TestActiveContext_PlanTabSurfacesPlanContext verifies that a plan tab
 // surfaces its PlanContext (PLAN key) rather than the slot-specific
 // BaseContext, so PLAN-scoped controller bindings dispatch correctly
-// when focus lands on a plan tab. dbsavvy-usj.
+// when focus lands on a plan tab.
 func TestActiveContext_PlanTabSurfacesPlanContext(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
 	if err := h.OpenPlanTab("EXPLAIN", models.Plan{RawText: "Seq Scan"}); err != nil {
@@ -2711,7 +2703,7 @@ func TestLayoutPaintRendersDataTabTitle(t *testing.T) {
 
 // TestTitleRowsAffected covers the DML-without-RETURNING case: a completed
 // tab with zero result rows but a non-zero command-tag count must report
-// "N rows affected" rather than the misleading "0 rows". dbsavvy-tiu8.
+// "N rows affected" rather than the misleading "0 rows".
 func TestTitleRowsAffected(t *testing.T) {
 	tests := []struct {
 		name         string

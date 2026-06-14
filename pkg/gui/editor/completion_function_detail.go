@@ -4,7 +4,7 @@ import "github.com/davesavic/dbsavvy/pkg/models"
 
 // FunctionDetailProvider is the synchronous-read + async-warm surface the
 // completion path queries for a SELECTED function's signature detail. It is the
-// dependency-inversion seam (dbsavvy-ko4m.5.3) that keeps the editor package
+// dependency-inversion seam that keeps the editor package
 // free of a pkg/gui/controllers/helpers/data import: the editor declares this
 // interface and the orchestrator injects the concrete ConnectHelper (whose
 // FunctionDetail / WarmFunctionDetail methods satisfy it structurally), exactly
@@ -28,8 +28,8 @@ import "github.com/davesavic/dbsavvy/pkg/models"
 // FunctionDetail after any warm landing rather than relying on their specific
 // onReady.
 //
-// Signature population for the selected suggestion via this provider is owned by
-// dbsavvy-ko4m.5.4; this task only supplies the seam.
+// This interface only supplies the seam; signature population for the selected
+// suggestion via this provider is implemented elsewhere.
 type FunctionDetailProvider interface {
 	FunctionDetail(schema, name string) ([]models.FunctionDetail, bool)
 	WarmFunctionDetail(schema, name string, onReady func())

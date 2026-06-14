@@ -49,7 +49,7 @@ var _ pgx.Rows = (*fakeStreamRows)(nil)
 // context.CancelFunc captured at construction is invoked EXACTLY ONCE when
 // the stream releases — and that repeated Close / EOF-release calls do not
 // fire it again. This is the load-bearing once/CAS guard for the
-// statement-timeout lifecycle (dbsavvy-fow.7 U15): a leaked CancelFunc
+// statement-timeout lifecycle: a leaked CancelFunc
 // would strand the deadline timer goroutine past release.
 func TestPgRowStreamReleaseInvokesCancelOnce(t *testing.T) {
 	var cancelCalls atomic.Int32

@@ -11,8 +11,8 @@ import (
 )
 
 // Package-level ActionID aliases. Canonical constants live in
-// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A,
-// dbsavvy-bwq.23). Aliases retain the controllers.CommitDialog* names
+// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A).
+// Aliases retain the controllers.CommitDialog* names
 // so existing callers (notably this package's tests) keep compiling.
 const (
 	CommitDialogOpen     = commands.CommitDialogOpen
@@ -25,7 +25,7 @@ const (
 
 // CommitDialogApplyHook is invoked when `[a]` is pressed on a default
 // connection (or on a confirm_writes connection once TypedName matches).
-// The implementation lives in A5 (dbsavvy-bwq.8) and routes through the
+// The implementation lives in A5 and routes through the
 // pending-edit apply helper. The controller defines the interface here
 // so it stays free of any apply-package import — Z1 wires the concrete
 // implementation post-construction.
@@ -209,8 +209,8 @@ func (e *CommitDialogController) ShowSql(_ commands.ExecCtx) error {
 // seeded with the current typed-name buffer; submit writes the value
 // back via SetTypedName and repaints so the apply gate re-evaluates.
 // The dialog's bare-letter commands stay reachable because the typed
-// text lives in the PROMPT scope, not this one (dbsavvy-p8cv —
-// replaces the never-wired per-rune input).
+// text lives in the PROMPT scope, not this one (replaces the
+// never-wired per-rune input).
 //
 // PROMPT and COMMIT_DIALOG are both TEMPORARY_POPUP, so pushing the
 // prompt evicts the dialog from the focus stack (ContextTree
@@ -378,7 +378,7 @@ func (e *CommitDialogController) typeNameDisabled() (string, bool) {
 // non-editable. Mode is ModeNormal because the [a]/[d]/[s]/[t] keys
 // MUST be reachable as bare letters — the typed-name input happens in
 // the PROMPT popup [t] pushes on top, so typing the connection name
-// never collides with this scope's bindings (dbsavvy-p8cv).
+// never collides with this scope's bindings.
 func (e *CommitDialogController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	scope := guicontext.CommitDialogKey()
 	return []*types.ChordBinding{

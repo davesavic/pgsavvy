@@ -13,8 +13,8 @@ import (
 )
 
 // Package-level ActionID aliases. The canonical constants now live in
-// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A,
-// dbsavvy-bwq.23); these aliases retain the original
+// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A);
+// these aliases retain the original
 // controllers.CellEdit* names so existing callers (notably this
 // package's tests) keep compiling. New code should reference commands.*
 // directly.
@@ -124,7 +124,7 @@ type FocusPopper interface {
 //
 // SetNull / Expr* bindings are declared so the user-visible chord
 // surface is stable from day one; their handlers are reserved for A2
-// (dbsavvy-bwq.5) and route to nil dispatchers until then.
+// and route to nil dispatchers until then.
 //
 // Concurrency: every handler runs on the gocui MainLoop. No internal
 // locking; the GridStatePicker / PendingEditStore implementations own
@@ -207,7 +207,7 @@ func (e *CellEditorController) Enter(_ commands.ExecCtx) error {
 		return nil
 	}
 	// Boolean cells open a true/false/NULL chooser instead of the plain
-	// text buffer (dbsavvy-uly7.6).
+	// text buffer.
 	if helpers.CategoryOf(col) == helpers.CategoryBoolean {
 		return e.openBooleanChooser(col, pk, value)
 	}
@@ -412,7 +412,7 @@ func (e *CellEditorController) enterDisabled() (string, bool) {
 //   - `<c-c>` on CELL_EDITOR (ModeInsert): Discard.
 //   - SetNull / Expr* bindings on CELL_EDITOR scope, reserved for A2.
 //     Declared here so the chord surface is stable; their handlers are
-//     registered as no-ops until A2 (dbsavvy-bwq.5) wires the real
+//     registered as no-ops until A2 wires the real
 //     per-type entry logic. Defaults follow the epic spec:
 //   - <c-n>  → CellEditSetNull       (NULL setter)
 //   - <c-t>  → CellEditExprNow       (now())
@@ -456,7 +456,7 @@ func (e *CellEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			ActionID:    CellEditDiscard,
 			Description: "Discard edit",
 		},
-		// A2 (dbsavvy-bwq.5) — per-type entry helpers. Key→ActionID
+		// A2 — per-type entry helpers. Key→ActionID
 		// mapping mirrors the AC:
 		//   <c-n>  → CellEditSetNull           (set NULL; disabled NOT NULL)
 		//   <c-d>  → CellEditExprNow           (inject now())
@@ -467,7 +467,7 @@ func (e *CellEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		// `<leader>cn` / `<leader>ce` chords. A1 routed them through
 		// <c-n>/<c-e> as the in-popup chord surface so the prefix
 		// doesn't double-handle the `<leader>` waiter from the master
-		// editor. Z1 (dbsavvy-bwq.23) reconciles both chord surfaces
+		// editor. Z1 reconciles both chord surfaces
 		// once central keybinding registration lands.
 		{
 			Sequence:    []types.ChordKey{{Code: 'n', Mod: types.ChordModCtrl}},
@@ -530,7 +530,7 @@ func (e *CellEditorController) RegisterActions(reg *commands.Registry) {
 		Handler:     e.Discard,
 	})
 
-	// A2 (dbsavvy-bwq.5) — real handlers backing the per-type entry
+	// A2 — real handlers backing the per-type entry
 	// chord surface. SetNull carries a GetDisabled predicate so the
 	// Matcher surfaces "column is NOT NULL" without dispatching.
 	_ = reg.Register(&commands.Command{
@@ -650,7 +650,7 @@ func (e *CellEditorController) injectExpression(
 // The warning text is helpers.WarnExprPromptLabel and asserts
 // "expressions are injected verbatim" per amendment. The layout pass
 // paints this prompt's border with the theme WarnBorder colour, keyed
-// off that label (see orchestrator.promptBorderStyle, dbsavvy-uly7.14).
+// off that label (see orchestrator.promptBorderStyle).
 func (e *CellEditorController) ExprPrompt(_ commands.ExecCtx) error {
 	if e.ctx == nil || !e.ctx.Active() {
 		return nil

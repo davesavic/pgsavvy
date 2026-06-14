@@ -159,7 +159,7 @@ func TestEditabilityIntrospect_NoPKTable(t *testing.T) {
 // TestEditabilityIntrospect_AppliesConnectionGate exercises the full
 // orchestrator flow: introspect a single editable base table, then fold in
 // the connection read-only flag via ApplyConnectionGate (the part wired into
-// the orchestrator closure for dbsavvy-s8y / Gap 2b).
+// the orchestrator closure for Gap 2b).
 func TestEditabilityIntrospect_AppliesConnectionGate(t *testing.T) {
 	sess := openIntegrationSession(t)
 	cols := columnsFromSelect(t, sess, "SELECT id, email FROM app.users LIMIT 0")

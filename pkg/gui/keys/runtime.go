@@ -21,7 +21,7 @@ type Runtime struct {
 }
 
 // NewRuntime builds a Runtime aggregate from the supplied collaborators.
-// Any field may be nil; the orchestrator (dlp.8c) wires non-nil values.
+// Any field may be nil; the orchestrator wires non-nil values.
 func NewRuntime(c *commands.Registry, m *Matcher, ms *ModeStore, wk *WhichKey, ex *ExRegistry) *Runtime {
 	return &Runtime{
 		Commands:   c,

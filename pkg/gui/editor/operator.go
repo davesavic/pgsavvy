@@ -6,7 +6,7 @@ import (
 )
 
 // ShiftWidth is the fixed indent step (in spaces) for the >>/<< operators.
-// Hardcoded for MVP per epic dbsavvy-wwd Architecture; vim's per-buffer
+// Hardcoded for MVP; vim's per-buffer
 // `&shiftwidth` option is deferred to a successor epic.
 const ShiftWidth = 2
 

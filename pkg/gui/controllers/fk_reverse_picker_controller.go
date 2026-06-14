@@ -21,8 +21,8 @@ import (
 )
 
 // Package-level ActionID aliases. Canonical constants live in
-// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A,
-// dbsavvy-bwq.23). Aliases retain the controllers.FKReverse* names so
+// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A).
+// Aliases retain the controllers.FKReverse* names so
 // existing callers (notably this package's tests) keep compiling.
 const (
 	FKReverseMenu    = commands.FKReverseMenu
@@ -153,8 +153,7 @@ func (p *ReversePanel) Body() string {
 func (p *ReversePanel) HandleKey(types.Key) bool { return false }
 
 // renderReltuples formats the reltuples float into the user-facing
-// "~N rows" / "~0 rows" / "~? rows" string per the amendment in
-// dbsavvy-bwq.17.
+// "~N rows" / "~0 rows" / "~? rows" string.
 func renderReltuples(rt float32) string {
 	switch {
 	case rt < 0:
@@ -181,8 +180,8 @@ func reverseTabTitle(fk models.ForeignKey) string {
 	return fmt.Sprintf("%s.%s", config.SafeText(fk.Table), config.SafeText(fk.Columns[0]))
 }
 
-// FKReversePickerController owns the FK_REVERSE_PICKER popup bindings
-// (dbsavvy-bwq.17). State lives on the supplied
+// FKReversePickerController owns the FK_REVERSE_PICKER popup bindings.
+// State lives on the supplied
 // *guicontext.FKReversePickerContext and is mutated through its installed
 // *popup.TabbedPopup.
 //

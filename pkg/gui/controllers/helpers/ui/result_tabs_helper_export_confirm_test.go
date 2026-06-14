@@ -14,7 +14,7 @@ import (
 
 // orderRecorder records the relative order of "confirm" vs "worker" so the
 // deadlock-avoidance guarantee (Confirm must run on the UI thread BEFORE the
-// worker is dispatched) can be asserted. dbsavvy-uv0.9 (T4).
+// worker is dispatched) can be asserted.
 type orderRecorder struct {
 	events []string
 }
@@ -256,7 +256,7 @@ func TestExportMenuConfirm_ConfirmPrecedesWorker(t *testing.T) {
 // TestExportMenuConfirm_EmptyPath_ToastsNoWrite verifies an empty File path
 // (the user cleared it via the 'i' edit prompt) is rejected with a toast and
 // aborts before any write: no file/.partial lands in the download dir, the
-// worker is never dispatched, and no overwrite Confirm fires. dbsavvy-uv0.9 (T4).
+// worker is never dispatched, and no overwrite Confirm fires.
 func TestExportMenuConfirm_EmptyPath_ToastsNoWrite(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_DOWNLOAD_DIR", dir)

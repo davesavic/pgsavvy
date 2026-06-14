@@ -4,7 +4,7 @@ import "testing"
 
 // TestContextKeyDisplay asserts the snake_case context keys humanize into
 // the readable labels the cheatsheet popup shows in its tab bar + scope
-// banner (dbsavvy-quyg).
+// banner.
 func TestContextKeyDisplay(t *testing.T) {
 	cases := []struct {
 		key  ContextKey

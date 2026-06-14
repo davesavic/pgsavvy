@@ -109,7 +109,7 @@ func (g *Gui) sessionSettingsAccessor() func() map[string]string {
 // result tab's grid at call time (every render frame) — it captures no
 // *grid.View pointer — so a tab switch reflects the new tab's match
 // count and the segment clears the next frame after focus leaves a
-// result tab or the search is cleared (dbsavvy-2ttm.5). Returns
+// result tab or the search is cleared. Returns
 // active=false when focus is not a result tab, no tab is active, or no
 // search is live. Returns nil when the tab helper is unwired (bootstrap
 // safety — no result pane yet).

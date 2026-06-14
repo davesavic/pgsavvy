@@ -6,7 +6,7 @@ package types
 // when one half is focused — the unfocused half still renders, and
 // keyboard input routes by the focused half's scope.
 //
-// DESIGN.md §7 and dbsavvy-66p §D11 motivate the type: the focus
+// DESIGN.md §7 motivates the type: the focus
 // stack is a single linear stack, but the main pane is logically two
 // slots. MainContextPair lets controllers + the orchestrator describe
 // "this is the QueryEditor / result-tab pairing" or "Plan view in the

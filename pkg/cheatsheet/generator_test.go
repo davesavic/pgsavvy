@@ -233,7 +233,7 @@ func TestGenerate_SameKeyDifferentModes(t *testing.T) {
 }
 
 // TestGenerate_PreservesLeaderTokenInKey is the regression for
-// dbsavvy-tro.9: chord bindings written as `<leader>q` must render with
+// chord bindings written as `<leader>q` must render with
 // the raw `<leader>` token in the cheatsheet's Key column — NOT the
 // post-expansion rune (`Space q`) and NOT a bare `q` (the old bug
 // dropped the prefix entirely).

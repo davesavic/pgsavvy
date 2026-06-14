@@ -12,9 +12,9 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// dbsavvy-ko4m.7.4: cross-feature snippet interaction guards (controller half).
+// cross-feature snippet interaction guards (controller half).
 //
-// These lock the runtime behaviors that the snippet accept path (ko4m.7.2)
+// These lock the runtime behaviors that the snippet accept path
 // shares with the broader completion/editor machinery:
 //   - post-accept suppression of the auto-trigger (ordinary keystroke), with
 //     the explicit `<ident>.` dot-context override still re-opening the popup;

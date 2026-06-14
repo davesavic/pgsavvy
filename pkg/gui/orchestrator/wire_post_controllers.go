@@ -11,8 +11,8 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// wireEditDeps builds the EditDeps inline-edit helper bundle
-// (dbsavvy-bwq.py4). All optional.
+// wireEditDeps builds the EditDeps inline-edit helper bundle.
+// All optional.
 func (g *Gui) wireEditDeps() controllers.EditDeps {
 	return controllers.EditDeps{
 		PendingDiscard: g.pendingDiscardH,
@@ -22,7 +22,7 @@ func (g *Gui) wireEditDeps() controllers.EditDeps {
 		// gD picker open — resolves through g.controllers at dispatch
 		// time so the closure works despite the controllers aggregate
 		// being filled in AttachControllers AFTER this HelperBag is
-		// composed. dbsavvy-8oo stub #2.
+		// composed.
 		OpenFKReversePicker: func(entries []controllers.ReverseEntry, origin controllers.FKReverseOriginTab, row, col int) bool {
 			if g.controllers.FKReversePicker == nil {
 				return false
@@ -31,14 +31,14 @@ func (g *Gui) wireEditDeps() controllers.EditDeps {
 		},
 		// Reverse-FK resolver — routes each lookup through the active
 		// SQLSession's FKCache so per-Connect rotation is invisible to
-		// the picker handler (dbsavvy-8oo stub #2). Extracted to a named
+		// the picker handler. Extracted to a named
 		// method so the parked-stream preempt is regression-testable
-		// (dbsavvy-lxn.4), symmetric with the forward adapter.
+		// symmetric with the forward adapter.
 		ReverseFKLookup: g.lookupReverseFK,
 		// ActivePendingEditSet resolves the per-(connID, baseTable) set
 		// from the registry using the currently-active tab's identity.
 		// Returns nil when no tab is active OR the tab has no row
-		// identity (non-table-backed result). dbsavvy-8oo stub #10 / #3.
+		// identity (non-table-backed result).
 		ActivePendingEditSet: func() *models.PendingEditSet {
 			if g.resultTabsH == nil || g.pendingEditReg == nil {
 				return nil
@@ -60,7 +60,7 @@ func (g *Gui) wireEditDeps() controllers.EditDeps {
 					// introspection stored on the grid, otherwise the
 					// apply-path UPDATE is unqualified and fails to resolve on
 					// a fresh pooled session whose search_path doesn't include
-					// the table's schema (dbsavvy-8q6).
+					// the table's schema.
 					if set.Table.Schema == "" {
 						if sch := gv.IdentitySchema(); sch != "" {
 							set.Table.Schema = sch
@@ -70,7 +70,7 @@ func (g *Gui) wireEditDeps() controllers.EditDeps {
 					// renderer shows staged values. The pointer is stable per
 					// (connID, baseTable) and the cell editor stages into the
 					// same instance via this resolver, so a staged edit
-					// reflects on the next render (dbsavvy-cyh).
+					// reflects on the next render.
 					gv.SetPendingEdits(set)
 				}
 			}
@@ -89,14 +89,14 @@ func (g *Gui) wireEditDeps() controllers.EditDeps {
 // TableInspect, History, Cheatsheet) now that g.controllers exists. The
 // four inline-edit popup controllers are wired separately.
 func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *connectInvoker) {
-	// dbsavvy-1rf: wire the CONNECTION_MANAGER modal's list + in-modal-connect
+	// wire the CONNECTION_MANAGER modal's list + in-modal-connect
 	// closures now that both the modal context and connectInvoker exist. The
 	// handlers run on the MainLoop (keybinding dispatch), so the connectInvoker
 	// gen seams stay serialised. The connect lifecycle renders INSIDE the modal
 	// (no standalone CONNECTING push); a successful publish pops the modal.
 	if g.controllers != nil && g.controllers.ConnectionManager != nil && g.registry != nil && g.registry.ConnectionManager != nil {
 		// Populate rows + restore the last-used cursor each time the modal
-		// gains focus (dbsavvy-1rf).
+		// gains focus.
 		g.registry.ConnectionManager.SetOnShow(func() {
 			g.refreshConnectionManagerRail()
 			g.restoreConnectionManagerCursor()
@@ -109,9 +109,9 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 				connectInv.Cancel()
 				g.registry.ConnectionManager.SetMode(guicontext.ModeList)
 			},
-			// dbsavvy-dyf: add/edit form wiring. Prompt drives the per-field
+			// add/edit form wiring. Prompt drives the per-field
 			// PROMPT popup; ExistingNames + DriversFn back validation + the
-			// driver selector. dbsavvy-zod: OnSaveConnection persists the
+			// driver selector. OnSaveConnection persists the
 			// validated profile (append for add, update for edit) and refreshes
 			// the modal list from disk. The full conn carries the
 			// form-untouched fields (Password, SSHTunnel, …) so the rewrite
@@ -143,7 +143,7 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 		// flip the PROMPT scope into ModeCommand on push. Without this
 		// the master Editor's Passthrough branch would not delegate to
 		// gocui.DefaultEditor and paste / arrow-key edits would silently
-		// drop (dbsavvy-7k9, dbsavvy-f5t).
+		// drop.
 		g.registry.Prompt.SetModes(g.keybindingSystem.modeStore)
 		// Plumb the read-and-clear surface so PromptController.Submit
 		// reads the typed value from the view's TextArea (production
@@ -170,7 +170,7 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 			}
 		})
 	}
-	// dbsavvy-2ttm: the SEARCH_LINE search input gets the same caret
+	// the SEARCH_LINE search input gets the same caret
 	// toggle through SearchLineHelper's lifecycle, and a SEARCH_LINE
 	// controller for its <cr>/<esc> bindings attached to the context.
 	if g.searchLineHelp != nil {
@@ -188,7 +188,7 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 		g.controllers.SearchLine = searchCtrl
 	}
 
-	// dbsavvy-3vf.9: build the TABLE_INSPECT popup controller and attach
+	// build the TABLE_INSPECT popup controller and attach
 	// it to its context so its bindings reach the trie via
 	// AllDefaultBindings (the bundle is consumed two blocks down at
 	// trie-build time). Constructed here — not in AttachControllers —
@@ -203,7 +203,7 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 		g.controllers.TableInspect = inspectCtrl
 	}
 
-	// dbsavvy-o9k0.5: build the HISTORY popup controller and attach it to
+	// build the HISTORY popup controller and attach it to
 	// its context so its j/k/gg/G/<cr>/<esc> bindings reach the trie via
 	// AllDefaultBindings. Constructed here — not in AttachControllers —
 	// because it needs a Pop-capable handle on the focus-stack
@@ -222,7 +222,7 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 		g.controllers.History = historyCtrl
 	}
 
-	// dbsavvy-bwq.Z1: build the CHEATSHEET popup controller and attach it
+	// build the CHEATSHEET popup controller and attach it
 	// to the context so the [, ], <tab>, <esc>, q bindings reach the trie
 	// via AllDefaultBindings. Constructed here — not in AttachControllers
 	// — because it needs a Pop-capable handle on the focus-stack.
@@ -238,7 +238,7 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 // wireEditorCompletion wires the completion engine + the SUGGESTIONS
 // overlay context to VimEditorController.
 func (g *Gui) wireEditorCompletion() {
-	// dbsavvy-qsb / dbsavvy-8oo #8: wire the completion engine + the
+	// wire the completion engine + the
 	// SUGGESTIONS overlay context to VimEditorController so the
 	// `<c-x><c-o>` trigger stops being a silent no-op. SchemaSource and
 	// FunctionSource close over the live ConnectHelper session + the
@@ -247,7 +247,7 @@ func (g *Gui) wireEditorCompletion() {
 	// earlier in wireWithDriver. Every source no-ops on nil deps so the
 	// popup degrades cleanly before the first Connect.
 	if g.controllers != nil && g.controllers.VimEditor != nil && g.registry != nil && g.registry.Suggestions != nil {
-		// dbsavvy-ko4m.2.3: completion reads a background-warmed metadata
+		// completion reads a background-warmed metadata
 		// snapshot synchronously instead of the live session — no data race, no
 		// UI block. The SchemaWarmer owns the store (eager table+function names,
 		// lazy per-table columns+FKs), routing every driver call through the
@@ -272,14 +272,14 @@ func (g *Gui) wireEditorCompletion() {
 		store := g.schemaWarmer.Store()
 		schemaPicker := schemasPickerAdapter{registry: g.registry.Schemas}
 		schemaProv := func() string { return schemaPicker.SelectedSchemaName() }
-		// dbsavvy-ko4m.5.3: inject the function-signature-help provider seam into
+		// inject the function-signature-help provider seam into
 		// the FunctionSource, mirroring the SchemaMetadata/SessionProvider wiring.
 		// The editor declares the FunctionDetailProvider interface; the concrete
 		// ConnectHelper satisfies it structurally (FunctionDetail sync read +
 		// WarmFunctionDetail async warm), so no helpers/data import leaks into the
 		// editor. The warm callback must land on the UI loop, so wire the
-		// ConnectHelper's UI scheduler + logger here (ko4m.5.2 handoff). Signature
-		// population/render is ko4m.5.4 — this only supplies the seam, so the
+		// ConnectHelper's UI scheduler + logger here. Signature
+		// population/render is handled elsewhere — this only supplies the seam, so the
 		// emitted function-name candidates are unchanged.
 		fnSource := editor.NewFunctionSource(store)
 		if g.connectHelper != nil {
@@ -290,7 +290,7 @@ func (g *Gui) wireEditorCompletion() {
 		sources := []editor.Source{
 			editor.NewSchemaSource(store, g.schemaWarmer, schemaProv),
 			fnSource,
-			// dbsavvy-ko4m.7.3: register the real SnippetSource backed by the
+			// register the real SnippetSource backed by the
 			// built-in starter set (BuiltinSnippetProvider) — replacing the
 			// removed placeholder source. NewSnippetSource defaults Priority() to
 			// SnippetSourcePriority (the SnippetSourceBias rank const, 50), so the
@@ -306,7 +306,7 @@ func (g *Gui) wireEditorCompletion() {
 		}
 		g.controllers.VimEditor.SetCompletionEngine(editor.NewEngine(sources))
 		g.controllers.VimEditor.SetSuggestionsContext(g.registry.Suggestions)
-		// dbsavvy-ko4m.5.4: feed the SAME signature-help provider + active-schema
+		// feed the SAME signature-help provider + active-schema
 		// source into the SUGGESTIONS popup context so the selected function's
 		// signature renders as a dedicated help footer with re-render-on-warm.
 		// The ConnectHelper's SetUIScheduler (wired above) guarantees the
@@ -315,7 +315,7 @@ func (g *Gui) wireEditorCompletion() {
 		if g.connectHelper != nil {
 			g.registry.Suggestions.SetFunctionDetailProvider(g.connectHelper, schemaProv)
 		}
-		// dbsavvy-ko4m.6.3: the SAME warmed store + active-schema provider feed
+		// the SAME warmed store + active-schema provider feed
 		// the accept-time ambiguous-column qualifier (it satisfies
 		// editor.SchemaMetadata). The store's Columns ok-return is the
 		// warmed-or-not signal the qualifier requires before guessing.

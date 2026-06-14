@@ -57,7 +57,7 @@ func (a schemasPickerAdapter) ToggleShowHidden() {
 		return
 	}
 	a.registry.SetShowHiddenMode(!a.registry.GetShowHiddenMode())
-	// dbsavvy-ioaj note 3: drop any active rail search on a show-hidden
+	// Drop any active rail search on a show-hidden
 	// toggle (UI-thread path, race-free) so n/N can't park the cursor on
 	// a now-hidden row. Must precede the HandleRender kick below.
 	a.registry.ClearSearch()
@@ -102,7 +102,7 @@ func (a *activeConnAdapter) ActiveConnectionID() string {
 // connectInvoker is the controllers.ConnectInvoker facade. It calls the
 // real data.ConnectHelper.Connect, stashes the active connection ID on
 // the Gui so SchemasInvoker can scope its AppState keys, and wires the
-// fresh SQLSession into the orchestrator-owned QueryRunner (dbsavvy-66p.16).
+// fresh SQLSession into the orchestrator-owned QueryRunner.
 //
 // The query SQLSession runs on a SECOND drivers.Session acquired from
 // the same Connection — the first session is owned by ConnectHelper for
@@ -116,8 +116,7 @@ type connectInvoker struct {
 	history *query.History
 
 	// mu guards cancelFn + current, which the MainLoop-serialised
-	// startAttempt / Cancel / Retry seams read and write (epic
-	// dbsavvy-e53.5).
+	// startAttempt / Cancel / Retry seams read and write.
 	mu sync.Mutex
 	// cancelFn aborts the in-flight UI dial's ctx. Set by startAttempt,
 	// cleared+called by Cancel, released by the worker closure on
@@ -132,7 +131,7 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	if c == nil || c.helper == nil {
 		return nil
 	}
-	// Supersession token (dbsavvy-fow.1): bump on entry and capture the
+	// Supersession token: bump on entry and capture the
 	// new value. This is the reconnect / direct-Connect path; UI-initiated
 	// attempts go through startAttempt (which bumps on the MainLoop). A
 	// later activation bumps it again; on completion we compare via
@@ -150,7 +149,7 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 // startAttempt is the single shared UI dial path. It MUST be invoked on the
 // gocui MainLoop: the connectGen bump and the Cancel bump both run there, so
 // Cancel's bump is always strictly higher than the attempt's gen and the
-// worker is reliably superseded (epic dbsavvy-e53.5 — the critical cancel
+// worker is reliably superseded (the critical cancel
 // race fix; do NOT move the bump onto the worker for UI attempts).
 func (c *connectInvoker) startAttempt(profile *models.Connection) {
 	if c == nil || c.g == nil || profile == nil {
@@ -159,8 +158,8 @@ func (c *connectInvoker) startAttempt(profile *models.Connection) {
 	gen := c.g.connectionState.connectGen.Add(1)
 	// Cancel-only, no deadline: the network connect budget lives in the pg
 	// driver (connectTimeout), applied AFTER interactive credential prompts so
-	// a human typing a passphrase is not charged against the dial budget (epic
-	// dbsavvy-t60w). cancel still drives Cancel/supersession.
+	// a human typing a passphrase is not charged against the dial budget.
+	// cancel still drives Cancel/supersession.
 	ctx, cancel := context.WithCancel(context.Background())
 	c.mu.Lock()
 	c.cancelFn = cancel
@@ -170,7 +169,7 @@ func (c *connectInvoker) startAttempt(profile *models.Connection) {
 	// re-enters the connecting state. Seeds the staged checklist (Tunnel only
 	// when the profile carries one; Auth + Objects always) with the first
 	// stage Active so a retry starts fresh — no stale ✓/✗ rows (T3). Always
-	// writes the modal's ConnectingState sink (dbsavvy-bsh: standalone
+	// writes the modal's ConnectingState sink (standalone
 	// CONNECTING retired).
 	if sink := c.connectingSink(true); sink != nil {
 		sink.SetConnectingStaged(profile.Name, buildStages(profile))
@@ -336,8 +335,8 @@ func schemaCountLabel(n int) string {
 	return fmt.Sprintf("%d schemas", n)
 }
 
-// startModalAttempt is the CONNECTION_MANAGER modal's connect entry point
-// (dbsavvy-1rf). It marks the attempt as modal-origin (so the connecting body
+// startModalAttempt is the CONNECTION_MANAGER modal's connect entry point.
+// It marks the attempt as modal-origin (so the connecting body
 // renders inside the modal and a successful publish pops it), flips the modal
 // into connecting mode, then dials via the SHARED startAttempt path — the
 // gen/supersession/cancel/worker logic is unchanged. MUST run on the MainLoop.
@@ -352,8 +351,7 @@ func (c *connectInvoker) startModalAttempt(profile *models.Connection) {
 }
 
 // connectingStateSink is the narrow connecting/error write surface shared by
-// the standalone CONNECTING screen and the modal's ConnectingState
-// (dbsavvy-1rf).
+// the standalone CONNECTING screen and the modal's ConnectingState.
 type connectingStateSink interface {
 	// SetConnectingStaged enters the connecting phase for name and REPLACES
 	// the stage checklist so a retry starts fresh (no stale ✓/✗ rows). T3
@@ -373,7 +371,7 @@ type connectingStateSink interface {
 
 // connectingSink returns the write target for the connecting/error body:
 // always the CONNECTION_MANAGER modal's ConnectingState (standalone
-// CONNECTING was retired by dbsavvy-bsh). The modal parameter is retained
+// CONNECTING was retired). The modal parameter is retained
 // for signature compatibility with callers but is unused. Nil when the
 // modal context is unwired (test fixtures).
 func (c *connectInvoker) connectingSink(_ bool) connectingStateSink {
@@ -389,8 +387,7 @@ func (c *connectInvoker) connectingSink(_ bool) connectingStateSink {
 // Cancel supersedes the in-flight UI attempt and aborts its dial. Invoked
 // on the MainLoop via the Esc seam: the connectGen bump here is strictly
 // higher than the bump startAttempt made (both serialised on the loop), so
-// the in-flight worker finds itself stale and publishes nothing (epic
-// dbsavvy-e53.5).
+// the in-flight worker finds itself stale and publishes nothing.
 func (c *connectInvoker) Cancel() {
 	if c == nil {
 		return
@@ -425,7 +422,7 @@ func (c *connectInvoker) Retry() {
 // through the shared ConnectHelper (which rejects a second Connect while a
 // Session is open). It is a no-op on a first connect (no active profile) and
 // on a same-profile re-select. Runs on the worker — the same lane, and the
-// same teardown ordering, as reconnectInvoker.Reconnect (dbsavvy-k70h).
+// same teardown ordering, as reconnectInvoker.Reconnect.
 func (c *connectInvoker) teardownForSwitch(profile *models.Connection) {
 	if c.g == nil || profile == nil {
 		return
@@ -436,7 +433,7 @@ func (c *connectInvoker) teardownForSwitch(profile *models.Connection) {
 	}
 	// Close the query session FIRST — it releases its pooled conn; closing the
 	// pool (helper.Disconnect) before that deadlocks waiting on the still-held
-	// conn (dbsavvy-txb).
+	// conn.
 	if c.g.queryState.activeSQLSession != nil {
 		_ = c.g.queryState.activeSQLSession.Close()
 		c.g.queryState.activeSQLSession = nil
@@ -449,9 +446,9 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 	// the worker goroutine — connections_controller.go schedules it via
 	// OnWorker). Nothing in this phase writes GUI state the MainLoop reads;
 	// results are collected into locals and published in the single
-	// OnUIThread closure below (dbsavvy-fow.1).
+	// OnUIThread closure below.
 	//
-	// dbsavvy-k70h: switching to a different profile mid-session (e.g.
+	// Switching to a different profile mid-session (e.g.
 	// <leader>C → pick another connection) must tear the live connection down
 	// first — the shared ConnectHelper rejects a second Connect with "already
 	// connected" while a Session is open. No-op on a first connect or a
@@ -524,17 +521,17 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 
 	editorBuf, editorOK := c.loadQueryEditorBuffer(profile)
 
-	// dbsavvy-dl7.4: direct-load saved schema/table state on worker.
+	// Direct-load saved schema/table state on worker.
 	savedSchemaIdx, tableItems, savedTableIdx := c.loadSavedSchemaTableState(
 		ctx, profile, schemaItems, schemaOK)
 
-	// dbsavvy-56u.1: stamp LastConnectionID and prepend the profile to
+	// Stamp LastConnectionID and prepend the profile to
 	// the LIFO RecentConnectionIDs ring (deduped, capped at 10). Persisted
 	// AFTER wireQueryRuntimeIO succeeds so a wiring rollback does not leave
 	// a debounced write pointing at a profile that failed to connect.
 	// MutateAndSave is independently synchronized and touches no gocui view
-	// state, so it stays on the worker (dbsavvy-fow.1).
-	// Stale-gated (epic dbsavvy-e53.5): a cancel-after-successful-dial bumps
+	// state, so it stays on the worker.
+	// Stale-gated: a cancel-after-successful-dial bumps
 	// gen, so a superseded attempt must NOT stamp persisted state.
 	if profile != nil && c.g != nil && c.g.deps.Store != nil && !c.isStaleConnect(gen) {
 		name := profile.Name
@@ -544,10 +541,10 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		})
 	}
 
-	// hq5.12: replay persisted session settings (search_path,
+	// replay persisted session settings (search_path,
 	// statement_timeout, timezone, application_name) on the fresh session.
 	// Runs on the worker — the toast hint is published in the UI closure.
-	// Stale-gated (epic dbsavvy-e53.5): a superseded attempt must NOT replay
+	// Stale-gated: a superseded attempt must NOT replay
 	// SET commands on the doomed session.
 	var restoreHint string
 	if profile != nil && rt.sqlSess != nil && !c.isStaleConnect(gen) {
@@ -557,7 +554,7 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 	// --- PUBLISH PHASE: a SINGLE OnUIThread closure performs every write
 	// the MainLoop reads (activeConn, SQLSession, QueryRunner.Bind, the
 	// SCHEMAS rail items, the editor buffer, the focus push) so they
-	// serialise with render-frame reads (dbsavvy-fow.1). The stale-gen
+	// serialise with render-frame reads. The stale-gen
 	// recheck runs FIRST: if a newer activation superseded us, we tear
 	// down everything the worker opened and publish NOTHING — so
 	// activeSQLSession is never written for a superseded connect and no
@@ -582,19 +579,19 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		c.publishQueryEditorBuffer(editorBuf, editorOK)
 		c.publishSchemaItems(schemaItems, schemaOK)
 		c.setActiveConn(profile)
-		// dbsavvy-ko4m.2.3: eagerly warm the completion metadata snapshot for
+		// Eagerly warm the completion metadata snapshot for
 		// the active schema (table+view names + per-connection function names)
 		// off the UI thread, so the first FROM/function completion serves from
 		// the store without a driver round-trip. LoadEager is idempotent and
 		// routes through the ConnectHelper serialized worker.
 		c.warmEagerSchema()
-		// dbsavvy-1rf: a modal-origin connect renders its connecting body
+		// A modal-origin connect renders its connecting body
 		// inside the CONNECTION_MANAGER modal. On success pop the modal (and
 		// reset it back to list mode for a later re-open) BEFORE pushing the
 		// schemas/tables rails so the user lands in restored navigation with
 		// the modal gone.
 		c.popModalOnSuccess()
-		// dbsavvy-dl7.4: restore schema cursor + publish tables.
+		// Restore schema cursor + publish tables.
 		if savedSchemaIdx >= 0 && c.g.registry != nil && c.g.registry.Schemas != nil {
 			c.g.registry.Schemas.SetCursor(savedSchemaIdx)
 		}
@@ -604,11 +601,11 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 				c.g.registry.Tables.SetCursor(savedTableIdx)
 			}
 		}
-		// hq5.12: show restore toast on the UI thread.
+		// show restore toast on the UI thread.
 		if restoreHint != "" && c.g.toastHelp != nil {
 			c.g.toastHelp.Show(restoreHint, 4*time.Second)
 		}
-		// dbsavvy-yea: land focus in the query editor on connection open,
+		// Land focus in the query editor on connection open,
 		// not the side rail. Push the rail first (SIDE_CONTEXT) so it is
 		// populated and rendered, then push the query editor (MAIN_CONTEXT)
 		// on top so it holds focus and the cursor starts there.
@@ -634,7 +631,7 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 // async driver is wired, and otherwise runs it inline. The inline branch
 // preserves the synchronous test-wiring path (c.g nil or the driver not
 // yet attached) where publication must still happen on the caller
-// goroutine. dbsavvy-fow.1.
+// goroutine.
 func (c *connectInvoker) runOnUIThread(fn func() error) {
 	if c == nil || fn == nil {
 		return
@@ -649,7 +646,7 @@ func (c *connectInvoker) runOnUIThread(fn func() error) {
 // isStaleConnect reports whether a connect that captured token gen has
 // been superseded by a newer activation (a later Connect bumped
 // connectGen past gen). Always false when g is nil (test wiring without
-// a Gui). dbsavvy-fow.1.
+// a Gui).
 func (c *connectInvoker) isStaleConnect(gen uint64) bool {
 	if c == nil || c.g == nil {
 		return false
@@ -662,7 +659,7 @@ func (c *connectInvoker) isStaleConnect(gen uint64) bool {
 // branch (the wiring-rollback branch already owns a UI closure and calls
 // publishConnectError inline). Stale-gen guarded both before scheduling and
 // inside the closure (the gen could be bumped between the two), so a
-// superseded worker never paints the live screen (epic dbsavvy-e53).
+// superseded worker never paints the live screen.
 func (c *connectInvoker) routeConnectError(gen uint64, err error) {
 	if c.isStaleConnect(gen) {
 		return
@@ -680,7 +677,7 @@ func (c *connectInvoker) routeConnectError(gen uint64, err error) {
 // top of the focus stack — a cancel/retry may have popped it, and writing a
 // dead screen would be a leak. Credentials are redacted (URL + kv forms)
 // THEN control bytes stripped before reaching the screen (SECURITY: never
-// surface a raw err). epic dbsavvy-e53.
+// surface a raw err).
 func (c *connectInvoker) publishConnectError(gen uint64, err error) {
 	if err == nil || c.isStaleConnect(gen) {
 		return
@@ -690,7 +687,7 @@ func (c *connectInvoker) publishConnectError(gen uint64, err error) {
 	}
 	// The error must only paint the screen that is actually top of the
 	// focus stack — a cancel/retry may have popped it, and writing a dead
-	// screen would be a leak (dbsavvy-bsh: always CONNECTION_MANAGER).
+	// screen would be a leak (always CONNECTION_MANAGER).
 	if top := c.g.tree.Current(); top == nil || top.GetKey() != types.CONNECTION_MANAGER {
 		return
 	}
@@ -703,7 +700,7 @@ func (c *connectInvoker) publishConnectError(gen uint64, err error) {
 }
 
 // popModalOnSuccess pops the CONNECTION_MANAGER modal off the focus stack and
-// resets it to list mode after a modal-origin connect succeeds (dbsavvy-1rf).
+// resets it to list mode after a modal-origin connect succeeds.
 // No-op for standalone CONNECTING-origin connects, or when the registry/tree
 // is unwired. MUST run on the UI thread (called from the publish closure).
 func (c *connectInvoker) popModalOnSuccess() {
@@ -716,7 +713,7 @@ func (c *connectInvoker) popModalOnSuccess() {
 
 // connectErrMessage returns the user-facing string for a Connect error.
 // Rewrites the data-layer "already connected" sentinel into a friendlier
-// short phrase (dbsavvy-e9i); every other error is surfaced verbatim. The
+// short phrase; every other error is surfaced verbatim. The
 // caller redacts + sanitizes the returned string before it reaches the
 // CONNECTING screen.
 func connectErrMessage(err error) string {
@@ -736,7 +733,7 @@ func connectErrMessage(err error) string {
 // setActiveConn writes the active-connection state. MUST be called on
 // the UI thread (via OnUIThread) so it serialises with the MainLoop
 // reads of activeConnID. Passing nil clears the state (wiring-rollback
-// path). dbsavvy-fow.1.
+// path).
 func (c *connectInvoker) setActiveConn(profile *models.Connection) {
 	if c == nil || c.g == nil {
 		return
@@ -754,17 +751,16 @@ func (c *connectInvoker) setActiveConn(profile *models.Connection) {
 // and pushes the visible subset (built-in / profile-hidden patterns
 // filtered out) onto the SchemasContext so the SCHEMAS rail draws rows
 // on the next layout frame. Without this hook the rail stays empty
-// after a successful connect even though the driver is ready
-// (dbsavvy-855).
+// after a successful connect even though the driver is ready.
 //
 // Best-effort: a LoadSchemas error is logged and swallowed — the user
 // still has the open connection and can retry by re-pressing <cr>.
 // Empty registry / context (test wiring) collapses to a silent no-op.
 //
-// dbsavvy-zt9: this runs on a WORKER goroutine, so the publishSchemaItems
+// This runs on a WORKER goroutine, so the publishSchemaItems
 // call (a mutex-free SetItems write the MainLoop reads every frame) is
 // marshaled onto the UI thread via runOnUIThread, mirroring the
-// load-on-worker / publish-on-UI-thread split (dbsavvy-fow.1). The other
+// load-on-worker / publish-on-UI-thread split. The other
 // publishSchemaItems caller (the connect path) is already on the UI thread
 // and stays raw, so the marshal lives here at the worker call site rather
 // than inside publishSchemaItems.
@@ -783,8 +779,8 @@ func (c *connectInvoker) populateSchemasRail(ctx context.Context) {
 // loads the schema list via ConnectHelper.LoadSchemas, applies the
 // builtin+profile hide-pattern filter, and builds the []any rail slice.
 // It performs NO context write (SetItems) so it is safe to run on the
-// worker goroutine; publishSchemaItems does the write on the UI thread
-// (dbsavvy-fow.1). The bool reports whether a slice was produced (false
+// worker goroutine; publishSchemaItems does the write on the UI thread.
+// The bool reports whether a slice was produced (false
 // on missing deps or a LoadSchemas error) so callers can skip the publish
 // and leave the existing rail items intact.
 func (c *connectInvoker) loadSchemaItems(ctx context.Context) ([]any, bool) {
@@ -821,7 +817,7 @@ func (c *connectInvoker) loadSchemaItems(ctx context.Context) ([]any, bool) {
 // loadSavedSchemaTableState finds the saved schema in schemaItems and, if
 // found, loads its tables via LoadTables (direct-load pattern). Returns the
 // schema cursor index (-1 if not found), table items (nil if not loaded), and
-// table cursor index (-1 if not found). All failures are no-ops. dbsavvy-dl7.4.
+// table cursor index (-1 if not found). All failures are no-ops.
 func (c *connectInvoker) loadSavedSchemaTableState(
 	ctx context.Context, profile *models.Connection, schemaItems []any, schemaOK bool,
 ) (schemaIdx int, tableItems []any, tableIdx int) {
@@ -882,7 +878,7 @@ func (c *connectInvoker) loadSavedSchemaTableState(
 // SideListContext.SetItems is a plain mutex-free write of items+cursor
 // that the MainLoop reads every frame via Items()/HandleRender()/
 // SelectedItem(), so this MUST run on the UI thread to serialise with
-// those reads (dbsavvy-fow.1). A false ok (load skipped/failed) is a
+// those reads. A false ok (load skipped/failed) is a
 // no-op, leaving the existing rail intact.
 func (c *connectInvoker) publishSchemaItems(items []any, ok bool) {
 	if c == nil || !ok || c.g == nil || c.g.registry == nil || c.g.registry.Schemas == nil {
@@ -897,7 +893,7 @@ func (c *connectInvoker) publishSchemaItems(items []any, ok bool) {
 // the store without a blocking driver call. The SchemaWarmer's LoadEager
 // already routes through the ConnectHelper serialized worker and is idempotent;
 // running it here off the UI thread keeps connect snappy. No-op when the warmer
-// is unwired or no schema is selected (dbsavvy-ko4m.2.3).
+// is unwired or no schema is selected.
 func (c *connectInvoker) warmEagerSchema() {
 	if c == nil || c.g == nil || c.g.schemaWarmer == nil {
 		return
@@ -916,17 +912,17 @@ func (c *connectInvoker) warmEagerSchema() {
 // populateTablesRail loads the table list for schema via
 // ConnectHelper.LoadTables and pushes the result onto TablesContext so
 // the TABLES rail draws rows on the next layout frame. Wired to the
-// SCHEMAS-rail <CR> handler via HelperBag.OnSchemaActivate (dbsavvy-04n).
+// SCHEMAS-rail <CR> handler via HelperBag.OnSchemaActivate.
 //
 // Best-effort: a LoadTables error is logged and swallowed; the existing
 // TablesContext.items are left intact so a transient failure does not
 // blank a previously-loaded list. An empty schema name is a silent
 // no-op (matches the picker's empty-list contract).
 //
-// dbsavvy-zt9: this runs on a WORKER goroutine, so the SetItems publish (a
+// This runs on a WORKER goroutine, so the SetItems publish (a
 // mutex-free items+cursor write the MainLoop reads every frame) is marshaled
 // onto the UI thread via runOnUIThread to serialise with render-frame reads,
-// mirroring the load-on-worker / publish-on-UI-thread split (dbsavvy-fow.1).
+// mirroring the load-on-worker / publish-on-UI-thread split.
 func (c *connectInvoker) populateTablesRail(ctx context.Context, schema string) {
 	if c == nil || c.g == nil || c.helper == nil {
 		return
@@ -962,10 +958,10 @@ func (c *connectInvoker) populateTablesRail(ctx context.Context, schema string) 
 // ColumnsContext.items are left intact so a transient failure does not
 // blank a previously-loaded list. Empty schema/table is a silent no-op.
 //
-// dbsavvy-zt9: this runs on a WORKER goroutine, so the SetItems publish (a
+// This runs on a WORKER goroutine, so the SetItems publish (a
 // mutex-free items+cursor write the MainLoop reads every frame) is marshaled
 // onto the UI thread via runOnUIThread to serialise with render-frame reads,
-// mirroring the load-on-worker / publish-on-UI-thread split (dbsavvy-fow.1).
+// mirroring the load-on-worker / publish-on-UI-thread split.
 func (c *connectInvoker) populateColumnsRail(ctx context.Context, schema, table string) {
 	if c == nil || c.g == nil || c.helper == nil {
 		return
@@ -996,16 +992,16 @@ func (c *connectInvoker) populateColumnsRail(ctx context.Context, schema, table 
 // ConnectHelper.LoadIndexes and pushes the result onto IndexesContext so
 // the INDEXES rail draws rows on the next layout frame. Mirrors
 // populateColumnsRail — wired alongside it from the TABLES-rail <CR>
-// composite worker (dbsavvy-56u.1).
+// composite worker.
 //
 // Best-effort: a LoadIndexes error is logged and swallowed; the existing
 // IndexesContext.items are left intact so a transient failure does not
 // blank a previously-loaded list. Empty schema/table is a silent no-op.
 //
-// dbsavvy-zt9: this runs on a WORKER goroutine, so the SetItems publish (a
+// This runs on a WORKER goroutine, so the SetItems publish (a
 // mutex-free items+cursor write the MainLoop reads every frame) is marshaled
 // onto the UI thread via runOnUIThread to serialise with render-frame reads,
-// mirroring the load-on-worker / publish-on-UI-thread split (dbsavvy-fow.1).
+// mirroring the load-on-worker / publish-on-UI-thread split.
 func (c *connectInvoker) populateIndexesRail(ctx context.Context, schema, table string) {
 	if c == nil || c.g == nil || c.helper == nil {
 		return
@@ -1032,17 +1028,17 @@ func (c *connectInvoker) populateIndexesRail(ctx context.Context, schema, table 
 	})
 }
 
-// loadQueryEditorBuffer is the I/O phase of the dbsavvy-wwd.9 post-Connect
+// loadQueryEditorBuffer is the I/O phase of the post-Connect
 // hook. It resolves (or generates) the persistent buffer UUID for the
 // active connection via AppStateStore.GetOrCreateBufferUUID and loads the
 // on-disk buffer (or a fresh empty Buffer when missing). The UUID lookup
 // MUST go through the store (not Common.AppState, which is an unwired
-// empty literal that never reaches disk — dbsavvy-lrh) so the same UUID
+// empty literal that never reaches disk) so the same UUID
 // is reused across runs and previously-persisted .sql files are picked up
 // instead of orphaned. It performs NO context write (SetBuffer) so it is
 // safe to run on the worker goroutine; the disk read does not block the
-// MainLoop. publishQueryEditorBuffer does the write on the UI thread
-// (dbsavvy-fow.1). Missing Common / Store / registry / profile are silent
+// MainLoop. publishQueryEditorBuffer does the write on the UI thread.
+// Missing Common / Store / registry / profile are silent
 // no-ops (false ok) so test wiring without persistence still passes
 // through.
 func (c *connectInvoker) loadQueryEditorBuffer(profile *models.Connection) (*editor.Buffer, bool) {
@@ -1073,7 +1069,7 @@ func (c *connectInvoker) loadQueryEditorBuffer(profile *models.Connection) (*edi
 // loadQueryEditorBuffer: it injects the loaded buffer into the live
 // QueryEditorContext. SetBuffer is mutex-free on QueryEditorContext and
 // the MainLoop renders the buffer every frame, so this MUST run on the UI
-// thread to serialise with those reads (dbsavvy-fow.1). The swapped
+// thread to serialise with those reads. The swapped
 // *editor.Buffer's own sync.RWMutex serialises subsequent edits. A false
 // ok (load skipped/failed) is a no-op.
 func (c *connectInvoker) publishQueryEditorBuffer(buf *editor.Buffer, ok bool) {
@@ -1090,7 +1086,7 @@ func (c *connectInvoker) publishQueryEditorBuffer(buf *editor.Buffer, ok bool) {
 // (worker goroutine) so the publish phase (UI thread) can Bind the runner
 // and stash the SQLSession on the Gui without re-acquiring. A nil sqlSess
 // means there was nothing to wire (runner/conn/profile absent — test
-// wiring); the publish phase then no-ops. dbsavvy-fow.1.
+// wiring); the publish phase then no-ops.
 type queryRuntime struct {
 	sqlSess *session.SQLSession
 	caps    drivers.Capabilities
@@ -1102,8 +1098,7 @@ type queryRuntime struct {
 // It performs NO GUI-state writes (no QueryRunner.Bind, no
 // g.activeSQLSession assignment) — those run on the UI thread in
 // publishQueryRuntime so the MainLoop's reads of activeSQLSession
-// serialise with the publication. Runs on the worker goroutine
-// (dbsavvy-fow.1).
+// serialise with the publication. Runs on the worker goroutine.
 func (c *connectInvoker) wireQueryRuntimeIO(ctx context.Context, conn drivers.Connection, profile *models.Connection) (queryRuntime, error) {
 	if c.runner == nil || conn == nil || profile == nil {
 		return queryRuntime{}, nil
@@ -1133,7 +1128,7 @@ func (c *connectInvoker) wireQueryRuntimeIO(ctx context.Context, conn drivers.Co
 // on the UI thread (the MainLoop reads g.activeSQLSession every frame).
 // QueryRunner.Bind is itself atomic, but g.activeSQLSession is a plain
 // field, so this serialises with render reads. A zero queryRuntime
-// (nil sqlSess) is a no-op. dbsavvy-fow.1.
+// (nil sqlSess) is a no-op.
 func (c *connectInvoker) publishQueryRuntime(rt queryRuntime) {
 	if c == nil || rt.sqlSess == nil {
 		return
@@ -1150,7 +1145,7 @@ func (c *connectInvoker) publishQueryRuntime(rt queryRuntime) {
 // replays allowed SET commands on the freshly opened SQLSession. Returns a
 // human-readable hint listing restored settings (empty when nothing restored).
 // Failures are logged and skipped — a partial restore is better than aborting
-// the connect. Runs on the worker goroutine (I/O phase). hq5.12.
+// the connect. Runs on the worker goroutine (I/O phase).
 func (c *connectInvoker) restoreSessionSettings(ctx context.Context, sess *session.SQLSession, connID string) string {
 	if sess == nil || connID == "" || c.g == nil || c.g.deps.Store == nil {
 		return ""
@@ -1320,7 +1315,7 @@ func (c *connectionFormInvoker) WalkAdd(ctx context.Context) error {
 // hideOverlayStateAdapter implements guicontext.HideOverlayState by
 // proxying through the ResultTabsHelper. The helper owns overlay
 // lifecycle (HideOverlayActive / HideOverlayBody) and the context only
-// renders the rendered body each frame. dbsavvy-uv0.6.
+// renders the rendered body each frame.
 type hideOverlayStateAdapter struct {
 	helper *ui.ResultTabsHelper
 }
@@ -1341,7 +1336,6 @@ func (a hideOverlayStateAdapter) Body() string {
 
 // exportMenuStateAdapter implements guicontext.ExportMenuState by
 // proxying through the ResultTabsHelper. Mirrors hideOverlayStateAdapter.
-// dbsavvy-uv0.9.
 type exportMenuStateAdapter struct {
 	helper *ui.ResultTabsHelper
 }
@@ -1362,8 +1356,8 @@ func (a exportMenuStateAdapter) Body() string {
 
 // promptStateAdapter implements guicontext.PromptState by surfacing
 // the PromptHelper's label + active flag to PromptContext.HandleRender.
-// The typed buffer is no longer combined here: post-dbsavvy-fq9 the
-// PROMPT view is editable and the runtime source of truth for the
+// The typed buffer is no longer combined here: the
+// PROMPT view is now editable and the runtime source of truth for the
 // input is the view's TextArea (PromptContext.Buffer reads through),
 // mirroring the COMMAND_LINE path.
 type promptStateAdapter struct {
@@ -1409,8 +1403,8 @@ func (m *menuPushHelper) PopMenu() error {
 }
 
 // reconnectInvoker adapts ConnectHelper + connectInvoker into the
-// narrow ReconnectInvoker surface the ReconnectController consumes
-// (hq5.7). PingConnection issues a lightweight pool-level round-trip;
+// narrow ReconnectInvoker surface the ReconnectController consumes.
+// PingConnection issues a lightweight pool-level round-trip;
 // Reconnect tears down both sessions (schema-rail + query) and
 // re-opens with the same profile via the full connectInvoker.Connect
 // pathway (which wires the QueryRunner, reloads schemas, etc.).
@@ -1443,7 +1437,7 @@ func (r *reconnectInvoker) Reconnect(ctx context.Context, profile *models.Connec
 	// Tear down the query session FIRST. SQLSession.Close releases its
 	// inner pool conn; if we close the pool first (helper.Disconnect) the
 	// pool's Close blocks forever waiting for that outstanding conn to be
-	// released, deadlocking the reconnect. dbsavvy-txb.
+	// released, deadlocking the reconnect.
 	if r.inv.g != nil && r.inv.g.queryState.activeSQLSession != nil {
 		_ = r.inv.g.queryState.activeSQLSession.Close()
 		r.inv.g.queryState.activeSQLSession = nil
@@ -1451,7 +1445,7 @@ func (r *reconnectInvoker) Reconnect(ctx context.Context, profile *models.Connec
 	// Tear down the schema-rail session + pool. This also satisfies the
 	// "data: already connected (call Disconnect first)" guard in Connect.
 	r.helper.Disconnect()
-	// dbsavvy-ko4m.2.4: drop ALL warmed completion metadata from the prior
+	// Drop ALL warmed completion metadata from the prior
 	// connection AND the warmer's per-key cooldown/in-flight bookkeeping, so no
 	// stale entry survives the reconnect and a table that was in cooldown at
 	// disconnect is not suppressed on the new connection. The following Connect
@@ -1467,7 +1461,7 @@ func (r *reconnectInvoker) Reconnect(ctx context.Context, profile *models.Connec
 // forwarding to the SchemaWarmer, resolved lazily because the warmer is
 // constructed (wireEditorCompletion) after the QueryDeps bundle this adapter
 // lives in is value-copied into the controllers. A nil warmer (pre-wire, or a
-// build that omits completion) makes every method a no-op. dbsavvy-ko4m.2.4.
+// build that omits completion) makes every method a no-op.
 type metadataInvalidatorAdapter struct{ g *Gui }
 
 func (a *metadataInvalidatorAdapter) InvalidateSchema(schema string) {

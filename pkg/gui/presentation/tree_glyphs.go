@@ -9,7 +9,7 @@ package presentation
 //   - GlyphLeaf ("─"): a node with no children.
 //
 // Plain Unicode, no SGR escapes — the renderer composes coloring on top
-// via theme.Style. dbsavvy-uv0.8.
+// via theme.Style.
 const (
 	GlyphExpanded  = "▼"
 	GlyphCollapsed = "▶"

@@ -15,8 +15,8 @@ import (
 // driverSessionMethods are the method names on drivers.Session that fetch
 // schema/function metadata. The jxw data race was caused by completion sources
 // calling these DIRECTLY on a live drivers.Session from the UI goroutine,
-// bypassing the per-Session serialization contract. ko4m.2 repointed every
-// completion source at the synchronous SchemaMetadata snapshot interface, so NO
+// bypassing the per-Session serialization contract. Every
+// completion source was repointed at the synchronous SchemaMetadata snapshot interface, so NO
 // completion_*.go path may name any of these (the warmer is the only caller, and
 // it routes them through the serialized ConnectHelper wrappers).
 var driverSessionMethods = []string{

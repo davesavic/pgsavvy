@@ -267,7 +267,7 @@ func TestValidateUserConfig_MissingCheatsheetWarning(t *testing.T) {
 	}
 }
 
-// TestQuitBindingRequired covers dbsavvy-ivck.5 (T5): a merged config with
+// TestQuitBindingRequired covers that a merged config with
 // no app.quit binding is a hard ERROR (not a warning), while a config that
 // does bind app.quit validates cleanly. help.cheatsheet must remain a
 // warning either way (the asymmetry is intentional).
@@ -367,7 +367,7 @@ func containsErrSubstr(errs []error, sub string) bool {
 }
 
 // TestValidateUserConfig_UIPaginationDefaults pins that the shipped
-// defaults (200/50/25/1_000_000) all pass validation. dbsavvy-uv0.3.
+// defaults (200/50/25/1_000_000) all pass validation.
 func TestValidateUserConfig_UIPaginationDefaults(t *testing.T) {
 	cfg := GetDefaultConfig()
 	_, errs := ValidateUserConfig(cfg, fullDeps())
@@ -446,7 +446,7 @@ func TestValidateUserConfig_MouseDoubleClickMs_DefaultClean(t *testing.T) {
 }
 
 // TestValidateUserConfig_ExportDefaults pins that the shipped export
-// defaults validate clean. dbsavvy-uv0.9.
+// defaults validate clean.
 func TestValidateUserConfig_ExportDefaults(t *testing.T) {
 	cfg := GetDefaultConfig()
 	_, errs := ValidateUserConfig(cfg, fullDeps())
@@ -456,7 +456,7 @@ func TestValidateUserConfig_ExportDefaults(t *testing.T) {
 }
 
 // TestValidateUserConfig_Export_BufferedRowWarnThresholdZero rejects
-// non-positive warn thresholds. dbsavvy-uv0.9.
+// non-positive warn thresholds.
 func TestValidateUserConfig_Export_BufferedRowWarnThresholdZero(t *testing.T) {
 	for _, v := range []int64{0, -1} {
 		cfg := GetDefaultConfig()
@@ -469,7 +469,7 @@ func TestValidateUserConfig_Export_BufferedRowWarnThresholdZero(t *testing.T) {
 }
 
 // TestValidateUserConfig_Export_ClipboardMaxBytesZero rejects
-// non-positive clipboard caps. dbsavvy-uv0.9.
+// non-positive clipboard caps.
 func TestValidateUserConfig_Export_ClipboardMaxBytesZero(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.UI.Export.ClipboardMaxBytes = 0
@@ -480,7 +480,7 @@ func TestValidateUserConfig_Export_ClipboardMaxBytesZero(t *testing.T) {
 }
 
 // TestValidateUserConfig_Export_ClipboardMaxBytesAboveGiB rejects caps
-// larger than 1 GiB. dbsavvy-uv0.9.
+// larger than 1 GiB.
 func TestValidateUserConfig_Export_ClipboardMaxBytesAboveGiB(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.UI.Export.ClipboardMaxBytes = (1 << 30) + 1

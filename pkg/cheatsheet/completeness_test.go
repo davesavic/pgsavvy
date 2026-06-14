@@ -20,10 +20,10 @@ import (
 // epic; future epics may add bindings to them but TODAY any binding in
 // these modes is a bug (per AC D13 — "future modes empty" invariant).
 //
-// ModeOperatorPending was removed in dbsavvy-wwd.5 — VimEditorController
+// ModeOperatorPending was removed — VimEditorController
 // now publishes motion bindings under Normal | OperatorPending. Visual
-// modes (ModeVisual / ModeVisualLine / ModeVisualBlock) were removed in
-// dbsavvy-wwd.7 — VimEditorController now publishes v / V / <c-v> /
+// modes (ModeVisual / ModeVisualLine / ModeVisualBlock) were removed —
+// VimEditorController now publishes v / V / <c-v> /
 // <esc> + Visual-mode motion + Visual-mode text-object bindings.
 var futureEmptyModes = []types.Mode{
 	types.ModeReplace,
@@ -126,7 +126,7 @@ func buildProductionTrieSet(t *testing.T) (*keys.TrieSet, *commands.Registry, []
 //
 // The key string is built with the SAME leader-aware label helper
 // Generate uses (keyLabel), so the (Walk ⇔ Generate) set-equality
-// invariant holds across the dbsavvy-tro.9 reverse-mapping change —
+// invariant holds across the reverse-mapping change —
 // post-expanded runes ` `/`,` become `<leader>`/`<localleader>` on
 // both sides.
 func collectWalkLeaves(trieSet *keys.TrieSet) map[rowKey]struct{} {
@@ -266,7 +266,7 @@ func futureModesEmptyInGenerate(trieSet *keys.TrieSet, probeScopes []types.Conte
 // TestCheatsheetCompleteness asserts the (Walk ⇔ Generate) invariant
 // for every populated (Mode, Scope) pair in the production trie, and
 // asserts the "future modes empty" invariant for the modes this epic
-// leaves unbound. See AC dlp.11 for the full contract.
+// leaves unbound.
 func TestCheatsheetCompleteness(t *testing.T) {
 	t.Parallel()
 	start := time.Now()
@@ -430,7 +430,7 @@ func TestCheatsheetCompleteness(t *testing.T) {
 
 	t.Run("FutureModeAccidentallyBound", func(t *testing.T) {
 		// Synthesise a single ChordBinding in ModeReplace (still a
-		// future-empty mode after dbsavvy-wwd.7); the future-modes-empty
+		// future-empty mode); the future-modes-empty
 		// helper MUST flag it.
 		reg := commands.NewRegistry()
 		_ = reg.Register(&commands.Command{

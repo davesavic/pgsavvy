@@ -43,7 +43,7 @@ type NoticeHelperDeps struct {
 // calls OnRunStart before launching a run, AttachStream for each
 // RunHandle the run produces, and Finish once no more streams will
 // attach; OnRunEnd then fires automatically when the last attached
-// stream's notice channel drains. dbsavvy-66p.13.
+// stream's notice channel drains.
 type NoticeReporter interface {
 	OnRunStart(runID string)
 	OnRunEnd(runID string)

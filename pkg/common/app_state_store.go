@@ -94,7 +94,7 @@ type AppStateStore struct {
 	// lastSaveErr records the most recent debounced-save error. Read under mu.
 	lastSaveErr error
 
-	// log is the optional structured logger used by dbsavvy-8s2.7 to emit
+	// log is the optional structured logger used to emit
 	// cat=state events (appstate_mutate_scheduled / appstate_save_fire /
 	// appstate_close). Wired post-construction via SetLogger so the
 	// existing NewAppStateStore signature stays stable for the many test
@@ -104,7 +104,7 @@ type AppStateStore struct {
 }
 
 // SetLogger wires the per-session structured logger used by the
-// dbsavvy-8s2.7 state-mutation instrumentation. Safe to call once before
+// state-mutation instrumentation. Safe to call once before
 // the store is published; not safe to swap concurrently with mutations.
 func (s *AppStateStore) SetLogger(l *slog.Logger) { s.log = l }
 
@@ -285,7 +285,7 @@ func (s *AppStateStore) StampStartupTips() {
 
 // HiddenColumnsSnapshot returns a defensive copy of the persisted hidden-column
 // name list for the given (connID, baseTable) pair. Returns nil when no entry
-// exists. Caller may mutate the returned slice. dbsavvy-uv0.6.
+// exists. Caller may mutate the returned slice.
 func (s *AppStateStore) HiddenColumnsSnapshot(connID, baseTable string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -308,7 +308,6 @@ func (s *AppStateStore) HiddenColumnsSnapshot(connID, baseTable string) []string
 // LastResultViewModeSnapshot returns the persisted result-grid view mode
 // ("grid" / "expanded"). Empty string means the user has never toggled.
 // Callers should normalise empty / unknown values to "grid" on read.
-// dbsavvy-uv0.7.
 func (s *AppStateStore) LastResultViewModeSnapshot() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -316,7 +315,7 @@ func (s *AppStateStore) LastResultViewModeSnapshot() string {
 }
 
 // SetLastResultViewMode persists the result-grid view mode through the
-// debounced save path. Idempotent. dbsavvy-uv0.7.
+// debounced save path. Idempotent.
 func (s *AppStateStore) SetLastResultViewMode(m string) {
 	s.MutateAndSave(func(a *AppState) {
 		a.LastResultViewMode = m
@@ -325,7 +324,7 @@ func (s *AppStateStore) SetLastResultViewMode(m string) {
 
 // LastSessionSettingsSnapshot returns a defensive copy of the persisted
 // session settings map for the given connection ID. Returns nil when no entry
-// exists. Caller may mutate the returned map. hq5.12.
+// exists. Caller may mutate the returned map.
 func (s *AppStateStore) LastSessionSettingsSnapshot(connID string) map[string]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -342,7 +341,7 @@ func (s *AppStateStore) LastSessionSettingsSnapshot(connID string) map[string]st
 }
 
 // StatementTimeoutOverrideValue returns the persisted statement_timeout
-// override for the given connection ID, or "" when none is stored. hq5.12.
+// override for the given connection ID, or "" when none is stored.
 func (s *AppStateStore) StatementTimeoutOverrideValue(connID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

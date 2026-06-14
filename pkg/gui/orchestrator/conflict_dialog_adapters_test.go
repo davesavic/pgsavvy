@@ -31,8 +31,8 @@ func newConflictHookFixture(t *testing.T, row models.Row, cols ...string) (*ui.R
 	return tabs, &models.PendingEditSet{}
 }
 
-// TestConflictRefreshHookWritesServerValueToGrid is the regression guard
-// for dbsavvy-py0n: `[r]` must surface the conflict-time server value in
+// TestConflictRefreshHookWritesServerValueToGrid is the regression guard:
+// `[r]` must surface the conflict-time server value in
 // the grid instead of leaving the stale loaded value rendered once the
 // dirty-cell substitution disappears with the dropped edit.
 func TestConflictRefreshHookWritesServerValueToGrid(t *testing.T) {

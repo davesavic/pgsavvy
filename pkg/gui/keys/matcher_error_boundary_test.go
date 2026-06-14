@@ -11,7 +11,7 @@ import (
 )
 
 // TestMatcher_HandlerError_ToastAndSwallowed proves the central error
-// boundary (bd dbsavvy-9v1.4): a leaf handler that returns a non-nil
+// boundary: a leaf handler that returns a non-nil
 // error keeps the app alive (Dispatch returns nil err — nothing reaches
 // gocui's MainLoop) and surfaces the error as a sanitized toast.
 func TestMatcher_HandlerError_ToastAndSwallowed(t *testing.T) {

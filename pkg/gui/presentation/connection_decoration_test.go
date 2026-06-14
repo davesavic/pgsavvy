@@ -158,7 +158,7 @@ func TestNewPerRowDecorationHook(t *testing.T) {
 	// The rail label is Profile.Name (not Profile.Label): the picker's
 	// purpose is to disambiguate profiles by their stable handle. A
 	// non-empty Profile.Label is ignored here; status-bar / title-bar
-	// rendering owns the Label-via-HeaderTextFor path. Bug dbsavvy-2ox.
+	// rendering owns the Label-via-HeaderTextFor path.
 	conn := &models.Connection{Icon: "★", Name: "local-pg", Label: "lbl", Color: "#abc"}
 	icon, label, color = h(conn)
 	if icon != "★" || label != "local-pg" || color != "#abc" {
@@ -167,7 +167,7 @@ func TestNewPerRowDecorationHook(t *testing.T) {
 }
 
 // TestNewPerRowDecorationHook_NameUsedWhenLabelMatchesHost guards the
-// dbsavvy-2ox regression: a profile saved with name='local-pg' and a
+// regression: a profile saved with name='local-pg' and a
 // DSN-derived label='localhost' (the host portion of the DSN — typical
 // of an auto-populated or user-set label) must render as 'local-pg' in
 // the CONNECTIONS rail. Two profiles sharing a host but differing in
@@ -186,7 +186,7 @@ func TestNewPerRowDecorationHook_NameUsedWhenLabelMatchesHost(t *testing.T) {
 }
 
 // TestNewPerRowDecorationHook_ActiveConnectionMarker checks the live
-// active-connection marker (dbsavvy-e53.6): the row whose Name matches
+// active-connection marker: the row whose Name matches
 // activeID() renders the connected marker "●" regardless of its own Icon,
 // while a non-active row keeps its own Icon (here empty).
 func TestNewPerRowDecorationHook_ActiveConnectionMarker(t *testing.T) {

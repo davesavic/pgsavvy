@@ -19,10 +19,10 @@ func newTestSchemas(drv types.GuiDriver) *SchemasContext {
 	return NewSchemasContext(base, deps)
 }
 
-// TestSchemasContext_HandleRenderWritesRows guards dbsavvy-5iv: without
+// TestSchemasContext_HandleRenderWritesRows guards against regression: without
 // a HandleRender override SchemasContext inherited BaseContext's no-op
 // and the SCHEMAS rail stayed blank after a successful connect even
-// though populateSchemasRail (dbsavvy-855) loaded the items.
+// though populateSchemasRail loaded the items.
 func TestSchemasContext_HandleRenderWritesRows(t *testing.T) {
 	drv := &captureDriver{}
 	c := newTestSchemas(drv)
@@ -90,7 +90,7 @@ func TestSchemasContext_HandleRenderEmptyClears(t *testing.T) {
 
 // TestSchemasContextShowHiddenModeConcurrentToggle fires ~100 concurrent
 // goroutines flipping SetShowHiddenMode and reading GetShowHiddenMode to
-// verify the atomic.Bool guard (enn.6 deferred AC). Run under -race the
+// verify the atomic.Bool guard. Run under -race the
 // Go runtime will fail the test if it observes a data race on the field.
 func TestSchemasContextShowHiddenModeConcurrentToggle(t *testing.T) {
 	tree := NewContextTree(types.ContextTreeDeps{})

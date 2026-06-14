@@ -97,7 +97,7 @@ func (m metaAdapter) ForeignKeys(schema, table string) ([]models.ForeignKey, boo
 func (m metaAdapter) FunctionNames() []string { return m.s.FunctionNames() }
 
 // TestCompletionFreshness_AlterAddColumn_AutocompletesWithoutManualR proves the
-// jxw/ko4m end-to-end freshness contract: after a local ALTER TABLE ADD COLUMN,
+// end-to-end freshness contract: after a local ALTER TABLE ADD COLUMN,
 // the new column autocompletes with ZERO manual 'r' presses. It wires the REAL
 // store + warmer + a real SchemaSource reading the store, with a fakeQuerier
 // whose column set CHANGES after the simulated ALTER (mirroring a DDL applied to
@@ -107,10 +107,10 @@ func (m metaAdapter) FunctionNames() []string { return m.s.FunctionNames() }
 //  1. Warm "public.users" -> store holds the PRE-ALTER columns. Completion offers
 //     them.
 //  2. Local ALTER adds "email": the post-run DDL path calls
-//     warmer.InvalidateSchema("public") (ko4m.2.4) — exactly what the controller
+//     warmer.InvalidateSchema("public") — exactly what the controller
 //     does after a successful DDL, no 'r'.
 //  3. The NEXT completion trigger reads the store, sees the column entry UNLOADED
-//     (invalidated), fires a reactive warm (ko4m.2.3 re-trigger on miss), which
+//     (invalidated), fires a reactive warm (re-trigger on miss), which
 //     reloads the now-fresh column set including "email".
 //  4. Completion now offers "email" — without any manual refresh keystroke.
 func TestCompletionFreshness_AlterAddColumn_AutocompletesWithoutManualR(t *testing.T) {
@@ -151,7 +151,7 @@ func TestCompletionFreshness_AlterAddColumn_AutocompletesWithoutManualR(t *testi
 	f.mu.Lock()
 	f.columns = postAlter
 	f.mu.Unlock()
-	// Post-run DDL invalidation (ko4m.2.4) — the controller's success-gated path,
+	// Post-run DDL invalidation — the controller's success-gated path,
 	// NOT a manual 'r'.
 	w.InvalidateSchema("public")
 
@@ -161,7 +161,7 @@ func TestCompletionFreshness_AlterAddColumn_AutocompletesWithoutManualR(t *testi
 	_ = complete("SELECT users.")
 	gotFresh := complete("SELECT users.")
 	require.Contains(t, gotFresh, "email",
-		"new column autocompletes after ALTER without any manual 'r' (ko4m.2.4 invalidate + 2.3 re-trigger)")
+		"new column autocompletes after ALTER without any manual 'r' (invalidate + re-trigger)")
 	require.ElementsMatch(t, []string{"id", "name", "email"}, gotFresh)
 }
 

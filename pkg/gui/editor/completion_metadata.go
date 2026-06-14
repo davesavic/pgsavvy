@@ -7,7 +7,7 @@ import "github.com/davesavic/dbsavvy/pkg/models"
 // snapshot store (controllers/helpers/data.SchemaMetadataStore) without the
 // editor package importing that package — dependency inversion keeps the
 // editor → controllers layering one-directional (the spec's import-cycle
-// guard, dbsavvy-ko4m.2.3).
+// guard).
 //
 // Every method is a pure in-memory read: NO network round-trip, NO blocking
 // driver call. The (cols,bool) / (fks,bool) shape distinguishes a loaded entry

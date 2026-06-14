@@ -11,7 +11,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/session"
 )
 
-// dbsavvy-lxn.4 regression suite.
+// regression suite.
 //
 // Hazard: the completion engine runs on the schema-rail session (a distinct
 // pooled conn) and is benign, but the FK-cache forward (gd) and reverse (gD
@@ -215,7 +215,7 @@ func TestFKReverseLoadPreemptsParkedStream(t *testing.T) {
 
 // TestFKLoadWhileParkedPanicsWithoutPreempt is the negative control: calling
 // the FK-cache loader directly (no preempt) while the guard is held panics
-// with the driver's "session: concurrent use" — the exact bug dbsavvy-lxn.4
+// with the driver's "session: concurrent use" — the exact bug this
 // fixes. This proves the guard is real and that the preempt in the positive
 // tests is what prevents the panic, not the fake being permissive.
 func TestFKLoadWhileParkedPanicsWithoutPreempt(t *testing.T) {

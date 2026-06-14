@@ -24,7 +24,7 @@ func writeView(deps depsAlias, fn func() error) {
 // railEmptyPlaceholder returns the contextual dim placeholder for an empty
 // side rail (SCHEMAS/TABLES/COLUMNS/INDEXES) via deps.RailEmptyText. It is
 // nil-safe: when the hook is unset (or returns ""), it returns "" so the
-// caller falls through to the prior blank render. dbsavvy-fow.5 (U7).
+// caller falls through to the prior blank render.
 func railEmptyPlaceholder(deps depsAlias, rail types.ContextKey) string {
 	if deps.RailEmptyText == nil {
 		return ""
@@ -38,7 +38,7 @@ func railEmptyPlaceholder(deps depsAlias, rail types.ContextKey) string {
 // marker for selection; gocui's own scroll origin is independent of
 // that marker, so without this call the cursor scrolls off-screen as
 // soon as the list overflows while the scrollbar still reads as
-// top-pinned (dbsavvy-f50). Nil-safe when GuiDriver is unset or the
+// top-pinned. Nil-safe when GuiDriver is unset or the
 // view isn't yet realized (unit tests, pre-layout).
 func scrollSideRailIntoView(deps depsAlias, viewName string, cursor int) {
 	if deps.GuiDriver == nil {

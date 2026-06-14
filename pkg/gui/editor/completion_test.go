@@ -135,7 +135,7 @@ func TestEngine_AddSource_AppendsAndUsed(t *testing.T) {
 // TestEngine_NilMatches_SortsIdentically pins that a Suggestion with a
 // nil Matches field (the zero-default for sources that have not adopted
 // the matcher) sorts and dedupes exactly as before — no panic, same
-// order (dbsavvy-ko4m.3.2 edge path).
+// order (edge path).
 func TestEngine_NilMatches_SortsIdentically(t *testing.T) {
 	a := &stubSource{name: "a", priority: 1, items: []Suggestion{
 		{Text: "one", Score: 1}, // Matches nil
@@ -252,8 +252,8 @@ func TestAutoTriggerFromContext_Cases(t *testing.T) {
 		{"after comparison operator", "SELECT * FROM t WHERE id = ", true},
 		{"after AND", "SELECT * FROM t WHERE id = 1 AND ", true},
 		{"column partial after SELECT", "SELECT user", true},
-		// Positive — broadened >=2-rune identifier-prefix gate
-		// (dbsavvy-ko4m.6.1): a partial identifier of two or more runes
+		// Positive — broadened >=2-rune identifier-prefix gate:
+		// a partial identifier of two or more runes
 		// auto-opens even with no governing clause keyword/operator/dot.
 		{"bare 2-rune prefix", "us", true},
 		{"bare 2-rune prefix mid-expr", "SELECT a, us", true},
@@ -264,7 +264,7 @@ func TestAutoTriggerFromContext_Cases(t *testing.T) {
 		{"quoted ident prefix Co", `SELECT "Co`, true},
 		// Negative — a single-rune prefix is below the threshold.
 		{"bare 1-rune prefix", "u", false},
-		// ko4m.1.3: engine-backed. `SELECT "C` and `SELECT a, ` now sit in a
+		// Engine-backed. `SELECT "C` and `SELECT a, ` now sit in a
 		// SELECT column context (ExpectColumns) per the clause model, so the
 		// NARROW gate (IsSchemaCompletableContext) fires regardless of prefix
 		// width. The old regex required the partial to ABUT the SELECT
@@ -308,7 +308,7 @@ func TestAutoTriggerFromContext_NilBuffer(t *testing.T) {
 }
 
 // TestIsSchemaCompletableContext_SuggestConsistency pins the reinterpreted
-// ko4m.1.3 consistency rule: the NARROW gate IsSchemaCompletableContext is
+// consistency rule: the NARROW gate IsSchemaCompletableContext is
 // true iff SchemaSource.Suggest returns a non-empty schema list, for every
 // tested cursor position. (The pre-6.1 rule named AutoTriggerFromContext;
 // post-6.1 that gate also fires on bare >=2-rune prefixes where Suggest is
@@ -340,7 +340,7 @@ func TestIsSchemaCompletableContext_SuggestConsistency(t *testing.T) {
 		// NOTE: column contexts with NO resolvable FROM table (`SELECT `,
 		// `SELECT a, `) are deliberately EXCLUDED — there the gate is true but
 		// Suggest is empty (no table to draw columns from). That asymmetry
-		// predates ko4m.1.3 (the regex gate had it too) and is governed by
+		// predates the engine gate (the regex gate had it too) and is governed by
 		// TestSchemaSource_UnqualifiedColumns_NoTableInScope_Empty.
 	}
 	mkSrc := func() *SchemaSource {
@@ -407,7 +407,7 @@ func TestIsIdentDotContext_EngineBacked(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// dbsavvy-ko4m.3.6: cross-source composite-ranking integration tests.
+// cross-source composite-ranking integration tests.
 //
 // These tests wire the REAL sources (SchemaSource/FunctionSource/KeywordsSource/
 // HistorySource) — each running editor.Match for genuine fuzzy scoring — through
@@ -754,12 +754,12 @@ func containsText(got []Suggestion, t string) bool {
 }
 
 // ---------------------------------------------------------------------------
-// dbsavvy-ko4m.7.4: cross-feature snippet interaction guard (engine half).
+// cross-feature snippet interaction guard (engine half).
 //
 // A snippet whose Name collides on Text with a SQL keyword must dedupe
 // deterministically by the rank constants — SnippetSourceBias (50) >
 // KeywordSourceBias (40) — so the kept entry is the snippet (Body-bearing),
-// not the keyword. This pins ko4m.7's "names unique" decision across sources
+// not the keyword. This pins the "names unique" decision across sources
 // (review-plan Finding S): the cross-source dedupe key is Text, and the
 // composite Score, not source registration order, decides the winner.
 // ---------------------------------------------------------------------------

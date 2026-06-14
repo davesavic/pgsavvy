@@ -372,7 +372,7 @@ func TestForm_SSHIdentityFileValidator(t *testing.T) {
 }
 
 // TestForm_PgpassIsFocusable asserts the pgpass row is now an editable text
-// field the cursor lands on, not a greyed "(soon)" placeholder (dbsavvy-km7u).
+// field the cursor lands on, not a greyed "(soon)" placeholder.
 func TestForm_PgpassIsFocusable(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
@@ -385,7 +385,7 @@ func TestForm_PgpassIsFocusable(t *testing.T) {
 }
 
 // TestForm_PgpassTextRoundTrip asserts the pgpass row reads/writes
-// conn.PgpassPath (dbsavvy-km7u).
+// conn.PgpassPath.
 func TestForm_PgpassTextRoundTrip(t *testing.T) {
 	f := &connForm{}
 	f.setTextValue(fieldPgpass, "~/.pgpass")
@@ -398,7 +398,7 @@ func TestForm_PgpassTextRoundTrip(t *testing.T) {
 }
 
 // TestForm_PgpassValidator rejects control chars/newlines, allows empty and
-// normal paths (dbsavvy-km7u).
+// normal paths.
 func TestForm_PgpassValidator(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	f := &connForm{}
@@ -428,7 +428,7 @@ func focusable(f *connForm, id connFieldID) bool {
 }
 
 // TestForm_CredentialRowsAreFocusable asserts icon/keyring/password_command are
-// editable (focusable) rows, not skipped "(soon)" placeholders (dbsavvy-uly7.3).
+// editable (focusable) rows, not skipped "(soon)" placeholders.
 func TestForm_CredentialRowsAreFocusable(t *testing.T) {
 	f := &connForm{}
 	for _, id := range []connFieldID{fieldIcon, fieldKeyring, fieldPasswordCommand} {
@@ -439,7 +439,7 @@ func TestForm_CredentialRowsAreFocusable(t *testing.T) {
 }
 
 // TestForm_IconTextRoundTrip asserts the icon row reads/writes conn.Icon and
-// clearing it saves an empty value (dbsavvy-uly7.3).
+// clearing it saves an empty value.
 func TestForm_IconTextRoundTrip(t *testing.T) {
 	f := &connForm{}
 	f.setTextValue(fieldIcon, "ICON")
@@ -456,7 +456,7 @@ func TestForm_IconTextRoundTrip(t *testing.T) {
 }
 
 // TestForm_KeyringTextRoundTrip asserts the keyring row reads/writes
-// conn.KeyringRef (dbsavvy-uly7.3).
+// conn.KeyringRef.
 func TestForm_KeyringTextRoundTrip(t *testing.T) {
 	f := &connForm{}
 	f.setTextValue(fieldKeyring, "prod/db")
@@ -469,7 +469,7 @@ func TestForm_KeyringTextRoundTrip(t *testing.T) {
 }
 
 // TestForm_PasswordCommandTextRoundTrip asserts the password_command row
-// reads/writes conn.PasswordCommand (dbsavvy-uly7.3).
+// reads/writes conn.PasswordCommand.
 func TestForm_PasswordCommandTextRoundTrip(t *testing.T) {
 	f := &connForm{}
 	f.setTextValue(fieldPasswordCommand, "pass show db")
@@ -483,7 +483,7 @@ func TestForm_PasswordCommandTextRoundTrip(t *testing.T) {
 
 // TestForm_CredentialRowsDisplayValueNotSoon asserts displayValue renders the
 // stored value for the credential rows rather than "(soon)", and never returns
-// "(soon)" even when empty (dbsavvy-uly7.3).
+// "(soon)" even when empty.
 func TestForm_CredentialRowsDisplayValueNotSoon(t *testing.T) {
 	specByID := func(id connFieldID) connFieldSpec {
 		for _, s := range connFormSpecs {

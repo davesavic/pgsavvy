@@ -214,7 +214,7 @@ func TestWindowRunes(t *testing.T) {
 // caretCaptureDriver embeds captureDriver (which records SetContent) and
 // additionally records the last SetCaretEnabled call so the focus hooks'
 // caret toggle is observable. The embedded stubDriver's SetCaretEnabled is
-// a no-op; overriding it here makes it assertable. dbsavvy-tzi.3.
+// a no-op; overriding it here makes it assertable.
 type caretCaptureDriver struct {
 	captureDriver
 	caretEnabled bool

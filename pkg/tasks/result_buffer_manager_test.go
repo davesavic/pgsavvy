@@ -372,7 +372,7 @@ func TestNewQueryTaskStopClosesStreamAndFiresOnDoneOnce(t *testing.T) {
 	h.stopUI()
 }
 
-// TestNewQueryTaskStopBeforeStreamFnStillClosesStream is the dbsavvy-dk6
+// TestNewQueryTaskStopBeforeStreamFnStillClosesStream is the
 // deadlock regression guard at the RBM layer. In dbsavvy the pgx stream is
 // opened — and the per-session streamMu locked — by SQLSession.Stream
 // BEFORE NewQueryTask; the worker's streamFn merely hands back that
@@ -572,7 +572,7 @@ func TestNewQueryTaskStreamFnErrorFiresOnDoneCleanly(t *testing.T) {
 
 // TestNewQueryTaskNextErrorMidStream — Next returns an error after
 // some rows: rows up to the error are retained; onDone fires
-// automatically with the propagated error (dbsavvy-uly7.1). Prior to
+// automatically with the propagated error. Prior to
 // the fix the Next error was swallowed and onDone only fired on a manual
 // Stop, leaving the result indistinguishable from a clean completion.
 func TestNewQueryTaskNextErrorMidStream(t *testing.T) {
@@ -636,7 +636,7 @@ func TestNewQueryTaskNextErrorMidStream(t *testing.T) {
 // TestNewQueryTaskReadToEndNextErrorMidStream — a mid-stream Next error
 // on the ReadToEnd (G / drain-to-end) path must NOT fire the ReadToEnd
 // `then` callback (clean completion) and must propagate the error through
-// onDone. Regression guard for dbsavvy-uly7.1: req.Then() previously fired
+// onDone. Regression guard: req.Then() previously fired
 // before the error check, so fireReadToEnd → markCompleteOnUI(nil) set
 // StateComplete first, and the later onDone(err) → markCompleteOnUI(err)
 // was skipped by its StateRunning/StateSorting guard — leaving the tab

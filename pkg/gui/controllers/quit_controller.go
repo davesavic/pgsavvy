@@ -17,8 +17,8 @@ import (
 //
 // Bindings:
 //   - <c-c>  : guarded quit (pending-edit gate, then open-tx gate)
-//   - ?      : open the auto-generated cheatsheet (real impl ships in
-//     dlp.10 — today the registered handler is a no-op stub so the
+//   - ?      : open the auto-generated cheatsheet (real impl ships
+//     later — today the registered handler is a no-op stub so the
 //     binding has a leaf to dispatch).
 //
 // The <leader>q chord is shipped as a default in
@@ -32,7 +32,7 @@ type QuitController struct {
 }
 
 // NewQuitController constructs the controller. UIDeps and QueryDeps are
-// needed for the tx-open confirmation dialog (hq5.5); EditDeps carries
+// needed for the tx-open confirmation dialog; EditDeps carries
 // the PendingDiscardHelper for the pending-edit gate.
 func NewQuitController(
 	c *common.Common,
@@ -53,7 +53,7 @@ func NewQuitController(
 
 // Quit terminates the gocui main loop after checking guards:
 //  1. Pending-edit gate (BlockQuitIfPending) — toast and abort if edits are pending.
-//  2. Open-transaction gate (hq5.5) — 3-choice dialog: commit/rollback/abort.
+//  2. Open-transaction gate — 3-choice dialog: commit/rollback/abort.
 //
 // If no guards fire, returns gocui.ErrQuit immediately.
 func (q *QuitController) Quit(_ commands.ExecCtx) error {
@@ -78,7 +78,7 @@ func (q *QuitController) Quit(_ commands.ExecCtx) error {
 
 // showTxQuitDialog pushes the 3-choice selection popup: commit-and-quit,
 // rollback-and-quit, or abort. The dialog body shows the statement count
-// and any active savepoint names (hq5.5 AC).
+// and any active savepoint names.
 func (q *QuitController) showTxQuitDialog() error {
 	if q.helpers.Choice == nil {
 		// No ChoiceHelper wired — fall through to quit.
@@ -195,7 +195,7 @@ func (q *QuitController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordB
 			ActionID:    commands.HelpCheatsheet,
 			Description: tr.Actions.ShowMenu,
 		},
-		// dbsavvy-bsh: <leader>C opens the connection manager mid-session.
+		// <leader>C opens the connection manager mid-session.
 		{
 			Sequence:    []types.ChordKey{{Special: types.KeyLeader}, {Code: 'C'}},
 			Mode:        types.ModeNormal,

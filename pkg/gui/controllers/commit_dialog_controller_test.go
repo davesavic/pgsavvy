@@ -542,7 +542,7 @@ func TestDefaultCommitDialogRender_RowDiffPreview(t *testing.T) {
 	}
 }
 
-// AC (dbsavvy-2ij6 follow-up): a json/jsonb column whose OldValue pgx
+// AC: a json/jsonb column whose OldValue pgx
 // decoded as []byte renders as JSON text in the preview — matching the
 // cell-editor seed and the new value — not Go's byte-slice form
 // "[123 34 ...]".

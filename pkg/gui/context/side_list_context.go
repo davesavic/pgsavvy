@@ -18,9 +18,9 @@ type SideListContext struct {
 	cursor int
 	items  []any
 
-	// search carries the rail search engine state (dbsavvy-ioaj). Single
-	// threaded on the UI thread (worker SetItems is marshaled onto it per
-	// dbsavvy-zt9), so it needs no lock.
+	// search carries the rail search engine state. Single
+	// threaded on the UI thread (worker SetItems is marshaled onto it),
+	// so it needs no lock.
 	search railSearchState
 	// nameOf extracts the searchable name from a raw items[] element. nil
 	// until a search-enabled rail injects one via SetRailNameAccessor; the

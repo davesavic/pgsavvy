@@ -30,13 +30,12 @@ type GuiDriver interface {
 	SetKeybinding(viewName string, key Key, mod Modifier, handler func() error) error
 
 	// SetMasterEditor installs ed as the per-view gocui.Editor for the
-	// named view (and marks the view editable). Used by dlp.8b to route
+	// named view (and marks the view editable). Used to route
 	// every keystroke for a view through the chord Matcher.
 	SetMasterEditor(view string, ed gocui.Editor) error
 
 	// SetViewClickBinding registers a mouse/click handler. The gocui
-	// surface is SetViewClickBinding (NOT SetMouseBinding); see decision
-	// dbsavvy-enn-T0-gocui-pin.
+	// surface is SetViewClickBinding (NOT SetMouseBinding).
 	SetViewClickBinding(b *ViewMouseBinding) error
 
 	// Update schedules fn for execution on the MainLoop with a full

@@ -45,8 +45,8 @@ func TestSessionIDIsMonotonic(t *testing.T) {
 	require.Greater(t, b.ID(), a.ID(), "second Session ID must be greater than the first")
 }
 
-// Execute and Stream are wired against a live pgx connection in task
-// dbsavvy-66p.3. Their happy-path semantics live in the //go:build integration
+// Execute and Stream are wired against a live pgx connection.
+// Their happy-path semantics live in the //go:build integration
 // suites at pkg/drivers/pg/{execute,stream}_test.go. We keep two unit-level
 // invariants here:
 //   1. The guard machinery panics on concurrent use / use-after-Close (already

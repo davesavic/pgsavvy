@@ -9,7 +9,7 @@ import (
 
 // fakeDetailProvider is a test double for FunctionDetailProvider. It records
 // FunctionDetail / WarmFunctionDetail calls and serves canned details, so the
-// ko4m.5.3 seam can be exercised without a live ConnectHelper.
+// detail seam can be exercised without a live ConnectHelper.
 type fakeDetailProvider struct {
 	details   map[string][]models.FunctionDetail
 	found     map[string]bool
@@ -40,7 +40,7 @@ func (f *fakeDetailProvider) WarmFunctionDetail(schema, name string, onReady fun
 	}
 }
 
-// TestSuggestion_HasSignatureField confirms the ko4m.4.1 Signature field exists
+// TestSuggestion_HasSignatureField confirms the Signature field exists
 // and is zero-valued by default — existing sources compile with it unset.
 func TestSuggestion_HasSignatureField(t *testing.T) {
 	var s Suggestion
@@ -54,7 +54,7 @@ func TestSuggestion_HasSignatureField(t *testing.T) {
 }
 
 // TestFunctionSource_DetailProviderSeam verifies the provider is held nil-safe
-// and exposed via DetailProvider for ko4m.5.4 to consume.
+// and exposed via DetailProvider to consume.
 func TestFunctionSource_DetailProviderSeam(t *testing.T) {
 	src := NewFunctionSource(nil)
 	if src.DetailProvider() != nil {
@@ -67,7 +67,7 @@ func TestFunctionSource_DetailProviderSeam(t *testing.T) {
 		t.Fatal("DetailProvider() after injection = nil; want the injected provider")
 	}
 
-	// The provider routes sync reads + async warms (the seam ko4m.5.4 will use).
+	// The provider routes sync reads + async warms (the signature-population seam).
 	p.set("public", "now", []models.FunctionDetail{{Name: "now"}})
 	if _, ok := src.DetailProvider().FunctionDetail("public", "now"); !ok {
 		t.Fatal("FunctionDetail(public, now) = not found; want hit")
@@ -83,7 +83,7 @@ func TestFunctionSource_DetailProviderSeam(t *testing.T) {
 
 // TestFunctionSource_NilProvider_NoBehaviorChange asserts the provider-less
 // source still emits the same function-name candidates with empty Signature —
-// the ko4m.5.3 invariant (no visible behavior change until 5.4).
+// the invariant (no visible behavior change until the provider is consumed).
 func TestFunctionSource_NilProvider_NoBehaviorChange(t *testing.T) {
 	m := newFakeMeta()
 	m.setFunctions("now", "lower")

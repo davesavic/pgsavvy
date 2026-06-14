@@ -21,11 +21,11 @@ import (
 
 // queryNonceCounter is the process-global monotonic source for QueryID.Nonce.
 // Stamped on every Execute/Stream so that two queries on the same Session at
-// the same instant remain distinguishable. See epic dbsavvy-66p §D5.
+// the same instant remain distinguishable.
 var queryNonceCounter atomic.Uint64
 
 // sessionIDCounter is the process-global monotonic source for Session.ID().
-// Incremented atomically at construction. See epic dbsavvy-921 D11.
+// Incremented atomically at construction.
 var sessionIDCounter atomic.Uint64
 
 // Session is a stateful checkout of a *Connection. It wraps a single
@@ -36,13 +36,13 @@ var sessionIDCounter atomic.Uint64
 //
 // ListTables is the only public entry point for relation listing; TableLoader
 // is package-private machinery exposed to enrichment workers. See Arch-5 of
-// the review-plan resolutions for epic dbsavvy-921.
+// the review-plan resolutions.
 type Session struct {
 	conn       *pgxpool.Conn
 	id         models.SessionID
 	backendPID uint32         // D19 — sized to match pgconn.PgConn.PID()
-	secretKey  uint32         // 66p.4 cancel-request authentication; captured from pgconn at construction
-	pgConn     *pgconn.PgConn // 66p.5 captured at newSession so Close can unbind from NoticeRouter
+	secretKey  uint32         // cancel-request authentication; captured from pgconn at construction
+	pgConn     *pgconn.PgConn // captured at newSession so Close can unbind from NoticeRouter
 	parent     *Connection
 	closed     atomic.Bool
 	inFlight   atomic.Int32
@@ -53,7 +53,7 @@ type Session struct {
 // newSession constructs a *Session bound to pgxConn and parent. Session.ID is
 // assigned from sessionIDCounter atomically; backendPID and secretKey are
 // captured from the underlying pgconn — both are required by the cancel-request
-// wire protocol (epic dbsavvy-66p.4) and remain stable for the life of the
+// wire protocol and remain stable for the life of the
 // pgconn. The session is registered with parent.registerCancel so that
 // Connection.Cancel can look it up by BackendPID.
 func newSession(pgxConn *pgxpool.Conn, parent *Connection) *Session {
@@ -82,7 +82,7 @@ func newSession(pgxConn *pgxpool.Conn, parent *Connection) *Session {
 
 // SecretKey returns the PostgreSQL cancel-request secret key captured from the
 // underlying pgconn at session-open time. The value is required to authenticate
-// a cancel-request packet for this backend (see epic dbsavvy-66p.4). It is
+// a cancel-request packet for this backend. It is
 // non-zero for any session opened against a real Postgres server.
 func (s *Session) SecretKey() uint32 { return s.secretKey }
 
@@ -174,7 +174,7 @@ func (s *Session) AttachNotice(ch chan<- pgconn.Notice) {
 
 // DroppedNotices reports the count of notices that arrived while the
 // subscriber channel was full and were therefore discarded. Useful as a
-// diagnostic in the messages writer (epic dbsavvy-66p.13). Zero when no
+// diagnostic in the messages writer. Zero when no
 // notices have been dropped (including when AttachNotice was never called).
 func (s *Session) DroppedNotices() uint64 {
 	if s.parent.notices == nil {
@@ -480,7 +480,7 @@ func (s *Session) DescribeFunction(ctx context.Context, schema, name string) ([]
 // tag; Duration spans the wall-clock from query dispatch to materialization.
 // A *pgconn.PgError is mapped to *drivers.QueryError via wrapPgError. The
 // inFlight guard is held for the entire call. Cancel/NOTICE/EXPLAIN are out
-// of scope (see epic dbsavvy-66p §D5; tasks 66p.4–66p.6).
+// of scope.
 func (s *Session) Execute(ctx context.Context, q models.Query) (models.Result, error) {
 	defer s.guard()()
 
@@ -526,8 +526,8 @@ func (s *Session) Execute(ctx context.Context, q models.Query) (models.Result, e
 // happens first. Calling Session.Stream (or any other Session method) again
 // before one of those release events fires panics with "session: concurrent
 // use". Caller-side serialization of multiple streams on a single Session is
-// the responsibility of the calling layer (see pkg/session.SQLSession, task
-// 66p.7). The QueryID returned by the stream is fully populated (SessionID,
+// the responsibility of the calling layer (see pkg/session.SQLSession).
+// The QueryID returned by the stream is fully populated (SessionID,
 // BackendPID, Started, Nonce all non-zero) BEFORE the first Next() call
 // returns; QueryID() may safely be read up front.
 func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream, error) {
@@ -538,8 +538,8 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 	// The derived context.CancelFunc is handed to the returned pgRowStream,
 	// which invokes it exactly once in release() (EOF / terminal error /
 	// explicit Close) so the deadline timer never leaks past the stream.
-	// q.Timeout == 0 leaves ctx untouched (no ceiling) and cancel stays nil
-	// (dbsavvy-fow.7 U15). The non-zero q.Timeout is the override the run
+	// q.Timeout == 0 leaves ctx untouched (no ceiling) and cancel stays nil.
+	// The non-zero q.Timeout is the override the run
 	// path sets when it wants a different ceiling than the configured
 	// default; the default itself is folded into q.Timeout by the caller.
 	var cancel context.CancelFunc
@@ -548,7 +548,7 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 	}
 
 	// Resolve unqualified object names against q.DefaultSchema (then public)
-	// for this statement. No-op when empty (dbsavvy-u1n).
+	// for this statement. No-op when empty.
 	if stmt := searchPathStmt(q.DefaultSchema); stmt != "" {
 		if _, err := s.conn.Exec(ctx, stmt); err != nil {
 			if cancel != nil {
@@ -583,8 +583,7 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 // object names resolve against schema first, then public. The schema is
 // quoted via pgx.Identifier.Sanitize so names with special characters (or a
 // crafted name) cannot break out of the identifier. Returns "" when schema is
-// empty, which callers treat as "leave the search_path untouched"
-// (dbsavvy-u1n).
+// empty, which callers treat as "leave the search_path untouched".
 func searchPathStmt(schema string) string {
 	if schema == "" {
 		return ""
@@ -597,7 +596,7 @@ func searchPathStmt(schema string) string {
 // models.Plan.RawText). When analyze is true, ANALYZE is included in both
 // statements — the caller is responsible for ensuring this is safe (no
 // side-effect-producing statements without a transaction; the auto-rollback
-// wrapping lives in the controller layer, task 66p.11). q.Args are forwarded
+// wrapping lives in the controller layer). q.Args are forwarded
 // to pgx and substituted for $N placeholders in the EXPLAIN'd statement.
 //
 // Failure of EITHER the JSON or the text EXPLAIN returns an error and a
@@ -617,7 +616,7 @@ func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (pl
 	}
 
 	// Resolve unqualified object names against q.DefaultSchema (then public)
-	// for the EXPLAIN'd statement. No-op when empty (dbsavvy-u1n).
+	// for the EXPLAIN'd statement. No-op when empty.
 	if stmt := searchPathStmt(q.DefaultSchema); stmt != "" {
 		if _, err := s.conn.Exec(ctx, stmt); err != nil {
 			return models.Plan{}, wrapPgError(err)

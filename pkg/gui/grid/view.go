@@ -11,7 +11,7 @@ import (
 
 // ClipboardWriter is the indirection through which Yank publishes the
 // selected text to the host environment. Production wires this to a
-// real OSC-52 / xclip / pbcopy adapter (66p.11+ scope); tests inject a
+// real OSC-52 / xclip / pbcopy adapter; tests inject a
 // recording fake. A nil ClipboardWriter is normalised to noopClipboard
 // in SetClipboard so Render / Yank can call it unconditionally.
 type ClipboardWriter interface {
@@ -43,7 +43,7 @@ func (noopClipboard) Write(string) error { return nil }
 //     auto-sizing; afterwards widths are frozen.
 //  4. Render(*gocui.View) draws the current viewport.
 //  5. Cursor + selection methods (MoveCursorDown etc) are wired to
-//     the keymap in 66p.11/66p.12.
+//     the keymap.
 type View struct {
 	// mu guards rows, cols, title, cursor + selection. Held for the
 	// shortest possible time in mutators; Render takes a snapshot
@@ -59,7 +59,7 @@ type View struct {
 	// that returned no result set (zero cols). When > 0 the empty-body
 	// renderers show "(N row(s) affected)" instead of the misleading
 	// "(0 rows)". Set once at stream completion via SetRowsAffected;
-	// stays 0 for SELECTs and in-flight streams. dbsavvy-outq.
+	// stays 0 for SELECTs and in-flight streams.
 	rowsAffected int64
 
 	title string
@@ -119,7 +119,7 @@ type View struct {
 	// Tab-level flow (QueryEditorController.sortActiveResult) decides the
 	// direction and re-runs the query DB-side. A nil callback means
 	// "sort routing not wired" — used in tests and the pre-wiring
-	// orchestrator state. dbsavvy-72k.5.
+	// orchestrator state.
 	onSortRequest func(col int)
 
 	clipboard ClipboardWriter
@@ -127,55 +127,52 @@ type View struct {
 	// searchState carries the active plain-substring SEARCH, if any. See
 	// search.go for the type definition and the SetSearch / ClearSearch /
 	// NextMatch / PrevMatch / SearchStatus surface. The search never hides
-	// rows; it drives cell-major n/N cursor navigation. dbsavvy-2ttm.
+	// rows; it drives cell-major n/N cursor navigation.
 	searchState searchState
 
 	// sortState carries the active column sort, if any. See sort.go for
-	// the SetSort / SortActive / SortIndicator surface. dbsavvy-uv0.5.
+	// the SetSort / SortActive / SortIndicator surface.
 	sortState sortState
 
 	// lastHeaderClick records the column + timestamp of the most recent
 	// row-0 (header) left-click. Used by HandleHeaderClick to detect a
 	// double-click on the same column inside the configured debounce
-	// window. dbsavvy-uv0.5.
+	// window.
 	lastHeaderClick headerClickState
 
 	// mouseDoubleClickMs is the maximum gap (in milliseconds) that still
 	// counts as a double-click on the same header. 0 falls back to
 	// defaultMouseDoubleClickMs. Wired from config at chord-registration
-	// time. dbsavvy-uv0.5.
+	// time.
 	mouseDoubleClickMs int
 
 	// hiddenColSet is the per-View hide-cols state used by the <leader>gH
 	// overlay. Keys are indices into the CURRENT cols slice. SetColumns
 	// clears this map (the indices are not stable across schema attaches);
 	// callers re-seed from persisted column NAMES via SetHiddenCols.
-	// dbsavvy-uv0.6.
 	hiddenColSet map[int]bool
 
 	// viewMode picks the render path: ViewModeGrid (default) renders the
 	// row/col table; ViewModeExpanded renders one record at a time in
 	// psql `\x` style. Persisted globally via AppState.LastResultViewMode
-	// — see helpers/ui/result_tabs_helper.go. dbsavvy-uv0.7.
+	// — see helpers/ui/result_tabs_helper.go.
 	viewMode string
 
 	// estimatedRowsLoader returns the optimiser's row-count estimate for
 	// the active stream, or 0 when unknown. snapshot() invokes it under
 	// RLock so the expanded-mode separator can display "~total" without
 	// the grid package importing the task runner. nil means "unknown".
-	// dbsavvy-uv0.7.
 	estimatedRowsLoader func() int64
 
 	// expandedLineOffset is the wrapped-line offset inside the active
 	// record in expanded mode. Bumped by WrappedLineDown / WrappedLineUp;
-	// reset to 0 when the cursor moves to a new record. dbsavvy-uv0.7.
+	// reset to 0 when the cursor moves to a new record.
 	expandedLineOffset int
 
 	// viewHeight tracks the data-row capacity of the most recent Render
 	// (innerH - 1 for the header). 0 means "no Render yet"; VisibleRows
 	// falls back to a no-op in that case. Stamped under v.mu.Lock by
 	// clampOffsetsLocked so export-time readers see a consistent value.
-	// dbsavvy-uv0.9.
 	viewHeight int
 
 	// editable, rowIdentity, disabledReason, identitySchema carry the
@@ -184,7 +181,7 @@ type View struct {
 	// invalidates the previous decision). identitySchema is the catalog-
 	// resolved schema (pg_namespace.nspname) used to schema-qualify the
 	// apply-path UPDATE; the SQL-parsed base table loses it for unqualified
-	// SELECTs (dbsavvy-8q6). dbsavvy-bwq.2 (F2).
+	// SELECTs.
 	editable       bool
 	rowIdentity    []int
 	disabledReason string
@@ -194,28 +191,27 @@ type View struct {
 	// renderer (DecorateDirtyCell / GutterMarker) and the status indicator
 	// (BuildPendingIndicator). Owned externally — A1 records edits, A7
 	// clears them on discard. Nil means "no edits staged" (treated as
-	// IsEmpty by the helpers). dbsavvy-bwq.6 (A3).
+	// IsEmpty by the helpers).
 	pendingEdits *models.PendingEditSet
 
 	// yankFlash is the transient post-yank highlight range, armed by
 	// FlashYankCell / FlashYankRow and auto-cleared after the flash TTL by
 	// the controller's delayed ClearYankFlash. nil means no active flash.
 	// yankFlashEpoch guards a stale clear from dropping a newer flash. See
-	// yank_flash.go (mirrors editor.Buffer). dbsavvy-j8xr.
+	// yank_flash.go (mirrors editor.Buffer).
 	yankFlash      *yankFlashRange
 	yankFlashEpoch uint64
 }
 
 // headerClickState is the per-View state used by HandleHeaderClick to
 // detect a double-click. col == -1 means "no prior click recorded".
-// dbsavvy-uv0.5.
 type headerClickState struct {
 	col int
 	t   time.Time
 }
 
 // defaultMouseDoubleClickMs mirrors the config default
-// (ui.mouse.double_click_ms = 400). dbsavvy-uv0.5.
+// (ui.mouse.double_click_ms = 400).
 const defaultMouseDoubleClickMs = 400
 
 // NewView returns an empty grid in its initial state: no rows, no
@@ -234,7 +230,7 @@ func NewView() *View {
 // SetMouseDoubleClickMs installs the maximum gap (in milliseconds) that
 // counts as a double-click on the same column header. n <= 0 falls back
 // to defaultMouseDoubleClickMs. Wired from config at chord-registration
-// time. dbsavvy-uv0.5.
+// time.
 func (v *View) SetMouseDoubleClickMs(n int) {
 	if n <= 0 {
 		n = defaultMouseDoubleClickMs
@@ -257,7 +253,7 @@ func (v *View) SetTitle(t string) {
 // indicator appended when a sort is active. The base title set via
 // SetTitle is left untouched; the indicator is applied here so callers
 // (and the result-tab layout pass) see the dynamic decoration without
-// having to re-call SetTitle on every sort flip. dbsavvy-uv0.5.
+// having to re-call SetTitle on every sort flip.
 func (v *View) Title() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -289,20 +285,20 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 	v.lastNearTailFireAt = -1
 	// Clear any active search — a new schema attach invalidates the
 	// cell-major match list (row/col indices are not stable across a
-	// schema reset). dbsavvy-2ttm.
+	// schema reset).
 	v.searchState = searchState{}
-	// Clear any active sort: a fresh schema attach resets sort/hide/filter
-	// (dbsavvy-uv0 AD-5). T6 will reseed hide-cols from AppState after this
+	// Clear any active sort: a fresh schema attach resets sort/hide/filter.
+	// Hide-cols are reseeded from AppState after this
 	// point in its own SetColumns extension.
 	v.sortState = sortState{}
 	v.lastHeaderClick = headerClickState{col: -1}
 	// Clear hide-cols: int indices are not stable across schema attaches.
 	// Callers reseed via SetHiddenCols after re-translating persisted names
-	// against the new cols slice. dbsavvy-uv0.6 AD-5.
+	// against the new cols slice.
 	v.hiddenColSet = nil
 	// Reset editability — the prior introspection no longer describes
 	// the new schema. Z1 re-runs EditabilityIntrospect on each schema
-	// attach. dbsavvy-bwq.2 (F2).
+	// attach.
 	v.editable = false
 	v.rowIdentity = nil
 	v.disabledReason = ""
@@ -318,8 +314,7 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 // All fields are stored atomically under the write lock so a concurrent
 // reader sees a consistent snapshot. A nil rowIdentity is stored as-is;
 // getters return defensive copies. schema is the catalog-resolved schema
-// of the base relation (empty when unknown). dbsavvy-bwq.2 (F2),
-// dbsavvy-8q6 (schema).
+// of the base relation (empty when unknown).
 func (v *View) SetEditability(editable bool, rowIdentity []int, disabledReason, schema string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -356,7 +351,7 @@ func (v *View) RowIdentity() []int {
 // IdentitySchema returns the catalog-resolved schema of the editable base
 // relation, or "" when unknown / not editable. The apply path uses it to
 // schema-qualify the UPDATE so an unqualified SELECT against a non-public
-// table still writes back correctly (dbsavvy-8q6).
+// table still writes back correctly.
 func (v *View) IdentitySchema() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -375,7 +370,7 @@ func (v *View) DisabledReason() string {
 // render. A nil / empty set clears any prior hide state. Indices outside
 // [0, len(cols)) are silently dropped — caller is responsible for
 // translating persisted column NAMES to indices against the current
-// columns slice before calling. dbsavvy-uv0.6.
+// columns slice before calling.
 func (v *View) SetHiddenCols(set map[int]bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -406,7 +401,7 @@ func (v *View) SetHiddenCols(set map[int]bool) {
 
 // HiddenCols returns a defensive copy of the current hidden-col index
 // set. Callers may mutate the returned map without affecting view state.
-// Returns nil when no columns are hidden. dbsavvy-uv0.6.
+// Returns nil when no columns are hidden.
 func (v *View) HiddenCols() map[int]bool {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -426,7 +421,7 @@ func (v *View) HiddenCols() map[int]bool {
 // the View's column order. Names of indices that fall outside the
 // current cols slice are silently skipped. Used by the helper to
 // translate the runtime int-set into the persisted []string for
-// AppState.HiddenColumns. dbsavvy-uv0.6.
+// AppState.HiddenColumns.
 func (v *View) HiddenColumnNames() []string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -469,7 +464,6 @@ func (v *View) RowCount() int {
 // The returned slice is a fresh allocation, so the caller may iterate
 // or mutate it while concurrent AppendRows continues without observing
 // torn state. Used by the export pipeline's Scope=All path.
-// dbsavvy-uv0.9.
 func (v *View) AllRows() []models.Row {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -483,7 +477,7 @@ func (v *View) AllRows() []models.Row {
 // window is [rowOffset, rowOffset+viewHeight), clamped to the buffer.
 // When no Render has happened yet (viewHeight == 0) or the buffer is
 // empty, an empty slice is returned. Used by the export pipeline's
-// Scope=Visible path. dbsavvy-uv0.9.
+// Scope=Visible path.
 func (v *View) VisibleRows() []models.Row {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -506,7 +500,7 @@ func (v *View) ColumnCount() int {
 
 // Columns returns a defensive copy of the column-metadata slice. Used by
 // the <leader>oe export pipeline to feed exporter.RowSource. Returns nil
-// when no columns are configured. dbsavvy-uv0.9.
+// when no columns are configured.
 func (v *View) Columns() []models.ColumnMeta {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -520,7 +514,7 @@ func (v *View) Columns() []models.ColumnMeta {
 
 // ColumnName returns the configured column name at index i, or "" when
 // i is out of range. Used by the sort picker to render the column-name
-// overlay. dbsavvy-uv0.5.
+// overlay.
 func (v *View) ColumnName(i int) string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -540,7 +534,7 @@ func (v *View) SetOnNearTail(fn func(n int)) {
 // SetOnSortRequest wires the header double-click sort hook. The callback
 // receives the RAW v.cols index the user double-clicked; routing it (and
 // the asc→desc→clear cycle) is the Tab-level flow's responsibility. Pass
-// nil to disable. dbsavvy-72k.5.
+// nil to disable.
 func (v *View) SetOnSortRequest(fn func(col int)) {
 	v.mu.Lock()
 	v.onSortRequest = fn
@@ -591,7 +585,6 @@ func (v *View) snapshot() viewSnapshot {
 		// The rendered title carries the dynamic sort indicator (e.g.
 		// " (sort: name ↑)") computed under the same RLock so Render
 		// sees a tearing-free combination of base title + sort flip.
-		// dbsavvy-uv0.5.
 		widths:             v.widths,
 		title:              v.title + sortIndicatorLocked(v.sortState, v.cols),
 		cursorRow:          v.cursorRow,
@@ -620,7 +613,7 @@ func (v *View) snapshot() viewSnapshot {
 // SetRowsAffected records the driver command-tag affected-row count for a
 // DML statement that returned no result set. The empty-body renderers use
 // it to show "(N row(s) affected)" in place of "(0 rows)". Safe from any
-// goroutine. dbsavvy-outq.
+// goroutine.
 func (v *View) SetRowsAffected(n int64) {
 	v.mu.Lock()
 	v.rowsAffected = n
@@ -630,7 +623,7 @@ func (v *View) SetRowsAffected(n int64) {
 // loadEstimatedRowsLocked invokes the configured loader (under v.mu).
 // Returns 0 when no loader is wired or the loader reports unknown.
 // Used by snapshot() to surface "~total" in the expanded mode banner
-// without grid importing the task runner. dbsavvy-uv0.7.
+// without grid importing the task runner.
 func (v *View) loadEstimatedRowsLocked() int64 {
 	if v.estimatedRowsLoader == nil {
 		return 0
@@ -645,7 +638,7 @@ func (v *View) loadEstimatedRowsLocked() int64 {
 // SetViewMode flips the render path. Accepts ViewModeGrid /
 // ViewModeExpanded; any other value falls back to ViewModeGrid. Moving
 // to a new mode resets the expanded line-offset so the next render
-// starts at the top of the active record. dbsavvy-uv0.7.
+// starts at the top of the active record.
 func (v *View) SetViewMode(m string) {
 	v.mu.Lock()
 	v.viewMode = normaliseViewMode(m)
@@ -654,7 +647,7 @@ func (v *View) SetViewMode(m string) {
 }
 
 // ViewMode returns the current render mode (ViewModeGrid or
-// ViewModeExpanded). Safe from any goroutine. dbsavvy-uv0.7.
+// ViewModeExpanded). Safe from any goroutine.
 func (v *View) ViewMode() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -664,7 +657,7 @@ func (v *View) ViewMode() string {
 // SetEstimatedRowsLoader wires the row-count-estimate provider for
 // expanded-mode rendering. The loader is invoked on every snapshot so
 // the banner stays current as the optimiser estimate is refined. Pass
-// nil to clear. dbsavvy-uv0.7.
+// nil to clear.
 func (v *View) SetEstimatedRowsLoader(fn func() int64) {
 	v.mu.Lock()
 	v.estimatedRowsLoader = fn
@@ -681,7 +674,7 @@ type viewSnapshot struct {
 	title  string
 
 	// rowsAffected drives the empty-body text for DML without a result
-	// set. > 0 only at stream completion for changing statements. dbsavvy-outq.
+	// set. > 0 only at stream completion for changing statements.
 	rowsAffected int64
 
 	cursorRow int
@@ -698,7 +691,7 @@ type viewSnapshot struct {
 	// Search projection inputs. The highlight pass (T2) reads these
 	// (never v.searchState directly) so a concurrent SetSearch / Next /
 	// Prev cannot tear the draw between snapshot capture and render.
-	// searchMatches is a DEFENSIVE COPY of the live slice. dbsavvy-2ttm.
+	// searchMatches is a DEFENSIVE COPY of the live slice.
 	searchMatches    []cellMatch
 	searchCurrentIdx int
 	searchActive     bool
@@ -706,13 +699,12 @@ type viewSnapshot struct {
 
 	// hidden is the index-set of columns to skip in visibleColumnOrder.
 	// Captured under the same RLock as the rest of the snapshot so a
-	// concurrent SetHiddenCols cannot tear the frame. dbsavvy-uv0.6.
+	// concurrent SetHiddenCols cannot tear the frame.
 	hidden map[int]bool
 
 	// viewMode + estimatedRows are the expanded-mode projection inputs.
 	// viewMode is normalised at snapshot time so renderExpanded never
 	// has to guess; estimatedRows is the loader's last-known value.
-	// dbsavvy-uv0.7.
 	viewMode           string
 	estimatedRows      int64
 	expandedLineOffset int
@@ -721,14 +713,13 @@ type viewSnapshot struct {
 	// renderDataLine reads the snapshot (never v.* directly) so a
 	// concurrent SetPendingEdits / SetEditability cannot tear the frame.
 	// rowIdentity holds the SELECT-order PK column indexes used to match a
-	// row against staged edits. dbsavvy-cyh.
+	// row against staged edits.
 	pendingEdits *models.PendingEditSet
 	rowIdentity  []int
 
 	// yankFlash is the transient post-yank highlight range (defensive copy).
 	// renderDataLine reads it via inYankFlash so a concurrent FlashYank* /
 	// ClearYankFlash cannot tear the frame. nil means no active flash.
-	// dbsavvy-j8xr.
 	yankFlash *yankFlashRange
 }
 
@@ -812,7 +803,6 @@ func (v *View) clampOffsetsLocked(snap viewSnapshot, innerW, innerH int) (rowOff
 	// scrolls in raw-index space and the cursor falls off-screen whenever
 	// a sort reorders the buffer. Falls back to position 0 when the
 	// cursor's row isn't in the projection (e.g. filtered out).
-	// dbsavvy-dr6.
 	proj := project(snap)
 	projectedCount := len(proj)
 	cursorPos := max(projectedPos(proj, snap.cursorRow), 0)
@@ -858,7 +848,6 @@ func (v *View) clampOffsetsLocked(snap viewSnapshot, innerW, innerH int) (rowOff
 	v.colOffset = colOffset
 	// Record the latest data-row capacity so VisibleRows (export Scope)
 	// can return the on-screen window without re-deriving the layout.
-	// dbsavvy-uv0.9.
 	v.viewHeight = dataRows
 	v.mu.Unlock()
 	return rowOffset, colOffset
@@ -901,15 +890,13 @@ func (v *View) maybeFireNearTail() {
 // the configured mouseDoubleClickMs window, this click counts as a
 // double-click and onSortRequest(col) fires (when wired) with the RAW
 // v.cols index — the grid no longer owns the sort cycle; the Tab-level
-// flow does (dbsavvy-72k.5). Otherwise the click is recorded so the NEXT
+// flow does. Otherwise the click is recorded so the NEXT
 // click against the same column within the window completes the
 // double-click. The recorded col is reset on any click against a
 // different column.
 //
 // The now argument is injected so tests can drive the debounce state
 // machine deterministically; production callers pass time.Now().
-//
-// dbsavvy-uv0.5.
 func (v *View) HandleHeaderClick(x, y int, now time.Time) {
 	if y != 0 {
 		// Non-header click. AC: data-row clicks must NOT alter sort state
@@ -928,7 +915,7 @@ func (v *View) HandleHeaderClick(x, y int, now time.Time) {
 		// Reset prior-click so the NEXT click starts a fresh first-click. The
 		// grid only DETECTS the double-click here; the asc→desc→clear cycle
 		// and DB re-run run through the Tab-level onSortRequest sink with the
-		// RAW v.cols index (dbsavvy-72k.5). Read the hook under lock, then
+		// RAW v.cols index. Read the hook under lock, then
 		// release before invoking it (mirrors maybeFireNearTail).
 		v.lastHeaderClick = headerClickState{col: -1}
 		cb := v.onSortRequest

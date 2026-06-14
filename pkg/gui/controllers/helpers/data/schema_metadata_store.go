@@ -188,11 +188,11 @@ func (s *SchemaMetadataStore) InvalidateTable(schema, table string) {
 // LEFT INTACT (a local DDL renames/adds columns but rarely removes the table
 // the user is looking at; the eager list self-heals on the next LoadEager).
 // Used on a successful local DDL where parsing the exact target table is
-// avoided (epic dbsavvy-ko4m.2 decision B: whole-schema invalidation): the
+// avoided (decision B: whole-schema invalidation): the
 // next WarmTable for any affected table reloads fresh columns/FKs.
 //
 // A subsequent Columns/ForeignKeys read for any table in schema returns
-// (nil,false) until it is re-warmed. dbsavvy-ko4m.2.4.
+// (nil,false) until it is re-warmed.
 func (s *SchemaMetadataStore) InvalidateSchema(schema string) {
 	prefix := schema + "\x00"
 	s.mu.Lock()

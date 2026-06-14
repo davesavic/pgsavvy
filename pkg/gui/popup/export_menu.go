@@ -26,8 +26,6 @@ const (
 // The menu is NOT itself a gocui context; rendering is done by the
 // caller via Body() (renderable text). The chord wiring + focus stack
 // integration is the orchestrator's responsibility.
-//
-// dbsavvy-uv0.9.
 type ExportMenu struct {
 	formats      []string
 	destinations []string
@@ -53,7 +51,7 @@ type ExportMenu struct {
 	// sqlInsertsDisabledReason is the inline reason rendered next to the
 	// disabled SQL-INSERTs row and surfaced via ConfirmBlockedReason.
 	// Empty falls back to the historical default text.
-	// dbsavvy-bwq.11 (A8): sourced from GridView.DisabledReason() so the
+	// Sourced from GridView.DisabledReason() so the
 	// menu reuses F2's single source of truth.
 	sqlInsertsDisabledReason string
 
@@ -298,7 +296,7 @@ func (m *ExportMenu) IsSQLInsertsSelected() bool {
 // text used when the SQL-INSERTs row is shown-but-disabled. The caller
 // sources the string from GridView.DisabledReason() so the menu reuses
 // the editability decision instead of inventing its own. Empty string
-// preserves the historical default annotation. dbsavvy-bwq.11 (A8).
+// preserves the historical default annotation.
 func (m *ExportMenu) SetSQLInsertsDisabledReason(reason string) {
 	m.sqlInsertsDisabledReason = reason
 }

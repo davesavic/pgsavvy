@@ -28,7 +28,7 @@ var errNotConnected = errors.New("data: not connected")
 // ConnectHelper owns the drivers.Connection / drivers.Session pair for a
 // single connection profile and serializes every Session method call through
 // a per-Session worker goroutine. Sessions are NOT safe for concurrent use
-// (drivers.driver.go §Session and dbsavvy-921 D18), so the helper acts as the
+// (drivers.driver.go §Session), so the helper acts as the
 // gatekeeper: controllers and other helpers call ConnectHelper.LoadX
 // concurrently; the worker queue runs at most one closure at a time against
 // the underlying Session.
@@ -61,7 +61,7 @@ type ConnectHelper struct {
 
 	// funcDetailMu guards the function-detail cache and the warm-in-flight set.
 	// Separate from stateMu so a cache read never contends with connect/disconnect
-	// state churn. dbsavvy-ko4m.5.2.
+	// state churn.
 	funcDetailMu       sync.Mutex
 	funcDetail         map[string][]models.FunctionDetail // schema+name -> details; nil until first populate
 	funcDetailInflight map[string]struct{}                // keys with a WarmFunctionDetail load in flight
@@ -340,7 +340,7 @@ func (h *ConnectHelper) LoadForeignKeys(ctx context.Context, schema, table strin
 // only). Mirrors LoadColumns so the eager function-name warm routes through the
 // SAME serialized worker queue rather than calling sess.ListFunctions on a raw
 // Session pointer (which would race other queries on the pgx conn). Added for
-// the schema-warmer eager tier (dbsavvy-ko4m.2.3).
+// the schema-warmer eager tier.
 func (h *ConnectHelper) LoadFunctions(ctx context.Context) ([]string, error) {
 	var out []string
 	err := h.submit(ctx, func(ctx context.Context) error {
@@ -367,7 +367,7 @@ func (h *ConnectHelper) LoadFunctions(ctx context.Context) ([]string, error) {
 // per-Session serialization contract. On success the result is cached under
 // schema+name so the synchronous FunctionDetail read can serve completion
 // without blocking. A load error is logged via logs.Event and leaves the cache
-// entry unpopulated. dbsavvy-ko4m.5.2.
+// entry unpopulated.
 func (h *ConnectHelper) LoadFunctionDetail(ctx context.Context, schema, name string) ([]models.FunctionDetail, error) {
 	var out []models.FunctionDetail
 	err := h.submit(ctx, func(ctx context.Context) error {
@@ -423,7 +423,6 @@ func (h *ConnectHelper) FunctionDetail(schema, name string) ([]models.FunctionDe
 // onReady still fires when that single load completes). A load failure does NOT
 // invoke onReady (the cache stays empty); the error is logged inside
 // LoadFunctionDetail. A nil onReady is safe (the load still warms the cache).
-// dbsavvy-ko4m.5.2.
 func (h *ConnectHelper) WarmFunctionDetail(schema, name string, onReady func()) {
 	if _, ok := h.FunctionDetail(schema, name); ok {
 		h.fireOnReady(onReady)

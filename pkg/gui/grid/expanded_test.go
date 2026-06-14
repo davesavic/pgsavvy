@@ -32,10 +32,10 @@ func TestView_SetViewMode_RoundTrips(t *testing.T) {
 }
 
 // TestRenderExpanded_FollowsProjectedCursorUnderFilter is a regression test
-// for the dbsavvy-dr6 follow-up: in expanded mode the displayed record is
-// chosen from the cursor. dbsavvy-dr6 redefined cursorRow as a RAW-buffer
+// for the follow-up: in expanded mode the displayed record is
+// chosen from the cursor. cursorRow was redefined as a RAW-buffer
 // index that navigation steps in projected order, so expanded mode must
-// translate cursorRow through projectedPos. Updated for dbsavvy-2ttm (T1):
+// translate cursorRow through projectedPos. Updated so that
 // applyFilter is now identity, so the projection is the full buffer and
 // JumpFirst lands on raw row 0; expanded mode must show that record.
 func TestRenderExpanded_FollowsProjectedCursor(t *testing.T) {
@@ -248,7 +248,7 @@ func TestWrappedLineDown_GridModeIsNoop(t *testing.T) {
 // TestTruncateToWidth_RuneBoundary asserts width-aware truncation never
 // splits a multibyte rune and never exceeds the column budget. The AC
 // edge case: "中文测试abc" to width 4 must yield valid UTF-8 on a rune
-// boundary (中 + … = 2+1 = 3 cols) with width ≤ 4. dbsavvy-fow.9 U22.
+// boundary (中 + … = 2+1 = 3 cols) with width ≤ 4.
 func TestTruncateToWidth_RuneBoundary(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -278,7 +278,7 @@ func TestTruncateToWidth_RuneBoundary(t *testing.T) {
 
 // TestWrapValue_WideRunesNeverSplit asserts the value-wrap path cuts on
 // rune boundaries by display width, so CJK / emoji content wrapping at
-// a narrow value column never corrupts a rune. dbsavvy-fow.9 U22.
+// a narrow value column never corrupts a rune.
 func TestWrapValue_WideRunesNeverSplit(t *testing.T) {
 	// 5 CJK runes = 10 display cols, wrapped at width 4 (2 wide runes
 	// per line). No line may exceed 4 cols and every chunk valid UTF-8.
@@ -295,7 +295,7 @@ func TestWrapValue_WideRunesNeverSplit(t *testing.T) {
 
 // TestExpandedRecordLines_WideName asserts a CJK column name longer than
 // the gutter is truncated on a rune boundary with the ellipsis and the
-// gutter padding lands the pipe at the gutter column. dbsavvy-fow.9 U22.
+// gutter padding lands the pipe at the gutter column.
 func TestExpandedRecordLines_WideName(t *testing.T) {
 	name := strings.Repeat("名", 30) // 60 display cols, well over gutter
 	lines := expandedRecordLines(name, "v", expandedGutterMax, 40)

@@ -10,7 +10,7 @@ import (
 
 // TestConnectionManagerControllerBindings asserts the controller publishes
 // <esc> → ConnectionManagerClose and q → AppQuit, both scoped to
-// CONNECTION_MANAGER. q quits because the modal is the startup root (ig4);
+// CONNECTION_MANAGER. q quits because the modal is the startup root;
 // it must NOT map to the Close action. Ctrl-C quits via the GLOBAL-scope
 // binding owned by QuitController.
 func TestConnectionManagerControllerBindings(t *testing.T) {

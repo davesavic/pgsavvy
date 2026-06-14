@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestGetDefaultConfigUIMouseEnabled pins the default per dbsavvy-zro AC.
+// TestGetDefaultConfigUIMouseEnabled pins the default.
 // Mouse is opt-out: the bootstrap-time mouse-binding registration block
 // in pkg/gui/controllers/* skips entirely when this flag is false, so
 // the default MUST stay true to preserve documented UX.
@@ -17,8 +17,7 @@ func TestGetDefaultConfigUIMouseEnabled(t *testing.T) {
 	}
 }
 
-// TestGetDefaultConfigLeaderDefaults pins the dbsavvy-dlp.3 defaults per
-// the review-plan D19 amendment.
+// TestGetDefaultConfigLeaderDefaults pins the leader defaults.
 func TestGetDefaultConfigLeaderDefaults(t *testing.T) {
 	cfg := GetDefaultConfig()
 	if cfg.Leader != " " {
@@ -42,8 +41,8 @@ func TestGetDefaultConfigTimeoutDefaults(t *testing.T) {
 	}
 }
 
-// TestGetDefaultConfigUIPaginationDefaults pins the dbsavvy-uv0.3
-// pagination knob defaults: 200/50/25/1_000_000.
+// TestGetDefaultConfigUIPaginationDefaults pins the pagination knob
+// defaults: 200/50/25/1_000_000.
 func TestGetDefaultConfigUIPaginationDefaults(t *testing.T) {
 	cfg := GetDefaultConfig()
 	if cfg.UI.ResultPageSize != 200 {
@@ -60,9 +59,8 @@ func TestGetDefaultConfigUIPaginationDefaults(t *testing.T) {
 	}
 }
 
-// TestGetDefaultConfigUIExportDefaults pins the dbsavvy-uv0.9 export
-// knob defaults: 100_000 buffered-row warn threshold and 16 MiB
-// clipboard cap.
+// TestGetDefaultConfigUIExportDefaults pins the export knob defaults:
+// 100_000 buffered-row warn threshold and 16 MiB clipboard cap.
 func TestGetDefaultConfigUIExportDefaults(t *testing.T) {
 	cfg := GetDefaultConfig()
 	if cfg.UI.Export.BufferedRowWarnThreshold != 100_000 {
@@ -73,9 +71,9 @@ func TestGetDefaultConfigUIExportDefaults(t *testing.T) {
 	}
 }
 
-// TestGetDefaultConfigEditorAutocompleteDefault pins the dbsavvy-bwq.22
-// (C5) default per ADR-16: auto-trigger completion is on by default on
-// fresh install. Users opt out via `editor.autocomplete: false`.
+// TestGetDefaultConfigEditorAutocompleteDefault pins the default per
+// ADR-16: auto-trigger completion is on by default on fresh install.
+// Users opt out via `editor.autocomplete: false`.
 func TestGetDefaultConfigEditorAutocompleteDefault(t *testing.T) {
 	cfg := GetDefaultConfig()
 	if !cfg.Editor.Autocomplete {
@@ -111,19 +109,19 @@ func TestParseYAML_EditorAutocomplete_Enabled(t *testing.T) {
 	}
 }
 
-// TestGetDefaultConfigEditorAutocompleteAliasDefault pins dbsavvy-ko4m.6.2
-// (Finding K): table-accept alias auto-insert is on by default on fresh
-// install. Users opt out via `editor.autocomplete_alias: false`.
+// TestGetDefaultConfigEditorAutocompleteAliasDefault pins the default:
+// table-accept alias auto-insert is on by default on fresh install.
+// Users opt out via `editor.autocomplete_alias: false`.
 func TestGetDefaultConfigEditorAutocompleteAliasDefault(t *testing.T) {
 	cfg := GetDefaultConfig()
 	if !cfg.Editor.AutocompleteAlias {
-		t.Fatal("GetDefaultConfig().Editor.AutocompleteAlias = false; want true (default per ko4m.6.2)")
+		t.Fatal("GetDefaultConfig().Editor.AutocompleteAlias = false; want true (default)")
 	}
 }
 
 // TestParseYAML_EditorAutocompleteAlias_Disabled asserts the top-level
 // `editor.autocomplete_alias` YAML path decodes onto
-// UserConfig.Editor.AutocompleteAlias (dbsavvy-ko4m.6.2, Finding K).
+// UserConfig.Editor.AutocompleteAlias.
 func TestParseYAML_EditorAutocompleteAlias_Disabled(t *testing.T) {
 	src := []byte("editor:\n  autocomplete_alias: false\n")
 	var cfg UserConfig

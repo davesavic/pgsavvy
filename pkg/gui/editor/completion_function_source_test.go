@@ -185,7 +185,7 @@ func TestFunctionSource_OneCharOverlapExcluded(t *testing.T) {
 	}
 }
 
-// TestEngine_FunctionsOutrankKeywords is the dbsavvy-ek4 regression test
+// TestEngine_FunctionsOutrankKeywords is the regression test
 // (mirrors TestEngine_SchemaTablesOutrankKeywords). At comparable match quality
 // a FUNCTION suggestion outranks a KEYWORD suggestion because FunctionSourceBias
 // (60) > KeywordSourceBias (40). Before this fix the function emitted Score=0

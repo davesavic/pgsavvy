@@ -19,9 +19,9 @@ import (
 // disjoint means a user cannot accidentally type `:command.open` and
 // trigger the chord-dispatched open path, and vice-versa.
 //
-// dlp.7 ships the registry itself + the `:reload` ex-command. Bootstrap
+// The registry itself + the `:reload` ex-command live here. Bootstrap
 // wiring (closure binding LoadUserConfig to the on-disk path, mounting
-// the registry into the gui) lands in dlp.8c.
+// the registry into the gui) lands during orchestrator bootstrap.
 
 // ErrDuplicateExCommand is returned by ExRegistry.Register when a
 // command with the same name is already registered.

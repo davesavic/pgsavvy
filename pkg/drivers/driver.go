@@ -7,14 +7,14 @@ import (
 )
 
 // ConnectionProfile is the connection-profile shape consumed by Driver.Open.
-// Per epic dbsavvy-921 D10 it is an alias of models.Connection (no separate
+// It is an alias of models.Connection (no separate
 // type) so that drivers receive plain configuration data via the same struct
 // the config loader produces.
 type ConnectionProfile = models.Connection
 
 // Factory constructs a Driver. Implementations live in concrete driver
 // packages (e.g. pkg/drivers/pg) and are passed to Register from main.go;
-// pkg/drivers itself imports no concrete driver (epic dbsavvy-921 D9).
+// pkg/drivers itself imports no concrete driver.
 type Factory func(ctx context.Context) (Driver, error)
 
 // Driver is the per-engine entry point. See DESIGN.md §11.1.
@@ -41,7 +41,7 @@ type Connection interface {
 // Session is a stateful checkout of a Connection that holds transaction
 // state, search_path, prepared statements, etc. Session methods are NOT safe
 // for concurrent use by multiple goroutines — callers must serialize. See
-// DESIGN.md §11.1 and epic dbsavvy-921 D18.
+// DESIGN.md §11.1.
 type Session interface {
 	Close() error
 	ID() models.SessionID
@@ -56,7 +56,7 @@ type Session interface {
 	// ListInboundForeignKeys returns every FK constraint whose
 	// referenced (target) table is (schema, table) — i.e. the inbound
 	// edges into the supplied table. Drives the `gD` reverse-FK picker
-	// (dbsavvy-bwq.17 / dbsavvy-8oo stub #2).
+	// (stub #2).
 	ListInboundForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error)
 	ListFunctions(ctx context.Context) ([]string, error)
 	DescribeFunction(ctx context.Context, schema, name string) ([]models.FunctionDetail, error)
@@ -71,8 +71,8 @@ type Session interface {
 
 	// Encoder returns the literal encoder for this session. It is a
 	// singleton owned by the session; the returned value is safe to retain
-	// for the session's lifetime. Encoder() lives here (per epic
-	// dbsavvy-uv0 AD-3) rather than on Driver because literal encoding
+	// for the session's lifetime. Encoder() lives here rather than on
+	// Driver because literal encoding
 	// can depend on session-scoped GUCs (standard_conforming_strings,
 	// server_encoding).
 	Encoder() Encoder
@@ -108,7 +108,7 @@ type RowStream interface {
 // Capabilities advertises the static feature flags a driver exposes; UI code
 // branches on these (and NEVER on the driver name). HasLiveCancel starts
 // false in the v1 Postgres driver and flips true when pg_cancel_backend
-// lands in epic E6 (see dbsavvy-921 D17). See DESIGN.md §11.1.
+// lands in epic E6. See DESIGN.md §11.1.
 type Capabilities struct {
 	HasSchemas           bool
 	HasMaterializedViews bool

@@ -448,7 +448,7 @@ func TestVimEditorTextObjectInVisualBlockSnapsSelection(t *testing.T) {
 	if !ok {
 		t.Fatalf("registry missing TextObjectInnerQuoteDouble")
 	}
-	// dbsavvy-uly7.9: text objects must fire (and snap) in VisualBlock.
+	// text objects must fire (and snap) in VisualBlock.
 	if err := cmd.Handler(commands.ExecCtx{Mode: types.ModeVisualBlock}); err != nil {
 		t.Fatalf("text-object handler err = %v", err)
 	}

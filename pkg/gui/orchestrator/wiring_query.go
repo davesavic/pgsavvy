@@ -7,8 +7,6 @@
 // — builds a SQLSession around that second session with the History as
 // HistoryRecorder, and Bind()s the QueryRunner so the controller sees a
 // HasSession()==true runner on the next <leader>r.
-//
-// dbsavvy-66p.16.
 package orchestrator
 
 import (
@@ -18,8 +16,8 @@ import (
 
 // editorBufferAdapter satisfies controllers.EditorBufferReader by
 // reading the canonical *editor.Buffer hung off QueryEditorContext.
-// Buffer is the source of truth (epic dbsavvy-wwd Architecture
-// Decision 2); the QUERY_EDITOR view is a mirror written by VimEditor
+// Buffer is the source of truth; the QUERY_EDITOR view is a mirror
+// written by VimEditor
 // on every Insert-mode Passthrough.
 //
 // Both methods return safe zero values when qec or its Buffer is nil
@@ -61,8 +59,8 @@ func (a *editorBufferAdapter) CursorOffset() int {
 
 // SelectionText returns the text covered by the canonical Buffer.Selection
 // when Visual mode is live, or ("", false) when no selection exists or
-// the wiring is nil. dbsavvy-wwd.7's <leader>r-in-Visual fan-out routes
-// through this method.
+// the wiring is nil. The <leader>r-in-Visual fan-out routes through
+// this method.
 func (a *editorBufferAdapter) SelectionText() (string, bool) {
 	if a == nil || a.qec == nil {
 		return "", false
@@ -76,7 +74,6 @@ func (a *editorBufferAdapter) SelectionText() (string, bool) {
 
 // ReplaceAll replaces the entire buffer content with text. The edit is
 // recorded in the UndoTree so `u` reverts the replacement.
-// dbsavvy-4y5.4.2.
 func (a *editorBufferAdapter) ReplaceAll(text string) error {
 	if a == nil || a.qec == nil {
 		return nil
@@ -112,7 +109,7 @@ func (a *editorBufferAdapter) ReplaceAll(text string) error {
 // InsertAtCursor splices text in at the canonical Buffer cursor and
 // moves the cursor to the end of the inserted text. The whole insert
 // (multi-line text included) is committed as ONE editor.EditKindInsert,
-// so a single `u` reverts it. dbsavvy-o9k0.2.
+// so a single `u` reverts it.
 func (a *editorBufferAdapter) InsertAtCursor(text string) error {
 	if a == nil || a.qec == nil {
 		return nil
@@ -134,7 +131,7 @@ func (a *editorBufferAdapter) InsertAtCursor(text string) error {
 }
 
 // ReplaceSelection replaces the visual selection with text. Exits
-// visual mode after the replacement. dbsavvy-4y5.4.2.
+// visual mode after the replacement.
 func (a *editorBufferAdapter) ReplaceSelection(text string) error {
 	if a == nil || a.qec == nil {
 		return nil

@@ -35,12 +35,12 @@ import (
 
 // DefaultMaxResultTabs is the shipped tab-count cap. The helper accepts
 // an override via ResultTabsHelperDeps.MaxTabs; the override falls back
-// to this default when 0 or negative. Matches dbsavvy-66p §D9 default
+// to this default when 0 or negative. Matches the §D9 default
 // (ui.result_tabs_max = 8).
 const DefaultMaxResultTabs = 8
 
 // resultTabInitialRows is the initial-fill row count handed to
-// ResultBufferManager.NewQueryTask. Matches dbsavvy-66p §D13 default
+// ResultBufferManager.NewQueryTask. Matches the §D13 default
 // (ui.result_initial_rows = 200). The dedicated config knob is wired in
 // a follow-up; for now the constant matches the design value.
 const resultTabInitialRows = 200
@@ -51,7 +51,7 @@ const resultTabToastTTL = 4 * time.Second
 // preemptStopBound caps the wall-clock wait for the preempt cancel+Stop loop
 // to drain every in-flight worker. On expiry the worker is still live and
 // streamMu is still held; PreemptInFlight warn-logs and returns expired so the
-// QueryRunner fences the session. gr7e.2 (AD2/AD4).
+// QueryRunner fences the session (AD2/AD4).
 const preemptStopBound = 5 * time.Second
 
 // TabState classifies the lifecycle phase of a result tab. The string
@@ -68,7 +68,7 @@ const (
 	// the new RowStream is open but no row has arrived yet. Flips to
 	// StateRunning on the first appended batch (or to a terminal state in
 	// markCompleteOnUI when the re-run completes with zero rows). Surfaces
-	// the "sorting…" affordance in Title() until then. dbsavvy-72k.3.
+	// the "sorting…" affordance in Title() until then.
 	StateSorting TabState = "sorting…"
 	// StateComplete — clean EOF.
 	StateComplete TabState = "complete"
@@ -85,7 +85,6 @@ const (
 	StateError TabState = "error"
 	// StateConnectionLost — the underlying connection died mid-stream.
 	// The tab preserves whatever rows were received before the failure.
-	// hq5.6.
 	StateConnectionLost TabState = "connection lost"
 )
 
@@ -107,7 +106,7 @@ type runHandle interface {
 // Exported so the orchestrator (which constructs the real
 // *tasks.ResultBufferManager) can pass a typed factory closure.
 //
-// dbsavvy-uv0.3 extends this interface with ReadRows / ReadToEnd / an
+// This interface extends the base with ReadRows / ReadToEnd / an
 // EstimatedRows accessor so the helper can drive pagination + the
 // G-with-warn flow without importing pkg/tasks (cycle).
 type StreamRunner interface {
@@ -134,7 +133,7 @@ type StreamRunner interface {
 	EstimatedRows() int64
 
 	// SetEstimatedRows caches a planner row-count estimate so a repeated
-	// ReadToEnd (G) doesn't re-EXPLAIN. dbsavvy-uly7.8 (lazy seed).
+	// ReadToEnd (G) doesn't re-EXPLAIN (lazy seed).
 	SetEstimatedRows(n int64)
 }
 
@@ -164,14 +163,14 @@ type onUIThreader func(func() error)
 // searchLineOpener is the narrow surface ResultTabsHelper uses to open
 // the bottom-anchored in-grid search input. The concrete satisfier is
 // *ui.SearchLineHelper; tests may inject a fake. nil disables the search
-// path (the "/" chord becomes a no-op). dbsavvy-2ttm.
+// path (the "/" chord becomes a no-op).
 type searchLineOpener interface {
 	Open(opts SearchLineOpts) error
 }
 
 // chooser is the narrow surface ResultTabsHelper uses to open the
 // <leader>s sort picker. The concrete satisfier is *ui.ChoiceHelper;
-// tests inject a fake. nil disables the sort-picker path. dbsavvy-uv0.5.
+// tests inject a fake. nil disables the sort-picker path.
 type chooser interface {
 	Choose(label string, choices []string, onSubmit func(idx int) error, onCancel func() error) error
 }
@@ -180,7 +179,6 @@ type chooser interface {
 // surface. *ui.ToastHelper satisfies it; tests inject a recorder. The
 // search caveat handler reaches for ShowOrUpdate when present (so a
 // repeated caveat replaces in place); otherwise it falls back to Show.
-// dbsavvy-2ttm.
 type toastUpdater interface {
 	ShowOrUpdate(key, message string, ttl time.Duration)
 }
@@ -214,52 +212,50 @@ type ResultTabsHelperDeps struct {
 	Now func() time.Time
 
 	// After is the timer used to bound the preempt Stop-wait. Defaults to
-	// time.After. Injectable for deterministic tests. gr7e.2.
+	// time.After. Injectable for deterministic tests.
 	After func(time.Duration) <-chan time.Time
 
 	// Confirm pushes a confirmation popup. Used by ReadToEnd above
 	// ReadToEndWarnThreshold to make the user explicitly opt in to a
-	// large drain. nil disables the warning path. dbsavvy-uv0.3.
+	// large drain. nil disables the warning path.
 	Confirm confirmer
 
 	// OnUIThread marshals a closure onto the gocui MainLoop. Used by
 	// the helper to flip Tab.complete from a worker goroutine (the
 	// onDone / then callbacks of ReadToEnd fire off-thread). nil means
 	// "run synchronously" — fine for the unit-test path; production
-	// wires Gui.OnUIThread. dbsavvy-uv0.3.
+	// wires Gui.OnUIThread.
 	OnUIThread onUIThreader
 
 	// ResultPageSize is the page size for explicit ]p / [p chord
 	// requests. Falls back to grid.ResultPageSize (200) when 0.
-	// dbsavvy-uv0.3.
 	ResultPageSize int
 
 	// ReadToEndWarnThreshold is the estimated-rows ceiling above which
 	// G first shows a confirmation prompt. 0 means "use the shipped
-	// default (1_000_000)". dbsavvy-uv0.3.
+	// default (1_000_000)".
 	ReadToEndWarnThreshold int64
 
 	// Search opens the bottom-anchored in-grid search input for the "/"
 	// chord. nil disables the search path (chord becomes a no-op).
-	// dbsavvy-2ttm.
 	Search searchLineOpener
 
 	// Choice pushes the column-picker overlay used by <leader>s. nil
-	// disables the sort-picker path (chord becomes a no-op). dbsavvy-uv0.5.
+	// disables the sort-picker path (chord becomes a no-op).
 	Choice chooser
 
 	// SortPickLabel is the picker label rendered above the column list.
-	// "" falls back to "sort by column". dbsavvy-uv0.5.
+	// "" falls back to "sort by column".
 	SortPickLabel string
 
 	// MouseDoubleClickMs is the maximum gap (in milliseconds) that still
 	// counts as a double-click on a grid header. 0 falls back to grid's
-	// default (400ms). dbsavvy-uv0.5.
+	// default (400ms).
 	MouseDoubleClickMs int
 
 	// Store is the *common.AppStateStore used to seed/persist the
 	// per-(connID, baseTable) hidden-column set. nil disables persistence
-	// (overlay still works session-only). dbsavvy-uv0.6.
+	// (overlay still works session-only).
 	Store *common.AppStateStore
 
 	// PushHideOverlay pushes the HIDE_OVERLAY context onto the focus
@@ -267,17 +263,16 @@ type ResultTabsHelperDeps struct {
 	// overlay state object. nil disables the modal push (overlay state
 	// is built but the popup never appears) — production wires a closure
 	// over (registry.HideOverlay.SetState(adapter); tree.Push(registry.HideOverlay)).
-	// dbsavvy-uv0.6.
 	PushHideOverlay func() error
 
 	// PopHideOverlay pops the HIDE_OVERLAY context off the focus stack.
 	// Invoked by HideOverlayClose() after the helper has committed the
 	// final hidden set + persisted it. nil disables the pop — production
-	// wires a closure over tree.Pop(). dbsavvy-uv0.6.
+	// wires a closure over tree.Pop().
 	PopHideOverlay func() error
 
 	// PushExportMenu pushes the EXPORT_MENU context onto the focus stack.
-	// Invoked by PromptExport(). dbsavvy-uv0.9.
+	// Invoked by PromptExport().
 	PushExportMenu func() error
 	// PopExportMenu pops the EXPORT_MENU context off the focus stack.
 	PopExportMenu func() error
@@ -287,30 +282,29 @@ type ResultTabsHelperDeps struct {
 	// PromptHelper.Prompt. Pushing the PROMPT (a TEMPORARY_POPUP) auto-pops
 	// the EXPORT_MENU (also a TEMPORARY_POPUP); the callbacks re-push the
 	// menu via PushExportMenu so focus returns to it. nil disables the
-	// edit-path path (the 'i' binding becomes a no-op). dbsavvy-uv0.9.
+	// edit-path path (the 'i' binding becomes a no-op).
 	EditExportPath func(initial string, onSubmit func(string) error, onCancel func() error) error
 
 	// OnWorker dispatches a closure onto a background worker goroutine
 	// (mirrors orchestrator.Gui.OnWorker). The <leader>oe export pipeline
 	// uses this to run exporter.Run off the UI thread. nil disables the
-	// worker path — ExportMenuConfirm will toast a failure. dbsavvy-uv0.9.
+	// worker path — ExportMenuConfirm will toast a failure.
 	OnWorker func(func(gocui.Task) error)
 
 	// ExportBufferedRowWarnThreshold is the row-count ceiling above which
 	// the export menu's "buffered" formats (Markdown, JSON Array) gate
 	// behind a typed-YES confirmation. 0 means "use the shipped default
-	// (100_000)". dbsavvy-uv0.9.
+	// (100_000)".
 	ExportBufferedRowWarnThreshold int64
 
 	// ExportClipboardMaxBytes caps the payload size pushed to the system
-	// clipboard. 0 means "use the shipped default (16 MiB)". dbsavvy-uv0.9.
+	// clipboard. 0 means "use the shipped default (16 MiB)".
 	ExportClipboardMaxBytes int64
 
 	// ExportClipboard is the transport a clipboard export pushes its final
 	// serialized payload to on Close. nil falls back to the real system
 	// clipboard (clipboard.NewSystemClipboard — the same transport grid yank
 	// uses), so production needs no explicit wiring; tests inject a fake.
-	// dbsavvy-rggk.
 	ExportClipboard exporter.ClipboardWriter
 
 	// IntrospectEditability decides whether a completed result is inline-
@@ -320,8 +314,8 @@ type ResultTabsHelperDeps struct {
 	// (editable, SELECT-order row-identity indexes, disabledReason,
 	// catalog-resolved base-relation schema). The schema is threaded onto
 	// the grid so the apply path can schema-qualify the UPDATE even when the
-	// SELECT was unqualified (dbsavvy-8q6). nil keeps editability off
-	// (unit-test default). dbsavvy-2b6.
+	// SELECT was unqualified. nil keeps editability off
+	// (unit-test default).
 	IntrospectEditability func(ctx context.Context, cols []models.ColumnMeta) (bool, []int, string, string)
 
 	// EstimateRows runs a side-effect-free planner EXPLAIN for sql (resolved
@@ -330,7 +324,7 @@ type ResultTabsHelperDeps struct {
 	// session (NOT the in-flight stream's session) and runs the pg planner-only
 	// EXPLAIN, so it never blocks or preempts the active stream. Used lazily by
 	// ReadToEnd (G) when the estimate is unknown (== 0). nil keeps the prior
-	// conservative behaviour (unknown estimate => prompt). dbsavvy-uly7.8.
+	// conservative behaviour (unknown estimate => prompt).
 	EstimateRows func(ctx context.Context, sql, defaultSchema string) (int64, error)
 
 	// ResolveTableNames maps the distinct source-table OIDs of a result's
@@ -344,14 +338,12 @@ type ResultTabsHelperDeps struct {
 
 // defaultReadToEndWarnThreshold is the shipped ceiling above which G
 // first prompts for confirmation. Mirrors the config default
-// (ui.read_to_end_warn_threshold = 1_000_000). dbsavvy-uv0.3.
+// (ui.read_to_end_warn_threshold = 1_000_000).
 const defaultReadToEndWarnThreshold int64 = 1_000_000
 
 // ResultTabsHelper owns the multi-result-tab pane in the orchestrator's
 // "secondary" window slot. It is the concrete satisfier of
 // controllers.ResultTabsHelper.
-//
-// dbsavvy-66p.12.
 type ResultTabsHelper struct {
 	deps          ResultTabsHelperDeps
 	maxTabs       int
@@ -373,18 +365,18 @@ type ResultTabsHelper struct {
 	activeID int64  // 0 when no tab is active
 
 	// hideOverlay tracks the currently-open <leader>gH overlay, if any.
-	// nil when no overlay is active. dbsavvy-uv0.6.
+	// nil when no overlay is active.
 	hideOverlay *activeHideOverlay
 
 	// exportMenu tracks the currently-open <leader>oe export menu.
-	// nil when no menu is active. Accessed under h.mu. dbsavvy-uv0.9.
+	// nil when no menu is active. Accessed under h.mu.
 	exportMenu *activeExportMenu
 
 	// onTabRemoved fires after a tab is removed via Close (which is also
 	// the eviction path: allocTab calls Close(victim) when at cap). The
 	// callback receives the closed tab's stringified ID so collaborators
 	// (e.g. ResultJumpList.PruneByTab) can drop stale references. Default
-	// no-op; wired via SetOnTabRemoved. dbsavvy-bwq.15.
+	// no-op; wired via SetOnTabRemoved.
 	onTabRemoved func(tabID string)
 
 	// onActiveClosed fires after CloseActive closes the focused tab —
@@ -393,7 +385,7 @@ type ResultTabsHelper struct {
 	// tab's MAIN_CONTEXT sits on top of the stack pointing at a now-
 	// deleted view, so focus must shift to the new active tab (or the
 	// query editor when none remain). Default no-op; set via
-	// SetOnActiveClosed. dbsavvy-aqw.
+	// SetOnActiveClosed.
 	onActiveClosed func()
 
 	// onActiveChanged fires after a user-initiated tab switch (Cycle /
@@ -402,7 +394,7 @@ type ResultTabsHelper struct {
 	// via ContextTree.Replace, so gocui's current-view (and thus the
 	// dispatch scope) follows the visible tab. Without it, leader chords
 	// dispatch under the prior tab's scope. Default no-op; set via
-	// SetOnActiveChanged. dbsavvy-pc4k.
+	// SetOnActiveChanged.
 	onActiveChanged func()
 
 	// onSortRequest fires when a sort entry point (the <leader>s picker or
@@ -410,7 +402,7 @@ type ResultTabsHelper struct {
 	// callback receives the RAW 0-based grid column index; the
 	// QueryEditorController wires it to sortActiveResult, which owns the
 	// guards + asc→desc→clear cycle + DB re-run. Default no-op (sort is a
-	// no-op until wired); set via SetOnSortRequest. dbsavvy-72k.5.
+	// no-op until wired); set via SetOnSortRequest.
 	onSortRequest func(col int)
 }
 
@@ -476,22 +468,22 @@ type Tab struct {
 	// rowsAffected is the driver's command-tag affected-row count,
 	// captured at stream completion. For DML without RETURNING the result
 	// set is empty (rowCount 0) so this is the only count to display
-	// ("N rows affected"). dbsavvy-tiu8.
+	// ("N rows affected").
 	rowsAffected int64
 	err          error
 	// origSQL is the canonical statement text behind this tab. It serves
 	// two readers with disjoint tab lifecycles: the QueryError position
-	// caret on error tabs (dbsavvy-fow.3, set via SetErrorSQL) and the
-	// sort re-run capture on result tabs (dbsavvy-72k.1, set via SetOrigin
+	// caret on error tabs (set via SetErrorSQL) and the
+	// sort re-run capture on result tabs (set via SetOrigin
 	// alongside origArgs / origDefaultSchema). A tab is either an error
 	// tab or a result tab, so the single field never has conflicting
 	// writers.
 	origSQL           string
-	origArgs          []any  // bound args behind origSQL (dbsavvy-72k.1)
-	origDefaultSchema string // search_path captured at tab-open time (dbsavvy-72k.1)
+	origArgs          []any  // bound args behind origSQL
+	origDefaultSchema string // search_path captured at tab-open time
 	plan              models.Plan
 	planRaw           string
-	planCtx           *guicontext.PlanContext // non-nil for plan tabs (dbsavvy-uv0.8)
+	planCtx           *guicontext.PlanContext // non-nil for plan tabs
 	cancelled         bool
 
 	// complete flips true when the stream has been drained to EOF
@@ -500,14 +492,14 @@ type Tab struct {
 	// "(complete)" suffix and used to drop the "~" approximate prefix
 	// from the row count. The flip is marshalled through the
 	// ResultBufferManager's onUIThread callback so off-thread writers
-	// don't race with rendering. dbsavvy-uv0.3.
+	// don't race with rendering.
 	complete bool
 
 	// caveatShown gates the once-per-tab "/regex filter loaded rows only"
 	// toast. Flipped true by the filter chord handler the first time a
 	// filter is applied to an incomplete tab; reset to false whenever
 	// the helper attaches a fresh schema to the tab's grid (re-run in
-	// the same tab fires a fresh caveat). dbsavvy-uv0.4.
+	// the same tab fires a fresh caveat).
 	caveatShown bool
 
 	rh           runHandle
@@ -518,8 +510,8 @@ type Tab struct {
 	disposed     atomic.Bool
 
 	// baseCtx is the IBaseContext attached to this tab so the focus stack
-	// can route to result_tab_<slot> through rail-switch bindings
-	// (dbsavvy-usj). For plan tabs the active context surfaced through
+	// can route to result_tab_<slot> through rail-switch bindings.
+	// For plan tabs the active context surfaced through
 	// Context() is planCtx instead — plan tabs carry their own PLAN-keyed
 	// context for the plan controller's bindings.
 	baseCtx guicontext.BaseContext
@@ -530,7 +522,6 @@ type Tab struct {
 	// hide-cols set. connID is "" and resultIdentity is the zero value
 	// until the caller invokes SetIdentity (typically right after
 	// OpenResultTab when both the connection and SQL are in hand).
-	// dbsavvy-uv0.6.
 	connID         string
 	resultIdentity query.ResultIdentity
 
@@ -539,7 +530,7 @@ type Tab struct {
 	// SortAsc/SortDesc encoding is display-only) so the cycle survives a re-run
 	// that rebuilds the grid. sortCol is a 0-based grid column index; sortDir
 	// uses the ui.sortDir encoding (sortClear/sortAsc/sortDesc). Zero value
-	// (sortClear) means "no active sort". Protected by mu. dbsavvy-72k.4.
+	// (sortClear) means "no active sort". Protected by mu.
 	sortCol int
 	sortDir sortDir
 }
@@ -548,7 +539,6 @@ type Tab struct {
 // the new direction. Selecting a column different from the current one
 // restarts the cycle at sortAsc; re-selecting the same column advances
 // asc → desc → clear → asc. col is a 0-based grid column index. Held under mu.
-// dbsavvy-72k.4.
 func (t *Tab) cycleSort(col int) sortDir {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -616,7 +606,7 @@ func (t *Tab) Grid() *grid.View {
 
 // Runner returns the per-tab StreamRunner, or nil when the tab has no
 // stream attached (plan / error tabs, or test wiring). Read-only
-// accessor used by the <leader>oe export pipeline. dbsavvy-uv0.9.
+// accessor used by the <leader>oe export pipeline.
 func (t *Tab) Runner() StreamRunner {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -657,13 +647,12 @@ func (t *Tab) Title() string {
 	case StateErrored, StatePlan:
 		return string(state)
 	case StateConnectionLost:
-		// hq5.6: "(error: connection terminated, N rows received)"
+		// "(error: connection terminated, N rows received)"
 		return fmt.Sprintf("(error: connection terminated, %d rows received)", rows)
 	}
 
 	// DML without RETURNING yields no result rows but changes N rows; the
 	// command tag carries N. Surface it instead of a misleading "0 rows".
-	// dbsavvy-tiu8.
 	if complete && rows == 0 && affected > 0 {
 		if affected == 1 {
 			return "1 row affected"
@@ -685,7 +674,7 @@ func (t *Tab) Title() string {
 // the tab-bar strip: "" for plan/error tabs or before any rows arrive,
 // "~N" while streaming, "N" once complete (or the affected-row count for a
 // RETURNING-less DML). It mirrors Title's counting rules but omits the
-// " rows" word so several tabs still fit on one row. dbsavvy-y6rc.
+// " rows" word so several tabs still fit on one row.
 func (t *Tab) BarCount() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -707,7 +696,6 @@ func (t *Tab) BarCount() string {
 }
 
 // Complete reports whether the tab's stream has been drained to EOF.
-// dbsavvy-uv0.3.
 func (t *Tab) Complete() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -715,7 +703,7 @@ func (t *Tab) Complete() bool {
 }
 
 // CaveatShown reports whether the once-per-tab /regex caveat toast has
-// already fired for this tab. dbsavvy-uv0.4.
+// already fired for this tab.
 func (t *Tab) CaveatShown() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -724,15 +712,15 @@ func (t *Tab) CaveatShown() bool {
 
 // SetCaveatShown flips the caveat-shown gate. The /regex chord handler
 // sets it true after firing the once-per-tab toast; startStreaming
-// resets it to false on a fresh schema attach. dbsavvy-uv0.4.
+// resets it to false on a fresh schema attach.
 func (t *Tab) SetCaveatShown(v bool) {
 	t.mu.Lock()
 	t.caveatShown = v
 	t.mu.Unlock()
 }
 
-// SetIdentity records the (connID, ResultIdentity) pair used by
-// dbsavvy-uv0.6 to gate hide-col persistence. The caller (typically
+// SetIdentity records the (connID, ResultIdentity) pair used to gate
+// hide-col persistence. The caller (typically
 // QueryEditorController right after OpenResultTab) supplies the active
 // connection ID and the heuristic result from
 // query.DetectFromQuery(sql). A zero ResultIdentity is valid — the
@@ -745,7 +733,7 @@ func (t *Tab) SetIdentity(connID string, ri query.ResultIdentity) {
 }
 
 // Identity returns the (connID, ResultIdentity) pair previously recorded
-// via SetIdentity. dbsavvy-uv0.6.
+// via SetIdentity.
 func (t *Tab) Identity() (string, query.ResultIdentity) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -755,7 +743,7 @@ func (t *Tab) Identity() (string, query.ResultIdentity) {
 // SetErrorSQL records the SQL text behind this tab's terminal error so
 // the error-panel renderer can draw the QueryError position caret under
 // the offending token. Empty SQL is valid — the caret is simply omitted.
-// Writes the canonical origSQL field. dbsavvy-fow.3.
+// Writes the canonical origSQL field.
 func (t *Tab) SetErrorSQL(sql string) {
 	t.mu.Lock()
 	t.origSQL = sql
@@ -763,7 +751,7 @@ func (t *Tab) SetErrorSQL(sql string) {
 }
 
 // errSQLSnapshot returns the SQL text recorded via SetErrorSQL (the
-// canonical origSQL field), under the tab mutex. dbsavvy-fow.3.
+// canonical origSQL field), under the tab mutex.
 func (t *Tab) errSQLSnapshot() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -774,7 +762,7 @@ func (t *Tab) errSQLSnapshot() string {
 // the DefaultSchema (search_path) used when the tab was opened, so a
 // later sort re-run can reissue the exact query. args is stored by
 // reference; callers must not mutate the slice afterwards. SQL writes the
-// canonical origSQL field shared with SetErrorSQL. dbsavvy-72k.1.
+// canonical origSQL field shared with SetErrorSQL.
 func (t *Tab) SetOrigin(sql string, args []any, defaultSchema string) {
 	t.mu.Lock()
 	t.origSQL = sql
@@ -786,7 +774,7 @@ func (t *Tab) SetOrigin(sql string, args []any, defaultSchema string) {
 // Origin returns the originating (sql, args, defaultSchema) triple
 // recorded via SetOrigin, under the tab mutex. The sql component is the
 // canonical origSQL field (also used by the error caret). Returns zero
-// values when SetOrigin was never called. dbsavvy-72k.1.
+// values when SetOrigin was never called.
 func (t *Tab) Origin() (sql string, args []any, defaultSchema string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -813,7 +801,7 @@ func (h *ResultTabsHelper) OpenResultTab(label string, rh *session.RunHandle) er
 // OpenPlanTab implements controllers.ResultTabsHelper. Creates a tab
 // holding the supplied plan; no stream is attached.
 //
-// dbsavvy-uv0.8: each plan tab gets its own *context.PlanContext bound
+// Each plan tab gets its own *context.PlanContext bound
 // to the tab's view name. The context owns the per-tab tree state
 // (collapse map, cursor, raw toggle) — discarded when the tab is closed.
 // PlanController handlers look up the active plan context through the
@@ -842,7 +830,7 @@ func (h *ResultTabsHelper) OpenPlanTab(label string, plan models.Plan) error {
 	// stream so it must drop the grid. Otherwise LayoutPaint's
 	// "if g := t.Grid(); g != nil { g.Render }" branch wins over the
 	// StatePlan branch and paints the empty grid's "(0 rows)"
-	// EmptyResultIndicator over the plan tree (dbsavvy-6pb).
+	// EmptyResultIndicator over the plan tree.
 	tab.grid = nil
 	tab.mu.Unlock()
 	h.setActive(tab.id)
@@ -853,7 +841,7 @@ func (h *ResultTabsHelper) OpenPlanTab(label string, plan models.Plan) error {
 // Context returns the IBaseContext the focus stack should push to land
 // on this tab. Plan tabs surface their PlanContext (PLAN key, PLAN
 // bindings); every other tab surfaces a result_tab_<slot>-keyed
-// BaseContext built at allocTab. dbsavvy-usj.
+// BaseContext built at allocTab.
 func (t *Tab) Context() types.IBaseContext {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -865,7 +853,7 @@ func (t *Tab) Context() types.IBaseContext {
 
 // ActiveContext returns the IBaseContext of the currently-active tab,
 // or nil when no tab exists. The rail-switch-to-results handler calls
-// this when pushing focus onto the result pane. dbsavvy-usj.
+// this when pushing focus onto the result pane.
 func (h *ResultTabsHelper) ActiveContext() types.IBaseContext {
 	t := h.Active()
 	if t == nil {
@@ -878,7 +866,7 @@ func (h *ResultTabsHelper) ActiveContext() types.IBaseContext {
 // currently-active tab, or nil when no plan tab is active. Wired into
 // the controllers.PlanController via a closure during bootstrap so
 // PLAN-scoped keybindings can mutate the live plan state without
-// touching the helper's internals. dbsavvy-uv0.8.
+// touching the helper's internals.
 func (h *ResultTabsHelper) ActivePlanContext() *guicontext.PlanContext {
 	t := h.Active()
 	if t == nil {
@@ -905,7 +893,7 @@ func (h *ResultTabsHelper) ShowError(label string, err error) {
 	tab.err = err
 	// Drop the eagerly-created grid so LayoutPaint reaches the Err()
 	// branch instead of painting the empty grid's "(0 rows)" over the
-	// error message (dbsavvy-6pb).
+	// error message.
 	tab.grid = nil
 	tab.mu.Unlock()
 	h.setActive(tab.id)
@@ -1058,7 +1046,7 @@ func (h *ResultTabsHelper) CloseAll() {
 // (via Close OR the eviction path in allocTab, which itself calls Close
 // on the victim). The callback receives the closed tab's stringified ID
 // so collaborators (e.g. ResultJumpList.PruneByTab) can drop stale
-// references. Passing nil unhooks. dbsavvy-bwq.15.
+// references. Passing nil unhooks.
 func (h *ResultTabsHelper) SetOnTabRemoved(fn func(tabID string)) {
 	h.mu.Lock()
 	h.onTabRemoved = fn
@@ -1069,7 +1057,7 @@ func (h *ResultTabsHelper) SetOnTabRemoved(fn func(tabID string)) {
 // the focused tab (the user-initiated <leader>X path only — eviction
 // goes through Close directly and does NOT fire this). The orchestrator
 // uses it to reconcile the focus stack off the now-deleted view.
-// Passing nil unhooks. dbsavvy-aqw.
+// Passing nil unhooks.
 func (h *ResultTabsHelper) SetOnActiveClosed(fn func()) {
 	h.mu.Lock()
 	h.onActiveClosed = fn
@@ -1079,7 +1067,7 @@ func (h *ResultTabsHelper) SetOnActiveClosed(fn func()) {
 // SetOnActiveChanged registers a callback fired after a user-initiated
 // tab switch (Cycle / Jump) lands on a different tab. The orchestrator
 // wires it to re-point the focus stack onto the new active tab's view.
-// Passing nil unhooks. dbsavvy-pc4k.
+// Passing nil unhooks.
 func (h *ResultTabsHelper) SetOnActiveChanged(fn func()) {
 	h.mu.Lock()
 	h.onActiveChanged = fn
@@ -1090,7 +1078,7 @@ func (h *ResultTabsHelper) SetOnActiveChanged(fn func()) {
 // through (<leader>s picker submit + grid header double-click). The
 // callback receives the RAW 0-based grid column index; the
 // QueryEditorController wires it to sortActiveResult (guards + cycle + DB
-// re-run). Passing nil unhooks (sort becomes a no-op). dbsavvy-72k.5.
+// re-run). Passing nil unhooks (sort becomes a no-op).
 func (h *ResultTabsHelper) SetOnSortRequest(fn func(col int)) {
 	h.mu.Lock()
 	h.onSortRequest = fn
@@ -1125,7 +1113,7 @@ func (h *ResultTabsHelper) Pin(t *Tab) bool {
 // the JumpEntry was pushed) — callers (jump-back/forward) treat nil as
 // a stale entry and surface a toast. The active grid is NOT moved here;
 // the caller positions the cursor via grid.View.SetCursor after the
-// switch. dbsavvy-8oo stub #4.
+// switch.
 func (h *ResultTabsHelper) SwitchToTabByID(tabID string) *Tab {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -1214,7 +1202,7 @@ func (h *ResultTabsHelper) Cycle(dir int) {
 // by one page (helper.pageSize rows). Forward paging requests more rows
 // from the active stream via runner.ReadRows; backward paging just
 // repositions the cursor at the top of the visible window. No-op when
-// no tab is active. dbsavvy-uv0.3.
+// no tab is active.
 //
 // When the stream is already complete, forward paging is a no-op
 // (the rule "[]p when stream is already complete: no-op") to avoid
@@ -1265,9 +1253,8 @@ func (h *ResultTabsHelper) Page(dir int) {
 // helper.warnThreshold (or when EstimatedRows is unknown == 0 AND the
 // stream isn't already complete with zero rows), it first shows a
 // confirmation prompt; the drain only fires after the user accepts.
-// dbsavvy-uv0.3.
 //
-// Semantics (see dbsavvy-uv0.3 AC "G with >1M warn"):
+// Semantics:
 //   - complete && rowsLoaded==0 → no-op
 //   - !complete && EstimatedRows()==0 → prompt (unknown = conservative)
 //   - !complete && EstimatedRows()>warnThreshold → prompt
@@ -1296,7 +1283,7 @@ func (h *ResultTabsHelper) ReadToEnd() {
 		return
 	}
 	est := runner.EstimatedRows()
-	// Lazy seed (dbsavvy-uly7.8): the estimate is unknown (== 0) in
+	// Lazy seed: the estimate is unknown (== 0) in
 	// production until the first G. Pay a single side-effect-free planner
 	// EXPLAIN here — only when the dep is wired and the tab's source SQL is
 	// known — cache it on the runner so a repeat G short-circuits, then
@@ -1313,7 +1300,7 @@ func (h *ResultTabsHelper) ReadToEnd() {
 }
 
 // decideReadToEnd applies the prompt-or-drain decision for a known (or
-// unknowable) estimate. Must run on the UI thread. dbsavvy-uv0.3 / uly7.8.
+// unknowable) estimate. Must run on the UI thread.
 func (h *ResultTabsHelper) decideReadToEnd(t *Tab, runner StreamRunner, est int64) {
 	shouldPrompt := est == 0 || est > h.warnThreshold
 	if shouldPrompt && h.deps.Confirm != nil {
@@ -1335,7 +1322,7 @@ func (h *ResultTabsHelper) decideReadToEnd(t *Tab, runner StreamRunner, est int6
 // the result on the runner, and marshals the prompt-or-drain decision back
 // onto the UI thread. An EXPLAIN error (or still-unknown estimate) falls back
 // to decideReadToEnd with est=0 — i.e. the conservative prompt — so G never
-// blocks and never silently drains. dbsavvy-uly7.8.
+// blocks and never silently drains.
 func (h *ResultTabsHelper) lazyEstimateThenDecide(t *Tab, runner StreamRunner, sql, schema string) {
 	run := func() {
 		est, err := h.deps.EstimateRows(context.Background(), sql, schema)
@@ -1363,7 +1350,7 @@ func (h *ResultTabsHelper) lazyEstimateThenDecide(t *Tab, runner StreamRunner, s
 }
 
 // fireReadToEnd issues the drain request and registers the
-// completion-flip callback. dbsavvy-uv0.3.
+// completion-flip callback.
 func (h *ResultTabsHelper) fireReadToEnd(tab *Tab, runner StreamRunner) {
 	if runner == nil {
 		return
@@ -1373,7 +1360,7 @@ func (h *ResultTabsHelper) fireReadToEnd(tab *Tab, runner StreamRunner) {
 	})
 }
 
-// readToEndPromptBody builds the confirmation popup body. dbsavvy-uv0.3.
+// readToEndPromptBody builds the confirmation popup body.
 func (h *ResultTabsHelper) readToEndPromptBody(est int64) string {
 	if est <= 0 {
 		return fmt.Sprintf("Estimated row count is unknown. Draining could be slow or consume a lot of memory.\nPress <CR> to proceed, <esc> to cancel. (warn threshold: %d)", h.warnThreshold)
@@ -1395,7 +1382,7 @@ func (h *ResultTabsHelper) CancelActive() error {
 
 // PreemptInFlight stops every in-flight result-tab stream so the
 // per-session queue serializer (SQLSession.streamMu) is released before a
-// new run tries to acquire it. dbsavvy-dk6: a streamed result larger than
+// new run tries to acquire it. A streamed result larger than
 // the initial-fill window parks its RBM worker on the chan loop while
 // still holding streamMu — the worker never reaches EOF, so RunHandle's
 // finish() (which unlocks the queue) never runs. A subsequent synchronous
@@ -1408,7 +1395,7 @@ func (h *ResultTabsHelper) CancelActive() error {
 // to observe the driver cancel, and only Stop() makes it return, close its
 // stream, and release streamMu; and (b) Stop runs that release on the
 // worker's own goroutine (before close(doneCh)), so the caller's next
-// Stream.Lock proceeds rather than deadlocking (dbsavvy-dk6). Stop stays
+// Stream.Lock proceeds rather than deadlocking. Stop stays
 // synchronous; the driver round-trip is done after the locks are dropped.
 //
 // Running tabs keep the rows already rendered; their state flips to
@@ -1417,10 +1404,10 @@ func (h *ResultTabsHelper) CancelActive() error {
 // stopped, so a queued waiter cannot auto-start when the prior stream's
 // Done closes.
 //
-// gr7e.2 (AD2/AD4): the cancel+Stop loop is bounded by preemptStopBound. The
-// common fast path — gr7e.1's Cancel aborts a blocked worker in ~1s — lets
+// AD2/AD4: the cancel+Stop loop is bounded by preemptStopBound. The
+// common fast path — Cancel aborts a blocked worker in ~1s — lets
 // Stop complete and release streamMu before this returns false, preserving
-// dbsavvy-dk6's guarantee. If the worker does NOT exit within the bound
+// that guarantee. If the worker does NOT exit within the bound
 // (parked past initial-fill on a dead/slow host), the wait is abandoned (the
 // goroutine unblocks when the worker finally exits) and PreemptInFlight
 // returns expired=true so the QueryRunner fences the session; the next session
@@ -1462,8 +1449,8 @@ func (h *ResultTabsHelper) PreemptInFlight() bool {
 	// Cancel before Stop, with the driver round-trip outside every lock.
 	// Cancel aborts a worker blocked in Next promptly; Stop then guarantees
 	// streamMu is released even for a parked worker. A Cancel error must not
-	// skip Stop. gr7e.1. The loop runs on its own goroutine so the wait can
-	// be bounded (gr7e.2): if a worker never exits, the goroutine unblocks
+	// skip Stop. The loop runs on its own goroutine so the wait can
+	// be bounded: if a worker never exits, the goroutine unblocks
 	// when it eventually does, and the preempt_cancel log still fires then.
 	// Snapshot the logger before spawning: on the timeout path the goroutine
 	// is abandoned and may emit its preempt_cancel log long after this returns,
@@ -1513,12 +1500,12 @@ func (h *ResultTabsHelper) PreemptInFlight() bool {
 
 // SetLogger wires the structured logger used by PreemptInFlight's cancel
 // telemetry. Mirrors ToastHelper.SetLogger; safe to omit in tests (logs.Event
-// no-ops on nil). gr7e.1.
+// no-ops on nil).
 func (h *ResultTabsHelper) SetLogger(l *slog.Logger) { h.log = l }
 
 // preemptTarget pairs a tab's RunHandle and StreamRunner captured under the
 // tab lock so PreemptInFlight can cancel+stop them after every lock is
-// dropped (mirrors cancelTab's capture). gr7e.1.
+// dropped (mirrors cancelTab's capture).
 type preemptTarget struct {
 	rh     runHandle
 	runner StreamRunner
@@ -1527,7 +1514,7 @@ type preemptTarget struct {
 // MarkConnectionLost flips every running/queued/sorting tab to
 // StateConnectionLost so the title reads "(error: connection terminated,
 // N rows received)". Called by the controller's handleConnectionDead
-// path after marking the session disconnected. hq5.6.
+// path after marking the session disconnected.
 func (h *ResultTabsHelper) MarkConnectionLost() {
 	h.mu.Lock()
 	for _, t := range h.tabs {
@@ -1583,7 +1570,7 @@ func (h *ResultTabsHelper) cancelTab(t *Tab) error {
 		// observe the driver cancel, so RunHandle.finish() (which unlocks
 		// the queue) never runs and the lock leaks under this now-Cancelled
 		// tab — a subsequent run then deadlocks the UI thread on
-		// Stream.Lock() (dbsavvy-dk6). Stop() forces the worker to return,
+		// Stream.Lock(). Stop() forces the worker to return,
 		// close its stream, and release the lock (on the worker goroutine,
 		// before close(doneCh)), mirroring dispose()/Close on a running tab.
 		if runner != nil {
@@ -1679,10 +1666,10 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 	// host clipboard through the common pkg/gui/clipboard transport. dbsavvy U4.
 	t.grid.SetClipboard(clipboard.NewSystemClipboard())
 	// Propagate the configured double-click window onto the grid so the
-	// header mouse-debounce uses the user's tuned value. dbsavvy-uv0.5.
+	// header mouse-debounce uses the user's tuned value.
 	t.grid.SetMouseDoubleClickMs(h.doubleClickMs)
 	// Seed the grid's viewMode from AppState.LastResultViewMode so a
-	// new tab opens in the user's last-chosen mode (dbsavvy-uv0.7). An
+	// new tab opens in the user's last-chosen mode. An
 	// empty string normalises to "grid" inside SetViewMode.
 	if h.deps.Store != nil {
 		t.grid.SetViewMode(h.deps.Store.LastResultViewModeSnapshot())
@@ -1691,7 +1678,7 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 		t.runner = h.deps.StreamFactory()
 	}
 	// Wire the EstimatedRows loader so expanded-mode renders the
-	// "~total" separator with the optimiser estimate (dbsavvy-uv0.7).
+	// "~total" separator with the optimiser estimate.
 	if t.runner != nil {
 		runner := t.runner
 		t.grid.SetEstimatedRowsLoader(runner.EstimatedRows)
@@ -1744,14 +1731,14 @@ func (h *ResultTabsHelper) priorRunningTab(excludeID int64) *Tab {
 // MAY be nil (used by unit tests of the tab-management layer); in that
 // case state is set to Running but no NewQueryTask runs.
 //
-// dbsavvy-uv0.3: wires grid.View.SetOnNearTail to runner.ReadRows so the
+// Wires grid.View.SetOnNearTail to runner.ReadRows so the
 // auto-prefetch path fires when the cursor crosses PrefetchThreshold,
 // and flips Tab.complete in the onDone closure (marshalled through
 // deps.OnUIThread so the rendering thread is the one that observes the
 // state transition).
 func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 	tab.mu.Lock()
-	// A re-run (dbsavvy-72k.3) pre-sets StateSorting so the "sorting…"
+	// A re-run pre-sets StateSorting so the "sorting…"
 	// affordance shows until the first re-streamed row; preserve it here
 	// rather than clobbering to StateRunning. A fresh OpenResultTab leaves
 	// the tab in its zero state, so this normally falls through to Running.
@@ -1761,7 +1748,7 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 	rh := tab.rh
 	runner := tab.runner
 	// Fresh schema attach: reset the once-per-tab /regex caveat gate so
-	// a re-run in the same tab re-fires the caveat. dbsavvy-uv0.4.
+	// a re-run in the same tab re-fires the caveat.
 	tab.caveatShown = false
 	tab.mu.Unlock()
 
@@ -1772,7 +1759,7 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 	// Next — drivers capture FieldDescriptions at Stream() time. Without
 	// this, the grid stays at zero columns and renders the
 	// EmptyResultIndicator "(0 rows)" regardless of how many rows the
-	// stream actually produces (dbsavvy-dqp).
+	// stream actually produces.
 	var cols []models.ColumnMeta
 	if gridView != nil && rh != nil {
 		if rs := rh.Rows(); rs != nil {
@@ -1783,7 +1770,7 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 			// isolated session, so it need not wait for the stream to
 			// finish. This lets Editable() flip true during StateRunning,
 			// so inline edits work on buffered rows while a no-LIMIT query
-			// is still streaming (dbsavvy-1po). Re-runs call startStreaming
+			// is still streaming. Re-runs call startStreaming
 			// again, so this re-introspects on each fresh schema attach.
 			if len(cols) > 0 {
 				h.scheduleEditabilityIntrospect(tab, cols)
@@ -1802,7 +1789,7 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		// sink so both entry points (header dblclick + <leader>s picker)
 		// share the Tab-level flow. The grid View persists across re-runs;
 		// installing alongside SetOnNearTail matches the established
-		// pattern. dbsavvy-72k.5.
+		// pattern.
 		gridView.SetOnSortRequest(func(col int) {
 			if h.onSortRequest != nil {
 				h.onSortRequest(col)
@@ -1819,7 +1806,7 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		tab.mu.Lock()
 		tab.rowCount += int64(len(rows))
 		// Clear the re-run "sorting…" affordance once the first re-streamed
-		// batch lands; a normal (StateRunning) tab is unaffected. dbsavvy-72k.3.
+		// batch lands; a normal (StateRunning) tab is unaffected.
 		if len(rows) > 0 && tab.state == StateSorting {
 			tab.state = StateRunning
 		}
@@ -1831,12 +1818,12 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		// complete flip is marshalled onto the UI thread so the next
 		// Render reads a consistent snapshot. Idempotent — dispose()
 		// may have already set Cancelled / etc. A non-nil err is a
-		// mid-stream failure (dbsavvy-uly7.1): the tab finalises to
+		// mid-stream failure: the tab finalises to
 		// StateErrored with the already-delivered rows preserved.
 		//
 		// Editability is introspected at stream start (above), not here:
 		// it is column-driven and the columns are known before the first
-		// row, so Editable() flips true during StateRunning. dbsavvy-1po.
+		// row, so Editable() flips true during StateRunning.
 		h.markCompleteOnUI(tab, err)
 	}
 	_ = runner.NewQueryTask(taskKey, streamFn, appendRows, resultTabInitialRows, onDone)
@@ -1844,20 +1831,19 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 
 // markCompleteOnUI schedules the Tab.complete + state finalisation flip
 // onto the UI thread. When deps.OnUIThread is nil the flip runs
-// synchronously (test path). dbsavvy-uv0.3.
+// synchronously (test path).
 //
 // streamErr is the terminal error from the RBM done path: nil for a
 // clean EOF / Stop, non-nil for a mid-stream stream.Next failure. On a
 // non-nil error the tab finalises to StateErrored with the error stored
 // for the title/error panel, and a toast surfaces the failure — the
-// already-delivered rows are preserved (dbsavvy-uly7.1).
+// already-delivered rows are preserved.
 func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab, streamErr error) {
 	flip := func() error {
 		tab.mu.Lock()
 		// StateSorting is treated like StateRunning here: a re-run that
 		// completes before any row arrives (zero-row result) must still
 		// reach a terminal state rather than stay stuck on "sorting…".
-		// dbsavvy-72k.3.
 		if tab.state == StateRunning || tab.state == StateSorting {
 			switch {
 			case tab.cancelled:
@@ -1865,7 +1851,7 @@ func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab, streamErr error) {
 			case streamErr != nil:
 				// Mid-stream failure: keep the rows received so far but
 				// mark the tab errored so the user sees the failure
-				// instead of a misleading "complete" (dbsavvy-uly7.1).
+				// instead of a misleading "complete".
 				tab.state = StateErrored
 				tab.err = streamErr
 			default:
@@ -1875,21 +1861,20 @@ func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab, streamErr error) {
 		tab.complete = true
 		// The stream has terminated, so the driver's command tag is now
 		// populated — capture the affected-row count for the title.
-		// dbsavvy-tiu8.
 		if tab.rh != nil {
 			if rs := tab.rh.Rows(); rs != nil {
 				tab.rowsAffected = rs.RowsAffected()
 				// Mirror the count into the grid so the column-less DML
 				// body reads "(N row(s) affected)" instead of the
-				// misleading "(0 rows)". dbsavvy-outq.
+				// misleading "(0 rows)".
 				if tab.grid != nil {
 					tab.grid.SetRowsAffected(tab.rowsAffected)
 				}
 			}
 		}
 		tab.mu.Unlock()
-		// Surface the mid-stream failure so it is not silently dropped
-		// (dbsavvy-uly7.1). Toast outside the tab mutex.
+		// Surface the mid-stream failure so it is not silently dropped.
+		// Toast outside the tab mutex.
 		if streamErr != nil {
 			h.toast(fmt.Sprintf("query failed mid-stream: %v", streamErr))
 		}
@@ -1905,7 +1890,7 @@ func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab, streamErr error) {
 // scheduleEditabilityIntrospect runs the (driver-agnostic) editability
 // introspection for a completed tab off the UI thread, then marshals the
 // SetEditability flip back onto the UI thread. No-op when the hook is
-// unwired or the tab has no grid. dbsavvy-2b6.
+// unwired or the tab has no grid.
 func (h *ResultTabsHelper) scheduleEditabilityIntrospect(tab *Tab, cols []models.ColumnMeta) {
 	if h.deps.IntrospectEditability == nil || tab == nil || tab.grid == nil {
 		return
@@ -1986,7 +1971,7 @@ func (h *ResultTabsHelper) setActive(id int64) {
 // the view to exist so SetViewOnTop / DeleteView have a target. Driver
 // may be nil in unit tests.
 //
-// dbsavvy-uv0.5: also registers the per-view left-click mouse binding
+// Also registers the per-view left-click mouse binding
 // used by the grid header double-click → SetSort flow. The binding is
 // best-effort (errors are swallowed by keys.RegisterMouseBinding) so a
 // terminal without mouse support degrades cleanly.
@@ -2008,7 +1993,7 @@ func (h *ResultTabsHelper) materialiseView(tab *Tab) {
 // tab's view. The handler maps the click X/Y onto the grid's column
 // layout and forwards to grid.View.HandleHeaderClick, which owns the
 // debounce + SetSort cycle. Plan / error tabs have a nil grid so the
-// handler becomes a no-op for them. dbsavvy-uv0.5.
+// handler becomes a no-op for them.
 func (h *ResultTabsHelper) wireGridMouseClick(tab *Tab) {
 	g := tab.Grid()
 	if g == nil {
@@ -2027,7 +2012,7 @@ func (h *ResultTabsHelper) wireGridMouseClick(tab *Tab) {
 		Handler:  handler,
 	}
 	// SetViewClickBinding errors are swallowed: the TUI must remain
-	// usable when the terminal refuses mouse mode (dbsavvy-zro AC).
+	// usable when the terminal refuses mouse mode.
 	_ = h.deps.Driver.SetViewClickBinding(binding)
 }
 
@@ -2087,7 +2072,7 @@ func (h *ResultTabsHelper) LayoutPaint(driver types.GuiDriver, x0, y0, x1, y1 in
 				g.SetTitle("")
 				g.Render(view)
 			} else if t.State() == StatePlan {
-				// dbsavvy-uv0.8: prefer the PlanContext-rendered tree
+				// Prefer the PlanContext-rendered tree
 				// body. Falls back to raw text when planCtx is missing
 				// (defensive: should not happen post-OpenPlanTab, but
 				// keeps the layout pass nil-safe).
@@ -2152,7 +2137,7 @@ func stateGlyph(s TabState) string {
 	case StatePlan:
 		return "⊞"
 	case StateConnectionLost:
-		return "⚡" // hq5.6
+		return "⚡"
 	default: // StateErrored / StateError ("error")
 		return "✗"
 	}
@@ -2162,7 +2147,7 @@ func stateGlyph(s TabState) string {
 // each open tab as "N label glyph" in slot order, the active tab in
 // reverse video. The strip is width-aware (go-runewidth) and windows
 // around the active tab with ‹ › overflow markers when the cells cannot
-// all fit. Returns "" when no tabs are open. dbsavvy-85f.
+// all fit. Returns "" when no tabs are open.
 func (h *ResultTabsHelper) RenderTabBar(width int) string {
 	tabs := h.Tabs()
 	if len(tabs) == 0 || width <= 0 {
@@ -2284,7 +2269,7 @@ func (h *ResultTabsHelper) activeIDSnapshot() int64 {
 // grid.SanitizeCellEscapes so untrusted server strings cannot inject ANSI
 // or C0 control sequences. The caret line is generated locally and is
 // inherently safe. Diagnostic text is emitted verbatim (never truncated);
-// horizontal/vertical overflow is handled by the view. dbsavvy-fow.3.
+// horizontal/vertical overflow is handled by the view.
 func renderQueryErrorPanel(qe *drivers.QueryError, sql string) string {
 	if qe == nil {
 		return ""
@@ -2345,7 +2330,7 @@ func queryErrorMessage(qe *drivers.QueryError) string {
 // preceding the offset on that line) followed by `^`. Returns ok=false
 // when pos <= 0 or pos is beyond the SQL length, so the caller omits the
 // block. Rune boundaries are respected: the column is counted in runes,
-// not bytes. dbsavvy-fow.3.
+// not bytes.
 func positionCaret(sql string, pos int) (string, string, bool) {
 	if pos <= 0 || sql == "" {
 		return "", "", false
@@ -2383,7 +2368,7 @@ func (t *Tab) planRawSnapshot() string {
 }
 
 // planContextSnapshot exposes the tab's *context.PlanContext (or nil)
-// under the tab mutex. dbsavvy-uv0.8.
+// under the tab mutex.
 func (t *Tab) planContextSnapshot() *guicontext.PlanContext {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -2394,7 +2379,7 @@ func (t *Tab) planContextSnapshot() *guicontext.PlanContext {
 // nil for non-plan tabs. Exported so callers outside the helper (e.g.
 // the orchestrator's PlanController resolver) can reach it without
 // going through ActivePlanContext when they already hold a *Tab
-// reference. dbsavvy-uv0.8.
+// reference.
 func (t *Tab) PlanContext() *guicontext.PlanContext {
 	return t.planContextSnapshot()
 }
@@ -2445,7 +2430,7 @@ func (t *Tab) dispose() {
 	})
 }
 
-// --- in-grid search surface (dbsavvy-2ttm) -------------------------------
+// --- in-grid search surface -------------------------------
 
 // searchCaveatKey tags the once-per-tab "searching loaded rows only"
 // toast so ShowOrUpdate replaces in place instead of stacking. The key
@@ -2465,7 +2450,6 @@ const searchCaveatMessage = "searching loaded rows only — press G to load all"
 // cursor. On incomplete tabs the once-per-tab caveat toast fires on the
 // first non-empty query. No-op
 // (toast) when no tab is active; no-op when the search helper is unwired.
-// dbsavvy-2ttm.
 func (h *ResultTabsHelper) SearchPrompt() {
 	t := h.Active()
 	if t == nil {
@@ -2505,7 +2489,7 @@ func (h *ResultTabsHelper) SearchPrompt() {
 
 // showSearchCaveat surfaces the search caveat toast, preferring
 // ShowOrUpdate when the toast surface supports it so re-fires replace
-// in place instead of stacking. dbsavvy-2ttm.
+// in place instead of stacking.
 func (h *ResultTabsHelper) showSearchCaveat() {
 	if h.deps.Toast == nil {
 		return
@@ -2518,7 +2502,7 @@ func (h *ResultTabsHelper) showSearchCaveat() {
 }
 
 // SearchNextMatch advances the cursor on the active tab's grid to the
-// next search match. dbsavvy-2ttm.
+// next search match.
 func (h *ResultTabsHelper) SearchNextMatch() {
 	g := h.activeGrid()
 	if g == nil {
@@ -2528,7 +2512,7 @@ func (h *ResultTabsHelper) SearchNextMatch() {
 }
 
 // SearchPrevMatch rewinds the cursor on the active tab's grid to the
-// previous search match. dbsavvy-2ttm.
+// previous search match.
 func (h *ResultTabsHelper) SearchPrevMatch() {
 	g := h.activeGrid()
 	if g == nil {
@@ -2538,7 +2522,6 @@ func (h *ResultTabsHelper) SearchPrevMatch() {
 }
 
 // SearchClear drops the active search on the active tab's grid.
-// dbsavvy-2ttm.
 func (h *ResultTabsHelper) SearchClear() {
 	g := h.activeGrid()
 	if g == nil {
@@ -2549,7 +2532,7 @@ func (h *ResultTabsHelper) SearchClear() {
 
 // SearchActive reports whether the active tab's grid has an active
 // search. Used by the shared <esc> chord to avoid shadowing other esc
-// handlers when no search is installed. dbsavvy-2ttm.
+// handlers when no search is installed.
 func (h *ResultTabsHelper) SearchActive() bool {
 	g := h.activeGrid()
 	if g == nil {
@@ -2560,7 +2543,7 @@ func (h *ResultTabsHelper) SearchActive() bool {
 
 // activeGrid returns the *grid.View attached to the currently-active
 // tab, or nil when no tab is active / the active tab is a plan/error
-// tab. dbsavvy-uv0.4.
+// tab.
 func (h *ResultTabsHelper) activeGrid() *grid.View {
 	t := h.Active()
 	if t == nil {
@@ -2569,16 +2552,15 @@ func (h *ResultTabsHelper) activeGrid() *grid.View {
 	return t.Grid()
 }
 
-// --- <leader>s sort picker (dbsavvy-uv0.5) -------------------------------
+// --- <leader>s sort picker -------------------------------
 
 // SortPick opens the column picker against the active tab. On submit the
 // chosen RAW column index is handed to the onSortRequest sink — the same
 // Tab-level flow the header double-click routes through — which owns the
-// asc → desc → clear cycle + DB re-run (dbsavvy-72k.5). idx is the raw
+// asc → desc → clear cycle + DB re-run. idx is the raw
 // gridColumnNames index, so hiding columns cannot shift the ordinal.
 // No-op when no tab is active, no grid is attached, the choice dep is
 // unwired, the sink is unwired, or the buffer has no columns yet.
-// dbsavvy-uv0.5.
 func (h *ResultTabsHelper) SortPick() {
 	t := h.Active()
 	if t == nil {
@@ -2599,7 +2581,7 @@ func (h *ResultTabsHelper) SortPick() {
 	_ = h.deps.Choice.Choose(h.sortPickLabel, cols, func(idx int) error {
 		// idx is the RAW gridColumnNames index. Route through the shared
 		// sink so the picker and header double-click produce identical
-		// behavior; no-op when the sink is unwired. dbsavvy-72k.5.
+		// behavior; no-op when the sink is unwired.
 		if h.onSortRequest != nil {
 			h.onSortRequest(idx)
 		}
@@ -2608,7 +2590,7 @@ func (h *ResultTabsHelper) SortPick() {
 }
 
 // sortPendingEditsToast is the message surfaced when a sort is requested
-// while the active tab's grid has staged (uncommitted) edits. dbsavvy-72k.4.
+// while the active tab's grid has staged (uncommitted) edits.
 const sortPendingEditsToast = "commit or discard edits before sorting"
 
 // SortActiveTab runs the database-side sort FLOW against the active tab and
@@ -2628,8 +2610,6 @@ const sortPendingEditsToast = "commit or discard edits before sorting"
 //     the runSQL: wrapSorted(origSQL, col+1, dir) for asc/desc, origSQL
 //     verbatim for clear. Returns it for the caller to hand to the re-run.
 //
-// dbsavvy-72k.4. Wired to the picker / header-dblclick entry points by
-// dbsavvy-72k.5.
 // SortActiveTab must be called on the gocui UI goroutine: the guard, cycle, and
 // origin read below each take tab.mu independently, so their atomicity relies on
 // single-threaded UI dispatch rather than a single held lock.
@@ -2661,10 +2641,10 @@ func (h *ResultTabsHelper) SortActiveTab(col int) (runSQL string, run bool, toas
 	return wrapSorted(origSQL, col+1, dir), true, ""
 }
 
-// --- <leader>gH hide-cols overlay (dbsavvy-uv0.6) ------------------------
+// --- <leader>gH hide-cols overlay ------------------------
 
 // activeHideOverlay holds the currently-open hide overlay (if any). nil
-// when no overlay is active. Accessed under h.mu. dbsavvy-uv0.6.
+// when no overlay is active. Accessed under h.mu.
 type activeHideOverlay struct {
 	tab *Tab
 	ov  *popup.HideOverlay
@@ -2675,7 +2655,7 @@ type activeHideOverlay struct {
 // grid.HiddenCols() (which itself was seeded from AppState on identity
 // attach when HasRowIdentity). Persistence on close is gated by the
 // tab's recorded ResultIdentity.HasRowIdentity flag — when false, the
-// overlay runs session-only and the footer notes it. dbsavvy-uv0.6.
+// overlay runs session-only and the footer notes it.
 func (h *ResultTabsHelper) HideOverlay() {
 	t := h.Active()
 	if t == nil {
@@ -2760,7 +2740,7 @@ func (h *ResultTabsHelper) applyHideColumnNames(ov *popup.HideOverlay, cols []mo
 
 // HideOverlayBody returns the current overlay body for rendering, or
 // the empty string when no overlay is active. Mirrors the Active+Body
-// shape the context's HideOverlayState interface requires. dbsavvy-uv0.6.
+// shape the context's HideOverlayState interface requires.
 func (h *ResultTabsHelper) HideOverlayBody() string {
 	h.mu.Lock()
 	ov := h.hideOverlay
@@ -2819,7 +2799,7 @@ func (h *ResultTabsHelper) HideOverlayToggle() {
 
 // HideOverlayClose applies the overlay's hidden set to the tab's grid,
 // persists the column-name list when persistence is enabled, and clears
-// the overlay state. <esc> handler. dbsavvy-uv0.6.
+// the overlay state. <esc> handler.
 //
 // Pop ordering: state is committed FIRST (SetHiddenCols + optional
 // MutateAndSave) so the popped popup snaps back to a grid that already
@@ -2888,7 +2868,6 @@ func (h *ResultTabsHelper) HideOverlayClose() {
 // ri.HasRowIdentity. The caller (QueryEditorController) invokes this
 // right after OpenResultTab so the per-(connID, baseTable) persisted
 // hidden columns reapply on tab attach. No-op when no tab is active.
-// dbsavvy-uv0.6.
 func (h *ResultTabsHelper) AttachActiveTabIdentity(connID string, ri query.ResultIdentity) {
 	t := h.Active()
 	if t == nil {
@@ -2901,7 +2880,7 @@ func (h *ResultTabsHelper) AttachActiveTabIdentity(connID string, ri query.Resul
 // AttachActiveTabErrorSQL records the SQL text behind the currently-active
 // (error) tab so the error panel can draw a position caret. The caller
 // (QueryEditorController) invokes this right after ShowError, when the
-// error tab is the active tab. No-op when no tab is active. dbsavvy-fow.3.
+// error tab is the active tab. No-op when no tab is active.
 func (h *ResultTabsHelper) AttachActiveTabErrorSQL(sql string) {
 	t := h.Active()
 	if t == nil {
@@ -2913,7 +2892,7 @@ func (h *ResultTabsHelper) AttachActiveTabErrorSQL(sql string) {
 // AttachActiveTabOrigin records the originating (sql, args, defaultSchema)
 // triple on the currently-active result tab so a later sort re-run can
 // reissue the exact query. The caller (QueryEditorController) invokes this
-// right after OpenResultTab. No-op when no tab is active. dbsavvy-72k.1.
+// right after OpenResultTab. No-op when no tab is active.
 func (h *ResultTabsHelper) AttachActiveTabOrigin(sql string, args []any, defaultSchema string) {
 	t := h.Active()
 	if t == nil {
@@ -2924,7 +2903,7 @@ func (h *ResultTabsHelper) AttachActiveTabOrigin(sql string, args []any, default
 
 // ActiveTabOrigin returns the (sql, args, defaultSchema) triple recorded on
 // the currently-active result tab via AttachActiveTabOrigin/SetOrigin. The
-// re-run path (dbsavvy-72k.3) reads it to rebuild the exact query: origArgs +
+// re-run path reads it to rebuild the exact query: origArgs +
 // origDefaultSchema feed QueryRunner.RunQuery, and origSQL recomputes the
 // original identity for decoupled hide-col seeding. Returns zero values when
 // no tab is active or SetOrigin was never called.
@@ -2943,7 +2922,7 @@ func (h *ResultTabsHelper) ActiveTabOrigin() (sql string, args []any, defaultSch
 // the wrapped form). The caller (QueryEditorController) issues
 // QueryRunner.RunQuery FIRST so the prior in-flight stream for this tab is
 // preempted (PreemptInFlight -> runner.Stop()), guaranteeing the new task is
-// NOT deduped by the "result_tab_<id>" taskKey. dbsavvy-72k.3.
+// NOT deduped by the "result_tab_<id>" taskKey.
 //
 // Flow:
 //  1. Reset tab-level state SetColumns does not cover (rowCount, complete,
@@ -2980,7 +2959,7 @@ func (h *ResultTabsHelper) reattachActiveTab(rh runHandle, runSQL, origSQL strin
 
 	// Reset the TAB-level fields startStreaming/SetColumns do not touch and
 	// pre-arm the "sorting…" affordance, then swap in the new RunHandle. All
-	// under tab.mu; released before startStreaming. dbsavvy-72k.3 AC#2/#5/#6.
+	// under tab.mu; released before startStreaming.
 	t.mu.Lock()
 	t.rowCount = 0
 	t.complete = false
@@ -3009,7 +2988,7 @@ func (h *ResultTabsHelper) reattachActiveTab(rh runHandle, runSQL, origSQL strin
 	h.seedHiddenColsForIdentity(t, connID, origRI)
 
 	// Mirror the Tab's authoritative sort onto the grid's display-only
-	// indicator (SetColumns cleared it). dbsavvy-72k.6.
+	// indicator (SetColumns cleared it).
 	if g := t.Grid(); g != nil {
 		t.mu.Lock()
 		col, dir := t.sortCol, t.sortDir
@@ -3019,7 +2998,7 @@ func (h *ResultTabsHelper) reattachActiveTab(rh runHandle, runSQL, origSQL strin
 }
 
 // sortDirToGridDir maps the Tab's authoritative ui.sortDir onto the grid's
-// display-only sort direction. dbsavvy-72k.6.
+// display-only sort direction.
 func sortDirToGridDir(d sortDir) int {
 	switch d {
 	case sortAsc:
@@ -3036,7 +3015,7 @@ func sortDirToGridDir(d sortDir) int {
 // the tab's grid as an index set. Called by the controller right after
 // the grid's SetColumns is invoked (and after SetIdentity has been
 // called). No-op when persistence is disabled, the store is unwired, or
-// no entry exists. dbsavvy-uv0.6.
+// no entry exists.
 func (h *ResultTabsHelper) SeedHiddenColsFromAppState(t *Tab) {
 	if t == nil {
 		return
@@ -3048,7 +3027,7 @@ func (h *ResultTabsHelper) SeedHiddenColsFromAppState(t *Tab) {
 // seedHiddenColsForIdentity re-installs the persisted hidden-col name set
 // for an EXPLICIT (connID, ri) pair onto the tab's grid, rather than reading
 // the tab's currently-attached identity via t.Identity(). This decoupling is
-// required by the sort re-run path (dbsavvy-72k.3): a wrapped re-run attaches
+// required by the sort re-run path: a wrapped re-run attaches
 // a read-only identity (HasRowIdentity=false, no BaseTable) to the tab to gate
 // editability, but hide-cols must still be seeded against the ORIGINAL
 // (editable) identity — the wrapped SELECT * FROM (orig) preserves column
@@ -3085,11 +3064,11 @@ func (h *ResultTabsHelper) seedHiddenColsForIdentity(t *Tab, connID string, ri q
 	g.SetHiddenCols(idx)
 }
 
-// --- <leader>oe export menu (dbsavvy-uv0.9) ------------------------------
+// --- <leader>oe export menu ------------------------------
 
 // activeExportMenu holds the currently-open export menu plus the
 // in-flight export's cancel func (when one is running). At most one menu
-// and one in-flight export per helper. Accessed under h.mu. dbsavvy-uv0.9.
+// and one in-flight export per helper. Accessed under h.mu.
 type activeExportMenu struct {
 	tab    *Tab
 	menu   *popup.ExportMenu
@@ -3119,7 +3098,6 @@ const (
 
 // PromptExport opens the <leader>oe export menu for the active tab.
 // Resolves SQL-INSERTs availability from the tab's ResultIdentity.
-// dbsavvy-uv0.9.
 func (h *ResultTabsHelper) PromptExport() {
 	t := h.Active()
 	if t == nil {
@@ -3146,7 +3124,7 @@ func (h *ResultTabsHelper) PromptExport() {
 	destinations := []string{"File", "Clipboard"}
 	scopes := []string{"Visible", "Loaded", "Full"}
 
-	// dbsavvy-bwq.11 (A8): when SQL-INSERTs is in the format list, gate
+	// When SQL-INSERTs is in the format list, gate
 	// it on the GridView's editability decision (F2's single source of
 	// truth). When the grid says not editable AND provides a reason,
 	// surface the row as shown-but-disabled with that reason inline.
@@ -3203,7 +3181,7 @@ func indexOf(ss []string, s string) int {
 }
 
 // ExportMenuBody returns the current menu body for rendering, "" when no
-// menu is active. dbsavvy-uv0.9.
+// menu is active.
 func (h *ResultTabsHelper) ExportMenuBody() string {
 	h.mu.Lock()
 	m := h.exportMenu
@@ -3215,7 +3193,7 @@ func (h *ResultTabsHelper) ExportMenuBody() string {
 }
 
 // ExportMenuActive reports whether the export menu is currently waiting
-// for input. dbsavvy-uv0.9.
+// for input.
 func (h *ResultTabsHelper) ExportMenuActive() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -3245,7 +3223,7 @@ func (h *ResultTabsHelper) ExportMenuMoveValue(d int) {
 }
 
 // ExportMenuCancel pops the menu. If an export is in flight, also
-// cancels it. dbsavvy-uv0.9.
+// cancels it.
 func (h *ResultTabsHelper) ExportMenuCancel() {
 	h.mu.Lock()
 	m := h.exportMenu
@@ -3264,7 +3242,7 @@ func (h *ResultTabsHelper) ExportMenuCancel() {
 // On submit the value is trimmed and rejected if it contains control
 // characters; valid values are written back via SetPath. Both submit and
 // cancel re-push the EXPORT_MENU so focus returns to it (pushing the
-// PROMPT auto-popped the menu). dbsavvy-uv0.9.
+// PROMPT auto-popped the menu).
 func (h *ResultTabsHelper) ExportMenuEditPath() {
 	h.mu.Lock()
 	m := h.exportMenu
@@ -3316,7 +3294,7 @@ func validateExportPath(raw string) error {
 
 // ExportMenuConfirm kicks off the export based on the menu's current
 // selection. Pops the menu first (so the user sees the toast), then
-// runs the export on a worker goroutine. dbsavvy-uv0.9.
+// runs the export on a worker goroutine.
 func (h *ResultTabsHelper) ExportMenuConfirm() {
 	h.mu.Lock()
 	m := h.exportMenu
@@ -3331,7 +3309,7 @@ func (h *ResultTabsHelper) ExportMenuConfirm() {
 
 	// Snapshot every menu field BEFORE popping the menu: pushing the
 	// CONFIRMATION (a TEMPORARY_POPUP) over the EXPORT_MENU auto-pops the
-	// menu, after which h.exportMenu.menu may be nil. dbsavvy-uv0.9 (T4).
+	// menu, after which h.exportMenu.menu may be nil.
 	tab := m.tab
 	formatLabel := m.menu.FormatLabel()
 	destLabel := m.menu.DestinationLabel()
@@ -3399,7 +3377,6 @@ func (h *ResultTabsHelper) ExportMenuConfirm() {
 // resolveExportPath expands "~" in the user-supplied path and joins a relative
 // result under the download dir, yielding the absolute final path. Returns ""
 // for non-File destinations (the path is irrelevant for clipboard).
-// dbsavvy-uv0.9 (T4).
 func (h *ResultTabsHelper) resolveExportPath(destLabel, menuPath string) (string, error) {
 	if destLabel != "File" {
 		return "", nil
@@ -3418,7 +3395,7 @@ func (h *ResultTabsHelper) resolveExportPath(destLabel, menuPath string) (string
 }
 
 // fileExists reports whether the File-destination target already exists on
-// disk. Always false for non-File destinations. dbsavvy-uv0.9 (T4).
+// disk. Always false for non-File destinations.
 func (h *ResultTabsHelper) fileExists(destLabel, resolvedPath string) bool {
 	if destLabel != "File" || resolvedPath == "" {
 		return false
@@ -3429,7 +3406,7 @@ func (h *ResultTabsHelper) fileExists(destLabel, resolvedPath string) bool {
 
 // dispatchExport stashes the cancel handle and runs the export on a worker
 // goroutine, surfacing the outcome via a toast. The completion toast carries
-// resolvedPath as the final written path. dbsavvy-uv0.9 (T4).
+// resolvedPath as the final written path.
 func (h *ResultTabsHelper) dispatchExport(tab *Tab, format exporter.Format, dest exporter.Destination, scopeIdx int, resolvedPath string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	h.mu.Lock()
@@ -3512,7 +3489,7 @@ func (h *ResultTabsHelper) buildFormat(t *Tab, label string) (exporter.Format, e
 // exporter.Destination. resolvedPath is the already-expanded, absolute final
 // path computed by ExportMenuConfirm (the single source of truth shared with
 // the existence check, the overwrite-confirm body, and the completion toast);
-// it is only consulted for the File destination. dbsavvy-uv0.9 (T4).
+// it is only consulted for the File destination.
 func (h *ResultTabsHelper) buildDestination(destLabel, resolvedPath string) (exporter.Destination, error) {
 	switch destLabel {
 	case "File":
@@ -3525,7 +3502,7 @@ func (h *ResultTabsHelper) buildDestination(destLabel, resolvedPath string) (exp
 		cb := h.deps.ExportClipboard
 		if cb == nil {
 			// Production fallback: same system-clipboard transport grid
-			// yank publishes through (see SetClipboard wiring). dbsavvy-rggk.
+			// yank publishes through (see SetClipboard wiring).
 			cb = clipboard.NewSystemClipboard()
 		}
 		return exporter.NewClipboardDest(cb, maxBytes), nil
@@ -3555,7 +3532,7 @@ func extFor(formatLabel string) string {
 // buildRowSource builds a RowSource for the given scope. Visible scope
 // snapshots grid.VisibleRows; Loaded snapshots grid.AllRows; Full
 // triggers ReadToEnd and blocks the worker goroutine until it
-// completes, then snapshots grid.AllRows. dbsavvy-uv0.9.
+// completes, then snapshots grid.AllRows.
 func (h *ResultTabsHelper) buildRowSource(t *Tab, scopeIdx int) exporter.RowSource {
 	g := t.Grid()
 	if g == nil {
@@ -3615,12 +3592,12 @@ func (h *ResultTabsHelper) tabEncoder(t *Tab) drivers.Encoder {
 	return nil
 }
 
-// --- Expanded view mode + result-grid motion (dbsavvy-uv0.7) -------------
+// --- Expanded view mode + result-grid motion -------------
 
 // ToggleViewMode flips the active tab's grid between ViewModeGrid and
 // ViewModeExpanded and persists the new value globally via
 // AppState.LastResultViewMode. No-op when no tab is active or the
-// active tab has no grid (plan / error tabs). dbsavvy-uv0.7.
+// active tab has no grid (plan / error tabs).
 func (h *ResultTabsHelper) ToggleViewMode() {
 	t := h.Active()
 	if t == nil {
@@ -3643,7 +3620,7 @@ func (h *ResultTabsHelper) ToggleViewMode() {
 
 // JumpLastOrReadToEnd dispatches the G chord: expanded mode -> jump to
 // the last loaded record (no drain); grid mode -> ReadToEnd with the
-// existing >1M warn. dbsavvy-uv0.7 (AD-14).
+// existing >1M warn.
 func (h *ResultTabsHelper) JumpLastOrReadToEnd() {
 	t := h.Active()
 	if t == nil {
@@ -3661,7 +3638,7 @@ func (h *ResultTabsHelper) JumpLastOrReadToEnd() {
 // CursorDown / CursorUp / CursorLeft / CursorRight / JumpFirst /
 // HalfPageDown / HalfPageUp / WrappedLineDown / WrappedLineUp /
 // SelectRow / SelectBlock delegate to the active grid. No-op when no
-// tab is active or the active tab has no grid. dbsavvy-uv0.7.
+// tab is active or the active tab has no grid.
 func (h *ResultTabsHelper) CursorDown() { h.withActiveGrid(func(g *grid.View) { g.MoveCursorDown() }) }
 func (h *ResultTabsHelper) CursorUp()   { h.withActiveGrid(func(g *grid.View) { g.MoveCursorUp() }) }
 func (h *ResultTabsHelper) CursorLeft() { h.withActiveGrid(func(g *grid.View) { g.HorizScrollLeft() }) }
@@ -3701,7 +3678,7 @@ func (h *ResultTabsHelper) SelectionActive() bool {
 }
 
 // withActiveGrid resolves the active tab's grid and invokes fn. No-op
-// when no tab is active or the active tab has no grid. dbsavvy-uv0.7.
+// when no tab is active or the active tab has no grid.
 func (h *ResultTabsHelper) withActiveGrid(fn func(*grid.View)) {
 	t := h.Active()
 	if t == nil {
@@ -3737,7 +3714,7 @@ func (h *ResultTabsHelper) gridColumnNames(g *grid.View) []string {
 // truncateLabel it preserves the END of a statement — the FROM table (the
 // token that distinguishes otherwise-identical SELECTs) lives there, so a
 // head truncation drops exactly the part that identifies the tab.
-// Rune-based so multi-byte SQL is never split mid-rune. dbsavvy-y6rc.
+// Rune-based so multi-byte SQL is never split mid-rune.
 func truncateTail(s string, cap int) string {
 	clean := strings.Join(strings.Fields(s), " ")
 	r := []rune(clean)

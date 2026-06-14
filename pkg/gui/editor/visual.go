@@ -9,10 +9,10 @@ import "github.com/davesavic/dbsavvy/pkg/gui/types"
 //
 // The functions here are intentionally narrow: they own Selection
 // state on b but DO NOT touch mode. Mode transitions are the
-// controller's responsibility (Architecture Decision 1 of epic
-// dbsavvy-wwd — keys.ModeStore is the sole source of truth for
+// controller's responsibility (Architecture Decision 1 —
+// keys.ModeStore is the sole source of truth for
 // per-context mode; Buffer carries no Mode field). Operator
-// handlers (wwd.8) read Buffer.Selection directly per Architecture
+// handlers read Buffer.Selection directly per Architecture
 // Decision 4 (Visual+operator bypasses op-pending).
 
 // EnterVisual seeds a Selection anchored at the current Cursor. The
@@ -47,7 +47,7 @@ func EnterVisual(b *Buffer, mode types.Mode) {
 // on a nil buffer or when no Selection is active (idempotent).
 // QueryEditorContext.HandleFocusLost calls this so Selection never
 // persists across a focus change (and therefore never lands on disk
-// in wwd.9).
+// on disk.
 func ExitVisual(b *Buffer) {
 	if b == nil {
 		return
@@ -64,7 +64,7 @@ func ExitVisual(b *Buffer) {
 // No-op when Selection is nil (caller hasn't entered Visual yet).
 // Vim allows Selection.End to be < Selection.Start in lex order
 // (backwards visual selection); ExtendSelection does NOT normalise —
-// operator handlers (wwd.8) normalise at consume time.
+// operator handlers normalise at consume time.
 func ExtendSelection(b *Buffer, to Position) {
 	if b == nil {
 		return

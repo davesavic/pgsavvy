@@ -35,7 +35,7 @@ type HistoryStore interface {
 // statement truncated to DisplayWidth with newlines collapsed to a glyph.
 //
 // HistorySource is the lowest-value source by design — its Score carries the
-// smallest source bias (HistorySourceBias, ko4m.3.2) so a colliding keyword or
+// smallest source bias (HistorySourceBias) so a colliding keyword or
 // schema suggestion wins the dedupe.
 //
 // FTS5 (Store.SearchByPrefix) is the PRIMARY retrieval filter; editor.Match is
@@ -71,7 +71,7 @@ func (h HistorySource) Suggest(ctx context.Context, buf *Buffer, pos Position) [
 	// column context) where the relevant tables/columns should lead. Defer
 	// to the schema source there and stay quiet. Uses the NARROW structured-
 	// context gate (not the broadened AutoTriggerFromContext, which fires on
-	// any >=2-rune prefix per dbsavvy-ko4m.6.1 and would suppress history
+	// any >=2-rune prefix and would suppress history
 	// everywhere, e.g. at a bare `SEL` statement start).
 	if IsSchemaCompletableContext(buf, pos) {
 		return []Suggestion{}

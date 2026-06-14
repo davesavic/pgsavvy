@@ -9,8 +9,8 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// TestShippedDefaultsHaveNoOrphanActions is the hard test gate for
-// dbsavvy-9v1.3 guard 1. At runtime an ActionID that resolves to no
+// TestShippedDefaultsHaveNoOrphanActions is the hard test gate for the
+// orphan-action guard. At runtime an ActionID that resolves to no
 // registered handler is only a WarnLevel `orphan_action` warning and the
 // binding is silently dropped (keys/keybinding_service.go:287-294,
 // :315-324). This test builds the REAL shipped defaults
@@ -39,11 +39,11 @@ func TestShippedDefaultsHaveNoOrphanActions(t *testing.T) {
 	}
 }
 
-// TestShippedDefaultsListActionIDsDoNotCrossScopes is dbsavvy-9v1.3 guard
-// 3a, scoped to the invariant that actually holds: a list-rail ActionID
+// TestShippedDefaultsListActionIDsDoNotCrossScopes is the cross-scope
+// guard, scoped to the invariant that actually holds: a list-rail ActionID
 // (list.up / list.down / list.confirm, in their per-rail
 // `<prefix>:<scope>` form) must be bound in EXACTLY ONE scope. A list
-// ActionID appearing in two scopes is the dbsavvy-6m9 cross-rail-dispatch
+// ActionID appearing in two scopes is the cross-rail-dispatch
 // collision — one chord routing to a handler registered for a different
 // rail's cursor.
 //
@@ -100,24 +100,24 @@ func TestShippedDefaultsListActionIDsDoNotCrossScopes(t *testing.T) {
 			for s := range scopes {
 				ss = append(ss, string(s))
 			}
-			t.Errorf("list ActionID %q is bound across multiple scopes %v — implies cross-rail dispatch (dbsavvy-6m9). Each rail must own a scope-distinct list ActionID",
+			t.Errorf("list ActionID %q is bound across multiple scopes %v — implies cross-rail dispatch. Each rail must own a scope-distinct list ActionID",
 				action, ss)
 		}
 	}
 }
 
-// TestShippedDefaultsListBindingsArePerRail is dbsavvy-9v1.3 guard 3b and
-// the dbsavvy-6m9 regression guard at the binding-data layer. The
+// TestShippedDefaultsListBindingsArePerRail is the per-rail regression
+// guard at the binding-data layer. The
 // list-style rail bindings (j=ListDown, k=ListUp, <CR>=ListConfirm) must
 // each carry a PER-RAIL (scope-distinct) ActionID: the SCHEMAS j-binding's
 // ActionID must differ from the CONNECTIONS j-binding's ActionID. Before
 // the fix all rails shared one global ListDown ActionID, so j on any rail
-// moved the CONNECTIONS cursor (dbsavvy-6m9). listActionID composes
+// moved the CONNECTIONS cursor. listActionID composes
 // `list.down:CONNECTIONS`, `list.down:SCHEMAS`, … so each rail's chord
 // resolves to its own handler.
 //
 // COLUMNS / INDEXES rails were superseded by the TABLE_INSPECT tabbed
-// popup (epic dbsavvy-3vf) and are not constructed as standalone rails;
+// popup and are not constructed as standalone rails;
 // the shipped side rails are CONNECTIONS, SCHEMAS, TABLES. We assert the
 // per-rail invariant across whichever of those three rails publish list
 // bindings, and require at least the two-rail j-collision case
@@ -128,7 +128,7 @@ func TestShippedDefaultsListBindingsArePerRail(t *testing.T) {
 
 	defaults := controllers.AllDefaultBindings(g.Controllers())
 
-	// The two shipped side rails (CONNECTIONS removed by dbsavvy-bsh).
+	// The two shipped side rails (CONNECTIONS removed).
 	railScopes := map[types.ContextKey]bool{
 		types.SCHEMAS: true,
 		types.TABLES:  true,
@@ -161,7 +161,7 @@ func TestShippedDefaultsListBindingsArePerRail(t *testing.T) {
 		}
 		for action, scopes := range byAction {
 			if len(scopes) > 1 {
-				t.Errorf("list action %q shared across rails %v — must be per-rail (dbsavvy-6m9)", action, scopes)
+				t.Errorf("list action %q shared across rails %v — must be per-rail", action, scopes)
 			}
 		}
 
@@ -174,14 +174,14 @@ func TestShippedDefaultsListBindingsArePerRail(t *testing.T) {
 
 	// Explicit regression assertion: the SCHEMAS j-binding and the
 	// TABLES j-binding must resolve to DIFFERENT ActionIDs. This is the
-	// per-rail dispatch invariant (dbsavvy-6m9).
+	// per-rail dispatch invariant.
 	schemaDown := listActionForRail(defaults, types.SCHEMAS, commands.ListDown)
 	tablesDown := listActionForRail(defaults, types.TABLES, commands.ListDown)
 	if schemaDown == "" || tablesDown == "" {
 		t.Fatalf("missing per-rail ListDown binding: schemas=%q tables=%q", schemaDown, tablesDown)
 	}
 	if schemaDown == tablesDown {
-		t.Fatalf("SCHEMAS and TABLES share ListDown ActionID %q — j on one would move the other's cursor (dbsavvy-6m9 regression)", schemaDown)
+		t.Fatalf("SCHEMAS and TABLES share ListDown ActionID %q — j on one would move the other's cursor (regression)", schemaDown)
 	}
 }
 

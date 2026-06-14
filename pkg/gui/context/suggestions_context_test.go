@@ -318,7 +318,7 @@ func TestFormatSuggestionsBody_ColumnRow(t *testing.T) {
 func TestSuggestionsRenderWidth_MatchesRenderedRows(t *testing.T) {
 	// The width the popup layout reserves must equal the widest *rendered*
 	// row (SGR stripped), or the box clips suggestions horizontally
-	// (dbsavvy-ko4m clip bug: "> ! WHER" instead of "> ! WHERE").
+	// (clip bug: "> ! WHER" instead of "> ! WHERE").
 	cases := []struct {
 		name string
 		sugs []editor.Suggestion
@@ -459,7 +459,7 @@ func TestFormatSuggestionsBody_WideCJKNoPanic(t *testing.T) {
 	}
 }
 
-// ---- ko4m.4.5: matched-name-character highlighting -------------------
+// ---- matched-name-character highlighting -------------------
 
 func TestSuggestionHighlight_NamePrefixWrapped(t *testing.T) {
 	// Matches=[0,1,2] for "order_email" => "ord" wrapped in the Search SGR,
@@ -575,7 +575,7 @@ func TestSuggestionHighlight_MultibyteMidStringBoundaries(t *testing.T) {
 	}
 }
 
-// ---- ko4m.5.4: selected-function signature help footer ---------------
+// ---- selected-function signature help footer ---------------
 
 // fakeDetailProvider is a stub editor.FunctionDetailProvider. cache maps
 // "schema\x00name" -> details; a present key is a HIT, an absent key is a
@@ -914,7 +914,7 @@ func formatSignatureLineForTest(t *testing.T, name string, details []models.Func
 	return stripSGR(formatSignatureLine(name, details))
 }
 
-// ---- ko4m.4.6: per-kind exact-render goldens ------------------------
+// ---- per-kind exact-render goldens ------------------------
 
 // TestFormatSuggestionsBody_PerKindGoldens pins the EXACT rendered row
 // (marker + glyph + name + aligned detail tokens) for each Kind. The detail
@@ -962,7 +962,7 @@ func TestFormatSuggestionsBody_PerKindGoldens(t *testing.T) {
 	}
 }
 
-// ---- ko4m.4.6: no-color (NO_COLOR / monochrome) ---------------------
+// ---- no-color (NO_COLOR / monochrome) ---------------------
 
 // TestFormatSuggestionsBody_NoColorEmitsNoSGR drives IsMonochrome=true and
 // asserts a typed, matched row renders WITHOUT any SGR (no detail tint, no
@@ -1028,7 +1028,7 @@ func TestHighlightName_NoColorSuppressesHighlight(t *testing.T) {
 	}
 }
 
-// ---- ko4m.4.6: window edges -----------------------------------------
+// ---- window edges -----------------------------------------
 
 func TestFormatSuggestionsBody_EmptyWindow(t *testing.T) {
 	if body := formatSuggestionsBody(nil, 0, suggestionsVisibleMax); body != "" {

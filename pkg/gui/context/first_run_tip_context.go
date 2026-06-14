@@ -2,7 +2,7 @@ package context
 
 // FirstRunTipContext renders the welcome popup shown above CONNECTIONS
 // on the user's first launch. Kind = PERSISTENT_POPUP so subsequent popup
-// pushes do not auto-evict it (AD-1 / dbsavvy-56u.2).
+// pushes do not auto-evict it.
 //
 // The popup's copy comes from deps.FirstRunTipText (typically
 // Tr.FirstRunTipTitle / Tr.FirstRunTipBody). The dismiss handler is

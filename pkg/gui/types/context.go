@@ -34,8 +34,7 @@ const (
 	// ContextTree iteration safe for deferred contexts (QUERY_EDITOR,
 	// TABLE_DATA_EDITOR, RESULT_GRID, PLAN, WHICH_KEY, HISTORY) that ship
 	// later. The layout manager filters views whose context Kind == STUB
-	// so SetView is never called for them (DESIGN.md §8, D11 resolution
-	// in dbsavvy-enn.3).
+	// so SetView is never called for them (DESIGN.md §8, D11 resolution).
 	STUB
 )
 
@@ -111,7 +110,7 @@ const (
 	SUGGESTIONS       ContextKey = "suggestions"
 	COMMAND_LINE      ContextKey = "command_line"
 	// SEARCH_LINE is the dedicated bottom-anchored single-line in-grid
-	// search input (epic dbsavvy-2ttm). Mirrors COMMAND_LINE geometry
+	// search input. Mirrors COMMAND_LINE geometry
 	// (PopupSizeCommandLine) but renders a "/" prefix and fires an
 	// onChange seam per keystroke. TEMPORARY_POPUP, editable.
 	SEARCH_LINE ContextKey = "search_line"
@@ -121,33 +120,29 @@ const (
 	LIMIT       ContextKey = "limit"
 	CHEATSHEET  ContextKey = "cheatsheet"
 	// HIDE_OVERLAY is the in-grid column-visibility overlay opened by
-	// <leader>gH on the active result tab (dbsavvy-uv0.6).
+	// <leader>gH on the active result tab.
 	HIDE_OVERLAY ContextKey = "hide_overlay"
 	// EXPORT_MENU is the <leader>oe export-result menu opened from the
-	// result-grid context. TEMPORARY_POPUP kind. dbsavvy-uv0.9.
+	// result-grid context. TEMPORARY_POPUP kind.
 	EXPORT_MENU ContextKey = "export_menu"
 	// FIRST_RUN_TIP is the welcome popup shown above CONNECTIONS on the
 	// user's first launch. PERSISTENT_POPUP kind so subsequent popup
-	// pushes do not auto-evict it (AD-1 / dbsavvy-56u.2).
+	// pushes do not auto-evict it (AD-1).
 	FIRST_RUN_TIP ContextKey = "first_run_tip"
 	// TABLE_INSPECT is the tabbed popup that replaces the columns/indexes
-	// side rails (epic dbsavvy-3vf). Non-editable; sized larger than the
+	// side rails. Non-editable; sized larger than the
 	// generic 50% × 50% popup to fit table metadata.
 	TABLE_INSPECT ContextKey = "table_inspect"
-	// CELL_EDITOR is the in-grid cell mini-buffer (TEMPORARY_POPUP). Owned by
-	// dbsavvy-bwq A1 / Z1.
+	// CELL_EDITOR is the in-grid cell mini-buffer (TEMPORARY_POPUP).
 	CELL_EDITOR ContextKey = "cell_editor"
-	// COMMIT_DIALOG is the pending-edit commit dialog (TEMPORARY_POPUP). Owned by
-	// dbsavvy-bwq A4 / Z1.
+	// COMMIT_DIALOG is the pending-edit commit dialog (TEMPORARY_POPUP).
 	COMMIT_DIALOG ContextKey = "commit_dialog"
 	// CONFLICT_DIALOG is the per-conflict refresh/overwrite dialog (TEMPORARY_POPUP).
-	// Owned by dbsavvy-bwq A6 / Z1.
 	CONFLICT_DIALOG ContextKey = "conflict_dialog"
 	// FK_REVERSE_PICKER is the reverse-FK referencing-table picker (TEMPORARY_POPUP).
-	// Owned by dbsavvy-bwq B6 / Z1.
 	FK_REVERSE_PICKER ContextKey = "fk_reverse_picker"
-	// CONNECTION_MANAGER is the centered modal connection-manager box
-	// (dbsavvy-ig4). MAIN_CONTEXT kind: when top of the focus stack it
+	// CONNECTION_MANAGER is the centered modal connection-manager box.
+	// MAIN_CONTEXT kind: when top of the focus stack it
 	// renders a centered bordered box over a blank background, suppressing
 	// both the side rails and the QUERY_EDITOR for the frame.
 	CONNECTION_MANAGER ContextKey = "connection_manager"
@@ -201,14 +196,14 @@ func AllContextKeys() []ContextKey {
 // context ships. Non-editable views receive per-key SetKeybinding
 // dispatch into the Matcher (no master Editor installed).
 //
-// PROMPT's flip in dbsavvy-fq9 fixes paste (gocui drops keybindings
+// PROMPT's flip fixes paste (gocui drops keybindings
 // during bracketed-paste on non-editable views) and arrow-key caret
 // motion (gocui's matchView rejects char-key keybindings on editable
 // views, so a TextArea-backed editor is the only way to receive both
 // printable runes AND arrow / Backspace / Delete / Home / End / paste
 // uniformly).
 //
-// QUERY_EDITOR's flip in dbsavvy-66p.11 is forward-compat: the
+// QUERY_EDITOR's flip is forward-compat: the
 // orchestrator only installs a master Editor on a live (non-STUB)
 // context, so flipping here has no runtime effect until the real
 // QUERY_EDITOR context lands.
@@ -242,9 +237,9 @@ type KeybindingsOpts struct{}
 // IBaseContext.AddKeybindingsFn to contribute keybindings to a Context.
 //
 // Returns *ChordBinding (the chord-aware binding shape). The Handler
-// and ViewName fields are transitional shims (dlp.8a) that let the
+// and ViewName fields are transitional shims that let the
 // orchestrator's single-key registration loop keep working while the
-// master Editor / commands.Registry dispatch path lands in dlp.8b/c.
+// master Editor / commands.Registry dispatch path lands.
 type KeybindingsFn func(KeybindingsOpts) []*ChordBinding
 
 // IBaseContext is the lifecycle + identity contract every Context

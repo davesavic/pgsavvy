@@ -13,12 +13,12 @@ type Key = gocui.Key
 // KeyName mirrors gocui.KeyName (a tcell-key enum). ViewMouseBinding.Key
 // is a KeyName (NOT a composite Key), so the mouse helper accepts this
 // alias to register mouse buttons / wheel events without importing gocui
-// directly. Added per dbsavvy-zro T7b mouse helper.
+// directly.
 type KeyName = gocui.KeyName
 
 // Mouse button / wheel constants, re-exported so pkg/gui/keys/** and
 // pkg/gui/controllers/helpers/** can wire mouse bindings without
-// importing gocui (a dbsavvy-zro AC invariant). Names mirror gocui.
+// importing gocui. Names mirror gocui.
 var (
 	MouseLeft       = gocui.MouseLeft
 	MouseRight      = gocui.MouseRight

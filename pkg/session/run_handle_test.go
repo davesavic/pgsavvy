@@ -29,7 +29,7 @@ func TestRunHandle_RouteNoticeAfterFinish_NoPanic(t *testing.T) {
 
 // TestRunHandle_Err_RecordsTerminalError verifies Err() reports the terminal
 // error observed at finish() once Done has closed, and nil for a clean EOF.
-// Post-run consumers (dbsavvy-ko4m.2.4) success-gate metadata invalidation on
+// Post-run consumers success-gate metadata invalidation on
 // this.
 func TestRunHandle_Err_RecordsTerminalError(t *testing.T) {
 	t.Run("clean EOF -> nil", func(t *testing.T) {

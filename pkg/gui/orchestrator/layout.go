@@ -85,7 +85,7 @@ func (g *Gui) RunLayout(w, h int) error {
 	// pass below can swap FrameColor per frame (gocui resets FrameColor
 	// to ColorDefault on each SetView — view.go:498 — so the swap has to
 	// run after SetView, not on focus-change events).
-	// CONNECTION_MANAGER modal (epic dbsavvy-ig4): while it is top of the
+	// CONNECTION_MANAGER modal: while it is top of the
 	// focus stack it renders a centered bordered box over a blank
 	// background. Suppress the Tier-1 side-rails + extras loop entirely for
 	// the frame so nothing paints behind the modal.
@@ -124,7 +124,7 @@ func (g *Gui) RunLayout(w, h int) error {
 		_ = ctx.HandleRender()
 	}
 
-	// Tier 1.4 (dbsavvy-9p3): always-on main pane. The MAIN_CONTEXT slot
+	// Tier 1.4: always-on main pane. The MAIN_CONTEXT slot
 	// (right-top, dims["main"]) hosts QUERY_EDITOR. Painted every frame
 	// regardless of focus-stack membership so the user always sees the
 	// editor — focus only governs FrameColor + which view gocui routes
@@ -144,7 +144,7 @@ func (g *Gui) RunLayout(w, h int) error {
 		// drawing it every frame — leaving border artifacts over the editor /
 		// results / status region. DeleteView removes it from g.views so it
 		// stops being drawn. Idempotent: ErrUnknownView (already gone) is
-		// the expected steady-state and is ignored (dbsavvy-1du).
+		// the expected steady-state and is ignored.
 		if g.registry.ConnectionManager != nil {
 			if name := g.registry.ConnectionManager.GetViewName(); name != "" {
 				_ = g.driver.DeleteView(name)
@@ -170,7 +170,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				// stays inside the viewport — typing or motion past the
 				// view's bottom would otherwise scroll the cursor off
 				// screen with the origin stuck at 0 (mirrors the side-rail
-				// scrollSideRailIntoView fix from dbsavvy-f50).
+				// scrollSideRailIntoView fix).
 				if buf := qec.Buffer(); buf != nil {
 					content := highlight.Highlight(buf.String())
 					if sel := buf.SelectionSnapshot(); sel != nil {
@@ -185,7 +185,7 @@ func (g *Gui) RunLayout(w, h int) error {
 					// FocusPoint pins only the vertical origin; without
 					// this the editor never scrolls horizontally, so
 					// lines wider than the pane clip past the right
-					// border and the caret vanishes (dbsavvy-jdyt).
+					// border and the caret vanishes.
 					scrollEditorColumnIntoView(v, cur.Col)
 				}
 			}
@@ -236,7 +236,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				activeTabView = g.resultTabsH.LayoutPaint(g.driver, d.X0, contentY0, d.X1, d.Y1)
 				if activeTabView != "" {
 					// Pick the editor by the active tab's context key: plan tabs
-					// dispatch under PLAN, grid tabs under RESULT_GRID (dbsavvy-s7gn).
+					// dispatch under PLAN, grid tabs under RESULT_GRID.
 					editorKey := types.RESULT_GRID
 					if ac := g.resultTabsH.ActiveContext(); ac != nil {
 						editorKey = ac.GetKey()
@@ -252,7 +252,7 @@ func (g *Gui) RunLayout(w, h int) error {
 		}
 	}
 
-	// Focus-frame swap (dbsavvy-tro.1): every Tier-1 rail repaints its
+	// Focus-frame swap: every Tier-1 rail repaints its
 	// FrameColor each frame — focused rail gets theme.ActiveBorder, the
 	// rest get theme.InactiveBorder. Popups (Tier-3) are NOT touched and
 	// keep whatever FrameColor their own render paths assign. Sourced
@@ -321,8 +321,8 @@ func (g *Gui) RunLayout(w, h int) error {
 						cl.SetView(view)
 					}
 				}
-				// Overlay the COMMAND_LINE buffer with a styled ':' prompt
-				// (dbsavvy-tro.12). The TextArea is the source of truth for
+				// Overlay the COMMAND_LINE buffer with a styled ':' prompt.
+				// The TextArea is the source of truth for
 				// the typed line; gocui's RenderTextArea writes the raw
 				// content (leading ':' + typed text) into the view buffer.
 				// We re-write the cell content via SetContent each frame so
@@ -346,8 +346,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				// RecorderGuiDriver which returns view=nil from SetView, so
 				// fall back to the context's Buffer() length (assumes the
 				// caret is at end-of-buffer in tests — adequate for the
-				// recorder, which has no real TextArea cursor). Bug
-				// dbsavvy-tro.2 / dbsavvy-go1.
+				// recorder, which has no real TextArea cursor).
 				cursorX, cursorY := 1, 0
 				if view != nil && view.TextArea != nil {
 					cursorX, cursorY = view.TextArea.GetCursorXY()
@@ -357,7 +356,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				_ = g.driver.SetViewCursor(name, cursorX, cursorY)
 			}
 			// PROMPT view-plumb + caret anchor. The PROMPT view is
-			// editable post-dbsavvy-fq9 — keystrokes flow through the
+			// now editable — keystrokes flow through the
 			// master Editor's Passthrough branch into
 			// gocui.DefaultEditor which writes into v.TextArea. On fresh
 			// view creation we seed the TextArea with the helper's
@@ -365,7 +364,7 @@ func (g *Gui) RunLayout(w, h int) error {
 			// last typed input as the new initial). We also publish the
 			// view's inner width to PromptContext so its label wrapper
 			// fits any validator error onto multiple lines instead of
-			// truncating at the popup right edge (dbsavvy-8p5).
+			// truncating at the popup right edge.
 			if ctx.GetKey() == types.PROMPT {
 				if cl, ok := ctx.(interface{ SetView(types.View) }); ok {
 					cl.SetView(view)
@@ -387,7 +386,7 @@ func (g *Gui) RunLayout(w, h int) error {
 					// when the view is nil (recorder driver path).
 					wsetter.SetLabelWrapWidth(view.InnerWidth())
 				}
-				// Pin the horizontal origin to 0 (dbsavvy-lcxe). The popup
+				// Pin the horizontal origin to 0. The popup
 				// is sized (popupRect) to fit the label and "> "+buffer, so
 				// the view never needs to scroll horizontally. gocui's
 				// RenderTextArea (run by DefaultEditor on each keystroke)
@@ -410,7 +409,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				// applyFocusFrameColors pass) and surface its title (set for
 				// the masked SSH credential prompt — see
 				// PromptContext.GetTitle). The free-form `<c-e>` expression
-				// prompt uses WarnBorder (dbsavvy-bwq.23) to flag that its
+				// prompt uses WarnBorder to flag that its
 				// input is injected verbatim; every other prompt keeps the
 				// active-border colour. gocui resets FrameColor on each
 				// SetView, so this must run after SetView, every frame.
@@ -424,7 +423,7 @@ func (g *Gui) RunLayout(w, h int) error {
 					view.FrameColor = frameAttr(promptBorderStyle(label))
 				}
 			}
-			// CELL_EDITOR view-plumb + seed + caret anchor (dbsavvy-tzi.2).
+			// CELL_EDITOR view-plumb + seed + caret anchor.
 			// Like PROMPT, CELL_EDITOR is an editable popup whose keystrokes
 			// flow through the master Editor's Passthrough into
 			// gocui.DefaultEditor (TextArea). Plumb the live view so
@@ -447,7 +446,7 @@ func (g *Gui) RunLayout(w, h int) error {
 					}
 				}
 				// Pin the horizontal origin to 0 each frame (mirrors the
-				// PROMPT path above, dbsavvy-lcxe). HandleRender repaints the
+				// PROMPT path above). HandleRender repaints the
 				// "> "+buffer line via SetContent in absolute (origin-0)
 				// coordinates and scrolls the buffer itself when it outgrows
 				// the box (CellEditorContext.hScroll), but the master Editor's
@@ -472,7 +471,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				}
 				// CELL_EDITOR is a focused editable popup like PROMPT but set
 				// no FrameColor previously, leaving it on gocui's per-SetView
-				// ColorDefault reset (dbsavvy-uly7.14). Paint the active-border
+				// ColorDefault reset. Paint the active-border
 				// colour to match PROMPT/CONFIRMATION/TABLE_INSPECT. gocui
 				// resets FrameColor on each SetView, so this runs after
 				// SetView, every frame.
@@ -480,7 +479,7 @@ func (g *Gui) RunLayout(w, h int) error {
 					view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 				}
 			}
-			// SEARCH_LINE view-plumb + width + caret (dbsavvy-2ttm). Like
+			// SEARCH_LINE view-plumb + width + caret. Like
 			// COMMAND_LINE, the search input is a borderless editable strip
 			// whose TextArea holds the raw query; HandleRender writes the "/"
 			// prefix + right-aligned match count via SetContent. The caret is
@@ -501,7 +500,7 @@ func (g *Gui) RunLayout(w, h int) error {
 					_ = g.driver.SetViewCursor(name, cx+1, cy)
 				}
 			}
-			// CONFIRMATION styling (dbsavvy-u6p7): the popup is always the
+			// CONFIRMATION styling: the popup is always the
 			// focused modal while it's on top, so paint its border with the
 			// active-border colour (popups are skipped by the Tier-1
 			// applyFocusFrameColors pass). gocui resets FrameColor on each
@@ -513,7 +512,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				view.Wrap = true
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
-			// TABLE_INSPECT styling (dbsavvy-2048): the columns/indexes
+			// TABLE_INSPECT styling: the columns/indexes
 			// inspect popup is the focused modal while on top, so give it
 			// the same focused-modal treatment as CONFIRMATION/PROMPT —
 			// surface its "Table inspect" frame title and paint the active
@@ -526,7 +525,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				view.Title = ctx.GetTitle()
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
-			// HISTORY styling (dbsavvy-o9k0): the query-history browse popup
+			// HISTORY styling: the query-history browse popup
 			// is the focused modal while on top, so give it the same
 			// focused-modal treatment as TABLE_INSPECT — surface its
 			// "History" frame title and paint the active border (popups are
@@ -539,7 +538,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				view.Title = ctx.GetTitle()
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
-			// CHEATSHEET styling + scroll (dbsavvy-quyg): the keybinding
+			// CHEATSHEET styling + scroll: the keybinding
 			// cheatsheet is the focused modal while on top, so give it the
 			// same "Keybindings" frame title + active border as HISTORY
 			// (popups are skipped by the Tier-1 applyFocusFrameColors pass;
@@ -567,8 +566,8 @@ func (g *Gui) RunLayout(w, h int) error {
 	// managed by their dedicated overlay paths (notifier-driven /
 	// tiny-terminal branch / IsVisible-driven respectively) and excluded
 	// here — SUGGESTIONS in particular is never pushed onto the focus
-	// stack (frozen dbsavvy-etp design) so the teardown must not delete
-	// its view out from under renderSuggestionsOverlay (dbsavvy-2fo).
+	// stack (frozen design) so the teardown must not delete
+	// its view out from under renderSuggestionsOverlay.
 	for _, ctx := range g.registry.Flatten() {
 		if ctx == nil {
 			continue
@@ -591,7 +590,7 @@ func (g *Gui) RunLayout(w, h int) error {
 		_ = g.driver.DeleteView(name)
 	}
 
-	// Tier 4a: always-on status bar (dbsavvy-tro.3). The boxlayout
+	// Tier 4a: always-on status bar. The boxlayout
 	// reserves a 2-row "status" slot at the canvas bottom; we materialise
 	// a borderless view there each frame and hand it to RenderStatusLine,
 	// which multiplexes the toast helper's Current() over the default
@@ -601,7 +600,7 @@ func (g *Gui) RunLayout(w, h int) error {
 	// renderer writes to the view via SetContent, which the recorder
 	// driver routes by name regardless of the *View handle.
 	//
-	// Rect expansion (dbsavvy-8tj): the lazygit gocui fork computes a
+	// Rect expansion: the lazygit gocui fork computes a
 	// view's writable InnerHeight as Height-2 regardless of Frame
 	// (pkg/gocui/view.go:527-547) and writes cells at screen position
 	// (x0+x+1, y0+y+1). The off-by-one cell offset places content at row
@@ -664,8 +663,8 @@ func (g *Gui) RunLayout(w, h int) error {
 		return err
 	}
 	// SUGGESTIONS is a shy overlay driven by IsVisible(), never by stack
-	// membership (the editor keeps focus per the frozen dbsavvy-etp
-	// design). dbsavvy-2fo.
+	// membership (the editor keeps focus per the frozen
+	// design).
 	if err := g.renderSuggestionsOverlay(dims, w, h); err != nil {
 		return err
 	}
@@ -711,7 +710,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				// clear any caret it inherited from the editable context
 				// beneath it, or gocui draws a stale cursor at the popup's
 				// (0,0) — e.g. CONFIRMATION pushed over a focused
-				// QUERY_EDITOR (dbsavvy-u6p7).
+				// QUERY_EDITOR.
 				if !top.GetKey().IsEditable() {
 					g.driver.SetCaretEnabled(false)
 				}
@@ -733,7 +732,7 @@ func (g *Gui) RunLayout(w, h int) error {
 // the back buffer but cannot force those physical cells to be re-emitted. A
 // Sync() (clear-screen flag + full invalidate) evicts the ghosts. Restricted
 // to teardown frames so steady-state rendering keeps the cheap diff path and
-// the user never sees a full-screen repaint mid-edit (dbsavvy-1du).
+// the user never sees a full-screen repaint mid-edit.
 func (g *Gui) resyncOnViewTeardown() {
 	vc, ok := g.driver.(interface{ LiveViewCount() int })
 	if !ok {
@@ -758,7 +757,7 @@ func (g *Gui) resyncOnViewTeardown() {
 // steady-state connecting/error frames keep the cheap diff path, and scoped to
 // ModeConnecting so benign list/form navigation never triggers a full repaint.
 // Sibling of resyncOnViewTeardown, which covers only the view-count-shrink
-// (modal close) case (dbsavvy-emu).
+// (modal close) case.
 func (g *Gui) resyncOnModalContentChange() {
 	if !g.modalIsTopMain() || g.registry.ConnectionManager.Mode() != guicontext.ModeConnecting {
 		g.prevModalBody = ""
@@ -783,7 +782,7 @@ func (g *Gui) resyncOnModalContentChange() {
 // layoutConnectionManagerMain owns the dims["main"] slot and BOTH the side
 // rails and the QUERY_EDITOR paint are suppressed so only the centered box
 // (and any popup above it) renders over a blank background.
-// Nil-safe across the registry / tree / context (epic dbsavvy-ig4).
+// Nil-safe across the registry / tree / context.
 func (g *Gui) modalIsTopMain() bool {
 	if g.registry == nil || g.registry.ConnectionManager == nil || g.tree == nil {
 		return false
@@ -797,7 +796,7 @@ func (g *Gui) modalIsTopMain() bool {
 }
 
 // connectionManagerWidthFrac / connectionManagerHeightFrac size the centered
-// modal box as a fraction of the dims["main"] slot (epic dbsavvy-ig4).
+// modal box as a fraction of the dims["main"] slot.
 const (
 	connectionManagerWidthFrac  = 0.65
 	connectionManagerHeightFrac = 0.65
@@ -807,7 +806,7 @@ const (
 // centered bordered box inside the dims["main"] slot and registers the view
 // in rails so it participates in the focus-frame swap. Called only when
 // modalIsTopMain reports true, so the QUERY_EDITOR paint and the side rails
-// are both suppressed for the frame (epic dbsavvy-ig4).
+// are both suppressed for the frame.
 func (g *Gui) layoutConnectionManagerMain(dims map[string]ui.Dimensions, rails map[string]*gocui.View) {
 	cm := g.registry.ConnectionManager
 	name := cm.GetViewName()
@@ -932,7 +931,7 @@ func (g *Gui) popupRect(ctx types.IBaseContext, dims map[string]ui.Dimensions, w
 	// An unmasked PROMPT (e.g. the export edit-path / pgpass path field)
 	// sizes its box to fit the label and "> "+buffer so a long path does
 	// not horizontally scroll the shared view — which would clip the
-	// label and hide the caret (dbsavvy-lcxe). The buffer is read live so
+	// label and hide the caret. The buffer is read live so
 	// the box tracks typing; Initial() seeds the width on the first frame
 	// before the TextArea is plumbed in.
 	if ctx.GetKey() == types.PROMPT {
@@ -1010,7 +1009,7 @@ func (g *Gui) renderLimitOverlay(w, h int) error {
 // whichKeyMaxCols caps the popup width; the renderer truncates per-row
 // content to fit. whichKeyFrameRows is the gocui top+bottom border the
 // popup height must add on top of one row per binding — the height is
-// content-driven (dbsavvy-y5t) and clamped to the canvas by
+// content-driven and clamped to the canvas by
 // bottomRightRect, so a long binding list expands to fit instead of
 // clipping overflow that the read-only popup cannot scroll.
 const (
@@ -1031,11 +1030,11 @@ const (
 // cellEditorMaxRows caps the cell-edit popup height. The frame's top and
 // bottom borders consume 2 rows, leaving ~3 content rows for the single
 // "> <buffer>" line. Height-bounded by design so the popup doesn't
-// occlude the result grid being edited (dbsavvy-tzi.1).
+// occlude the result grid being edited.
 const cellEditorMaxRows = 5
 
-// promptMaxRows / promptMaxCols cap the single-field PROMPT popup
-// (dbsavvy-jzeo). The frame's top+bottom borders consume 2 rows; the
+// promptMaxRows / promptMaxCols cap the single-field PROMPT popup.
+// The frame's top+bottom borders consume 2 rows; the
 // remaining 6 content rows hold a word-wrapped label (1 line normally,
 // up to ~3 for a multi-line validator-error re-prompt), a blank
 // separator, and the "> <buffer>" input line — sized to the field, not
@@ -1046,7 +1045,7 @@ const (
 )
 
 // promptPopupCols returns the column count the unmasked PROMPT popup
-// needs so its content fits without horizontal scrolling (dbsavvy-lcxe).
+// needs so its content fits without horizontal scrolling.
 // The label and the editable buffer share one gocui view, so a single
 // horizontal origin governs both lines: if the buffer is wide enough to
 // scroll the origin (to chase the end-of-buffer caret), it drags the
@@ -1111,8 +1110,7 @@ const maskedPromptMaxRows = 4
 // view is best-effort deleted so it doesn't linger from a prior frame.
 //
 // Wired conservatively: a missing registry, missing WhichKey context,
-// or unwired notifier collapses to a no-op (the concrete WhichKey
-// wiring lands in dlp.8c).
+// or unwired notifier collapses to a no-op.
 func (g *Gui) renderWhichKeyOverlay(w, h int, dims map[string]ui.Dimensions) error {
 	if g.registry == nil || g.registry.WhichKey == nil {
 		return nil
@@ -1122,7 +1120,7 @@ func (g *Gui) renderWhichKeyOverlay(w, h int, dims map[string]ui.Dimensions) err
 		_ = g.driver.DeleteView(string(types.WHICH_KEY))
 		return nil
 	}
-	// Empty-rows policy (dbsavvy-tro.4): if the wired resolver yields no
+	// Empty-rows policy: if the wired resolver yields no
 	// children for the current (scope, prefix), hide the notifier and
 	// delete the view so we don't paint an empty popup rect onscreen. A
 	// chord prefix with no continuations is "dead air" — the user would
@@ -1139,7 +1137,7 @@ func (g *Gui) renderWhichKeyOverlay(w, h int, dims map[string]ui.Dimensions) err
 	}
 	// Size the popup to fit every binding row (one row each + the gocui
 	// frame); bottomRightRect clamps the height to the canvas so it never
-	// exceeds the screen (dbsavvy-y5t).
+	// exceeds the screen.
 	rowCount := g.registry.WhichKey.RowCount(scope, prefix)
 	r := bottomRightRect(canvas, whichKeyMaxCols, rowCount+whichKeyFrameRows)
 	if _, err := g.driver.SetView(string(types.WHICH_KEY), r.X0, r.Y0, r.X1, r.Y1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
@@ -1153,10 +1151,10 @@ func (g *Gui) renderWhichKeyOverlay(w, h int, dims map[string]ui.Dimensions) err
 // renderSuggestionsOverlay positions the cursor-anchored completion
 // popup whenever the SuggestionsContext reports IsVisible() — driven by
 // the popup's own visibility, NOT by focus-stack membership. The frozen
-// dbsavvy-etp design keeps the QUERY_EDITOR focused (the controller
+// design keeps the QUERY_EDITOR focused (the controller
 // intercepts nav keys while the popup is visible) and never pushes
 // SUGGESTIONS onto the focus stack, so the focus-stack Tier-3 loop never
-// rendered it (dbsavvy-2fo). On invisibility the view is best-effort
+// rendered it. On invisibility the view is best-effort
 // deleted so it doesn't linger from a prior frame. A missing registry
 // or suggestions context collapses to a no-op.
 func (g *Gui) renderSuggestionsOverlay(dims map[string]ui.Dimensions, w, h int) error {
@@ -1256,7 +1254,7 @@ func commandLineRect(dims map[string]ui.Dimensions) rect {
 // active tab without updating the stack, so the stack name goes stale.
 // Whenever the stack points at any result tab we follow the live active
 // tab view (activeTabView) instead, so the highlight tracks the visible
-// tab rather than the one that was active at push time. dbsavvy-66p.
+// tab rather than the one that was active at push time.
 func resolveFocusedRailName(stackViewName, activeTabView string) string {
 	if activeTabView != "" && strings.HasPrefix(stackViewName, types.ResultTabViewPrefix) {
 		return activeTabView
@@ -1276,7 +1274,7 @@ type cheatsheetScroller interface {
 // context's scroll offset, clamped to the content's last page. Called
 // after HandleRender so view.LinesHeight reflects the freshly written
 // body. The clamped value is written back so `G` (a large sentinel) and
-// any over-scroll settle exactly on the last page (dbsavvy-quyg).
+// any over-scroll settle exactly on the last page.
 func applyCheatsheetScroll(view *gocui.View, ctx types.IBaseContext) {
 	sc, ok := ctx.(cheatsheetScroller)
 	if !ok {
@@ -1305,7 +1303,7 @@ type tableInspectScroller interface {
 // scroll offsets, clamping each axis to the content's last page / last
 // column. Called after HandleRender so view dimensions reflect the
 // freshly written body. Clamped values are written back so the `G` and
-// `l` sentinels settle exactly on the last page / column (dbsavvy-ep0k).
+// `l` sentinels settle exactly on the last page / column.
 func applyTableInspectScroll(view *gocui.View, ctx types.IBaseContext) {
 	sc, ok := ctx.(tableInspectScroller)
 	if !ok {
@@ -1358,7 +1356,7 @@ func applyFocusFrameColors(rails map[string]*gocui.View, focusedName string, act
 // buffer ensures the user-typed text isn't accidentally restyled.
 // gocui's escape interpreter parses the inline SGR and lifts it to
 // per-cell Attribute values; the recorder driver stores the raw bytes
-// so tests can assert on the wrapper directly (dbsavvy-tro.12).
+// so tests can assert on the wrapper directly.
 //
 // A nil style or unrecognised colour collapses to a default-fg ':' —
 // callers still get a visible prompt, just without the brighten.
@@ -1395,7 +1393,7 @@ func frameAttr(s *theme.Style) gocui.Attribute {
 // promptBorderStyle picks the border colour for a PROMPT popup from its
 // label: the free-form `<c-e>` expression prompt
 // (helpers.WarnExprPromptLabel) gets WarnBorder to flag verbatim
-// injection (dbsavvy-bwq.23); every other prompt keeps ActiveBorder.
+// injection; every other prompt keeps ActiveBorder.
 // When WarnBorder is unset in the active theme frameAttr falls back to
 // ColorDefault, so an absent key degrades gracefully.
 func promptBorderStyle(label string) *theme.Style {
@@ -1447,7 +1445,7 @@ const suggestionsFrame = 2
 // The final rect is clamped within the editor view bounds.
 //
 // Wide-char (CJK/emoji) rune→cell width is best-effort v1: ASCII
-// identifiers position correctly (epic dbsavvy-etp out-of-scope note).
+// identifiers position correctly.
 func anchoredRect(vx0, vy0, vx1, vy1, ox, oy int, anchor editor.Position, contentW, rows int) rect {
 	cursorX := vx0 + 1 + (anchor.Col - ox)
 	cursorY := vy0 + 1 + (anchor.Line - oy)

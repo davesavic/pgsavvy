@@ -8,7 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// searchState carries the in-grid plain-substring SEARCH (dbsavvy-2ttm).
+// searchState carries the in-grid plain-substring SEARCH.
 // Search never hides rows — it produces a
 // cell-major match list with UTF-8 byte offsets into each cell's
 // renderCellPlain output, and drives n/N cursor navigation across cells

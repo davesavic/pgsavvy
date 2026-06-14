@@ -21,7 +21,7 @@ import (
 )
 
 // bootstrapSaveGui wires a real *orchestrator.Gui whose ConnectionsProvider
-// reads the live afero memfs at connsPath. dbsavvy-zod: the
+// reads the live afero memfs at connsPath. The
 // OnSaveConnection seam is the production g.saveConnectionForm, so driving the
 // modal form's Confirm writes through to connections.yml end-to-end.
 func bootstrapSaveGui(t *testing.T, fs afero.Fs, connsPath string) (*orchestrator.Gui, *testfake.RecorderGuiDriver) {
@@ -63,7 +63,7 @@ func pushModal(t *testing.T, g *orchestrator.Gui) *guicontext.ConnectionManagerC
 	return modal
 }
 
-// TestConnectionManagerEditPreservesHiddenFields is the dbsavvy-zod headline
+// TestConnectionManagerEditPreservesHiddenFields is the headline case
 // (AC1-edit + AC2 + AC3): a profile carrying ssh_tunnel AND password_command is
 // edited (name changed) via the modal form, and after the rewrite BOTH fields
 // survive on the renamed row.

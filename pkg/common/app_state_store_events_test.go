@@ -13,7 +13,7 @@ import (
 
 // newLoggerWithBuf returns a DEBUG-level slog logger whose JSON output is
 // captured into the returned buffer. Used by the cat=state instrumentation
-// tests (dbsavvy-8s2.7, ported to slog by dbsavvy-962.2) to verify the
+// tests (ported to slog) to verify the
 // expected line is emitted.
 func newLoggerWithBuf() (*slog.Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}

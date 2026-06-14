@@ -5,8 +5,6 @@
 // owns the skip-or-open dance for individual Sessions; for cancel coverage we
 // also need access to the *pg.Connection, which is why some tests below
 // duplicate the open dance and capture both halves.
-//
-// See epic dbsavvy-66p.4 — fulfils the D17 deferral from dbsavvy-921.
 
 package pg_test
 
@@ -70,7 +68,7 @@ func requirePGConnAndSession(t *testing.T) (drivers.Connection, drivers.Session)
 }
 
 func TestPgCancelHasLiveCancelTrue(t *testing.T) {
-	// Smoke check: after 66p.4, the static capability flag must read true.
+	// Smoke check: the static capability flag must read true.
 	// This does not need a live server — exercised in the unit suite too —
 	// but kept here so a future regression that requires server-side state
 	// (e.g. pg_cancel_backend authz) surfaces alongside the live tests.
@@ -81,7 +79,7 @@ func TestPgCancelHasLiveCancelTrue(t *testing.T) {
 		t.Fatalf("factory: %v", err)
 	}
 	if !drv.Capabilities().HasLiveCancel {
-		t.Fatal("Capabilities.HasLiveCancel = false, want true after 66p.4")
+		t.Fatal("Capabilities.HasLiveCancel = false, want true")
 	}
 }
 

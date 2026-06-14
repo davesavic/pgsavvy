@@ -14,14 +14,14 @@ import (
 const stmtTimeoutToastTTL = 4 * time.Second
 
 // StatementTimeoutController owns the <leader>tt QUERY_EDITOR-scope
-// binding (hq5.11) that prompts for a postgres-style duration, validates
+// binding that prompts for a postgres-style duration, validates
 // it, runs SET statement_timeout on the session, and persists the
 // override to AppState.
 type StatementTimeoutController struct {
 	baseController
 
 	// SetRunner is wired by the orchestrator to the setExHandler closure
-	// (hq5.8). Called with the tokenised args after "SET".
+	// Called with the tokenised args after "SET".
 	SetRunner func(args []string, ctx commands.ExecCtx) error
 
 	// PersistTimeout is wired by the orchestrator to persist the validated

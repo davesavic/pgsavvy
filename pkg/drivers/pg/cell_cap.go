@@ -12,7 +12,7 @@ import (
 // value retained in a buffered result row. Values larger than this are
 // truncated at the stream boundary so a wide-payload query (e.g. a jsonb
 // audit log) cannot accumulate hundreds of MB of heap across the buffered
-// rows and stall the whole process under GC pressure (dbsavvy-fspu).
+// rows and stall the whole process under GC pressure.
 //
 // It sits far above the 10 KB display cap (grid.MaxCellRenderBytes) and the
 // 10 KB yank/export cap, so on-screen output and copy/export are unaffected

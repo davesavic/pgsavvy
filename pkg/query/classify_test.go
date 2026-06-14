@@ -60,7 +60,7 @@ func TestEffectiveKind(t *testing.T) {
 		// Known limitation: a DML keyword inside a string literal falsely
 		// elevates (fail-closed bias). Documents actual behavior.
 		{"delete inside string literal falsely elevates", "SELECT 'DELETE' AS note", KindDML},
-		// DDL-CTE verdict (dbsavvy-ko4m.2 decision B): NO ddlTokenRE elevation.
+		// DDL-CTE verdict: NO ddlTokenRE elevation.
 		// A WITH-led statement cannot execute DDL in Postgres, and a benign
 		// read-only SELECT with a DDL-keyword-named column (e.g. "comment") must
 		// NOT be elevated to KindDDL (else the pre-run ConfirmDDL prompt spuri-

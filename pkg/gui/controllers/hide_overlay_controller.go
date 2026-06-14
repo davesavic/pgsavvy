@@ -7,8 +7,8 @@ import (
 )
 
 // HideOverlayManager is the narrow surface HideOverlayController
-// dispatches to. The concrete satisfier is *ui.ResultTabsHelper
-// (dbsavvy-uv0.6); the interface keeps the controller package free of
+// dispatches to. The concrete satisfier is *ui.ResultTabsHelper.
+// The interface keeps the controller package free of
 // the helpers/ui import. Mirrors ResultTabsManager's shape so the same
 // nil-safe dispatch pattern applies.
 type HideOverlayManager interface {
@@ -23,7 +23,7 @@ type HideOverlayManager interface {
 }
 
 // HideOverlayController owns the HIDE_OVERLAY popup bindings opened by
-// <leader>gH (dbsavvy-uv0.6). All state lives on the helper; the
+// <leader>gH. All state lives on the helper; the
 // controller is a thin dispatcher into HideOverlayManager.
 //
 //   - j / <down> / <C-n> move cursor +1
@@ -106,7 +106,7 @@ func (h *HideOverlayController) GetKeybindings(_ types.KeybindingsOpts) []*types
 			ActionID:    commands.HideOverlayUp,
 			Description: tr.Actions.Up,
 		},
-		// <C-n> / <C-p> mirror Down / Up per AD-9 (dbsavvy-56u.2). The
+		// <C-n> / <C-p> mirror Down / Up per AD-9. The
 		// controller godoc at the top of this file claims emacs-style
 		// navigation; the bindings ship here so claim matches behavior.
 		{

@@ -152,7 +152,7 @@ type railHighlightSpan struct {
 // When spans is empty the output is byte-identical to the pre-feature
 // render: name (connected) or "\x1b[2m"+name+"\x1b[0m" (disconnected).
 //
-// Disconnected composition (dbsavvy-ioaj.2 review amendment): a dim
+// Disconnected composition: a dim
 // baseline "\x1b[2m"; each highlight span CLOSES by restoring dim —
 // emit "\x1b[0m" (full reset, clears the CurSearch black-on-yellow bg)
 // then re-open "\x1b[2m" — so trailing bytes stay dim and no bg SGR

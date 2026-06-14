@@ -2,7 +2,7 @@
 
 // Package orchestrator_test (integration) exercises the
 // ResultTabsHelper end-to-end through the wired *orchestrator.Gui to
-// satisfy dbsavvy-66p.12 AC ("Smoke: opens 9 tabs sequentially,
+// satisfy the AC ("Smoke: opens 9 tabs sequentially,
 // asserts eviction order").
 //
 // The test is integration-tagged to keep it out of the default `task

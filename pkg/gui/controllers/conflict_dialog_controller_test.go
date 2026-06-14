@@ -419,7 +419,7 @@ func TestDefaultConflictDialogRender_PerRowLines(t *testing.T) {
 	}
 }
 
-// AC (dbsavvy-2ij6 follow-up): a json/jsonb conflict renders the server
+// AC: a json/jsonb conflict renders the server
 // value as JSON text — matching the grid and commit preview — not Go's
 // byte-slice form for a []byte the server returned.
 func TestDefaultConflictDialogRender_JSONValues(t *testing.T) {

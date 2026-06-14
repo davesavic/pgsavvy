@@ -69,8 +69,8 @@ func TestListFunctions_OverloadedNameCollapsesToOneEntry(t *testing.T) {
 	sess := openIntegrationSession(t)
 	ctx := context.Background()
 
-	// The fixture seeds app.fn_overload with two distinct signatures
-	// (dbsavvy-ko4m.5.1). ListFunctions projects routine_name alone, so the
+	// The fixture seeds app.fn_overload with two distinct signatures.
+	// ListFunctions projects routine_name alone, so the
 	// overloaded pair must collapse to exactly one entry — DescribeFunction is
 	// the surface that fans the overloads back out.
 	if _, err := sess.Execute(ctx, models.Query{SQL: `SET search_path TO app, public`}); err != nil {

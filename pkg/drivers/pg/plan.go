@@ -71,7 +71,7 @@ func parseSettings(v any) map[string]string {
 
 // nodeHasActuals reports whether n (or any descendant) carries one or more
 // Actual* fields populated by `EXPLAIN ANALYZE`. The walk is depth-first;
-// returns true on the first node with a non-zero actual. dbsavvy-uv0.8.
+// returns true on the first node with a non-zero actual.
 func nodeHasActuals(n *models.PlanNode) bool {
 	if n == nil {
 		return false

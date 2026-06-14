@@ -18,19 +18,18 @@ import (
 )
 
 // VimEditorController owns the motion / operator / textobject
-// keybindings under the QUERY_EDITOR scope (epic dbsavvy-wwd).
+// keybindings under the QUERY_EDITOR scope.
 //
 // Unlike the side-rail controllers, VimEditorController is NOT built
 // on baseController. It takes explicit dependencies (qec, matcher)
 // so the wiring is unambiguous: the controller closes over a single
 // *editor.Buffer (the one inside the live QueryEditorContext) and
 // reaches the keybinding Matcher directly when it needs to (e.g.
-// applyPending in wwd.8 will register an operator-pending state in
+// applyPending will register an operator-pending state in
 // the Matcher rather than mutating the buffer immediately).
 //
-// wwd.5 ships the motion layer ONLY. Bindings are registered under
-// Normal + OperatorPending. Visual modes are added in wwd.7; operator
-// dispatch is added in wwd.8.
+// Bindings are registered under Normal + OperatorPending, plus the
+// Visual modes; operator dispatch covers the OperatorPending state.
 type VimEditorController struct {
 	qec     *context.QueryEditorContext
 	matcher *keys.Matcher
@@ -69,14 +68,13 @@ type VimEditorController struct {
 	// as-you-type AutoTrigger would spuriously re-open the popup over the
 	// just-accepted text. acceptSuggestion sets this one-shot flag;
 	// AutoTrigger consumes and clears it, then requires a fresh keystroke.
-	// dbsavvy-etp.4.
 	suppressNextAutoTrigger bool
 
 	// lastTriggerPos records the cursor position the controller last ran the
 	// completion engine at (RefilterOrTrigger). The async warm re-trigger
 	// bridge (OnWarmLanded) compares it against the live cursor to DROP a late
 	// warm whose result no longer matches where the user is — the stale-trigger
-	// guard. dbsavvy-ko4m.2.3.
+	// guard.
 	lastTriggerPos editor.Position
 
 	// aliasOnAccept gates the auto-insert of an editable, deduped table
@@ -84,13 +82,13 @@ type VimEditorController struct {
 	// accepting `users` after `FROM ` inserts `users u`). DEFAULT ON
 	// (set true in NewVimEditorController); the orchestrator flips it off
 	// per `editor.autocomplete_alias: false`. When off, table accept inserts
-	// the bare candidate text. dbsavvy-ko4m.6.2 (Finding K).
+	// the bare candidate text.
 	aliasOnAccept bool
 
 	// schemaMeta is the synchronous, race-safe metadata reader used at
 	// accept time to count, across the in-scope tables, how many own the
-	// accepted column — the ambiguity signal that drives auto-qualification
-	// (dbsavvy-ko4m.6.3). Same warmed snapshot store the completion sources
+	// accepted column — the ambiguity signal that drives auto-qualification.
+	// Same warmed snapshot store the completion sources
 	// read; the (cols, ok) ok-return is the warmed-or-not signal. Wired
 	// post-construction via SetSchemaMetadata. Nil => no qualification (bare
 	// column accept).
@@ -100,7 +98,6 @@ type VimEditorController struct {
 	// carries no explicit schema qualifier (mirrors SchemaSource.schemaFor:
 	// TableRef.Schema when set, else this provider). Wired alongside
 	// schemaMeta via SetSchemaMetadata. Nil => active schema "".
-	// dbsavvy-ko4m.6.3.
 	schemaProv editor.SchemaProvider
 }
 
@@ -114,7 +111,7 @@ func NewVimEditorController(qec *context.QueryEditorContext, matcher *keys.Match
 }
 
 // SetAliasOnAccept toggles the auto-insert of an editable table alias on
-// table-context accept (dbsavvy-ko4m.6.2, Finding K). Default ON; the
+// table-context accept. Default ON; the
 // orchestrator calls this with false when `editor.autocomplete_alias` is
 // disabled. When off, accepting a table inserts the bare candidate text.
 func (c *VimEditorController) SetAliasOnAccept(on bool) {
@@ -122,8 +119,8 @@ func (c *VimEditorController) SetAliasOnAccept(on bool) {
 }
 
 // SetSchemaMetadata wires the accept-time metadata reader + active-schema
-// provider used to auto-qualify an ambiguous column on accept
-// (dbsavvy-ko4m.6.3). meta is the same warmed snapshot store the completion
+// provider used to auto-qualify an ambiguous column on accept.
+// meta is the same warmed snapshot store the completion
 // sources read (it satisfies editor.SchemaMetadata); schema resolves the
 // active schema for an unqualified in-scope table. A nil meta leaves the
 // controller qualification-free (accept inserts the bare column). The
@@ -179,7 +176,7 @@ func (c *VimEditorController) SetCompletionEngine(e *editor.Engine) {
 }
 
 // CompletionEngineForTest exposes the wired completion engine so wiring
-// tests can assert which sources were registered (dbsavvy-ko4m.7.3). Returns
+// tests can assert which sources were registered. Returns
 // nil when no engine is wired.
 func (c *VimEditorController) CompletionEngineForTest() *editor.Engine {
 	return c.completionEngine
@@ -224,9 +221,9 @@ func (c *VimEditorController) TriggerCompletion() error {
 // the popup in place: it Shows the candidates (popup visible, selection
 // reset to the top match) or Hides when the engine returns nothing.
 // This is the single place the refilter/trigger logic lives so the
-// manual `<c-x><c-o>` action and dbsavvy-etp.4's as-you-type
+// manual `<c-x><c-o>` action and the as-you-type
 // SetAutoCompleter callback share one code path. No-op when the engine
-// or suggestions context is unwired. dbsavvy-etp.1.
+// or suggestions context is unwired.
 func (c *VimEditorController) RefilterOrTrigger(buf *editor.Buffer, pos editor.Position) {
 	if buf == nil || c.completionEngine == nil || c.suggestions == nil {
 		return
@@ -247,7 +244,7 @@ func (c *VimEditorController) RefilterOrTrigger(buf *editor.Buffer, pos editor.P
 // at — but ONLY when the popup is still open AND the live cursor is exactly
 // where the warm was requested (lastTriggerPos). A warm that lands after the
 // user moved the cursor, dismissed the popup, or whose buffer is gone is
-// DROPPED — the stale-trigger guard (dbsavvy-ko4m.2.3). The schema/table args
+// DROPPED — the stale-trigger guard. The schema/table args
 // are unused: the guard is purely positional, so a warm for any table the
 // current context references refreshes the popup, and an unrelated warm is a
 // harmless re-filter at the same position.
@@ -278,7 +275,7 @@ func (c *VimEditorController) OnWarmLanded(_ /*schema*/, _ /*table*/ string) {
 //
 // Manual `<c-x><c-o>` never routes through here, so the flag and the
 // context gate never restrict it. No-op when the popup context is
-// unwired. dbsavvy-etp.4.
+// unwired.
 func (c *VimEditorController) AutoTrigger(buf *editor.Buffer, pos editor.Position) {
 	if c.suggestions == nil {
 		return
@@ -343,9 +340,8 @@ type motionFunc func(b *editor.Buffer, pos editor.Position, count int, frame edi
 type textObjectFunc func(b *editor.Buffer, pos editor.Position) (editor.Range, bool)
 
 // textObjectSpec ties together a default key shorthand, an action ID,
-// a human description, and the resolver. wwd.6 registers bindings
-// under OperatorPending only; wwd.7 extends the mode mask to include
-// Visual / VisualLine once those mode primitives ship.
+// a human description, and the resolver. Bindings are registered
+// under OperatorPending plus Visual / VisualLine.
 type textObjectSpec struct {
 	shorthand   string
 	actionID    string
@@ -356,7 +352,7 @@ type textObjectSpec struct {
 // motionSpec ties together a default key shorthand, an action ID, a
 // human description, and the pure motion function the handler invokes.
 // jump = true classifies the motion for JumpList recording (gg, G,
-// {, } per the wwd architecture decisions).
+// {, }).
 type motionSpec struct {
 	shorthand   string
 	actionID    string
@@ -396,7 +392,7 @@ func (c *VimEditorController) motionSpecs() []motionSpec {
 		{"(", commands.MotionSentencePrev, "sentence prev", editor.SentencePrev, false},
 		{")", commands.MotionSentenceNext, "sentence next", editor.SentenceNext, false},
 
-		// Screen-relative motions (buffer-relative stubs in wwd.5).
+		// Screen-relative motions (buffer-relative stubs).
 		{"H", commands.MotionScreenTop, "screen top", editor.ScreenTop, false},
 		{"M", commands.MotionScreenMiddle, "screen middle", editor.ScreenMiddle, false},
 		{"L", commands.MotionScreenBottom, "screen bottom", editor.ScreenBottom, false},
@@ -416,16 +412,16 @@ const motionModeMask = types.ModeOperatorPending |
 	types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 
 // textObjectModeMask is the Mode mask under which text-object bindings
-// fire. OperatorPending is the original (wwd.6); wwd.7 extends to
-// Visual / VisualLine so `vi"`-style flows snap the Selection to the
-// resolved object. ModeVisualBlock is included (dbsavvy-uly7.9) so
+// fire. OperatorPending plus Visual / VisualLine, so `vi"`-style
+// flows snap the Selection to the
+// resolved object. ModeVisualBlock is included so
 // `<c-v>iw`-style flows snap the Selection too.
 const textObjectModeMask = types.ModeOperatorPending |
 	types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock
 
 // visualEntryModeMask is the Mode mask under which the visual-enter
 // bindings (v / V / <c-v>) fire — Normal only. Re-pressing `v` in
-// Visual mode is vim's "exit" gesture; wwd.7 ships `<esc>` for that
+// Visual mode is vim's "exit" gesture; `<esc>` handles that
 // instead, leaving v/V/<c-v> as Normal-only entry chords.
 const visualEntryModeMask = types.ModeNormal
 
@@ -440,8 +436,8 @@ const visualExitModeMask = types.ModeVisual | types.ModeVisualLine | types.ModeV
 const insertEntryModeMask = types.ModeNormal
 
 // insertExitModeMask is the Mode mask under which `<esc>` fires the
-// mode.normal action. wwd.10 shipped this as Insert-only; wwd.8 extends
-// it to also cover OperatorPending so a half-typed operator can be
+// mode.normal action. Covers Insert plus OperatorPending so a
+// half-typed operator can be
 // cancelled with `<esc>` (clears RepeatStore.PendingOpID + resets mode).
 // Visual `<esc>` is bound separately to visual.exit and does not
 // overlap (the modes are disjoint bits).
@@ -459,7 +455,7 @@ const pasteModeMask = types.ModeVisual | types.ModeVisualLine | types.ModeVisual
 
 // editorRepeatModeMask is the Mode mask under which `.` fires — Normal
 // only. Replaying a captured operator from Visual or OperatorPending
-// would conflict with the live state machine, so wwd.9 restricts replay
+// would conflict with the live state machine, so replay is restricted
 // to the Normal-mode entry point.
 const editorRepeatModeMask = types.ModeNormal
 
@@ -476,7 +472,7 @@ type operatorSpec struct {
 	isChange    bool
 }
 
-// operatorSpecs returns the wwd.8 operator binding table.
+// operatorSpecs returns the operator binding table.
 //
 //   - d/y/c (delete/yank/change): char-wise apply.
 //   - gU/gu (upper/lower): char-wise replace, no register write.
@@ -571,7 +567,7 @@ func (c *VimEditorController) findOperatorSpec(id string) (operatorSpec, bool) {
 //   - Visual-exit binding (<esc>): every Visual variant.
 //
 // The mark-jump binding (`'a..z`) is NOT published here; that recall
-// family ships in a later wwd task.
+// family ships later.
 func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	specs := c.motionSpecs()
 	textObjects := c.textObjectSpecs()
@@ -698,7 +694,7 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			})
 		}
 	}
-	// Repeat binding: `.` Normal-only (wwd.9).
+	// Repeat binding: `.` Normal-only.
 	if seq, err := keys.SequenceFromShorthand("."); err == nil {
 		out = append(out, &types.ChordBinding{
 			Sequence:    seq,
@@ -710,7 +706,7 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 		})
 	}
 	// `D` — delete to end of line (vim `d$` alias). Normal-only single
-	// keystroke (dbsavvy-5fxk).
+	// keystroke.
 	if seq, err := keys.SequenceFromShorthand("D"); err == nil {
 		out = append(out, &types.ChordBinding{
 			Sequence:    seq,
@@ -745,7 +741,7 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			})
 		}
 	}
-	// dbsavvy-bwq.Z1: `<c-x><c-o>` triggers the completion engine. Insert-
+	// `<c-x><c-o>` triggers the completion engine. Insert-
 	// only mode mask so the chord doesn't shadow Normal-mode bindings.
 	if seq, err := keys.SequenceFromShorthand("<c-x><c-o>"); err == nil {
 		out = append(out, &types.ChordBinding{
@@ -757,7 +753,7 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 			Tag:         "Insert",
 		})
 	}
-	// dbsavvy-etp.1: Insert-mode popup-navigation aliases. These keys are
+	// Insert-mode popup-navigation aliases. These keys are
 	// otherwise dropped by the insert seam, so each handler guards on
 	// suggestions.IsVisible() and no-ops when the popup is hidden —
 	// preserving the keys' (currently inert) Insert behaviour.
@@ -775,7 +771,7 @@ func (c *VimEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.C
 	}
 	// (op-pending cancel: the existing `<esc>` → mode.normal binding from
 	// the insert-entry specs covers OperatorPending too — its mode mask
-	// was widened in wwd.8 via insertExitModeMask.)
+	// is widened via insertExitModeMask.)
 	return out
 }
 
@@ -789,7 +785,7 @@ type visualSpec struct {
 	mode        types.Mode
 }
 
-// visualSpecs returns the wwd.7 visual-entry + visual-exit table.
+// visualSpecs returns the visual-entry + visual-exit table.
 func (c *VimEditorController) visualSpecs() []visualSpec {
 	return []visualSpec{
 		{"v", commands.VisualEnter, "enter visual", visualEntryModeMask},
@@ -800,8 +796,8 @@ func (c *VimEditorController) visualSpecs() []visualSpec {
 }
 
 // editorActionSpec ties a shorthand to an action ID and its mode mask.
-// Used for the insert-entry, mode.normal, and undo/redo bindings added
-// by wwd.10. Each entry resolves to a dedicated handler in
+// Used for the insert-entry, mode.normal, and undo/redo bindings.
+// Each entry resolves to a dedicated handler in
 // RegisterActions; no shared closure family like motionHandler.
 type editorActionSpec struct {
 	shorthand   string
@@ -811,7 +807,7 @@ type editorActionSpec struct {
 	mode        types.Mode
 }
 
-// insertEntrySpecs returns the wwd.10 insert-entry + mode.normal table.
+// insertEntrySpecs returns the insert-entry + mode.normal table.
 // Insert entries fire only from Normal; the `<esc>` mode.normal exit
 // fires only from Insert. Tag drives the cheatsheet section heading.
 func (c *VimEditorController) insertEntrySpecs() []editorActionSpec {
@@ -830,7 +826,7 @@ func (c *VimEditorController) insertEntrySpecs() []editorActionSpec {
 	}
 }
 
-// completionNavSpecs returns the etp.1 Insert-mode popup-navigation
+// completionNavSpecs returns the Insert-mode popup-navigation
 // aliases. Tab/Enter are handled in the VimEditor insert seam (they
 // keep their normal Insert meaning when the popup is hidden); the Vim
 // control aliases below are registered as Insert bindings because the
@@ -845,7 +841,7 @@ func (c *VimEditorController) completionNavSpecs() []editorActionSpec {
 	}
 }
 
-// editorHistorySpecs returns the wwd.10 undo / redo bindings.
+// editorHistorySpecs returns the undo / redo bindings.
 func (c *VimEditorController) editorHistorySpecs() []editorActionSpec {
 	return []editorActionSpec{
 		{"u", commands.EditorUndo, "undo", "Edit history", editorHistoryModeMask},
@@ -863,7 +859,7 @@ func (c *VimEditorController) editorHistorySpecs() []editorActionSpec {
 //     - visual           → ExtendSelection(buf, newPos) (jumps NOT pushed)
 //     - else             → set Cursor; push jump (when motion is jump)
 //
-// applyPending is a stub in wwd.5 (returns nil); wwd.8 fills the body.
+// applyPending performs the operator application.
 //
 // Text-object handlers in OperatorPending hand off to applyPending; in
 // Visual / VisualLine they snap Buffer.Selection to the resolved range.
@@ -900,7 +896,7 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 			Handler:     c.textObjectHandler(spec),
 		})
 	}
-	// Visual entry / exit handlers (wwd.7). v / V / <c-v> share a
+	// Visual entry / exit handlers. v / V / <c-v> share a
 	// parameterised entry handler; <esc> drives the exit.
 	_ = reg.Register(&commands.Command{
 		ID:          commands.VisualEnter,
@@ -935,7 +931,7 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 		Tag:         "Visual",
 		Handler:     commands.NopSentinel,
 	})
-	// wwd.10 — insert-entry + mode.normal + undo/redo handlers.
+	// insert-entry + mode.normal + undo/redo handlers.
 	_ = reg.Register(&commands.Command{
 		ID:          commands.InsertEnter,
 		Description: "Enter insert mode at cursor",
@@ -990,7 +986,7 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 		Tag:         "Edit history",
 		Handler:     c.redoHandler(),
 	})
-	// wwd.8 — operator handlers. Each spec gets its own Handler closure
+	// operator handlers. Each spec gets its own Handler closure
 	// over the spec value (loop-var aliasing avoided).
 	for _, s := range c.operatorSpecs() {
 		spec := s
@@ -1031,7 +1027,7 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 		Tag:         "Edit history",
 		Handler:     c.repeatHandler(),
 	})
-	// dbsavvy-bwq.Z1: `<c-x><c-o>` completion trigger. TriggerCompletion
+	// `<c-x><c-o>` completion trigger. TriggerCompletion
 	// is a silent no-op when the engine / suggestions context are unwired,
 	// so the binding is safe to register before either lands.
 	_ = reg.Register(&commands.Command{
@@ -1042,7 +1038,7 @@ func (c *VimEditorController) RegisterActions(reg *commands.Registry) {
 			return c.TriggerCompletion()
 		},
 	})
-	// dbsavvy-etp.1: popup-navigation handlers. Each guards on
+	// popup-navigation handlers. Each guards on
 	// suggestions.IsVisible() and is a no-op when the popup is hidden.
 	_ = reg.Register(&commands.Command{
 		ID:          commands.EditorCompletionNext,
@@ -1229,7 +1225,7 @@ func (c *VimEditorController) visualExitHandler() commands.Handler {
 	}
 }
 
-// textObjectSpecs returns the wwd.6 text-object table. Quote-text
+// textObjectSpecs returns the text-object table. Quote-text
 // objects use a small adapter to bind the quote rune into a
 // textObjectFunc closure.
 func (c *VimEditorController) textObjectSpecs() []textObjectSpec {
@@ -1269,11 +1265,10 @@ func (c *VimEditorController) textObjectSpecs() []textObjectSpec {
 
 // textObjectHandler returns the Handler closure for one textObjectSpec.
 // Dispatch:
-//   - OperatorPending → resolve range, hand off to applyPending (stub
-//     in wwd.5; wwd.8 fills the body).
+//   - OperatorPending → resolve range, hand off to applyPending.
 //   - Visual / VisualLine → resolve range, snap Buffer.Selection to it
-//     via editor.SetSelection. Per Architecture Decision 4 of the wwd
-//     epic, Visual + textobject bypasses op-pending entirely.
+//     via editor.SetSelection. Visual + textobject bypasses op-pending
+//     entirely.
 //   - else → no-op.
 func (c *VimEditorController) textObjectHandler(spec textObjectSpec) commands.Handler {
 	return func(ec commands.ExecCtx) error {
@@ -1363,7 +1358,7 @@ func (c *VimEditorController) motionHandler(spec motionSpec) commands.Handler {
 // the current line.
 //
 // After applying, applyPending updates RepeatStore.{LastOpID, LastMotionID,
-// LastTextObjectID, LastCount, LastRegister} so wwd.9's `.` action can
+// LastTextObjectID, LastCount, LastRegister} so the `.` action can
 // replay. PendingOpID is cleared on every exit path.
 func (c *VimEditorController) applyPending(buf *editor.Buffer, r editor.Range, completedMotionID, completedTextObjectID string, ctx commands.ExecCtx) error {
 	if c.qec == nil || buf == nil {
@@ -1402,7 +1397,7 @@ func (c *VimEditorController) applyPending(buf *editor.Buffer, r editor.Range, c
 		// r is already half-open (op-pending motion range); flash as-is.
 		c.flashYank(spec.actionID, buf, r)
 	}
-	// Repeat-store bookkeeping (wwd.9 will consume this for `.`).
+	// Repeat-store bookkeeping (consumed by the `.` action).
 	rep.LastOpID = pendingOpID
 	rep.LastMotionID = completedMotionID
 	rep.LastTextObjectID = completedTextObjectID
@@ -2035,7 +2030,7 @@ func (c *VimEditorController) insertAppendEndHandler() commands.Handler {
 
 // completionNextHandler returns the `<c-n>` handler: advance the popup
 // selection when visible, otherwise a no-op (the key is otherwise
-// dropped by the insert seam). etp.1.
+// dropped by the insert seam).
 func (c *VimEditorController) completionNextHandler() commands.Handler {
 	return func(_ commands.ExecCtx) error {
 		if c.suggestions != nil && c.suggestions.IsVisible() {
@@ -2046,7 +2041,7 @@ func (c *VimEditorController) completionNextHandler() commands.Handler {
 }
 
 // completionPrevHandler returns the `<c-p>` handler: retreat the popup
-// selection when visible, otherwise a no-op. etp.1.
+// selection when visible, otherwise a no-op.
 func (c *VimEditorController) completionPrevHandler() commands.Handler {
 	return func(_ commands.ExecCtx) error {
 		if c.suggestions != nil && c.suggestions.IsVisible() {
@@ -2058,7 +2053,7 @@ func (c *VimEditorController) completionPrevHandler() commands.Handler {
 
 // completionAcceptHandler returns the `<c-y>` handler: accept the
 // selected suggestion (replace the typed partial identifier) when
-// visible, otherwise a no-op. etp.1.
+// visible, otherwise a no-op.
 func (c *VimEditorController) completionAcceptHandler() commands.Handler {
 	return func(_ commands.ExecCtx) error {
 		c.acceptSuggestion()
@@ -2067,7 +2062,7 @@ func (c *VimEditorController) completionAcceptHandler() commands.Handler {
 }
 
 // completionDismissHandler returns the `<c-e>` handler: hide the popup
-// when visible (staying in Insert mode), otherwise a no-op. etp.1.
+// when visible (staying in Insert mode), otherwise a no-op.
 func (c *VimEditorController) completionDismissHandler() commands.Handler {
 	return func(_ commands.ExecCtx) error {
 		if c.suggestions != nil && c.suggestions.IsVisible() {
@@ -2082,7 +2077,7 @@ func (c *VimEditorController) completionDismissHandler() commands.Handler {
 // only when the popup is visible (i.e. it consumed the key): Tab advances
 // the selection, Shift+Tab (Backtab) moves it backward, Enter accepts.
 // When the popup is hidden it returns false so the key keeps its normal
-// Insert meaning (Tab dropped, Enter newline). etp.1.
+// Insert meaning (Tab dropped, Enter newline).
 func (c *VimEditorController) CompletionKey(k keys.Key) bool {
 	if c.suggestions == nil || !c.suggestions.IsVisible() {
 		return false
@@ -2109,7 +2104,6 @@ func (c *VimEditorController) CompletionKey(k keys.Key) bool {
 // identifier the popup tracked (different line, or before the
 // identifier start), the buffer mutation is aborted and the popup is
 // dismissed instead of corrupting text. No-op when the popup is hidden.
-// etp.1.
 func (c *VimEditorController) acceptSuggestion() {
 	if c.suggestions == nil || !c.suggestions.IsVisible() {
 		return
@@ -2138,7 +2132,7 @@ func (c *VimEditorController) acceptSuggestion() {
 	if !ok {
 		return
 	}
-	// dbsavvy-ko4m.7.2: a snippet accept inserts the (already
+	// a snippet accept inserts the (already
 	// SanitizeSnippetText'd) Body as ONE undoable multi-line edit. Replace
 	// the typed partial [identStart, cur) with the Body via a single
 	// EditKindReplace (one undo node even for a multi-line body — Apply
@@ -2160,7 +2154,7 @@ func (c *VimEditorController) acceptSuggestion() {
 		c.suppressNextAutoTrigger = true
 		return
 	}
-	// dbsavvy-ko4m.6.2 / .6.3: accept-time context analysis drives two
+	// accept-time context analysis drives two
 	// SINGLE-EditKindReplace smart-accept branches (one undo step each):
 	//   - Expect==Tables → auto-insert an editable deduped alias ("<table> <alias>").
 	//   - Expect==Columns → auto-qualify an ambiguous column ("<alias>.<column>").
@@ -2179,7 +2173,7 @@ func (c *VimEditorController) acceptSuggestion() {
 		c.suppressNextAutoTrigger = true
 		return
 	}
-	// dbsavvy-ko4m.6.3: in a column context (Expect==Columns) that is NOT
+	// in a column context (Expect==Columns) that is NOT
 	// already dot-qualified, auto-qualify the accepted column with the
 	// first owning in-scope table's alias when the column is AMBIGUOUS —
 	// it appears in >=2 in-scope tables AND every consulted table is warmed.
@@ -2224,14 +2218,14 @@ func (c *VimEditorController) acceptSuggestion() {
 		return
 	}
 	buf.SetCursor(editor.Position{Line: cur.Line, Col: identStart + len([]rune(s.Text))})
-	// Re-popup-after-accept guard (dbsavvy-etp.4): the inserted identifier
+	// Re-popup-after-accept guard: the inserted identifier
 	// can still satisfy the AutoTriggerFromContext gate, so suppress the
 	// next as-you-type trigger and require a fresh keystroke.
 	c.suppressNextAutoTrigger = true
 }
 
 // composeTableAlias builds the "<table> <alias>" text inserted on a
-// table-context accept (dbsavvy-ko4m.6.2). The alias is the first letter
+// table-context accept. The alias is the first letter
 // of the table name lowercased, deduped against the aliases already bound
 // by inScope by appending a numeric suffix (u, u2, u3, …; suffixes already
 // present are skipped). Both the table token and the alias are emitted in
@@ -2245,7 +2239,7 @@ func composeTableAlias(table string, inScope []sqlcontext.TableRef) string {
 }
 
 // composeColumnQualifier builds the text inserted on a column-context
-// accept (dbsavvy-ko4m.6.3). It returns the AUTO-QUALIFIED form
+// accept. It returns the AUTO-QUALIFIED form
 // `"<alias>.<column>"` only when the accepted column is AMBIGUOUS — it
 // belongs to >=2 in-scope tables AND every consulted table's columns are
 // warmed (Store.Columns ok==true) — using the FIRST owning in-scope table's
@@ -2290,7 +2284,7 @@ func (c *VimEditorController) composeColumnQualifier(column string, inScope []sq
 // schemaFor resolves the schema for an in-scope table reference: the
 // reference's own schema qualifier when present, else the active schema from
 // the wired provider (mirrors editor.SchemaSource.schemaFor). Nil provider
-// yields "". dbsavvy-ko4m.6.3.
+// yields "".
 func (c *VimEditorController) schemaFor(refSchema string) string {
 	if refSchema != "" {
 		return refSchema
@@ -2304,7 +2298,7 @@ func (c *VimEditorController) schemaFor(refSchema string) string {
 // columnsContain reports whether cols holds a column whose bare name equals
 // name, case-insensitively (Postgres folds unquoted identifiers to
 // lowercase; the snapshot stores names as the catalog reports them). The
-// accepted candidate name is the bare (unquoted) form. dbsavvy-ko4m.6.3.
+// accepted candidate name is the bare (unquoted) form.
 func columnsContain(cols []models.Column, name string) bool {
 	for _, col := range cols {
 		if strings.EqualFold(col.Name, name) {
@@ -2386,7 +2380,7 @@ func isBareIdent(s string) bool {
 // identifierStartCol returns the column of the first identifier rune of
 // the run immediately left of pos on pos.Line, or pos.Col when no
 // identifier precedes the cursor. Mirrors editor.identifierPrefixAt's
-// scan (letters / digits / underscore). etp.1.
+// scan (letters / digits / underscore).
 func identifierStartCol(buf *editor.Buffer, pos editor.Position) int {
 	lines := buf.LinesCopy()
 	if pos.Line < 0 || pos.Line >= len(lines) {
@@ -2405,7 +2399,7 @@ func identifierStartCol(buf *editor.Buffer, pos editor.Position) int {
 // pos.Line is a '.', i.e. the identifier run starting at pos is the member
 // part of a dot-qualified reference (`alias.col`). Used by the column
 // auto-qualify accept path to avoid double-qualifying a column the user has
-// already qualified with an explicit `alias.` prefix (dbsavvy-ko4m.6.3).
+// already qualified with an explicit `alias.` prefix.
 func dotPrecedesIdentStart(buf *editor.Buffer, pos editor.Position) bool {
 	lines := buf.LinesCopy()
 	if pos.Line < 0 || pos.Line >= len(lines) {
@@ -2420,7 +2414,7 @@ func dotPrecedesIdentStart(buf *editor.Buffer, pos editor.Position) bool {
 
 // isIdentRune reports whether r is part of a SQL identifier (letters,
 // digits, underscore). Mirrors editor.isIdentRune, duplicated here
-// because that helper is unexported in pkg/gui/editor. etp.1.
+// because that helper is unexported in pkg/gui/editor.
 func isIdentRune(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }

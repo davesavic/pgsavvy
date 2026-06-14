@@ -9,7 +9,7 @@ import (
 
 // ConfirmHelper pushes the CONFIRMATION popup onto the focus stack and
 // remembers the onYes / onNo callbacks the controller wants invoked on
-// dismissal. Per dbsavvy-enn-T2 CONFIRMATION is a TEMPORARY_POPUP, so
+// dismissal. CONFIRMATION is a TEMPORARY_POPUP, so
 // pushing it auto-replaces a top-of-stack temporary popup (which is the
 // desired UX — only one popup visible at a time).
 //

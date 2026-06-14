@@ -27,7 +27,7 @@ func viewName(k types.ContextKey) string { return string(k) }
 // RegisterRailSwitchActions; the per-controller bindings just publish
 // ActionID strings the Matcher resolves through the commands.Registry.
 //
-// dbsavvy-xs0 also appends per-view directional Ctrl+H/J/K/L chords.
+// It also appends per-view directional Ctrl+H/J/K/L chords.
 // The right-hand main column is split vertically (boxlayout.ROW puts
 // children top-to-bottom), so QueryEditor sits ABOVE Results — the
 // j/k axis covers that edge, not h/l:
@@ -81,7 +81,7 @@ func railSwitchBindings(view string, tr *i18n.TranslationSet) []*types.ChordBind
 // the given scope. The mapping depends on which pane this view is:
 // vertically-stacked side rail, QueryEditor, or RESULT_GRID. Any other
 // scope returns nil — directional navigation is only published on
-// panes the focus model knows about. dbsavvy-xs0.
+// panes the focus model knows about.
 func railDirectionalBindings(scope types.ContextKey, tr *i18n.TranslationSet) []*types.ChordBinding {
 	ctrlH := types.ChordKey{Code: 'h', Mod: types.ChordModCtrl}
 	ctrlJ := types.ChordKey{Code: 'j', Mod: types.ChordModCtrl}
@@ -107,7 +107,7 @@ func railDirectionalBindings(scope types.ContextKey, tr *i18n.TranslationSet) []
 		}
 	case types.RESULT_GRID, types.PLAN:
 		// PLAN tabs occupy the same physical result pane as the grid, so they
-		// reuse the grid's directional mapping (dbsavvy-s7gn).
+		// reuse the grid's directional mapping.
 		return []*types.ChordBinding{
 			{Sequence: []types.ChordKey{ctrlH}, Scope: scope, ActionID: commands.RailSwitchTables, Description: tr.Actions.RailTables},
 			{Sequence: []types.ChordKey{ctrlK}, Scope: scope, ActionID: commands.RailSwitchQueryEditor, Description: tr.Actions.RailQueryEditor},
@@ -164,7 +164,7 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 		return
 	}
 
-	// dbsavvy-xs0: last-focused rail tracking for the editor's Ctrl+H
+	// last-focused rail tracking for the editor's Ctrl+H
 	// round-trip. Updated by pushRail whenever the push lands on one
 	// of the three SIDE_CONTEXT rails; consumed by RailSwitchLastRail.
 	// Defaults to SCHEMAS so the very first Ctrl+H from the editor
@@ -203,7 +203,7 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 	_ = reg.Register(&commands.Command{ID: commands.RailSwitchTables, Description: commands.RailSwitchTables, Handler: jumpTo(ctxTree.Tables)})
 	_ = reg.Register(&commands.Command{ID: commands.RailSwitchQueryEditor, Description: commands.RailSwitchQueryEditor, Handler: jumpTo(ctxTree.QueryEditor)})
 
-	// dbsavvy-xs0: directional rail navigation handlers (Ctrl+K/J/H on
+	// directional rail navigation handlers (Ctrl+K/J/H on
 	// QUERY_EDITOR / side rails). Up/Down walk the vertical rail stack
 	// based on the current focus; no-op at the ends and when the
 	// current focus is not a rail. LastRail consults the lastRailKey

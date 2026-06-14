@@ -6,7 +6,7 @@
 // The package is read-only over the TrieSet: Generate never mutates the
 // trie and Walk is concurrent-safe (the TrieSet is immutable after Build).
 //
-// See DESIGN.md §10.11 and dbsavvy-dlp.10 for the AC.
+// See DESIGN.md §10.11.
 package cheatsheet
 
 import (
@@ -68,7 +68,7 @@ type ModeView struct {
 // pseudo-scope.
 //
 // Both slices contain ONLY modes that carry ≥1 leaf in the input
-// TrieSet — the completeness invariant test (dlp.11) consumes this
+// TrieSet — the completeness invariant test consumes this
 // shape directly.
 type Output struct {
 	CurrentScope []ModeView

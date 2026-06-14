@@ -14,17 +14,17 @@ package commands
 //
 // Sources:
 //   - DESIGN.md §10.10 config schema example
-//   - Existing E1–E4 controller publishings (pre-dlp.8 KeyBinding lists)
+//   - Existing E1–E4 controller publishings (earlier KeyBinding lists)
 //
-// Out of scope for dlp.1: query/result/cursor/pane families (added by
-// later epics dbsavvy-66p, dbsavvy-wwd, etc.). dlp.7 adds `:reload`
+// Out of scope here: query/result/cursor/pane families (added by
+// later epics). The `:reload` command is registered
 // via the ExRegistry, not the CommandRegistry — so no `reload.config`
 // constant appears here.
 //
 // Namespace ownership:
 //
 //   - The `motion.*`, `operator.*`, and `textobject.*` namespaces are
-//     owned exclusively by VimEditorController (epic dbsavvy-wwd). No
+//     owned exclusively by VimEditorController. No
 //     other controller may register an ID in these namespaces. Action
 //     IDs in those namespaces resolve through the same Registry but
 //     their handlers are constructed by VimEditorController with closures
@@ -59,7 +59,7 @@ const (
 	RailSwitchResults     = "rail.switch.results"
 	RailSwitchNext        = "rail.switch.next"
 
-	// Directional rail navigation (dbsavvy-xs0). Bound to Ctrl+K/J on the
+	// Directional rail navigation. Bound to Ctrl+K/J on the
 	// five side rails (move focus up/down through the vertical stack;
 	// no-op at the ends). RailSwitchLastRail is bound to Ctrl+H on the
 	// QueryEditor — returns focus to the most-recently-focused rail so
@@ -73,7 +73,7 @@ const (
 	// (Connections / Schemas / Tables / Columns / Indexes). Bound to `r`
 	// in Normal mode. Each rail's handler dispatches through
 	// HelperBag.Refresh, which reloads the underlying data and pushes it
-	// back into the rail context (dbsavvy-56u.1).
+	// back into the rail context.
 	RailRefresh = "rail.refresh"
 
 	// MenuConfirm / MenuCancel — owned by MenuController. `<cr>` / `<esc>`
@@ -85,8 +85,7 @@ const (
 	// `<cr>` / `<esc>` inside the PROMPT popup context. Printable
 	// runes, Backspace, Delete, Left/Right/Home/End and bracketed
 	// paste all flow through the master gocui.Editor's Passthrough
-	// branch into gocui.DefaultEditor (dbsavvy-fq9 / dbsavvy-7k9 /
-	// dbsavvy-f5t) — the PROMPT view is editable and gocui rejects
+	// branch into gocui.DefaultEditor — the PROMPT view is editable and gocui rejects
 	// char-key SetKeybinding shims on editable views (matchView), so
 	// per-rune action IDs no longer exist here.
 	PromptSubmit = "prompt.submit"
@@ -94,7 +93,7 @@ const (
 
 	// SelectionUp / SelectionDown / SelectionConfirm / SelectionCancel —
 	// owned by SelectionController. `<up>`/`k`, `<down>`/`j`, `<cr>`,
-	// `<esc>` inside the SELECTION popup context (dbsavvy-m47.2).
+	// `<esc>` inside the SELECTION popup context.
 	SelectionUp      = "selection.up"
 	SelectionDown    = "selection.down"
 	SelectionConfirm = "selection.confirm"
@@ -104,7 +103,7 @@ const (
 	// CommandCancel — owned by COMMAND_LINE context; closes it. `<esc>`
 	// CommandSubmit — owned by COMMAND_LINE context; submits the typed
 	// buffer to the ExRegistry. `<cr>`
-	// (All three are consumed by dlp.7's COMMAND_LINE bindings.)
+	// (All three are consumed by the COMMAND_LINE bindings.)
 	CommandOpen   = "command.open"
 	CommandCancel = "command.cancel"
 	CommandSubmit = "command.submit"
@@ -112,32 +111,32 @@ const (
 	// HelpCheatsheet — opens the auto-generated cheatsheet popup. `?`
 	HelpCheatsheet = "help.cheatsheet"
 
-	// ConfirmYes / ConfirmNo — owned by ConfirmationController (dbsavvy-56u.2).
+	// ConfirmYes / ConfirmNo — owned by ConfirmationController.
 	// CONFIRMATION-scoped. y / <cr> invoke ConfirmHelper.Yes; n / <esc>
 	// invoke ConfirmHelper.No. Defaults are hardcoded, not user-overridable
 	// (AD-4).
 	ConfirmYes = "confirm.yes"
 	ConfirmNo  = "confirm.no"
 
-	// ConnectionManagerQuitOrClose — owned by ConnectionManagerController
-	// (dbsavvy-bsh). q on the modal: quits when the modal is the startup root
+	// ConnectionManagerQuitOrClose — owned by ConnectionManagerController.
+	// q on the modal: quits when the modal is the startup root
 	// (stack depth == 1), closes the modal back to data when opened mid-session
 	// (stack depth > 1).
 	ConnectionManagerQuitOrClose = "connection_manager.quit_or_close"
 
 	// ConnectionManagerOpen — GLOBAL-scoped action that opens the
-	// CONNECTION_MANAGER modal mid-session (<leader>C). dbsavvy-bsh.
+	// CONNECTION_MANAGER modal mid-session (<leader>C).
 	ConnectionManagerOpen = "connection_manager.open"
 
-	// ConnectionManagerClose — owned by ConnectionManagerController
-	// (dbsavvy-ig4). CONNECTION_MANAGER-scoped. <esc> pops the modal off
+	// ConnectionManagerClose — owned by ConnectionManagerController.
+	// CONNECTION_MANAGER-scoped. <esc> pops the modal off
 	// the focus stack, but is a no-op when the modal is the startup root
 	// (never pops at stack bottom). q is bound at CONNECTION_MANAGER scope to
 	// AppQuit; Ctrl-C quits via the GLOBAL-scope binding.
 	ConnectionManagerClose = "connection_manager.close"
 
 	// ConnectionManagerDown / Up / Confirm / Retry — owned by
-	// ConnectionManagerController (dbsavvy-1rf). CONNECTION_MANAGER-scoped.
+	// ConnectionManagerController. CONNECTION_MANAGER-scoped.
 	// j/k move the list cursor; <CR> connects the selected profile (or
 	// retries from the error state); r retries from the connecting/error
 	// body. The connect lifecycle renders inside the modal (no standalone
@@ -149,7 +148,7 @@ const (
 	ConnectionManagerJumpFirst = "connection_manager.jump.first"
 	ConnectionManagerJumpLast  = "connection_manager.jump.last"
 
-	// ConnectionManager add/edit form actions (dbsavvy-dyf).
+	// ConnectionManager add/edit form actions.
 	// CONNECTION_MANAGER-scoped. In ModeList a opens a blank add form and e
 	// edits the selected row. In ModeForm: Tab / Shift-Tab move field focus,
 	// i edits the focused field (text → PROMPT popup; toggle/driver flip),
@@ -164,12 +163,12 @@ const (
 	ConnectionManagerToggle    = "connection_manager.toggle"
 	ConnectionManagerDelete    = "connection_manager.delete"
 
-	// TipDismiss — owned by the orchestrator's FirstRunTip wiring
-	// (dbsavvy-56u.2). FIRST_RUN_TIP-scoped. Pops the tip popup and
+	// TipDismiss — owned by the orchestrator's FirstRunTip wiring.
+	// FIRST_RUN_TIP-scoped. Pops the tip popup and
 	// stamps the seen-at timestamp via AppStateStore.StampStartupTips.
 	TipDismiss = "tip.dismiss"
 
-	// Query family — owned by QueryEditorController (dbsavvy-66p.11).
+	// Query family — owned by QueryEditorController.
 	// Default bindings: <leader>r, <leader>R, <leader>e, <leader>E,
 	// <leader>x, <leader>! respectively.
 	QueryRun            = "query.run"
@@ -180,7 +179,7 @@ const (
 	QueryRunInNewTx     = "query.run_in_new_tx"
 	QueryFormat         = "query.format"
 
-	// Result-tab family — owned by ResultTabsController (dbsavvy-66p.12).
+	// Result-tab family — owned by ResultTabsController.
 	// Jump bindings are GLOBAL-scoped so <leader>1..9 work from any
 	// focused view; the close / pin / cancel / cycle bindings are
 	// RESULT_GRID-scoped so they only fire when a result tab is active.
@@ -199,15 +198,15 @@ const (
 	ResultTabPin    = "result.tab.pin"
 	ResultTabCancel = "result.tab.cancel"
 
-	// Pagination + read-to-end (dbsavvy-uv0.3). RESULT_GRID-scoped:
+	// Pagination + read-to-end. RESULT_GRID-scoped:
 	// ]p / [p / G fire only when a result tab is focused. ]G forces
-	// ReadToEnd regardless of viewMode (dbsavvy-uv0.7 AD-14).
+	// ReadToEnd regardless of viewMode (AD-14).
 	ResultPageNext       = "result.page.next"
 	ResultPagePrev       = "result.page.prev"
 	ResultReadToEnd      = "result.read_to_end"
 	ResultReadToEndForce = "result.read_to_end_force"
 
-	// In-grid search family (dbsavvy-2ttm). RESULT_GRID-scoped. The ID
+	// In-grid search family. RESULT_GRID-scoped. The ID
 	// STRING values keep their historical "result.filter.*" form so user
 	// keybindings.yaml entries that bind by string stay stable across the
 	// filter→search rename.
@@ -220,7 +219,7 @@ const (
 	ResultFilterPrev   = "result.filter.prev"
 	ResultFilterClear  = "result.filter.clear"
 
-	// dbsavvy-ioaj: left-rail (Schemas/Tables) highlight+jump search.
+	// Left-rail (Schemas/Tables) highlight+jump search.
 	//   RailSearchPrompt - /     opens the search input on the focused rail
 	//   RailSearchNext   - n     jump to next rail match
 	//   RailSearchPrev   - N     jump to previous rail match
@@ -230,24 +229,24 @@ const (
 	RailSearchPrev   = "rail.search.prev"
 	RailSearchClear  = "rail.search.clear"
 
-	// SEARCH_LINE-scoped accept / cancel (dbsavvy-2ttm). Internal IDs —
+	// SEARCH_LINE-scoped accept / cancel. Internal IDs —
 	// not bound by user keybindings.yaml; driven by the SearchLine
 	// controller's <cr> / <esc> bindings.
 	ResultSearchAccept = "result.search.accept"
 	ResultSearchCancel = "result.search.cancel"
 
-	// In-grid sort (dbsavvy-uv0.5). RESULT_GRID-scoped.
+	// In-grid sort. RESULT_GRID-scoped.
 	//   ResultSortPick - <leader>s opens column picker; first invocation
 	//                    on a column = asc, second = desc, third = clear.
 	ResultSortPick = "result.sort.pick"
 
-	// In-grid hide-columns overlay (dbsavvy-uv0.6). RESULT_GRID-scoped.
+	// In-grid hide-columns overlay. RESULT_GRID-scoped.
 	//   ResultHideOverlay - <leader>gH opens the column-visibility overlay.
 	//                       Persistence is gated on the active tab's
 	//                       ResultIdentity.HasRowIdentity flag.
 	ResultHideOverlay = "result.hide.overlay"
 
-	// Expanded view mode (dbsavvy-uv0.7). RESULT_GRID-scoped.
+	// Expanded view mode. RESULT_GRID-scoped.
 	//   ResultViewToggle - <leader>gx flips the active grid between
 	//                      grid and expanded view; persisted globally
 	//                      via AppState.LastResultViewMode.
@@ -268,13 +267,13 @@ const (
 	ResultSelectRow       = "result.select.row"
 	ResultSelectBlock     = "result.select.block"
 
-	// Clipboard yank (dbsavvy U4). RESULT_GRID-scoped.
+	// Clipboard yank. RESULT_GRID-scoped.
 	//   ResultYankCell - `y` copies the focused cell's display value.
 	//   ResultYankRow  - `yy` copies the focused row as TSV.
 	ResultYankCell = "result.yank.cell"
 	ResultYankRow  = "result.yank.row"
 
-	// HideOverlay-scope handlers (dbsavvy-uv0.6) — owned by
+	// HideOverlay-scope handlers — owned by
 	// HideOverlayController. j/k cursor moves, <space> toggle, <esc> /
 	// q apply-and-close.
 	HideOverlayUp     = "hide_overlay.up"
@@ -282,7 +281,7 @@ const (
 	HideOverlayToggle = "hide_overlay.toggle"
 	HideOverlayClose  = "hide_overlay.close"
 
-	// Result-export menu (dbsavvy-uv0.9). RESULT_GRID-scoped.
+	// Result-export menu. RESULT_GRID-scoped.
 	//   ResultExportPrompt - <leader>oe opens the export-destination menu.
 	//                        Chord registration is deferred until the menu
 	//                        UI lands; this constant exists so the action
@@ -291,7 +290,6 @@ const (
 
 	// ExportMenuUp / Down move the field cursor; Left / Right adjust the
 	// value of the current field; Confirm executes; Cancel pops the popup.
-	// dbsavvy-uv0.9.
 	ExportMenuUp      = "export.menu.up"
 	ExportMenuDown    = "export.menu.down"
 	ExportMenuLeft    = "export.menu.left"
@@ -300,12 +298,11 @@ const (
 	ExportMenuCancel  = "export.menu.cancel"
 	// ExportMenuEditPath opens the editable PROMPT seeded with the current
 	// File-destination Path. No-op unless the Path field is active.
-	// dbsavvy-uv0.9.
 	ExportMenuEditPath = "export.menu.editpath"
 
 	// TableInspectOpen opens the TABLE_INSPECT popup from the TABLES rail
 	// (`i` in Normal mode). TableInspectNextTab / PrevTab cycle the tabs of
-	// the TABLE_INSPECT popup (dbsavvy-3vf). Close pops the popup back to
+	// the TABLE_INSPECT popup. Close pops the popup back to
 	// the Tables rail.
 	TableInspectOpen    = "table_inspect.open"
 	TableInspectNextTab = "table_inspect.next_tab"
@@ -314,10 +311,10 @@ const (
 
 	// HistoryOpen opens the HISTORY recent-query browser popup from the
 	// QUERY_EDITOR (`<leader>h` in Normal mode). Loads Recent(N) off the
-	// UI thread and pushes the popup (dbsavvy-o9k0).
+	// UI thread and pushes the popup.
 	HistoryOpen = "history.open"
 
-	// Plan family — owned by PlanController (dbsavvy-uv0.8). All PLAN-
+	// Plan family — owned by PlanController. All PLAN-
 	// scoped; published only when a plan tab is the focused context.
 	//   PlanToggle        - <CR> toggles collapse on the cursor node
 	//   PlanExpandAll     - <C-a> empties the collapsed map
@@ -336,7 +333,7 @@ const (
 	PlanCursorDown     = "plan.cursor_down"
 	PlanCursorUp       = "plan.cursor_up"
 
-	// Motion family — owned by VimEditorController (dbsavvy-wwd.5).
+	// Motion family — owned by VimEditorController.
 	// Defaults follow vim: w/b/e (word_*), W/B/E (WORD_*), 0/^/$,
 	// gg/G, {/}/(/), h/j/k/l, H/M/L.
 	MotionWordNext          = "motion.word_next"
@@ -362,7 +359,7 @@ const (
 	MotionScreenMiddle      = "motion.screen_middle"
 	MotionScreenBottom      = "motion.screen_bottom"
 
-	// Operator family — owned by VimEditorController (dbsavvy-wwd.8).
+	// Operator family — owned by VimEditorController.
 	// Defaults: d/y/c (delete/yank/change), gU/gu (upper/lower), >/< (indent
 	// right/left). Each operator binds in Normal | OperatorPending | every
 	// Visual variant. In Normal mode the operator stashes itself in
@@ -381,10 +378,10 @@ const (
 	OperatorIndentLeft  = "operator.indent_left"
 	// OperatorDeleteEndOfLine — vim `D` (single-key alias for `d$`):
 	// deletes from the cursor to the end of the current line, char-wise,
-	// writing the span to the register. Normal-mode only (dbsavvy-5fxk).
+	// writing the span to the register. Normal-mode only.
 	OperatorDeleteEndOfLine = "operator.delete_eol"
 
-	// EditorPaste — owned by VimEditorController (dbsavvy-wwd.8). Bound
+	// EditorPaste — owned by VimEditorController. Bound
 	// to `p` in Normal mode. The handler reads from the effective
 	// register (ec.Register, defaulting to '"') and inserts the text
 	// after the cursor. LineWise registers (set by dd/yy) paste on a new
@@ -402,12 +399,12 @@ const (
 	// tildeop off (default) `~` is NOT an operator — it acts immediately.
 	EditorToggleCase = "editor.toggle_case"
 
-	// Text-object family — owned by VimEditorController (dbsavvy-wwd.6).
+	// Text-object family — owned by VimEditorController.
 	// Defaults follow vim: i"/a" (double quote), i'/a' (single quote),
 	// i(/a( (paren), i[/a[ (bracket), i{/a{ + iB/aB (brace),
 	// ip/ap (paragraph — blank-line delimited per vim), is/as (SQL
-	// statement — naive ';' split). Bindings live under OperatorPending
-	// in wwd.6; the Visual / VisualLine mode mask is added in wwd.7.
+	// statement — naive ';' split). Bindings live under OperatorPending,
+	// with the Visual / VisualLine mode mask added on top.
 	TextObjectInnerWord         = "textobject.inner_word"
 	TextObjectAroundWord        = "textobject.around_word"
 	TextObjectInnerWORD         = "textobject.inner_word_big"
@@ -427,7 +424,7 @@ const (
 	TextObjectInnerStatement    = "textobject.inner_statement"
 	TextObjectAroundStatement   = "textobject.around_statement"
 
-	// Insert-entry family — owned by VimEditorController (dbsavvy-wwd.10).
+	// Insert-entry family — owned by VimEditorController.
 	// Defaults: `i` enters Insert with cursor in place; `a` enters with
 	// cursor moved one column right (append); `o`/`O` open a new line
 	// below/above; `I`/`A` jump to first-non-blank / line-end+1 and
@@ -441,19 +438,19 @@ const (
 	InsertFirstNonblank = "insert.first_nonblank"
 	InsertAppendEnd     = "insert.append_end"
 
-	// ModeNormal — owned by VimEditorController (dbsavvy-wwd.10).
+	// ModeNormal — owned by VimEditorController.
 	// Bound to `<esc>` in Insert mode; flips ModeStore[QUERY_EDITOR]
 	// back to ModeNormal. Visual modes use VisualExit instead.
 	ModeNormal = "mode.normal"
 
-	// Editor history family — owned by VimEditorController (dbsavvy-wwd.10).
+	// Editor history family — owned by VimEditorController.
 	// `u` invokes Buffer.Undo (replays the inverse of the most recent
 	// Edit); `<c-r>` invokes Buffer.Redo (re-applies along children[0]
 	// of the UndoTree). Both are no-ops at the tree boundaries.
 	EditorUndo = "editor.undo"
 	EditorRedo = "editor.redo"
 
-	// EditorRepeat — owned by VimEditorController (dbsavvy-wwd.9). Bound
+	// EditorRepeat — owned by VimEditorController. Bound
 	// to `.` in Normal mode. The handler reads the most-recently-captured
 	// operator from QueryEditorContext.RepeatStore, re-resolves the
 	// motion or text-object range from the CURRENT cursor position
@@ -461,7 +458,7 @@ const (
 	// and re-invokes the operator via the same applyPending pathway.
 	EditorRepeat = "editor.repeat"
 
-	// Cell-edit family — owned by CellEditorController (dbsavvy-bwq A1/A2/Z1).
+	// Cell-edit family — owned by CellEditorController.
 	// `i` enters the CELL_EDITOR popup over the cursor cell; `<cr>`/`<esc>`
 	// commit; `<c-c>` discards; SetNull / Expr* are the per-type entry
 	// helpers (<c-n>/<c-t>/<c-d>/<c-e>).
@@ -473,10 +470,10 @@ const (
 	CellEditExprCurrentDate = "cell.edit.expr.current_date"
 	CellEditExprPrompt      = "cell.edit.expr.prompt"
 
-	// Commit-dialog family — owned by CommitDialogController (dbsavvy-bwq A4/A5/Z1).
+	// Commit-dialog family — owned by CommitDialogController.
 	// `:w`/`<leader>cw` open; `[a]` apply (gated); `[d]` dry-run; `[s]` SQL
 	// preview toggle; `[Esc]`/`[c]` cancel; `[t]` opens the typed-name
-	// prompt that drives the confirm_writes apply gate (dbsavvy-p8cv).
+	// prompt that drives the confirm_writes apply gate.
 	CommitDialogOpen     = "commit.dialog.open"
 	CommitDialogApply    = "commit.dialog.apply"
 	CommitDialogDryRun   = "commit.dialog.dryrun"
@@ -484,14 +481,14 @@ const (
 	CommitDialogCancel   = "commit.dialog.cancel"
 	CommitDialogTypeName = "commit.dialog.type_name"
 
-	// Conflict-dialog family — owned by ConflictDialogController (dbsavvy-bwq A6/Z1).
+	// Conflict-dialog family — owned by ConflictDialogController.
 	// `[r]` refresh; `[o]` overwrite (omitted on confirm_writes); `[Esc]` cancel.
 	ConflictDialogRefresh   = "conflict.dialog.refresh"
 	ConflictDialogOverwrite = "conflict.dialog.overwrite"
 	ConflictDialogCancel    = "conflict.dialog.cancel"
 
-	// FK reverse-picker family — owned by FKReversePickerController
-	// (dbsavvy-bwq B6/Z1). `gD` opens the picker; <tab>/]/[ cycle tabs;
+	// FK reverse-picker family — owned by FKReversePickerController.
+	// `gD` opens the picker; <tab>/]/[ cycle tabs;
 	// <cr> selects; <esc>/q closes.
 	FKReverseMenu    = "row.fk_reverse_menu"
 	FKReverseNextTab = "fk_reverse_picker.next_tab"
@@ -500,24 +497,24 @@ const (
 	FKReverseClose   = "fk_reverse_picker.close"
 
 	// Pending-edit discard family — owned by PendingDiscardHelper
-	// + result_tabs_controller (dbsavvy-bwq A8/Z1). `<leader>cu` discards at
+	// + result_tabs_controller. `<leader>cu` discards at
 	// cursor; `<leader>cU` discards all (with confirmation > threshold).
 	PendingDiscardAtCursor = "pending.discard.at_cursor"
 	PendingDiscardAll      = "pending.discard.all"
 
-	// FK forward-jump (dbsavvy-bwq B5/Z1). `gd` jumps to the referenced row.
+	// FK forward-jump. `gd` jumps to the referenced row.
 	FKJumpForward = "row.fk_forward"
 
-	// Result jump history (dbsavvy-bwq B5/B6/Z1). `<c-o>` back; `<c-i>` forward
+	// Result jump history. `<c-o>` back; `<c-i>` forward
 	// through the per-grid jump list pushed by gd / gD.
 	ResultJumpBack    = "result.jump.back"
 	ResultJumpForward = "result.jump.forward"
 
-	// Editor completion (dbsavvy-bwq/Z1). Manually triggers the completion
+	// Editor completion. Manually triggers the completion
 	// popup in QUERY_EDITOR insert mode (`<c-space>` default).
 	EditorCompletionTrigger = "editor.completion.trigger"
 
-	// Editor completion popup navigation (dbsavvy-etp.1). Insert-mode
+	// Editor completion popup navigation. Insert-mode
 	// bindings that drive the popup while it is visible; each handler
 	// no-ops (leaving the key's normal Insert meaning) when hidden.
 	EditorCompletionNext    = "editor.completion.next"
@@ -525,25 +522,25 @@ const (
 	EditorCompletionAccept  = "editor.completion.accept"
 	EditorCompletionDismiss = "editor.completion.dismiss"
 
-	// Reconnect — owned by ReconnectController (hq5.7). <leader>R in
+	// Reconnect — owned by ReconnectController. <leader>R in
 	// GLOBAL scope triggers a Ping → reconnect dialog when the session
 	// is disconnected. (QUERY_EDITOR uses <leader>R for QueryRunAll, so
 	// this binding is GLOBAL-only and masked by the editor scope.)
 	Reconnect = "app.reconnect"
 
-	// SearchPathQuickSet — owned by SearchPathController (hq5.10).
+	// SearchPathQuickSet — owned by SearchPathController.
 	// <leader>p in GLOBAL scope opens a prompt pre-filled with
 	// "SET search_path TO "; on submit the full text is fed to the
-	// existing SET handler from hq5.8.
+	// existing SET handler.
 	SearchPathQuickSet = "session.search_path"
 
-	// StatementTimeoutSet — owned by StatementTimeoutController (hq5.11).
+	// StatementTimeoutSet — owned by StatementTimeoutController.
 	// <leader>tt in QUERY_EDITOR scope prompts for a postgres-style duration,
 	// validates via session.CanonicalizeStatementTimeout, executes
 	// SET statement_timeout on the session, and persists to AppState.
 	StatementTimeoutSet = "session.statement_timeout"
 
-	// Transaction family — owned by TxController (hq5.3). Default bindings:
+	// Transaction family — owned by TxController. Default bindings:
 	// <leader>tb, <leader>tc, <leader>tr, <leader>ts, <leader>tR, <leader>to.
 	TxBegin               = "tx.begin"
 	TxCommit              = "tx.commit"
@@ -552,7 +549,7 @@ const (
 	TxReleaseSavepoint    = "tx.release_savepoint"
 	TxRollbackToSavepoint = "tx.rollback_to_savepoint"
 
-	// Visual / Selection family — owned by VimEditorController (dbsavvy-wwd.7).
+	// Visual / Selection family — owned by VimEditorController.
 	// Bindings: `v` / `V` / `<c-v>` enter char/line/block visual from Normal;
 	// `<esc>` exits to Normal. SelectionExtend is the action ID covering
 	// in-Visual motion dispatch (motion keys re-target ExtendSelection

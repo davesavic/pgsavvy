@@ -7,7 +7,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// Typed presentation-field population (ko4m.4.3): Schema/Function/Keywords
+// Typed presentation-field population: Schema/Function/Keywords
 // sources populate Kind/Detail/IsPrimaryKey/NotNull/FKRef from the warmed
 // snapshot. All reads go through fakeMeta (the SchemaMetadata fake) — no
 // drivers.Session is on any of these paths.

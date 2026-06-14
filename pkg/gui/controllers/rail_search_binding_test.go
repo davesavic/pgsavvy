@@ -9,7 +9,7 @@ import (
 )
 
 // railSearchBindings is the (key, actionID) set both rails must publish
-// in ModeNormal for the dbsavvy-ioaj highlight+jump search.
+// in ModeNormal for the highlight+jump search.
 //
 //	/    → RailSearchPrompt
 //	n    → RailSearchNext

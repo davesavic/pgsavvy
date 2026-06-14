@@ -1,7 +1,7 @@
 package orchestrator
 
 // Internal test (package orchestrator) so it can reach the unexported
-// schemasPickerAdapter. Verifies dbsavvy-ioaj note 3: a show-hidden
+// schemasPickerAdapter. Verifies a show-hidden
 // toggle drops any active rail search so n/N cannot later park the
 // cursor on a now-hidden row.
 

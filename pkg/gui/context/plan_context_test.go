@@ -583,7 +583,7 @@ func TestPlanContext_Heat_EstimateOnlyUsesSelfCost(t *testing.T) {
 	}
 }
 
-// --- T6: plan-doctor insights surfacing (dbsavvy-xwde.6) ---------------------
+// --- plan-doctor insights surfacing -----------------------------------------
 
 // findingPlan builds an ANALYZED two-node plan that produces exactly one
 // plan-doctor finding (a bad-row-estimate) on the child "Seq Scan flagged":

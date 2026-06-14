@@ -16,7 +16,7 @@ import (
 // All fields are optional: a nil closure or a nil receiver collapses
 // the corresponding RefreshXxx call to a silent no-op so early-boot
 // wiring order (helpers built before the orchestrator finishes wiring
-// closures) never panics the controllers. dbsavvy-56u.1.
+// closures) never panics the controllers.
 type RefreshHelper struct {
 	refreshSchemas func(ctx context.Context) error
 	refreshTables  func(ctx context.Context, schema string) error

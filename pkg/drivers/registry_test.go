@@ -114,6 +114,6 @@ func TestRegisterGetNames_ConcurrentNoRace(t *testing.T) {
 	wg.Wait()
 }
 
-// Compile-time sanity check (epic dbsavvy-921 D16): the Factory underlying
+// Compile-time sanity check: the Factory underlying
 // signature matches func(context.Context) (Driver, error).
 var _ Factory = (func(context.Context) (Driver, error))(nil)

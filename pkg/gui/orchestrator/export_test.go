@@ -29,7 +29,7 @@ func (g *Gui) HistoryStoreForTest() *query.History {
 }
 
 // SearchPathSetRunnerForTest exposes the SetRunner wired onto the SearchPath
-// controller. Guards the setExHandler triple-use (dbsavvy-y5th.1.1): the :set
+// controller. Guards the setExHandler triple-use: the :set
 // ex-command, SearchPath.SetRunner, and StatementTimeout.SetRunner must all
 // route to g.handleSetEx after wireWithDriver.
 func (g *Gui) SearchPathSetRunnerForTest() func([]string, commands.ExecCtx) error {

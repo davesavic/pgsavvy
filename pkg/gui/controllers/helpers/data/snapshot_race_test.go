@@ -76,7 +76,7 @@ func (q *serializedQuerier) LoadFunctions(_ context.Context) ([]string, error) {
 	return []string{"now", "lower"}, nil
 }
 
-// TestSnapshotRace_CompletionDuringInflightSessionOp is the ko4m.2 capstone race
+// TestSnapshotRace_CompletionDuringInflightSessionOp is the capstone race
 // test (jxw criterion #2). It runs, concurrently and under -race:
 //
 //   - A REAL async worker goroutine pool draining warm bodies (OnWorker), each of

@@ -9,7 +9,7 @@ import (
 )
 
 // TestPopupRectFor_TableInspect locks in the 60% × 60% rect for the
-// TABLE_INSPECT popup (epic dbsavvy-3vf, task .1). Uses a 100×100
+// TABLE_INSPECT popup. Uses a 100×100
 // popup-overlay canvas so 0.6 fractions land at 60 in either axis.
 func TestPopupRectFor_TableInspect(t *testing.T) {
 	canvas := ui.Dimensions{X0: 0, Y0: 0, X1: 100, Y1: 100}
@@ -28,7 +28,7 @@ func TestPopupRectFor_TableInspect(t *testing.T) {
 }
 
 // TestPopupRectFor_CellEditor locks in the small, height-bounded rect
-// for the CELL_EDITOR popup (dbsavvy-tzi.1). The core property is the
+// for the CELL_EDITOR popup. The core property is the
 // bounded height (~3 content rows + borders) so the popup does not
 // occlude the result grid; width is ~60% of the canvas. Uses a 100×100
 // popup-overlay canvas.
@@ -55,7 +55,7 @@ func TestPopupRectFor_CellEditor(t *testing.T) {
 }
 
 // TestPopupRectFor_CommitDialog locks in a centered rect for the
-// COMMIT_DIALOG popup (dbsavvy-b0l). Without a popupRectFor case the
+// COMMIT_DIALOG popup. Without a popupRectFor case the
 // dialog was pushed onto the focus stack but never got a view, so it
 // rendered blank and never received input focus. Width is ~70% of the
 // canvas (room for SQL preview lines), height ~60%. Uses a 100×100
@@ -83,8 +83,8 @@ func TestPopupRectFor_CommitDialog(t *testing.T) {
 }
 
 // TestPopupRectFor_ConflictDialog locks in a centered 60% × 60% rect for
-// the CONFLICT_DIALOG popup (dbsavvy-xp2, same root cause as parent
-// dbsavvy-b0l). Without a popupRectFor case the dialog was pushed onto
+// the CONFLICT_DIALOG popup (same root cause as the COMMIT_DIALOG).
+// Without a popupRectFor case the dialog was pushed onto
 // the focus stack but never got a view, so it rendered blank and never
 // received input focus. Uses a 100×100 popup-overlay canvas so 0.6
 // fractions land at 60 in either axis.
@@ -111,8 +111,8 @@ func TestPopupRectFor_ConflictDialog(t *testing.T) {
 }
 
 // TestPopupRectFor_FKReversePicker locks in a centered 60% × 60% rect for
-// the FK_REVERSE_PICKER popup (dbsavvy-q5j, same root cause as parent
-// dbsavvy-b0l). Without a popupRectFor case the picker was pushed onto the
+// the FK_REVERSE_PICKER popup (same root cause as the COMMIT_DIALOG).
+// Without a popupRectFor case the picker was pushed onto the
 // focus stack but never got a view, so it rendered blank and never
 // received input focus. Uses a 100×100 popup-overlay canvas so 0.6
 // fractions land at 60 in either axis.
@@ -138,7 +138,7 @@ func TestPopupRectFor_FKReversePicker(t *testing.T) {
 	}
 }
 
-// TestPopupRectAnchoredBelowCursor (dbsavvy-etp.2): the SUGGESTIONS popup
+// TestPopupRectAnchoredBelowCursor: the SUGGESTIONS popup
 // is cursor-anchored. anchoredRect derives the screen cell directly below
 // the cursor from the editor view origin (vx0,vy0), the scroll offset
 // (ox,oy) and the rune-indexed anchor (Line,Col): screen_x = vx0 + 1 +
@@ -165,7 +165,7 @@ func TestPopupRectAnchoredBelowCursor(t *testing.T) {
 	}
 }
 
-// TestPopupRectAnchoredScrollOffset (dbsavvy-etp.2, edge): when the editor
+// TestPopupRectAnchoredScrollOffset (edge): when the editor
 // is scrolled (oy>0), screen_y subtracts the scroll origin so the popup
 // tracks the on-screen cursor, not the buffer line.
 func TestPopupRectAnchoredScrollOffset(t *testing.T) {
@@ -183,7 +183,7 @@ func TestPopupRectAnchoredScrollOffset(t *testing.T) {
 	}
 }
 
-// TestPopupRectAnchoredFlipsAboveAtBottom (dbsavvy-etp.2, boundary): when
+// TestPopupRectAnchoredFlipsAboveAtBottom (boundary): when
 // placing the dropdown below the cursor would push its bottom past the
 // editor's bottom edge (vy1), it flips to render ABOVE the cursor line —
 // ending at screen_y-1 (the cursor row) — and stays fully within view.
@@ -204,7 +204,7 @@ func TestPopupRectAnchoredFlipsAboveAtBottom(t *testing.T) {
 	}
 }
 
-// TestPopupRectAnchoredLastVisibleRowFlips (dbsavvy-etp.2, boundary):
+// TestPopupRectAnchoredLastVisibleRowFlips (boundary):
 // cursor on the very last visible editor row must flip above (there is no
 // room for even one row below).
 func TestPopupRectAnchoredLastVisibleRowFlips(t *testing.T) {
@@ -219,7 +219,7 @@ func TestPopupRectAnchoredLastVisibleRowFlips(t *testing.T) {
 	}
 }
 
-// TestPopupRectAnchoredClampsWithinView (dbsavvy-etp.2): the rect never
+// TestPopupRectAnchoredClampsWithinView: the rect never
 // exceeds the editor view rectangle on any edge, even for a wide popup
 // near the right edge.
 func TestPopupRectAnchoredClampsWithinView(t *testing.T) {

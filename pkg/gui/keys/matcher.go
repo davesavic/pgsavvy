@@ -29,8 +29,8 @@ import (
 //
 // FellThrough  the key did not match any binding in the scope OR global
 //
-//	trie for the active mode. Caller (master Editor in
-//	dlp.8) decides whether to forward to View.Editor.Edit or
+//	trie for the active mode. Caller (master Editor)
+//	decides whether to forward to View.Editor.Edit or
 //	swallow.
 //
 // Cancelled    reserved: Matcher.Cancel was driven by the dispatch
@@ -45,7 +45,7 @@ import (
 // Passthrough  ModeInsert / ModeCommand received a printable rune that
 //
 //	does NOT match any binding AND no partial match is in
-//	flight. Signals to the master Editor (dlp.8b) that the
+//	flight. Signals to the master Editor that the
 //	rune should be forwarded to gocui.DefaultEditor.
 type DispatchResult int
 
@@ -83,7 +83,7 @@ func (r DispatchResult) String() string {
 // (acceptance criterion "count overflow").
 const countMax = 999999
 
-// InsertPendingFlush is the callback shape master Editor (dlp.8b)
+// InsertPendingFlush is the callback shape master Editor
 // registers with the Matcher. The Matcher invokes it from the timer
 // goroutine when a partial sequence in ModeInsert times out without
 // resolving to a leaf, so the buffered runes can be written to the
@@ -141,7 +141,7 @@ type MatcherConfig struct {
 	Log           DebugLogger
 
 	// Toaster surfaces refusal messages when Matcher.Dispatch
-	// intercepts a disabled command (per epic D10 / 66p.2). nil
+	// intercepts a disabled command (per epic D10). nil
 	// means refusals are silent — handy for unit tests that do not
 	// care about toast emissions.
 	Toaster ToastFunc
@@ -153,8 +153,8 @@ type MatcherConfig struct {
 //
 // Returns an error if cfg.Leader is a digit rune ('0'..'9'). Such a
 // leader would make count-collection ambiguous (per AC "Matcher refuses
-// to start if leader is a single digit"); dlp.3 already rejects this at
-// config validation, the Matcher refuses defensively.
+// to start if leader is a single digit"); config validation already
+// rejects this, and the Matcher refuses defensively.
 func NewMatcher(initial *TrieSet, cfg MatcherConfig) (*Matcher, error) {
 	if cfg.Leader >= '0' && cfg.Leader <= '9' {
 		return nil, fmt.Errorf("keys: leader %q is a digit; counts would be ambiguous", cfg.Leader)
@@ -210,14 +210,14 @@ func (m *Matcher) SwapTrieSet(t *TrieSet) {
 }
 
 // SwapCount returns the monotonic count of SwapTrieSet invocations.
-// Test accessor used by the dlp.14 integration smoke test to confirm
+// Test accessor used by the integration smoke test to confirm
 // exactly one swap on `:reload`.
 func (m *Matcher) SwapCount() uint64 {
 	return m.swapCount.Load()
 }
 
 // TrieSet returns the currently-published TrieSet snapshot. Cheatsheet
-// (dlp.10) and options-bar (dlp.12) callers read the live trie to
+// and options-bar callers read the live trie to
 // enumerate bindings. Returns nil when no TrieSet has been published
 // yet; callers MUST nil-check.
 func (m *Matcher) TrieSet() *TrieSet {
@@ -267,7 +267,7 @@ func (m *Matcher) flushInsertPending(scope types.ContextKey, pending []Key) {
 }
 
 // CurrentMode returns the Mode currently recorded for scope. The master
-// Editor (dlp.8b) calls this to decide whether a Passthrough result
+// Editor calls this to decide whether a Passthrough result
 // should delegate to gocui.DefaultEditor (ModeInsert / ModeCommand) or
 // be dropped (other modes).
 func (m *Matcher) CurrentMode(scope types.ContextKey) types.Mode {
@@ -478,7 +478,7 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 	if hadChordPartial && (mode == types.ModeInsert || mode == types.ModeCommand) {
 		m.flushInsertPending(scope, droppedPending)
 	}
-	// dbsavvy-tro.5: if a CHORD prefix was pending (scope-trie pending
+	// If a CHORD prefix was pending (scope-trie pending
 	// was just dropped above) AND dispatch is falling through (no
 	// global match found either), pull down the which-key popup that
 	// was shown for the abandoned prefix. Hide is called OUTSIDE m.mu
@@ -535,11 +535,11 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		// Interior node: pure prefix. Buffer + notify which-key.
 		m.pending = seq
 		m.lastLeaf = nil
-		// dbsavvy-81j: in non-insert modes a pure prefix is a which-key
+		// In non-insert modes a pure prefix is a which-key
 		// waypoint — keep it pending (and the popup visible) until the
 		// next key or <esc>, instead of abandoning it after timeout_len.
 		// Insert / command modes still arm the timer so buffered runes
-		// flush (dbsavvy-1yb) and their existing timeout behaviour is
+		// flush and their existing timeout behaviour is
 		// preserved. stopTimerLocked clears any timer armed by an earlier
 		// ambiguous-leaf in this same sequence and bumps seq so an
 		// in-flight fire is ignored.
@@ -617,7 +617,7 @@ func (m *Matcher) invokeHandler(cmd *commands.Command, scope types.ContextKey, m
 		Mode:     mode,
 		Scope:    scope,
 	}
-	// Disabled-binding intercept (66p.2): a Command may refuse
+	// Disabled-binding intercept: a Command may refuse
 	// execution at dispatch time via its Disabled predicate. When it
 	// does, we emit a toast carrying the reason and report Dispatched
 	// (the key was consumed; the Handler is intentionally skipped).
@@ -626,7 +626,7 @@ func (m *Matcher) invokeHandler(cmd *commands.Command, scope types.ContextKey, m
 		return Dispatched, nil
 	}
 	if err := cmd.Handler(ctx); err != nil {
-		// Central error boundary (dbsavvy-9v1.4): a non-nil handler error
+		// Central error boundary: a non-nil handler error
 		// is converted to a sanitized toast + debug breadcrumb and is NOT
 		// propagated upward — gocui's MainLoop treats a returned error as
 		// FATAL and exits the process. gocui.ErrQuit is the one control
@@ -701,8 +701,8 @@ func (m *Matcher) scheduleTimerLocked(scope types.ContextKey, mode types.Mode) {
 
 // stopTimerLocked stops any armed inactivity timer and bumps seq so an
 // in-flight fire is ignored, WITHOUT arming a replacement and WITHOUT
-// clearing the pending chord. Used by the non-insert pure-prefix path
-// (dbsavvy-81j): the which-key popup for a pure prefix must persist until
+// clearing the pending chord. Used by the non-insert pure-prefix path:
+// the which-key popup for a pure prefix must persist until
 // the next key or <esc> rather than being abandoned after timeout_len.
 // Caller MUST hold m.mu.
 func (m *Matcher) stopTimerLocked() {

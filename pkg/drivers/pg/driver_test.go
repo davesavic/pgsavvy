@@ -64,7 +64,7 @@ func TestDriverCapabilitiesEqualsSingleSourceVar(t *testing.T) {
 
 func TestPgCapabilitiesShape(t *testing.T) {
 	// Locks the documented §11.1 capability set. HasLiveCancel was flipped
-	// from false to true in epic dbsavvy-66p.4 (Connection.Cancel now dials
+	// from false to true (Connection.Cancel now dials
 	// a fresh CancelRequest packet); the corresponding invariant test
 	// TestCapabilitiesLiveCancelMatchesCancelImpl enforces that the flag and
 	// the impl stay in lock-step.
@@ -87,7 +87,7 @@ func TestPgCapabilitiesShape(t *testing.T) {
 func TestCapabilitiesLiveCancelMatchesCancelImpl(t *testing.T) {
 	// Invariant: any Capabilities flag set true must have a non-sentinel
 	// implementation, and any flag set false must surface ErrNotImplemented.
-	// Since epic dbsavvy-66p.4 flipped HasLiveCancel to true, we exercise a
+	// Since HasLiveCancel was flipped to true, we exercise a
 	// nil-PID Cancel (which short-circuits BEFORE the pool is touched) and
 	// require it does NOT return ErrNotImplemented; the precondition error
 	// drivers.ErrInvalidQueryID is the expected response.
@@ -127,7 +127,7 @@ func TestConnectionAcquireSessionErrorsWithoutLivePool(t *testing.T) {
 	// pgxpool.NewWithConfig is lazy; the first Acquire is what actually
 	// dials. Without a live server, Acquire surfaces a dial error, which
 	// AcquireSession MUST wrap with the documented "pg: acquire session:"
-	// prefix. The happy live-Session path is covered by 921.10 integration
+	// prefix. The happy live-Session path is covered by integration
 	// tests.
 	cfg, err := pgxpool.ParseConfig("postgres://u:p@127.0.0.1:1/dbsavvy_unit_test")
 	require.NoError(t, err)

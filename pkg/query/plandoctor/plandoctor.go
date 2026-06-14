@@ -43,7 +43,7 @@ const (
 	// loosened from 1.0ms because fast-but-imperfect plans (small/cached
 	// tables) kept every node under 1ms and so surfaced no findings at all —
 	// including predictive ones like a bad row estimate that matter regardless
-	// of how fast the node ran today. dbsavvy-v6ep.
+	// of how fast the node ran today.
 	minSelfTimeMs = 0.1
 	// minSelfCost is the smallest exclusive (self) planner cost for a node to
 	// be worth flagging in an estimate-only plan. Postgres seq-scans a handful

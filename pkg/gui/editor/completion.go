@@ -135,10 +135,10 @@ func (e *Engine) Sources() []Source {
 
 // minPrefixTriggerRunes is the identifier-prefix width (in runes) at or
 // above which AutoTriggerFromContext opens the popup outside the
-// keyword/dot/column gates. dbsavvy-ko4m.6.1 broadens the auto-trigger
+// keyword/dot/column gates. The auto-trigger is broadened
 // from "only at FROM/JOIN/UPDATE/INTO or `<ident>.`" to "anywhere the
 // cursor sits at the end of a >=2-rune identifier prefix". The fuzzy
-// quality floor (dbsavvy-ko4m.3) trims the broadened firing so it does
+// quality floor trims the broadened firing so it does
 // not flood the popup. 2 is the threshold: a single typed letter is too
 // noisy (matches almost everything), two is the smallest prefix that
 // usefully narrows.
@@ -151,9 +151,9 @@ const minPrefixTriggerRunes = 2
 //     (FROM/JOIN/UPDATE/INTO, `<ident>.`, ON/USING, or a SELECT/WHERE
 //     column context) — see IsSchemaCompletableContext, OR
 //   - the cursor sits at the end of a >=2-rune identifier prefix
-//     (dbsavvy-ko4m.6.1) anywhere outside the structured contexts above,
+//     anywhere outside the structured contexts above,
 //     provided the cursor is not inside a string/comment. The fuzzy
-//     quality floor (dbsavvy-ko4m.3) keeps the broadened firing from
+//     quality floor keeps the broadened firing from
 //     flooding.
 //
 // The structured detection routes through the sqlcontext engine
@@ -165,9 +165,6 @@ const minPrefixTriggerRunes = 2
 // strings/comments.
 //
 // Nil buf is treated as "no context"; returns false.
-//
-// dbsavvy-bwq.22 (C5); broadened in dbsavvy-ko4m.6.1; engine-backed in
-// dbsavvy-ko4m.1.3.
 func AutoTriggerFromContext(buf *Buffer, pos Position) bool {
 	if IsSchemaCompletableContext(buf, pos) {
 		return true
@@ -175,7 +172,7 @@ func AutoTriggerFromContext(buf *Buffer, pos Position) bool {
 	if buf == nil {
 		return false
 	}
-	// Broadened gate (dbsavvy-ko4m.6.1): a >=2-rune identifier prefix at the
+	// Broadened gate: a >=2-rune identifier prefix at the
 	// cursor opens the popup outside the structured contexts above, but must
 	// NOT fire inside a string/comment. The narrow gate above already returns
 	// false in noise; re-check here so the prefix gate honours it too.
@@ -202,9 +199,6 @@ func AutoTriggerFromContext(buf *Buffer, pos Position) bool {
 // Columns, ON/USING→Both) or a trailing dot-qualifier. A cursor in noise
 // yields the zero ContextResult, so this returns false there. Nil buf
 // returns false.
-//
-// dbsavvy-ko4m.6.1 (extracted from AutoTriggerFromContext); engine-backed
-// in dbsavvy-ko4m.1.3.
 func IsSchemaCompletableContext(buf *Buffer, pos Position) bool {
 	if buf == nil {
 		return false
@@ -311,7 +305,7 @@ func bufferTextAndOffset(buf *Buffer, pos Position) (string, int) {
 // resulting ContextResult. It is the exported seam acceptSuggestion uses
 // to decide, at accept time, whether the cursor sits in a table context
 // (ContextResult.Expect == ExpectTables) and which aliases are already in
-// scope. A nil/empty buffer yields the zero ContextResult. dbsavvy-ko4m.6.2.
+// scope. A nil/empty buffer yields the zero ContextResult.
 func AnalyzeContextAt(buf *Buffer, pos Position) sqlcontext.ContextResult {
 	if buf == nil {
 		return sqlcontext.ContextResult{}

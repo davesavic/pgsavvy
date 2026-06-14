@@ -13,7 +13,7 @@ var (
 
 // Register adds factory under name. It panics on an empty name, a nil
 // factory, or a duplicate name — registration is a programmer-controlled
-// process-startup step (epic dbsavvy-921 D9), so misuse is a bug and not a
+// process-startup step, so misuse is a bug and not a
 // runtime error.
 func Register(name string, factory Factory) {
 	if name == "" {

@@ -35,7 +35,7 @@ func (v *View) autoSizeFromSampleLocked() {
 	for c, col := range v.cols {
 		// Seed against the rendered header label (col.Name plus the FK
 		// `→ ` prefix when IsForeignKey) so the locked width accommodates
-		// the glyph and the header never overflows. dbsavvy-bwq.14 (B3).
+		// the glyph and the header never overflows.
 		best := displayWidth(headerLabel(col))
 		for r := range sample {
 			row := v.rows[r]
@@ -73,7 +73,7 @@ func displayWidth(s string) int {
 // displayCols returns the terminal display width of s in columns,
 // counting East Asian wide / fullwidth runes (CJK, emoji) as 2 cells
 // and combining marks as 0 via go-runewidth. Used by the rune-boundary
-// truncation paths so wide chars budget correctly (dbsavvy-fow.9 U22).
+// truncation paths so wide chars budget correctly.
 func displayCols(s string) int {
 	return runewidth.StringWidth(s)
 }
@@ -84,7 +84,7 @@ func displayCols(s string) int {
 // are never sliced mid-byte — and its display width never exceeds
 // maxCols. maxCols ≤ 0 yields "". When s already fits it is returned
 // unchanged. A wide rune that would straddle the budget is dropped
-// rather than half-rendered (dbsavvy-fow.9 U22).
+// rather than half-rendered.
 func truncateToWidth(s string, maxCols int) string {
 	if maxCols <= 0 {
 		return ""

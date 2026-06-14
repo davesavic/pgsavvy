@@ -64,7 +64,7 @@ type Toaster interface {
 }
 
 // BusyChecker reports whether the underlying session currently has an
-// active stream. Currently unused: with last-wins (dbsavvy-lxn.1) a new
+// active stream. Currently unused: with last-wins a new
 // op preempts any parked stream rather than queueing, so Jump no longer
 // branches on busyness. Retained as optional plumbing; may be nil.
 type BusyChecker interface {
@@ -99,10 +99,10 @@ type CurrentTab interface {
 // a cursor cell on an FK column, build a parameterized SELECT against
 // the referenced (parent) table, push a JumpEntry capturing the
 // originating tab + cursor, and open a new result tab streaming the
-// parent rows. See dbsavvy-bwq.16 (B5).
+// parent rows.
 //
 // The helper deliberately holds no state — every Jump call is a fresh
-// lookup. Last-wins (dbsavvy-lxn.1): RunQuery preempts any parked prior
+// lookup. Last-wins: RunQuery preempts any parked prior
 // stream at the QueryRunner chokepoint, so a later gd press preempts an
 // earlier one rather than queueing behind it.
 type FKForwardHelper struct {
@@ -173,7 +173,7 @@ var (
 // the guards (no FK / NULL cell / row not loaded / composite missing
 // columns) trips, OR when a downstream dependency (runner / tabs)
 // surfaces an error. A successful Jump returns nil after the new tab
-// has been opened (preempting any parked prior stream; dbsavvy-lxn.1).
+// has been opened (preempting any parked prior stream).
 //
 // Guard order: invalid arguments → cache lookup → FK match → composite
 // columns → cursor row → cursor cell. We do the cheapest checks first
@@ -285,7 +285,7 @@ func (h *FKForwardHelper) Jump(ctx context.Context, tab CurrentTab, cursorRow, c
 		At:      time.Now(),
 	})
 
-	// Last-wins (dbsavvy-lxn.1): RunQuery preempts any parked prior stream
+	// Last-wins: RunQuery preempts any parked prior stream
 	// at the QueryRunner chokepoint before running, mirroring run/run_all.
 	// fk-forward therefore does NOT queue behind an active stream, so no
 	// "queued" toast is emitted — the preempt is silent, matching run_all.

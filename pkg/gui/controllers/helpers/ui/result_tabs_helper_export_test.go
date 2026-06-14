@@ -16,7 +16,7 @@ func (r *recordingClipboard) Write(text string) error {
 }
 
 // TestBuildDestination_Clipboard_WritesToConfiguredWriter is the regression
-// guard for dbsavvy-rggk: buildDestination used to pass a nil ClipboardWriter,
+// guard: buildDestination used to pass a nil ClipboardWriter,
 // so clipboard exports were serialized and then silently discarded on Close.
 // The destination must push the buffered payload to the configured writer.
 func TestBuildDestination_Clipboard_WritesToConfiguredWriter(t *testing.T) {
@@ -53,7 +53,7 @@ func TestBuildDestination_Clipboard_WritesToConfiguredWriter(t *testing.T) {
 }
 
 // TestBuildDestination_StdoutRemoved guards the removal of the stdout export
-// destination (dbsavvy-rggk): its bytes were written to os.Stdout from a
+// destination: its bytes were written to os.Stdout from a
 // worker while gocui owns the alternate screen, so they could never render.
 // The destination is no longer offered, and the builder must reject it.
 func TestBuildDestination_StdoutRemoved(t *testing.T) {

@@ -65,7 +65,7 @@ func (j *JumpList) At(i int) Position {
 	return j.entries[(j.head+i)%jumpListCap]
 }
 
-// NewBuffer returns a Buffer with Jumps (cap 100) initialised. wwd.2
+// NewBuffer returns a Buffer with Jumps (cap 100) initialised.
 // zero-valued Buffers (`&Buffer{}`) still work for the legacy
 // buffer_test.go path — Jumps is lazily allocated by Push when nil.
 func NewBuffer() *Buffer {

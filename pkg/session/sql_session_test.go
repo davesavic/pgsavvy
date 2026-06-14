@@ -199,7 +199,7 @@ func TestSQLSessionCancel_InFlightCallsConnCancelOnce(t *testing.T) {
 	_ = rh.Rows().Close()
 }
 
-// TestSQLSessionCancel_BoundsCancelDialDeadline is the gr7e.1/AD5 guard: the
+// TestSQLSessionCancel_BoundsCancelDialDeadline is the AD5 guard: the
 // cancel round-trip must run under a bounded context so rh.Cancel() cannot
 // freeze the UI on a dead/slow host. Prior code used context.Background()
 // (no deadline); this asserts the conn.Cancel ctx now carries a deadline a
@@ -247,12 +247,12 @@ func TestSQLSessionCancel_BoundsCancelDialDeadline(t *testing.T) {
 	_ = rh.Rows().Close()
 }
 
-// TestSQLSession_PreemptPendingFencesThenClears is the gr7e.2/AD4 guard: a
+// TestSQLSession_PreemptPendingFencesThenClears is the AD4 guard: a
 // bound-expiry fence (MarkPreemptPending) makes Stream/Execute/Explain/Begin
 // fail fast with ErrPreemptPending instead of blocking on streamMu while the
 // wedged worker still holds it; onFinish clears the fence when the worker
 // finally exits, after which the next op proceeds. Without this, the bounded
-// Stop merely relocates the dbsavvy-dk6 deadlock to the next query.
+// Stop merely relocates the deadlock to the next query.
 func TestSQLSession_PreemptPendingFencesThenClears(t *testing.T) {
 	s, _, fs := newTestSession(t, nil)
 	release := make(chan struct{})

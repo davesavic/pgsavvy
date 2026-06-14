@@ -33,7 +33,7 @@ func NewSchemasController(
 	// <CR> on SCHEMAS fires HelperBag.OnSchemaActivate with the
 	// cursor-selected schema name, which the orchestrator wires to a
 	// worker-goroutine LoadTables that populates the TABLES rail
-	// (dbsavvy-04n). Empty selection or nil callback → no-op.
+	// Empty selection or nil callback → no-op.
 	onConfirm := func(_ commands.ExecCtx) error {
 		if picker == nil || nav.OnSchemaActivate == nil {
 			return nil
@@ -172,7 +172,7 @@ func (s *SchemasController) GetKeybindings(_ types.KeybindingsOpts) []*types.Cho
 		})
 	}
 
-	// dbsavvy-ioaj: rail highlight+jump search. Single action IDs bound
+	// rail highlight+jump search. Single action IDs bound
 	// on SCHEMAS; the orchestrator handler resolves the focused rail from
 	// ctx.Scope. H/U/<leader>H/r and baseBindings are untouched.
 	out = append(out,

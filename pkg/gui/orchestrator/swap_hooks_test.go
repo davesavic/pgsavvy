@@ -95,7 +95,7 @@ func TestIsResultPaneKey(t *testing.T) {
 // makeRunningTab returns a fresh helper with a single tab in
 // StateRunning. The tab has no RunHandle attached, so CancelActive on
 // a Running tab will flip its state to Cancelled without touching any
-// driver. dbsavvy-66p.17.
+// driver.
 func makeRunningTab(t *testing.T) (*ui.ResultTabsHelper, *ui.Tab) {
 	t.Helper()
 	h := ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{})
@@ -204,7 +204,7 @@ func TestSwapHookEnteringFromOutsideNoCancel(t *testing.T) {
 func TestSwapHookLeavingWithNonRunningActiveNoCancel(t *testing.T) {
 	// Active tab is in StatePlan (not Running). Leaving the pane must
 	// NOT call CancelActive — the hook's state-guard rules out every
-	// non-Running state. dbsavvy-66p.17 only preempts running streams;
+	// non-Running state. The hook only preempts running streams;
 	// queued / complete / cancelled / plan / error tabs are untouched.
 	//
 	// We use StatePlan as the representative non-Running state. The

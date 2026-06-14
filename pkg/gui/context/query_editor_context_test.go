@@ -8,7 +8,7 @@ import (
 
 // fakeMatcherCanceller counts Cancel calls; satisfies
 // types.MatcherCanceller. Lives in this file (not shared) so test
-// failures point at the dbsavvy-wwd.1 wiring directly.
+// failures point at the wiring directly.
 type fakeMatcherCanceller struct {
 	calls int
 }
@@ -55,10 +55,10 @@ func TestQueryEditorContext_IBaseContextSurface(t *testing.T) {
 func TestQueryEditorContext_BufferAndRepeatNonNil(t *testing.T) {
 	ctx, _, _ := newTestQueryEditorContext()
 	if ctx.Buffer() == nil {
-		t.Fatal("Buffer() = nil, want non-nil (wwd.1 ships an empty shell)")
+		t.Fatal("Buffer() = nil, want non-nil")
 	}
 	if ctx.Repeat() == nil {
-		t.Fatal("Repeat() = nil, want non-nil (wwd.1 ships an empty shell)")
+		t.Fatal("Repeat() = nil, want non-nil")
 	}
 }
 

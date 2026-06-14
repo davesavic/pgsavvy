@@ -44,7 +44,7 @@ var openTunnel = func(promptCtx, dialCtx context.Context, cfg models.SSHTunnelCo
 // excludes interactive credential prompts, which Open resolves before deriving
 // the dialCtx. Long enough to ride out a slow tunneled handshake, short enough
 // that an unreachable host fails fast instead of wedging the UI. Raised from
-// the former 10s adapters-layer budget (epic dbsavvy-t60w): a tunneled connect
+// the former 10s adapters-layer budget: a tunneled connect
 // must fit an SSH handshake plus AfterConnect SET round-trips through the
 // bastion, which 10s could not cover once the prompt was excluded.
 const connectTimeout = 30 * time.Second
@@ -105,8 +105,7 @@ func secretPrompter() session.SecretPrompter {
 // pgCapabilities is the single-source-of-truth Capabilities value for the
 // Postgres driver. Tests assert deep-equality against this var rather than a
 // literal so a future field addition can't silently drift the public surface.
-// HasLiveCancel was flipped from false to true in epic dbsavvy-66p.4, which
-// fulfils the D17 deferral from dbsavvy-921: Connection.Cancel now dials a
+// HasLiveCancel was flipped from false to true: Connection.Cancel now dials a
 // fresh CancelRequest packet against the same server using the per-session
 // secret key captured at AcquireSession time. See connection.go:Cancel.
 var pgCapabilities = drivers.Capabilities{
@@ -133,7 +132,7 @@ type Driver struct {
 // New returns a drivers.Factory closure that, when invoked, yields a
 // *Driver wrapping prompter. The closure shape (rather than returning
 // *Driver directly) lets main.go register the factory before any per-process
-// configuration is read — see epic dbsavvy-921 D16.
+// configuration is read.
 func New(prompter session.Prompter) drivers.Factory {
 	return func(_ context.Context) (drivers.Driver, error) {
 		return &Driver{prompter: prompter}, nil
@@ -188,7 +187,7 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile, re
 		return nil, err
 	}
 
-	// NOTICE/WARNING plumbing (epic dbsavvy-66p.5): the per-Connection router
+	// NOTICE/WARNING plumbing: the per-Connection router
 	// is constructed BEFORE pool creation so cfg.ConnConfig.OnNotice can be
 	// wired exactly once — the pgconn handler is captured at pool dial time
 	// and cannot be replaced thereafter. session.BuildPgxConfig does NOT set
@@ -200,7 +199,7 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile, re
 	// connectTimeout bounds only the NETWORK phase (bastion dial + SSH
 	// handshake + pool dial + ping + SELECT version()) — it is derived HERE,
 	// after credential and interactive-secret resolution, so a human typing a
-	// passphrase is never charged against the dial budget (epic dbsavvy-t60w).
+	// passphrase is never charged against the dial budget.
 	// The parent ctx (untimed by the connect path) still governs the prompt and
 	// remains cancellable for supersession.
 	dialCtx, cancel := context.WithTimeout(ctx, connectTimeout)

@@ -37,7 +37,7 @@ var ErrPopAtBottom = errors.New("gui: cannot pop the root context")
 // short-circuit on duplicate-top, after Pop, and after Replace). Hooks
 // receive no arguments and are intended for cross-cutting cancellation
 // concerns (e.g. keys.OneshotArm cancels any pending arm on context
-// switch). Added per dbsavvy-zro T7b — keeps the OneshotArm cancel path
+// switch). Keeps the OneshotArm cancel path
 // simple without polling on every keypress.
 type ContextTree struct {
 	stack      []types.IBaseContext
@@ -46,7 +46,7 @@ type ContextTree struct {
 	// evictedMain holds the MAIN_CONTEXT most recently displaced by
 	// removeMain (nil when the displacing push found no main to evict).
 	// The connection-manager close path consumes it via TakeEvictedMain to
-	// restore the pane the modal covered (dbsavvy-yea).
+	// restore the pane the modal covered.
 	evictedMain types.IBaseContext
 }
 
@@ -289,7 +289,7 @@ func (t *ContextTree) removeMain() {
 // TakeEvictedMain returns and clears the MAIN_CONTEXT most recently
 // displaced by removeMain (nil when none). The connection-manager close
 // path uses it to re-push the pane the modal covered so focus returns
-// where the user was (dbsavvy-yea).
+// where the user was.
 func (t *ContextTree) TakeEvictedMain() types.IBaseContext {
 	c := t.evictedMain
 	t.evictedMain = nil

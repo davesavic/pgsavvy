@@ -11,7 +11,7 @@ import (
 // ErrNotImplemented is returned by driver methods that are stubbed in the
 // current scope but will be filled in by a later epic. It is a fresh
 // sentinel — NOT errors.ErrUnsupported, which the Go standard library godoc
-// forbids aliasing. See epic dbsavvy-921 D4 and DESIGN.md §11.5.
+// forbids aliasing. See DESIGN.md §11.5.
 var ErrNotImplemented = errors.New("driver: operation not yet implemented")
 
 // ErrUnknownDriver is wrapped by Get when the requested driver name has not
@@ -22,7 +22,6 @@ var ErrUnknownDriver = errors.New("drivers: unknown driver")
 // QueryID that cannot identify a live backend (e.g. BackendPID == 0). It is a
 // precondition-violation sentinel, distinct from network failures on the cancel
 // dial — those propagate as wrapped *QueryError values from the driver layer.
-// See epic dbsavvy-66p.4.
 var ErrInvalidQueryID = errors.New("driver: invalid query id")
 
 // QueryError is the engine-neutral wrapper drivers map their native error

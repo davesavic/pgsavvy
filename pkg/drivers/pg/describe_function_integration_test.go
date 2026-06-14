@@ -2,7 +2,7 @@
 
 // Integration tests for Session.DescribeFunction against the docker/postgres
 // fixture. The fixture seeds an overloaded pair app.fn_overload(int) and
-// app.fn_overload(text, text) (dbsavvy-ko4m.5.1). Mirrors the
+// app.fn_overload(text, text). Mirrors the
 // openIntegrationSession pattern. Skipped (not failed) when DBSAVVY_TEST_PG
 // is unset.
 

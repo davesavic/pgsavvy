@@ -28,29 +28,29 @@ type ContextTree struct {
 	Selection    *SelectionContext
 	Suggestions  *SuggestionsContext
 	CommandLine  *CommandLineContext
-	// SearchLine is the bottom-anchored in-grid search input
-	// (epic dbsavvy-2ttm). TEMPORARY_POPUP kind, mirrors CommandLine.
+	// SearchLine is the bottom-anchored in-grid search input.
+	// TEMPORARY_POPUP kind, mirrors CommandLine.
 	SearchLine *SearchLineContext
-	// HideOverlay is the <leader>gH column-visibility overlay
-	// (dbsavvy-uv0.6). TEMPORARY_POPUP kind.
+	// HideOverlay is the <leader>gH column-visibility overlay.
+	// TEMPORARY_POPUP kind.
 	HideOverlay *HideOverlayContext
-	// ExportMenu is the <leader>oe export-result menu
-	// (dbsavvy-uv0.9). TEMPORARY_POPUP kind.
+	// ExportMenu is the <leader>oe export-result menu.
+	// TEMPORARY_POPUP kind.
 	ExportMenu *ExportMenuContext
-	// TableInspect is the tabbed columns/indexes inspect popup
-	// (epic dbsavvy-3vf). TEMPORARY_POPUP kind.
+	// TableInspect is the tabbed columns/indexes inspect popup.
+	// TEMPORARY_POPUP kind.
 	TableInspect *TableInspectContext
-	// CellEditor is the inline cell-edit mini-buffer popup
-	// (epic dbsavvy-bwq A1). TEMPORARY_POPUP kind.
+	// CellEditor is the inline cell-edit mini-buffer popup.
+	// TEMPORARY_POPUP kind.
 	CellEditor *CellEditorContext
-	// CommitDialog is the pending-edit commit dialog (epic
-	// dbsavvy-bwq A4). TEMPORARY_POPUP kind.
+	// CommitDialog is the pending-edit commit dialog.
+	// TEMPORARY_POPUP kind.
 	CommitDialog *CommitDialogContext
-	// ConflictDialog is the per-conflict refresh/overwrite dialog
-	// (epic dbsavvy-bwq A4). TEMPORARY_POPUP kind.
+	// ConflictDialog is the per-conflict refresh/overwrite dialog.
+	// TEMPORARY_POPUP kind.
 	ConflictDialog *ConflictDialogContext
-	// FKReversePicker is the reverse-FK referencing-table picker
-	// (epic dbsavvy-bwq B6). TEMPORARY_POPUP kind.
+	// FKReversePicker is the reverse-FK referencing-table picker.
+	// TEMPORARY_POPUP kind.
 	FKReversePicker *FKReversePickerContext
 
 	// Live GLOBAL / DISPLAY instances.
@@ -63,19 +63,18 @@ type ContextTree struct {
 	FirstRunTip *FirstRunTipContext
 
 	// QueryEditor is the live top-right MAIN_CONTEXT pane that hosts
-	// the vim-style SQL editor (epic dbsavvy-wwd). Promoted from
-	// StubContext in dbsavvy-wwd.1; subsequent child tasks fill in
-	// the *editor.Buffer / *editor.RepeatStore behind it.
+	// the vim-style SQL editor. Promoted from StubContext; subsequent
+	// child tasks fill in the *editor.Buffer / *editor.RepeatStore behind it.
 	QueryEditor *QueryEditorContext
 
 	// ConnectionManager is the centered modal MAIN_CONTEXT connection
-	// manager (dbsavvy-ig4). When top of the focus stack it suppresses both
+	// manager. When top of the focus stack it suppresses both
 	// the side rails and the QueryEditor paint and renders a centered
 	// bordered box over a blank background.
 	ConnectionManager *ConnectionManagerContext
 
-	// History is the <leader>h recent-query browser popup
-	// (dbsavvy-o9k0). TEMPORARY_POPUP kind.
+	// History is the <leader>h recent-query browser popup.
+	// TEMPORARY_POPUP kind.
 	History *HistoryContext
 
 	// Stub instances for the remaining deferred Contexts; Layout
@@ -145,7 +144,7 @@ func contextSpecs() []contextSpec {
 			assign: func(t *ContextTree, c types.IBaseContext) { t.Tables = c.(*TablesContext) },
 		},
 		// COLUMNS/INDEXES: named fields retained, Kind=STUB, excluded from
-		// Flatten() (superseded by TABLE_INSPECT popup, epic dbsavvy-3vf).
+		// Flatten() (superseded by TABLE_INSPECT popup).
 		{
 			key: types.COLUMNS, kind: types.STUB, title: "Columns", inFlatten: false,
 			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewColumnsContext(b, d) },
@@ -172,9 +171,9 @@ func contextSpecs() []contextSpec {
 		},
 		{
 			key: types.PROMPT, kind: types.TEMPORARY_POPUP, inFlatten: true,
-			// Content-capped box (dbsavvy-jzeo): a single-field prompt sized
+			// Content-capped box: a single-field prompt sized
 			// to its label+input, not a screen fraction. The cap is wide
-			// enough that wrapped validator-error bodies (dbsavvy-8p5) don't
+			// enough that wrapped validator-error bodies don't
 			// truncate at the right edge.
 			popupRect: types.PopupRectSpec{Kind: types.PopupSizePrompt},
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewPromptContext(b, d) },
@@ -188,7 +187,7 @@ func contextSpecs() []contextSpec {
 		},
 		{
 			key: types.SUGGESTIONS, kind: types.TEMPORARY_POPUP, inFlatten: true,
-			// Cursor-anchored dropdown (dbsavvy-etp.2): the orchestrator
+			// Cursor-anchored dropdown: the orchestrator
 			// places this below the editor cursor (flipping above near the
 			// bottom edge), not screen-centred. WidthFrac/HeightFrac are
 			// the centred fallback used when the editor view is absent.
@@ -239,7 +238,7 @@ func contextSpecs() []contextSpec {
 		{
 			key: types.COMMIT_DIALOG, kind: types.TEMPORARY_POPUP, title: "Commit", inFlatten: true,
 			// 0.7 wide so the generated-SQL preview lines fit without
-			// truncating (dbsavvy-b0l).
+			// truncating.
 			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.7, HeightFrac: 0.6},
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewCommitDialogContext(b, d) },
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.CommitDialog = c.(*CommitDialogContext) },
@@ -296,7 +295,7 @@ func contextSpecs() []contextSpec {
 		},
 
 		// FirstRunTip is the welcome popup shown above CONNECTIONS on the
-		// user's first launch (dbsavvy-56u.2). PERSISTENT_POPUP so
+		// user's first launch. PERSISTENT_POPUP so
 		// subsequent popup pushes don't auto-evict it.
 		{
 			key: types.FIRST_RUN_TIP, kind: types.PERSISTENT_POPUP, inFlatten: true,
@@ -304,8 +303,8 @@ func contextSpecs() []contextSpec {
 			assign: func(t *ContextTree, c types.IBaseContext) { t.FirstRunTip = c.(*FirstRunTipContext) },
 		},
 
-		// QUERY_EDITOR is the live top-right MAIN_CONTEXT pane (epic
-		// dbsavvy-wwd). wwd.1 promotes it from stub to a real
+		// QUERY_EDITOR is the live top-right MAIN_CONTEXT pane,
+		// promoted from stub to a real
 		// BaseContext-embedding type; modes + matcher come straight from
 		// the dependency bag so focus/blur can drive the ModeStore +
 		// Matcher.Cancel contract documented on the type.
@@ -317,7 +316,7 @@ func contextSpecs() []contextSpec {
 			assign: func(t *ContextTree, c types.IBaseContext) { t.QueryEditor = c.(*QueryEditorContext) },
 		},
 
-		// CONNECTION_MANAGER is the centered modal MAIN_CONTEXT (dbsavvy-ig4).
+		// CONNECTION_MANAGER is the centered modal MAIN_CONTEXT.
 		// Modelled on CONNECTING: MAIN_CONTEXT kind, inFlatten=true, view name
 		// "connection_manager". When top of the focus stack the layout pass
 		// paints it as a centered bordered box, suppressing the side rails and

@@ -4,7 +4,7 @@
 // makes the config user-friendly — users rebind by action ID, not by
 // closure.
 //
-// Architectural invariant (DESIGN §10, dlp epic D1): this package MUST
+// Architectural invariant (DESIGN §10, epic D1): this package MUST
 // NOT import any of:
 //
 //	pkg/gui/keys           (Matcher / ChordTrie are downstream consumers)

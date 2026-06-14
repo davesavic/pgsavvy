@@ -156,7 +156,7 @@ func TestAppState_Save_ReadOnlyFs_ReturnsError(t *testing.T) {
 	require.True(t, os.IsNotExist(statErr))
 }
 
-// dbsavvy-56u.1: PushRecentConnectionID prepends, dedupes, and caps the
+// PushRecentConnectionID prepends, dedupes, and caps the
 // returned slice at 10 entries.
 
 func TestPushRecentConnectionID_EmptyConnIDLeavesSliceUnchanged(t *testing.T) {

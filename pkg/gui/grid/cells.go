@@ -85,7 +85,7 @@ func renderCell(value any, col models.ColumnMeta) (visible, decorated string) {
 // When isDirty is true the decorated string is layered with the
 // DirtyCellBg tint; the visible string is unchanged because the edit is
 // signalled by background colour, not a glyph. When isDirty is false the
-// result is identical to renderCell. dbsavvy-bwq.6 (A3).
+// result is identical to renderCell.
 func renderCellWithDirty(value any, col models.ColumnMeta, isDirty bool) (visible, decorated string) {
 	visible, decorated = renderCell(value, col)
 	if !isDirty {
@@ -103,7 +103,6 @@ func renderCellWithDirty(value any, col models.ColumnMeta, isDirty bool) (visibl
 // truncation ellipsis, so no per-cell glyph is needed. Padding the plain
 // visible string before wrapping mirrors renderDataLine's clean path so a
 // digit in the SGR prefix can never collide with a padded value.
-// dbsavvy-cyh (A3 wiring).
 func renderCellPadded(value any, col models.ColumnMeta, w int, isDirty bool) string {
 	visible := renderCellPlain(value, col)
 	padded := padRight(visible, w)
@@ -117,7 +116,7 @@ func renderCellPadded(value any, col models.ColumnMeta, w int, isDirty bool) str
 // renderCellPlain is the unstyled cell stringifier. Used for column
 // auto-sizing (where SGR escapes would skew the width) and for TSV
 // yank output (which must not carry colour codes). All non-NULL
-// strings are routed through SanitizeCellEscapes (dbsavvy-uv0 AD-16)
+// strings are routed through SanitizeCellEscapes
 // so untrusted server output cannot bleed terminal escapes into the
 // grid or exports.
 func renderCellPlain(value any, col models.ColumnMeta) string {
@@ -170,7 +169,7 @@ func formatScalar(value any) string {
 // multibyte rune and emit invalid UTF-8. When truncation occurs the
 // ellipsis "…" is appended; the retained prefix is the largest rune
 // sequence whose byte length is < MaxCellRenderBytes. Cells within the
-// cap are returned unchanged (dbsavvy-fow.9 U22).
+// cap are returned unchanged.
 func capCellBytes(s string) string {
 	if len(s) <= MaxCellRenderBytes {
 		return s
@@ -294,7 +293,7 @@ func ansiFgCode(fg string) string {
 // honored by gocui because the TUI runs in OutputTrue (see gui.go).
 // W3C colour names fall back to the basic 40-47 / bright 100-107 codes.
 // Empty/unknown tokens collapse to "" — same fallback policy as
-// ansiFgCode. dbsavvy-kvk.
+// ansiFgCode.
 func ansiBgCode(bg string) string {
 	if code := ansiTrueColorBg(bg); code != "" {
 		return code
@@ -339,7 +338,7 @@ func ansiTrueColorBg(bg string) string {
 // SanitizeCellEscapes strips ANSI escape introducers and C0 control
 // characters from s so untrusted server output cannot hijack the
 // terminal. Used by renderExpanded, grid cell passthrough, yank, EXPLAIN
-// raw text, and exporters (dbsavvy-uv0 AD-16).
+// raw text, and exporters.
 //
 // Rules:
 //   - CSI sequences (\x1b[ ... final-byte) are dropped wholesale.

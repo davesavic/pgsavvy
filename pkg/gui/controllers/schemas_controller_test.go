@@ -86,7 +86,7 @@ func TestSchemasControllerLeaderHIsPublishedAsTwoKeyChord(t *testing.T) {
 	}
 }
 
-// AC (dbsavvy-04n): <CR> on a schema row invokes OnSchemaActivate with
+// AC: <CR> on a schema row invokes OnSchemaActivate with
 // the picker's selected name. Verifies the per-rail trait Enter binding
 // routes through SchemasController's onConfirm closure.
 func TestSchemasControllerEnterFiresOnSchemaActivate(t *testing.T) {
@@ -110,7 +110,7 @@ func TestSchemasControllerEnterFiresOnSchemaActivate(t *testing.T) {
 	}
 }
 
-// AC (dbsavvy-04n): <CR> with no selection does not invoke
+// AC: <CR> with no selection does not invoke
 // OnSchemaActivate (no spurious LoadTables for empty schema name).
 func TestSchemasControllerEnterEmptySelectionNoFire(t *testing.T) {
 	b := newBag()
@@ -133,7 +133,7 @@ func TestSchemasControllerEnterEmptySelectionNoFire(t *testing.T) {
 	}
 }
 
-// AC (dbsavvy-04n): <CR> with nil OnSchemaActivate is a clean no-op
+// AC: <CR> with nil OnSchemaActivate is a clean no-op
 // (preserves backward compat with test wiring that leaves the closure
 // unset).
 func TestSchemasControllerEnterNilCallbackNoPanic(t *testing.T) {

@@ -15,13 +15,13 @@ import (
 )
 
 // ErrDisconnected is returned by Execute/Stream/Begin when the session
-// has been marked connection-dead via SetDisconnected. hq5.6.
+// has been marked connection-dead via SetDisconnected.
 var ErrDisconnected = errors.New("session: connection lost")
 
 // ErrPreemptPending is returned by Stream/Execute/Explain/Begin when a prior
 // query's worker did not exit within the bounded preempt Stop-wait and is
 // still holding streamMu. The fence lifts when that wedged worker finally
-// exits (its onFinish releases streamMu and clears the flag). gr7e.2 (AD4).
+// exits (its onFinish releases streamMu and clears the flag). AD4.
 var ErrPreemptPending = errors.New("session: prior query still terminating")
 
 // noticeAttacher is the optional capability of a drivers.Session: when the
@@ -29,7 +29,7 @@ var ErrPreemptPending = errors.New("session: prior query still terminating")
 // Connection.Capabilities().HasNotice) it implements AttachNotice on the
 // pg.Session value. SQLSession type-asserts against this private interface
 // at construction so it can stay engine-agnostic. AttachNotice itself is
-// owned by pkg/drivers/pg.Session (task dbsavvy-66p.5).
+// owned by pkg/drivers/pg.Session.
 type noticeAttacher interface {
 	AttachNotice(ch chan<- pgconn.Notice)
 }
@@ -106,19 +106,18 @@ type SQLSession struct {
 
 	// disconnected is set when IsConnectionDead classifies a terminal error.
 	// Once true the session rejects new Execute/Stream/Begin attempts and the
-	// UI renders the schema rail dimmed. hq5.6.
+	// UI renders the schema rail dimmed.
 	disconnected atomic.Bool
 
 	// preemptPending is set when a bounded preempt Stop-wait expired with the
 	// prior worker still live (streamMu still held). Once true the session
 	// rejects new Execute/Stream/Explain/Begin attempts with ErrPreemptPending
-	// until the wedged worker's onFinish releases streamMu and clears it. gr7e.2.
+	// until the wedged worker's onFinish releases streamMu and clears it.
 	preemptPending atomic.Bool
 
 	// fkCache is the per-Connection foreign-key cache. Constructed lazily on
 	// first FKCache() call so SQLSessions whose callers never need FK metadata
-	// pay zero cost. Guarded by fkCacheOnce. See pkg/session/fk_cache.go and
-	// task dbsavvy-bwq.13.
+	// pay zero cost. Guarded by fkCacheOnce. See pkg/session/fk_cache.go.
 	fkCache     *FKCache
 	fkCacheOnce sync.Once
 
@@ -173,7 +172,7 @@ func (s *SQLSession) SessionID() models.SessionID { return s.inner.ID() }
 // FKCache returns the per-Connection foreign-key cache, constructing it on
 // first call. The loader wraps the inner driver session's ListForeignKeys.
 // Subsequent calls return the same cache instance for the lifetime of this
-// SQLSession; closing the SQLSession drops it. See dbsavvy-bwq.13 / ADR-8.
+// SQLSession; closing the SQLSession drops it. See ADR-8.
 func (s *SQLSession) FKCache() *FKCache {
 	s.fkCacheOnce.Do(func() {
 		s.fkCache = NewFKCache(func(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
@@ -197,18 +196,17 @@ func (s *SQLSession) CurrentTransaction() drivers.Transaction { return s.inner.C
 func (s *SQLSession) SettingsSnapshot() *SettingsSnapshot { return s.settings }
 
 // SetDisconnected marks the session as connection-dead. Once set, new
-// Execute/Stream/Begin calls return ErrDisconnected. Idempotent. hq5.6.
+// Execute/Stream/Begin calls return ErrDisconnected. Idempotent.
 func (s *SQLSession) SetDisconnected(v bool) { s.disconnected.Store(v) }
 
 // MarkPreemptPending fences the session after a bounded preempt Stop-wait
 // expired with the prior worker still live. New Execute/Stream/Explain/Begin
 // calls return ErrPreemptPending until the wedged worker's onFinish releases
 // streamMu and clears the flag. Called by the QueryRunner on bound-expiry.
-// gr7e.2.
 func (s *SQLSession) MarkPreemptPending() { s.preemptPending.Store(true) }
 
 // IsDisconnected reports whether the session has been marked
-// connection-dead via SetDisconnected. hq5.6.
+// connection-dead via SetDisconnected.
 func (s *SQLSession) IsDisconnected() bool { return s.disconnected.Load() }
 
 // TxStatementCount returns the number of statements executed in the current
@@ -273,7 +271,7 @@ func (s *SQLSession) Execute(ctx context.Context, q models.Query) (models.Result
 	if !LoggingSuppressed(ctx) {
 		s.recordHistory(q.SQL, durMs, rows, err == nil)
 	}
-	// hq5.6: mark session disconnected on transport-level errors.
+	// mark session disconnected on transport-level errors.
 	if err != nil && drivers.IsConnectionDead(err) {
 		s.disconnected.Store(true)
 	}
@@ -397,7 +395,7 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 			if tx := s.inner.CurrentTransaction(); tx != nil {
 				tx.ObserveError(termErr)
 			}
-			// hq5.6: mark session disconnected on transport-level errors
+			// mark session disconnected on transport-level errors
 			// so subsequent Execute/Stream/Begin calls fail fast.
 			if drivers.IsConnectionDead(termErr) {
 				s.disconnected.Store(true)
@@ -405,7 +403,7 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 		}
 		// The wedged worker has now exited and is releasing streamMu; lift the
 		// preempt fence at the same instant so a fenced session reopens for new
-		// queries exactly when the queue is free again. gr7e.2.
+		// queries exactly when the queue is free again.
 		s.preemptPending.Store(false)
 		s.streamMu.Unlock()
 	}

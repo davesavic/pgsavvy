@@ -12,7 +12,7 @@ func TestNewContextTreeReturnsAllContexts(t *testing.T) {
 		t.Fatal("NewContextTree returned nil")
 	}
 	flat := tree.Flatten()
-	// dbsavvy-2ttm.3 adds SEARCH_LINE (TEMPORARY_POPUP), 26→27.
+	// SEARCH_LINE (TEMPORARY_POPUP) takes the count 26→27.
 	if len(flat) != 27 {
 		t.Fatalf("Flatten() len = %d, want 27 (20 live + 4 stub + 2 main + 1 persistent)", len(flat))
 	}
@@ -28,12 +28,12 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 	tree := NewContextTree(types.ContextTreeDeps{})
 
 	allKeys := []types.ContextKey{
-		// Live (15 — 2 side + 9 temp popup + 1 global + 3 display + 1 persistent popup; messages panel removed by dbsavvy-fc2.1).
+		// Live (15 — 2 side + 9 temp popup + 1 global + 3 display + 1 persistent popup; messages panel removed).
 		types.SCHEMAS, types.TABLES,
 		types.MENU, types.CONFIRMATION, types.PROMPT, types.SELECTION, types.SUGGESTIONS, types.COMMAND_LINE, types.HIDE_OVERLAY, types.EXPORT_MENU, types.TABLE_INSPECT,
 		types.GLOBAL, types.LIMIT, types.WHICH_KEY, types.CHEATSHEET,
 		types.FIRST_RUN_TIP,
-		// Main + stub (6 — CONNECTING removed by dbsavvy-bsh).
+		// Main + stub (6 — CONNECTING removed).
 		types.QUERY_EDITOR, types.CONNECTION_MANAGER, types.TABLE_DATA_EDITOR, types.RESULT_GRID,
 		types.PLAN, types.HISTORY,
 	}
@@ -59,7 +59,7 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		kind types.ContextKind
 	}
 	cases := []want{
-		// 2 SIDE_CONTEXT (CONNECTIONS removed by dbsavvy-bsh).
+		// 2 SIDE_CONTEXT (CONNECTIONS removed).
 		{types.SCHEMAS, types.SIDE_CONTEXT},
 		{types.TABLES, types.SIDE_CONTEXT},
 		// 9 TEMPORARY_POPUP.
@@ -72,16 +72,16 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.HIDE_OVERLAY, types.TEMPORARY_POPUP},
 		{types.EXPORT_MENU, types.TEMPORARY_POPUP},
 		{types.TABLE_INSPECT, types.TEMPORARY_POPUP},
-		// dbsavvy-o9k0.5: HISTORY promoted from STUB to TEMPORARY_POPUP.
+		// HISTORY promoted from STUB to TEMPORARY_POPUP.
 		{types.HISTORY, types.TEMPORARY_POPUP},
-		// 1 GLOBAL, 3 DISPLAY (messages panel removed by dbsavvy-fc2.1).
+		// 1 GLOBAL, 3 DISPLAY (messages panel removed).
 		{types.GLOBAL, types.GLOBAL_CONTEXT},
 		{types.LIMIT, types.DISPLAY_CONTEXT},
 		{types.WHICH_KEY, types.DISPLAY_CONTEXT},
 		{types.CHEATSHEET, types.DISPLAY_CONTEXT},
-		// 1 PERSISTENT_POPUP (FIRST_RUN_TIP — dbsavvy-56u.2).
+		// 1 PERSISTENT_POPUP (FIRST_RUN_TIP).
 		{types.FIRST_RUN_TIP, types.PERSISTENT_POPUP},
-		// 2 MAIN_CONTEXT (CONNECTING removed by dbsavvy-bsh).
+		// 2 MAIN_CONTEXT (CONNECTING removed).
 		{types.QUERY_EDITOR, types.MAIN_CONTEXT},
 		{types.CONNECTION_MANAGER, types.MAIN_CONTEXT},
 		// 3 STUB (TABLE_DATA_EDITOR + RESULT_GRID + PLAN).
@@ -111,23 +111,23 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 	}
 	want := map[types.ContextKind]int{
 		types.SIDE_CONTEXT: 2,
-		// dbsavvy-bwq.py4: CellEditor, CommitDialog, ConflictDialog and
+		// CellEditor, CommitDialog, ConflictDialog and
 		// FKReversePicker take TEMPORARY_POPUP from 9→13.
-		// dbsavvy-2ttm.3: SEARCH_LINE takes it 13→14.
-		// dbsavvy-o9k0.5: HISTORY (promoted from STUB) takes it 14→15.
+		// SEARCH_LINE takes it 13→14.
+		// HISTORY (promoted from STUB) takes it 14→15.
 		types.TEMPORARY_POPUP: 15,
 		types.EXTRAS_CONTEXT:  0,
 		types.GLOBAL_CONTEXT:  1,
 		types.DISPLAY_CONTEXT: 3,
-		// dbsavvy-wwd.1 promotes QUERY_EDITOR from STUB to a real
+		// QUERY_EDITOR was promoted from STUB to a real
 		// MAIN_CONTEXT, so STUB drops 5→4 and MAIN_CONTEXT rises 0→1.
-		// dbsavvy-e53.2 adds CONNECTING (MAIN_CONTEXT), so MAIN_CONTEXT is 2.
-		// dbsavvy-bsh removes CONNECTING, so MAIN_CONTEXT is 2.
+		// CONNECTING was added (MAIN_CONTEXT), so MAIN_CONTEXT is 2.
+		// CONNECTING was later removed, so MAIN_CONTEXT is 2.
 		types.MAIN_CONTEXT: 2,
-		// dbsavvy-o9k0.5 promotes HISTORY from STUB to TEMPORARY_POPUP, so
+		// HISTORY was promoted from STUB to TEMPORARY_POPUP, so
 		// STUB drops 4→3.
 		types.STUB: 3,
-		// dbsavvy-56u.2 introduces FIRST_RUN_TIP, the first
+		// FIRST_RUN_TIP is the first
 		// PERSISTENT_POPUP shipped by the app.
 		types.PERSISTENT_POPUP: 1,
 	}

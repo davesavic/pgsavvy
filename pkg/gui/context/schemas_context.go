@@ -11,7 +11,7 @@ import (
 
 // SchemasContext renders the schema list in the left-rail SCHEMAS slot.
 // The ShowHiddenMode flag is a transient view-state bit toggled by the
-// schemas helper (T5, enn.6) via the show/hide leader bindings; the
+// schemas helper (T5) via the show/hide leader bindings; the
 // helper reads/writes it through the accessors below so the context
 // stays the single source of truth for its own UI state.
 type SchemasContext struct {
@@ -21,7 +21,7 @@ type SchemasContext struct {
 	// HandleRender (introduced incrementally by T5) should include
 	// hidden-flagged schemas in the row list. Stored as atomic.Bool so
 	// concurrent H/U toggles from the helper layer remain race-clean
-	// without forcing callers through a mutex (enn.6 AC).
+	// without forcing callers through a mutex.
 	showHiddenMode atomic.Bool
 }
 
@@ -80,8 +80,8 @@ func (s *SchemasContext) isRowVisible(i int) bool {
 // HandleRender writes the schema-row text into the SCHEMAS view each
 // frame. Mirrors ConnectionsContext.HandleRender: cursor row gets a
 // "> " marker, other rows get "  " so columns line up. populateSchemasRail
-// (dbsavvy-855) feeds Items; without this method the rail stayed blank
-// after a successful connect (dbsavvy-5iv).
+// feeds Items; without this method the rail stayed blank
+// after a successful connect.
 func (s *SchemasContext) HandleRender() error {
 	deps := s.deps
 	viewName := s.GetViewName()
@@ -111,7 +111,7 @@ func (s *SchemasContext) renderRows() string {
 	// items[cursor]). We walk that slice but skip rows that hit the
 	// hidden filter; the "> " marker only paints when the cursor lands
 	// on a row that survives the filter. j/k clamping is unchanged.
-	// hq5.6: dim items when the session is disconnected.
+	// dim items when the session is disconnected.
 	dim := s.deps.IsDisconnected != nil && s.deps.IsDisconnected()
 
 	var b strings.Builder

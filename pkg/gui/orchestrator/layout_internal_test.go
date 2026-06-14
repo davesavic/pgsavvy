@@ -28,7 +28,7 @@ func resetThemeToDefaultDark(t *testing.T) {
 	}
 }
 
-// TestApplyFocusFrameColorsFocusedAndUnfocused (dbsavvy-tro.1 AC #1/#2):
+// TestApplyFocusFrameColorsFocusedAndUnfocused:
 // the focused rail's FrameColor matches theme.ActiveBorder; every other
 // Frame=true non-popup rail gets theme.InactiveBorder.
 func TestApplyFocusFrameColorsFocusedAndUnfocused(t *testing.T) {
@@ -57,7 +57,7 @@ func TestApplyFocusFrameColorsFocusedAndUnfocused(t *testing.T) {
 	}
 }
 
-// TestApplyFocusFrameColorsSwapWithinOneCall (dbsavvy-tro.1 AC #3):
+// TestApplyFocusFrameColorsSwapWithinOneCall:
 // swapping focus and re-invoking the helper updates BOTH the previously
 // focused and newly focused views in a single pass. Mirrors the
 // once-per-Layout integration in RunLayout.
@@ -85,7 +85,7 @@ func TestApplyFocusFrameColorsSwapWithinOneCall(t *testing.T) {
 	}
 }
 
-// TestApplyFocusFrameColorsSkipsFrameFalse (dbsavvy-tro.1 AC #4):
+// TestApplyFocusFrameColorsSkipsFrameFalse:
 // views with Frame=false (e.g. COMMAND_LINE — borderless 1-row strip)
 // must NOT have their FrameColor written by the helper.
 func TestApplyFocusFrameColorsSkipsFrameFalse(t *testing.T) {
@@ -106,7 +106,7 @@ func TestApplyFocusFrameColorsSkipsFrameFalse(t *testing.T) {
 	}
 }
 
-// TestApplyFocusFrameColorsLeavesPopupsUntouched (dbsavvy-tro.1 AC #5):
+// TestApplyFocusFrameColorsLeavesPopupsUntouched:
 // callers are responsible for excluding popup-Kind views from the input
 // map. The RunLayout integration only collects SIDE/EXTRAS contexts, so
 // a popup-style view passed implicitly stays untouched — assert by
@@ -131,7 +131,7 @@ func TestApplyFocusFrameColorsLeavesPopupsUntouched(t *testing.T) {
 	}
 }
 
-// TestApplyFocusFrameColorsNoFocusedMatch (dbsavvy-tro.1 AC #6 negative
+// TestApplyFocusFrameColorsNoFocusedMatch (negative
 // case): when focusedName is empty or matches no rail (e.g. before any
 // SetCurrentView has fired and Current() returns nil), every rail gets
 // inactive — no panic, no stale active border lingering from a previous
@@ -152,7 +152,7 @@ func TestApplyFocusFrameColorsNoFocusedMatch(t *testing.T) {
 	}
 }
 
-// TestPromptBorderStyleExprPromptUsesWarnBorder (dbsavvy-uly7.14 AC #1):
+// TestPromptBorderStyleExprPromptUsesWarnBorder:
 // the free-form `<c-e>` expression prompt, keyed off its label, paints
 // the WarnBorder colour.
 func TestPromptBorderStyleExprPromptUsesWarnBorder(t *testing.T) {
@@ -162,8 +162,8 @@ func TestPromptBorderStyleExprPromptUsesWarnBorder(t *testing.T) {
 	}
 }
 
-// TestPromptBorderStyleOtherPromptUsesActiveBorder (dbsavvy-uly7.14
-// AC #3): every other prompt label keeps ActiveBorder.
+// TestPromptBorderStyleOtherPromptUsesActiveBorder: every other prompt
+// label keeps ActiveBorder.
 func TestPromptBorderStyleOtherPromptUsesActiveBorder(t *testing.T) {
 	resetThemeToDefaultDark(t)
 	if got := promptBorderStyle("Enter database name: "); got != theme.Current().ActiveBorder {
@@ -171,8 +171,8 @@ func TestPromptBorderStyleOtherPromptUsesActiveBorder(t *testing.T) {
 	}
 }
 
-// TestPromptBorderStyleWarnUnsetFallsBackToDefault (dbsavvy-uly7.14
-// invariant / edge path): a theme that leaves WarnBorder unset must not
+// TestPromptBorderStyleWarnUnsetFallsBackToDefault (invariant / edge
+// path): a theme that leaves WarnBorder unset must not
 // crash — promptBorderStyle returns the nil style and frameAttr maps it
 // to ColorDefault.
 func TestPromptBorderStyleWarnUnsetFallsBackToDefault(t *testing.T) {
@@ -188,7 +188,7 @@ func TestPromptBorderStyleWarnUnsetFallsBackToDefault(t *testing.T) {
 	}
 }
 
-// TestResolveFocusedRailName (dbsavvy-66p): the focus-frame swap follows
+// TestResolveFocusedRailName: the focus-frame swap follows
 // the live active result tab instead of the stale focus-stack context.
 // When focus is pushed to the result pane the stack captures one
 // result_tab_<slot> context; gt/gT change the active tab without updating

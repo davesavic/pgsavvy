@@ -304,7 +304,7 @@ func TestCompletionAcceptReplacesPartialIdentifier(t *testing.T) {
 		t.Fatal("popup not visible after trigger")
 	}
 	// Enter via the insert seam = accept. In a FROM (table) context the
-	// accept auto-inserts a deduped editable alias (dbsavvy-ko4m.6.2),
+	// accept auto-inserts a deduped editable alias,
 	// so "us" -> "users u".
 	if !ctrl.CompletionKey(keys.Key{Special: keys.KeyEnter}) {
 		t.Fatal("CompletionKey(Enter) returned false; want consumed")
@@ -373,7 +373,7 @@ func TestCompletionTabNextWrapsThenAccept(t *testing.T) {
 	}
 	// candidates sorted by engine; index 1 must have replaced the prefix.
 	// FROM is a table context so accept appends a deduped alias
-	// (dbsavvy-ko4m.6.2): "users u" / "usage u".
+	// "users u" / "usage u".
 	got := string(buf.Lines[0].Runes)
 	if got != "SELECT * FROM users u" && got != "SELECT * FROM usage u" {
 		t.Fatalf("accept produced %q; want a full candidate", got)
@@ -417,7 +417,7 @@ func TestCompletionShiftTabFallsThroughWhenHidden(t *testing.T) {
 	}
 }
 
-// TestAutoTriggerOpensInFromContext pins the dbsavvy-etp.4 gate: with the
+// TestAutoTriggerOpensInFromContext pins the auto-trigger gate: with the
 // popup hidden, AutoTrigger opens it only when the cursor sits at an
 // AutoTriggerFromContext position (here `FROM us`).
 func TestAutoTriggerOpensInFromContext(t *testing.T) {
@@ -431,17 +431,17 @@ func TestAutoTriggerOpensInFromContext(t *testing.T) {
 	}
 }
 
-// TestAutoTriggerOpensOnBareTwoRunePrefix pins the dbsavvy-ko4m.6.1
+// TestAutoTriggerOpensOnBareTwoRunePrefix pins the bare-prefix
 // broadening: a bare >=2-rune identifier prefix with NO governing clause
 // keyword, operator, or `<ident>.` context now auto-opens the popup
 // (previously this was suppressed as "prefix-everywhere"). The fuzzy
-// quality floor (ko4m.3) is what keeps the broadened firing from
+// quality floor is what keeps the broadened firing from
 // flooding; the gate itself opens.
 func TestAutoTriggerOpensOnBareTwoRunePrefix(t *testing.T) {
 	ctrl, _, buf, sugg, _ := newCompletionRig(t, "us", 2, []string{"users"})
 	ctrl.AutoTrigger(buf, buf.CursorPos())
 	if !sugg.IsVisible() {
-		t.Error("AutoTrigger did not open popup on a bare 2-rune prefix; want visible (ko4m.6.1)")
+		t.Error("AutoTrigger did not open popup on a bare 2-rune prefix; want visible")
 	}
 }
 
@@ -482,7 +482,7 @@ func TestAutoTriggerRefiltersWhileVisible(t *testing.T) {
 // TestAutoTriggerBackspaceRefiltersToEmptyDismisses pins the edge path:
 // backspacing the partial identifier down to a non-matching prefix (here
 // to a candidate set of zero) dismisses the popup cleanly rather than
-// leaving it stale. dbsavvy-etp.4.
+// leaving it stale.
 func TestAutoTriggerBackspaceRefiltersToEmptyDismisses(t *testing.T) {
 	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT * FROM usz", 17, []string{"users"})
 	// Open with a matching prefix first.
@@ -503,14 +503,14 @@ func TestAutoTriggerBackspaceRefiltersToEmptyDismisses(t *testing.T) {
 }
 
 // TestAutoTriggerNoRePopupAfterAccept pins the re-popup-after-accept
-// guard under the dbsavvy-ko4m.6.1 broadened gate: the accept itself does
+// guard under the broadened gate: the accept itself does
 // not fire AutoTrigger (accept routes through CompletionKey / <c-y>,
 // never the printable/backspace seam), so the one-shot suppression flag
 // armed by the accept survives intact to the next real keystroke. The
 // just-inserted full identifier `users` (a 5-rune prefix) now DOES
 // satisfy the broadened gate — so the suppression flag, not the gate, is
 // what keeps the very next non-dot keystroke from re-opening the popup
-// over the just-accepted text. dbsavvy-etp.4 / dbsavvy-ko4m.6.1.
+// over the just-accepted text.
 func TestAutoTriggerNoRePopupAfterAccept(t *testing.T) {
 	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT * FROM us", 16, []string{"users"})
 	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
@@ -533,7 +533,7 @@ func TestAutoTriggerNoRePopupAfterAccept(t *testing.T) {
 // boundary of the one-shot suppression under the broadened gate: the flag
 // suppresses only the SINGLE next keystroke. Once consumed, a subsequent
 // keystroke that leaves a >=2-rune prefix re-opens the popup — this is the
-// intended broadened behavior (the user is typing on, and ko4m.3's fuzzy
+// intended broadened behavior (the user is typing on, and the fuzzy
 // floor trims the candidate set). The frozen design has no timer, so there
 // is no signal to distinguish "still extending the accepted word" from
 // "typing a new identifier"; the one-shot only owes the immediate next key.
@@ -849,7 +849,7 @@ func TestVimEditorPublishesInsertAndHistoryBindings(t *testing.T) {
 
 // TestCompletionAcceptAliasInColumnContextOmitsAlias asserts that when the
 // accept cursor is NOT in a table context (Expect != Tables), the bare
-// candidate is inserted with no alias (dbsavvy-ko4m.6.2). A SELECT-clause
+// candidate is inserted with no alias. A SELECT-clause
 // identifier is a column context.
 func TestCompletionAcceptAliasInColumnContextOmitsAlias(t *testing.T) {
 	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT na FROM users", 9, []string{"name"})
@@ -865,7 +865,7 @@ func TestCompletionAcceptAliasInColumnContextOmitsAlias(t *testing.T) {
 
 // TestCompletionAcceptAliasCollisionSuffixes asserts that a second table
 // whose derived alias collides with an in-scope alias gets a numeric suffix
-// (u -> u2), deduped against ContextResult.InScopeTables (dbsavvy-ko4m.6.2).
+// (u -> u2), deduped against ContextResult.InScopeTables.
 func TestCompletionAcceptAliasCollisionSuffixes(t *testing.T) {
 	ctrl, _, buf, _, _ := newCompletionRig(t, "SELECT * FROM users u JOIN ur", 29, []string{"urls"})
 	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
@@ -877,7 +877,7 @@ func TestCompletionAcceptAliasCollisionSuffixes(t *testing.T) {
 
 // TestCompletionAcceptAliasSingleUndo asserts the whole "<table> <alias>"
 // insertion is a single EditKindReplace: one Undo reverts it back to the
-// typed prefix (dbsavvy-ko4m.6.2).
+// typed prefix.
 func TestCompletionAcceptAliasSingleUndo(t *testing.T) {
 	ctrl, _, buf, _, _ := newCompletionRig(t, "SELECT * FROM us", 16, []string{"users"})
 	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
@@ -895,7 +895,7 @@ func TestCompletionAcceptAliasSingleUndo(t *testing.T) {
 
 // TestCompletionAcceptAliasEmptyInScopeNoPanic asserts that accepting in a
 // table context with zero pre-existing in-scope aliases still derives the
-// alias from the table name and does not panic (dbsavvy-ko4m.6.2).
+// alias from the table name and does not panic.
 func TestCompletionAcceptAliasEmptyInScopeNoPanic(t *testing.T) {
 	ctrl, _, buf, _, _ := newCompletionRig(t, "SELECT * FROM ord", 17, []string{"orders"})
 	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
@@ -907,7 +907,7 @@ func TestCompletionAcceptAliasEmptyInScopeNoPanic(t *testing.T) {
 
 // TestCompletionAcceptAliasToggleOff asserts that with the alias toggle
 // disabled (editor.autocomplete_alias: false) a table accept inserts the
-// bare table name with no alias (dbsavvy-ko4m.6.2, Finding K).
+// bare table name with no alias.
 func TestCompletionAcceptAliasToggleOff(t *testing.T) {
 	ctrl, _, buf, _, _ := newCompletionRig(t, "SELECT * FROM us", 16, []string{"users"})
 	ctrl.SetAliasOnAccept(false)
@@ -920,7 +920,7 @@ func TestCompletionAcceptAliasToggleOff(t *testing.T) {
 
 // TestCompletionAcceptAliasQuotedMixedCase asserts that a mixed-case table
 // candidate emits the double-quoted round-trippable form on accept, and the
-// derived alias is the lowercased first letter (dbsavvy-ko4m.6.2, Finding Q).
+// derived alias is the lowercased first letter.
 func TestCompletionAcceptAliasQuotedMixedCase(t *testing.T) {
 	ctrl, _, buf, _, _ := newCompletionRig(t, "SELECT * FROM My", 16, []string{"MyTable"})
 	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
@@ -931,7 +931,7 @@ func TestCompletionAcceptAliasQuotedMixedCase(t *testing.T) {
 }
 
 // fakeSchemaMeta is a controlled editor.SchemaMetadata for the accept-time
-// ambiguous-column-qualify tests (dbsavvy-ko4m.6.3). cols maps a
+// ambiguous-column-qualify tests. cols maps a
 // "schema.table" key to its column list; warmed records whether that
 // (schema,table) is considered loaded — the Columns ok-return that gates
 // qualification. A table absent from warmed is treated as NOT warmed
@@ -964,7 +964,7 @@ func cols(names ...string) []models.Column {
 
 // newQualifyRig builds a completion rig with a fake SchemaMetadata wired in
 // (active schema "public") so the accept-time ambiguous-column qualifier
-// (dbsavvy-ko4m.6.3) reads controlled (cols, ok) per in-scope table.
+// reads controlled (cols, ok) per in-scope table.
 func newQualifyRig(t *testing.T, line string, col int, candidates []string, meta fakeSchemaMeta) (*controllers.VimEditorController, *editor.Buffer, *context.SuggestionsContext) {
 	t.Helper()
 	ctrl, _, buf, sugg, _ := newCompletionRig(t, line, col, candidates)
@@ -974,7 +974,7 @@ func newQualifyRig(t *testing.T, line string, col int, candidates []string, meta
 
 // TestCompletionAcceptQualifiesAmbiguousColumn: a column owned by >=2 warmed
 // in-scope tables is qualified with the FIRST owning table's alias via one
-// EditKindReplace (dbsavvy-ko4m.6.3).
+// EditKindReplace.
 func TestCompletionAcceptQualifiesAmbiguousColumn(t *testing.T) {
 	meta := fakeSchemaMeta{
 		cols: map[string][]models.Column{
@@ -992,7 +992,7 @@ func TestCompletionAcceptQualifiesAmbiguousColumn(t *testing.T) {
 }
 
 // TestCompletionAcceptUniqueColumnBare: a column owned by only ONE in-scope
-// table is inserted bare (no qualifier) — dbsavvy-ko4m.6.3.
+// table is inserted bare (no qualifier).
 func TestCompletionAcceptUniqueColumnBare(t *testing.T) {
 	meta := fakeSchemaMeta{
 		cols: map[string][]models.Column{
@@ -1011,7 +1011,7 @@ func TestCompletionAcceptUniqueColumnBare(t *testing.T) {
 
 // TestCompletionAcceptOwningAliasIsFirstInScope: when the same column is in
 // >=2 tables, the qualifier alias is that of the FIRST in-scope table (by
-// InScopeTables order) that owns it — dbsavvy-ko4m.6.3.
+// InScopeTables order) that owns it.
 func TestCompletionAcceptOwningAliasIsFirstInScope(t *testing.T) {
 	meta := fakeSchemaMeta{
 		cols: map[string][]models.Column{
@@ -1030,8 +1030,7 @@ func TestCompletionAcceptOwningAliasIsFirstInScope(t *testing.T) {
 }
 
 // TestCompletionAcceptUnwarmedColumnBare: if ANY consulted in-scope table is
-// not warmed (Columns ok==false), the column is inserted bare — no guess
-// (dbsavvy-ko4m.6.3).
+// not warmed (Columns ok==false), the column is inserted bare — no guess.
 func TestCompletionAcceptUnwarmedColumnBare(t *testing.T) {
 	meta := fakeSchemaMeta{
 		cols: map[string][]models.Column{
@@ -1050,7 +1049,7 @@ func TestCompletionAcceptUnwarmedColumnBare(t *testing.T) {
 }
 
 // TestCompletionAcceptEmptyScopeColumnBare: a column context with no in-scope
-// tables inserts the bare column and does not panic (dbsavvy-ko4m.6.3).
+// tables inserts the bare column and does not panic.
 func TestCompletionAcceptEmptyScopeColumnBare(t *testing.T) {
 	meta := fakeSchemaMeta{cols: map[string][]models.Column{}, warmed: map[string]bool{}}
 	// No FROM clause → InScopeTables empty.
@@ -1064,7 +1063,7 @@ func TestCompletionAcceptEmptyScopeColumnBare(t *testing.T) {
 
 // TestCompletionAcceptQualifiedColumnSingleUndo: the whole "<alias>.<column>"
 // qualification is a single EditKindReplace — one Undo reverts it to the
-// typed prefix (dbsavvy-ko4m.6.3).
+// typed prefix.
 func TestCompletionAcceptQualifiedColumnSingleUndo(t *testing.T) {
 	meta := fakeSchemaMeta{
 		cols: map[string][]models.Column{
@@ -1089,7 +1088,7 @@ func TestCompletionAcceptQualifiedColumnSingleUndo(t *testing.T) {
 
 // TestCompletionAcceptAlreadyQualifiedNotDoubled: when the partial sits after
 // an "alias." dot-qualifier ("u.na"), the accept does NOT add another
-// qualifier (dbsavvy-ko4m.6.3). The user already chose the table; the qualify
+// qualifier. The user already chose the table; the qualify
 // branch is skipped because a dot immediately precedes the identifier run
 // (dotPrecedesIdentStart) so it never emits "u.u.name".
 func TestCompletionAcceptAlreadyQualifiedNotDoubled(t *testing.T) {
@@ -1112,7 +1111,7 @@ func TestCompletionAcceptAlreadyQualifiedNotDoubled(t *testing.T) {
 // newSnippetRig wires a controller + buffer with a SuggestionsContext that
 // has a single Kind==snippet suggestion already shown, anchored at the
 // cursor (so the accept-time stale guard passes). The Body carries the
-// multi-line expansion. dbsavvy-ko4m.7.2.
+// multi-line expansion.
 func newSnippetRig(t *testing.T, line string, col int, body string) (*controllers.VimEditorController, *editor.Buffer, *context.SuggestionsContext) {
 	t.Helper()
 	modes := keys.NewModeStore()

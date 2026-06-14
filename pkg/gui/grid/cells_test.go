@@ -25,7 +25,7 @@ func resetThemeForTest(t *testing.T) {
 // (decoded by pgx into a Go slice) renders as Postgres array syntax
 // {a,b,c} rather than Go's "[a b c]" slice formatting. The grid display
 // and the edit-seed share this path, so what the user sees is a valid
-// array literal they can edit and commit (dbsavvy-26i).
+// array literal they can edit and commit.
 func TestRenderCellPlain_ArrayLiteral(t *testing.T) {
 	resetThemeForTest(t)
 	col := models.ColumnMeta{Name: "tags", TypeName: "_text"}
@@ -124,8 +124,7 @@ func TestRenderCell_BlobPreview(t *testing.T) {
 
 // TestSanitizeCellEscapes asserts the AD-16 stripping contract: CSI/OSC
 // escapes and C0 controls (except \t / \n) are removed; plain text and
-// tab/newline pass through unchanged. dbsavvy-uv0.7 implements the body
-// previously stubbed by dbsavvy-uv0.8.
+// tab/newline pass through unchanged.
 func TestSanitizeCellEscapes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -175,7 +174,6 @@ func TestRenderCell_HugeCellTruncates(t *testing.T) {
 // a rune boundary and never emits invalid UTF-8, even when a multibyte
 // rune straddles the MaxCellRenderBytes cap. The previous byte-slice
 // implementation could split a 3-byte CJK rune into mojibake.
-// dbsavvy-fow.9 U22.
 func TestCapCellBytes_RuneBoundary(t *testing.T) {
 	cases := []struct {
 		name string

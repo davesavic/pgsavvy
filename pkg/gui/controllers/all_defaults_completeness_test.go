@@ -12,7 +12,7 @@ import (
 // satisfies this interface MUST be listed in the per-controller registry
 // (Controllers.entries()), otherwise AllDefaultBindings (which is DERIVED
 // from that registry) never concatenates its GetKeybindings output and the
-// keys silently do nothing (dbsavvy-9v1.3 guard 2 / dbsavvy-fow.11 D3a).
+// keys silently do nothing.
 type keybindingProvider interface {
 	GetKeybindings(types.KeybindingsOpts) []*types.ChordBinding
 }

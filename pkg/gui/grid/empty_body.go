@@ -7,7 +7,7 @@ import "fmt"
 // never reaches here — only DML without RETURNING produces a column-less
 // result. When such a statement changed rows, the command tag carries the
 // count and we surface "(N row(s) affected)" rather than the misleading
-// "(0 rows)", which reads as "nothing happened". dbsavvy-outq.
+// "(0 rows)", which reads as "nothing happened".
 func emptyResultText(snap viewSnapshot) string {
 	if snap.rowsAffected <= 0 {
 		return EmptyResultIndicator

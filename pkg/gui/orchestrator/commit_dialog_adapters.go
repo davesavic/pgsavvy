@@ -79,7 +79,7 @@ func (h commitApplyHook) Apply(set *models.PendingEditSet, conn *models.Connecti
 	set.Clear()
 	// Write the post-commit server values back into the grid so the
 	// applied cells render fresh data instead of the original load
-	// snapshot. dbsavvy-5kto.
+	// snapshot.
 	refreshGridRows(h.deps.tabs, res.RefetchedColumns, res.RefetchedRows)
 	if h.deps.toast != nil {
 		h.deps.toast.Show(fmt.Sprintf("%d row(s) committed", rows), 0)
@@ -92,7 +92,6 @@ func (h commitApplyHook) Apply(set *models.PendingEditSet, conn *models.Connecti
 // or grid degrades to "grid keeps its loaded values", never an error:
 // by the time callers reach here the server-side work has already
 // committed, so display refresh must not fail the operation.
-// dbsavvy-5kto / dbsavvy-py0n.
 func refreshGridRows(tabs *ui.ResultTabsHelper, cols []models.ColumnMeta, rows []models.Row) {
 	if tabs == nil {
 		return
@@ -159,7 +158,7 @@ func (h commitShowSqlHook) OnShowSQL(set *models.PendingEditSet, conn *models.Co
 // conflictDialogDeps bundles the collaborators the conflict-dialog
 // refresh / overwrite hooks need. Sibling to commitDialogDeps —
 // separated so the conflict dialog can be wired independently of the
-// commit dialog's onUI + conflictCtx fields. dbsavvy-lda (dbsavvy-8oo #7).
+// commit dialog's onUI + conflictCtx fields.
 type conflictDialogDeps struct {
 	apply         *helpers.CellApplyHelper
 	tabs          *ui.ResultTabsHelper
@@ -171,7 +170,7 @@ type conflictDialogDeps struct {
 // Drops each conflicted edit from the active PendingEditSet and writes
 // the conflict-time ServerValue into the grid cell, so the user sees the
 // server's current data instead of the stale load snapshot once the
-// dirty-cell substitution disappears with the dropped edit. dbsavvy-py0n.
+// dirty-cell substitution disappears with the dropped edit.
 type conflictRefreshHook struct{ deps conflictDialogDeps }
 
 func (h conflictRefreshHook) Refresh(conflicts []models.ConflictedEdit, _ *models.Connection) error {
@@ -202,7 +201,7 @@ func (h conflictRefreshHook) Refresh(conflicts []models.ConflictedEdit, _ *model
 // share a row, whereas batching same-PK rows into one call would let the
 // last row win. A failure to resolve the grid's PK columns degrades to
 // "grid keeps its loaded values" — the edits are already dropped and the
-// server was never written, so there is nothing to fail. dbsavvy-py0n.
+// server was never written, so there is nothing to fail.
 func writeServerValuesToGrid(tabs *ui.ResultTabsHelper, conflicts []models.ConflictedEdit) {
 	pkCols, err := pkColsFromActiveTab(tabs)
 	if err != nil {
@@ -266,7 +265,7 @@ func (h conflictOverwriteHook) Overwrite(conflicts []models.ConflictedEdit, _ *m
 		set.Remove(c.Edit.PrimaryKey, c.Edit.Column)
 	}
 	// Write the post-overwrite server rows back into the grid — same
-	// refetch contract as the apply path (dbsavvy-5kto). dbsavvy-py0n.
+	// refetch contract as the apply path.
 	refreshGridRows(h.deps.tabs, res.RefetchedColumns, res.RefetchedRows)
 	if h.deps.toast != nil {
 		h.deps.toast.Show(

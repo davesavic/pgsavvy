@@ -8,7 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// TestEscAbortsPendingChordOnNonEditableView pins dbsavvy-xpj.
+// TestEscAbortsPendingChordOnNonEditableView pins the Esc-abort behavior.
 //
 // Non-editable views (list rails like "schemas"/"tables") receive no
 // gocui Editor — only per-key SetKeybinding shims, and only for keys
@@ -30,7 +30,7 @@ func TestEscAbortsPendingChordOnNonEditableView(t *testing.T) {
 	// Structural: the Esc shim must exist on the non-editable view.
 	if !rec.HasKeybinding(view, esc, gocui.ModNone) {
 		t.Fatalf("no Esc shim registered on view %q — Escape will be dropped by gocui "+
-			"and a pending leader chord can never be aborted (dbsavvy-xpj)", view)
+			"and a pending leader chord can never be aborted", view)
 	}
 
 	// Behavioural: feed the leader, confirm the Matcher buffers it, then
@@ -44,7 +44,7 @@ func TestEscAbortsPendingChordOnNonEditableView(t *testing.T) {
 	}
 
 	if err := rec.FeedKey(view, esc, gocui.ModNone); err != nil {
-		t.Fatalf("feed Esc on %q: %v (no Esc shim => gocui drops the key — dbsavvy-xpj)", view, err)
+		t.Fatalf("feed Esc on %q: %v (no Esc shim => gocui drops the key)", view, err)
 	}
 	if g.Matcher().IsPartial() {
 		t.Error("Matcher still partial after Esc — pending leader chord was not aborted")

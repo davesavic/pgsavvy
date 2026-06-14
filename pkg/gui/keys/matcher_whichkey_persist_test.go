@@ -8,7 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// dbsavvy-81j: a pure-prefix partial in a non-insert mode is a which-key
+// A pure-prefix partial in a non-insert mode is a which-key
 // waypoint. It MUST stay pending (so the popup stays visible) until the
 // next key or <esc> — it must NOT be abandoned by the inactivity timer
 // after timeout_len. Before the fix, onTimerFire dropped the pending in

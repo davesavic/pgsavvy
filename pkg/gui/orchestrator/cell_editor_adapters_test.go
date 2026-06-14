@@ -22,7 +22,7 @@ func TestFormatForEdit_JSONObject(t *testing.T) {
 	require.Equal(t, `{"active":true,"plan":"pro"}`, got)
 }
 
-// TestFormatForEdit_JSONBytes pins the fix for dbsavvy-2ij6: pgx decodes a
+// TestFormatForEdit_JSONBytes pins the fix: pgx decodes a
 // json/jsonb column whose value arrives as raw text into a Go []byte, which
 // the shape-based fallbacks miss (not a map, and FormatArrayLiteral rejects
 // []byte), so the editor used to seed Go's byte-slice form "[123 34 ...]".
@@ -40,7 +40,7 @@ func TestFormatForEdit_JSONBytes(t *testing.T) {
 // permitted during StateRunning (rows are buffered, appends are
 // append-only, pending edits are PK-keyed) but blocked while no stable
 // buffer exists — StateQueued (no rows opened) and StateSorting (re-run
-// cleared the buffer). Terminal states never block. dbsavvy-1po.
+// cleared the buffer). Terminal states never block.
 func TestStreamBlocksEdit(t *testing.T) {
 	cases := []struct {
 		state ui.TabState

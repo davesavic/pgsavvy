@@ -2,7 +2,7 @@ package types
 
 // TextStyle is the minimal shape ContextTreeDeps.PresentationHook returns
 // so context code can stay decoupled from the full style builder shipped
-// by epic T8 (enn.9). T8 may refine this struct (replacing the string
+// by epic T8. T8 may refine this struct (replacing the string
 // colour fields with concrete style.Color values); contexts only consume
 // the struct as a value and do not depend on its internal representation.
 type TextStyle struct {

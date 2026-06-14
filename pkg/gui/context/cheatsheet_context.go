@@ -14,7 +14,7 @@ import (
 // HandleRender which invokes the wired render closure and writes the
 // resulting body into the CHEATSHEET view via the driver.
 //
-// Mirrors the WhichKeyContext pattern (dlp.6): pkg/gui/context cannot
+// Mirrors the WhichKeyContext pattern: pkg/gui/context cannot
 // import pkg/gui/keys or pkg/cheatsheet directly (those packages would
 // pull pkg/gui/keys into the import DAG of pkg/gui/context, which the
 // architecture forbids). The orchestrator wires a closure that closes
@@ -76,7 +76,7 @@ func (c *CheatsheetContext) SetRender(render func(scope types.ContextKey) string
 	c.render = render
 }
 
-// SetState installs a TabbedPopup state object (dbsavvy-bwq.Z1). When
+// SetState installs a TabbedPopup state object. When
 // non-nil, HandleRender writes state.Body() into the view — replacing
 // the single-scope render-closure path. The orchestrator's
 // help.cheatsheet action builds a state with one tab per relevant scope

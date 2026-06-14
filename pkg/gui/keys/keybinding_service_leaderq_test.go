@@ -1,11 +1,11 @@
 package keys
 
-// This file holds the failing repro test for dbsavvy-tro.18 — the
-// `<leader>q` dispatch regression. The fix lands in dbsavvy-tro.7;
-// this test is expected to FAIL at master @ f370700 and flip to
-// passing once .7 widens shim coverage to chord-trailing keys.
+// This file holds the failing repro test for the
+// `<leader>q` dispatch regression. This test is expected to FAIL at
+// master @ f370700 and flip to passing once the fix widens shim
+// coverage to chord-trailing keys.
 //
-// Bug shape (per epic dbsavvy-tro §Architecture Decisions, bug 7):
+// Bug shape:
 // `installShimsForScope` at pkg/gui/orchestrator/gui.go:512-547
 // installs `driver.SetKeybinding` only for `trie.RootKeys()`. For a
 // chord like `<leader>q` (== Space + q), only Space is registered as
@@ -69,8 +69,8 @@ func (f *shimFake) FeedKey(view string, gk types.Key, gmod types.Modifier) error
 }
 
 // installShimsForScopeLikeProduction faithfully replicates the shim
-// installation loop at pkg/gui/orchestrator/gui.go:518-545. Post-fix
-// (dbsavvy-tro.7), the loop walks `trie.ReachableKeys()` so every key
+// installation loop at pkg/gui/orchestrator/gui.go:518-545. Post-fix,
+// the loop walks `trie.ReachableKeys()` so every key
 // at any depth in the trie gets a SetKeybinding — root keys AND
 // chord-trailing keys (the `q` in `<leader>q`). This replica must stay
 // in lockstep with the production loop.
@@ -104,7 +104,7 @@ func installShimsForScopeLikeProduction(f *shimFake, m *Matcher, ts *TrieSet, sc
 }
 
 // TestKeybindingService_LeaderQDispatchesAppQuit reproduces the
-// `<leader>q` dispatch regression (epic dbsavvy-tro, bug 7).
+// `<leader>q` dispatch regression.
 //
 // At master @ f370700 this test FAILS because `installShimsForScope`
 // (gui.go:512) only registers shims for trie root keys (Space), not
@@ -113,7 +113,7 @@ func installShimsForScopeLikeProduction(f *shimFake, m *Matcher, ts *TrieSet, sc
 // `<leader>q → app.quit` never fires and gocui.ErrQuit is never
 // propagated to the gocui main loop.
 //
-// The fix (dbsavvy-tro.7) is to widen shim coverage so EVERY key
+// The fix is to widen shim coverage so EVERY key
 // reachable in the trie has a SetKeybinding shim — not just the root
 // keys. After the fix, this test should PASS.
 func TestKeybindingService_LeaderQDispatchesAppQuit(t *testing.T) {
@@ -205,7 +205,7 @@ func TestKeybindingService_LeaderQDispatchesAppQuit(t *testing.T) {
 	if !shim.Has("", qKey, qMod) {
 		t.Errorf("BUG: no shim registered for 'q' — `<leader>q` chord trailing key " +
 			"will never be delivered to Matcher (gui.go:525 only walks trie.RootKeys()). " +
-			"Fix in dbsavvy-tro.7 must widen shim coverage to all chord-reachable keys.")
+			"Fix must widen shim coverage to all chord-reachable keys.")
 	}
 
 	// --- Phase 5: drive the chord. Feed Space first — should succeed

@@ -41,7 +41,7 @@ const (
 )
 
 // Warning is a non-fatal Build diagnostic. Warnings surface to the
-// startup log (and, in dlp.7's `:reload`, to the command-line response
+// startup log (and, via `:reload`, to the command-line response
 // area) so the user can correct a problematic config without crashing
 // the app.
 //
@@ -63,7 +63,7 @@ type TrieSetKey struct {
 }
 
 // TrieSet aggregates one ChordTrie per (Mode, Scope) pair. It is the
-// snapshot the Matcher (dlp.5) consumes — built once at startup and
+// snapshot the Matcher consumes — built once at startup and
 // atomically swapped on `:reload`.
 //
 // Leader / LocalLeader carry the configured leader runes that were used
@@ -121,7 +121,6 @@ func (s *TrieSet) Get(mode types.Mode, scope types.ContextKey) (*ChordTrie, bool
 // Returns (nil, false) only when neither trie resolves prefix. Returns
 // (empty, true) when prefix resolves but has no continuations. When scope
 // IS GLOBAL the global trie is consulted once (no double-collect).
-// dbsavvy-81j.
 func (s *TrieSet) ChildrenAtMerged(mode types.Mode, scope types.ContextKey, prefix []Key) ([]ChildRow, bool) {
 	if s == nil {
 		return nil, false
@@ -223,7 +222,7 @@ func NewKeybindingService(known ...types.ContextKey) *KeybindingService {
 //
 // Inputs:
 //   - defaults: bindings published by controllers (via
-//     AllDefaultBindings in dlp.8c). Source is forced to ShippedDefault.
+//     AllDefaultBindings). Source is forced to ShippedDefault.
 //     Sequence is expected to already be a []Key from
 //     SequenceFromShorthand; KeyLeader / KeyLocalLeader are expanded
 //     here using cfg.Leader / cfg.LocalLeader.
@@ -312,7 +311,7 @@ func (s *KeybindingService) Build(
 			cmd = commands.NopCommand
 		case cb.Source == CustomCmd:
 			// `command:` shorthand. Dispatch machinery ships with E11;
-			// dlp.4 records a stub Command so the cheatsheet ★ glyph
+			// a stub Command is recorded so the cheatsheet ★ glyph
 			// renderer can find the leaf via Source==CustomCmd. The
 			// stub is NOT registered with the Registry — it lives only
 			// inside this trie.
@@ -690,7 +689,7 @@ func userTargetedModes(lifted []*ChordBinding, actionID string, scope types.Cont
 // the binding is skipped.
 //
 // Source is set from the shorthand: Action: → UserOverride;
-// Command: → CustomCmd. Validation (dlp.3) already enforces Action XOR
+// Command: → CustomCmd. Config validation already enforces Action XOR
 // Command, so this function need not double-check.
 func liftKeybindingConfig(kb *config.KeybindingConfig) ([]*ChordBinding, []Warning) {
 	origin := fmtOrigin(kb)
@@ -737,7 +736,7 @@ func liftKeybindingConfig(kb *config.KeybindingConfig) ([]*ChordBinding, []Warni
 		source = UserOverride
 	case kb.Command != "":
 		// Per epic Non-Goals, CustomCmd handler machinery ships in E11.
-		// dlp.4 records the binding so the cheatsheet ★ glyph paints
+		// The binding is recorded so the cheatsheet ★ glyph paints
 		// correctly; dispatch will be wired by the later epic.
 		actionID = "command:" + kb.Command
 		source = CustomCmd

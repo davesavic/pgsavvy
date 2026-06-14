@@ -19,7 +19,7 @@ import (
 
 // fakeEditorBuffer is the EditorBufferReader test double; tests set
 // Text + Off in the case body and feed the bag into the controller.
-// Sel + HasSel mirror Visual-mode selection state for the wwd.7
+// Sel + HasSel mirror Visual-mode selection state for the
 // <leader>r-in-Visual fan-out tests; default empty values report "no
 // selection" so legacy non-visual tests need no changes.
 type fakeEditorBuffer struct {
@@ -131,7 +131,7 @@ func TestQueryEditorControllerPublishesSixBindings(t *testing.T) {
 	}
 }
 
-// dbsavvy-1yb: Leader chords MUST NOT be active in INSERT mode in the
+// Leader chords MUST NOT be active in INSERT mode in the
 // ResultTabsController either; <leader>1..9 / <leader>X / <leader>= /
 // <leader>x / <leader>s / <leader>gH leak into the editor's INSERT
 // mode via the (mode, GLOBAL) trie lookup performed by the matcher's
@@ -160,7 +160,7 @@ func TestResultTabsControllerLeaderBindingsExcludeInsertMode(t *testing.T) {
 	}
 }
 
-// dbsavvy-1yb: Leader chords MUST NOT be active in INSERT mode. When
+// Leader chords MUST NOT be active in INSERT mode. When
 // <leader> is <space>, an INSERT-mode mask makes the space rune a
 // chord-prefix and the matcher buffers it until tlen expires, producing
 // the user-visible "select*" reordering bug. Regression guard: every
@@ -189,14 +189,14 @@ func TestQueryEditorControllerLeaderBindingsExcludeInsertMode(t *testing.T) {
 	}
 }
 
-// dbsavvy-8u4: <leader>r must fire in Normal mode. ModeNormal is the
+// <leader>r must fire in Normal mode. ModeNormal is the
 // zero sentinel (types/mode.go), so it CANNOT be OR'd into a multi-mode
 // mask without vanishing (0 | X == X). A run binding built as
 // `ModeNormal | ModeVisual | ...` therefore fans out to the Visual modes
 // ONLY, leaving <leader>r dead in Normal mode — the mode you are in when
 // you run a query — so no statement executes and no result tab ever
 // opens. Guard: GetKeybindings must publish a QueryRun binding that
-// fires in Normal mode AND one that fires in Visual mode (the wwd.7
+// fires in Normal mode AND one that fires in Visual mode (the
 // visual-selection fan-out must be preserved).
 func TestQueryEditorControllerRunBindingFiresInNormalMode(t *testing.T) {
 	b := newQueryBag(t, drivers.Capabilities{HasLiveCancel: true})
@@ -220,7 +220,7 @@ func TestQueryEditorControllerRunBindingFiresInNormalMode(t *testing.T) {
 		t.Errorf("no QueryRun binding fires in Normal mode; <leader>r is dead where queries are run")
 	}
 	if !visualRun {
-		t.Errorf("no QueryRun binding fires in Visual mode; visual-selection run (wwd.7) regressed")
+		t.Errorf("no QueryRun binding fires in Visual mode; visual-selection run regressed")
 	}
 }
 
@@ -281,7 +281,7 @@ func TestQueryEditorCancelEnabledWhenDriverSupportsLiveCancel(t *testing.T) {
 }
 
 // TestQueryEditorController_CancelDisabled_RecomputesAfterBind locks in
-// dbsavvy-3tt: the <leader>x disabled state must be evaluated against
+// the contract that the <leader>x disabled state must be evaluated against
 // the LIVE QueryRunner.Capabilities() at dispatch time, not captured at
 // RegisterActions time. Production bootstrap wires the runner with
 // caps={} (HasLiveCancel=false) before Connect; once Bind() lands the
@@ -524,7 +524,6 @@ func TestQueryEditorRunOnSecondLineRoutesCorrectStatement(t *testing.T) {
 // runEditorWith builds a query-editor controller over a recording runner
 // session with the given buffer text and connection profile, drives the
 // QueryRun action, and returns the recorder + fake confirm for assertions.
-// dbsavvy-wxkf.
 func runEditorWith(t *testing.T, bufText string, conn *models.Connection) (*recordingRunnerSession, *fakeConfirm) {
 	t.Helper()
 	rec := &recordingRunnerSession{}
@@ -548,7 +547,7 @@ func runEditorWith(t *testing.T, bufText string, conn *models.Connection) (*reco
 
 // TestQueryEditorConfirmWritesGatesUpdate verifies that with ConfirmWrites
 // enabled an UPDATE is NOT executed until the confirmation popup's onYes
-// fires. dbsavvy-wxkf.
+// fires.
 func TestQueryEditorConfirmWritesGatesUpdate(t *testing.T) {
 	rec, confirm := runEditorWith(t, "UPDATE t SET a=1", &models.Connection{ConfirmWrites: true})
 
@@ -573,7 +572,7 @@ func TestQueryEditorConfirmWritesGatesUpdate(t *testing.T) {
 }
 
 // TestQueryEditorConfirmWritesSkipsSelect verifies a read-only statement
-// runs immediately even with ConfirmWrites enabled. dbsavvy-wxkf.
+// runs immediately even with ConfirmWrites enabled.
 func TestQueryEditorConfirmWritesSkipsSelect(t *testing.T) {
 	rec, confirm := runEditorWith(t, "SELECT 1", &models.Connection{ConfirmWrites: true})
 
@@ -586,7 +585,7 @@ func TestQueryEditorConfirmWritesSkipsSelect(t *testing.T) {
 }
 
 // TestQueryEditorConfirmWritesOffRunsUpdate verifies an UPDATE runs without
-// a prompt when the connection has ConfirmWrites disabled. dbsavvy-wxkf.
+// a prompt when the connection has ConfirmWrites disabled.
 func TestQueryEditorConfirmWritesOffRunsUpdate(t *testing.T) {
 	rec, confirm := runEditorWith(t, "UPDATE t SET a=1", &models.Connection{ConfirmWrites: false})
 
@@ -599,7 +598,7 @@ func TestQueryEditorConfirmWritesOffRunsUpdate(t *testing.T) {
 }
 
 // TestQueryEditorConfirmDDLGatesCreate verifies ConfirmDDL gates a DDL
-// statement but ConfirmWrites alone does not. dbsavvy-wxkf.
+// statement but ConfirmWrites alone does not.
 func TestQueryEditorConfirmDDLGatesCreate(t *testing.T) {
 	rec, confirm := runEditorWith(t, "CREATE TABLE t (id int)", &models.Connection{ConfirmDDL: true})
 	if len(confirm.calls) != 1 {
@@ -618,8 +617,8 @@ func TestQueryEditorConfirmDDLGatesCreate(t *testing.T) {
 	}
 }
 
-// TestQueryEditorRunAppliesConfigDefaultTimeout covers dbsavvy-fow.7
-// (U15): when query.default_statement_timeout is non-zero, the streaming
+// TestQueryEditorRunAppliesConfigDefaultTimeout covers the case where,
+// when query.default_statement_timeout is non-zero, the streaming
 // run path must apply it as the streamed Query.Timeout so the pg Stream
 // derives a deadline (context.WithTimeout) and bounds a runaway query.
 func TestQueryEditorRunAppliesConfigDefaultTimeout(t *testing.T) {
@@ -736,7 +735,7 @@ func TestQueryEditorRunAllDispatchesEverySegmentSequentially(t *testing.T) {
 }
 
 // TestQueryEditorRunSQLNoSessionReturnsFalse covers the TABLES <CR>
-// "open table data" reuse path (dbsavvy-gj8): with no active session,
+// "open table data" reuse path: with no active session,
 // RunSQL toasts, opens no tab, and returns false so the caller skips
 // focusing an empty results panel.
 func TestQueryEditorRunSQLNoSessionReturnsFalse(t *testing.T) {
@@ -794,7 +793,7 @@ func TestQueryEditorRunSQLDispatchesStatement(t *testing.T) {
 	}
 }
 
-// TestSurfaceErrPreemptPendingShowsToastNotErrorTab is the gr7e.2/AD4 UI
+// TestSurfaceErrPreemptPendingShowsToastNotErrorTab is the AD4 UI
 // guard: a session refusing a query because a prior one is still terminating
 // (ErrPreemptPending) must surface as a transient toast, NOT a sticky error
 // tab — the prior query failed nothing, it is merely still winding down.
@@ -823,7 +822,7 @@ func TestSurfaceErrPreemptPendingShowsToastNotErrorTab(t *testing.T) {
 
 // preemptRecorder records, at each PreemptInFlight call, how many
 // streams the runner session has issued so far — a witness for ordering.
-// Wired to the runner via SetPreempter (dbsavvy-lxn.1: preemption now
+// Wired to the runner via SetPreempter (preemption now
 // lives in the QueryRunner chokepoint, not behind the controller's
 // ResultTabs surface).
 type preemptRecorder struct {
@@ -837,7 +836,7 @@ func (p *preemptRecorder) PreemptInFlight() bool {
 }
 
 // TestQueryEditorRunAllPreemptsBeforeEachStream is the deadlock-fix wiring
-// guard (dbsavvy-dk6, now centralized per dbsavvy-lxn.1): each statement
+// guard (now centralized): each statement
 // must preempt any in-flight stream BEFORE it issues its own Stream, so a
 // >200-row prior run can't leave the per-session queue lock held and freeze
 // the UI. The witness is the stream count observed at each preempt: [0, 1]
@@ -910,7 +909,7 @@ func TestQueryEditorExplainAnalyzeWrapsInBeginRollback(t *testing.T) {
 	// SELECT (not a write) so the fail-closed EffectiveAnalyze gate keeps
 	// analyze=true; this test verifies the QueryRunner Begin/Rollback wrap,
 	// not the gate. A write statement would (correctly) be downgraded to
-	// estimate-only and never reach Begin. dbsavvy-u1n.
+	// estimate-only and never reach Begin.
 	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: "SELECT * FROM t;", Off: 3}
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 
@@ -961,7 +960,7 @@ func TestQueryEditorExplainNoticeToasts(t *testing.T) {
 	}
 }
 
-// TestQueryEditorVisualRunFansOutEachStatement asserts the dbsavvy-wwd.7
+// TestQueryEditorVisualRunFansOutEachStatement asserts the
 // contract: when <leader>r fires in Visual mode, the controller reads
 // SelectionText, splits on ';' via SplitStatements, and calls runner.Run
 // once per non-empty statement (under the cap).
@@ -997,7 +996,7 @@ func TestQueryEditorVisualRunFansOutEachStatement(t *testing.T) {
 	}
 }
 
-// TestQueryEditorVisualRunOverCapAbortsBeforeAnyRun asserts the wwd.7
+// TestQueryEditorVisualRunOverCapAbortsBeforeAnyRun asserts the
 // hard cap: a Visual selection that splits into >maxVisualRunBatch
 // non-empty statements toasts and does NOT invoke runner.Run at all
 // (no partial run).

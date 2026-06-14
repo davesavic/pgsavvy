@@ -2,7 +2,7 @@
 
 // Package orchestrator_test (integration) drives the dbsavvy TUI end-to-end
 // against a live Postgres fixture, exercising every acceptance-criteria
-// touch-point on the dbsavvy-enn epic in one walk-through.
+// touch-point in one walk-through.
 //
 // The test does NOT spin up gocui; it injects the recorder GuiDriver via
 // orchestrator.Gui.UseDriverForTest and drives helpers at their public

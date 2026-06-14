@@ -170,7 +170,7 @@ func TestConnectionManagerController_ConnectingErrorRetryAndCancel(t *testing.T)
 // TestConnectionManagerController_ActiveDialIgnoresRetry asserts that during the
 // active-dial phase (ModeConnecting with no error set) <CR>/r do NOT invoke
 // Retry — retrying mid-dial would supersede the in-flight attempt and re-prompt
-// for credentials. Only <esc> acts, cancelling the dial (dbsavvy-f4fz).
+// for credentials. Only <esc> acts, cancelling the dial.
 func TestConnectionManagerController_ActiveDialIgnoresRetry(t *testing.T) {
 	ctx := newModalCtx()
 	ctx.SetItems([]any{&models.Connection{Name: "alpha"}})

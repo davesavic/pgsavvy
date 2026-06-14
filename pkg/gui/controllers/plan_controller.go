@@ -13,7 +13,7 @@ import (
 // returns its attached *context.PlanContext (or nil for non-plan tabs).
 //
 // Returning nil is the documented no-op sentinel — every PlanController
-// handler nil-checks before dispatching. dbsavvy-uv0.8.
+// handler nil-checks before dispatching.
 type PlanContextResolver func() *context.PlanContext
 
 // PlanController publishes the EXPLAIN plan-tree keybindings under the
@@ -30,7 +30,7 @@ type PlanContextResolver func() *context.PlanContext
 //
 // All handlers delegate to the current PlanContext via the resolver;
 // when the resolver returns nil (no active plan tab) every handler is a
-// no-op. dbsavvy-uv0.8.
+// no-op.
 type PlanController struct {
 	baseController
 	resolve PlanContextResolver
@@ -50,8 +50,8 @@ func NewPlanController(c *common.Common, core CoreDeps, resolve PlanContextResol
 // modes are wired.
 //
 // Descriptions are English literals today — the i18n.TranslationSet
-// does not yet carry Plan.* action labels. When dbsavvy-uv0.8 follow-
-// ups add Tr.Actions.Plan* fields, swap each literal for the
+// does not yet carry Plan.* action labels. When follow-ups add
+// Tr.Actions.Plan* fields, swap each literal for the
 // translated string.
 func (p *PlanController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
 	out := []*types.ChordBinding{
@@ -115,8 +115,8 @@ func (p *PlanController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordB
 	// Republish the result-pane navigation chords under PLAN. The PLAN master
 	// editor dispatches only under PLAN (+ GLOBAL), so without these a plan tab
 	// traps the user: rail switches (1..4 + <tab>) and tab-cycle (gt/gT) all
-	// FellThrough with no way back to a grid tab. Mirrors the dbsavvy-usj
-	// rationale ResultTabsController applies to RESULT_GRID. dbsavvy-s7gn.
+	// FellThrough with no way back to a grid tab. Mirrors the
+	// rationale ResultTabsController applies to RESULT_GRID.
 	tr := p.tr()
 	out = append(out, railSwitchBindings(string(types.PLAN), tr)...)
 	out = append(out,

@@ -108,7 +108,7 @@ func TestRender_EmptyShowsZeroRows(t *testing.T) {
 // TestRender_EmptyWithRowsAffected verifies that a DML statement with no
 // result set (zero columns) but a non-zero affected-row count surfaces the
 // affected count in the body instead of the misleading "(0 rows)". Singular
-// vs plural is honoured. dbsavvy-outq.
+// vs plural is honoured.
 func TestRender_EmptyWithRowsAffected(t *testing.T) {
 	v := NewView()
 	v.SetRowsAffected(1)
@@ -144,7 +144,6 @@ func TestRender_HonoursTitle(t *testing.T) {
 // TestAllRows_ReturnsCopyOfBufferedRows verifies AllRows returns every
 // buffered row and that the result is a defensive copy — mutating the
 // returned slice must not affect later AllRows calls or RowCount.
-// dbsavvy-uv0.9.
 func TestAllRows_ReturnsCopyOfBufferedRows(t *testing.T) {
 	v := NewView()
 	v.SetColumns(makeSingleCol("c1", "text"))
@@ -171,7 +170,7 @@ func TestAllRows_ReturnsCopyOfBufferedRows(t *testing.T) {
 
 // TestVisibleRows_ReturnsViewportSlice seeds the View with 100 rows and
 // stamps viewport state (rowOffset=20, viewHeight=10) directly, then
-// expects VisibleRows to return rows[20:30]. dbsavvy-uv0.9.
+// expects VisibleRows to return rows[20:30].
 func TestVisibleRows_ReturnsViewportSlice(t *testing.T) {
 	v := NewView()
 	v.SetColumns(makeSingleCol("c1", "text"))
@@ -194,7 +193,7 @@ func TestVisibleRows_ReturnsViewportSlice(t *testing.T) {
 
 // TestVisibleRows_EmptyBeforeRender verifies that with no Render having
 // run (viewHeight == 0) VisibleRows returns an empty slice rather than
-// panicking. dbsavvy-uv0.9.
+// panicking.
 func TestVisibleRows_EmptyBeforeRender(t *testing.T) {
 	v := NewView()
 	v.SetColumns(makeSingleCol("c1", "text"))
@@ -205,7 +204,6 @@ func TestVisibleRows_EmptyBeforeRender(t *testing.T) {
 // TestEditability_DefaultsAndSetAndReset verifies the SetEditability /
 // Editable / RowIdentity / DisabledReason surface, including the defensive
 // copy behaviour on the RowIdentity getter and the SetColumns reset.
-// dbsavvy-bwq.2 (F2).
 func TestEditability_DefaultsAndSetAndReset(t *testing.T) {
 	v := NewView()
 	// Defaults.
@@ -221,7 +219,7 @@ func TestEditability_DefaultsAndSetAndReset(t *testing.T) {
 	require.Equal(t, []int{0, 2}, v.RowIdentity())
 	require.Equal(t, "", v.DisabledReason())
 	require.Equal(t, "myschema", v.IdentitySchema(),
-		"IdentitySchema must carry the catalog-resolved schema (dbsavvy-8q6)")
+		"IdentitySchema must carry the catalog-resolved schema")
 
 	// RowIdentity getter must return a defensive copy.
 	got := v.RowIdentity()
@@ -245,7 +243,7 @@ func TestEditability_DefaultsAndSetAndReset(t *testing.T) {
 
 // TestAllRows_ConcurrentSafety runs a producer goroutine appending rows
 // alongside a reader goroutine repeatedly calling AllRows. Run with
-// -race to catch any data race. dbsavvy-uv0.9.
+// -race to catch any data race.
 func TestAllRows_ConcurrentSafety(t *testing.T) {
 	v := NewView()
 	v.SetColumns(makeSingleCol("c1", "text"))

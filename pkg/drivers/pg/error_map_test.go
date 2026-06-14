@@ -58,7 +58,7 @@ func TestIsStatementTimeout_NilAndOther(t *testing.T) {
 }
 
 // TestStatementTimeoutMessage pins the verbatim cancel-reason string the tab
-// surfaces for a timed-out stream (dbsavvy-fow.7 U15 AC: the tab shows
+// surfaces for a timed-out stream (the tab shows
 // "cancelled: statement timeout").
 func TestStatementTimeoutMessage(t *testing.T) {
 	if StatementTimeoutMessage != "cancelled: statement timeout" {

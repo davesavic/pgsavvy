@@ -15,7 +15,7 @@ func cmdWithDesc(id, desc string) *commands.Command {
 	}
 }
 
-// dbsavvy-81j: the which-key popup must list the continuations that would
+// The which-key popup must list the continuations that would
 // actually fire, which (mirroring Dispatch's scope→GLOBAL fall-through) is
 // the UNION of the focused scope's children and GLOBAL's children for the
 // pending prefix. The scope-specific binding wins on a key collision.

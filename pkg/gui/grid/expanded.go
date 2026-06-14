@@ -10,14 +10,14 @@ import (
 // ViewModeGrid / ViewModeExpanded are the two render modes a grid View
 // can be in. Defaults to ViewModeGrid; flipped via SetViewMode. The
 // AppState scalar `LastResultViewMode` round-trips this string verbatim
-// for the global session-preference defined in dbsavvy-uv0 §12.3.
+// for the global session-preference defined in §12.3.
 const (
 	ViewModeGrid     = "grid"
 	ViewModeExpanded = "expanded"
 )
 
 // expandedGutterMin / expandedGutterMax bound the column-name gutter
-// width in expanded mode. Per dbsavvy-uv0 §12.3 the gutter is sized to
+// width in expanded mode. Per §12.3 the gutter is sized to
 // max(len(col_name)) clamped to [12, 32].
 const (
 	expandedGutterMin = 12
@@ -76,7 +76,7 @@ func renderExpanded(snap viewSnapshot, innerW, innerH int) string {
 	// directly — otherwise an active sort double-projects and expanded
 	// mode shows a different record than the one j/k landed on. Falls back
 	// to the first projected record when the cursor's row isn't visible
-	// (e.g. filtered out), matching the grid-mode clamp. dbsavvy-dr6.
+	// (e.g. filtered out), matching the grid-mode clamp.
 	indices := project(snap)
 	if len(indices) == 0 {
 		return expandedSeparator(0, snap.estimatedRows, innerW)
@@ -212,7 +212,7 @@ func expandedRecordLines(name, value string, gutter, valueWidth int) []string {
 // on rune boundaries (never mid-byte) and wide runes are kept whole, so
 // a multibyte / CJK value never corrupts into invalid UTF-8. Values
 // that fit in one chunk return a single-element slice. width must be
-// > 0 (dbsavvy-fow.9 U22).
+// > 0.
 func wrapValue(s string, width int) []string {
 	if width <= 0 {
 		return []string{s}

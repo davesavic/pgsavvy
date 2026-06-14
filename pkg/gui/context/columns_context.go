@@ -20,7 +20,7 @@ func NewColumnsContext(base BaseContext, deps Deps) *ColumnsContext {
 }
 
 // HandleRender writes the column rows into the COLUMNS view. Mirrors
-// the other SIDE_CONTEXT renderers (dbsavvy-5iv).
+// the other SIDE_CONTEXT renderers.
 func (c *ColumnsContext) HandleRender() error {
 	deps := c.deps
 	viewName := c.GetViewName()
@@ -39,7 +39,7 @@ func (c *ColumnsContext) renderRows() string {
 	if len(c.items) == 0 {
 		return ""
 	}
-	// hq5.6: dim items when the session is disconnected.
+	// dim items when the session is disconnected.
 	dim := c.deps.IsDisconnected != nil && c.deps.IsDisconnected()
 
 	var b strings.Builder

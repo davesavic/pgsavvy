@@ -1,7 +1,7 @@
 package grid
 
 // Defaults wired throughout the grid package. Exported because callers
-// (66p.11/12 keymap wiring, ResultBufferManager seeding) read them to
+// (keymap wiring, ResultBufferManager seeding) read them to
 // stay in lock-step with the View's own sizing assumptions.
 const (
 	// ResultInitialRows is the size of the synchronous initial-fill

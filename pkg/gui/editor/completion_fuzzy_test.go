@@ -182,7 +182,7 @@ func BenchmarkMatch(b *testing.B) {
 	}
 }
 
-// BenchmarkMatch10k mirrors the downstream ko4m.6.1 gate: full match+score
+// BenchmarkMatch10k mirrors the downstream perf gate: full match+score
 // over ~10k candidates within one frame budget (~8ms p99, no debounce).
 func BenchmarkMatch10k(b *testing.B) {
 	cands := genCandidates(10000)

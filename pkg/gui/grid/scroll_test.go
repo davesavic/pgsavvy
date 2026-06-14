@@ -126,7 +126,7 @@ func TestMoveCursorClampsAtEdges(t *testing.T) {
 }
 
 // TestJumpColFirstLast moves the cursor to the first / last column in
-// grid mode (the 0 / $ chords). dbsavvy-2fq.
+// grid mode (the 0 / $ chords).
 func TestJumpColFirstLast(t *testing.T) {
 	v := NewView()
 	v.SetColumns([]models.ColumnMeta{
@@ -372,7 +372,7 @@ func TestMaybeFireNearTail_FiresOncePerCrossing(t *testing.T) {
 }
 
 // TestJumpLast_LandsAtLastLoadedRow pins the grid-side cursor jump that
-// ]p (Page(+1)) relies on. dbsavvy-uv0.3 AC #2.
+// ]p (Page(+1)) relies on.
 func TestJumpLast_LandsAtLastLoadedRow(t *testing.T) {
 	v := NewView()
 	v.SetColumns(makeSingleCol("c1", "text"))
@@ -389,7 +389,6 @@ func TestJumpLast_LandsAtLastLoadedRow(t *testing.T) {
 // TestHalfPageUp_MovesCursorUp pins the grid-side cursor rewind that
 // [p (Page(-1)) relies on. The helper invokes HalfPageUp twice; the
 // resulting net movement must be strictly upward when there's room.
-// dbsavvy-uv0.3 AC #2.
 func TestHalfPageUp_MovesCursorUp(t *testing.T) {
 	v := NewView()
 	v.SetColumns(makeSingleCol("c1", "text"))
@@ -497,7 +496,7 @@ func TestRenderDataLine_DigitInSGRPrefixDoesNotCorruptEscape(t *testing.T) {
 // always move the cursor onto the current match, so that cell is "in
 // selection"; wrapping it in reverse-video swaps the black-on-yellow into
 // yellow-on-black — the "black background" the highlight is supposed to
-// avoid (dbsavvy-537j). The fix skips the reverse-video wrap on cells that
+// avoid. The fix skips the reverse-video wrap on cells that
 // carry search-match spans so the explicit highlight survives.
 func TestRenderDataLine_CurrentMatchNotInvertedBySelection(t *testing.T) {
 	v := NewView()
@@ -524,7 +523,7 @@ func TestRenderDataLine_CurrentMatchNotInvertedBySelection(t *testing.T) {
 // grid is wired to a PendingEditSet (SetPendingEdits) and has a row
 // identity, renderDataLine renders a staged edit's NewValue — not the
 // stale DB value — with the DirtyCellBg background tint. This is the
-// integration the A3 feature was missing (dbsavvy-cyh): the staged set must
+// integration the A3 feature was missing: the staged set must
 // reach the render snapshot and be looked up per cell by PK + column.
 func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
 	v := NewView()
@@ -579,7 +578,7 @@ func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
 // projectedView builds a single text-column view with the given label
 // values in raw (insertion) order. Used by the projected-cursor navigation
 // regression tests, which drive a non-contiguous projection via an active
-// FILTER (dbsavvy-72k.6: the grid no longer reorders for sort).
+// FILTER (the grid no longer reorders for sort).
 func projectedView(t *testing.T, labels ...string) *View {
 	t.Helper()
 	v := NewView()
@@ -590,8 +589,8 @@ func projectedView(t *testing.T, labels ...string) *View {
 	return v
 }
 
-// TestCursorNavigation_FollowsProjectedOrder is the dbsavvy-dr6 regression
-// test, updated for dbsavvy-2ttm: applyFilter is now identity, so the
+// TestCursorNavigation_FollowsProjectedOrder is the regression
+// test, updated so applyFilter is now identity, so the
 // projection is always the full raw buffer in order and the cursor walks
 // every row.
 func TestCursorNavigation_FollowsProjectedOrder(t *testing.T) {
@@ -630,8 +629,8 @@ func TestCursorNavigation_FollowsProjectedOrder(t *testing.T) {
 	require.Equal(t, 0, r, "MoveCursorUp must clamp at the first row")
 }
 
-// TestRender_VerticalScroll_FollowsCursor is the dbsavvy-dr6 viewport half,
-// updated for dbsavvy-2ttm (T1): with applyFilter now identity the
+// TestRender_VerticalScroll_FollowsCursor is the viewport half,
+// updated so that with applyFilter now identity the
 // projection is the full buffer, so JumpLast lands on the raw tail and the
 // viewport must scroll so that row is on-screen.
 func TestRender_VerticalScroll_FollowsCursorToTail(t *testing.T) {

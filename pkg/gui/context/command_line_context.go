@@ -11,7 +11,7 @@ import (
 // action) and popped on <esc> / <cr> (via command.cancel / command.submit).
 //
 // Runtime source of truth for the typed line is the underlying gocui
-// View's TextArea: the master gocui.Editor (installed in dlp.8b) routes
+// View's TextArea: the master gocui.Editor routes
 // COMMAND_LINE keystrokes through the Matcher, and Passthrough delegates
 // to gocui.DefaultEditor which writes directly into v.TextArea then
 // calls v.RenderTextArea. The orchestrator plumbs the *gocui.View handle
@@ -35,7 +35,7 @@ func NewCommandLineContext(base BaseContext, deps depsAlias, modes types.ModeSet
 
 // HandleFocus marks the per-scope mode as ModeCommand so the Matcher's
 // Insert/Command passthrough routes printable runes into the master
-// Editor (dlp.8b) instead of count-collection / register-prefix logic.
+// Editor instead of count-collection / register-prefix logic.
 func (c *CommandLineContext) HandleFocus(_ types.OnFocusOpts) error {
 	if c.modes != nil {
 		c.modes.Set(types.COMMAND_LINE, types.ModeCommand)

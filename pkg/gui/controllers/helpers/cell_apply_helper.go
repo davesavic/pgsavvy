@@ -35,7 +35,7 @@ type SessionAcquirer interface {
 // column edit with an IS NOT DISTINCT FROM old-value predicate to detect
 // concurrent overwrites, collect conflicts (RowsAffected==0), and on
 // success re-fetch the touched rows by PK so the caller can refresh the
-// grid. See dbsavvy-bwq.8 (A5).
+// grid.
 //
 // The helper is stateless beyond its construction arguments; every Apply
 // call is independent. Concurrency is bounded by the underlying driver
@@ -114,7 +114,7 @@ type ApplyResult struct {
 // in BEGIN/ROLLBACK so callers can preview rows-affected without
 // committing — conflict collection and refetch are skipped in dry-run.
 //
-// Behavioural contract (every line traces to an AC in dbsavvy-bwq.8):
+// Behavioural contract:
 //   - Empty set returns (zero ApplyResult, nil, nil) without issuing
 //     BEGIN.
 //   - Identifiers (schema/table/column) flow through pg.QuoteIdent /
@@ -264,7 +264,7 @@ func (h *CellApplyHelper) Apply(
 // Overwrite is like Apply but issues PK-only UPDATEs (no IS NOT DISTINCT
 // FROM guard). Used by the conflict dialog's `[o]` handler on
 // non-confirm_writes connections — the user has explicitly chosen to let
-// the staged NewValues land over server drift. dbsavvy-lda (dbsavvy-8oo #7).
+// the staged NewValues land over server drift.
 //
 // Behavioural differences from Apply:
 //   - No dry-run mode (callers reach here only after the user accepted

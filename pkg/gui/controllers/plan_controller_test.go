@@ -111,7 +111,7 @@ func TestPlanController_GetKeybindings_CoversAllActions(t *testing.T) {
 // so without these bindings a plan tab traps the user — every rail-switch /
 // tab-cycle / directional key FellThrough and there was no way back to a grid
 // tab. PLAN must republish the same navigation chords RESULT_GRID carries
-// (mirrors the dbsavvy-usj rationale on ResultTabsController).
+// (mirrors the rationale on ResultTabsController).
 func TestPlanController_GetKeybindings_PublishesNavigationEscape(t *testing.T) {
 	ctrl := NewPlanController(nil, CoreDeps{}, nil)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})

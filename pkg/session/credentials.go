@@ -26,7 +26,7 @@ type Prompter interface {
 	PromptPassword(ctx context.Context, hint string) (string, error)
 }
 
-// Unexported sentinel errors. Kept unexported per task 921.4 spec: callers
+// Unexported sentinel errors. Kept unexported by design: callers
 // outside this package use errors.Is via wrapped sentinels exposed in later
 // tasks, or simply check error presence.
 var (
@@ -51,7 +51,7 @@ var (
 //
 // Auto-discovery sentinel: when prompter is nil AND every mechanism above
 // either was unset or produced an empty value, ResolvePassword returns
-// ("", nil). Callers (e.g. pkg/session BuildPgxConfig in task 921.5)
+// ("", nil). Callers (e.g. pkg/session BuildPgxConfig)
 // interpret this as "let pgx auto-discover ~/.pgpass on dial".
 //
 // When prompter IS non-nil and every mechanism (including the prompter)
@@ -64,7 +64,7 @@ var (
 // fallthrough is reserved for "this mechanism had nothing to contribute",
 // not "this mechanism failed".
 //
-// See DESIGN.md §11.2 and epic dbsavvy-921 (D1, D5, D15, D20).
+// See DESIGN.md §11.2.
 func ResolvePassword(ctx context.Context, profile models.Connection, prompter Prompter) (string, error) {
 	// 1. Inline plaintext. Empty value falls through (explicit AC).
 	if profile.Password != "" {

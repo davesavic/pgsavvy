@@ -8,7 +8,7 @@ import (
 // TestAttachActiveTabOriginRoundTrip verifies the originating statement,
 // its bound args, and the DefaultSchema captured at tab-open time round
 // trip unchanged through the Tab.Origin accessor for a parameterized,
-// schema-qualified result tab. dbsavvy-72k.1.
+// schema-qualified result tab.
 func TestAttachActiveTabOriginRoundTrip(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
 	const sql = "SELECT * FROM s.t WHERE c=$1"
@@ -37,7 +37,7 @@ func TestAttachActiveTabOriginRoundTrip(t *testing.T) {
 
 // TestOriginSQLAndErrorSQLShareCanonicalField verifies SetOrigin and
 // SetErrorSQL write the same canonical origSQL field (no parallel SQL
-// store). dbsavvy-72k.1.
+// store).
 func TestOriginSQLAndErrorSQLShareCanonicalField(t *testing.T) {
 	h, _ := newTestHelper(t, nil)
 	_ = h.openTab("placeholder", nil)

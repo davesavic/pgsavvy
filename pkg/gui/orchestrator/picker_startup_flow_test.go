@@ -21,8 +21,8 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/query"
 )
 
-// T7 — Integration AC capstone for the picker-first startup flow
-// (epic dbsavvy-e53). These tests drive the FULL connect lifecycle through
+// T7 — Integration AC capstone for the picker-first startup flow.
+// These tests drive the FULL connect lifecycle through
 // the deterministic wire-fake harness (NOT the real-Postgres integration
 // harness) so they run under plain `go test`.
 //
@@ -38,7 +38,7 @@ import (
 
 // assertEditorOverRail verifies the post-connect focus stack: the
 // QUERY_EDITOR is the focused top, with the expected side rail populated
-// directly beneath it (dbsavvy-yea).
+// directly beneath it.
 func assertEditorOverRail(t *testing.T, g *orchestrator.Gui, rail types.ContextKey) {
 	t.Helper()
 	if got := g.ContextTree().Current().GetKey(); got != types.QUERY_EDITOR {
@@ -92,7 +92,7 @@ func buildPickerGui(
 }
 
 // AC: startup lands on the CONNECTIONS picker with ZERO connect attempts —
-// the silent auto-connect was removed (epic dbsavvy-e53). The user always
+// the silent auto-connect was removed. The user always
 // chooses a profile explicitly.
 func TestPickerStartupFlow_LandsOnPickerNoConnect(t *testing.T) {
 	_, conn := registerWireFake(t, drivers.Capabilities{})
@@ -165,7 +165,7 @@ func TestPickerStartupFlow_RestoresCursorOnLastUsedProfile(t *testing.T) {
 // the dial succeeds, schemas are populated, and focus advances to the
 // SCHEMAS rail.
 // AC: on connection open the cursor lands in the QUERY_EDITOR, with the
-// SCHEMAS rail populated directly beneath it (dbsavvy-yea).
+// SCHEMAS rail populated directly beneath it.
 func TestPickerStartupFlow_SuccessLandsInQueryEditorOverSchemas(t *testing.T) {
 	g, _ := buildTestGuiWithHistory(t)
 
@@ -187,8 +187,8 @@ func TestPickerStartupFlow_SuccessLandsInQueryEditorOverSchemas(t *testing.T) {
 }
 
 // AC: success restore populates the TABLES rail when saved schema+table
-// state is present for the profile (dbsavvy-dl7.4), with the cursor landing
-// in the QUERY_EDITOR above it (dbsavvy-yea). We seed LastSchemaName /
+// state is present for the profile, with the cursor landing
+// in the QUERY_EDITOR above it. We seed LastSchemaName /
 // LastTableName for the profile, with the saved schema matching one the
 // driver returns, so connectWithGen direct-loads tables and pushes TABLES.
 func TestPickerStartupFlow_SuccessLandsInQueryEditorOverTablesWithSavedState(t *testing.T) {
@@ -248,7 +248,7 @@ func TestPickerStartupFlow_FailureThenRetrySucceeds(t *testing.T) {
 }
 
 // AC: cancel mid-connect leaves activeConn unchanged (empty). The cancel
-// path exercises the connectGen supersession. dbsavvy-bsh: standalone
+// path exercises the connectGen supersession. Standalone
 // CONNECTING is retired; the CONNECTION_MANAGER modal handles all connect
 // lifecycle.
 func TestPickerStartupFlow_CancelMidConnectReturnsToPicker(t *testing.T) {
@@ -273,7 +273,7 @@ func TestPickerStartupFlow_CancelMidConnectReturnsToPicker(t *testing.T) {
 // creds stripped) and the active connection is marked with "●". We seed a
 // profile with credentials in the DSN, render the modal, and assert the
 // endpoint shows while the secret never leaks; then connect and assert the
-// active marker paints on that row. dbsavvy-bsh: uses CONNECTION_MANAGER.
+// active marker paints on that row. Uses CONNECTION_MANAGER.
 func TestPickerStartupFlow_RowsShowHostDbAndActiveMarker(t *testing.T) {
 	driverName, conn := registerWireFake(t, drivers.Capabilities{})
 	conn.schemas = []models.Schema{{Name: "public", Owner: "u"}}

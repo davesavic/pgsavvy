@@ -7,7 +7,7 @@ import (
 )
 
 // This file is a faithful 1D mirror of the grid substring matcher in
-// pkg/gui/grid/search.go (dbsavvy-2ttm). The grid helpers are
+// pkg/gui/grid/search.go. The grid helpers are
 // package-private to grid, so they are replicated here with rail-prefixed
 // names (to avoid any future redeclaration inside package context) and the
 // column dimension stripped: a rail row carries a single name string.

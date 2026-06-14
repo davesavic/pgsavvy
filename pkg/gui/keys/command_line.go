@@ -36,7 +36,7 @@ type StackOps interface {
 type CaretToggler func(enabled bool)
 
 // CommandLineCommandDeps groups the dependencies for command.open,
-// command.cancel, and command.submit. Bootstrap (dlp.8c) supplies the
+// command.cancel, and command.submit. Bootstrap supplies the
 // concrete focus stack, the live CommandLineContext, the ExRegistry,
 // the toast surface, and the caret toggler.
 type CommandLineCommandDeps struct {

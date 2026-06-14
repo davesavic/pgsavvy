@@ -9,7 +9,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// TestLeaderQQuitsFromQueryEditor is the dbsavvy-dg5 regression test.
+// TestLeaderQQuitsFromQueryEditor is the regression test.
 //
 // When the QUERY_EDITOR view is focused, gocui routes keystrokes through
 // the VimEditor's gocui.Editor (Edit), NOT through the SetKeybinding

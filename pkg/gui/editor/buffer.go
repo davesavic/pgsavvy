@@ -16,14 +16,14 @@ var ErrEditOutOfRange = errors.New("editor: edit out of range")
 
 // undoCap matches vim's default undolevels=1000. Buffer lazily
 // constructs its UndoTree at first Apply with this cap unless the
-// History field is pre-populated by a caller (e.g. wwd.9 hydration).
+// History field is pre-populated by a caller (e.g. hydration).
 const undoCap = 1000
 
 // Line is one editor row. Runes (not bytes) is the storage choice so
 // cursor columns and motions reason in rune coordinates without
 // repeated UTF-8 decoding. The Highlights []Span field DESIGN.md
-// §13.1 mentions is deferred to the highlighter epic
-// ([[dbsavvy-wwd-highlighter]]); wwd.2 keeps Line minimal.
+// §13.1 mentions is deferred to the highlighter epic;
+// for now Line is kept minimal.
 type Line struct {
 	Runes []rune
 }
@@ -42,8 +42,8 @@ type Position struct {
 // LineWise flags a vim line-wise range (dd, yy, V): TextInRange
 // emits every whole line in [Start.Line, End.Line] regardless of
 // Col; deleteRangeLocked removes whole lines. BlockWise is reserved
-// for the VisualBlock motion (wwd.7 / wwd.8); wwd.2 stores the
-// field and treats it as character-wise.
+// for the VisualBlock motion; for now the field is stored and
+// treated as character-wise.
 type Range struct {
 	Start, End Position
 	LineWise   bool
@@ -55,13 +55,12 @@ type Range struct {
 //
 // Concurrency: mu (sync.RWMutex) guards every field. Method
 // receivers grab RLock for read-only accessors and Lock for
-// mutators; the worker-dispatched SaveBuffer in wwd.9 takes a
+// mutators; the worker-dispatched SaveBuffer takes a
 // LinesCopy snapshot on the MainLoop before handing the copy off to
 // disk so mu is never held across the file write.
 //
 // Buffer intentionally has NO Mode field — keys.ModeStore[QUERY_EDITOR]
-// is the sole source of truth (Architecture Decision 1 of epic
-// dbsavvy-wwd).
+// is the sole source of truth (Architecture Decision 1).
 type Buffer struct {
 	mu sync.RWMutex
 
@@ -330,7 +329,7 @@ func (b *Buffer) LineCount() int {
 
 // SetCursor writes p to Cursor under b.mu. Used by VimEditor after
 // Apply to keep Cursor following the insertion point; future motion
-// handlers (wwd.5) call this too.
+// handlers call this too.
 func (b *Buffer) SetCursor(p Position) {
 	b.mu.Lock()
 	b.Cursor = p

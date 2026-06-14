@@ -24,7 +24,7 @@ func TestInNoise(t *testing.T) {
 		{"after closed block comment", "SELECT /* x */ FROM ", runeLen("SELECT /* x */ FROM "), false},
 		// Closed dollar-quote is a String token; the cursor inside it is noise.
 		// (An UNTERMINATED dollar-quote is NOT detectable — Chroma lexes `$$`
-		// as a Number, not a String — a known limitation; see ko4m.1.3.)
+		// as a Number, not a String — a known limitation.)
 		{"inside closed dollar quote", "SELECT $$body$$", runeLen("SELECT $$bo"), true},
 		// Multi-line: the string opens on line 1 and the cursor sits on line
 		// 2 still inside it — the prior single-line stripper missed this.

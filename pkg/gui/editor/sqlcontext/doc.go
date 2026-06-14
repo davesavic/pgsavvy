@@ -15,12 +15,12 @@
 // so a clause keyword in an earlier statement never leaks context into
 // a cursor sitting in a later one.
 //
-// Scope (dbsavvy-ko4m.1.1 + 1.2): clause + expect detection, plus
+// Scope: clause + expect detection, plus
 // in-scope table/alias resolution, schema-qualified and quoted-identifier
 // handling, and trailing dot-qualifier resolution (ContextResult.
-// InScopeTables and ContextResult.Qualifier). FK-aware JOIN ranking
-// (dbsavvy-ko4m.1.4), wiring into the completion SchemaSource
-// (dbsavvy-ko4m.1.3), and CTE/subquery scopes (deferred) are out of
+// InScopeTables and ContextResult.Qualifier). FK-aware JOIN ranking,
+// wiring into the completion SchemaSource,
+// and CTE/subquery scopes (deferred) are out of
 // scope and live in sibling tasks. This package exposes ContextResult,
 // TableRef, Qualifier, and Analyze.
 package sqlcontext

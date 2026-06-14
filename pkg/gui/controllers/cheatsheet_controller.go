@@ -8,7 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// Cheatsheet action IDs (dbsavvy-bwq.Z1). Local to the controller —
+// Cheatsheet action IDs. Local to the controller —
 // the global commands.* table is intentionally not extended here: these
 // IDs only ever fire under the CHEATSHEET scope and have no user-facing
 // config knob (the bindings are shipped defaults).
@@ -63,8 +63,8 @@ func (p *CheatsheetScopePanel) Body() string {
 // not handle keys — the controller owns tab cycling + close.
 func (p *CheatsheetScopePanel) HandleKey(types.Key) bool { return false }
 
-// CheatsheetController owns the CHEATSHEET popup bindings
-// (dbsavvy-bwq.Z1). Mirrors TableInspectController's tab-cycling shape:
+// CheatsheetController owns the CHEATSHEET popup bindings.
+// Mirrors TableInspectController's tab-cycling shape:
 //
 //   - `<tab>` / `]`  cycle to next tab
 //   - `[`            cycle to previous tab

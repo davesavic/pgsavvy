@@ -11,7 +11,7 @@ import (
 // PromptController owns the PROMPT TEMPORARY_POPUP submit / cancel
 // wiring.
 //
-// Post-dbsavvy-fq9 the line buffer is no longer owned here: the PROMPT
+// The line buffer is no longer owned here: the PROMPT
 // view is editable and the master gocui.Editor's Passthrough branch
 // delegates printable runes / Backspace / Delete / Left / Right /
 // Home / End / bracketed-paste to gocui.DefaultEditor — which writes

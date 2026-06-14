@@ -61,7 +61,7 @@ const suggestionsVisibleMax = 8
 // text on HandleRender; the orchestrator owns view sizing / anchor
 // placement (Z1).
 //
-// Signature help (dbsavvy-ko4m.5.4): when the SELECTED suggestion is a
+// Signature help: when the SELECTED suggestion is a
 // function, the popup renders a DEDICATED help FOOTER line below the
 // list — `name(arg type, ...) -> ReturnType` — resolved from the
 // injected detailProvider. The detail provider is a sync-read cache; on
@@ -95,12 +95,12 @@ func NewSuggestionsContext(base BaseContext, deps Deps) *SuggestionsContext {
 }
 
 // SetFunctionDetailProvider injects the function-signature-help cache
-// (dbsavvy-ko4m.5.4) and the active-schema source used as its lookup
+// and the active-schema source used as its lookup
 // key. Both are optional and nil-safe: with no provider the popup never
 // renders a signature help line. Wired from the orchestrator over the
 // ConnectHelper (which satisfies editor.FunctionDetailProvider) and the
 // SCHEMAS rail's selected-schema accessor, mirroring the FunctionSource
-// provider wiring (ko4m.5.3).
+// provider wiring.
 func (c *SuggestionsContext) SetFunctionDetailProvider(p editor.FunctionDetailProvider, schemaProv func() string) {
 	c.detailProvider = p
 	c.schemaProv = schemaProv
@@ -240,7 +240,7 @@ func (c *SuggestionsContext) OnCursorMoved(pos editor.Position) {
 // hijack the terminal.
 //
 // When the SELECTED suggestion is a function, a dedicated signature
-// help FOOTER line is appended below the list (dbsavvy-ko4m.5.4). The
+// help FOOTER line is appended below the list. The
 // signature is resolved synchronously from the detail provider; on a
 // cold miss the render emits the list WITHOUT a footer and fires
 // WarmFunctionDetail with an onReady that re-renders, so the footer
@@ -267,8 +267,8 @@ func (c *SuggestionsContext) HandleRender() error {
 // cached. On a cache miss it fires a single WarmFunctionDetail whose
 // onReady re-renders the popup so the footer materialises once the
 // cache warms — the user does not re-trigger completion. onReady is
-// guaranteed to land on the UI loop by the provider's UI scheduler
-// (ko4m.5.2), so it calls HandleRender directly.
+// guaranteed to land on the UI loop by the provider's UI scheduler,
+// so it calls HandleRender directly.
 //
 // The (schema, name) key uses the active schema from schemaProv (a
 // documented v1 limit — see the type doc); name is the suggestion's
@@ -376,7 +376,7 @@ func formatSuggestionsBody(suggestions []editor.Suggestion, selected, visibleMax
 // marker, the glyph + space prefix, the name column padded to the widest name,
 // the 2-col detail gutter, and the detail tokens. The layout previously sized
 // the box from len(Display)+marker alone, which omitted the glyph/space/detail
-// columns and clipped wide rows (dbsavvy-ko4m: "> ! WHER" instead of "WHERE").
+// columns and clipped wide rows ("> ! WHER" instead of "WHERE").
 func SuggestionsRenderWidth(suggestions []editor.Suggestion) int {
 	const markerCols = 2
 	// First pass mirrors formatSuggestionsBody: sanitize each name and find
@@ -444,7 +444,7 @@ func isUntyped(s editor.Suggestion) bool {
 // then theme-tinted, and the tint SGR is added here (never re-fed to
 // SanitizeCellEscapes — Design D4).
 //
-// Match highlighting (Design D3, ko4m.4.5): the bare sanitized name is
+// Match highlighting (Design D3): the bare sanitized name is
 // wrapped via grid.HighlightRuneSpans BEFORE the glyph/marker prefix and
 // detail suffix are added, so the "> "/"  " 2-col marker never shifts the
 // highlight onto the wrong runes and the detail tokens are never
@@ -479,7 +479,7 @@ func composeSuggestionRow(s editor.Suggestion, sanitizedName string, nameWidth i
 
 // tint wraps s in the named theme foreground SGR + reset, EXCEPT under
 // NO_COLOR (theme.IsMonochrome): a monochrome runtime emits s unchanged so the
-// suggestion row carries no colour codes (dbsavvy-ko4m.4.6, no-color AC). An
+// suggestion row carries no colour codes. An
 // unknown/empty colour name (AnsiFgSGR == "") also returns s plain. The SGR is
 // added AFTER the caller has sanitized s and is never re-fed to
 // SanitizeCellEscapes (Design D4).
@@ -514,7 +514,7 @@ func highlightName(rawName, sanitized string, matches []int) string {
 		return sanitized
 	}
 	// No-color (NO_COLOR): suppress the match-highlight SGR too so the row
-	// renders as plain text (dbsavvy-ko4m.4.6, no-color AC). The matched runes
+	// renders as plain text. The matched runes
 	// are still present — only the highlight tint is dropped.
 	if theme.IsMonochrome() {
 		return sanitized
@@ -534,7 +534,7 @@ func highlightName(rawName, sanitized string, matches []int) string {
 // signatureTokenColor names the theme colour used to tint the
 // signature help footer. It is applied AFTER the per-segment sanitize +
 // compose so the SGR is never fed back through SanitizeCellEscapes
-// (Design D4 / ko4m.4 D4, adopted verbatim per review-plan Finding E).
+// (Design D4, adopted verbatim per review-plan Finding E).
 const signatureTokenColor = "cyan"
 
 // formatSignatureLine renders the dedicated signature help footer for a

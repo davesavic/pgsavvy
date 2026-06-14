@@ -4,8 +4,6 @@ package context
 // reads each frame. *ui.ResultTabsHelper satisfies this through its
 // HideOverlayState accessor returning *popup.HideOverlay (which exposes
 // Body()). Active() reports whether the overlay is currently waiting.
-//
-// dbsavvy-uv0.6.
 type HideOverlayState interface {
 	Active() bool
 	Body() string

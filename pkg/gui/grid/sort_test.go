@@ -90,7 +90,7 @@ func TestSetSort_OnEmptyBufferDoesNotCrash(t *testing.T) {
 	require.Empty(t, indices)
 }
 
-// TestProject_SortIndicatorDoesNotReorder pins the dbsavvy-72k.6 contract:
+// TestProject_SortIndicatorDoesNotReorder pins the contract:
 // with a display-only sort indicator installed (via SetSortIndicator), the
 // projection returns IDENTITY order — the grid no longer reorders rows
 // (ordering is DB-side) — while the title still carries the " (sort: …)"

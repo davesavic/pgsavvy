@@ -253,7 +253,7 @@ func TestSecretPromptHelper_CtxCancel_ReturnsCancelledNoLeak(t *testing.T) {
 // path on the concrete PromptContext: with masking on, the rendered content
 // buffer shows mask runes, NOT the typed secret. Masking is content-level
 // (renderBuffer), so the live gocui View.Mask is deliberately NOT set — setting
-// it would mask the label too (dbsavvy-3ye.8). The real secret remains readable
+// it would mask the label too. The real secret remains readable
 // from the TextArea.
 func TestSecretPromptHelper_MaskedRender_RealView(t *testing.T) {
 	const secret = "topsecretvalue"
@@ -304,7 +304,7 @@ func TestSecretPromptHelper_MaskedRender_RealView(t *testing.T) {
 // it renders the masked prompt into a real gocui View attached to a headless
 // Gui, draws it to gocui's headless tcell screen, and reads the rendered cells
 // back.
-// Regression for dbsavvy-3ye.8 — before the fix the code set View.Mask, which
+// Regression test — before the fix the code set View.Mask, which
 // masks EVERY cell at draw time, so the whole popup (label included) drew as
 // bullets. The masked-prompt label now renders as the frame title (the body is
 // just the masked input line). Asserts on the DRAWN cells: (1) the label

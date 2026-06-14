@@ -35,7 +35,7 @@ func scopeTables(tokens []highlight.Token) []TableRef {
 		// Continue scanning from the token after the ref so a JOIN
 		// keyword that follows is still picked up; comma-separated
 		// FROM lists (rare in completion-time partial SQL) are not
-		// chased here — out of scope for ko4m.1.2.
+		// chased here — out of scope.
 		i = next - 1
 	}
 	return refs

@@ -8,7 +8,7 @@ import (
 )
 
 // TestHasPendingEdits covers the three states the sort flow gates on:
-// no set installed, an empty set, and a set with a staged edit. dbsavvy-72k.4.
+// no set installed, an empty set, and a set with a staged edit.
 func TestHasPendingEdits(t *testing.T) {
 	v := NewView()
 

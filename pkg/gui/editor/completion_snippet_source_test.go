@@ -139,7 +139,7 @@ func TestSnippetSource_BuiltinStarterSet(t *testing.T) {
 }
 
 // TestSnippetSource_OtherSourcesBodyZero confirms Suggestion.Body stays zero
-// for the non-snippet sources (additive-field contract from ko4m.4.1).
+// for the non-snippet sources (additive-field contract).
 func TestSnippetSource_OtherSourcesBodyZero(t *testing.T) {
 	buf, pos := bufferFromLines(t, "SE")
 	for _, s := range (KeywordsSource{}).Suggest(context.Background(), buf, pos) {

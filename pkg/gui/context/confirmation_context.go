@@ -8,7 +8,7 @@ import (
 )
 
 // ConfirmationContext renders the confirmation popup. Border styling and
-// header text come from deps.PresentationHook so T8 (enn.9) supplies the
+// header text come from deps.PresentationHook so T8 supplies the
 // connection-coloured styling without touching this file.
 type ConfirmationContext struct {
 	BaseContext

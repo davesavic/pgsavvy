@@ -14,8 +14,6 @@ import (
 // The overlay is NOT itself a gocui context; rendering is done by the
 // caller via Body() (renderable text). The chord wiring + focus stack
 // integration is the orchestrator's responsibility.
-//
-// dbsavvy-uv0.6.
 type HideOverlay struct {
 	names   []string
 	hidden  map[int]bool
@@ -25,7 +23,7 @@ type HideOverlay struct {
 
 // ErrMinimumOneVisible is returned by Toggle when the user tries to
 // hide the last visible column. The minimum-one-visible rule is
-// enforced overlay-side per the dbsavvy-uv0.6 AC. dbsavvy-uv0.6.
+// enforced overlay-side.
 var ErrMinimumOneVisible = errors.New("at least one column must remain visible")
 
 // NewHideOverlay constructs an overlay over names with the supplied

@@ -4,8 +4,8 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// ChordBinding mirrors types.ChordBinding. dlp.8a moved the canonical
-// definition into pkg/gui/types so the IBaseContext interface can
+// ChordBinding mirrors types.ChordBinding. The canonical
+// definition lives in pkg/gui/types so the IBaseContext interface can
 // reference it without a package import cycle; this alias keeps the
 // keys-package call sites (and existing tests) compiling unchanged.
 type ChordBinding = types.ChordBinding

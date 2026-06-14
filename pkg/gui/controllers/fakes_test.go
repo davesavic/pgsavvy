@@ -13,7 +13,7 @@ import (
 )
 
 // fakeConnectInvoker records Connect calls and the ctx each received so
-// the U1 timeout AC (dbsavvy-fow.1) can assert a non-zero Deadline.
+// the U1 timeout AC can assert a non-zero Deadline.
 type fakeConnectInvoker struct {
 	calls    []*models.Connection
 	ctxs     []context.Context
@@ -110,7 +110,7 @@ func (f *fakeToast) Show(msg string, ttl time.Duration) {
 	f.msgs = append(f.msgs, toastMsg{msg, ttl})
 }
 
-// ShowOrUpdate records keyed toast calls (dbsavvy-fow.1). The Connect
+// ShowOrUpdate records keyed toast calls. The Connect
 // path emits a "connecting" toast then clears/replaces it under the same
 // key; tests inspect updates to assert that sequence.
 func (f *fakeToast) ShowOrUpdate(key, msg string, ttl time.Duration) {
@@ -135,7 +135,7 @@ func (f *fakeTableDouble) DoubleClickStub(t *models.Table) error {
 }
 
 // fakeRefresh records RefreshXxx calls so per-rail `r` binding tests
-// can assert dispatch. dbsavvy-56u.1.
+// can assert dispatch.
 type fakeRefresh struct {
 	schemas int
 	tables  []string
@@ -215,8 +215,7 @@ type bag struct {
 	Logger       *recordingLogger
 
 	// WorkerCalls counts OnWorker dispatches. The wired closure runs its
-	// fn inline so the connect path executes synchronously in tests
-	// (dbsavvy-fow.1).
+	// fn inline so the connect path executes synchronously in tests.
 	WorkerCalls int
 }
 

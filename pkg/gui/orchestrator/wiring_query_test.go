@@ -122,18 +122,17 @@ type wireFakeConn struct {
 	indexes  []models.Index
 	columns  []models.Column
 	// openHook fires from wireFakeDriver.Open during the dial, before the
-	// connection is returned. The dbsavvy-fow.1 supersession test uses it
+	// connection is returned. The supersession test uses it
 	// to bump the Gui's connectGen mid-dial (simulating a newer activation
 	// arriving while this connect is still in flight).
 	openHook func()
 	// openErr, when non-nil, makes wireFakeDriver.Open return it instead of
 	// the connection — simulating a dial failure so the connect error path
-	// (connectInvoker.routeConnectError → CONNECTING.SetError) is exercised
-	// (epic dbsavvy-e53).
+	// (connectInvoker.routeConnectError → CONNECTING.SetError) is exercised.
 	openErr error
 	// openHookCtx, when set, receives the Open ctx so a test can block the
 	// dial on <-ctx.Done() and assert the cancellable ctx threads through to
-	// the driver (epic dbsavvy-e53.5 cancel/teardown). Runs instead of
+	// the driver (cancel/teardown). Runs instead of
 	// openHook when both are set is avoided — set only one.
 	openHookCtx func(context.Context)
 	// emitStages, when set, is the sequence of driver ConnectStages the fake
@@ -273,7 +272,7 @@ func TestQueryRunnerHasNoSessionBeforeConnect(t *testing.T) {
 	}
 }
 
-// AC dbsavvy-855: a successful Connect MUST populate the SchemasContext
+// A successful Connect MUST populate the SchemasContext
 // with the visible (non-builtin-hidden) schemas returned by the driver.
 // Before this fix the rail stayed empty even though the driver was
 // connected.
@@ -362,7 +361,7 @@ func TestEditorBufferReaderReadsBuffer(t *testing.T) {
 	g, _ := buildTestGuiWithHistory(t)
 
 	// Seed the canonical *editor.Buffer hung off QueryEditorContext.
-	// wwd.4 rewired editorBufferAdapter to read from Buffer (not the
+	// editorBufferAdapter reads from Buffer (not the
 	// view's TextArea) — Architecture Decision 2: Buffer is the source
 	// of truth, the view is a mirror written by VimEditor on every
 	// Passthrough.
@@ -501,7 +500,7 @@ func TestEditorBufferAdapterInsertAtCursorMultiLineOneUndo(t *testing.T) {
 // wires the completion engine (wireEditorCompletion, run during
 // wireWithDriver), the engine's Sources() contains exactly one source named
 // "snippets" and it is the real *editor.SnippetSource — not the removed
-// placeholder stub source (dbsavvy-ko4m.7.3).
+// placeholder stub source.
 func TestWireEditorCompletionRegistersSnippetSource(t *testing.T) {
 	g, _ := buildTestGuiWithHistory(t)
 

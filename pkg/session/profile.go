@@ -22,8 +22,7 @@ import (
 // statementTimeoutRe is the permissive grammar for Connection.StatementTimeout.
 // It is the SOLE regex gate, but not the sole defense: CanonicalizeStatementTimeout
 // also rejects forbidden bytes and rebuilds the literal from a hard-coded unit
-// table before it is interpolated into the SET command. See epic dbsavvy-921 §D7
-// and dbsavvy-921.5's review-plan resolutions.
+// table before it is interpolated into the SET command.
 var statementTimeoutRe = regexp.MustCompile(`^(0|\d+\s*(ms|s|min|h|d))$`)
 
 // validStatementTimeoutUnits is the closed allowlist consulted after the regex
@@ -59,12 +58,12 @@ var ErrStatementTimeoutInvalid = errors.New("session: invalid statement_timeout 
 //     discovery runs at dial time.
 //   - cfg.AfterConnect issues "SET statement_timeout = '<canonical>'" on every
 //     fresh pool connection, and additionally "SET default_transaction_read_only
-//     = on" iff profile.ReadOnly is true (epic dbsavvy-921 §D7, §D8). Both SETs
+//     = on" iff profile.ReadOnly is true. Both SETs
 //     are re-applied on every pool-conn recycle by virtue of running in
 //     AfterConnect (§D12).
 //   - Pool defaults: MinConns=2, MaxConns=8, MaxConnLifetime=30m,
 //     MaxConnIdleTime=5m, HealthCheckPeriod=1m (§11.3). MinConns was raised
-//     from 1 to 2 in epic dbsavvy-66p.4 so that Connection.Cancel and any
+//     from 1 to 2 so that Connection.Cancel and any
 //     concurrent session never compete for the only available pool slot —
 //     the cancel path opens a fresh raw TCP cancel-request rather than
 //     acquiring a pool conn, so MinConns=2 is conservative belt-and-braces
@@ -220,7 +219,7 @@ func sslModeForLog(dsn string) string {
 var dsnInlineCredRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^:/@?\s]+):[^@/?\s]+@`)
 
 // RedactDSN scrubs inline passwords from any string that may embed a
-// URL-form Postgres DSN. Used by BuildPgxConfig and (in dbsavvy-921.8)
+// URL-form Postgres DSN. Used by BuildPgxConfig and
 // pg.Driver.Open before returning errors that bubble up to logs / TUI.
 func RedactDSN(s string) string {
 	return dsnInlineCredRe.ReplaceAllString(s, "${1}${2}:***@")

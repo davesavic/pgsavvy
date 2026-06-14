@@ -16,7 +16,7 @@ import (
 const txToastTTL = 4 * time.Second
 
 // TxController owns the <leader>t transaction-submenu bindings under
-// QUERY_EDITOR scope (hq5.3): Begin, Commit, Rollback, Savepoint,
+// QUERY_EDITOR scope: Begin, Commit, Rollback, Savepoint,
 // ReleaseSavepoint, RollbackToSavepoint. Handlers delegate to the
 // QueryRunner's Transaction API.
 type TxController struct {

@@ -28,7 +28,7 @@ import (
 // MainLoop where Update closures run on a single thread, distinct from the
 // worker goroutine that schedules them.
 //
-// This is the seam that makes the dbsavvy-fow.1 concurrency regression
+// This is the seam that makes the concurrency regression
 // observable under -race: the recorder runs Update inline on the worker
 // goroutine, so its publish writes never actually cross a thread boundary
 // and the detector sees no conflict. With this driver, the worker truly
@@ -201,8 +201,7 @@ func TestConnect_AsyncPublish_NoRaceWithLayoutRead(t *testing.T) {
 //     with the HandleRender read here under -race.
 //
 // openHook blocks the dial until this goroutine has begun its read/drain
-// loop, guaranteeing the worker's error-publish overlaps the render reads
-// (epic dbsavvy-e53).
+// loop, guaranteeing the worker's error-publish overlaps the render reads.
 func TestConnect_AsyncErrorPublish_NoRaceWithConnectingRender(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	log := slog.New(slog.DiscardHandler)

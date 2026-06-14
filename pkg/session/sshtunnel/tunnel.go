@@ -69,7 +69,7 @@ func Open(ctx context.Context, cfg models.SSHTunnelConfig) (*Tunnel, error) {
 // Two contexts are taken so the caller can bound them independently:
 //   - promptCtx governs interactive secret resolution (authMethods). It should
 //     NOT carry the network connect deadline — a human typing a passphrase must
-//     not be charged against the dial budget (epic dbsavvy-t60w).
+//     not be charged against the dial budget.
 //   - dialCtx governs the network: the TCP dial to the bastion and the SSH
 //     handshake. Cancelling it unblocks a stalled handshake and preserves
 //     fast-fail when the bastion is unreachable.

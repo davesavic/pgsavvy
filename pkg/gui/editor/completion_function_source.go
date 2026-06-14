@@ -12,7 +12,7 @@ const FunctionSourceName = "functions"
 // Engine dedupe; higher than keywords/history so a function name wins
 // over an identically-spelled keyword. It derives from the central
 // FunctionSourceBias (completion_source.go) so the function rank lives
-// in ONE place (dbsavvy-ko4m.3, Finding B4) — do not redeclare a
+// in ONE place — do not redeclare a
 // separate 60 here.
 const FunctionSourcePriority = FunctionSourceBias
 
@@ -29,10 +29,10 @@ const FunctionSourcePriority = FunctionSourceBias
 type FunctionSource struct {
 	priority int
 	meta     SchemaMetadata
-	// detail is the injected signature-help seam (dbsavvy-ko4m.5.3). Optional
+	// detail is the injected signature-help seam. Optional
 	// and nil-safe: Suggest never touches it (the function-name candidates are
-	// unchanged). It is held here so the selection-driven signature population in
-	// ko4m.5.4 can resolve the chosen suggestion's signature via FunctionDetail /
+	// unchanged). It is held here so the selection-driven signature population
+	// can resolve the chosen suggestion's signature via FunctionDetail /
 	// WarmFunctionDetail without the editor importing controllers/helpers/data.
 	detail FunctionDetailProvider
 }
@@ -46,18 +46,18 @@ func NewFunctionSource(meta SchemaMetadata) *FunctionSource {
 	}
 }
 
-// SetDetailProvider injects the function-signature-help provider seam
-// (dbsavvy-ko4m.5.3). Optional and nil-safe: passing nil (or never calling this)
+// SetDetailProvider injects the function-signature-help provider seam.
+// Optional and nil-safe: passing nil (or never calling this)
 // leaves the source emitting the same function-name candidates with empty
-// Signature — there is no visible behavior change until ko4m.5.4 consumes the
-// provider. Wired from the orchestrator over ConnectHelper, mirroring the
+// Signature — there is no visible behavior change until the provider is
+// consumed. Wired from the orchestrator over ConnectHelper, mirroring the
 // SchemaMetadata / TableWarmer injection.
 func (s *FunctionSource) SetDetailProvider(p FunctionDetailProvider) {
 	s.detail = p
 }
 
 // DetailProvider returns the injected signature-help provider, or nil when none
-// was wired. ko4m.5.4 reads it to populate the selected suggestion's Signature.
+// was wired. Read to populate the selected suggestion's Signature.
 func (s *FunctionSource) DetailProvider() FunctionDetailProvider {
 	return s.detail
 }
@@ -72,7 +72,7 @@ func (s *FunctionSource) Priority() int { return s.priority }
 // fuzzily filtered by the typed identifier prefix and read synchronously. Each
 // surviving candidate carries a composite Score = matchQuality +
 // FunctionSourceBias (>0) and the rune-offset Matches from the fuzzy matcher
-// (ko4m.3.2 ranking contract; closes dbsavvy-ek4, where unscored Score=0
+// (ranking contract; previously unscored Score=0
 // functions sorted below every keyword). An empty prefix keeps every function
 // at the baseline Score = FunctionSourceBias via the Match("", x) == (true, 0,
 // nil) contract. Never returns nil.

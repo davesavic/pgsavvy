@@ -15,8 +15,8 @@ import (
 )
 
 // Package-level ActionID aliases. Canonical constants live in
-// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A,
-// dbsavvy-bwq.23). Aliases retain the controllers.ConflictDialog* names
+// pkg/gui/commands/actions.go (upstreamed by Z1 Phase A).
+// Aliases retain the controllers.ConflictDialog* names
 // so existing callers (notably this package's tests) keep compiling.
 const (
 	ConflictDialogRefresh   = commands.ConflictDialogRefresh
@@ -377,7 +377,7 @@ func formatConflictPK(pk []any) string {
 // formatConflictValue renders a value with NULL-safety, type-aware on the
 // column's SQL type. json/jsonb values render as JSON text — the same form
 // the grid and commit preview show — rather than Go's byte-slice form for a
-// []byte the server returned (dbsavvy-2ij6). Nil renders as the literal
+// []byte the server returned. Nil renders as the literal
 // `NULL` so the user can distinguish a missing row from an empty string.
 func formatConflictValue(v any, columnType string) string {
 	if v == nil {

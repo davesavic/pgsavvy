@@ -17,7 +17,7 @@ import (
 // fill. The first page (initialRows) is drained and dispatched to the UI
 // in chunks of this size so the grid paints progressively rather than
 // staying blank until the entire page is read — important for wide-payload
-// queries whose per-row decode is slow (dbsavvy-fspu).
+// queries whose per-row decode is slow.
 const initialFillChunkRows = 50
 
 // ResultBufferManager is the SQL-row analogue of lazygit's
@@ -39,7 +39,7 @@ const initialFillChunkRows = 50
 //
 // All exported methods are safe for concurrent use from any goroutine.
 //
-// DESIGN.md §12.1; epic dbsavvy-66p §Shared Artifacts Registry.
+// DESIGN.md §12.1 §Shared Artifacts Registry.
 type ResultBufferManager struct {
 	// onWorker spawns a background goroutine via the orchestrator
 	// (pkg/gui/orchestrator/threading.go:OnWorker). It increments the
@@ -84,19 +84,19 @@ type ResultBufferManager struct {
 	// need to gate on a row-count threshold treat unknown as
 	// conservative (e.g. show a warning prompt).
 	//
-	// dbsavvy-uv0.3: seeded externally via Store / left at zero. The
+	// seeded externally via Store / left at zero. The
 	// real EXPLAIN-side seed is deferred — for now this field is
 	// always 0 in production; consumers must handle the unknown case.
-	// TODO(dbsavvy-uv0.4+): wire a real EXPLAIN seed.
+	// TODO: wire a real EXPLAIN seed.
 	estimatedRows atomic.Int64
 
-	// log is the optional structured logger used by dbsavvy-8s2.7 for
+	// log is the optional structured logger used for
 	// cat=state RBM lifecycle events. Nil-tolerant via logs.Event.
 	log *slog.Logger
 }
 
 // SetLogger wires the per-session structured logger consumed by the
-// dbsavvy-8s2.7 cat=state instrumentation (rbm_task_launch /
+// cat=state instrumentation (rbm_task_launch /
 // rbm_task_cleanup / rbm_estimated_rows). Safe to call post-construction
 // before the first NewQueryTask.
 func (m *ResultBufferManager) SetLogger(l *slog.Logger) { m.log = l }
@@ -128,14 +128,14 @@ func (m *ResultBufferManager) TaskKey() string {
 }
 
 // EstimatedRows returns the optimiser's row-count estimate seeded into
-// the manager, or 0 when unknown. dbsavvy-uv0.3.
+// the manager, or 0 when unknown.
 func (m *ResultBufferManager) EstimatedRows() int64 {
 	return m.estimatedRows.Load()
 }
 
 // SetEstimatedRows stores the planner-side row-count estimate. Intended
 // to be called once at stream open by code that has just parsed an
-// EXPLAIN result. dbsavvy-uv0.3.
+// EXPLAIN result.
 func (m *ResultBufferManager) SetEstimatedRows(n int64) {
 	m.estimatedRows.Store(n)
 	logs.Event(m.log, "state", "rbm_estimated_rows", slog.Int64("n", n))
@@ -216,7 +216,7 @@ func (m *ResultBufferManager) Stop() {
 //   - onDone is invoked exactly once when the task completes. Its
 //     argument is the terminal error: nil for a clean EOF or a Stop /
 //     preempt, non-nil for a mid-stream stream.Next failure
-//     (dbsavvy-uly7.1) so the caller can render an error state rather
+//     so the caller can render an error state rather
 //     than a misleading "complete".
 func (m *ResultBufferManager) NewQueryTask(
 	taskKey string,
@@ -334,7 +334,7 @@ func (m *ResultBufferManager) runTask(
 		// taskErr is the terminal mid-stream error (nil on clean EOF,
 		// Stop, or streamFn failure handled separately). The deferred
 		// cleanup hands it to onDone so the UI can distinguish
-		// StateComplete from StateErrored (dbsavvy-uly7.1).
+		// StateComplete from StateErrored.
 		taskErr    error
 		onDoneOnce sync.Once
 		fireOnDone = func() {
@@ -400,7 +400,7 @@ func (m *ResultBufferManager) runTask(
 	// (and the per-session streamMu locked) by SQLSession.Stream before
 	// this worker runs, and streamFn just hands it back, so bailing here
 	// WITHOUT closing would orphan the open stream and leak streamMu —
-	// deadlocking the next run (dbsavvy-dk6). streamFn is a zero-cost
+	// deadlocking the next run. streamFn is a zero-cost
 	// `return rh.Rows(), nil`, so always calling it is free.
 	select {
 	case <-stopCh:
@@ -414,7 +414,7 @@ func (m *ResultBufferManager) runTask(
 	// chunks on the UI thread so the grid paints progressively instead
 	// of staying blank until the whole initial page is drained. With
 	// wide-payload rows a single 200-row drain can take tens of seconds,
-	// during which the UI looks frozen (dbsavvy-fspu). Chunking also
+	// during which the UI looks frozen. Chunking also
 	// bounds the peak un-dispatched batch held in memory. The "first
 	// page is on screen before the chan loop starts" property required by
 	// AC scenario "Initial fill pre-paints rows" still holds.
@@ -435,7 +435,7 @@ func (m *ResultBufferManager) runTask(
 				// Mid-stream failure during the initial fill: retain the
 				// rows already dispatched, record the error, and exit so
 				// the deferred cleanup fires onDone(err) → StateErrored
-				// (dbsavvy-uly7.1). Previously the error was swallowed and
+				// Previously the error was swallowed and
 				// the tab finished as StateComplete.
 				taskErr = err
 				return
@@ -476,7 +476,7 @@ func (m *ResultBufferManager) runTask(
 				// causing the deferred onDone(err) → markCompleteOnUI(tab,
 				// err) to be skipped by its StateRunning/StateSorting guard.
 				// Exiting here routes the error solely through onDone(err) →
-				// StateErrored (dbsavvy-uly7.1).
+				// StateErrored.
 				taskErr = err
 				return
 			}
@@ -501,7 +501,7 @@ func (m *ResultBufferManager) runTask(
 // failure returns eof=false,err!=nil; Stop returns eof=false,err=nil
 // (stopCh is not EOF). Already-pulled rows are always returned so the
 // caller can dispatch them before acting on the terminal condition
-// (dbsavvy-uly7.1: the Next error was previously swallowed).
+// (the Next error was previously swallowed).
 //
 // want=-1 means "drain to end".
 func (m *ResultBufferManager) drainRows(

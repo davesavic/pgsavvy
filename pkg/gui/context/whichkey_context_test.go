@@ -154,7 +154,7 @@ func TestWhichKeyContext_RendersRowsAligned(t *testing.T) {
 		t.Errorf("view = %q, want %q", drv.lastView, string(types.WHICH_KEY))
 	}
 	lines := strings.Split(drv.lastContent, "\n")
-	// dbsavvy-tro.11: body is padded to whichKeyBodyRows lines so the
+	// body is padded to whichKeyBodyRows lines so the
 	// popup rect is fully covered (defends against cells from views
 	// beneath bleeding through the empty rows of the popup).
 	if len(lines) != whichKeyBodyRows {
@@ -190,7 +190,7 @@ func TestWhichKeyContext_TruncatesLongRows(t *testing.T) {
 		t.Fatalf("HandleRender: %v", err)
 	}
 	// Per-line truncation: every non-empty row must fit within
-	// whichKeyMaxRowWidth (the padding added in dbsavvy-tro.11 emits
+	// whichKeyMaxRowWidth (the padding emits
 	// empty trailing newlines, so we measure the first content row).
 	firstLine, _, _ := strings.Cut(drv.lastContent, "\n")
 	if got := len(firstLine); got > whichKeyMaxRowWidth {
@@ -214,8 +214,8 @@ func TestWhichKeyContext_SatisfiesIBaseContext(t *testing.T) {
 	var _ types.IBaseContext = &WhichKeyContext{}
 }
 
-// TestWhichKeyContext_HasRows guards the empty-rows policy seam
-// (dbsavvy-tro.4): the orchestrator's layout pass calls HasRows to
+// TestWhichKeyContext_HasRows guards the empty-rows policy seam:
+// the orchestrator's layout pass calls HasRows to
 // decide whether to dismiss a notifier whose prefix has no trie
 // continuations. Nil resolver and empty-resolver must both report
 // false; a non-empty resolver must report true.

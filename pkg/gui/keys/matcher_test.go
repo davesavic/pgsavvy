@@ -772,7 +772,7 @@ func TestMatcher_HandlerErrorReturnedStateReset(t *testing.T) {
 	m := shortMatcher(t, ts, types.QUERY_EDITOR, types.ModeNormal)
 
 	res, err := m.Dispatch(types.QUERY_EDITOR, keyOf('z'))
-	// The central error boundary (dbsavvy-9v1.4) swallows handler errors so
+	// The central error boundary swallows handler errors so
 	// gocui's MainLoop never sees them; the sanitized toast is covered by
 	// TestMatcher_HandlerError_ToastAndSwallowed. This test's purpose is the
 	// post-error state reset asserted below.
@@ -880,7 +880,7 @@ func TestMatcher_AfterFuncStaleFireSuppressed(t *testing.T) {
 	}
 }
 
-// --- dbsavvy-tro.6: editor-safe Special-key Passthrough --------------
+// --- editor-safe Special-key Passthrough --------------
 //
 // These tests pin the contract that the Matcher's Passthrough gate
 // (matcher.go: Step 3) returns Passthrough — NOT FellThrough — for
@@ -1114,7 +1114,7 @@ func TestIsEditorSafeSpecial(t *testing.T) {
 	}
 }
 
-// --- dbsavvy-tro.5: which-key dismissal on unmatched continuation / esc --
+// --- which-key dismissal on unmatched continuation / esc --
 
 // recordingNotifier is a minimal WhichKeyNotifier fake that counts
 // ShowAfter / Hide calls. Safe for concurrent use.

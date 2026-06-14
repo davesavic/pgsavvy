@@ -8,7 +8,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// AC epic dbsavvy-e53.5: a supersession bump mid-dial causes the worker to
+// A supersession bump mid-dial causes the worker to
 // find itself stale and publish NOTHING. Neither activeConn nor the persisted
 // LastConnectionID may be stamped. We inject the bump from inside the dial
 // via openHook.
@@ -35,7 +35,7 @@ func TestConnectInvokerCancelMidDialDropsSuccessfulResult(t *testing.T) {
 	}
 }
 
-// AC epic dbsavvy-e53.5: two sequential connects; only the second succeeds
+// Two sequential connects; only the second succeeds
 // because the first is superseded mid-dial. The active connection must be the
 // second profile.
 func TestConnectInvokerRapidCancelThenNewAttempt(t *testing.T) {

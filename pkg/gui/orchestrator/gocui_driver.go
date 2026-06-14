@@ -9,7 +9,7 @@ import (
 // LiveViewCount returns the number of live gocui views. RunLayout reads it to
 // detect teardown frames (a shrink in the set) that need a full Screen.Sync()
 // to evict cells orphaned by a closed modal/popup, which the incremental
-// Show() leaves behind (dbsavvy-1du).
+// Show() leaves behind.
 func (d *gocuiDriver) LiveViewCount() int {
 	return len(d.g.Views())
 }

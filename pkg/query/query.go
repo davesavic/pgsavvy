@@ -51,7 +51,7 @@ type QueryObj struct {
 // Explain) so callers can build a template and fill it in later.
 //
 // (Named NewQueryObj rather than New because pkg/query already exports
-// New as the constructor for the History type — task dbsavvy-66p.14.)
+// New as the constructor for the History type.)
 func NewQueryObj(sess *session.SQLSession, sql string) *QueryObj {
 	return &QueryObj{exec: sess, sql: sql}
 }

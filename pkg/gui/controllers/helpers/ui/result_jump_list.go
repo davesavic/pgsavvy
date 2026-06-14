@@ -13,8 +13,7 @@ const DefaultJumpListCapacity = 100
 // is the 0-based slot index, TabID the tab's stable monotonic ID (string
 // form per the parent design), Row/Col the grid cursor position at push
 // time, At the wall-clock stamp, and Tombstone reserved for future
-// soft-eviction semantics (currently PruneByTab physically removes per
-// dbsavvy-bwq amendment).
+// soft-eviction semantics (currently PruneByTab physically removes).
 type JumpEntry struct {
 	TabSlot   int
 	TabID     string
@@ -147,7 +146,7 @@ func (l *ResultJumpList) Forward() (JumpEntry, bool) {
 
 // PruneByTab physically removes every entry whose TabID == tabID and
 // clamps the cursor to remain valid (clamped to len(entries); -1 when
-// all entries removed). Per the dbsavvy-bwq amendment we compact rather
+// all entries removed). We compact rather
 // than soft-tombstone — the Tombstone field is retained on JumpEntry as
 // documented future use.
 func (l *ResultJumpList) PruneByTab(tabID string) {

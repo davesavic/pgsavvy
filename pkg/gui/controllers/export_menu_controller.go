@@ -10,7 +10,7 @@ import (
 // to. The concrete satisfier is *ui.ResultTabsHelper; the interface keeps
 // the controller package free of the helpers/ui import. Mirrors
 // HideOverlayManager's shape so the same nil-safe dispatch pattern
-// applies. dbsavvy-uv0.9.
+// applies.
 type ExportMenuManager interface {
 	// ExportMenuMoveField moves the field cursor by d (+1 / -1).
 	ExportMenuMoveField(d int)
@@ -26,7 +26,7 @@ type ExportMenuManager interface {
 }
 
 // ExportMenuController owns the EXPORT_MENU popup bindings opened by
-// <leader>oe (dbsavvy-uv0.9). All state lives on the helper; the
+// <leader>oe. All state lives on the helper; the
 // controller is a thin dispatcher into ExportMenuManager.
 //
 //   - j / <down>            move field cursor +1

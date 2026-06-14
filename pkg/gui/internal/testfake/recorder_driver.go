@@ -41,7 +41,7 @@ type SetViewCall struct {
 }
 
 // SetViewCursorCall records one SetViewCursor invocation. Used by the
-// COMMAND_LINE caret tests in dbsavvy-tro.2.
+// COMMAND_LINE caret tests.
 type SetViewCursorCall struct {
 	View string
 	X, Y int
@@ -97,7 +97,7 @@ type RecorderGuiDriver struct {
 	// realViewNames opts specific view names into returning a real
 	// *gocui.View from SetView (instead of nil). realViews caches the
 	// backing view per enabled name so repeated SetView calls return the
-	// same handle (and DeleteView evicts it). dbsavvy-tzi.2.
+	// same handle (and DeleteView evicts it).
 	realViewNames map[string]bool
 	realViews     map[string]*gocui.View
 }
@@ -347,7 +347,7 @@ func (r *RecorderGuiDriver) GetViewBuffer(viewName string) string {
 // EnableRealView makes SetView(name, ...) return a real *gocui.View
 // (with an auto-initialized TextArea) instead of nil, so tests can
 // assert TextArea seeding done by the layout. Opt-in per view name;
-// names not enabled keep the historical nil-view behavior. dbsavvy-tzi.2.
+// names not enabled keep the historical nil-view behavior.
 func (r *RecorderGuiDriver) EnableRealView(name string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -361,7 +361,7 @@ func (r *RecorderGuiDriver) EnableRealView(name string) {
 // read live view geometry (Dimensions/Origin/Cursor) via ViewByName see
 // the supplied handle. Registers the name in the view map too, so
 // ViewByName returns the view rather than ErrUnknownView. Test-only seam
-// for cursor-anchored popup placement (dbsavvy-etp.2).
+// for cursor-anchored popup placement.
 func (r *RecorderGuiDriver) SetRealView(name string, v *gocui.View) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -376,7 +376,7 @@ func (r *RecorderGuiDriver) SetRealView(name string, v *gocui.View) {
 
 // RealView returns the cached *gocui.View created for an enabled name
 // (via EnableRealView + a SetView call), or nil if none exists yet.
-// Test-only accessor. dbsavvy-tzi.2.
+// Test-only accessor.
 func (r *RecorderGuiDriver) RealView(name string) *gocui.View {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -393,7 +393,7 @@ func (r *RecorderGuiDriver) SetView(name string, x0, y0, x1, y1 int, overlaps by
 	if !existed {
 		r.views[name] = &viewState{}
 	}
-	// Opt-in real-view path (dbsavvy-tzi.2): when enabled, lazily create a
+	// Opt-in real-view path: when enabled, lazily create a
 	// real *gocui.View on first SetView for the name and cache it. First
 	// creation returns (view, ErrUnknownView); subsequent calls return
 	// (view, nil) — mirrors gocui's "fresh view paired with ErrUnknownView"
@@ -538,7 +538,7 @@ func (r *RecorderGuiDriver) ViewByName(name string) (types.View, error) {
 	if _, ok := r.views[name]; !ok {
 		return nil, gocui.ErrUnknownView
 	}
-	// Opt-in real-view path (dbsavvy-tzi.2): when a real *gocui.View was
+	// Opt-in real-view path: when a real *gocui.View was
 	// created for this name, hand it back so callers that read live view
 	// geometry (Dimensions/Origin/Cursor) see real values, matching
 	// production. Names without a real view keep the historical nil-view
@@ -555,7 +555,7 @@ func (r *RecorderGuiDriver) DeleteView(name string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.DeleteViews = append(r.DeleteViews, name)
-	// Evict any cached real view (dbsavvy-tzi.2) so the next SetView for an
+	// Evict any cached real view so the next SetView for an
 	// enabled name re-creates a fresh view (returning ErrUnknownView again),
 	// matching gocui teardown semantics on pop/re-push.
 	if r.realViews != nil {

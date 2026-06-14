@@ -93,7 +93,7 @@ func TestWrapSorted_ClearByteForByte(t *testing.T) {
 // TestWrapSorted_HoistsTrailingLimitOffset asserts that a trailing LIMIT/OFFSET
 // is moved OUT of the inner derived table and re-applied AFTER the ORDER BY.
 // Otherwise Postgres applies the inner LIMIT to an unordered scan first, sorting
-// only an arbitrary subset (dbsavvy-af3: id=1 missing when browsing >LIMIT rows).
+// only an arbitrary subset (id=1 missing when browsing >LIMIT rows).
 func TestWrapSorted_HoistsTrailingLimitOffset(t *testing.T) {
 	tests := []struct {
 		name    string

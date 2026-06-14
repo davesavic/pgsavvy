@@ -40,8 +40,8 @@ func TestRunLayoutSkipsStubContexts(t *testing.T) {
 		t.Fatalf("RunLayout large: %v", err)
 	}
 	// QUERY_EDITOR is no longer in this list — promoted to a live
-	// MAIN_CONTEXT (dbsavvy-wwd.1) and tiled into dims["main"] every
-	// frame by Tier 1.4 (dbsavvy-9p3). See
+	// MAIN_CONTEXT and tiled into dims["main"] every
+	// frame by Tier 1.4. See
 	// TestRunLayoutCreatesQueryEditorMainPane.
 	for _, name := range []string{
 		string(types.TABLE_DATA_EDITOR),
@@ -56,7 +56,7 @@ func TestRunLayoutSkipsStubContexts(t *testing.T) {
 	}
 }
 
-// TestRunLayoutCreatesQueryEditorMainPane (dbsavvy-9p3): the QUERY_EDITOR
+// TestRunLayoutCreatesQueryEditorMainPane: the QUERY_EDITOR
 // is a live MAIN_CONTEXT and must be SetView'd into dims["main"] every
 // frame, regardless of focus-stack membership — focus only governs
 // FrameColor and SetCurrentView, not whether the pane exists.
@@ -104,7 +104,7 @@ func TestRunLayoutEnablesCaretOnQueryEditorFocus(t *testing.T) {
 // prior QUERY_EDITOR frame doesn't bleed a cursor onto the rail list.
 func TestRunLayoutDisablesCaretOnSideRailFocus(t *testing.T) {
 	g, rec := buildTestGui(t)
-	// dbsavvy-56u.2: pop the first-run tip pushed at bootstrap so the
+	// Pop the first-run tip pushed at bootstrap so the
 	// assertion measures CONNECTIONS focus, not the popup on top of it.
 	if err := g.ContextTree().Pop(); err != nil {
 		t.Fatalf("Pop first-run tip: %v", err)
@@ -121,7 +121,7 @@ func TestRunLayoutDisablesCaretOnSideRailFocus(t *testing.T) {
 }
 
 // TestRunLayoutDisablesCaretOnConfirmationPopup regresses the "cursor
-// at the top of the confirmation dialog" bug (dbsavvy-u6p7). The confirm
+// at the top of the confirmation dialog" bug. The confirm
 // popup is a non-editable TEMPORARY_POPUP that opens over the focused
 // QUERY_EDITOR, which leaves g.Cursor enabled from the prior frame.
 // Unless the layout actively clears the caret when a non-editable popup
@@ -204,8 +204,8 @@ func TestRunLayoutOmitsOffStackPopups(t *testing.T) {
 	}
 }
 
-// lastSetView returns the most recent SetView call for name (dbsavvy-etp.2
-// helper). The Tier-3 popup loop SetViews each frame, so the last call
+// lastSetView returns the most recent SetView call for name. The Tier-3
+// popup loop SetViews each frame, so the last call
 // reflects the rect actually applied.
 func lastSetView(rec *testfake.RecorderGuiDriver, name string) (testfake.SetViewCall, bool) {
 	var got testfake.SetViewCall
@@ -218,7 +218,7 @@ func lastSetView(rec *testfake.RecorderGuiDriver, name string) (testfake.SetView
 	return got, found
 }
 
-// TestRunLayoutSuggestionsAnchoredBelowCursor (dbsavvy-etp.2): when the
+// TestRunLayoutSuggestionsAnchoredBelowCursor: when the
 // SUGGESTIONS popup is on the focus stack and visible, RunLayout sizes its
 // view to the cell directly below the cursor — derived from the live
 // QUERY_EDITOR view Dimensions()+Origin() and the SuggestionsContext
@@ -261,8 +261,8 @@ func TestRunLayoutSuggestionsAnchoredBelowCursor(t *testing.T) {
 	}
 }
 
-// TestRunLayoutSuggestionsFallsBackToCenteredWithoutEditorView
-// (dbsavvy-etp.2): when the QUERY_EDITOR view handle is unavailable
+// TestRunLayoutSuggestionsFallsBackToCenteredWithoutEditorView: when the
+// QUERY_EDITOR view handle is unavailable
 // (ViewByName -> nil, the default recorder behavior), the SUGGESTIONS
 // popup degrades to a centered rect rather than landing at (0,0).
 func TestRunLayoutSuggestionsFallsBackToCenteredWithoutEditorView(t *testing.T) {
@@ -286,8 +286,8 @@ func TestRunLayoutSuggestionsFallsBackToCenteredWithoutEditorView(t *testing.T) 
 }
 
 // TestRunLayoutRendersVisibleSuggestionsOffStack regresses the
-// dbsavvy-2fo integration gap. The frozen design (dbsavvy-etp Scope IN
-// #1) keeps the QUERY_EDITOR focused and NEVER pushes SUGGESTIONS onto
+// off-stack-suggestions integration gap. The frozen design keeps the
+// QUERY_EDITOR focused and NEVER pushes SUGGESTIONS onto
 // the focus stack, yet the only popup-render path was the focus-stack
 // Tier-3 loop. Result: in the real TUI the completion popup never
 // appeared (Show() flipped an internal visible bool the orchestrator
@@ -361,7 +361,7 @@ func TestRunLayoutCheatsheetFocusedAfterPush(t *testing.T) {
 	}
 }
 
-// TestRunLayoutWhichKeyOverlayFillsRectBody (dbsavvy-tro.11): with the
+// TestRunLayoutWhichKeyOverlayFillsRectBody: with the
 // WHICH_KEY notifier visible and only a couple of binding rows wired,
 // the SetContent payload written into the WHICH_KEY view must span the
 // popup's interior height — no fewer lines than the body-row spec.
@@ -425,7 +425,7 @@ func TestRunLayoutWhichKeyOverlayFillsRectBody(t *testing.T) {
 	}
 }
 
-// TestRunLayoutWhichKeyOverlayExpandsToFitRows (dbsavvy-y5t): the
+// TestRunLayoutWhichKeyOverlayExpandsToFitRows: the
 // which-key popup height must grow to fit every wired binding row
 // (clamped to the screen), not a fixed 12-row rect that clipped
 // everything past ~10 children with no way to scroll. Here 15 rows are
@@ -468,7 +468,7 @@ func TestRunLayoutWhichKeyOverlayExpandsToFitRows(t *testing.T) {
 	}
 }
 
-// TestWhichKeyRowsResolverWiredAtBoot (dbsavvy-tro.4): the orchestrator
+// TestWhichKeyRowsResolverWiredAtBoot: the orchestrator
 // MUST install a non-nil WhichKeyRows closure on the WhichKeyContext at
 // boot so HandleRender can resolve children for the live trie. Without
 // the wiring, the popup would render an empty body even when the trie
@@ -490,7 +490,7 @@ func TestWhichKeyRowsResolverWiredAtBoot(t *testing.T) {
 	}
 }
 
-// TestRunLayoutWhichKeyOverlayEmptyRowsHidesPopup (dbsavvy-tro.4): when
+// TestRunLayoutWhichKeyOverlayEmptyRowsHidesPopup: when
 // the WHICH_KEY notifier flips visible but the wired rows-resolver
 // returns no children for the current (scope, prefix), the layout pass
 // must dismiss the notifier and DeleteView the popup. Without this
@@ -568,7 +568,7 @@ func TestRunLayoutCreatesPopupOnStack(t *testing.T) {
 	}
 }
 
-// TestCommandActionsFlipDriverCaret (dbsavvy-tro.2): the live wiring in
+// TestCommandActionsFlipDriverCaret: the live wiring in
 // gui.go assembles CommandLineCommandDeps.CaretToggler = driver.SetCaretEnabled.
 // Invoke the registered command.open / command.cancel handlers and
 // verify the recorder driver observed (true, false).
@@ -599,7 +599,7 @@ func TestCommandActionsFlipDriverCaret(t *testing.T) {
 	}
 }
 
-// TestRunLayoutCommandLineCaretAtPromptColumn (dbsavvy-tro.2): each
+// TestRunLayoutCommandLineCaretAtPromptColumn: each
 // Layout pass while COMMAND_LINE is on the focus stack must call
 // driver.SetViewCursor on the command-line view at column = 1 +
 // len(buffer) so the caret sits right after the ':' prompt.
@@ -671,7 +671,7 @@ func TestRunLayoutCommandLineCaretTracksBufferLength(t *testing.T) {
 	}
 }
 
-// TestRunLayoutCommandLinePromptStyled (dbsavvy-tro.12): each Layout
+// TestRunLayoutCommandLinePromptStyled: each Layout
 // pass while COMMAND_LINE is on the focus stack must write a buffer
 // content that opens with the PromptFg ANSI SGR escape, then ':', then
 // the reset. Without the wrapper, the prompt renders in the terminal's
@@ -732,7 +732,7 @@ func TestRunLayoutCommandLinePromptStyled_BufferAppended(t *testing.T) {
 // is permitted to span row 0 (and only in the tiny-terminal branch,
 // which never executes here). Any other hit indicates a candidate
 // source of the "thin blue line at canvas top" artifact described in
-// dbsavvy-tro.13: a Frame=true gocui view's top border lands at row 0,
+// a Frame=true gocui view's top border lands at row 0,
 // outside the slot the boxlayout reserved for "options" (which the
 // orchestrator deliberately leaves un-SetView'd).
 func row0Artifact(calls []testfake.SetViewCall) (testfake.SetViewCall, bool) {
@@ -747,7 +747,7 @@ func row0Artifact(calls []testfake.SetViewCall) (testfake.SetViewCall, bool) {
 	return testfake.SetViewCall{}, false
 }
 
-// TestRunLayoutRow0_NoArtifact_FirstFrame (dbsavvy-tro.13, hypothesis 4):
+// TestRunLayoutRow0_NoArtifact_FirstFrame (hypothesis 4):
 // the very first RunLayout pass after wireWithDriver must not create
 // any view whose declared rectangle touches row 0. The orchestrator
 // reserves row 0 for the "options" boxlayout slot but never calls
@@ -768,11 +768,11 @@ func TestRunLayoutRow0_NoArtifact_FirstFrame(t *testing.T) {
 	}
 }
 
-// TestRunLayoutRow0_NoArtifact_AfterPopupCycle (dbsavvy-tro.13): a
+// TestRunLayoutRow0_NoArtifact_AfterPopupCycle: a
 // popup show → hide cycle must not leave any view with Y0=0 in the
 // final SetView log slice. Walks the scenario from the walkthrough:
 // push MENU, run a frame, pop, run another frame. After the final
-// frame, no popup view should occupy row 0; with dbsavvy-b1a
+// frame, no popup view should occupy row 0; with the
 // Screen.Clear() in place, no stale row-0 cells survive either, so
 // the only way row 0 could now show paint is via a SetView call we
 // missed — which this assertion fails on.
@@ -799,7 +799,7 @@ func TestRunLayoutRow0_NoArtifact_AfterPopupCycle(t *testing.T) {
 	}
 }
 
-// TestRunLayoutRow0_NoArtifact_AfterResize (dbsavvy-tro.13): popup
+// TestRunLayoutRow0_NoArtifact_AfterResize: popup
 // show → resize → popup hide. The resize transition is the canonical
 // reproducer for stale back-buffer paint (different SetView rect on
 // the second frame leaves the old border in the cell grid). With
@@ -876,7 +876,7 @@ func TestRunLayoutCommandLineCaretResetOnRePush(t *testing.T) {
 	}
 }
 
-// TestRunLayoutStatusBarRectHasVisibleInnerRow (dbsavvy-8tj) regresses
+// TestRunLayoutStatusBarRectHasVisibleInnerRow regresses
 // the QA-1.1 "no status bar" bug. The lazygit gocui fork computes a
 // view's writable InnerHeight as Height-2 regardless of Frame and
 // writes cells at screen position (x0+x+1, y0+y+1). boxlayout's Size:2
@@ -933,7 +933,7 @@ func TestRunLayoutStatusBarRectHasVisibleInnerRow(t *testing.T) {
 	}
 }
 
-// TestRunLayoutSeedsCellEditorTextAreaFromInitial (dbsavvy-tzi.2): the
+// TestRunLayoutSeedsCellEditorTextAreaFromInitial: the
 // layout's CELL_EDITOR branch must plumb the live view into the context
 // and seed the fresh view's TextArea from Initial() exactly once, so
 // Buffer()/ReadAndClearBuffer() read the live TextArea (not the test-mode
@@ -976,7 +976,7 @@ func TestRunLayoutSeedsCellEditorTextAreaFromInitial(t *testing.T) {
 	}
 }
 
-// TestRunLayoutCellEditorRePushSeedsNewValue (dbsavvy-tzi.2): popping the
+// TestRunLayoutCellEditorRePushSeedsNewValue: popping the
 // CELL_EDITOR and running a layout pass tears down the view (the off-stack
 // teardown loop DeleteViews it, which evicts the recorder's cached real
 // view). Re-opening on a new value and re-pushing must seed a FRESH view

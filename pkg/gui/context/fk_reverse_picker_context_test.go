@@ -56,7 +56,7 @@ func TestFKReversePickerContext_HandleRender_DelegatesToBody(t *testing.T) {
 	}
 }
 
-// Mirrors the dbsavvy-3vf regression test for TableInspect: the context
+// Mirrors the regression test for TableInspect: the context
 // layer must NOT strip ANSI / newlines from the composed body. AD-17
 // places SafeText at the leaf panel layer, not here.
 func TestFKReversePickerContext_HandleRender_PreservesEscapesAndNewlines(t *testing.T) {

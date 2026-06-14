@@ -1,6 +1,6 @@
 package ui_test
 
-// Seam-level flow tests for the dbsavvy-ioaj rail highlight+jump search.
+// Seam-level flow tests for the rail highlight+jump search.
 //
 // The orchestrator's openRailSearch / setRailMatchCount are unexported
 // methods on *Gui and wiring a full Gui in a unit test is impractical, so

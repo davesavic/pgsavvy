@@ -9,7 +9,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
 
-// TestProjection_FilterIsIdentityEvenWhenActive pins the dbsavvy-2ttm
+// TestProjection_FilterIsIdentityEvenWhenActive pins the
 // amendment: applyFilter no longer hides rows — the projection returns
 // every row in raw order. (The regex filter was superseded by the
 // never-hiding plain-substring SEARCH.)
@@ -65,7 +65,7 @@ func TestProjection_SortAloneNoFilterIsIdentity(t *testing.T) {
 
 // captureSortRequests installs a capturing onSortRequest hook on v and
 // returns a pointer to the slice of RAW column indices it was invoked with.
-// The grid no longer owns the sort cycle (dbsavvy-72k.5), so the
+// The grid no longer owns the sort cycle, so the
 // double-click DETECTION is now verified by observing the sink, not the
 // grid's sortState.
 func captureSortRequests(v *View) *[]int {
@@ -127,7 +127,7 @@ func TestHandleHeaderClick_DifferentColumnResetsPair(t *testing.T) {
 // TestHandleHeaderClick_TripleClickAscDesc pins the qualifying-double-click
 // machine: each Nth qualifying double-click fires onSortRequest once with
 // the same RAW col. Direction (asc/desc) is no longer the grid's concern —
-// the Tab-level flow owns the cycle (dbsavvy-72k.5) — so here we assert TWO
+// the Tab-level flow owns the cycle — so here we assert TWO
 // qualifying double-clicks fire onSortRequest twice with col 0.
 func TestHandleHeaderClick_TripleClickAscDesc(t *testing.T) {
 	v := sortableView(t, [][]any{{"x", int64(1)}})

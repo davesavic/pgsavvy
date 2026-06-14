@@ -107,7 +107,7 @@ func (l *ListControllerTrait[T]) Confirm(ctx commands.ExecCtx) error {
 // RegisterActions registers this trait's three actions (ListUp /
 // ListDown / ListConfirm) with reg under per-rail IDs derived from
 // viewName. Each rail owns its own handler so j/k/<CR> dispatched on
-// rail X mutate rail X's cursor (dbsavvy-6m9). The aggregate
+// rail X mutate rail X's cursor. The aggregate
 // Controllers.RegisterActions must invoke this on every rail's trait.
 func (l *ListControllerTrait[T]) RegisterActions(reg *commands.Registry) {
 	if reg == nil {

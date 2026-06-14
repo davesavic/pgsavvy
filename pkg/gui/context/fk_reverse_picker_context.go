@@ -5,8 +5,8 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
-// FKReversePickerContextKey aliases types.FK_REVERSE_PICKER. Z1
-// (dbsavvy-bwq.23 Phase A) promoted the canonical ContextKey into
+// FKReversePickerContextKey aliases types.FK_REVERSE_PICKER. The
+// canonical ContextKey was promoted into
 // pkg/gui/types/context.go; this alias is retained so existing callers
 // (controllers, tests) keep compiling without a wider rename. New code
 // should reference types.FK_REVERSE_PICKER directly.
@@ -20,7 +20,7 @@ const FKReversePickerContextKey = types.FK_REVERSE_PICKER
 // The context is a thin state holder: state is owned by a
 // *popup.TabbedPopup installed via SetState. The controller owns key
 // dispatch (tab cycling, <CR> selection, close). Pattern mirrors
-// TableInspectContext (dbsavvy-3vf). dbsavvy-bwq.17 (B6).
+// TableInspectContext.
 type FKReversePickerContext struct {
 	BaseContext
 

@@ -61,7 +61,7 @@ func TestPromptContext_RendersLabelAndBuffer(t *testing.T) {
 	drv := &captureDriver{}
 	state := &fakePromptState{active: true, label: "Connection name", buffer: "alice"}
 	c := newTestPrompt(state, drv)
-	// Post-dbsavvy-fq9 the typed buffer lives on the view's TextArea
+	// The typed buffer lives on the view's TextArea
 	// (or, when no view is plumbed in, the test-mode buf). The state's
 	// Buffer() field is no longer read by HandleRender — seed the test
 	// buffer explicitly here.

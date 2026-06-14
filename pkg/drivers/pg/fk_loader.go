@@ -14,7 +14,7 @@ import (
 // established by conkey/confkey unnest WITH ORDINALITY (conkey[i] pairs with
 // confkey[i]). The confupdtype / confdeltype catalog letters are mapped to
 // human-readable labels in the SQL ('a'->NO ACTION, 'r'->RESTRICT,
-// 'c'->CASCADE, 'n'->SET NULL, 'd'->SET DEFAULT). See B1 / dbsavvy-bwq.12.
+// 'c'->CASCADE, 'n'->SET NULL, 'd'->SET DEFAULT). See B1.
 func (s *Session) ListForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
 	defer s.guard()()
 	s.parent.warnIfPostgresGE18()
@@ -31,7 +31,7 @@ func (s *Session) ListForeignKeys(ctx context.Context, schema, table string) ([]
 // values are the planner's row estimate (round up to derive `~N rows`),
 // zero means "table has zero rows", and a negative value (typically -1)
 // signals "no ANALYZE since last reset", which the caller renders as
-// `~? rows`. Returns 0 + an error when the table is not found. dbsavvy-bwq.17 (B6).
+// `~? rows`. Returns 0 + an error when the table is not found. (B6).
 func (s *Session) TableReltuples(ctx context.Context, schema, table string) (float32, error) {
 	defer s.guard()()
 	const q = `SELECT c.reltuples FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2`
@@ -49,7 +49,7 @@ func (s *Session) TableReltuples(ctx context.Context, schema, table string) (flo
 // fields hold the input table (schema, table), and Schema/Table/Columns
 // hold the REFERENCING table. The result is empty (non-nil) when no other
 // table references this one. Self-referencing FKs appear in the result
-// just like any other reference. See B6 / dbsavvy-bwq.17.
+// just like any other reference. See B6.
 func (s *Session) ListInboundForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
 	defer s.guard()()
 	s.parent.warnIfPostgresGE18()

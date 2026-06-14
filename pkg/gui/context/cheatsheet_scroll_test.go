@@ -18,8 +18,7 @@ func newTestCheatsheet() *CheatsheetContext {
 
 // TestCheatsheetScroll asserts the scroll offset accumulates, clamps at
 // the top (never negative), and is reset when a fresh TabbedPopup state
-// is installed (each `?` press / tab cycle starts at the top) — the
-// navigation half of dbsavvy-quyg.
+// is installed (each `?` press / tab cycle starts at the top).
 func TestCheatsheetScroll(t *testing.T) {
 	c := newTestCheatsheet()
 

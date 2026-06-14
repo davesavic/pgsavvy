@@ -18,7 +18,7 @@ func TestErrNotImplemented_SelfMatches(t *testing.T) {
 
 func TestErrNotImplemented_NotErrUnsupported(t *testing.T) {
 	if errors.Is(ErrNotImplemented, errors.ErrUnsupported) {
-		t.Fatal("ErrNotImplemented must not alias errors.ErrUnsupported (epic dbsavvy-921 D4)")
+		t.Fatal("ErrNotImplemented must not alias errors.ErrUnsupported")
 	}
 }
 

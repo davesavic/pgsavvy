@@ -202,7 +202,7 @@ func feedSpecial(t *testing.T, drv *serializedDriver, view string, name gocui.Ke
 
 // feedSpecialEditable dispatches a special key through the recorder's
 // master Editor instead of the SetKeybinding shim list. Editable views
-// (post-dbsavvy-fq9 that now includes PROMPT) install a master Editor
+// (that now includes PROMPT) install a master Editor
 // and SKIP per-key SetKeybinding shims, so FeedKey for Enter/Esc would
 // return errNotFound — FeedChord drives the same Dispatcher path the
 // production gocui Editor uses, so the matcher resolves Enter →
@@ -222,7 +222,7 @@ func feedSpecialEditable(t *testing.T, drv *serializedDriver, view string, name 
 // chained-prompt flow via RecorderGuiDriver.FeedKey and asserts the new
 // profile lands in connections.yml verbatim.
 func TestConnectionAdd_HappyPath_AppendsOneRow(t *testing.T) {
-	t.Skip("dbsavvy-bsh: CONNECTIONS rail removed; WalkAdd chained prompt flow retired in favor of inline modal form")
+	t.Skip("CONNECTIONS rail removed; WalkAdd chained prompt flow retired in favor of inline modal form")
 	g, rec, fs, path := bootstrapAddConnGui(t)
 
 	pre, err := config.LoadConnections(fs, path)
@@ -254,7 +254,7 @@ func TestConnectionAdd_HappyPath_AppendsOneRow(t *testing.T) {
 	assertPopupRendered(t, g, rec, string(types.PROMPT))
 	assertPopupBodyContains(t, g, rec, string(types.PROMPT), "Connection name")
 	assertCaretEnabled(t, rec, true)
-	// Post-dbsavvy-fq9 PROMPT is editable: in production gocui.DefaultEditor
+	// PROMPT is editable: in production gocui.DefaultEditor
 	// writes keystrokes into v.TextArea, but the recorder driver returns
 	// nil from SetView so the TextArea path is unreachable. Inject the
 	// typed value via the test seam so PromptController.Submit reads
@@ -264,7 +264,7 @@ func TestConnectionAdd_HappyPath_AppendsOneRow(t *testing.T) {
 	// SetViewCursor("prompt", 2+len("alice"), 2). The "> " prefix is two
 	// cells on body line 2 (label=0, blank=1, "> <buf>"=2). Without this
 	// the user sees the typed text but no caret showing where their next
-	// character will land (dbsavvy-m47.x / PROMPT caret bug).
+	// character will land (PROMPT caret bug).
 	assertPromptCursorAt(t, g, rec, 2+len("alice"), 2)
 	feedSpecialEditable(t, rec, string(types.PROMPT), gocui.KeyEnter)
 
@@ -315,7 +315,7 @@ func TestConnectionAdd_HappyPath_AppendsOneRow(t *testing.T) {
 // at the SELECTION popup unwinds the entire WalkAddConnection sequence
 // cleanly with no file write and no leaked popup state.
 func TestConnectionAdd_EscAtDriverPick_NoWrite(t *testing.T) {
-	t.Skip("dbsavvy-bsh: CONNECTIONS rail removed; WalkAdd chained prompt flow retired in favor of inline modal form")
+	t.Skip("CONNECTIONS rail removed; WalkAdd chained prompt flow retired in favor of inline modal form")
 	g, rec, fs, path := bootstrapAddConnGui(t)
 
 	feedRune(t, rec, string(types.CONNECTION_MANAGER), 'a')

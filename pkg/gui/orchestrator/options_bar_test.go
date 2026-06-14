@@ -12,7 +12,7 @@ import (
 // optionsBarBinding is a compact ChordBinding constructor for tests.
 // Every entry resolves to a fixture *commands.Command whose Tag and
 // Description are propagated into the trie leaf via the trieNode
-// extension landed in dlp.12.
+// extension.
 type optionsBarBinding struct {
 	seq         string
 	mode        types.Mode
@@ -198,7 +198,7 @@ func TestCollectOptionsForScope_FocusedScopeIsGlobalNoDoubleCount(t *testing.T) 
 }
 
 func TestCollectOptionsForScope_ConnectionsHasAtLeastThreeHints(t *testing.T) {
-	// dbsavvy-fow.2: the CONNECTIONS rail flags its top bindings
+	// the CONNECTIONS rail flags its top bindings
 	// (connect/add/refresh) ShowInBar:true so the status options bar
 	// lights up. Mirror those three production leaves here and assert
 	// CollectOptionsForScope returns a non-empty slice with >=3 entries.

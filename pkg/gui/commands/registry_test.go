@@ -258,12 +258,12 @@ func TestActionIDs_NonEmptyDotNamespacedAndUnique(t *testing.T) {
 }
 
 // reload.config was explicitly removed by the /review-plan amendment:
-// `:reload` lives in dlp.7's ExRegistry, not in commands.Registry.
+// `:reload` lives in the ExRegistry, not in commands.Registry.
 func TestActionIDs_NoOrphanReloadConfig(t *testing.T) {
 	for _, id := range AllActionIDs() {
 		if id == "reload.config" {
 			t.Errorf("reload.config must not appear in CommandRegistry constants " +
-				"(per /review-plan amendment — :reload lives in dlp.7's ExRegistry)")
+				"(per /review-plan amendment — :reload lives in the ExRegistry)")
 		}
 	}
 }

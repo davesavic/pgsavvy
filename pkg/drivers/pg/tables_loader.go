@@ -13,7 +13,7 @@ import (
 //
 // External callers MUST go through Session.ListTables; only same-package
 // async-enrichment glue should construct or invoke a TableLoader directly.
-// See Arch-5 of the review-plan resolutions for epic dbsavvy-921.
+// See Arch-5 of the review-plan resolutions.
 type TableLoader struct {
 	session *Session
 }
