@@ -549,12 +549,32 @@ func (g *Gui) RunLayout(w, h int) error {
 				view.Title = ctx.GetTitle()
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
+			// RELATIONSHIP_PANEL styling: a focus-retaining DISPLAY_CONTEXT with
+			// two states — FOLLOW mode (grid keeps input) and INPUT mode (Enter;
+			// panel focused). Paint the active border only in input mode so the
+			// user can see the panel is the live target, the inactive border in
+			// follow mode (popups are skipped by the Tier-1 applyFocusFrameColors
+			// pass; gocui resets FrameColor on SetView, so this runs every frame).
+			// Wrap so preview lines wider than the docked panel reflow instead of
+			// clipping off the right edge. The vertical scroll that keeps the
+			// selection visible is applied after HandleRender below.
+			if ctx.GetKey() == types.RELATIONSHIP_PANEL && view != nil {
+				view.Wrap = true
+				border := theme.Current().InactiveBorder
+				if g.relationshipPanelFocused() {
+					border = theme.Current().ActiveBorder
+				}
+				view.FrameColor = frameAttr(border)
+			}
 			_ = ctx.HandleRender()
 			if ctx.GetKey() == types.CHEATSHEET && view != nil {
 				applyCheatsheetScroll(view, ctx)
 			}
 			if ctx.GetKey() == types.TABLE_INSPECT && view != nil {
 				applyTableInspectScroll(view, ctx)
+			}
+			if ctx.GetKey() == types.RELATIONSHIP_PANEL && view != nil {
+				applyRelationshipPanelScroll(view, g.relationshipPanelFocused())
 			}
 			_, _ = g.driver.SetViewOnTop(name)
 			onStack[ctx.GetKey()] = struct{}{}
@@ -685,8 +705,7 @@ func (g *Gui) RunLayout(w, h int) error {
 			// CHEATSHEET — DO own input, so this is keyed on the specific panel
 			// key, not the kind.)
 			if top.GetKey() == types.RELATIONSHIP_PANEL {
-				if g.controllers != nil && g.controllers.RelationshipPanel != nil &&
-					g.controllers.RelationshipPanel.IsFocused() {
+				if g.relationshipPanelFocused() {
 					if vn := top.GetViewName(); vn != "" {
 						_, _ = g.driver.SetCurrentView(vn)
 					}
@@ -1374,6 +1393,57 @@ func maxLineWidth(view *gocui.View) int {
 		}
 	}
 	return w
+}
+
+// applyRelationshipPanelScroll keeps the focused panel's selection on screen.
+// The panel bakes a "> " gutter onto the selected row (writeOutbound /
+// writeInbound), so the layout locates that row in the wrap-applied view lines
+// and scrolls the vertical origin just enough to keep it visible — the panel
+// renders the whole list in one SetContent, so without this the selection
+// disappears past the docked bottom edge. In follow mode (not focused) the
+// panel tracks the grid cursor and always shows from the top, so the origin is
+// pinned to 0. Called after HandleRender so ViewBufferLines reflects the freshly
+// written, wrapped body (origin is indexed in visual lines, not logical lines).
+func applyRelationshipPanelScroll(view *gocui.View, focused bool) {
+	if !focused {
+		view.SetOriginY(0)
+		return
+	}
+	lines := view.ViewBufferLines()
+	sel := -1
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, "> ") {
+			sel = i
+			break
+		}
+	}
+	if sel < 0 {
+		return
+	}
+	height := view.InnerHeight()
+	if height <= 0 {
+		return
+	}
+	oy := view.OriginY()
+	if sel < oy {
+		oy = sel
+	} else if sel >= oy+height {
+		oy = sel - height + 1
+	}
+	if maxOY := max(len(lines)-height, 0); oy > maxOY {
+		oy = maxOY
+	}
+	view.SetOriginY(oy)
+}
+
+// relationshipPanelFocused reports whether the user has entered the panel
+// (input mode). The Tier-3 styling/scroll passes read it to pick the border
+// colour and to decide whether to follow the selection; the Tier-4 focus guard
+// reads the same flag to route keyboard input.
+func (g *Gui) relationshipPanelFocused() bool {
+	return g.controllers != nil &&
+		g.controllers.RelationshipPanel != nil &&
+		g.controllers.RelationshipPanel.IsFocused()
 }
 
 func applyFocusFrameColors(rails map[string]*gocui.View, focusedName string, active, inactive gocui.Attribute) {
