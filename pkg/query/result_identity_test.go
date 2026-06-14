@@ -47,6 +47,26 @@ func TestResultIdentity_DetectFromQuery(t *testing.T) {
 			sql:  "SELECT * FROM users;",
 			want: ResultIdentity{BaseTable: "users", HasRowIdentity: true},
 		},
+		{
+			name: "rule_implicit_alias",
+			sql:  "SELECT * FROM categories c;",
+			want: ResultIdentity{BaseTable: "categories", HasRowIdentity: true},
+		},
+		{
+			name: "rule_explicit_alias",
+			sql:  "SELECT * FROM categories AS c;",
+			want: ResultIdentity{BaseTable: "categories", HasRowIdentity: true},
+		},
+		{
+			name: "rule_implicit_alias_with_where",
+			sql:  "SELECT * FROM categories c WHERE c.id = 1",
+			want: ResultIdentity{BaseTable: "categories", HasRowIdentity: true},
+		},
+		{
+			name: "rule_schema_qualified_implicit_alias",
+			sql:  "SELECT * FROM public.users u ORDER BY u.id",
+			want: ResultIdentity{BaseTable: "public.users", HasRowIdentity: true},
+		},
 
 		// --- AC Rules: reject set --------------------------------
 		{

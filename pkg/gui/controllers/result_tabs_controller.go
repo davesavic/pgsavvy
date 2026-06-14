@@ -826,8 +826,9 @@ func (r *ResultTabsController) pendingDiscardAtCursorHandler(_ commands.ExecCtx)
 	return nil
 }
 
-// pendingDiscardAllHandler dispatches `<leader>cU` — clears every
-// staged PendingEdit, prompting above the threshold via the helper.
+// pendingDiscardAllHandler dispatches `<leader>cU` — clears every staged
+// PendingEdit across ALL tables, prompting above the combined-count
+// threshold. The helper resolves the registry snapshot itself.
 func (r *ResultTabsController) pendingDiscardAllHandler(_ commands.ExecCtx) error {
 	h := r.helpers.PendingDiscard
 	if h == nil {

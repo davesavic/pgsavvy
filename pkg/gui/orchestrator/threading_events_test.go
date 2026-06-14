@@ -151,6 +151,30 @@ func TestOnWorker_PanicEmitsWorkerEndWithRecovered(t *testing.T) {
 	require.Len(t, panicEnds, 1, "expected one panic_recovered worker_end; got %v", buf.String())
 }
 
+// TestOnWorker_PanicEmitsPanicStackBreadcrumb verifies a panicking worker
+// also leaves the cat=app, evt=panic breadcrumb carrying the panic value and
+// the full goroutine stack — the same durable post-mortem the MainLoop guard
+// writes, so a background-goroutine crash is just as findable.
+func TestOnWorker_PanicEmitsPanicStackBreadcrumb(t *testing.T) {
+	l, buf := bufLogger()
+	g, _, _ := buildTestGuiWithLogger(t, l)
+	defer func() { _ = g.Close() }()
+
+	done := make(chan struct{})
+	g.OnWorker(func(_ gocui.Task) error {
+		defer close(done)
+		panic("synthetic panic")
+	})
+	<-done
+	g.WaitWorkers()
+
+	// The breadcrumb is a single JSON line carrying evt=panic, the value,
+	// and a stack attr (logPanicStack is the frame that calls debug.Stack,
+	// so it is always present in the captured trace).
+	panics := grepLines(buf, `"evt":"panic"`, `synthetic panic`, `logPanicStack`)
+	require.Len(t, panics, 1, "expected one evt=panic breadcrumb with a stack; got %v", buf.String())
+}
+
 // TestOnWorker_ErrEmitsWorkerEnd verifies a non-nil error return from the
 // worker fn emits a worker_end{err:...} line on top of the existing
 // Errorf log line.

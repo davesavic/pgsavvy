@@ -141,6 +141,37 @@ func TestBuildPendingIndicator_LargeCountFitsExpanded(t *testing.T) {
 	}
 }
 
+// TestBuildPendingIndicatorCount_ZeroReturnsEmpty proves the cross-table
+// count form omits the segment when nothing is staged anywhere.
+func TestBuildPendingIndicatorCount_ZeroReturnsEmpty(t *testing.T) {
+	if got := BuildPendingIndicatorCount(0, nil, 80); got != "" {
+		t.Fatalf("got %q, want empty for zero count", got)
+	}
+	if got := BuildPendingIndicatorCount(-3, nil, 80); got != "" {
+		t.Fatalf("got %q, want empty for negative count", got)
+	}
+}
+
+// TestBuildPendingIndicatorCount_AggregatedTotal proves the indicator
+// renders a summed cross-table count (e.g. 2 tables × edits).
+func TestBuildPendingIndicatorCount_AggregatedTotal(t *testing.T) {
+	got := BuildPendingIndicatorCount(7, nil, 80)
+	if got != "[7 pending]" {
+		t.Fatalf("got %q, want %q", got, "[7 pending]")
+	}
+}
+
+// TestBuildPendingIndicatorCount_Tinted proves the count form honours the
+// same destructive-flag tinting as the set form.
+func TestBuildPendingIndicatorCount_Tinted(t *testing.T) {
+	conn := &models.Connection{Color: "red", ConfirmWrites: true}
+	got := BuildPendingIndicatorCount(4, conn, 80)
+	want := "\x1b[31m[4 pending]\x1b[0m"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 // TestBuildDisabledEditCellOption_EditableReturnsEmpty proves the
 // no-op path: when GridView.Editable=true the segment is omitted.
 func TestBuildDisabledEditCellOption_EditableReturnsEmpty(t *testing.T) {

@@ -11,7 +11,9 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -193,13 +195,10 @@ type Gui struct {
 	// Inline-edit helpers. Built by wireWithDriver
 	// alongside the existing UI helpers; pinned on Gui so future bd
 	// issues can plumb them through dispatchers
-	// without re-instantiating. pendingEditSet is the legacy single
-	// process-wide set retained for the discard helper + status
-	// indicator surfaces that have not yet been migrated to per-table
-	// resolution; pendingEditReg is the per-(connID, baseTable) registry
-	// that CommitDialogOpen and CellEditor route
-	// through to land each edit on the right table's set.
-	pendingEditSet  *models.PendingEditSet
+	// without re-instantiating. pendingEditReg is the per-(connID,
+	// baseTable) registry that CommitDialogOpen, CellEditor, the discard
+	// flows, the quit guard, and the status indicator all route through to
+	// land / count edits on the right table's set.
 	pendingEditReg  *pendingEditRegistry
 	pendingDiscardH *helpers.PendingDiscardHelper
 	jumpListH       *ui.ResultJumpList
@@ -500,17 +499,19 @@ func (g *Gui) wireWithDriver() error {
 	// once at boot and pinned on *Gui so subsequent re-wires
 	// can extend the dispatch surface without rebuilding the state.
 	//
-	// PendingEditSet is a single process-wide shared set today;
-	// swap this for a per-(connID, baseTable) registry once the apply
-	// pipeline lands.
-	if g.pendingEditSet == nil {
-		g.pendingEditSet = &models.PendingEditSet{}
-	}
+	// The discard helper resolves staged edits through the per-(connID,
+	// baseTable) registry via AllSets, so DiscardAll / BlockQuitIfPending
+	// see every table's edits rather than a single shared set.
 	if g.pendingEditReg == nil {
 		g.pendingEditReg = newPendingEditRegistry()
 	}
 	g.pendingDiscardH = helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{
-		Set:     g.pendingEditSet,
+		AllSets: func() []*models.PendingEditSet {
+			if g.pendingEditReg == nil {
+				return nil
+			}
+			return g.pendingEditReg.All()
+		},
 		Confirm: g.confirmHelp,
 		Toast:   g.toastHelp,
 	})
@@ -1326,15 +1327,46 @@ type shimKey struct {
 // RunAndHandleError is the production entry. It builds the driver,
 // installs the manager, and runs the gocui main loop. gocui.ErrQuit
 // from MainLoop is the normal shutdown path and collapses to nil.
-func (g *Gui) RunAndHandleError() error {
-	if err := g.initGocui(); err != nil {
-		return err
+//
+// gocui's MainLoop has no panic recovery of its own, so a panic in an
+// event handler / Layout / flush unwinds straight through here to the Go
+// runtime, which prints the stack to stderr — lost the moment the TUI tears
+// down and the terminal scrollback is reset. The deferred guard records the
+// panic value + full goroutine stack to the session log (which the deferred
+// Close in the caller flushes during unwind) and then re-panics, preserving
+// the exact crash semantics while leaving a durable post-mortem breadcrumb.
+//
+// NOTE: this only covers panics on the MainLoop goroutine. A panic on a
+// worker goroutine (OnWorker) still aborts the process without this log.
+func (g *Gui) RunAndHandleError() (err error) {
+	if initErr := g.initGocui(); initErr != nil {
+		return initErr
 	}
-	err := g.driver.MainLoop()
+	defer func() {
+		if r := recover(); r != nil {
+			logPanicStack(g.deps.Common.Logger(), r)
+			panic(r)
+		}
+	}()
+	err = g.driver.MainLoop()
 	if err == nil || err == gocui.ErrQuit {
 		return nil
 	}
 	return err
+}
+
+// logPanicStack records a recovered panic value and the current goroutine
+// stack to the session log under cat=app, evt=panic. Extracted from the
+// RunAndHandleError guard so the formatting is unit-testable without
+// triggering the surrounding recover / re-panic. No-op on a nil logger.
+func logPanicStack(logger *slog.Logger, recovered any) {
+	if logger == nil {
+		return
+	}
+	logs.Event(logger, "app", "panic",
+		slog.Any("value", recovered),
+		slog.String("stack", string(debug.Stack())),
+	)
 }
 
 // Close runs the M15c shutdown sequence:

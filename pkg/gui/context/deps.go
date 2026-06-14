@@ -1,6 +1,10 @@
 package context
 
 import (
+	"errors"
+
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 )
 
@@ -14,11 +18,26 @@ type depsAlias = types.ContextTreeDeps
 // All concrete contexts that perform view writes go through this helper
 // so the nil-driver case (unit tests, partial wiring) is a silent no-op
 // rather than a panic.
+//
+// The fn runs asynchronously on the gocui Update queue, which treats any
+// returned error as FATAL and exits MainLoop. A queued view write can race
+// the view's lifecycle: a TEMPORARY_POPUP that is re-pushed after being
+// evicted (popup-replaces-popup) deletes its gocui view, and the layout
+// pass that recreates it may not have run when the queued write drains —
+// so the write targets a view that momentarily does not exist and returns
+// gocui.ErrUnknownView. That is benign (the layout repaints the view next
+// frame), so we swallow it rather than let it kill the app. Any other
+// error still propagates.
 func writeView(deps depsAlias, fn func() error) {
 	if deps.GuiDriver == nil {
 		return
 	}
-	deps.GuiDriver.Update(fn)
+	deps.GuiDriver.Update(func() error {
+		if err := fn(); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+		return nil
+	})
 }
 
 // railEmptyPlaceholder returns the contextual dim placeholder for an empty

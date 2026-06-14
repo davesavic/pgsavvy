@@ -96,7 +96,17 @@ type StatusRenderDeps struct {
 	// result tab, no tab is active, or no search is live. Nil → no
 	// search segment rendered (bootstrap safety / partial test wiring).
 	SearchStatus func() (query string, cur, total int, active bool)
+	// PendingCount returns the total staged-edit count aggregated across
+	// every per-(connID, baseTable) set in the registry. Drives the
+	// "[N pending]" status-bar indicator. Nil or 0 → no segment rendered.
+	PendingCount func() int
 }
+
+// pendingIndicatorBudget is the width handed to the pending indicator.
+// Large enough to always render the expanded "[N pending]" form; the
+// status bar handles overall line wrapping, so the indicator does not
+// need to self-collapse here.
+const pendingIndicatorBudget = 1 << 20
 
 // RenderStatusLine resolves the focused context's mode label, builds the
 // status line via status.BuildStatusLine, and writes it to the
@@ -209,6 +219,14 @@ func RenderStatusLine(d StatusRenderDeps) {
 	// the provider reports active=false.
 	if d.SearchStatus != nil {
 		if seg := status.SearchIndicator(d.SearchStatus()); seg != "" {
+			options = append(options, seg)
+		}
+	}
+	// Pending-edit indicator: aggregate count across every table so a
+	// staged edit on any tab is visible from anywhere, not just the tab
+	// it was made on.
+	if d.PendingCount != nil {
+		if seg := status.BuildPendingIndicatorCount(d.PendingCount(), conn, pendingIndicatorBudget); seg != "" {
 			options = append(options, seg)
 		}
 	}

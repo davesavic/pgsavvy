@@ -415,7 +415,7 @@ func detectSingleStatement(stmt string) (ResultIdentity, bool) {
 		return ResultIdentity{}, false
 	}
 
-	tail := rest[consumed:]
+	tail := skipAlias(rest[consumed:])
 	if !validTail(tail) {
 		return ResultIdentity{}, false
 	}
@@ -460,6 +460,26 @@ func isReservedTableName(lower string) bool {
 		return true
 	}
 	return false
+}
+
+// skipAlias consumes an optional table alias from the start of the FROM
+// tail — either `AS name` or a bare `name` — and returns the remaining
+// tokens. A bare identifier is only treated as an alias when it is not a
+// reserved clause keyword (so WHERE/ORDER/etc. fall through to validTail).
+func skipAlias(tail []token) []token {
+	if len(tail) == 0 || tail[0].kind != tIdent {
+		return tail
+	}
+	if !tail[0].quoted && tail[0].raw == "as" {
+		if len(tail) >= 2 && tail[1].kind == tIdent {
+			return tail[2:]
+		}
+		return tail
+	}
+	if tail[0].quoted || !isReservedTableName(tail[0].raw) {
+		return tail[1:]
+	}
+	return tail
 }
 
 // validTail returns true when the tokens after the FROM <table> form

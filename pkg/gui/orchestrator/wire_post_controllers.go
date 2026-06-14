@@ -19,7 +19,6 @@ func (g *Gui) wireEditDeps() controllers.EditDeps {
 		PendingDiscard: g.pendingDiscardH,
 		JumpList:       g.jumpListH,
 		FKForward:      g.fkForwardH,
-		PendingEditSet: g.pendingEditSet,
 		// gD picker open — resolves through g.controllers at dispatch
 		// time so the closure works despite the controllers aggregate
 		// being filled in AttachControllers AFTER this HelperBag is

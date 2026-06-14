@@ -258,6 +258,85 @@ func TestDiscardAll_NoConfirmHelper_ClearsImmediately(t *testing.T) {
 	}
 }
 
+// --- DiscardAllSets ------------------------------------------------------
+
+func TestDiscardAllSets_ClearsEveryTableImmediately(t *testing.T) {
+	a := newSet(t, models.Ref{Schema: "public", Table: "users"}, 2)
+	b := newSet(t, models.Ref{Schema: "public", Table: "orders"}, 2)
+	confirm := &fakeConfirm{}
+	toast := &fakeDiscardToast{}
+	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{
+		Confirm: confirm,
+		Toast:   toast,
+	})
+
+	if err := h.DiscardAllSets([]*models.PendingEditSet{a, b}); err != nil {
+		t.Fatalf("DiscardAllSets: %v", err)
+	}
+	if confirm.pushCalls != 0 {
+		t.Fatalf("combined count 4 is at/below threshold, want no popup, got %d", confirm.pushCalls)
+	}
+	if !a.IsEmpty() || !b.IsEmpty() {
+		t.Fatalf("both sets must be cleared: a=%d b=%d", a.Count(), b.Count())
+	}
+	if len(toast.messages) != 1 || !strings.Contains(toast.messages[0], "4 pending edit") {
+		t.Fatalf("expected one toast with combined count 4, got %v", toast.messages)
+	}
+}
+
+func TestDiscardAllSets_CombinedCountAboveThreshold_OpensSingleConfirm(t *testing.T) {
+	a := newSet(t, models.Ref{Schema: "public", Table: "users"}, 3)
+	b := newSet(t, models.Ref{Schema: "public", Table: "orders"}, 4)
+	confirm := &fakeConfirm{}
+	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{Confirm: confirm})
+
+	if err := h.DiscardAllSets([]*models.PendingEditSet{a, b}); err != nil {
+		t.Fatalf("DiscardAllSets: %v", err)
+	}
+	if confirm.pushCalls != 1 {
+		t.Fatalf("expected a single confirm popup for the combined count, got %d", confirm.pushCalls)
+	}
+	if !strings.Contains(confirm.body, "7 pending edits") {
+		t.Fatalf("confirm body = %q, want combined count 7", confirm.body)
+	}
+	if a.IsEmpty() || b.IsEmpty() {
+		t.Fatalf("sets cleared before user confirmed")
+	}
+	if err := confirm.pressYes(); err != nil {
+		t.Fatalf("pressYes: %v", err)
+	}
+	if !a.IsEmpty() || !b.IsEmpty() {
+		t.Fatalf("both sets must be cleared on Yes: a=%d b=%d", a.Count(), b.Count())
+	}
+}
+
+func TestDiscardAllSets_SkipsNilAndEmptySets(t *testing.T) {
+	a := newSet(t, tableRef(), 1)
+	confirm := &fakeConfirm{}
+	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{Confirm: confirm})
+
+	if err := h.DiscardAllSets([]*models.PendingEditSet{nil, a, nil}); err != nil {
+		t.Fatalf("DiscardAllSets: %v", err)
+	}
+	if !a.IsEmpty() {
+		t.Fatalf("non-nil set not cleared (count=%d)", a.Count())
+	}
+}
+
+func TestDiscardAllSets_AllEmptyIsNoop(t *testing.T) {
+	confirm := &fakeConfirm{}
+	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{Confirm: confirm})
+
+	if err := h.DiscardAllSets([]*models.PendingEditSet{
+		{Table: tableRef()}, nil,
+	}); err != nil {
+		t.Fatalf("DiscardAllSets on empty input: %v", err)
+	}
+	if confirm.pushCalls != 0 {
+		t.Fatalf("expected no popup when nothing is staged, got %d", confirm.pushCalls)
+	}
+}
+
 // --- BlockQuitIfPending --------------------------------------------------
 
 func TestBlockQuitIfPending_EmptySetReturnsNil(t *testing.T) {
@@ -295,183 +374,29 @@ func TestBlockQuitIfPending_NilSetReturnsNil(t *testing.T) {
 	}
 }
 
-// --- Table-switch hook ---------------------------------------------------
-
-func TestShouldPromptOnTableSwitch_DifferentTableWithPending(t *testing.T) {
-	set := newSet(t, tableRef(), 1)
-	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{Set: set})
-
-	got := h.ShouldPromptOnTableSwitch(tableRef(), models.Ref{Schema: "public", Table: "orders"})
-	if !got {
-		t.Fatal("ShouldPromptOnTableSwitch: want true, got false")
-	}
-}
-
-func TestShouldPromptOnTableSwitch_SameTableReRunDoesNotPrompt(t *testing.T) {
-	// AC: same-table query re-run does NOT trigger the table-switch
-	// prompt. This is the F5/refresh path — a SELECT against the same
-	// target table refreshes the grid without invalidating pending
-	// edits.
-	set := newSet(t, tableRef(), 1)
-	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{Set: set})
-
-	if h.ShouldPromptOnTableSwitch(tableRef(), tableRef()) {
-		t.Fatal("ShouldPromptOnTableSwitch on same-table re-run: want false")
-	}
-}
-
-func TestShouldPromptOnTableSwitch_EmptySetDoesNotPrompt(t *testing.T) {
-	set := &models.PendingEditSet{Table: tableRef()}
-	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{Set: set})
-
-	if h.ShouldPromptOnTableSwitch(tableRef(), models.Ref{Schema: "public", Table: "orders"}) {
-		t.Fatal("ShouldPromptOnTableSwitch with empty set: want false")
-	}
-}
-
-// TestShouldPromptOnTableSwitch_GDNewTabDoesNotPrompt encodes the
-// amendment AC: when gd (B5/B6) adds a NEW tab pointing at a different
-// parent table, the table-switch hook MUST NOT fire. The hook is the
-// caller's predicate — OpenResultTab's "new tab" branch never invokes
-// ShouldPromptOnTableSwitch, so we model the gd path by simply not
-// calling the predicate and asserting the set is preserved.
-func TestShouldPromptOnTableSwitch_GDNewTabDoesNotPrompt(t *testing.T) {
-	set := newSet(t, tableRef(), 1)
-	confirm := &fakeConfirm{}
+func TestBlockQuitIfPending_CountsAcrossAllTables(t *testing.T) {
+	a := newSet(t, models.Ref{Schema: "public", Table: "users"}, 2)
+	b := newSet(t, models.Ref{Schema: "public", Table: "orders"}, 3)
 	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{
-		Set:     set,
-		Confirm: confirm,
-	})
-	_ = h // helper exists; caller (result_tabs_helper) decides whether to invoke it.
-
-	// gd new-tab path: caller does NOT consult the predicate. Verify
-	// the set remains intact and no popup was opened.
-	if set.IsEmpty() {
-		t.Fatal("set should remain intact on gd new-tab path")
-	}
-	if confirm.pushCalls != 0 {
-		t.Fatalf("expected 0 popups on gd new-tab path, got %d", confirm.pushCalls)
-	}
-}
-
-// --- PromptDiscardOnTableSwitch -----------------------------------------
-
-func TestPromptDiscardOnTableSwitch_YesClearsAndProceeds(t *testing.T) {
-	set := newSet(t, tableRef(), 2)
-	confirm := &fakeConfirm{}
-	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{
-		Set:     set,
-		Confirm: confirm,
+		AllSets: func() []*models.PendingEditSet {
+			return []*models.PendingEditSet{a, nil, b}
+		},
 	})
 
-	proceeded := false
-	cancelled := false
-	err := h.PromptDiscardOnTableSwitch(
-		models.Ref{Schema: "public", Table: "orders"},
-		func() error { proceeded = true; return nil },
-		func() error { cancelled = true; return nil },
-	)
-	if err != nil {
-		t.Fatalf("PromptDiscardOnTableSwitch: %v", err)
+	err := h.BlockQuitIfPending()
+	if err == nil {
+		t.Fatal("BlockQuitIfPending: want error for cross-table pending edits, got nil")
 	}
-	if confirm.pushCalls != 1 {
-		t.Fatalf("expected 1 popup, got %d", confirm.pushCalls)
-	}
-	if !strings.Contains(confirm.body, "orders") || !strings.Contains(confirm.body, "2 pending edits") {
-		t.Fatalf("body %q must mention target table + count", confirm.body)
-	}
-
-	if err := confirm.pressYes(); err != nil {
-		t.Fatalf("pressYes: %v", err)
-	}
-	if !proceeded {
-		t.Fatal("onProceed was not invoked on Yes")
-	}
-	if cancelled {
-		t.Fatal("onCancel was invoked on Yes path")
-	}
-	if !set.IsEmpty() {
-		t.Fatalf("set not cleared on Yes (count=%d)", set.Count())
+	if !strings.Contains(err.Error(), "5 pending edits") {
+		t.Fatalf("err = %q, want combined count 5 across both tables", err.Error())
 	}
 }
 
-func TestPromptDiscardOnTableSwitch_NoPreservesSetAndCancels(t *testing.T) {
-	set := newSet(t, tableRef(), 2)
-	confirm := &fakeConfirm{}
+func TestBlockQuitIfPending_AllSetsEmptyReturnsNil(t *testing.T) {
 	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{
-		Set:     set,
-		Confirm: confirm,
+		AllSets: func() []*models.PendingEditSet { return nil },
 	})
-
-	cancelled := false
-	err := h.PromptDiscardOnTableSwitch(
-		models.Ref{Schema: "public", Table: "orders"},
-		nil,
-		func() error { cancelled = true; return nil },
-	)
-	if err != nil {
-		t.Fatalf("PromptDiscardOnTableSwitch: %v", err)
-	}
-	if err := confirm.pressNo(); err != nil {
-		t.Fatalf("pressNo: %v", err)
-	}
-	if !cancelled {
-		t.Fatal("onCancel was not invoked on No path")
-	}
-	if set.IsEmpty() {
-		t.Fatal("set was cleared on No; should be preserved")
-	}
-}
-
-func TestPromptDiscardOnTableSwitch_EmptySetProceeds(t *testing.T) {
-	set := &models.PendingEditSet{Table: tableRef()}
-	confirm := &fakeConfirm{}
-	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{
-		Set:     set,
-		Confirm: confirm,
-	})
-
-	proceeded := false
-	err := h.PromptDiscardOnTableSwitch(
-		models.Ref{Schema: "public", Table: "orders"},
-		func() error { proceeded = true; return nil },
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("PromptDiscardOnTableSwitch on empty set: %v", err)
-	}
-	if confirm.pushCalls != 0 {
-		t.Fatalf("expected no popup on empty set, got %d", confirm.pushCalls)
-	}
-	if !proceeded {
-		t.Fatal("onProceed was not invoked on empty-set short-circuit")
-	}
-}
-
-func TestPromptDiscardOnTableSwitch_SameTableProceeds(t *testing.T) {
-	set := newSet(t, tableRef(), 2)
-	confirm := &fakeConfirm{}
-	h := helpers.NewPendingDiscardHelper(helpers.PendingDiscardDeps{
-		Set:     set,
-		Confirm: confirm,
-	})
-
-	proceeded := false
-	err := h.PromptDiscardOnTableSwitch(
-		tableRef(), // same table as the set
-		func() error { proceeded = true; return nil },
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("PromptDiscardOnTableSwitch same table: %v", err)
-	}
-	if confirm.pushCalls != 0 {
-		t.Fatalf("expected no popup on same-table path, got %d", confirm.pushCalls)
-	}
-	if !proceeded {
-		t.Fatal("onProceed was not invoked on same-table short-circuit")
-	}
-	if set.IsEmpty() {
-		t.Fatal("set was cleared on same-table short-circuit")
+	if err := h.BlockQuitIfPending(); err != nil {
+		t.Fatalf("BlockQuitIfPending(no sets): %v", err)
 	}
 }

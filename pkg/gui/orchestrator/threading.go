@@ -248,8 +248,9 @@ func (g *Gui) OnUIThreadContentOnly(fn func() error) {
 // busy counter is incremented before fn runs and decremented when fn
 // returns (or panics) — observers (BusyCount, the bottom spinner) see a
 // non-zero value for the entire lifetime of the call. Panics are
-// recovered and converted to a logged error so a misbehaving worker
-// can't take the TUI down.
+// recovered and logged with their full goroutine stack (cat=app,
+// evt=panic — same breadcrumb as the MainLoop guard) so a misbehaving
+// worker can't take the TUI down.
 //
 // The Task hand-off matches lazygit's signature (a gocui.Task per
 // worker so the caller can Pause/Continue/Done independent of busy
@@ -318,8 +319,15 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 		}()
 		defer func() {
 			if r := recover(); r != nil {
+				// Record the panic value + full goroutine stack to the
+				// session log under the SAME cat=app, evt=panic breadcrumb
+				// the MainLoop guard uses (logPanicStack), so a background
+				// worker crash is as findable post-mortem as a main-thread
+				// one. Unlike the MainLoop guard this does NOT re-panic —
+				// the worker is recovered so a misbehaving job can't take
+				// the TUI down.
 				if g.deps.Common != nil {
-					g.deps.Common.Logger().Error("gui: OnWorker panic recovered", slog.Any("err", r))
+					logPanicStack(g.deps.Common.Logger(), r)
 				}
 				// AD-20 edge: panic-recover always emits a worker_end with
 				// panic_recovered=true (regardless of the sampling gate)

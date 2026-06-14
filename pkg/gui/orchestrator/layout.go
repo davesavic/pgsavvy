@@ -673,6 +673,7 @@ func (g *Gui) RunLayout(w, h int) error {
 			TxStatus:        g.txStatusAccessor(),
 			SessionSettings: g.sessionSettingsAccessor(),
 			SearchStatus:    g.searchStatusAccessor(),
+			PendingCount:    g.pendingEditCount,
 		})
 	}
 

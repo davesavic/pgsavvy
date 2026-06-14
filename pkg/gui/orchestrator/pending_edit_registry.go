@@ -63,6 +63,36 @@ func (r *pendingEditRegistry) Lookup(connID, baseTable string) *models.PendingEd
 	return r.sets[pendingEditRegKey{connID: connID, baseTable: baseTable}]
 }
 
+// All returns a snapshot of every materialised PendingEditSet across all
+// (connID, baseTable) keys. Order is unspecified. Drives the cross-table
+// `<leader>cU` discard-all flow; sets never touched (no edit staged) are
+// absent because For only allocates on demand.
+func (r *pendingEditRegistry) All() []*models.PendingEditSet {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*models.PendingEditSet, 0, len(r.sets))
+	for _, s := range r.sets {
+		out = append(out, s)
+	}
+	return out
+}
+
+// pendingEditCount sums the staged-edit count across every table in the
+// registry. Drives the status-bar "[N pending]" indicator. Returns 0 when
+// the registry is unwired (bootstrap safety).
+func (g *Gui) pendingEditCount() int {
+	if g.pendingEditReg == nil {
+		return 0
+	}
+	n := 0
+	for _, s := range g.pendingEditReg.All() {
+		if s != nil {
+			n += s.Count()
+		}
+	}
+	return n
+}
+
 // refFromBaseTable parses a "schema.table" identifier into a models.Ref.
 // query.ResultIdentity.BaseTable carries schema-qualified names; a bare
 // identifier (no dot) lands in Table with an empty Schema.

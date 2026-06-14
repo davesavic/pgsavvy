@@ -215,8 +215,7 @@ func NewThreadingDeps(
 // PendingDiscard drives the `<leader>cu` / `<leader>cU` discard flows +
 // table-switch guard. JumpList records originating-cell entries for
 // `<c-o>` / `<c-i>` jump navigation. FKForward owns `gd` forward FK
-// navigation. PendingEditSet is the process-wide pending-edit
-// collection. OpenFKReversePicker / ReverseFKLookup / ActivePendingEditSet
+// navigation. OpenFKReversePicker / ReverseFKLookup / ActivePendingEditSet
 // / ActiveConnectionProfile resolve the gD reverse-FK + commit-dialog
 // paths. All fields are optional and nil-safe: controllers nil-check on
 // dispatch.
@@ -224,7 +223,6 @@ type EditDeps struct {
 	PendingDiscard *helpers.PendingDiscardHelper
 	JumpList       *ui.ResultJumpList
 	FKForward      *helpers.FKForwardHelper
-	PendingEditSet *models.PendingEditSet
 
 	// OpenFKReversePicker pushes the reverse-FK picker popup. Wired by
 	// the orchestrator to FKReversePickerController.Open; ResultTabs-

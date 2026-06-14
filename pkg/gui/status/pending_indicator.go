@@ -34,10 +34,21 @@ const pendingIndicatorCollapseWidth = 40
 // the collapsed form unconditionally; pass any large positive number to
 // force the expanded form.
 func BuildPendingIndicator(set *models.PendingEditSet, conn *models.Connection, availableWidth int) string {
-	if set == nil || set.IsEmpty() {
+	if set == nil {
 		return ""
 	}
-	count := set.Count()
+	return BuildPendingIndicatorCount(set.Count(), conn, availableWidth)
+}
+
+// BuildPendingIndicatorCount renders the indicator for a precomputed
+// total staged-edit count — the cross-table form, where the caller has
+// summed every per-table PendingEditSet from the registry. count <= 0
+// yields "" (no slot). Width-collapse and tint contract are identical to
+// BuildPendingIndicator.
+func BuildPendingIndicatorCount(count int, conn *models.Connection, availableWidth int) string {
+	if count <= 0 {
+		return ""
+	}
 	expanded := fmt.Sprintf("[%d pending]", count)
 	collapsed := fmt.Sprintf("[%d]", count)
 
