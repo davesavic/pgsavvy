@@ -3,6 +3,8 @@ package controllers
 import (
 	"strings"
 	"testing"
+
+	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
 // TestConfirmSQLPreviewPreservesShortStatement locks the regression:
@@ -42,12 +44,57 @@ func TestConfirmSQLPreviewCapsOversizedStatement(t *testing.T) {
 	}
 }
 
-// TestConfirmRunBodyMultiStatementShowsCount asserts the multi-statement
-// branch is unchanged by the single-statement preview swap.
-func TestConfirmRunBodyMultiStatementShowsCount(t *testing.T) {
+// TestConfirmRunBodyMultiStatementListsStatements asserts the
+// multi-statement branch keeps the count line and now lists each
+// statement so the user sees what runs, not just a number. Monochrome
+// is forced so the highlighter passes the SQL through verbatim.
+func TestConfirmRunBodyMultiStatementListsStatements(t *testing.T) {
+	restore := theme.SetMonochromeForTest(true)
+	defer restore()
+
 	got := confirmRunBody([]string{"select 1", "select 2", "select 3"})
-	want := "Execute 3 statements?"
-	if got != want {
-		t.Fatalf("confirmRunBody = %q, want %q", got, want)
+	for _, want := range []string{
+		"Execute 3 statements?",
+		"1. select 1",
+		"2. select 2",
+		"3. select 3",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("confirmRunBody = %q, missing %q", got, want)
+		}
+	}
+}
+
+// TestConfirmRunBodyMultiStatementCapsList bounds the rendered list so the
+// popup and its hint stay on screen, collapsing the overflow to a tail.
+func TestConfirmRunBodyMultiStatementCapsList(t *testing.T) {
+	restore := theme.SetMonochromeForTest(true)
+	defer restore()
+
+	stmts := make([]string, 20)
+	for i := range stmts {
+		stmts[i] = "select 1"
+	}
+	got := confirmRunBody(stmts)
+	if strings.Contains(got, " 9. ") {
+		t.Fatalf("confirmRunBody listed past the cap:\n%s", got)
+	}
+	if !strings.Contains(got, "… +12 more") {
+		t.Fatalf("confirmRunBody missing overflow tail:\n%s", got)
+	}
+}
+
+// TestConfirmRunBodySingleStatementHeader verifies a single statement gets
+// an action header summarising its verb and effect above the SQL.
+func TestConfirmRunBodySingleStatementHeader(t *testing.T) {
+	restore := theme.SetMonochromeForTest(true)
+	defer restore()
+
+	got := confirmRunBody([]string{"update accounts set active = false"})
+	if !strings.Contains(got, "UPDATE · writes data") {
+		t.Fatalf("confirmRunBody missing action header:\n%s", got)
+	}
+	if !strings.Contains(got, "update accounts set active = false") {
+		t.Fatalf("confirmRunBody missing statement:\n%s", got)
 	}
 }

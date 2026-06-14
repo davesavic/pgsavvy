@@ -16,6 +16,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor"
 	"github.com/davesavic/dbsavvy/pkg/gui/editor/format"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/dbsavvy/pkg/gui/keys"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/logs"
@@ -448,13 +449,88 @@ func (q *QueryEditorController) runNeedsConfirm(stmts []string) bool {
 	return false
 }
 
-// confirmRunBody builds the popup body: the single statement (preview)
-// or the count for a multi-statement run.
+// confirmRunBody builds the popup body: a single highlighted statement
+// under an action header, or a numbered (capped) list for a multi-statement
+// run so the user sees what actually executes — not just a count.
 func confirmRunBody(stmts []string) string {
 	if len(stmts) == 1 {
-		return fmt.Sprintf("Execute this statement?\n\n%s", confirmSQLPreview(stmts[0]))
+		return confirmSingleBody(stmts[0])
 	}
-	return fmt.Sprintf("Execute %d statements?", len(stmts))
+	return confirmMultiBody(stmts)
+}
+
+// confirmSingleBody renders one statement: an action header (verb +
+// effect, e.g. "UPDATE · writes data") above the syntax-highlighted SQL.
+func confirmSingleBody(stmt string) string {
+	header := confirmActionHeader(stmt)
+	sql := highlight.Highlight(confirmSQLPreview(stmt))
+	return fmt.Sprintf("%s\n\n%s", header, sql)
+}
+
+// confirmMultiBody renders a count line followed by a numbered, one-line,
+// syntax-highlighted preview of each statement. The list is capped so the
+// popup and its [y]es/[n]o hint stay on screen; overflow collapses to a
+// "… +N more" tail.
+func confirmMultiBody(stmts []string) string {
+	const maxShown = 8
+	shown := min(len(stmts), maxShown)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Execute %d statements?\n", len(stmts))
+	for i := range shown {
+		fmt.Fprintf(&b, "\n  %d. %s", i+1, highlight.Highlight(confirmLinePreview(stmts[i])))
+	}
+	if len(stmts) > shown {
+		fmt.Fprintf(&b, "\n  … +%d more", len(stmts)-shown)
+	}
+	return b.String()
+}
+
+// confirmActionHeader summarises a statement as "<VERB> · <effect>",
+// e.g. "DELETE · writes data" or "ALTER · changes schema". The effect is
+// dropped when the statement is neither DML nor DDL.
+func confirmActionHeader(stmt string) string {
+	verb := confirmVerb(stmt)
+	effect := confirmEffectLabel(query.EffectiveKind(stmt))
+	if effect == "" {
+		return verb
+	}
+	return verb + " · " + effect
+}
+
+// confirmVerb returns the upper-cased leading keyword of stmt, or
+// "STATEMENT" when stmt has no words.
+func confirmVerb(stmt string) string {
+	fields := strings.Fields(stmt)
+	if len(fields) == 0 {
+		return "STATEMENT"
+	}
+	return strings.ToUpper(fields[0])
+}
+
+// confirmEffectLabel maps a statement kind to a short, human effect.
+func confirmEffectLabel(kind query.StatementKind) string {
+	switch kind {
+	case query.KindDML:
+		return "writes data"
+	case query.KindDDL:
+		return "changes schema"
+	default:
+		return ""
+	}
+}
+
+// confirmLinePreview collapses whitespace and caps stmt to a single short
+// line for the multi-statement list (distinct from confirmSQLPreview's
+// 400-char single-statement budget).
+func confirmLinePreview(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	const max = 72
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-1]) + "…"
 }
 
 // confirmSQLPreview prepares a single statement for the confirmation

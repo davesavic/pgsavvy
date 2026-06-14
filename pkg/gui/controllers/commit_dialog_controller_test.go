@@ -11,6 +11,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
 // fakeApplyHook records Apply invocations and returns the configured
@@ -605,6 +606,7 @@ func TestDefaultCommitDialogRender_ExpressionFooter(t *testing.T) {
 
 // AC: SqlPreview mode emits BEGIN/COMMIT envelope + IS NOT DISTINCT FROM.
 func TestDefaultCommitDialogRender_SqlPreviewShape(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
 	set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "users"}}
 	_ = set.Add(models.PendingEdit{
 		PrimaryKey: []any{int64(7)},
@@ -635,6 +637,7 @@ func TestDefaultCommitDialogRender_SqlPreviewShape(t *testing.T) {
 // AC: Expression edits in SQL preview render inline-unquoted (no $N
 // for the new value).
 func TestDefaultCommitDialogRender_SqlPreviewExpressionInline(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
 	set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "users"}}
 	_ = set.Add(models.PendingEdit{
 		PrimaryKey: []any{int64(1)},
@@ -751,6 +754,7 @@ func TestDefaultCommitDialogRender_TypedNameMatch(t *testing.T) {
 
 // AC: DryRunResult mode renders the per-statement rows-affected list.
 func TestDefaultCommitDialogRender_DryRunListing(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
 	view := guicontext.CommitDialogView{
 		Set:  stagedSet("s", "t", 1),
 		Conn: &models.Connection{Name: "dev"},

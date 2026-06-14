@@ -5,6 +5,7 @@ import (
 
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
 // ConfirmationContext renders the confirmation popup. Border styling and
@@ -60,12 +61,28 @@ func (c *ConfirmationContext) HandleRender() error {
 	if c.title == "" && c.body == "" {
 		return nil
 	}
-	content := fmt.Sprintf("%s\n\n[y]es / [n]o", c.body)
+	content := fmt.Sprintf("%s\n\n%s", c.body, confirmHint())
 	viewName := c.GetViewName()
 	writeView(c.deps, func() error {
 		return c.deps.GuiDriver.SetContent(viewName, content)
 	})
 	return nil
+}
+
+// confirmHint returns the answer-key line painted beneath every
+// confirmation body. The mnemonic keys are emphasised (bold) so they read
+// as the actionable part; under NO_COLOR the plain text is returned so
+// no-color terminals and the recorder driver see stable bytes.
+func confirmHint() string {
+	const plain = "[y]es   ·   [n]o"
+	if theme.IsMonochrome() {
+		return plain
+	}
+	const (
+		bold  = "\x1b[1m"
+		reset = "\x1b[0m"
+	)
+	return bold + "[y]" + reset + "es   ·   " + bold + "[n]" + reset + "o"
 }
 
 // Presentation resolves the popup border style and header text via

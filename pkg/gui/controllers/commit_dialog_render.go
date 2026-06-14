@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/dbsavvy/pkg/gui/grid"
 	"github.com/davesavic/dbsavvy/pkg/models"
 )
@@ -252,7 +253,7 @@ func writeCommitDialogSQL(b *strings.Builder, v guicontext.CommitDialogView) {
 	b.WriteString("BEGIN;\n")
 	shown := min(len(stmts), commitDialogMaxStmts)
 	for i := range shown {
-		b.WriteString(stmts[i])
+		b.WriteString(highlight.Highlight(stmts[i]))
 		b.WriteByte('\n')
 	}
 	if len(stmts) > shown {
@@ -277,13 +278,14 @@ func writeCommitDialogDryRun(b *strings.Builder, v guicontext.CommitDialogView) 
 	shown := min(total, commitDialogMaxStmts)
 	for i := range shown {
 		r := v.DryRunResult[i]
+		sql := highlight.Highlight(truncateSQL(r.SQL))
 		switch {
 		case r.Err != nil:
-			fmt.Fprintf(b, "[ERR] %s: %v\n", truncateSQL(r.SQL), r.Err)
+			fmt.Fprintf(b, "[ERR] %s: %v\n", sql, r.Err)
 		case r.RowsAffected < 0:
-			fmt.Fprintf(b, "[? rows] %s\n", truncateSQL(r.SQL))
+			fmt.Fprintf(b, "[? rows] %s\n", sql)
 		default:
-			fmt.Fprintf(b, "[%d rows] %s\n", r.RowsAffected, truncateSQL(r.SQL))
+			fmt.Fprintf(b, "[%d rows] %s\n", r.RowsAffected, sql)
 		}
 	}
 	if total > shown {

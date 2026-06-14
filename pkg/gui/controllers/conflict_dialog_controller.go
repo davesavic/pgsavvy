@@ -9,6 +9,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/common"
 	"github.com/davesavic/dbsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/dbsavvy/pkg/gui/grid"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
@@ -316,7 +317,7 @@ func DefaultConflictDialogRender(v guicontext.ConflictDialogView) string {
 // this annotation).
 func writeConflictRow(b *strings.Builder, c models.ConflictedEdit) {
 	fmt.Fprintf(b, "row %s · column %s\n", formatConflictPK(c.Edit.PrimaryKey), c.Edit.Column)
-	fmt.Fprintf(b, "  your edit:  %s\n", formatConflictValue(stagedNewPayload(c.Edit), c.Edit.ColumnType))
+	fmt.Fprintf(b, "  your edit:  %s\n", formatConflictYourEdit(c.Edit))
 	fmt.Fprintf(b, "  server now: %s\n", formatConflictValue(c.ServerValue, c.Edit.ColumnType))
 	fmt.Fprintf(b, "  loaded at:  %s", c.LoadedAt.Format(time.RFC3339))
 	if isAlreadyApplied(c) {
@@ -335,6 +336,19 @@ func writeConflictLegend(b *strings.Builder, conn *models.Connection) {
 	}
 	parts = append(parts, "[Esc] cancel")
 	b.WriteString(strings.Join(parts, "   "))
+}
+
+// formatConflictYourEdit renders the staged "your edit:" payload. An
+// Expression edit is raw SQL (e.g. now()), so it is syntax-highlighted to
+// match the commit dialog's SQL preview; a Literal edit is data and is
+// rendered plain via formatConflictValue.
+func formatConflictYourEdit(e models.PendingEdit) string {
+	payload := stagedNewPayload(e)
+	if e.Kind == models.Expression {
+		expr, _ := payload.(string)
+		return highlight.Highlight(expr)
+	}
+	return formatConflictValue(payload, e.ColumnType)
 }
 
 // stagedNewPayload returns the payload the user staged for the conflict.

@@ -11,6 +11,7 @@ import (
 	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
 	"github.com/davesavic/dbsavvy/pkg/gui/types"
 	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/dbsavvy/pkg/theme"
 )
 
 // fakeRefreshHook records Refresh invocations and returns the configured
@@ -555,6 +556,7 @@ func TestDefaultConflictDialogRender_NullServerValue(t *testing.T) {
 
 // AC: Expression edits render NewExpr (not NewValue) in `your edit:`.
 func TestDefaultConflictDialogRender_ExpressionRendersExpr(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
 	view := guicontext.ConflictDialogView{
 		Conflicts: []models.ConflictedEdit{
 			{
