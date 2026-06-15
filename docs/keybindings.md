@@ -6,9 +6,7 @@ defaults, how to discover the action IDs you can bind, and which keys are
 deliberately fixed and cannot be changed.
 
 > Config file location: `$XDG_CONFIG_HOME/pgsavvy/config.yml`
-> (typically `~/.config/pgsavvy/config.yml`). See the
-> [Config File notes](review/cross_cutting.md#config-file) for how the file
-> is created and overlaid onto the built-in defaults.
+> (typically `~/.config/pgsavvy/config.yml`).
 
 ---
 
@@ -350,14 +348,3 @@ keybindings:
     key: n
     action: confirm.no
 ```
-
----
-
-## See also
-
-- [Config File notes](review/cross_cutting.md#config-file) — how the config
-  file is located, created, and overlaid onto defaults.
-- [Command line (`:` commands)](review/command_line.md#recognised--commands) —
-  the shipped `:q`, `:quit`, and `:reload` commands.
-</content>
-</invoke>
