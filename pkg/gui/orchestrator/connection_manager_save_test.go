@@ -150,13 +150,16 @@ func TestConnectionManagerAddAppendsRow(t *testing.T) {
 	if modal.Mode() != guicontext.ModeForm {
 		t.Fatalf("mode = %v after Add, want ModeForm", modal.Mode())
 	}
-	// Field order is name, driver, dsn — name is focus 0, dsn is focus 2. Set
-	// both via the text seam. The driver field defaults via the form's
-	// driversFn; we don't assert its exact value (the test binary's registry
-	// is shared across tests).
-	modal.FormSetFocusedValue("alice")
+	// Discrete-field order is name(0) driver(1) host(2) port(3) user(4)
+	// database(5) sslmode(6). The Add form pre-seeds host=localhost, port=5432;
+	// here we override host and set a database via the text seam. The driver
+	// field defaults via the form's driversFn; we don't assert its exact value
+	// (the test binary's registry is shared across tests).
+	modal.FormSetFocusedValue("alice") // name @ 0
 	modal.FormMoveFocus(2)
-	modal.FormSetFocusedValue("postgres://localhost:5432/db")
+	modal.FormSetFocusedValue("dbhost") // host @ 2
+	modal.FormMoveFocus(3)
+	modal.FormSetFocusedValue("appdb") // database @ 5
 
 	if err := g.Controllers().ConnectionManager.Confirm(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Confirm: %v", err)
@@ -173,8 +176,11 @@ func TestConnectionManagerAddAppendsRow(t *testing.T) {
 		t.Fatalf("post: got %d rows, want 1 (AppendConnection)", len(loaded))
 	}
 	got := loaded[0]
-	if got.Name != "alice" || got.DSN != "postgres://localhost:5432/db" {
-		t.Fatalf("loaded[0] = %+v, want Name=alice DSN=postgres://localhost:5432/db", got)
+	// Saved as discrete fields (host overridden, port from the default seed,
+	// database entered); no raw dsn is written for a discrete connection.
+	if got.Name != "alice" || got.Host != "dbhost" || got.Database != "appdb" ||
+		got.Port != 5432 || got.DSN != "" {
+		t.Fatalf("loaded[0] = %+v, want Name=alice Host=dbhost Database=appdb Port=5432 DSN=\"\"", got)
 	}
 
 	// AC4 (refresh): the modal list reflects the new row without restart.
@@ -197,22 +203,20 @@ func TestConnectionManagerSaveSSHTunnelRoundTrip(t *testing.T) {
 	if err := g.Controllers().ConnectionManager.Add(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	// Focus index after Add is 0. Functional order: name(0) driver(1) dsn(2)
-	// read_only(3) confirm_writes(4) confirm_ddl(5) statement_timeout(6)
-	// color(7) label(8) icon(9) tags(10) ssh_host(11) ssh_user(12)
-	// ssh_port(13) identity_file(14) identity_from_agent(15) known_hosts(16).
-	// Move +1 at a time so the relative cursor stays predictable.
+	// Focus index after Add is 0. Functional order: name(0) driver(1) host(2)
+	// port(3) user(4) database(5) sslmode(6) read_only(7) confirm_writes(8)
+	// confirm_ddl(9) statement_timeout(10) color(11) label(12) icon(13)
+	// tags(14) ssh_host(15) ssh_user(16) ssh_port(17) identity_file(18)
+	// identity_from_agent(19) known_hosts(20).
 	modal.FormSetFocusedValue("ssh-conn") // name @ 0
-	modal.FormMoveFocus(2)
-	modal.FormSetFocusedValue("postgres://localhost:5432/db") // dsn @ 2
-	modal.FormMoveFocus(9)
-	modal.FormSetFocusedValue("bastion.prod") // ssh_host @ 11
+	modal.FormMoveFocus(15)
+	modal.FormSetFocusedValue("bastion.prod") // ssh_host @ 15
 	modal.FormMoveFocus(1)
-	modal.FormSetFocusedValue("deploy") // ssh_user @ 12
+	modal.FormSetFocusedValue("deploy") // ssh_user @ 16
 	modal.FormMoveFocus(1)
-	modal.FormSetFocusedValue("2222") // ssh_port @ 13
+	modal.FormSetFocusedValue("2222") // ssh_port @ 17
 	modal.FormMoveFocus(2)
-	modal.FormToggleFocused() // identity_from_agent @ 15
+	modal.FormToggleFocused() // identity_from_agent @ 19
 
 	if err := g.Controllers().ConnectionManager.Confirm(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Confirm: %v", err)

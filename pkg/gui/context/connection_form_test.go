@@ -22,7 +22,8 @@ func TestForm_RendersAllFunctionalRows(t *testing.T) {
 	}
 	body := drv.lastContent
 	for _, want := range []string{
-		"name:", "driver:", "dsn:", "read_only:", "confirm_writes:",
+		"name:", "driver:", "host:", "port:", "user:", "database:", "sslmode:",
+		"read_only:", "confirm_writes:",
 		"confirm_ddl:", "statement_timeout:", "color:", "label:", "icon:", "tags:",
 		"ssh_host:", "ssh_user:", "ssh_port:", "identity_file:",
 		"identity_from_agent:", "known_hosts:",
@@ -31,6 +32,10 @@ func TestForm_RendersAllFunctionalRows(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("form body missing %q\n%s", want, body)
 		}
+	}
+	// The single DSN row was replaced by the discrete fields above.
+	if strings.Contains(body, "dsn:") {
+		t.Errorf("form body still renders the dsn row; expected discrete fields\n%s", body)
 	}
 	// keyring/password_command are now editable text rows, not "(soon)".
 	if strings.Contains(body, "(soon)") {
@@ -58,10 +63,12 @@ func TestForm_AddSeedsFirstDriver(t *testing.T) {
 func TestForm_FieldNavMovesFocus(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
-	// 11 base functional rows (now incl. icon) + 6 SSH rows + keyring + pgpass
-	// + password_command → focusable count is 20.
-	if got := len(c.form.focusableSpecs()); got != 20 {
-		t.Fatalf("focusable rows = %d, want 20", got)
+	// 15 base functional rows (name, driver, host, port, user, database,
+	// sslmode, read_only, confirm_writes, confirm_ddl, statement_timeout,
+	// color, label, icon, tags) + 6 SSH rows + keyring + pgpass +
+	// password_command → focusable count is 24.
+	if got := len(c.form.focusableSpecs()); got != 24 {
+		t.Fatalf("focusable rows = %d, want 24", got)
 	}
 	// Move far past the end; clamps to the last functional row (password_command).
 	for range 50 {
@@ -96,8 +103,8 @@ func TestForm_ToggleFlipsBoolAndCyclesDriver(t *testing.T) {
 		t.Fatalf("driver after wrap = %q, want postgres", got)
 	}
 
-	// Focus read_only (index 3) and flip.
-	c.FormMoveFocus(2)
+	// Focus read_only (index 7, after the 5 discrete fields replaced dsn) and flip.
+	c.FormMoveFocus(6)
 	if c.form.focusedSpec().id != fieldReadOnly {
 		t.Fatalf("focus = %v, want fieldReadOnly", c.form.focusedSpec().id)
 	}
@@ -134,25 +141,6 @@ func TestForm_NameValidation(t *testing.T) {
 	}
 }
 
-// TestForm_DSNValidation covers url.Parse + inline-password rejection (AC3).
-func TestForm_DSNValidation(t *testing.T) {
-	tr := i18n.EnglishTranslationSet()
-	if err := validateDSN("", tr); err == nil {
-		t.Error("empty DSN accepted")
-	}
-	if err := validateDSN("://bad::url", tr); err == nil {
-		t.Error("unparseable DSN accepted")
-	}
-	if err := validateDSN("postgres://user:secret@host/db", tr); err == nil {
-		t.Error("DSN with inline password accepted")
-	} else if !strings.Contains(err.Error(), tr.DSNInlinePassword) {
-		t.Errorf("inline-password error = %q, want DSNInlinePassword", err)
-	}
-	if err := validateDSN("postgres://user@host/db", tr); err != nil {
-		t.Errorf("valid DSN rejected: %v", err)
-	}
-}
-
 // TestForm_ValidateAllStampsErrorAndMovesFocus asserts a failing validate-all
 // renders the error inline at the offending field (AC3).
 func TestForm_ValidateAllStampsErrorAndMovesFocus(t *testing.T) {
@@ -174,16 +162,6 @@ func TestForm_ValidateAllStampsErrorAndMovesFocus(t *testing.T) {
 	}
 	if !strings.Contains(drv.lastContent, "name must not be empty") {
 		t.Errorf("inline name error not rendered\n%s", drv.lastContent)
-	}
-
-	// Fix name, leave DSN empty → fail moves focus onto DSN.
-	c.form.conn.Name = "ok"
-	_, _, _, ok = c.FormValidateAll(tr)
-	if ok {
-		t.Fatal("validate-all passed with empty DSN")
-	}
-	if c.form.focusedSpec().id != fieldDSN {
-		t.Errorf("focus after DSN failure = %v, want fieldDSN", c.form.focusedSpec().id)
 	}
 }
 
@@ -210,8 +188,8 @@ func TestForm_ValidateAllSucceedsReturnsConn(t *testing.T) {
 func TestForm_TagsRoundTrip(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
-	// Focus tags row (index 10, after icon was inserted at 9).
-	for range 10 {
+	// Focus tags row (index 14, after the 5 discrete fields replaced dsn).
+	for range 14 {
 		c.FormMoveFocus(1)
 	}
 	if c.form.focusedSpec().id != fieldTags {

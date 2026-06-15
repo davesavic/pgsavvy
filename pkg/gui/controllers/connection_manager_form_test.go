@@ -229,10 +229,11 @@ func TestController_ToggleFlipsBool(t *testing.T) {
 	ctx.SetItems([]any{&models.Connection{Name: "beta", DSN: "postgres://u@h/db"}})
 	dispatchCM(t, ctrl, commands.ConnectionManagerEdit)
 
-	// Move focus to read_only (index 3: name, driver, dsn, read_only).
-	dispatchCM(t, ctrl, commands.ConnectionManagerFieldNext)
-	dispatchCM(t, ctrl, commands.ConnectionManagerFieldNext)
-	dispatchCM(t, ctrl, commands.ConnectionManagerFieldNext)
+	// Move focus to read_only (index 7: name, driver, host, port, user,
+	// database, sslmode, read_only).
+	for range 7 {
+		dispatchCM(t, ctrl, commands.ConnectionManagerFieldNext)
+	}
 	dispatchCM(t, ctrl, commands.ConnectionManagerToggle)
 	dispatchCM(t, ctrl, commands.ConnectionManagerConfirm)
 

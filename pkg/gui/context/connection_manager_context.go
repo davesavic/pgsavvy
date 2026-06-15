@@ -230,6 +230,10 @@ func (c *ConnectionManagerContext) OpenAddForm(existingNames []string, driversFn
 	if names := f.names(); len(names) > 0 {
 		f.conn.Driver = names[0]
 	}
+	// Sensible defaults so a newcomer can connect to a local Postgres by only
+	// filling User/Database (host + port pre-filled).
+	f.conn.Host = "localhost"
+	f.conn.Port = 5432
 	c.form = f
 	c.mode = ModeForm
 }
@@ -238,6 +242,7 @@ func (c *ConnectionManagerContext) OpenAddForm(existingNames []string, driversFn
 // originalName is excluded from the uniqueness check) and switches to
 // ModeForm.
 func (c *ConnectionManagerContext) OpenEditForm(conn models.Connection, existingNames []string, driversFn func() []string) {
+	conn = migrateLegacyDSN(conn)
 	c.form = connForm{
 		conn:          conn,
 		isEdit:        true,

@@ -2,7 +2,6 @@ package context
 
 import (
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -23,6 +22,7 @@ type connFieldKind int
 const (
 	fieldText connFieldKind = iota
 	fieldDriver
+	fieldSelector
 	fieldToggle
 	fieldSoon
 )
@@ -35,7 +35,11 @@ type connFieldID int
 const (
 	fieldName connFieldID = iota
 	fieldDriverSel
-	fieldDSN
+	fieldHost
+	fieldPort
+	fieldUser
+	fieldDatabase
+	fieldSSLMode
 	fieldReadOnly
 	fieldConfirmWrites
 	fieldConfirmDDL
@@ -70,7 +74,11 @@ type connFieldSpec struct {
 var connFormSpecs = []connFieldSpec{
 	{fieldName, "name", fieldText},
 	{fieldDriverSel, "driver", fieldDriver},
-	{fieldDSN, "dsn", fieldText},
+	{fieldHost, "host", fieldText},
+	{fieldPort, "port", fieldText},
+	{fieldUser, "user", fieldText},
+	{fieldDatabase, "database", fieldText},
+	{fieldSSLMode, "sslmode", fieldSelector},
 	{fieldReadOnly, "read_only", fieldToggle},
 	{fieldConfirmWrites, "confirm_writes", fieldToggle},
 	{fieldConfirmDDL, "confirm_ddl", fieldToggle},
@@ -174,6 +182,22 @@ func (f *connForm) cycleDriver() {
 	f.conn.Driver = names[idx%len(names)]
 }
 
+// sslModeOptions is the fixed cycle for the sslmode selector, in libpq order.
+var sslModeOptions = []string{"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
+
+// cycleSSLMode advances SSLMode to the next option, wrapping last→first. An
+// empty or unrecognized current value starts the cycle at the first option.
+func (f *connForm) cycleSSLMode() {
+	idx := 0
+	for i, m := range sslModeOptions {
+		if m == f.conn.SSLMode {
+			idx = i + 1
+			break
+		}
+	}
+	f.conn.SSLMode = sslModeOptions[idx%len(sslModeOptions)]
+}
+
 // toggleFocused flips the focused toggle, or cycles the driver when the
 // driver row is focused. No-op on text rows.
 func (f *connForm) toggleFocused() { f.toggle(f.focusedSpec().id) }
@@ -194,6 +218,8 @@ func (f *connForm) toggle(id connFieldID) {
 		f.normalizeSSHTunnel()
 	case fieldDriverSel:
 		f.cycleDriver()
+	case fieldSSLMode:
+		f.cycleSSLMode()
 	}
 }
 
@@ -227,8 +253,17 @@ func (f *connForm) textValue(id connFieldID) string {
 	switch id {
 	case fieldName:
 		return f.conn.Name
-	case fieldDSN:
-		return f.conn.DSN
+	case fieldHost:
+		return f.conn.Host
+	case fieldUser:
+		return f.conn.User
+	case fieldDatabase:
+		return f.conn.Database
+	case fieldPort:
+		if f.conn.Port == 0 {
+			return ""
+		}
+		return strconv.Itoa(f.conn.Port)
 	case fieldStatementTimeout:
 		return f.conn.StatementTimeout
 	case fieldColor:
@@ -276,8 +311,17 @@ func (f *connForm) setTextValue(id connFieldID, v string) {
 	switch id {
 	case fieldName:
 		f.conn.Name = v
-	case fieldDSN:
-		f.conn.DSN = v
+	case fieldHost:
+		f.conn.Host = v
+	case fieldUser:
+		f.conn.User = v
+	case fieldDatabase:
+		f.conn.Database = v
+	case fieldPort:
+		// The port validator already rejected non-numeric input at the popup;
+		// an empty string clears the port to 0 (unset, pgx default applies).
+		port, _ := strconv.Atoi(v)
+		f.conn.Port = port
 	case fieldStatementTimeout:
 		f.conn.StatementTimeout = v
 	case fieldColor:
@@ -332,6 +376,32 @@ func parseTags(v string) []string {
 	return out
 }
 
+// connHasDiscreteFields reports whether any discrete connection field is set.
+func connHasDiscreteFields(c models.Connection) bool {
+	return c.Host != "" || c.Port != 0 || c.User != "" || c.Database != "" || c.SSLMode != ""
+}
+
+// migrateLegacyDSN lazily parses a legacy dsn-only profile into discrete fields
+// so the Edit form renders populated discrete rows. The raw DSN is left intact;
+// the config save normalizer (A2) drops it once discrete fields are present. A
+// parse failure leaves the discrete fields empty so the raw DSN remains the
+// connect-time fallback.
+func migrateLegacyDSN(conn models.Connection) models.Connection {
+	if conn.DSN == "" || connHasDiscreteFields(conn) {
+		return conn
+	}
+	parsed, err := session.ParseDSNIntoConnection(conn.DSN)
+	if err != nil {
+		return conn
+	}
+	conn.Host = parsed.Host
+	conn.Port = parsed.Port
+	conn.User = parsed.User
+	conn.Database = parsed.Database
+	conn.SSLMode = parsed.SSLMode
+	return conn
+}
+
 // validateName enforces non-empty + unique (excluding the edited row's own
 // original name). Used both by the PROMPT popup validator and validate-all.
 func (f *connForm) validateName(raw string, tr *i18n.TranslationSet) error {
@@ -350,33 +420,14 @@ func (f *connForm) validateName(raw string, tr *i18n.TranslationSet) error {
 	return nil
 }
 
-// validateDSN enforces url.Parse-able + no inline password. Shared by the
-// popup validator and validate-all.
-func validateDSN(raw string, tr *i18n.TranslationSet) error {
-	v := strings.TrimSpace(raw)
-	if v == "" {
-		return fmt.Errorf("%s", tr.InvalidDSN)
-	}
-	u, err := url.Parse(v)
-	if err != nil {
-		return fmt.Errorf("%s", tr.InvalidDSN)
-	}
-	if u.User != nil {
-		if _, hasPwd := u.User.Password(); hasPwd {
-			return fmt.Errorf("%s", tr.DSNInlinePassword)
-		}
-	}
-	return nil
-}
-
 // validatorFor returns the popup validator for a text field, or nil if the
 // field has no validation (free text).
 func (f *connForm) validatorFor(id connFieldID, tr *i18n.TranslationSet) func(string) error {
 	switch id {
 	case fieldName:
 		return func(s string) error { return f.validateName(s, tr) }
-	case fieldDSN:
-		return func(s string) error { return validateDSN(s, tr) }
+	case fieldPort:
+		return validateSSHPort
 	case fieldSSHPort:
 		return validateSSHPort
 	case fieldSSHIdentityFile:
@@ -432,9 +483,9 @@ func (f *connForm) validateAll(tr *i18n.TranslationSet) (msg string, fieldIdx in
 	if err := f.validateName(f.conn.Name, tr); err != nil {
 		return err.Error(), f.focusIndexOf(fieldName), false
 	}
-	if err := validateDSN(f.conn.DSN, tr); err != nil {
-		return err.Error(), f.focusIndexOf(fieldDSN), false
-	}
+	// Discrete connection fields are not required at save time (drafts are
+	// allowed); an empty Host is handled at connect time. Only name uniqueness
+	// and SSH-tunnel completeness are enforced here.
 	// Drop a tunnel whose every input is blank, then reuse the session-layer
 	// rule as the single source of truth for host/user-required.
 	f.normalizeSSHTunnel()
@@ -496,6 +547,11 @@ func (f *connForm) displayValue(s connFieldSpec) string {
 			return "(none)"
 		}
 		return f.conn.Driver
+	case fieldSelector:
+		if f.conn.SSLMode == "" {
+			return "(default)"
+		}
+		return f.conn.SSLMode
 	default:
 		v := f.textValue(s.id)
 		if v == "" {

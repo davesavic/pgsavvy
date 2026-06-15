@@ -127,6 +127,26 @@ func (g *Gui) whichKeyRows(scope types.ContextKey, prefix []types.ChordKey) []ty
 	return rows
 }
 
+// rowEndpoint derives the "host/db" suffix shown on a connection-picker row.
+// It prefers the parsed DSN endpoint and falls back to the discrete Host/
+// Database fields, so a discrete-only connection (no raw DSN) still shows an
+// endpoint instead of a blank row. Returns "" when neither yields a host or
+// database. SECURITY: only host + database are surfaced (never the raw DSN /
+// password); each leaf is run through config.SafeText.
+func rowEndpoint(c *models.Connection) string {
+	if c == nil {
+		return ""
+	}
+	host, db := session.ParseDSNEndpoint(c.DSN)
+	if host == "" && db == "" {
+		host, db = c.Host, c.Database
+	}
+	if host == "" && db == "" {
+		return ""
+	}
+	return config.SafeText(host) + "/" + config.SafeText(db)
+}
+
 // wireContextRegistry builds the context registry with hooks closed over the
 // driver. Extracted verbatim from wireWithDriver; must run
 // after wireKeybindingSystem (reads g.keybindingSystem.matcher / g.keybindingSystem.modeStore / g.keybindingSystem.whichkey).
@@ -144,16 +164,7 @@ func (g *Gui) wireContextRegistry(tr *i18n.TranslationSet, provider func() []mod
 		// endpoint. SECURITY: only the discrete host + database fields are
 		// surfaced (never the raw DSN / password); each leaf is run through
 		// config.SafeText. Malformed/empty DSN → "" → name-only row.
-		RowSuffix: func(c *models.Connection) string {
-			if c == nil {
-				return ""
-			}
-			host, db := session.ParseDSNEndpoint(c.DSN)
-			if host == "" && db == "" {
-				return ""
-			}
-			return config.SafeText(host) + "/" + config.SafeText(db)
-		},
+		RowSuffix:        rowEndpoint,
 		LimitText:        presentation.NewLimitText(tr),
 		ModeStore:        g.keybindingSystem.modeStore,
 		WhichKey:         g.keybindingSystem.whichkey,
