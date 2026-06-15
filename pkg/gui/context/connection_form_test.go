@@ -21,12 +21,13 @@ func TestForm_RendersAllFunctionalRows(t *testing.T) {
 		t.Fatalf("HandleRender: %v", err)
 	}
 	body := drv.lastContent
+	// Always-visible rows. The SSH detail rows are gated behind the
+	// use_ssh_tunnel toggle and are asserted separately below.
 	for _, want := range []string{
 		"name:", "driver:", "host:", "port:", "user:", "database:", "sslmode:",
 		"read_only:", "confirm_writes:",
 		"confirm_ddl:", "statement_timeout:", "color:", "label:", "icon:", "tags:",
-		"ssh_host:", "ssh_user:", "ssh_port:", "identity_file:",
-		"identity_from_agent:", "known_hosts:",
+		"use_ssh_tunnel:",
 		"keyring:", "pgpass:", "password_command:",
 	} {
 		if !strings.Contains(body, want) {
@@ -37,14 +38,37 @@ func TestForm_RendersAllFunctionalRows(t *testing.T) {
 	if strings.Contains(body, "dsn:") {
 		t.Errorf("form body still renders the dsn row; expected discrete fields\n%s", body)
 	}
-	// keyring/password_command are now editable text rows, not "(soon)".
+	// keyring/password_command are editable text rows, not "(soon)".
 	if strings.Contains(body, "(soon)") {
 		t.Errorf("form body still renders a greyed (soon) marker\n%s", body)
 	}
-	// ssh_tunnel was reclassified from a "(soon)" placeholder into the six
-	// editable sub-rows above; its old label must no longer render.
-	if strings.Contains(body, "ssh_tunnel:") {
-		t.Errorf("ssh_tunnel: still rendered as a row; expected the 6 SSH sub-rows\n%s", body)
+	// With the tunnel OFF (Add default), the SSH detail rows and the old
+	// identity_from_agent toggle must not render.
+	for _, absent := range []string{
+		"ssh_auth:", "ssh_host:", "ssh_user:", "ssh_port:", "identity_file:",
+		"known_hosts:", "identity_from_agent:",
+	} {
+		if strings.Contains(body, absent) {
+			t.Errorf("SSH row %q rendered while tunnel is off\n%s", absent, body)
+		}
+	}
+
+	// Toggle the tunnel on and re-render: the SSH detail rows now appear.
+	for range 15 {
+		c.FormMoveFocus(1)
+	}
+	if c.form.focusedSpec().id != fieldUseSSHTunnel {
+		t.Fatalf("expected focus on use_ssh_tunnel, got %v", c.form.focusedSpec().id)
+	}
+	c.FormToggleFocused()
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender (ssh on): %v", err)
+	}
+	body = drv.lastContent
+	for _, want := range []string{"ssh_auth:", "ssh_host:", "ssh_user:", "ssh_port:", "known_hosts:"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("SSH row %q missing after enabling tunnel\n%s", want, body)
+		}
 	}
 }
 
@@ -65,10 +89,11 @@ func TestForm_FieldNavMovesFocus(t *testing.T) {
 	c.OpenAddForm(nil, testDrivers)
 	// 15 base functional rows (name, driver, host, port, user, database,
 	// sslmode, read_only, confirm_writes, confirm_ddl, statement_timeout,
-	// color, label, icon, tags) + 6 SSH rows + keyring + pgpass +
-	// password_command → focusable count is 24.
-	if got := len(c.form.focusableSpecs()); got != 24 {
-		t.Fatalf("focusable rows = %d, want 24", got)
+	// color, label, icon, tags) + use_ssh_tunnel + keyring + pgpass +
+	// password_command → focusable count is 19 with the SSH tunnel OFF (the 6
+	// SSH detail rows are hidden until the tunnel is enabled).
+	if got := len(c.form.focusableSpecs()); got != 19 {
+		t.Fatalf("focusable rows = %d, want 19", got)
 	}
 	// Move far past the end; clamps to the last functional row (password_command).
 	for range 50 {
@@ -211,16 +236,21 @@ func TestForm_SSHRowsAreFocusable(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
 
+	// Enable the tunnel and pick key-file so identity_file is among the
+	// revealed rows.
+	c.form.toggle(fieldUseSSHTunnel)
+	c.form.sshAuth = sshAuthKeyFile
+
 	got := map[connFieldID]bool{}
 	for _, s := range c.form.focusableSpecs() {
 		got[s.id] = true
 	}
 	for _, id := range []connFieldID{
-		fieldSSHHost, fieldSSHUser, fieldSSHPort,
-		fieldSSHIdentityFile, fieldSSHIdentityFromAgent, fieldSSHKnownHosts,
+		fieldSSHAuthMethod, fieldSSHHost, fieldSSHUser, fieldSSHPort,
+		fieldSSHIdentityFile, fieldSSHKnownHosts,
 	} {
 		if !got[id] {
-			t.Errorf("SSH field %v not focusable", id)
+			t.Errorf("SSH field %v not focusable when tunnel enabled", id)
 		}
 	}
 }
@@ -269,23 +299,39 @@ func TestForm_SSHPortNilSafeAndZero(t *testing.T) {
 	}
 }
 
-// TestForm_SSHAgentToggle asserts the agent toggle flips and reads back, and
-// allocates the tunnel on toggle-on (T6).
-func TestForm_SSHAgentToggle(t *testing.T) {
-	f := &connForm{}
-	if f.toggleValue(fieldSSHIdentityFromAgent) {
-		t.Fatal("agent toggle on for nil tunnel")
+// TestForm_SSHTunnelToggle asserts the use_ssh_tunnel gate allocates the tunnel
+// on and drops it off, and that the transient auth picker maps onto the tunnel
+// at save (applySSHAuth) with no persisted auth-method key (A3).
+func TestForm_SSHTunnelToggle(t *testing.T) {
+	f := &connForm{sshAuth: sshAuthAgent}
+	if f.toggleValue(fieldUseSSHTunnel) {
+		t.Fatal("tunnel reads enabled before toggle")
 	}
-	f.toggle(fieldSSHIdentityFromAgent)
-	if f.conn.SSHTunnel == nil {
-		t.Fatal("SSHTunnel nil after agent toggle-on")
+	f.toggle(fieldUseSSHTunnel)
+	if !f.sshEnabled || f.conn.SSHTunnel == nil {
+		t.Fatal("tunnel not enabled/allocated after toggle-on")
 	}
-	if !f.toggleValue(fieldSSHIdentityFromAgent) {
-		t.Fatal("agent toggle not on after toggle")
+	// Auth picker → config mapping (applied at save time).
+	f.applySSHAuth()
+	if !f.conn.SSHTunnel.IdentityFromAgent {
+		t.Error("agent auth did not set IdentityFromAgent")
 	}
-	f.toggle(fieldSSHIdentityFromAgent)
-	if f.conn.SSHTunnel != nil {
-		t.Fatal("SSHTunnel not normalized to nil after toggle-off")
+	f.sshAuth = sshAuthKeyFile
+	f.conn.SSHTunnel.IdentityFile = "/k"
+	f.applySSHAuth()
+	if f.conn.SSHTunnel.IdentityFromAgent || f.conn.SSHTunnel.IdentityFile != "/k" {
+		t.Errorf("key-file auth mapping wrong: %+v", f.conn.SSHTunnel)
+	}
+	// Toggle off flips the gate but PRESERVES in-progress data in memory; a
+	// re-enable restores it (validateAll drops it at save — see
+	// TestForm_SSHOffSavesNilTunnel).
+	f.toggle(fieldUseSSHTunnel)
+	if f.sshEnabled {
+		t.Fatal("gate still enabled after toggle-off")
+	}
+	f.toggle(fieldUseSSHTunnel)
+	if f.conn.SSHTunnel == nil || f.conn.SSHTunnel.IdentityFile != "/k" {
+		t.Errorf("tunnel data not preserved across off→on: %+v", f.conn.SSHTunnel)
 	}
 }
 
@@ -504,9 +550,9 @@ func TestForm_ValidateAllSSHHostRequired(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
 	c.form.conn.Name = "ok"
-	c.form.conn.DSN = "postgres://u@h/db"
-	// Agent on, host empty → tunnel non-nil, host missing.
-	c.form.toggle(fieldSSHIdentityFromAgent)
+	// SSH tunnel on, host empty → validate-all ensures the tunnel and the
+	// session rule reports the missing host.
+	c.form.toggle(fieldUseSSHTunnel)
 
 	_, _, _, ok := c.FormValidateAll(tr)
 	if ok {

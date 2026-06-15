@@ -234,6 +234,9 @@ func (c *ConnectionManagerContext) OpenAddForm(existingNames []string, driversFn
 	// filling User/Database (host + port pre-filled).
 	f.conn.Host = "localhost"
 	f.conn.Port = 5432
+	// SSH tunnel starts off; seed the auth picker so it shows a valid method
+	// the moment the user toggles the tunnel on.
+	f.sshAuth = sshAuthAgent
 	c.form = f
 	c.mode = ModeForm
 }
@@ -243,8 +246,11 @@ func (c *ConnectionManagerContext) OpenAddForm(existingNames []string, driversFn
 // ModeForm.
 func (c *ConnectionManagerContext) OpenEditForm(conn models.Connection, existingNames []string, driversFn func() []string) {
 	conn = migrateLegacyDSN(conn)
+	sshEnabled, sshAuth := deriveSSHAuth(conn)
 	c.form = connForm{
 		conn:          conn,
+		sshEnabled:    sshEnabled,
+		sshAuth:       sshAuth,
 		isEdit:        true,
 		originalName:  conn.Name,
 		existingNames: existingNames,

@@ -203,20 +203,19 @@ func TestConnectionManagerSaveSSHTunnelRoundTrip(t *testing.T) {
 	if err := g.Controllers().ConnectionManager.Add(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	// Focus index after Add is 0. Functional order: name(0) driver(1) host(2)
-	// port(3) user(4) database(5) sslmode(6) read_only(7) confirm_writes(8)
-	// confirm_ddl(9) statement_timeout(10) color(11) label(12) icon(13)
-	// tags(14) ssh_host(15) ssh_user(16) ssh_port(17) identity_file(18)
-	// identity_from_agent(19) known_hosts(20).
+	// SSH is gated behind use_ssh_tunnel @ 15. Toggling it on reveals the SSH
+	// detail rows: ssh_auth(16) ssh_host(17) ssh_user(18) ssh_port(19) ...
+	// (identity_file is hidden under the default agent auth method).
 	modal.FormSetFocusedValue("ssh-conn") // name @ 0
-	modal.FormMoveFocus(15)
-	modal.FormSetFocusedValue("bastion.prod") // ssh_host @ 15
+	modal.FormMoveFocus(15)               // use_ssh_tunnel @ 15
+	modal.FormToggleFocused()             // enable tunnel; auth defaults to agent
+	modal.FormMoveFocus(2)                // ssh_host @ 17 (past ssh_auth @ 16)
+	modal.FormSetFocusedValue("bastion.prod")
 	modal.FormMoveFocus(1)
-	modal.FormSetFocusedValue("deploy") // ssh_user @ 16
+	modal.FormSetFocusedValue("deploy") // ssh_user @ 18
 	modal.FormMoveFocus(1)
-	modal.FormSetFocusedValue("2222") // ssh_port @ 17
-	modal.FormMoveFocus(2)
-	modal.FormToggleFocused() // identity_from_agent @ 19
+	modal.FormSetFocusedValue("2222") // ssh_port @ 19
+	// IdentityFromAgent is set from the agent auth method at save (applySSHAuth).
 
 	if err := g.Controllers().ConnectionManager.Confirm(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Confirm: %v", err)

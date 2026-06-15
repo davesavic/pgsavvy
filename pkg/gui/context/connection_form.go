@@ -48,12 +48,17 @@ const (
 	fieldLabel
 	fieldIcon
 	fieldTags
-	// SSH tunnel rows — editable, mapping to Connection.SSHTunnel (T6).
+	// SSH tunnel rows. fieldUseSSHTunnel and fieldSSHAuthMethod are TRANSIENT
+	// form state (connForm.sshEnabled / sshAuth), NOT persisted Connection
+	// fields: the auth picker derives Connection.SSHTunnel.IdentityFromAgent /
+	// IdentityFile at save time. The detail rows are hidden until the tunnel is
+	// enabled, and identity_file only shows for the key-file auth method.
+	fieldUseSSHTunnel
+	fieldSSHAuthMethod
 	fieldSSHHost
 	fieldSSHUser
 	fieldSSHPort
 	fieldSSHIdentityFile
-	fieldSSHIdentityFromAgent
 	fieldSSHKnownHosts
 	// Credential rows — editable text mapping to the credential waterfall
 	// (pkg/session/credentials.go).
@@ -87,11 +92,12 @@ var connFormSpecs = []connFieldSpec{
 	{fieldLabel, "label", fieldText},
 	{fieldIcon, "icon", fieldText},
 	{fieldTags, "tags", fieldText},
+	{fieldUseSSHTunnel, "use_ssh_tunnel", fieldToggle},
+	{fieldSSHAuthMethod, "ssh_auth", fieldSelector},
 	{fieldSSHHost, "ssh_host", fieldText},
 	{fieldSSHUser, "ssh_user", fieldText},
 	{fieldSSHPort, "ssh_port", fieldText},
 	{fieldSSHIdentityFile, "identity_file", fieldText},
-	{fieldSSHIdentityFromAgent, "identity_from_agent", fieldToggle},
 	{fieldSSHKnownHosts, "known_hosts", fieldText},
 	{fieldKeyring, "keyring", fieldText},
 	{fieldPgpass, "pgpass", fieldText},
@@ -109,6 +115,13 @@ type connForm struct {
 	conn  models.Connection
 	focus int // index into the FOCUSABLE field list (functional rows only)
 	err   string
+
+	// sshEnabled and sshAuth are TRANSIENT (never persisted): they gate the
+	// SSH section's visibility and drive how the auth picker maps onto
+	// Connection.SSHTunnel at save time. Derived from the loaded tunnel on
+	// edit-open (deriveSSHAuth).
+	sshEnabled bool
+	sshAuth    string
 
 	isEdit       bool
 	originalName string
@@ -128,12 +141,42 @@ type connForm struct {
 func (f *connForm) focusableSpecs() []connFieldSpec {
 	out := make([]connFieldSpec, 0, len(connFormSpecs))
 	for _, s := range connFormSpecs {
-		if s.kind == fieldSoon {
+		if !f.visible(s) {
 			continue
 		}
 		out = append(out, s)
 	}
 	return out
+}
+
+// visible reports whether a row is part of the focusable set given the current
+// transient SSH state: the SSH detail rows appear only when the tunnel is
+// enabled, and identity_file only for the key-file auth method.
+func (f *connForm) visible(s connFieldSpec) bool {
+	switch s.id {
+	case fieldSSHAuthMethod, fieldSSHHost, fieldSSHUser, fieldSSHPort, fieldSSHKnownHosts:
+		return f.sshEnabled
+	case fieldSSHIdentityFile:
+		return f.sshEnabled && f.sshAuth == sshAuthKeyFile
+	}
+	return s.kind != fieldSoon
+}
+
+// clampFocus re-pins the field cursor into the current focusable range after a
+// visibility change (SSH toggle / auth-method) shrinks the set, so the cursor
+// never lands on a now-hidden row.
+func (f *connForm) clampFocus() {
+	n := len(f.focusableSpecs())
+	if n == 0 {
+		f.focus = 0
+		return
+	}
+	if f.focus >= n {
+		f.focus = n - 1
+	}
+	if f.focus < 0 {
+		f.focus = 0
+	}
 }
 
 // focusedSpec returns the spec under the field cursor.
@@ -198,6 +241,81 @@ func (f *connForm) cycleSSLMode() {
 	f.conn.SSLMode = sslModeOptions[idx%len(sslModeOptions)]
 }
 
+// SSH auth methods. These are TRANSIENT selector values (connForm.sshAuth),
+// never persisted: applySSHAuth maps them onto Connection.SSHTunnel at save.
+const (
+	sshAuthAgent    = "agent"
+	sshAuthKeyFile  = "key-file"
+	sshAuthPassword = "password"
+)
+
+var sshAuthOptions = []string{sshAuthAgent, sshAuthKeyFile, sshAuthPassword}
+
+// cycleSSHAuth advances the transient auth method, wrapping last→first, then
+// re-clamps focus because identity_file's visibility depends on it.
+func (f *connForm) cycleSSHAuth() {
+	idx := 0
+	for i, m := range sshAuthOptions {
+		if m == f.sshAuth {
+			idx = i + 1
+			break
+		}
+	}
+	f.sshAuth = sshAuthOptions[idx%len(sshAuthOptions)]
+	f.clampFocus()
+}
+
+// toggleSSHEnabled flips the "Use SSH tunnel?" gate. Turning it on allocates a
+// tunnel so host/user edits have a target. Turning it off KEEPS any in-progress
+// tunnel data in memory so a re-enable restores it — validateAll drops the
+// tunnel at save when the gate is off, so a disabled section never persists.
+// Focus is re-clamped because the SSH rows appear/disappear.
+func (f *connForm) toggleSSHEnabled() {
+	f.sshEnabled = !f.sshEnabled
+	if f.sshEnabled {
+		f.ensureSSHTunnel()
+	}
+	f.clampFocus()
+}
+
+// applySSHAuth maps the transient auth method onto the tunnel config at save
+// time so IdentityFromAgent/IdentityFile reflect the picker without a persisted
+// auth-method key (A3). No-op when the tunnel is nil.
+func (f *connForm) applySSHAuth() {
+	t := f.conn.SSHTunnel
+	if t == nil {
+		return
+	}
+	switch f.sshAuth {
+	case sshAuthAgent:
+		t.IdentityFromAgent = true
+		t.IdentityFile = ""
+	case sshAuthPassword:
+		t.IdentityFromAgent = false
+		t.IdentityFile = ""
+	default: // sshAuthKeyFile — keep the entered IdentityFile
+		t.IdentityFromAgent = false
+	}
+}
+
+// deriveSSHAuth reads the transient (enabled, auth) state from a loaded
+// connection so the edit form reflects how the existing tunnel authenticates,
+// with no persisted auth-method key. A nil tunnel defaults to agent so toggling
+// the gate on starts from a sensible method.
+func deriveSSHAuth(c models.Connection) (enabled bool, auth string) {
+	t := c.SSHTunnel
+	if t == nil {
+		return false, sshAuthAgent
+	}
+	if t.IdentityFromAgent {
+		return true, sshAuthAgent
+	}
+	if t.IdentityFile != "" {
+		return true, sshAuthKeyFile
+	}
+	return true, sshAuthPassword
+}
+
 // toggleFocused flips the focused toggle, or cycles the driver when the
 // driver row is focused. No-op on text rows.
 func (f *connForm) toggleFocused() { f.toggle(f.focusedSpec().id) }
@@ -213,9 +331,10 @@ func (f *connForm) toggle(id connFieldID) {
 		f.conn.ConfirmWrites = !f.conn.ConfirmWrites
 	case fieldConfirmDDL:
 		f.conn.ConfirmDDL = !f.conn.ConfirmDDL
-	case fieldSSHIdentityFromAgent:
-		f.ensureSSHTunnel().IdentityFromAgent = !f.conn.SSHTunnel.IdentityFromAgent
-		f.normalizeSSHTunnel()
+	case fieldUseSSHTunnel:
+		f.toggleSSHEnabled()
+	case fieldSSHAuthMethod:
+		f.cycleSSHAuth()
 	case fieldDriverSel:
 		f.cycleDriver()
 	case fieldSSLMode:
@@ -486,9 +605,16 @@ func (f *connForm) validateAll(tr *i18n.TranslationSet) (msg string, fieldIdx in
 	// Discrete connection fields are not required at save time (drafts are
 	// allowed); an empty Host is handled at connect time. Only name uniqueness
 	// and SSH-tunnel completeness are enforced here.
-	// Drop a tunnel whose every input is blank, then reuse the session-layer
-	// rule as the single source of truth for host/user-required.
-	f.normalizeSSHTunnel()
+	//
+	// When the SSH gate is on, the tunnel must exist and be complete: apply the
+	// picker's auth choice, then let the session-layer rule require host+user.
+	// When off, drop the tunnel entirely so a disabled section never persists.
+	if f.sshEnabled {
+		f.ensureSSHTunnel()
+		f.applySSHAuth()
+	} else {
+		f.conn.SSHTunnel = nil
+	}
 	if err := session.ValidateSSHTunnel(f.conn.SSHTunnel); err != nil {
 		return err.Error(), f.focusIndexOf(fieldSSHHost), false
 	}
@@ -512,8 +638,11 @@ func (f *connForm) render() string {
 	var b strings.Builder
 	focused := f.focusedSpec()
 	for _, s := range connFormSpecs {
+		if !f.visible(s) {
+			continue
+		}
 		marker := "  "
-		if s.kind != fieldSoon && s.id == focused.id {
+		if s.id == focused.id {
 			marker = "> "
 		}
 		fmt.Fprintf(&b, "%s%-18s %s\n", marker, s.label+":", f.displayValue(s))
@@ -548,6 +677,9 @@ func (f *connForm) displayValue(s connFieldSpec) string {
 		}
 		return f.conn.Driver
 	case fieldSelector:
+		if s.id == fieldSSHAuthMethod {
+			return f.sshAuth
+		}
 		if f.conn.SSLMode == "" {
 			return "(default)"
 		}
@@ -574,8 +706,8 @@ func (f *connForm) toggleValue(id connFieldID) bool {
 		return f.conn.ConfirmWrites
 	case fieldConfirmDDL:
 		return f.conn.ConfirmDDL
-	case fieldSSHIdentityFromAgent:
-		return f.conn.SSHTunnel != nil && f.conn.SSHTunnel.IdentityFromAgent
+	case fieldUseSSHTunnel:
+		return f.sshEnabled
 	}
 	return false
 }
