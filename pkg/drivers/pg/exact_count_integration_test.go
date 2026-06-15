@@ -3,7 +3,7 @@
 // Integration tests for CountPredicatedRows against the docker/postgres
 // fixture. Mirrors the openIntegrationSession pattern from
 // predicated_estimate_integration_test.go. Skipped (not failed) when
-// DBSAVVY_TEST_PG is unset.
+// PGSAVVY_TEST_PG is unset.
 
 package pg_test
 

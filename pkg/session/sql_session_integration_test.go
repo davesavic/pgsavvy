@@ -1,7 +1,7 @@
 //go:build integration
 
 // Integration tests for pkg/session.SQLSession against the docker/postgres
-// fixture. Skipped (not failed) when DBSAVVY_TEST_PG is unset or the probe
+// fixture. Skipped (not failed) when PGSAVVY_TEST_PG is unset or the probe
 // fails — mirrors the pattern in pkg/drivers/pg/execute_test.go.
 
 package session_test
@@ -20,7 +20,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
-const envDSN = "DBSAVVY_TEST_PG"
+const envDSN = "PGSAVVY_TEST_PG"
 
 // requirePGSQLSession opens a real pg.Connection + Session and wraps it in
 // a session.SQLSession. All resources are registered with t.Cleanup.

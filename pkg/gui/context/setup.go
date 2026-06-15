@@ -4,7 +4,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
-// ContextTree is the registry of every Context the dbsavvy TUI knows
+// ContextTree is the registry of every Context the pgsavvy TUI knows
 // about. It is distinct from gui.ContextTree (the focus-stack manager in
 // pkg/gui/context_mgr.go): this struct is the SOURCE of Context
 // instances, while the stack manager owns their ORDERING.

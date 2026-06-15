@@ -2,7 +2,7 @@
 
 // Integration tests for EditabilityIntrospect against the docker/postgres
 // fixture. Mirrors the requirePGSession pattern from execute_test.go (same
-// package, same DSN env). Skipped (not failed) when DBSAVVY_TEST_PG is
+// package, same DSN env). Skipped (not failed) when PGSAVVY_TEST_PG is
 // unset.
 
 package pg_test
@@ -23,9 +23,9 @@ import (
 // via pg.New + drv.Open + conn.AcquireSession to reach here.
 func openIntegrationSession(t *testing.T) *pg.Session {
 	t.Helper()
-	dsn := os.Getenv("DBSAVVY_TEST_PG")
+	dsn := os.Getenv("PGSAVVY_TEST_PG")
 	if dsn == "" {
-		t.Skipf("DBSAVVY_TEST_PG unset; editability integration test requires the docker/postgres fixture")
+		t.Skipf("PGSAVVY_TEST_PG unset; editability integration test requires the docker/postgres fixture")
 	}
 	ctx := context.Background()
 	factory := pg.New(nil)

@@ -58,7 +58,7 @@ func wrapSorted(orig string, ordinal1Based int, dir sortDir) string {
 		stripped = stripped[:loc[0]]
 	}
 
-	wrapped := fmt.Sprintf("SELECT * FROM (\n%s\n) _dbsavvy_sort\nORDER BY %d %s", stripped, ordinal1Based, keyword)
+	wrapped := fmt.Sprintf("SELECT * FROM (\n%s\n) _pgsavvy_sort\nORDER BY %d %s", stripped, ordinal1Based, keyword)
 	if tail != "" {
 		wrapped += "\n" + tail
 	}

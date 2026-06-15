@@ -45,7 +45,7 @@ var (
 //  1. profile.Password         — inline plaintext (development only).
 //  2. profile.PasswordCommand  — shell command whose stdout is the password.
 //  3. profile.KeyringRef       — item key in the 99designs/keyring file backend
-//     at $XDG_DATA_HOME/dbsavvy/keyring (no CGO; epic D1).
+//     at $XDG_DATA_HOME/pgsavvy/keyring (no CGO; epic D1).
 //  4. profile.PgpassPath       — explicit libpq-format .pgpass file (mode 0600).
 //  5. prompter                 — interactive Prompter, if non-nil.
 //
@@ -261,5 +261,5 @@ func ParseDSNEndpoint(dsn string) (host, db string) {
 // directory is created lazily by the keyring library on first write; this
 // function only computes the path. See env/xdg.DataHome (epic D1).
 func keyringDir() string {
-	return filepath.Join(xdgDataHome(), "dbsavvy", "keyring")
+	return filepath.Join(xdgDataHome(), "pgsavvy", "keyring")
 }

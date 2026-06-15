@@ -31,7 +31,7 @@ func seedKeyring(t *testing.T, dir, passphrase, key, value string) {
 	}
 	kr, err := keyring.Open(keyring.Config{
 		AllowedBackends:  []keyring.BackendType{keyring.FileBackend},
-		ServiceName:      "dbsavvy",
+		ServiceName:      "pgsavvy",
 		FileDir:          dir,
 		FilePasswordFunc: keyring.FixedStringPrompt(passphrase),
 	})
@@ -46,7 +46,7 @@ func seedKeyring(t *testing.T, dir, passphrase, key, value string) {
 func TestResolvePassword_KeyringEnvPassphrase(t *testing.T) {
 	tmp := t.TempDir()
 	withXDGDataHome(t, tmp)
-	dir := filepath.Join(tmp, "dbsavvy", "keyring")
+	dir := filepath.Join(tmp, "pgsavvy", "keyring")
 	seedKeyring(t, dir, "phrase", "prod-db", "secret-from-keyring")
 
 	t.Setenv(keyringPassphraseEnv, "phrase")
@@ -63,7 +63,7 @@ func TestResolvePassword_KeyringEnvPassphrase(t *testing.T) {
 func TestKeyringEnvPassphraseSetButEmptyFallsToPrompter(t *testing.T) {
 	tmp := t.TempDir()
 	withXDGDataHome(t, tmp)
-	dir := filepath.Join(tmp, "dbsavvy", "keyring")
+	dir := filepath.Join(tmp, "pgsavvy", "keyring")
 	seedKeyring(t, dir, "real-phrase", "prod-db", "kr-pw")
 
 	// Env present but empty → must fall through to prompter.
@@ -85,13 +85,13 @@ func TestKeyringEnvPassphraseSetButEmptyFallsToPrompter(t *testing.T) {
 func TestKeyringFileMode0600(t *testing.T) {
 	tmp := t.TempDir()
 	withXDGDataHome(t, tmp)
-	dir := filepath.Join(tmp, "dbsavvy", "keyring")
+	dir := filepath.Join(tmp, "pgsavvy", "keyring")
 
 	t.Setenv(keyringPassphraseEnv, "phrase")
 	// Trigger creation via a Set through resolveKeyring's open path.
 	seedKeyring(t, dir, "phrase", "k", "v")
 
-	// Parent ("dbsavvy") should be 0700; we don't necessarily own its mode
+	// Parent ("pgsavvy") should be 0700; we don't necessarily own its mode
 	// after MkdirAll inside seedKeyring, but ensureKeyringDirMode tightens
 	// when our code opens it.
 	profile := models.Connection{Name: "p", KeyringRef: "k"}
@@ -99,7 +99,7 @@ func TestKeyringFileMode0600(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 
-	parent := filepath.Join(tmp, "dbsavvy")
+	parent := filepath.Join(tmp, "pgsavvy")
 	if info, err := os.Stat(parent); err != nil {
 		t.Fatal(err)
 	} else if info.Mode().Perm() != 0o700 {
@@ -115,7 +115,7 @@ func TestKeyringFileMode0600(t *testing.T) {
 func TestKeyringWarnsOnLooseMode(t *testing.T) {
 	tmp := t.TempDir()
 	withXDGDataHome(t, tmp)
-	dir := filepath.Join(tmp, "dbsavvy", "keyring")
+	dir := filepath.Join(tmp, "pgsavvy", "keyring")
 	seedKeyring(t, dir, "phrase", "k", "v")
 
 	// Find a seeded file and chmod it loose.
@@ -194,7 +194,7 @@ func installWarnTestSeams(t *testing.T, isTTY bool) *bytes.Buffer {
 func TestKeyringEnvPassphraseEmitsTTYWarnOnce(t *testing.T) {
 	tmp := t.TempDir()
 	withXDGDataHome(t, tmp)
-	dir := filepath.Join(tmp, "dbsavvy", "keyring")
+	dir := filepath.Join(tmp, "pgsavvy", "keyring")
 	seedKeyring(t, dir, "phrase", "prod-db", "kr-pw")
 
 	t.Setenv(keyringPassphraseEnv, "phrase")
@@ -205,7 +205,7 @@ func TestKeyringEnvPassphraseEmitsTTYWarnOnce(t *testing.T) {
 		t.Fatalf("first resolve: %v", err)
 	}
 
-	want := "DBSAVVY_KEYRING_PASSPHRASE is set"
+	want := "PGSAVVY_KEYRING_PASSPHRASE is set"
 	got := buf.String()
 	if !strings.Contains(got, "WARN") || !strings.Contains(got, want) {
 		t.Fatalf("expected WARN substring in %q", got)
@@ -227,7 +227,7 @@ func TestKeyringEnvPassphraseEmitsTTYWarnOnce(t *testing.T) {
 func TestKeyringEnvPassphraseNoWarnWhenNotTTY(t *testing.T) {
 	tmp := t.TempDir()
 	withXDGDataHome(t, tmp)
-	dir := filepath.Join(tmp, "dbsavvy", "keyring")
+	dir := filepath.Join(tmp, "pgsavvy", "keyring")
 	seedKeyring(t, dir, "phrase", "prod-db", "kr-pw")
 
 	t.Setenv(keyringPassphraseEnv, "phrase")
@@ -238,7 +238,7 @@ func TestKeyringEnvPassphraseNoWarnWhenNotTTY(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 
-	if got := buf.String(); strings.Contains(got, "DBSAVVY_KEYRING_PASSPHRASE is set") {
+	if got := buf.String(); strings.Contains(got, "PGSAVVY_KEYRING_PASSPHRASE is set") {
 		t.Fatalf("did not expect TTY WARN, got: %q", got)
 	}
 }
@@ -246,7 +246,7 @@ func TestKeyringEnvPassphraseNoWarnWhenNotTTY(t *testing.T) {
 func TestKeyringEnvPassphraseNoWarnWhenEnvUnset(t *testing.T) {
 	tmp := t.TempDir()
 	withXDGDataHome(t, tmp)
-	dir := filepath.Join(tmp, "dbsavvy", "keyring")
+	dir := filepath.Join(tmp, "pgsavvy", "keyring")
 	seedKeyring(t, dir, "real-phrase", "prod-db", "kr-pw")
 
 	// Env explicitly unset.
@@ -261,7 +261,7 @@ func TestKeyringEnvPassphraseNoWarnWhenEnvUnset(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 
-	if got := buf.String(); strings.Contains(got, "DBSAVVY_KEYRING_PASSPHRASE is set") {
+	if got := buf.String(); strings.Contains(got, "PGSAVVY_KEYRING_PASSPHRASE is set") {
 		t.Fatalf("did not expect TTY WARN when env unset, got: %q", got)
 	}
 }
@@ -269,7 +269,7 @@ func TestKeyringEnvPassphraseNoWarnWhenEnvUnset(t *testing.T) {
 func TestKeyringNoEnvNoPrompterErrors(t *testing.T) {
 	tmp := t.TempDir()
 	withXDGDataHome(t, tmp)
-	dir := filepath.Join(tmp, "dbsavvy", "keyring")
+	dir := filepath.Join(tmp, "pgsavvy", "keyring")
 	seedKeyring(t, dir, "phrase", "k", "v")
 
 	// Ensure env is unset.

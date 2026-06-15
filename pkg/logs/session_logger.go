@@ -27,7 +27,7 @@ type LogCloser interface {
 }
 
 const (
-	sessionFilePrefix = "dbsavvy-"
+	sessionFilePrefix = "pgsavvy-"
 	sessionFileSuffix = ".log"
 	sessionsSubdir    = "sessions"
 )
@@ -161,7 +161,7 @@ func (c *sessionCloser) CloseWithDeadline(d time.Duration) error {
 		return err
 	case <-time.After(d):
 		forceCloseFd(c.f)
-		fmt.Fprintln(os.Stderr, "dbsavvy: log file close timed out; fd force-closed")
+		fmt.Fprintln(os.Stderr, "pgsavvy: log file close timed out; fd force-closed")
 		return errors.New("logs: close deadline exceeded")
 	}
 }

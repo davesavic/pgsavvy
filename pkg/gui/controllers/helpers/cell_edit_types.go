@@ -77,7 +77,7 @@ func CategoryOf(col models.ColumnMeta) TypeCategory {
 	default:
 		// json / jsonb / enum-typed columns / array types (`_int4` …) /
 		// bytea / uuid / interval / inet / cidr / etc. all land here.
-		// TODO(dbsavvy follow-up): dedicated editors for json / jsonb /
+		// TODO(pgsavvy follow-up): dedicated editors for json / jsonb /
 		// enum / array / bytea per epic Out-of-Scope list.
 		return CategoryDefaultText
 	}
@@ -302,7 +302,7 @@ const WarnExprPromptLabel = "expr (injected verbatim, no escaping): "
 // surfaced in tests as a known-deferred behaviour rather than silently
 // dropping into the default branch.
 //
-// TODO(dbsavvy follow-up bd): dedicated editors for these types.
+// TODO(pgsavvy follow-up bd): dedicated editors for these types.
 func IsDeferredEditor(col models.ColumnMeta) bool {
 	name := normalizeTypeName(col.TypeName)
 	switch name {

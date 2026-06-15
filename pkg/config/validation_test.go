@@ -97,7 +97,7 @@ func TestValidateUserConfig_OrphanAction(t *testing.T) {
 	cfg.Keybindings = []KeybindingConfig{
 		{
 			Mode: "n", Scope: "global", Key: "q", Action: "no.such.action",
-			OriginFile: "/etc/dbsavvy.yml", OriginLine: 42,
+			OriginFile: "/etc/pgsavvy.yml", OriginLine: 42,
 		},
 		{Mode: "n", Scope: "global", Key: "?", Action: "help.cheatsheet"},
 		{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit"},
@@ -114,7 +114,7 @@ func TestValidateUserConfig_OrphanAction(t *testing.T) {
 	if !strings.Contains(msg, "no.such.action") {
 		t.Errorf("error should mention action id, got %q", msg)
 	}
-	if !strings.Contains(msg, "/etc/dbsavvy.yml:42") {
+	if !strings.Contains(msg, "/etc/pgsavvy.yml:42") {
 		t.Errorf("error should mention OriginFile:OriginLine, got %q", msg)
 	}
 }

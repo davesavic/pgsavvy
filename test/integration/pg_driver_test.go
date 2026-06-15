@@ -1,7 +1,7 @@
 //go:build integration
 
 // Package integration_test exercises the pkg/drivers/pg driver against a live
-// Postgres fixture. Every Test* requires DBSAVVY_TEST_PG to point at a running
+// Postgres fixture. Every Test* requires PGSAVVY_TEST_PG to point at a running
 // instance loaded with docker/postgres/init/01_fixture.sql; the suite skips
 // (does not fail) when the probe fails.
 //
@@ -38,9 +38,9 @@ import (
 )
 
 const (
-	envDSN                 = "DBSAVVY_TEST_PG"
+	envDSN                 = "PGSAVVY_TEST_PG"
 	expectedFixtureVersion = 2
-	keyringPassphraseEnv   = "DBSAVVY_KEYRING_PASSPHRASE"
+	keyringPassphraseEnv   = "PGSAVVY_KEYRING_PASSPHRASE"
 )
 
 // pgProbeErr is set once by TestMain and consulted by requirePG. A nil value
@@ -436,11 +436,11 @@ func TestSessionListDatabasesIncludesFixtureDB(t *testing.T) {
 		t.Fatalf("ListDatabases: %v", err)
 	}
 	for _, d := range dbs {
-		if d.Name == "dbsavvy_test" {
+		if d.Name == "pgsavvy_test" {
 			return
 		}
 	}
-	t.Skipf("dbsavvy_test absent from ListDatabases result (got %+v) — fixture DB name may differ", dbs)
+	t.Skipf("pgsavvy_test absent from ListDatabases result (got %+v) — fixture DB name may differ", dbs)
 }
 
 func TestCapabilitiesShape(t *testing.T) {
@@ -607,7 +607,7 @@ func TestCredentialsResolveAll(t *testing.T) {
 		xdg.Reload()
 		t.Setenv(keyringPassphraseEnv, "test-passphrase")
 
-		ref := "dbsavvy-integration"
+		ref := "pgsavvy-integration"
 		seedKeyring(t, ref, password, "test-passphrase")
 
 		profile := models.Connection{
@@ -954,13 +954,13 @@ func dsnFields(t *testing.T, dsn string) (host, port, dbname, user string) {
 // the same store via the env passphrase and reads the item.
 func seedKeyring(t *testing.T, ref, password, passphrase string) {
 	t.Helper()
-	dir := filepath.Join(xdg.DataHome, "dbsavvy", "keyring")
+	dir := filepath.Join(xdg.DataHome, "pgsavvy", "keyring")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir keyring: %v", err)
 	}
 	cfg := keyring.Config{
 		AllowedBackends:  []keyring.BackendType{keyring.FileBackend},
-		ServiceName:      "dbsavvy",
+		ServiceName:      "pgsavvy",
 		FileDir:          dir,
 		FilePasswordFunc: func(string) (string, error) { return passphrase, nil },
 	}

@@ -50,7 +50,7 @@ func TestRenderCellPlain_Numeric(t *testing.T) {
 // TestRenderCellPlain_JSONObject asserts a json/jsonb column value that
 // pgx decoded into a Go map renders as JSON text ({"plan":"pro"}) rather
 // than Go's default map formatting (map[plan:pro]). Keys are emitted in
-// json.Marshal's sorted order. dbsavvy json-cell-format.
+// json.Marshal's sorted order. pgsavvy json-cell-format.
 func TestRenderCellPlain_JSONObject(t *testing.T) {
 	resetThemeForTest(t)
 	col := models.ColumnMeta{Name: "data", TypeName: "jsonb"}

@@ -3,7 +3,7 @@
 // Integration tests for CellApplyHelper against the docker/postgres
 // fixture. Exercises the live BEGIN / UPDATE / IS NOT DISTINCT FROM /
 // COMMIT pipeline on transient tables created per-test in an isolated
-// schema. Skipped (not failed) when DBSAVVY_TEST_PG is unset — mirrors
+// schema. Skipped (not failed) when PGSAVVY_TEST_PG is unset — mirrors
 // the harness pattern used by fk_forward_integration_test.go.
 
 package helpers_test
@@ -19,7 +19,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
-const cellApplyEnvDSN = "DBSAVVY_TEST_PG"
+const cellApplyEnvDSN = "PGSAVVY_TEST_PG"
 
 // openIntegrationConn returns a live *pg.Connection ready to hand out
 // sessions via AcquireSession. The caller is expected to Close the

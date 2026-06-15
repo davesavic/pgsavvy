@@ -176,7 +176,7 @@ func TestNewPerRowDecorationHook_NameUsedWhenLabelMatchesHost(t *testing.T) {
 	h := NewPerRowDecorationHook(func() string { return "" })
 	conn := &models.Connection{
 		Name:  "local-pg",
-		DSN:   "postgres://dbsavvy:dbsavvy@localhost:5432/dbsavvy_test",
+		DSN:   "postgres://pgsavvy:pgsavvy@localhost:5432/pgsavvy_test",
 		Label: "localhost",
 	}
 	_, label, _ := h(conn)

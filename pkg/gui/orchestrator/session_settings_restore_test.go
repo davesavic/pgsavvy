@@ -126,16 +126,16 @@ func TestReplaySessionSettings(t *testing.T) {
 		}
 		snap := session.NewSettingsSnapshot()
 		saved := map[string]string{
-			"application_name": "dbsavvy",
+			"application_name": "pgsavvy",
 			"search_path":      "gone_schema",
 		}
 		got := replaySessionSettings(ctx, saved, exec, snap, log, "conn1")
 
-		assert.Contains(t, got, "application_name=dbsavvy")
+		assert.Contains(t, got, "application_name=pgsavvy")
 		assert.NotContains(t, got, "search_path")
 		all := snap.All()
 		assert.Equal(t, "", all["search_path"])
-		assert.Equal(t, "dbsavvy", all["application_name"])
+		assert.Equal(t, "pgsavvy", all["application_name"])
 	})
 
 	t.Run("all settings fail returns empty hint", func(t *testing.T) {

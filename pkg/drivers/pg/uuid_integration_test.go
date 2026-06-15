@@ -1,7 +1,7 @@
 //go:build integration
 
 // Integration test for uuid column decoding against the docker/postgres
-// fixture. Skipped (not failed) when DBSAVVY_TEST_PG is unset; see
+// fixture. Skipped (not failed) when PGSAVVY_TEST_PG is unset; see
 // requirePGSession for the shared probe/skip pattern.
 //
 // Regression guard: pgx's default UUIDCodec decodes uuid into [16]byte, which

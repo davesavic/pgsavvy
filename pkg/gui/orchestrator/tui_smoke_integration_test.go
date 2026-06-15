@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package orchestrator_test (integration) drives the dbsavvy TUI end-to-end
+// Package orchestrator_test (integration) drives the pgsavvy TUI end-to-end
 // against a live Postgres fixture, exercising every acceptance-criteria
 // touch-point in one walk-through.
 //
@@ -52,12 +52,12 @@ func registerSmokeDriver() {
 		// nil prompter: ResolvePassword returns ("", nil) and lets pgx
 		// auto-discover credentials from the DSN's inline user:password.
 		// This avoids the TUIRefusePrompter rejection in step 04 — the
-		// DSN env var carries dbsavvy:dbsavvy inline, which pgx accepts.
+		// DSN env var carries pgsavvy:pgsavvy inline, which pgx accepts.
 		drivers.Register("postgres", pg.New(nil))
 	})
 }
 
-const smokeEnvDSN = "DBSAVVY_TEST_PG"
+const smokeEnvDSN = "PGSAVVY_TEST_PG"
 
 // requireSmokePG opens a one-shot pgx connection to verify the fixture is
 // reachable. Mirrors the pattern in test/integration/pg_driver_test.go

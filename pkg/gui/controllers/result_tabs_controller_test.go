@@ -36,7 +36,7 @@ func TestResultTabsControllerGBindingJumpsLast(t *testing.T) {
 	}
 }
 
-// TestResultTabsControllerYankBindings guards dbsavvy U4: `y` yanks the
+// TestResultTabsControllerYankBindings guards pgsavvy U4: `y` yanks the
 // focused cell (ResultYankCell) and `yy` yanks the focused row
 // (ResultYankRow), both RESULT_GRID-scoped, Normal mode.
 func TestResultTabsControllerYankBindings(t *testing.T) {

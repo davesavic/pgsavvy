@@ -15,14 +15,14 @@ import (
 // keyringPassphraseEnv is the env var consulted for the keyring file-backend
 // passphrase. Documented in DESIGN.md §11.2 (epic D2). It is also stripped
 // from password_command child env so external helpers cannot exfiltrate it.
-const keyringPassphraseEnv = "DBSAVVY_KEYRING_PASSPHRASE"
+const keyringPassphraseEnv = "PGSAVVY_KEYRING_PASSPHRASE"
 
 // maxStderrBytes caps the size of stderr included in password_command exit
 // errors so a runaway helper cannot blow up an error message.
 const maxStderrBytes = 4 * 1024
 
 // execPasswordCommand runs cmd via a POSIX shell with the user's
-// environment (minus DBSAVVY_KEYRING_PASSPHRASE), enforces ctx as the
+// environment (minus PGSAVVY_KEYRING_PASSPHRASE), enforces ctx as the
 // timeout, and returns trimmed stdout on exit 0.
 //
 // Shell resolution: $SHELL → /bin/bash → /bin/sh. If none exist as

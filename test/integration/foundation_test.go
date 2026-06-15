@@ -1,5 +1,5 @@
 // Package integration_test contains cross-package smoke tests that wire
-// together packages from different layers of the dbsavvy architecture. These
+// together packages from different layers of the pgsavvy architecture. These
 // tests are intentionally placed outside pkg/ so they cannot accidentally
 // import unexported symbols and so they exercise only the public API surface
 // each downstream epic will consume.

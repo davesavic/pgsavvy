@@ -1,4 +1,4 @@
-// Package builtin holds the bundled ThemeConfig presets shipped with dbsavvy.
+// Package builtin holds the bundled ThemeConfig presets shipped with pgsavvy.
 package builtin
 
 import "github.com/davesavic/pgsavvy/pkg/config"

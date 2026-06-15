@@ -28,11 +28,11 @@ import (
 // reverts to the pre-feature stderr-only WarnLevel logger with no file and no
 // redaction hook — for emergency rollback when the session log itself causes
 // problems.
-const disableSessionLogEnv = "DBSAVVY_DISABLE_SESSION_LOG"
+const disableSessionLogEnv = "PGSAVVY_DISABLE_SESSION_LOG"
 
 // logDirEnv overrides the directory that holds the per-session log file's
-// sessions/ subdir. Precedence: --log-dir flag > DBSAVVY_LOG_DIR > state dir.
-const logDirEnv = "DBSAVVY_LOG_DIR"
+// sessions/ subdir. Precedence: --log-dir flag > PGSAVVY_LOG_DIR > state dir.
+const logDirEnv = "PGSAVVY_LOG_DIR"
 
 // BuildInfo carries build-time metadata injected via -ldflags.
 type BuildInfo struct {
@@ -49,16 +49,16 @@ type BuildInfo struct {
 // (store.Flush → store.Close → driver.Close) is enforced by
 // orchestrator.Gui.Close.
 func Start(build *BuildInfo, args []string) error {
-	flags := flag.NewFlagSet("dbsavvy", flag.ContinueOnError)
+	flags := flag.NewFlagSet("pgsavvy", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	showVersion := flags.Bool("version", false, "print version and exit")
 	logDirFlag := flags.String("log-dir", "",
-		"directory for per-session log files (overrides $DBSAVVY_LOG_DIR and $XDG_STATE_HOME/dbsavvy); logs land in <dir>/sessions/")
+		"directory for per-session log files (overrides $PGSAVVY_LOG_DIR and $XDG_STATE_HOME/pgsavvy); logs land in <dir>/sessions/")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if *showVersion {
-		fmt.Printf("dbsavvy %s (%s)\n", build.Version, build.BuildSource)
+		fmt.Printf("pgsavvy %s (%s)\n", build.Version, build.BuildSource)
 		return nil
 	}
 
@@ -187,7 +187,7 @@ func resolveLogDir(flagVal, envVal, stateDir string) (string, bool) {
 }
 
 // wireSessionLogger builds the primary logger. Behavior:
-//   - DBSAVVY_DISABLE_SESSION_LOG=1 → stderr-only WarnLevel slog logger,
+//   - PGSAVVY_DISABLE_SESSION_LOG=1 → stderr-only WarnLevel slog logger,
 //     no file, but RedactingHandler is still wired (AMD-F2-6 closes the
 //     pre-migration gap where the kill-switch path leaked unredacted DSNs).
 //   - logs.Open success → DEBUG-level file logger + stderr Warn+ via the
@@ -232,7 +232,7 @@ func newFallbackLogger() *slog.Logger {
 	return slog.New(logs.NewRedactingHandler(base, logs.DefaultRedactor()))
 }
 
-// newKillSwitchLogger builds the DBSAVVY_DISABLE_SESSION_LOG=1 logger:
+// newKillSwitchLogger builds the PGSAVVY_DISABLE_SESSION_LOG=1 logger:
 // stderr text output at WarnLevel, RedactingHandler retained so that the
 // emergency-rollback path does not leak credentials (AMD-F2-6).
 func newKillSwitchLogger() *slog.Logger {

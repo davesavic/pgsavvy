@@ -7,8 +7,8 @@
 // resolvable on the host. It only resolves bastion-side, so a successful
 // connection proves the driver routes DNS + TCP through the tunnel (F1).
 //
-// Gating: every Test* here Skips unless BOTH DBSAVVY_TEST_SSH_BASTION and
-// DBSAVVY_TEST_SSH_KEY are set (independent of DBSAVVY_TEST_PG). Bring the
+// Gating: every Test* here Skips unless BOTH PGSAVVY_TEST_SSH_BASTION and
+// PGSAVVY_TEST_SSH_KEY are set (independent of PGSAVVY_TEST_PG). Bring the
 // fixture up with `task sshtunnel:up`, which prints the exports to use.
 package integration_test
 
@@ -32,13 +32,13 @@ import (
 )
 
 const (
-	envSSHBastion = "DBSAVVY_TEST_SSH_BASTION"
-	envSSHKey     = "DBSAVVY_TEST_SSH_KEY"
+	envSSHBastion = "PGSAVVY_TEST_SSH_BASTION"
+	envSSHKey     = "PGSAVVY_TEST_SSH_KEY"
 
 	// privatepgDSN points at the docker service `privatepg` on port 5432.
 	// The host is resolvable only on the bastion-side `private` network, so
 	// reaching it from the test host is itself the proof the tunnel works.
-	privatepgDSN = "postgres://dbsavvy:dbsavvy@privatepg:5432/dbsavvy_test?sslmode=disable"
+	privatepgDSN = "postgres://pgsavvy:pgsavvy@privatepg:5432/pgsavvy_test?sslmode=disable"
 )
 
 // requireSSH skips unless both the bastion address and key path are set.
@@ -312,7 +312,7 @@ func TestSSHTunnelDialFailureTyped(t *testing.T) {
 }
 
 // TestDirectRegressionNoTunnel guards that adding the tunnel wiring did not
-// break plain (non-tunnel) connects. Skips unless DBSAVVY_TEST_PG is set.
+// break plain (non-tunnel) connects. Skips unless PGSAVVY_TEST_PG is set.
 func TestDirectRegressionNoTunnel(t *testing.T) {
 	if os.Getenv(envDSN) == "" {
 		t.Skipf("set %s to run the direct-connect regression", envDSN)

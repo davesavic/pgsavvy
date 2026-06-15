@@ -373,7 +373,7 @@ func TestNewQueryTaskStopClosesStreamAndFiresOnDoneOnce(t *testing.T) {
 }
 
 // TestNewQueryTaskStopBeforeStreamFnStillClosesStream is the
-// deadlock regression guard at the RBM layer. In dbsavvy the pgx stream is
+// deadlock regression guard at the RBM layer. In pgsavvy the pgx stream is
 // opened — and the per-session streamMu locked — by SQLSession.Stream
 // BEFORE NewQueryTask; the worker's streamFn merely hands back that
 // already-open stream. If a Stop arrives before the worker reaches

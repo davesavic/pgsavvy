@@ -1,7 +1,7 @@
 //go:build integration
 
 // Integration tests for (*Session).Execute against the docker/postgres fixture.
-// Skipped (not failed) when DBSAVVY_TEST_PG is unset or the fixture probe
+// Skipped (not failed) when PGSAVVY_TEST_PG is unset or the fixture probe
 // fails; see test/integration for the shared probe pattern.
 
 package pg_test
@@ -20,7 +20,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
-const envDSN = "DBSAVVY_TEST_PG"
+const envDSN = "PGSAVVY_TEST_PG"
 
 // requirePGSession is the per-file gate: skip when the fixture DSN is unset,
 // otherwise build a Driver, open a Connection, and acquire a Session. All

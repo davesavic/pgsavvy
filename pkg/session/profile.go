@@ -193,7 +193,7 @@ func warnInsecureSSL(w io.Writer, name, host, mode string) {
 	if name == "" {
 		name = "<unnamed>"
 	}
-	_, _ = fmt.Fprintf(w, "WARN: dbsavvy: connection %q targets non-loopback host %s with sslmode=%s — traffic is unencrypted\n", name, host, mode)
+	_, _ = fmt.Fprintf(w, "WARN: pgsavvy: connection %q targets non-loopback host %s with sslmode=%s — traffic is unencrypted\n", name, host, mode)
 }
 
 // sslModeForLog returns the sslmode advertised by the DSN, or pgx's default

@@ -22,7 +22,7 @@ func newBuildInfo() *BuildInfo {
 
 func TestWireSessionLogger_CreatesSessionFile(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	stateDir := "/state/dbsavvy"
+	stateDir := "/state/pgsavvy"
 	t.Setenv(disableSessionLogEnv, "")
 
 	log, closer, err := wireSessionLogger(stateDir, false, fs, newBuildInfo())
@@ -35,7 +35,7 @@ func TestWireSessionLogger_CreatesSessionFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	name := entries[0].Name()
-	require.True(t, strings.HasPrefix(name, "dbsavvy-") && strings.HasSuffix(name, ".log"),
+	require.True(t, strings.HasPrefix(name, "pgsavvy-") && strings.HasSuffix(name, ".log"),
 		"unexpected filename: %s", name)
 }
 
@@ -43,7 +43,7 @@ func TestWireSessionLogger_CreatesSessionFile(t *testing.T) {
 // the primary file sink emits JSON lines with {level, msg, time, cat} keys.
 func TestWireSessionLogger_PrimaryPath_WritesJSONWithFourKeys(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	stateDir := "/state/dbsavvy"
+	stateDir := "/state/pgsavvy"
 	t.Setenv(disableSessionLogEnv, "")
 
 	log, closer, err := wireSessionLogger(stateDir, false, fs, newBuildInfo())
@@ -99,7 +99,7 @@ func TestWireSessionLogger_FallbackPath_RedactsDSN(t *testing.T) {
 func TestWireSessionLogger_DisableEnvVar(t *testing.T) {
 	t.Setenv(disableSessionLogEnv, "1")
 	fs := afero.NewMemMapFs()
-	stateDir := "/state/dbsavvy"
+	stateDir := "/state/pgsavvy"
 
 	var log *slog.Logger
 	var closer io.Closer
@@ -125,7 +125,7 @@ func TestWireSessionLogger_DisableEnvVar(t *testing.T) {
 // only when flag or env supplied the value (so mkdir failure on that path
 // surfaces an error instead of falling back to stderr).
 func TestResolveLogDir_Precedence(t *testing.T) {
-	const stateDir = "/state/dbsavvy"
+	const stateDir = "/state/pgsavvy"
 
 	tests := []struct {
 		name      string
@@ -185,8 +185,8 @@ func TestWireSessionLogger_OverrideDirIsHonored(t *testing.T) {
 }
 
 // TestWireSessionLogger_DisableEnvWinsOverOverride validates that the
-// DBSAVVY_DISABLE_SESSION_LOG kill switch still beats --log-dir /
-// DBSAVVY_LOG_DIR. Operators must always be able to disable session logging
+// PGSAVVY_DISABLE_SESSION_LOG kill switch still beats --log-dir /
+// PGSAVVY_LOG_DIR. Operators must always be able to disable session logging
 // regardless of which path was configured.
 func TestWireSessionLogger_DisableEnvWinsOverOverride(t *testing.T) {
 	t.Setenv(disableSessionLogEnv, "1")
@@ -207,7 +207,7 @@ func TestWireSessionLogger_DisableEnvWinsOverOverride(t *testing.T) {
 // the seam Start() uses to abort BEFORE gocui.NewGui so the message
 // survives tcell's Fini.
 func TestRequireQuitBinding(t *testing.T) {
-	const configPath = "/home/user/.config/dbsavvy/config.yml"
+	const configPath = "/home/user/.config/pgsavvy/config.yml"
 
 	t.Run("missing app.quit returns error naming action and path", func(t *testing.T) {
 		cfg := config.GetDefaultConfig()

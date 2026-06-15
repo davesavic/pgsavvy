@@ -13,8 +13,8 @@ import (
 // minimum-data: SQL is truncated + connection-password scrubbed, bound
 // params are hashed.
 const (
-	envIncludeSQL    = "DBSAVVY_LOG_INCLUDE_SQL"
-	envIncludeParams = "DBSAVVY_LOG_INCLUDE_PARAMS"
+	envIncludeSQL    = "PGSAVVY_LOG_INCLUDE_SQL"
+	envIncludeParams = "PGSAVVY_LOG_INCLUDE_PARAMS"
 
 	// sqlPreviewMax is the truncation budget for SQL emitted to logs by
 	// default. AD-14 mandates 200; the cut is at a UTF-8 rune boundary so
@@ -32,7 +32,7 @@ const (
 
 // sqlPreview returns the first sqlPreviewMax bytes of sql, cut at a UTF-8
 // rune boundary so the result is always valid UTF-8. When the env var
-// DBSAVVY_LOG_INCLUDE_SQL=full is set, the SQL is returned verbatim with
+// PGSAVVY_LOG_INCLUDE_SQL=full is set, the SQL is returned verbatim with
 // no truncation and no password scrub (forensic opt-in). Otherwise, the
 // supplied connection-profile password (if non-empty) is scrubbed via
 // literal substring replacement with "***" BEFORE truncation.
@@ -63,7 +63,7 @@ func truncateUTF8(s string, max int) string {
 
 // paramsHashes returns ([]string) for the first paramsHashCount values in
 // args. Each entry is the first paramHashLen hex chars of sha256(
-// fmt.Sprint(v)). When DBSAVVY_LOG_INCLUDE_PARAMS=1 is set, the raw
+// fmt.Sprint(v)). When PGSAVVY_LOG_INCLUDE_PARAMS=1 is set, the raw
 // stringified values are returned instead (forensic opt-in, AD-14). The
 // returned slice is empty when args is empty.
 //

@@ -181,7 +181,7 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"K", commands.ResultWrappedLineUp, tr.Actions.ResultWrappedLineUp, types.RESULT_GRID},
 		{"V", commands.ResultSelectRow, tr.Actions.ResultSelectRow, types.RESULT_GRID},
 		{"<c-v>", commands.ResultSelectBlock, tr.Actions.ResultSelectBlock, types.RESULT_GRID},
-		// dbsavvy U4: clipboard yank. `y` cell, `yy` row (TSV).
+		// pgsavvy U4: clipboard yank. `y` cell, `yy` row (TSV).
 		{"y", commands.ResultYankCell, tr.Actions.ResultYankCell, types.RESULT_GRID},
 		{"yy", commands.ResultYankRow, tr.Actions.ResultYankRow, types.RESULT_GRID},
 	}
@@ -476,7 +476,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 	r.registerMotionHandler(reg, commands.ResultSelectRow, tr.Actions.ResultSelectRow, func() { r.mgr.SelectRow() })
 	r.registerMotionHandler(reg, commands.ResultSelectBlock, tr.Actions.ResultSelectBlock, func() { r.mgr.SelectBlock() })
 
-	// dbsavvy U4: clipboard yank handlers (`y` cell / `yy` row).
+	// pgsavvy U4: clipboard yank handlers (`y` cell / `yy` row).
 	_ = reg.Register(&commands.Command{
 		ID:          commands.ResultYankCell,
 		Description: tr.Actions.ResultYankCell,

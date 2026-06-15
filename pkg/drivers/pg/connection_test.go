@@ -223,7 +223,7 @@ func TestDriverOpenTunnelOpenFailureReturnsSSHError(t *testing.T) {
 func TestConnectionCloseClosesPoolThenTunnel(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
-	cfg, err := pgxpool.ParseConfig("postgres://u:p@127.0.0.1:1/dbsavvy_unit_test")
+	cfg, err := pgxpool.ParseConfig("postgres://u:p@127.0.0.1:1/pgsavvy_unit_test")
 	require.NoError(t, err)
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	require.NoError(t, err)
@@ -242,7 +242,7 @@ func TestConnectionCloseClosesPoolThenTunnel(t *testing.T) {
 // TestConnectionCloseNilTunnelReturnsNil confirms the no-tunnel Close path is
 // unchanged (returns nil).
 func TestConnectionCloseNilTunnelReturnsNil(t *testing.T) {
-	cfg, err := pgxpool.ParseConfig("postgres://u:p@127.0.0.1:1/dbsavvy_unit_test")
+	cfg, err := pgxpool.ParseConfig("postgres://u:p@127.0.0.1:1/pgsavvy_unit_test")
 	require.NoError(t, err)
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	require.NoError(t, err)

@@ -91,7 +91,7 @@ func TestOpen_EmitsConnOpenEvents(t *testing.T) {
 	profile := models.Connection{
 		Name:   "log-test",
 		Driver: "postgres",
-		DSN:    "postgres://u:hunter2@127.0.0.1:1/dbsavvy_unit",
+		DSN:    "postgres://u:hunter2@127.0.0.1:1/pgsavvy_unit",
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancel so any network attempt fails fast.

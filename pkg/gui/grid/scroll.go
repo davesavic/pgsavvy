@@ -442,7 +442,7 @@ func renderHeaderLine(snap viewSnapshot, innerW int, moreLeft, moreRight bool) s
 // padding so the arrow doesn't sit flush against the view border. ◄ / ► are
 // single-cell glyphs (unlike ◀ / ▶, which some terminals widen), so the
 // rune overlay keeps the column grid aligned. Safe only for the header line,
-// which carries no ANSI styling. dbsavvy column-scroll indicator.
+// which carries no ANSI styling. pgsavvy column-scroll indicator.
 func overlayColumnArrows(line string, left, right bool) string {
 	if !left && !right {
 		return line
@@ -464,7 +464,7 @@ func overlayColumnArrows(line string, left, right bool) string {
 
 // columnScrollHints reports whether non-hidden columns exist beyond the
 // rendered window to the left / right of the current horizontal scroll
-// position. Drives the header edge arrows. dbsavvy column-scroll indicator.
+// position. Drives the header edge arrows. pgsavvy column-scroll indicator.
 func columnScrollHints(snap viewSnapshot, innerW int) (left, right bool) {
 	order := visibleColumnOrder(snap)
 	right = fitColumns(order, snap.widths, innerW) < len(order)

@@ -189,10 +189,10 @@ func BenchmarkMatcher_ChordPartial(b *testing.B) {
 
 // TestMatcher_PasteLatencyUnder20ms guards against keystroke-rate
 // regressions: 4000 keys through Dispatch in ModeInsert must complete
-// under 20ms (40ms with DBSAVVY_BENCH_RELAX=1). Race builds should pass
+// under 20ms (40ms with PGSAVVY_BENCH_RELAX=1). Race builds should pass
 // -short to skip — the 100x race overhead trips the threshold by design.
 // Threshold detects O(n) per-key regressions; relaxed via
-// DBSAVVY_BENCH_RELAX=1; skip via -short.
+// PGSAVVY_BENCH_RELAX=1; skip via -short.
 func TestMatcher_PasteLatencyUnder20ms(t *testing.T) {
 	if testing.Short() {
 		t.Skip("paste latency test skipped under -short (and -race)")
@@ -207,7 +207,7 @@ func TestMatcher_PasteLatencyUnder20ms(t *testing.T) {
 	)
 
 	threshold := 20 * time.Millisecond
-	if os.Getenv("DBSAVVY_BENCH_RELAX") == "1" {
+	if os.Getenv("PGSAVVY_BENCH_RELAX") == "1" {
 		threshold = 40 * time.Millisecond
 	}
 

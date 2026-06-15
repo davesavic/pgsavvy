@@ -74,7 +74,7 @@ func TestKeyringPassphraseUnsetInTUIRefuses(t *testing.T) {
 	// Seed a keyring item using its OWN passphrase via the test helper —
 	// our code-under-test is the passphraseFunc returning the typed error
 	// BEFORE it ever opens the store via the prompter path.
-	seedKeyring(t, tmp+"/dbsavvy/keyring", "phrase", "k", "v")
+	seedKeyring(t, tmp+"/pgsavvy/keyring", "phrase", "k", "v")
 
 	// Ensure env is unset.
 	t.Setenv(keyringPassphraseEnv, "")

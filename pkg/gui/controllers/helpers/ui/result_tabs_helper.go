@@ -1028,7 +1028,7 @@ func (h *ResultTabsHelper) Close(t *Tab) error {
 }
 
 // CloseAll disposes every tab and removes them all, leaving the helper
-// empty with no active selection. Used on a connection switch (dbsavvy
+// empty with no active selection. Used on a connection switch (pgsavvy
 // <leader>C → pick another connection): result tabs are bound to the
 // outgoing connection's session, so they must not survive into the new
 // one. Disposes each tab's stream (cancel + stop), deletes its gocui
@@ -1751,7 +1751,7 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 		}),
 	}
 	// Wire the shared system clipboard so `y` / `yy` yank publishes to the
-	// host clipboard through the common pkg/gui/clipboard transport. dbsavvy U4.
+	// host clipboard through the common pkg/gui/clipboard transport. pgsavvy U4.
 	t.grid.SetClipboard(clipboard.NewSystemClipboard())
 	// Install the relationship-panel live-follow hook (no-op until the
 	// panel controller wires it). h.mu is held here; the callback only
@@ -2793,7 +2793,7 @@ func (h *ResultTabsHelper) HideOverlay() {
 // relation names off the UI thread, then marshals a label upgrade back
 // onto the UI thread so a join's bare column names become qualified
 // ("table.column"). No-op unless the result spans more than one table
-// and a resolver is wired. dbsavvy hide-cols join qualification.
+// and a resolver is wired. pgsavvy hide-cols join qualification.
 func (h *ResultTabsHelper) scheduleHideColumnQualify(ov *popup.HideOverlay, cols []models.ColumnMeta) {
 	if h.deps.ResolveTableNames == nil || ov == nil {
 		return

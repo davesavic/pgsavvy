@@ -1,4 +1,4 @@
-// Package orchestrator wires the dbsavvy TUI: it owns the focus-stack
+// Package orchestrator wires the pgsavvy TUI: it owns the focus-stack
 // tree, the GuiDriver instance, every UI/data helper and controller,
 // and the gocui MainLoop entry point.
 //
@@ -132,7 +132,7 @@ func WithClock(clk Clock) Option {
 	}
 }
 
-// Gui is the dbsavvy TUI orchestrator. NewGui builds the driver-free
+// Gui is the pgsavvy TUI orchestrator. NewGui builds the driver-free
 // pieces (focus stack, data helpers). The driver-dependent pieces
 // (context registry, ui helpers, controllers, bindings) are built
 // lazily by wireWithDriver, called from either initGocui (real

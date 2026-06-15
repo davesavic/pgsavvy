@@ -1,7 +1,7 @@
 //go:build integration
 
 // Integration tests for the per-Session NoticeRouter against the
-// docker/postgres fixture. Skipped (not failed) when DBSAVVY_TEST_PG is unset.
+// docker/postgres fixture. Skipped (not failed) when PGSAVVY_TEST_PG is unset.
 //
 // NOTICE / WARNING / INFO routing via
 // pgconn.Config.OnNotice → NoticeRouter → (*Session).AttachNotice channel.

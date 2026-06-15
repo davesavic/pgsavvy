@@ -1,7 +1,7 @@
 //go:build integration
 
 // Integration test for QueryRunner.Explain auto-rollback against the
-// docker/postgres fixture. Skipped (not failed) when DBSAVVY_TEST_PG
+// docker/postgres fixture. Skipped (not failed) when PGSAVVY_TEST_PG
 // is unset. Mirrors the bootstrap pattern from pkg/drivers/pg tests.
 //
 // Covers acceptance scenario:
@@ -27,7 +27,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
-const envDSN = "DBSAVVY_TEST_PG"
+const envDSN = "PGSAVVY_TEST_PG"
 
 // requirePGRunner builds a live QueryRunner against the docker fixture.
 // Resources (driver, connection, session, SQLSession) are registered

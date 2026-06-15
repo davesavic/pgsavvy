@@ -5,7 +5,7 @@
 // drives Jump on app.user_roles (which has FKs to app.users + app.roles)
 // and asserts the resulting tab carries a parent row.
 //
-// Skipped (not failed) when DBSAVVY_TEST_PG is unset.
+// Skipped (not failed) when PGSAVVY_TEST_PG is unset.
 
 package helpers_test
 
@@ -23,7 +23,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
-const envDSN = "DBSAVVY_TEST_PG"
+const envDSN = "PGSAVVY_TEST_PG"
 
 // openIntegrationSQLSession opens a *session.SQLSession against the
 // docker/postgres fixture. Mirrors the openIntegrationSession pattern

@@ -3,7 +3,7 @@
 // Integration test for Session.Stream honoring Query.DefaultSchema by issuing
 // SET search_path before the statement. Mirrors the
 // openIntegrationSession pattern from editability_integration_test.go. Skipped
-// (not failed) when DBSAVVY_TEST_PG is unset.
+// (not failed) when PGSAVVY_TEST_PG is unset.
 
 package pg_test
 

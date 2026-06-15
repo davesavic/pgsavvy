@@ -68,13 +68,13 @@ import (
 // behaviour live PG must confirm. Idempotent (DROP ... CASCADE first), cleaned
 // up by the caller.
 const sortScratchDDL = `
-DROP SCHEMA IF EXISTS dbsavvy_sort_it CASCADE;
-CREATE SCHEMA dbsavvy_sort_it;
-CREATE TABLE dbsavvy_sort_it.a (id BIGINT PRIMARY KEY, label TEXT NOT NULL);
-CREATE TABLE dbsavvy_sort_it.b (id BIGINT PRIMARY KEY, a_id BIGINT NOT NULL, note TEXT NOT NULL);
-INSERT INTO dbsavvy_sort_it.a (id, label) VALUES
+DROP SCHEMA IF EXISTS pgsavvy_sort_it CASCADE;
+CREATE SCHEMA pgsavvy_sort_it;
+CREATE TABLE pgsavvy_sort_it.a (id BIGINT PRIMARY KEY, label TEXT NOT NULL);
+CREATE TABLE pgsavvy_sort_it.b (id BIGINT PRIMARY KEY, a_id BIGINT NOT NULL, note TEXT NOT NULL);
+INSERT INTO pgsavvy_sort_it.a (id, label) VALUES
     (10, 'ten'), (30, 'thirty'), (20, 'twenty'), (40, 'forty'), (5, 'five');
-INSERT INTO dbsavvy_sort_it.b (id, a_id, note) VALUES
+INSERT INTO pgsavvy_sort_it.b (id, a_id, note) VALUES
     (101, 10, 'n1'), (103, 30, 'n3'), (102, 20, 'n2'), (104, 40, 'n4'), (105, 5, 'n5');
 `
 
@@ -96,7 +96,7 @@ func openSortScratch(t *testing.T, dsn string) *pgx.Conn {
 	t.Cleanup(func() {
 		dctx, dcancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer dcancel()
-		_, _ = conn.Exec(dctx, "DROP SCHEMA IF EXISTS dbsavvy_sort_it CASCADE")
+		_, _ = conn.Exec(dctx, "DROP SCHEMA IF EXISTS pgsavvy_sort_it CASCADE")
 		_ = conn.Close(dctx)
 	})
 	return conn
@@ -266,7 +266,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 		// surfaces both as "id" — sorting by name would be ambiguous; wrapSorted
 		// uses the ordinal, so this proves the ordinal wrap runs on real PG and
 		// orders the FULL set from the top.
-		const join = "SELECT a.id, a.label, b.id, b.note FROM dbsavvy_sort_it.a a JOIN dbsavvy_sort_it.b b ON b.a_id = a.id"
+		const join = "SELECT a.id, a.label, b.id, b.note FROM pgsavvy_sort_it.a a JOIN pgsavvy_sort_it.b b ON b.a_id = a.id"
 		tab := openTabDirect(t, s, helper, join, nil)
 		waitRows(t, tab, 5)
 
@@ -276,7 +276,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 
 		gotCol0 := gridColumn(t, tab, 0)
 		// Reference: wrap the SAME join in a derived table and ORDER BY ordinal 1
-		// ASC — exactly what wrapSorted builds (modulo the _dbsavvy_sort alias).
+		// ASC — exactly what wrapSorted builds (modulo the _pgsavvy_sort alias).
 		wantCol0 := refColumn(t, conn, 0,
 			"SELECT * FROM ("+join+") _x ORDER BY 1 ASC")
 		if !eqStrings(gotCol0, wantCol0) {
@@ -308,7 +308,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 	})
 
 	t.Run("scenario2_cycle_asc_desc_clear", func(t *testing.T) {
-		const q = "SELECT id, label FROM dbsavvy_sort_it.a"
+		const q = "SELECT id, label FROM pgsavvy_sort_it.a"
 		tab := openTabDirect(t, s, helper, q, nil)
 		waitRows(t, tab, 5)
 
@@ -353,7 +353,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 		// origArgs from ActiveTabOrigin — that re-bind on the WRAPPED re-run is
 		// exactly what this scenario proves on live PG (a lost binding surfaces
 		// as "$1 unbound").
-		const q = "SELECT id, label FROM dbsavvy_sort_it.a WHERE id >= $1"
+		const q = "SELECT id, label FROM pgsavvy_sort_it.a WHERE id >= $1"
 		const arg = int64(20)
 		tab := openTabDirect(t, s, helper, q, []any{arg})
 		// id >= 20 -> {20,30,40} = 3 rows.
@@ -388,7 +388,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 		// true minimum (here id=5) can be missing entirely. wrapSorted must hoist
 		// the LIMIT out past the ORDER BY so the FULL set is sorted, then limited.
 		// Table a has 5 rows {5,10,20,30,40}; LIMIT 3 must yield the 3 SMALLEST.
-		const q = "SELECT id, label FROM dbsavvy_sort_it.a LIMIT 3"
+		const q = "SELECT id, label FROM pgsavvy_sort_it.a LIMIT 3"
 		tab := openTabDirect(t, s, helper, q, nil)
 		waitRows(t, tab, 3)
 
@@ -413,9 +413,9 @@ func TestResultSortDBSide_AC(t *testing.T) {
 		// Statement ending in a trailing line comment + a trailing ';'. wrapSorted
 		// TrimRight-strips the ';' and emits a newline before the closing paren so
 		// the "-- c" comment cannot swallow the injected ORDER BY. A naive wrap
-		// would produce "... -- c) _dbsavvy_sort ORDER BY 1 ASC" (the ORDER BY
+		// would produce "... -- c) _pgsavvy_sort ORDER BY 1 ASC" (the ORDER BY
 		// commented out / syntax error). This proves the real wrap survives.
-		const q = "SELECT id, label FROM dbsavvy_sort_it.a -- trailing comment\n;"
+		const q = "SELECT id, label FROM pgsavvy_sort_it.a -- trailing comment\n;"
 		tab := openTabDirect(t, s, helper, q, nil)
 		waitRows(t, tab, 5)
 

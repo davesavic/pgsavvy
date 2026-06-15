@@ -1,7 +1,7 @@
 package i18n
 
 // TranslationSet holds the full collection of localized UI strings used across
-// dbsavvy. Top-level fields cover labels and short messages; the Actions
+// pgsavvy. Top-level fields cover labels and short messages; the Actions
 // sub-struct collects user-invocable command names. All fields are populated
 // with English defaults by EnglishTranslationSet; locale overlays loaded via
 // LoadAndMerge replace individual fields while leaving omitted ones at their
@@ -323,7 +323,7 @@ func EnglishTranslationSet() *TranslationSet {
 		DisabledByDriver:     "The active driver does not support this action.",
 		DisabledNoLiveCancel: "The active driver cannot cancel a running query.",
 
-		FirstRunTipTitle: "Welcome to dbsavvy",
+		FirstRunTipTitle: "Welcome to pgsavvy",
 		FirstRunTipBody:  "Press ? at any time to see available keys. Press a to add your first connection.",
 
 		EmptyConnectionsHint: "No connections yet.\nPress a to add",

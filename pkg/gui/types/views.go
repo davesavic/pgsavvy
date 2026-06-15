@@ -1,6 +1,6 @@
 package types
 
-// Views aggregates every named *gocui.View handle the dbsavvy TUI binds
+// Views aggregates every named *gocui.View handle the pgsavvy TUI binds
 // a Context to. Populated by the layout manager once SetView returns a
 // non-nil handle for each name; consumers should treat nil fields as
 // "not yet laid out" rather than as a fatal error.

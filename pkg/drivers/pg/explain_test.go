@@ -1,7 +1,7 @@
 //go:build integration
 
 // Integration tests for (*Session).Explain against the docker/postgres fixture.
-// Skipped (not failed) when DBSAVVY_TEST_PG is unset; see requirePGSession in
+// Skipped (not failed) when PGSAVVY_TEST_PG is unset; see requirePGSession in
 // execute_test.go for the shared bootstrap.
 
 package pg_test

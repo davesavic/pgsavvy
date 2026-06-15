@@ -13,7 +13,7 @@ import (
 
 func TestEnsureInitialConfig_CreatesWhenMissing(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	dir := "/cfg/dbsavvy"
+	dir := "/cfg/pgsavvy"
 	if err := EnsureInitialConfig(fs, dir); err != nil {
 		t.Fatalf("EnsureInitialConfig: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestEnsureInitialConfig_CreatesWhenMissing(t *testing.T) {
 
 func TestEnsureInitialConfig_NoOpWhenPresent(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	dir := "/cfg/dbsavvy"
+	dir := "/cfg/pgsavvy"
 	path := filepath.Join(dir, "config.yml")
 	if err := fs.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestEnsureInitialConfig_NoOpWhenPresent(t *testing.T) {
 
 func TestEnsureInitialConfig_TemplateHasNoCredentialFields(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	dir := "/cfg/dbsavvy"
+	dir := "/cfg/pgsavvy"
 	if err := EnsureInitialConfig(fs, dir); err != nil {
 		t.Fatalf("EnsureInitialConfig: %v", err)
 	}
@@ -85,12 +85,12 @@ func TestEnsureInitialConfig_ConcurrentSingleWinner(t *testing.T) {
 	// realistically. MemMapFs honors O_EXCL too — we run both for coverage.
 	t.Run("memfs", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		runConcurrent(t, fs, "/cfg/dbsavvy")
+		runConcurrent(t, fs, "/cfg/pgsavvy")
 	})
 	t.Run("osfs", func(t *testing.T) {
 		dir := t.TempDir()
 		fs := afero.NewOsFs()
-		runConcurrent(t, fs, filepath.Join(dir, "dbsavvy"))
+		runConcurrent(t, fs, filepath.Join(dir, "pgsavvy"))
 	})
 }
 

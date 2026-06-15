@@ -5,7 +5,7 @@
 // live fixture (app.user_roles, which has FKs user_id->users(id) and
 // role_id->roles(id)), feeds them into the same synchronous SchemaMetadata the
 // production snapshot satisfies, and asserts the FK column ranks first in an
-// ON-clause completion. Skipped (not failed) when DBSAVVY_TEST_PG is unset.
+// ON-clause completion. Skipped (not failed) when PGSAVVY_TEST_PG is unset.
 //
 // Mirrors the openIntegrationSession pattern from
 // pkg/drivers/pg/editability_integration_test.go (same DSN env, same skip).
@@ -22,13 +22,13 @@ import (
 )
 
 // openFKIntegrationSession opens a *pg.Session against the docker fixture, or
-// skips when DBSAVVY_TEST_PG is unset. Self-contained so this test file does
+// skips when PGSAVVY_TEST_PG is unset. Self-contained so this test file does
 // not depend on the pg package's test helpers.
 func openFKIntegrationSession(t *testing.T) *pg.Session {
 	t.Helper()
-	dsn := os.Getenv("DBSAVVY_TEST_PG")
+	dsn := os.Getenv("PGSAVVY_TEST_PG")
 	if dsn == "" {
-		t.Skipf("DBSAVVY_TEST_PG unset; FK completion integration test requires the docker/postgres fixture")
+		t.Skipf("PGSAVVY_TEST_PG unset; FK completion integration test requires the docker/postgres fixture")
 	}
 	ctx := context.Background()
 	factory := pg.New(nil)

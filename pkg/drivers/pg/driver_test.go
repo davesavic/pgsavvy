@@ -129,7 +129,7 @@ func TestConnectionAcquireSessionErrorsWithoutLivePool(t *testing.T) {
 	// AcquireSession MUST wrap with the documented "pg: acquire session:"
 	// prefix. The happy live-Session path is covered by integration
 	// tests.
-	cfg, err := pgxpool.ParseConfig("postgres://u:p@127.0.0.1:1/dbsavvy_unit_test")
+	cfg, err := pgxpool.ParseConfig("postgres://u:p@127.0.0.1:1/pgsavvy_unit_test")
 	require.NoError(t, err)
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	require.NoError(t, err)
@@ -162,7 +162,7 @@ func TestConnectionCloseIsIdempotent(t *testing.T) {
 	// pgxpool.NewWithConfig does not dial; it constructs the pool lazily.
 	// We can therefore exercise real pool.Close() in a unit test without a
 	// live Postgres.
-	cfg, err := pgxpool.ParseConfig("postgres://u:p@127.0.0.1:1/dbsavvy_unit_test")
+	cfg, err := pgxpool.ParseConfig("postgres://u:p@127.0.0.1:1/pgsavvy_unit_test")
 	require.NoError(t, err)
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	require.NoError(t, err)

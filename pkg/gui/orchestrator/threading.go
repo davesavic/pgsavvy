@@ -257,7 +257,7 @@ func (g *Gui) OnUIThreadContentOnly(fn func() error) {
 // counting). We use gocui.NewFakeTask() because our busy counter is the
 // source of truth for "is the program busy" — the real gocui.TaskManager
 // hangs off *gocui.Gui and is only needed by lazygit's integration-test
-// harness, which dbsavvy does not consume.
+// harness, which pgsavvy does not consume.
 //
 // shutdownWG tracks live goroutines so Close can wait for them to
 // finish before the goleak test in Phase 8 inspects the goroutine pool.

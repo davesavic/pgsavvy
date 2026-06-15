@@ -13,7 +13,7 @@ import (
 // json/jsonb value pgx decoded into a Go map is JSON text, not Go's
 // default map formatting (map[plan:pro]) that the user would otherwise
 // have to hand-correct. Mirrors the grid renderer so seed and display
-// agree. dbsavvy json-cell-format.
+// agree. pgsavvy json-cell-format.
 func TestFormatForEdit_JSONObject(t *testing.T) {
 	got := cellEditorPicker{}.FormatForEdit(
 		map[string]any{"plan": "pro", "active": true},

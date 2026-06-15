@@ -5,7 +5,7 @@
 // test wires a real *orchestrator.Gui via UseDriverForTest +
 // RecorderGuiDriver, opens a per-test history.sqlite under t.TempDir()
 // via Deps.HistoryProvider, drives bag.Connect.Connect against the
-// docker postgres fixture (DSN from DBSAVVY_TEST_PG) so the production
+// docker postgres fixture (DSN from PGSAVVY_TEST_PG) so the production
 // wireQueryRuntime path fires, then invokes the QueryEditorController's
 // shipped command handlers directly through the CommandRegistry to
 // exercise the <leader>r / <leader>R / <leader>e / <leader>x semantics.

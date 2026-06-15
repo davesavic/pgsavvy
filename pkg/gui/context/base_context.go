@@ -4,7 +4,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
-// BaseContext is the concrete root for every Context in the dbsavvy TUI.
+// BaseContext is the concrete root for every Context in the pgsavvy TUI.
 // Concrete contexts embed BaseContext and override the lifecycle hooks
 // they care about. Lifecycle hooks default to no-op returning nil so
 // embedding contexts only declare what they need (DESIGN.md §8).

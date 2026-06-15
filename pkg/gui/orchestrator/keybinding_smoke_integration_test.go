@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package orchestrator_test (integration) drives the dbsavvy keybinding
+// Package orchestrator_test (integration) drives the pgsavvy keybinding
 // subsystem end-to-end through the live wired graph, exercising every
 // acceptance-criterion item in one walkthrough.
 //

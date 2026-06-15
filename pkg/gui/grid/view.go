@@ -404,7 +404,7 @@ func (v *View) SetHiddenCols(set map[int]bool) {
 	}
 	v.hiddenColSet = out
 	// If the column under the cursor was just hidden, move the cursor to
-	// a visible neighbor so it never renders invisibly. dbsavvy hidden-col
+	// a visible neighbor so it never renders invisibly. pgsavvy hidden-col
 	// navigation fix.
 	v.snapCursorOffHiddenLocked()
 }

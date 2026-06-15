@@ -62,7 +62,7 @@ func ResultTabKey(i int) ContextKey {
 
 // itoa is a tiny base-10 int formatter to avoid an strconv import in
 // this minimal types package. Single-digit positive ints cover the
-// dbsavvy result-tab cap (default 8).
+// pgsavvy result-tab cap (default 8).
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

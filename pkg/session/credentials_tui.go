@@ -9,7 +9,7 @@ import (
 // TUIRefusePrompter.PromptPassword. It is the final-step refusal in the
 // credentials waterfall: every non-interactive mechanism (inline,
 // password_command, keyring, pgpass) was either absent or empty, and the
-// prompter refuses to take over because dbsavvy is running in TUI mode where a
+// prompter refuses to take over because pgsavvy is running in TUI mode where a
 // blocking stdin read would conflict with the gocui main loop.
 //
 // The sentinel is intentionally UNEXPORTED. Callers outside this package
@@ -18,7 +18,7 @@ var errInteractivePromptNotSupported = errors.New(
 	"session: interactive password prompt not supported in TUI mode; " +
 		"configure password_command, keyring, or pgpass")
 
-// TUIRefusePrompter is the Prompter installed when dbsavvy runs in TUI mode.
+// TUIRefusePrompter is the Prompter installed when pgsavvy runs in TUI mode.
 // Every non-prompter step in the ResolvePassword waterfall (inline,
 // password_command, keyring, pgpass) continues to work; only the final
 // interactive prompt step refuses with errInteractivePromptNotSupported so the

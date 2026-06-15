@@ -15,7 +15,7 @@ import (
 // keyringPassphraseEnv mirrors the constant defined in credentials_exec.go
 // for non-Windows builds; duplicated here so each build tag is
 // self-contained.
-const keyringPassphraseEnv = "DBSAVVY_KEYRING_PASSPHRASE"
+const keyringPassphraseEnv = "PGSAVVY_KEYRING_PASSPHRASE"
 
 const maxStderrBytes = 4 * 1024
 

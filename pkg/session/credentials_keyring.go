@@ -23,7 +23,7 @@ var keyringIsTTY = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 var keyringWarnSink io.Writer = os.Stderr
 
 // keyringEnvPassphraseWarnOnce guards the one-shot stderr WARN emitted when
-// DBSAVVY_KEYRING_PASSPHRASE is set and stdin is a TTY. See Rule 7 of D20.
+// PGSAVVY_KEYRING_PASSPHRASE is set and stdin is a TTY. See Rule 7 of D20.
 // Pointer-valued so tests can swap in a fresh once without violating
 // copylocks (sync.Once embeds sync.noCopy).
 var keyringEnvPassphraseWarnOnce = &sync.Once{}
@@ -35,7 +35,7 @@ func xdgDataHome() string {
 	return xdg.DataHome
 }
 
-// resolveKeyring opens (or initializes) the dbsavvy file-backend keyring
+// resolveKeyring opens (or initializes) the pgsavvy file-backend keyring
 // and fetches the item identified by ref. The passphrase is supplied via
 // passphraseFunc (env first, then prompter). See epic D1, D2, D20.
 func resolveKeyring(ctx context.Context, ref string, prompter Prompter) (string, error) {
@@ -46,7 +46,7 @@ func resolveKeyring(ctx context.Context, ref string, prompter Prompter) (string,
 
 	cfg := keyring.Config{
 		AllowedBackends:  []keyring.BackendType{keyring.FileBackend},
-		ServiceName:      "dbsavvy",
+		ServiceName:      "pgsavvy",
 		FileDir:          dir,
 		FilePasswordFunc: passphraseFunc(ctx, prompter),
 	}
@@ -69,18 +69,18 @@ func resolveKeyring(ctx context.Context, ref string, prompter Prompter) (string,
 }
 
 // errKeyringPassphraseRequiredInTUI is returned by passphraseFunc when
-// DBSAVVY_KEYRING_PASSPHRASE is unset (or set-but-empty) AND the active
+// PGSAVVY_KEYRING_PASSPHRASE is unset (or set-but-empty) AND the active
 // Prompter is TUIRefusePrompter. It is a SEPARATE typed sentinel from
 // errInteractivePromptNotSupported: the keyring path has a different
-// remediation message ("set DBSAVVY_KEYRING_PASSPHRASE before launching
-// dbsavvy") than the generic prompter-refusal, and the toast layer renders
+// remediation message ("set PGSAVVY_KEYRING_PASSPHRASE before launching
+// pgsavvy") than the generic prompter-refusal, and the toast layer renders
 // them as distinct strings.
 //
 // The sentinel is unexported; callers detect via
 // IsKeyringPassphraseRequiredInTUI.
 var errKeyringPassphraseRequiredInTUI = errors.New(
 	"session: keyring passphrase required in TUI mode; " +
-		"set DBSAVVY_KEYRING_PASSPHRASE before launching dbsavvy")
+		"set PGSAVVY_KEYRING_PASSPHRASE before launching pgsavvy")
 
 // IsKeyringPassphraseRequiredInTUI reports whether err (or anything it wraps)
 // is the typed keyring-passphrase-in-TUI sentinel.
@@ -90,7 +90,7 @@ func IsKeyringPassphraseRequiredInTUI(err error) bool {
 
 // passphraseFunc returns the PromptFunc the keyring library uses to obtain
 // the file-backend passphrase. Resolution order: env first
-// (DBSAVVY_KEYRING_PASSPHRASE, set-and-non-empty) → prompter → error.
+// (PGSAVVY_KEYRING_PASSPHRASE, set-and-non-empty) → prompter → error.
 // Set-but-empty env is treated as unset (Critic resolution).
 //
 // TUI-mode short-circuit: when env is unset/empty AND prompter is
@@ -104,7 +104,7 @@ func passphraseFunc(ctx context.Context, prompter Prompter) keyring.PromptFunc {
 			if keyringIsTTY() {
 				keyringEnvPassphraseWarnOnce.Do(func() {
 					_, _ = fmt.Fprintln(keyringWarnSink,
-						"WARN: DBSAVVY_KEYRING_PASSPHRASE is set; prompter is safer on multi-user hosts")
+						"WARN: PGSAVVY_KEYRING_PASSPHRASE is set; prompter is safer on multi-user hosts")
 				})
 			}
 			return v, nil
@@ -128,7 +128,7 @@ func passphraseFunc(ctx context.Context, prompter Prompter) keyring.PromptFunc {
 
 // ensureKeyringDirMode creates the keyring dir (and its parent) with mode
 // 0700 if missing. If found with looser mode, it tightens to 0700 and
-// returns no error (parent of keyring data is dbsavvy/, which we own).
+// returns no error (parent of keyring data is pgsavvy/, which we own).
 // See epic D20.
 func ensureKeyringDirMode(dir string) error {
 	parent := filepath.Dir(dir)
@@ -162,7 +162,7 @@ func warnIfLooseKeyringMode(dir string) {
 		}
 		if info.Mode().Perm()&0o077 != 0 {
 			path := filepath.Join(dir, e.Name())
-			fmt.Fprintf(os.Stderr, "dbsavvy: WARN keyring item %s has loose mode %04o; tightening to 0600\n",
+			fmt.Fprintf(os.Stderr, "pgsavvy: WARN keyring item %s has loose mode %04o; tightening to 0600\n",
 				path, info.Mode().Perm())
 			_ = os.Chmod(path, 0o600)
 		}

@@ -1,6 +1,6 @@
 // Package editor hosts the canonical *Buffer + UndoTree state for one
 // QUERY_EDITOR pane and the per-context gocui.Editor implementations
-// dbsavvy ships outside the COMMAND_LINE master editor.
+// pgsavvy ships outside the COMMAND_LINE master editor.
 //
 // VimEditor is the gocui.Editor bound to the QUERY_EDITOR view:
 // it routes keystrokes through keys.Matcher under the QUERY_EDITOR

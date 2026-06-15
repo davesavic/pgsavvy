@@ -18,7 +18,7 @@ import (
 // and the renderer (renderDataLine) must agree on how much width each
 // column consumes; if the clamp under-counts the inter-column separator
 // it leaves colOffset too small and the renderer truncates the cursor
-// cell off the right edge. dbsavvy column-scroll fix.
+// cell off the right edge. pgsavvy column-scroll fix.
 func TestCursorColumnVisibleAfterHorizontalScroll(t *testing.T) {
 	v := NewView()
 	cols := make([]models.ColumnMeta, 0, 6)
@@ -48,7 +48,7 @@ func TestCursorColumnVisibleAfterHorizontalScroll(t *testing.T) {
 }
 
 // TestColumnScrollHints verifies the ‹ / › header arrows appear exactly
-// when non-hidden columns sit beyond the viewport edges. dbsavvy
+// when non-hidden columns sit beyond the viewport edges. pgsavvy
 // column-scroll indicator.
 func TestColumnScrollHints(t *testing.T) {
 	v := NewView()
@@ -163,7 +163,7 @@ func fourColView() *View {
 
 // TestMoveCursorRight_SkipsHiddenColumns verifies right-motion steps over
 // a run of hidden columns instead of parking the cursor on one (where it
-// would render invisibly). dbsavvy hidden-col navigation fix.
+// would render invisibly). pgsavvy hidden-col navigation fix.
 func TestMoveCursorRight_SkipsHiddenColumns(t *testing.T) {
 	v := fourColView()
 	v.SetHiddenCols(map[int]bool{1: true, 2: true})
@@ -221,7 +221,7 @@ func TestJumpColFirst_LandsOnFirstVisibleColumn(t *testing.T) {
 
 // TestSetHiddenCols_SnapsCursorOffNewlyHiddenColumn verifies that hiding
 // the column the cursor sits on moves the cursor to a visible neighbor so
-// it never renders invisibly. dbsavvy hidden-col navigation fix.
+// it never renders invisibly. pgsavvy hidden-col navigation fix.
 func TestSetHiddenCols_SnapsCursorOffNewlyHiddenColumn(t *testing.T) {
 	v := fourColView()
 	v.SetCursor(0, 2)

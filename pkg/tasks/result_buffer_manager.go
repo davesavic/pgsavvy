@@ -396,7 +396,7 @@ func (m *ResultBufferManager) runTask(
 
 	// Early-stop check AFTER capturing the stream: if Stop fired before
 	// the worker was scheduled, return now — but only once `stream` is set
-	// so the deferred cleanup closes it. In dbsavvy the stream is opened
+	// so the deferred cleanup closes it. In pgsavvy the stream is opened
 	// (and the per-session streamMu locked) by SQLSession.Stream before
 	// this worker runs, and streamFn just hands it back, so bailing here
 	// WITHOUT closing would orphan the open stream and leak streamMu —

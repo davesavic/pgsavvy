@@ -9,9 +9,9 @@ import (
 // TestGetDownloadDir_RespectsXDGEnv pins the highest-priority branch:
 // XDG_DOWNLOAD_DIR wins over every other source when set.
 func TestGetDownloadDir_RespectsXDGEnv(t *testing.T) {
-	t.Setenv("XDG_DOWNLOAD_DIR", "/tmp/dbsavvy-xdg-download-test")
-	if got := GetDownloadDir(); got != "/tmp/dbsavvy-xdg-download-test" {
-		t.Fatalf("got %q, want '/tmp/dbsavvy-xdg-download-test'", got)
+	t.Setenv("XDG_DOWNLOAD_DIR", "/tmp/pgsavvy-xdg-download-test")
+	if got := GetDownloadDir(); got != "/tmp/pgsavvy-xdg-download-test" {
+		t.Fatalf("got %q, want '/tmp/pgsavvy-xdg-download-test'", got)
 	}
 }
 

@@ -19,7 +19,7 @@ func ResolveTemplate(tmpl string, data any) (string, error) {
 	if tmpl == "" {
 		return "", nil
 	}
-	t, err := template.New("dbsavvy").Parse(tmpl)
+	t, err := template.New("pgsavvy").Parse(tmpl)
 	if err != nil {
 		return "", fmt.Errorf("template parse: %w", err)
 	}

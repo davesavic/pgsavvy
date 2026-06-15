@@ -1,5 +1,5 @@
 // Package context contains the concrete Context implementations the
-// dbsavvy TUI focus stack manages: the five side-rail contexts
+// pgsavvy TUI focus stack manages: the five side-rail contexts
 // (Connections, Schemas, Tables, Columns, Indexes), the four popup
 // contexts (Menu, Confirmation, Prompt, Suggestions), the command-log
 // EXTRAS context, the GLOBAL context (no view), the LIMIT

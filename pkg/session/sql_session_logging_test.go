@@ -229,7 +229,7 @@ func TestExecStart_ParamsHashedByDefault(t *testing.T) {
 
 func TestExecStart_ParamsVerbatimWithEnvOptIn(t *testing.T) {
 	resetLogEnv(t)
-	t.Setenv("DBSAVVY_LOG_INCLUDE_PARAMS", "1")
+	t.Setenv("PGSAVVY_LOG_INCLUDE_PARAMS", "1")
 	s, _, _, buf := newLoggedSession(t)
 
 	_, _ = s.Execute(context.Background(), models.Query{SQL: "X", Args: []any{"hunter2"}})
@@ -252,6 +252,6 @@ func TestSQLPreview_ConnectionPasswordScrubbed(t *testing.T) {
 // resetLogEnv unsets the AD-14 verbosity env vars for the duration of t.
 func resetLogEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("DBSAVVY_LOG_INCLUDE_SQL", "")
-	t.Setenv("DBSAVVY_LOG_INCLUDE_PARAMS", "")
+	t.Setenv("PGSAVVY_LOG_INCLUDE_SQL", "")
+	t.Setenv("PGSAVVY_LOG_INCLUDE_PARAMS", "")
 }

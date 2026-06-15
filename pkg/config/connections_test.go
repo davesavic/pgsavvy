@@ -46,7 +46,7 @@ func TestLoadConnections_PasswordIndirectionFields(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	body := "connections:\n" +
 		"  - name: dev\n    driver: postgres\n    dsn: postgres://localhost/dev\n    password_command: \"vault read /pg\"\n" +
-		"  - name: prod\n    driver: postgres\n    dsn: postgres://localhost/prod\n    keyring: \"dbsavvy/prod\"\n" +
+		"  - name: prod\n    driver: postgres\n    dsn: postgres://localhost/prod\n    keyring: \"pgsavvy/prod\"\n" +
 		"  - name: legacy\n    driver: postgres\n    dsn: postgres://localhost/legacy\n    pgpass: \"/home/u/.pgpass\"\n"
 	if err := afero.WriteFile(fs, "/c.yml", []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestLoadConnections_PasswordIndirectionFields(t *testing.T) {
 	if got[0].Password != "" {
 		t.Errorf("Password = %q, want empty", got[0].Password)
 	}
-	if got[1].KeyringRef != "dbsavvy/prod" {
+	if got[1].KeyringRef != "pgsavvy/prod" {
 		t.Errorf("KeyringRef = %q", got[1].KeyringRef)
 	}
 	if got[1].Password != "" {
@@ -257,7 +257,7 @@ func TestLoadConnections_NoWarnWhenStrictMode(t *testing.T) {
 func TestLoadConnections_NoWarnWhenNoInlinePassword(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.yml")
-	body := "connections:\n  - name: dev\n    driver: postgres\n    dsn: postgres://localhost/dev\n    keyring: dbsavvy/dev\n"
+	body := "connections:\n  - name: dev\n    driver: postgres\n    dsn: postgres://localhost/dev\n    keyring: pgsavvy/dev\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

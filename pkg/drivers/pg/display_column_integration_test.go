@@ -2,7 +2,7 @@
 
 // Integration tests for ResolveDisplayValue against the docker/postgres
 // fixture. Mirrors the openIntegrationSession pattern from
-// fk_loader_integration_test.go. Skipped (not failed) when DBSAVVY_TEST_PG
+// fk_loader_integration_test.go. Skipped (not failed) when PGSAVVY_TEST_PG
 // is unset.
 
 package pg_test
