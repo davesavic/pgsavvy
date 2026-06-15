@@ -1,7 +1,7 @@
 # pgsavvy
 
 [![CI](https://github.com/davesavic/pgsavvy/actions/workflows/ci.yml/badge.svg)](https://github.com/davesavic/pgsavvy/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 A vim-style TUI PostgreSQL client built like [lazygit](https://github.com/jesseduffield/lazygit) — fast keyboard navigation, modal panes, and a focused workflow for browsing and querying your database from the terminal. The name is short for "PostgreSQL savvy".
 
@@ -122,4 +122,4 @@ task pg:down && task pg:up
 
 ## License
 
-[MIT](LICENSE) — Copyright (c) 2026 Dave Savic.
+[Apache 2.0](LICENSE) — Copyright (c) 2026 Dave Savic.

@@ -29,23 +29,23 @@ linters:
             - '**/pkg/drivers/*.go'
           deny:
             - pkg: github.com/jackc/pgx
-              desc: pkg/drivers root must stay engine-neutral (epic dbsavvy-921 D9); pgx imports belong in pkg/drivers/pg.
+              desc: pkg/drivers root must stay engine-neutral (epic pgsavvy-921 D9); pgx imports belong in pkg/drivers/pg.
             - pkg: github.com/jackc/pgconn
-              desc: pkg/drivers root must stay engine-neutral (epic dbsavvy-921 D9); pgconn imports belong in pkg/drivers/pg.
+              desc: pkg/drivers root must stay engine-neutral (epic pgsavvy-921 D9); pgconn imports belong in pkg/drivers/pg.
             - pkg: github.com/davesavic/pgsavvy/pkg/drivers/pg
-              desc: pkg/drivers root must not depend on a concrete driver implementation (epic dbsavvy-921 D9).
+              desc: pkg/drivers root must not depend on a concrete driver implementation (epic pgsavvy-921 D9).
         drivers-all:
           files:
             - '**/pkg/drivers/**'
           deny:
             - pkg: github.com/jesseduffield/lazygit
-              desc: pkg/drivers/** must not depend on the gui/tui layer (epic dbsavvy-enn T0); lazygit (pkg/gocui) imports belong in pkg/gui/** + main.go.
+              desc: pkg/drivers/** must not depend on the gui/tui layer (epic pgsavvy-enn T0); lazygit (pkg/gocui) imports belong in pkg/gui/** + main.go.
         gui-context:
           files:
             - '**/pkg/gui/context/**'
           deny:
             - pkg: github.com/davesavic/pgsavvy/pkg/gui/controllers
-              desc: pkg/gui/context/** must not depend on pkg/gui/controllers (epic dbsavvy-fow D7); the controllers->context direction stays allowed.
+              desc: pkg/gui/context/** must not depend on pkg/gui/controllers (epic pgsavvy-fow D7); the controllers->context direction stays allowed.
 
 formatters:
   enable:
