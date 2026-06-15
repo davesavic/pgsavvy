@@ -1,19 +1,19 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: dbsavvy-postgres
+    container_name: pgsavvy-postgres
     restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: dbsavvy
-      POSTGRES_PASSWORD: dbsavvy
-      POSTGRES_DB: dbsavvy_test
+      POSTGRES_USER: pgsavvy
+      POSTGRES_PASSWORD: pgsavvy
+      POSTGRES_DB: pgsavvy_test
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dbsavvy -d dbsavvy_test"]
+      test: ["CMD-SHELL", "pg_isready -U pgsavvy -d pgsavvy_test"]
       interval: 5s
       timeout: 5s
       retries: 10

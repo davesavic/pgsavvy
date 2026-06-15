@@ -37,9 +37,9 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_USER: dbsavvy
-          POSTGRES_PASSWORD: dbsavvy
-          POSTGRES_DB: dbsavvy_test
+          POSTGRES_USER: pgsavvy
+          POSTGRES_PASSWORD: pgsavvy
+          POSTGRES_DB: pgsavvy_test
         ports:
           - 5432:5432
         options: >-
@@ -61,16 +61,16 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Wait for postgres
-        run: until pg_isready -h localhost -U dbsavvy; do sleep 1; done
+        run: until pg_isready -h localhost -U pgsavvy; do sleep 1; done
         timeout-minutes: 2
 
       - name: Apply fixture
         run: |
           sudo apt-get update
           sudo apt-get install -y postgresql-client
-          PGPASSWORD=dbsavvy psql -h localhost -U dbsavvy -d dbsavvy_test -f docker/postgres/init/01_fixture.sql
+          PGPASSWORD=pgsavvy psql -h localhost -U pgsavvy -d pgsavvy_test -f docker/postgres/init/01_fixture.sql
 
       - name: Run integration tests
         env:
-          DBSAVVY_TEST_PG: 'postgres://dbsavvy:dbsavvy@localhost:5432/dbsavvy_test?sslmode=disable'
+          PGSAVVY_TEST_PG: 'postgres://pgsavvy:pgsavvy@localhost:5432/pgsavvy_test?sslmode=disable'
         run: task test:integration

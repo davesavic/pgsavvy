@@ -7,7 +7,7 @@
 # Build artifacts
 bin/
 dist/
-/dbsavvy
+/pgsavvy
 
 # Test & coverage artifacts
 *.test

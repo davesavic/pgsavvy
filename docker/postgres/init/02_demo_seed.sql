@@ -3,7 +3,7 @@
 --
 -- Idempotent: every INSERT uses ON CONFLICT DO NOTHING so the file is
 -- safe to re-run against an already-seeded database via:
---   docker exec -i dbsavvy-postgres psql -U dbsavvy -d dbsavvy_test \
+--   docker exec -i pgsavvy-postgres psql -U pgsavvy -d pgsavvy_test \
 --       < docker/postgres/init/02_demo_seed.sql
 --
 -- Does NOT bump app._fixture_meta.version (no schema changes, only data).

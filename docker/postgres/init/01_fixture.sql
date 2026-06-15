@@ -1,4 +1,4 @@
--- dbsavvy integration-test fixture.
+-- pgsavvy integration-test fixture.
 --
 -- Exercises the introspection surface (pkg/drivers/pg loaders):
 --   schemas, tables, materialized view, view, columns w/ text[]+jsonb,
