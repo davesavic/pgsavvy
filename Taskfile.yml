@@ -100,3 +100,25 @@ tasks:
     desc: Cut a release (stub until release pipeline lands).
     cmds:
       - 'echo "release: not yet wired"'
+
+  demo:
+    desc: Record the pgsavvy demo GIF (docs/demo.gif) via VHS against the docker fixture.
+    deps: [build]
+    env:
+      XDG_CONFIG_HOME: '{{.ROOT_DIR}}/.demo/config'
+      XDG_STATE_HOME: '{{.ROOT_DIR}}/.demo/state'
+    preconditions:
+      - sh: '[ "$(docker inspect -f ''{{`{{.State.Health.Status}}`}}'' pgsavvy-postgres 2>/dev/null)" = "healthy" ]'
+        msg: 'docker fixture not healthy; run `task pg:up` first.'
+      - sh: 'command -v vhs >/dev/null 2>&1'
+        msg: 'vhs not found on PATH; install github.com/charmbracelet/vhs.'
+    cmds:
+      - mkdir -p "$XDG_CONFIG_HOME/pgsavvy" "$XDG_STATE_HOME/pgsavvy"
+      - |
+        cat > "$XDG_CONFIG_HOME/pgsavvy/connections.yml" <<'YAML'
+        connections:
+          - name: demo
+            driver: postgres
+            dsn: postgres://pgsavvy:pgsavvy@localhost:5432/pgsavvy_test?sslmode=disable
+        YAML
+      - vhs docs/demo.tape
