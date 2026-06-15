@@ -6,6 +6,14 @@ type Connection struct {
 	Name   string `yaml:"name"`
 	Driver string `yaml:"driver"`
 	DSN    string `yaml:"dsn" log:"redact"`
+	// Discrete connection fields. When DSN is empty, BuildPgxConfig assembles
+	// the connection from these. When DSN is non-empty it wins and these are
+	// ignored. A zero-value Connection emits none of these keys (omitempty).
+	Host     string `yaml:"host,omitempty"`
+	Port     int    `yaml:"port,omitempty"`
+	User     string `yaml:"user,omitempty"`
+	Database string `yaml:"database,omitempty"`
+	SSLMode  string `yaml:"sslmode,omitempty"`
 	// Password is a plaintext fallback for development only. Production deployments MUST prefer PasswordCommand, KeyringRef, or PgpassPath. Never log this value; never serialize back to config files written by the app. See DESIGN.md §11.2 / §15.6.
 	Password         string           `yaml:"password,omitempty" log:"redact"`
 	PasswordCommand  string           `yaml:"password_command,omitempty" log:"redact"`

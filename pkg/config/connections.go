@@ -22,7 +22,11 @@ var warnWriter io.Writer = os.Stderr
 // be a mapping with a top-level `connections:` key whose value is the profile
 // sequence. The legacy flat-sequence form is rejected at load time.
 type connectionsFile struct {
-	Connections []models.Connection `yaml:"connections"`
+	// SchemaVersion is an informational marker only; no behavior is gated on
+	// it. omitempty + a known struct field lets files WITHOUT it load cleanly
+	// under dec.KnownFields(true), while files carrying it round-trip.
+	SchemaVersion int                 `yaml:"schema_version,omitempty"`
+	Connections   []models.Connection `yaml:"connections"`
 }
 
 const legacyMigrationSnippet = `connections:

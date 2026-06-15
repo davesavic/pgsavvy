@@ -119,6 +119,77 @@ func TestSaveConnections_SSHOmitemptyKeysAbsent(t *testing.T) {
 	}
 }
 
+func TestSaveConnections_DropsDSNWhenDiscreteSet(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	conns := []models.Connection{{
+		Name: "dev", Driver: "postgres",
+		DSN:  "postgres://legacy@old/db",
+		Host: "newhost", Port: 5432, User: "app", Database: "appdb", SSLMode: "require",
+	}}
+	if err := SaveConnections(fs, "/c.yml", conns); err != nil {
+		t.Fatalf("SaveConnections: %v", err)
+	}
+	raw, err := afero.ReadFile(fs, "/c.yml")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	body := string(raw)
+	// The dsn key is always emitted (no omitempty on the field), but its
+	// VALUE must be cleared so it cannot override the discrete fields on load.
+	if strings.Contains(body, "postgres://legacy@old/db") {
+		t.Errorf("legacy dsn VALUE persisted despite discrete fields set:\n%s", body)
+	}
+	if !strings.Contains(body, `dsn: ""`) {
+		t.Errorf("dsn value not cleared:\n%s", body)
+	}
+	if !strings.Contains(body, "host: newhost") {
+		t.Errorf("discrete host not written:\n%s", body)
+	}
+	// Caller's in-memory struct must NOT be mutated (operate on a copy).
+	if conns[0].DSN != "postgres://legacy@old/db" {
+		t.Errorf("caller DSN mutated: %q", conns[0].DSN)
+	}
+}
+
+func TestSaveConnections_KeepsDSNWhenNoDiscrete(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	conns := []models.Connection{{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}}
+	if err := SaveConnections(fs, "/c.yml", conns); err != nil {
+		t.Fatalf("SaveConnections: %v", err)
+	}
+	raw, _ := afero.ReadFile(fs, "/c.yml")
+	if !strings.Contains(string(raw), "dsn: postgres://localhost/dev") {
+		t.Errorf("dsn dropped when no discrete fields set:\n%s", raw)
+	}
+}
+
+func TestSaveConnections_StripsInlinePassword(t *testing.T) {
+	withWarnWriter(t) // silence WARN
+	fs := afero.NewMemMapFs()
+	conns := []models.Connection{{
+		Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev",
+		Password: "hunter2supersecret",
+	}}
+	if err := SaveConnections(fs, "/c.yml", conns); err != nil {
+		t.Fatalf("SaveConnections: %v", err)
+	}
+	raw, err := afero.ReadFile(fs, "/c.yml")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	body := string(raw)
+	if strings.Contains(body, "password:") {
+		t.Errorf("password key persisted:\n%s", body)
+	}
+	if strings.Contains(body, "hunter2supersecret") {
+		t.Errorf("plaintext password value leaked into written bytes:\n%s", body)
+	}
+	// Caller's in-memory struct must NOT be mutated.
+	if conns[0].Password != "hunter2supersecret" {
+		t.Errorf("caller Password mutated: %q", conns[0].Password)
+	}
+}
+
 func TestSaveConnections_RenameFailureRemovesTmp(t *testing.T) {
 	base := afero.NewMemMapFs()
 	fs := &renameFailFs{Fs: base}

@@ -39,15 +39,45 @@ var ErrConnectionNotFound = errors.New("config: connection not found")
 func SaveConnections(fs afero.Fs, path string, conns []models.Connection) error {
 	if IsInlinePasswordPresent(conns) {
 		_, _ = fmt.Fprintf(warnWriter,
-			"config: rewriting %s; %d profile(s) still carry plaintext password — migrate to password_command\n",
-			path, countInlinePassword(conns),
+			"config: dropping inline plaintext password from %d profile(s) on write to %s — migrate to password_command\n",
+			countInlinePassword(conns), path,
 		)
 	}
-	wrapper := connectionsFile{Connections: conns}
+	wrapper := connectionsFile{Connections: normalizeForWrite(conns)}
 	if err := utils.AtomicWriteYAML(fs, path, wrapper, 0o600); err != nil {
 		return errors.New(session.RedactDSN(err.Error()))
 	}
 	return nil
+}
+
+// normalizeForWrite returns a COPY of conns with save-time hygiene applied, so
+// the caller's in-memory slice/structs are never mutated:
+//
+//   - A5: inline Password is unconditionally cleared — it must never persist.
+//   - A2: when ANY discrete field is set (Host/Port/User/Database/SSLMode), the
+//     raw DSN is cleared, because the discrete fields are now the source of
+//     truth (BuildPgxConfig assembles from them only when DSN is empty).
+//
+// DATA-LOSS (user-accepted, intentionally visible): A2 drops the ENTIRE DSN,
+// including exotic libpq params it carried (application_name, search_path,
+// connect_timeout, target_session_attrs, etc.). When a legacy dsn-only entry
+// is edited to add discrete fields and saved, those params are lost — they are
+// not reconstructed from the discrete fields.
+func normalizeForWrite(conns []models.Connection) []models.Connection {
+	out := make([]models.Connection, len(conns))
+	copy(out, conns)
+	for i := range out {
+		out[i].Password = ""
+		if hasDiscreteFields(out[i]) {
+			out[i].DSN = ""
+		}
+	}
+	return out
+}
+
+// hasDiscreteFields reports whether any discrete connection field is set.
+func hasDiscreteFields(c models.Connection) bool {
+	return c.Host != "" || c.Port != 0 || c.User != "" || c.Database != "" || c.SSLMode != ""
 }
 
 // AppendConnection loads the existing connections.yml at path (treating a

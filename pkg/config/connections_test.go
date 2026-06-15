@@ -161,6 +161,33 @@ func TestLoadConnections_EmptyArrayIsAllowed(t *testing.T) {
 	}
 }
 
+func TestLoadConnections_WithSchemaVersionLoadsCleanly(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	body := "schema_version: 1\nconnections:\n  - name: dev\n    driver: postgres\n    dsn: postgres://localhost/dev\n"
+	if err := afero.WriteFile(fs, "/c.yml", []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadConnections(fs, "/c.yml")
+	if err != nil {
+		t.Fatalf("schema_version should load cleanly under KnownFields: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "dev" {
+		t.Errorf("loaded = %+v; want one profile 'dev'", got)
+	}
+}
+
+func TestLoadConnections_WithoutSchemaVersionLoadsCleanly(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	// omitempty + known field: absence must NOT trip KnownFields(true).
+	body := "connections:\n  - name: dev\n    driver: postgres\n    dsn: postgres://localhost/dev\n"
+	if err := afero.WriteFile(fs, "/c.yml", []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConnections(fs, "/c.yml"); err != nil {
+		t.Fatalf("file without schema_version should load cleanly: %v", err)
+	}
+}
+
 func TestLoadConnections_UnknownKeyAtRootIsRejected(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	body := "connections: []\nbogus_root: x\n"

@@ -114,6 +114,99 @@ func TestBuildPgxConfig_AfterConnectHookInstalled(t *testing.T) {
 	}
 }
 
+// ---------- BuildPgxConfig: discrete-field assembly -------------------------
+
+func TestBuildPgxConfig_RawDSNWinsOverDiscrete(t *testing.T) {
+	// Both DSN and discrete fields set: DSN must win, discrete ignored.
+	profile := models.Connection{
+		Name: "p", DSN: validDSN,
+		Host: "ignored", Port: 9999, User: "ignored", Database: "ignored",
+	}
+	cfg, err := BuildPgxConfig(context.Background(), profile, "pw")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if cfg.ConnConfig.Host != "db.prod.internal" {
+		t.Errorf("Host = %q, want db.prod.internal (DSN must win)", cfg.ConnConfig.Host)
+	}
+	if cfg.ConnConfig.Port != 5432 {
+		t.Errorf("Port = %d, want 5432 (DSN must win)", cfg.ConnConfig.Port)
+	}
+}
+
+func TestBuildPgxConfig_DiscreteAssembly(t *testing.T) {
+	cases := []struct {
+		name                       string
+		profile                    models.Connection
+		wantHost, wantUser, wantDB string
+		wantPort                   uint16
+	}{
+		{
+			name:     "all fields",
+			profile:  models.Connection{Host: "db.example.com", Port: 5433, User: "app", Database: "appdb", SSLMode: "disable"},
+			wantHost: "db.example.com", wantPort: 5433, wantUser: "app", wantDB: "appdb",
+		},
+		{
+			name:     "special chars in user and db",
+			profile:  models.Connection{Host: "h", Port: 5432, User: "a@dmin", Database: "my/db"},
+			wantHost: "h", wantPort: 5432, wantUser: "a@dmin", wantDB: "my/db",
+		},
+		{
+			name:     "ipv6 host",
+			profile:  models.Connection{Host: "::1", Port: 5432, User: "u"},
+			wantHost: "::1", wantPort: 5432, wantUser: "u",
+		},
+		{
+			name:     "empty port falls back to pgx default 5432",
+			profile:  models.Connection{Host: "h", User: "u"},
+			wantHost: "h", wantPort: 5432, wantUser: "u",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := BuildPgxConfig(context.Background(), c.profile, "")
+			if err != nil {
+				t.Fatalf("BuildPgxConfig: %v", err)
+			}
+			if cfg.ConnConfig.Host != c.wantHost {
+				t.Errorf("Host = %q, want %q", cfg.ConnConfig.Host, c.wantHost)
+			}
+			if cfg.ConnConfig.Port != c.wantPort {
+				t.Errorf("Port = %d, want %d", cfg.ConnConfig.Port, c.wantPort)
+			}
+			if c.wantUser != "" && cfg.ConnConfig.User != c.wantUser {
+				t.Errorf("User = %q, want %q", cfg.ConnConfig.User, c.wantUser)
+			}
+			if c.wantDB != "" && cfg.ConnConfig.Database != c.wantDB {
+				t.Errorf("Database = %q, want %q", cfg.ConnConfig.Database, c.wantDB)
+			}
+		})
+	}
+}
+
+func TestBuildPgxConfig_NoDSNNoHostErrors(t *testing.T) {
+	_, err := BuildPgxConfig(context.Background(), models.Connection{Name: "p"}, "pw")
+	if err == nil {
+		t.Fatal("expected error for profile with no dsn and no host")
+	}
+	if !errors.Is(err, ErrNoConnectionTarget) {
+		t.Fatalf("err = %v, want ErrNoConnectionTarget", err)
+	}
+}
+
+func TestBuildPgxConfig_DiscreteNoPasswordEmbedded(t *testing.T) {
+	// The assembled connection string must never embed the password; it is
+	// applied via cfg.ConnConfig.Password instead.
+	profile := models.Connection{Host: "h", Port: 5432, User: "u", Database: "db"}
+	cfg, err := BuildPgxConfig(context.Background(), profile, "sekret")
+	if err != nil {
+		t.Fatalf("BuildPgxConfig: %v", err)
+	}
+	if cfg.ConnConfig.Password != "sekret" {
+		t.Errorf("Password = %q, want applied via arg", cfg.ConnConfig.Password)
+	}
+}
+
 // ---------- statement_timeout validation ------------------------------------
 
 func TestBuildPgxConfig_InvalidStatementTimeoutFailsAtBuildTime(t *testing.T) {

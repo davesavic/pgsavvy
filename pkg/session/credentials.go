@@ -257,6 +257,52 @@ func ParseDSNEndpoint(dsn string) (host, db string) {
 	return cfg.Host, cfg.Database
 }
 
+// ErrEmptyDSN is returned by ParseDSNIntoConnection for an empty input.
+var ErrEmptyDSN = errors.New("session: empty dsn")
+
+// ParseDSNIntoConnection parses a Postgres DSN (URL-form or keyword/value
+// form) into the discrete fields of a models.Connection: Host, Port, User,
+// Database, and SSLMode. It is the inverse of buildKVDSN, used to migrate a
+// legacy dsn-only profile into discrete fields.
+//
+// SECURITY: the password is deliberately DROPPED — never populated into the
+// returned Connection. Host/Port/Database/User are extracted via
+// pgconn.ParseConfig (robust across both DSN forms); SSLMode is extracted
+// separately because pgconn folds it into TLSConfig rather than exposing the
+// literal. An empty or unparseable DSN returns a typed error.
+func ParseDSNIntoConnection(dsn string) (models.Connection, error) {
+	if dsn == "" {
+		return models.Connection{}, ErrEmptyDSN
+	}
+	cfg, err := pgconn.ParseConfig(dsn)
+	if err != nil || cfg == nil {
+		// The error text can embed credentials; redact before returning.
+		return models.Connection{}, fmt.Errorf("session: parse dsn: %s", RedactConnectionString(err.Error()))
+	}
+	return models.Connection{
+		Host:     cfg.Host,
+		Port:     int(cfg.Port),
+		User:     cfg.User,
+		Database: cfg.Database,
+		SSLMode:  sslModeFromDSN(dsn),
+	}, nil
+}
+
+// sslModeFromDSN extracts the literal sslmode from a DSN. URL-form reads the
+// query parameter; kv-form reads the token. Empty string when absent (pgx's
+// "prefer" default applies and we do not want to persist a default we did not
+// see). Unlike sslModeForLog this never substitutes "prefer"/"unknown".
+func sslModeFromDSN(dsn string) string {
+	if v, ok := kvDSNValue(dsn, "sslmode"); ok {
+		return v
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return ""
+	}
+	return u.Query().Get("sslmode")
+}
+
 // keyringDir returns the path used for the file-backend keyring store. The
 // directory is created lazily by the keyring library on first write; this
 // function only computes the path. See env/xdg.DataHome (epic D1).

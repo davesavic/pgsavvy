@@ -93,6 +93,38 @@ func TestConnectionYAMLRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConnectionYAMLZeroValueOmitsDiscreteFields(t *testing.T) {
+	out, err := yaml.Marshal(Connection{})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	body := string(out)
+	for _, key := range []string{"host:", "port:", "user:", "database:", "sslmode:"} {
+		if strings.Contains(body, key) {
+			t.Errorf("zero-value Connection emitted %q (omitempty broken):\n%s", key, body)
+		}
+	}
+}
+
+func TestConnectionYAMLDiscreteFieldsRoundTrip(t *testing.T) {
+	in := Connection{
+		Name: "disc", Driver: "postgres",
+		Host: "db.example.com", Port: 5433, User: "app",
+		Database: "appdb", SSLMode: "require",
+	}
+	out, err := yaml.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got Connection
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(in, got) {
+		t.Fatalf("round-trip mismatch\nwant: %#v\ngot:  %#v\nyaml:\n%s", in, got, out)
+	}
+}
+
 func TestConnectionYAMLEmptySSHTunnelIsNil(t *testing.T) {
 	const src = `name: x
 driver: postgres

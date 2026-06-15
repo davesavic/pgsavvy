@@ -82,13 +82,11 @@ func TestUpdateConnection_OldNameMissing(t *testing.T) {
 }
 
 func TestUpdateConnection_NeighborRoundTripsAll18Fields(t *testing.T) {
-	withWarnWriter(t) // neighbor carries an inline Password; mute the WARN line
 	fs := afero.NewMemMapFs()
 	neighbor := models.Connection{
 		Name:            "fullyloaded",
 		Driver:          "postgres",
 		DSN:             "postgres://localhost/full",
-		Password:        "hunter2",
 		PasswordCommand: "pass show db",
 		KeyringRef:      "service/account",
 		PgpassPath:      "/home/u/.pgpass",
@@ -130,7 +128,9 @@ func TestUpdateConnection_NeighborRoundTripsAll18Fields(t *testing.T) {
 	if gotNeighbor.Name != "fullyloaded" {
 		t.Fatalf("neighbor order changed: got[0].Name = %q", gotNeighbor.Name)
 	}
-	// All 18 fields must equal the original neighbor (deep-equal via reflect).
+	// Every persisted field must equal the original neighbor (deep-equal via
+	// reflect). Inline Password is intentionally excluded — it is never seeded
+	// here because SaveConnections strips it on write (A5).
 	if !reflect.DeepEqual(neighbor, gotNeighbor) {
 		t.Errorf("neighbor not preserved.\n want %+v\n  got %+v", neighbor, gotNeighbor)
 	}

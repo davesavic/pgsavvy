@@ -48,6 +48,10 @@ const statementTimeoutForbiddenBytes = "';\"\\\x00\r\n\t"
 // be canonicalized to a known-safe literal.
 var ErrStatementTimeoutInvalid = errors.New("session: invalid statement_timeout (want \"0\" or \"<n>{ms|s|min|h|d}\")")
 
+// ErrNoConnectionTarget is returned by BuildPgxConfig when neither a raw DSN
+// nor a discrete Host is present, so there is nothing to dial.
+var ErrNoConnectionTarget = errors.New("session: connection has no dsn and no host")
+
 // BuildPgxConfig translates a connection profile + a resolved password into a
 // *pgxpool.Config ready for pgxpool.NewWithConfig.
 //
@@ -83,11 +87,16 @@ var ErrStatementTimeoutInvalid = errors.New("session: invalid statement_timeout 
 //
 // The ctx argument is reserved for future hooks; v1 performs no I/O.
 func BuildPgxConfig(_ context.Context, profile models.Connection, password string) (*pgxpool.Config, error) {
-	cfg, err := pgxpool.ParseConfig(profile.DSN)
+	connString, err := connectionStringFor(profile)
 	if err != nil {
-		// pgxpool surfaces the DSN literal in its error; scrub inline
+		return nil, err
+	}
+
+	cfg, err := pgxpool.ParseConfig(connString)
+	if err != nil {
+		// pgxpool surfaces the connection string in its error; scrub inline
 		// credentials before returning. See /review-plan-2026-05-17 Sec-7.
-		return nil, fmt.Errorf("session: parse dsn: %s", RedactDSN(err.Error()))
+		return nil, fmt.Errorf("session: parse dsn: %s", RedactConnectionString(err.Error()))
 	}
 
 	rawTimeout := profile.StatementTimeout
@@ -118,11 +127,65 @@ func BuildPgxConfig(_ context.Context, profile models.Connection, password strin
 	cfg.MaxConnIdleTime = 5 * time.Minute
 	cfg.HealthCheckPeriod = 1 * time.Minute
 
-	if shouldWarnInsecureSSL(profile.DSN, cfg) {
-		warnInsecureSSL(os.Stderr, profile.Name, cfg.ConnConfig.Host, sslModeForLog(profile.DSN))
+	if shouldWarnInsecureSSL(connString, cfg) {
+		warnInsecureSSL(os.Stderr, profile.Name, cfg.ConnConfig.Host, sslModeForLog(connString))
 	}
 
 	return cfg, nil
+}
+
+// connectionStringFor returns the connection string BuildPgxConfig hands to
+// pgxpool.ParseConfig. A non-empty raw DSN wins verbatim (discrete fields are
+// ignored). Otherwise the string is assembled from the discrete fields in pgx
+// key-value form. A profile with neither a DSN nor a Host has nothing to dial.
+//
+// No password is ever embedded here: it is applied later via
+// cfg.ConnConfig.Password.
+func connectionStringFor(profile models.Connection) (string, error) {
+	if profile.DSN != "" {
+		return profile.DSN, nil
+	}
+	if profile.Host == "" {
+		return "", ErrNoConnectionTarget
+	}
+	return buildKVDSN(profile), nil
+}
+
+// buildKVDSN assembles a pgx key-value DSN ("host='..' port=.. ...") from the
+// discrete fields. URL assembly is deliberately avoided: it mishandles '@',
+// '/', IPv6 hosts, and empty values. kv-form with quoted+escaped values is
+// robust, and pgconn.ParseConfig (reached via pgxpool.ParseConfig) accepts it
+// and still derives TLSConfig from sslmode. Empty fields (Port==0, empty
+// User/Database/SSLMode) are omitted so pgx defaults apply.
+func buildKVDSN(profile models.Connection) string {
+	var b strings.Builder
+	b.WriteString("host=")
+	b.WriteString(quoteKVValue(profile.Host))
+	if profile.Port != 0 {
+		fmt.Fprintf(&b, " port=%d", profile.Port)
+	}
+	if profile.User != "" {
+		b.WriteString(" user=")
+		b.WriteString(quoteKVValue(profile.User))
+	}
+	if profile.Database != "" {
+		b.WriteString(" dbname=")
+		b.WriteString(quoteKVValue(profile.Database))
+	}
+	if profile.SSLMode != "" {
+		b.WriteString(" sslmode=")
+		b.WriteString(quoteKVValue(profile.SSLMode))
+	}
+	return b.String()
+}
+
+// quoteKVValue wraps a value in single quotes for pgx key-value DSN form,
+// escaping backslash and single-quote per libpq's rules. Always quoting is
+// safe and sidesteps whitespace/empty-value edge cases.
+func quoteKVValue(v string) string {
+	v = strings.ReplaceAll(v, `\`, `\\`)
+	v = strings.ReplaceAll(v, `'`, `\'`)
+	return "'" + v + "'"
 }
 
 // pgConnExecer is the slice of *pgx.Conn that runAfterConnect uses. Extracting
@@ -201,6 +264,9 @@ func warnInsecureSSL(w io.Writer, name, host, mode string) {
 // DSN, which pgxpool.ParseConfig would already have rejected upstream — kept
 // here so the function is safe to call on any string.
 func sslModeForLog(dsn string) string {
+	if v, ok := kvDSNValue(dsn, "sslmode"); ok {
+		return v
+	}
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return "unknown"
@@ -209,6 +275,72 @@ func sslModeForLog(dsn string) string {
 		return v
 	}
 	return "prefer"
+}
+
+// kvDSNValue best-effort extracts a key's value from a pgx key-value form
+// connection string ("host='..' sslmode=require"). It returns ok=false when
+// the string is not kv-form or the key is absent, so URL-form callers fall
+// through. Values may be single-quoted (with \\ / \' escapes) or bare.
+func kvDSNValue(dsn, key string) (string, bool) {
+	tokens := splitKVDSN(dsn)
+	for _, tok := range tokens {
+		k, v, found := strings.Cut(tok, "=")
+		if !found || strings.TrimSpace(k) != key {
+			continue
+		}
+		return unquoteKVValue(strings.TrimSpace(v)), true
+	}
+	return "", false
+}
+
+// splitKVDSN splits a kv-form DSN on unquoted whitespace, preserving quoted
+// values. It returns nil for a string with no '=' (e.g. a URL-form DSN), so
+// callers can cheaply detect non-kv input.
+func splitKVDSN(dsn string) []string {
+	if !strings.Contains(dsn, "=") {
+		return nil
+	}
+	var tokens []string
+	var cur strings.Builder
+	inQuote := false
+	for i := 0; i < len(dsn); i++ {
+		c := dsn[i]
+		if c == '\\' && i+1 < len(dsn) {
+			cur.WriteByte(c)
+			cur.WriteByte(dsn[i+1])
+			i++
+			continue
+		}
+		if c == '\'' {
+			inQuote = !inQuote
+			cur.WriteByte(c)
+			continue
+		}
+		if c == ' ' && !inQuote {
+			if cur.Len() > 0 {
+				tokens = append(tokens, cur.String())
+				cur.Reset()
+			}
+			continue
+		}
+		cur.WriteByte(c)
+	}
+	if cur.Len() > 0 {
+		tokens = append(tokens, cur.String())
+	}
+	return tokens
+}
+
+// unquoteKVValue reverses quoteKVValue: strips surrounding single quotes and
+// unescapes \\ and \'. A bare (unquoted) value is returned unchanged.
+func unquoteKVValue(v string) string {
+	if len(v) < 2 || v[0] != '\'' || v[len(v)-1] != '\'' {
+		return v
+	}
+	inner := v[1 : len(v)-1]
+	inner = strings.ReplaceAll(inner, `\'`, `'`)
+	inner = strings.ReplaceAll(inner, `\\`, `\`)
+	return inner
 }
 
 // dsnInlineCredRe matches the userinfo section of a URL-form DSN
