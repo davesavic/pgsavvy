@@ -27,15 +27,20 @@ Sleep 2.5s
 Enter
 Sleep 2.5s
 
-# Browse the schema rails: Schemas (1) then Tables (2).
+# Browse the schema rails: focus Schemas (1), activate the app schema (Enter)
+# to load its tables, then focus the Tables rail (2) and scroll.
 Type "1"
-Sleep 1s
+Sleep 800ms
+Enter
+Sleep 1.5s
 Type "2"
-Sleep 1s
+Sleep 800ms
 Type "j"
-Sleep 600ms
+Sleep 500ms
 Type "j"
-Sleep 1s
+Sleep 500ms
+Type "j"
+Sleep 1.2s
 
 # Jump to the query editor (3), enter insert mode, write a query.
 Type "3"
@@ -53,10 +58,7 @@ Sleep 3s
 
 # Back to the editor and show the EXPLAIN plan tree (<leader>e = Space e).
 Type "3"
-Sleep 500ms
+Sleep 600ms
 Space
 Type "e"
-Sleep 3.5s
-
-# Done.
-Sleep 1s
+Sleep 5s
