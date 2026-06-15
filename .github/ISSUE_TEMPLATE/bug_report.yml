@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a problem with pgsavvy
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill in the sections
+        below so we can reproduce and fix the issue quickly.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected to happen instead.
+      placeholder: When I run a query against ..., the result grid ...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to reproduce the behavior.
+      placeholder: |
+        1. Connect to ...
+        2. Open the query editor and run ...
+        3. See error ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: pgsavvy version
+      description: Output of `pgsavvy --version`.
+      placeholder: "dev (task) / vX.Y.Z"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: OS and version (e.g. Ubuntu 24.04, macOS 14.5).
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Session log
+      description: |
+        Attach or paste the relevant session log. By default pgsavvy writes
+        per-session JSON logs (with secrets redacted) to
+        `~/.local/state/pgsavvy/sessions/` (i.e. `$XDG_STATE_HOME/pgsavvy/sessions/`).
+        Please attach the log from the session where the bug occurred.
+      render: shell
+    validations:
+      required: false
