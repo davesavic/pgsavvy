@@ -521,6 +521,24 @@ func migrateLegacyDSN(conn models.Connection) models.Connection {
 	return conn
 }
 
+// applyPastedDSN parses a clipboard DSN into the form's discrete fields. On a
+// parse failure it sets the inline error and leaves every field untouched
+// (ok=false). On success it returns whether the DSN carried an inline password
+// — which is DROPPED, never stored — so the caller can warn the user.
+func (f *connForm) applyPastedDSN(dsn string) (hadPassword, ok bool) {
+	parsed, err := session.ParseDSNIntoConnection(dsn)
+	if err != nil {
+		f.err = "clipboard does not contain a valid Postgres DSN"
+		return false, false
+	}
+	f.conn.Host = parsed.Host
+	f.conn.Port = parsed.Port
+	f.conn.User = parsed.User
+	f.conn.Database = parsed.Database
+	f.conn.SSLMode = parsed.SSLMode
+	return session.DSNHasInlinePassword(dsn), true
+}
+
 // validateName enforces non-empty + unique (excluding the edited row's own
 // original name). Used both by the PROMPT popup validator and validate-all.
 func (f *connForm) validateName(raw string, tr *i18n.TranslationSet) error {

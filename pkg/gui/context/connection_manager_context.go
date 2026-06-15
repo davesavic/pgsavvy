@@ -203,6 +203,14 @@ func (c *ConnectionManagerContext) FormSetError(msg string) { c.form.err = msg }
 // (space / i on a non-text field).
 func (c *ConnectionManagerContext) FormToggleFocused() { c.form.toggleFocused() }
 
+// FormApplyDSN populates the form's discrete fields from a pasted DSN. Returns
+// (hadInlinePassword, ok): ok=false (with an inline error already stamped) when
+// the DSN is unparseable, leaving the fields untouched. A dropped inline
+// password is reported via hadInlinePassword so the controller can warn.
+func (c *ConnectionManagerContext) FormApplyDSN(dsn string) (hadPassword, ok bool) {
+	return c.form.applyPastedDSN(dsn)
+}
+
 // FormValidateAll runs save-time validation. On failure it stamps the inline
 // error and moves focus onto the offending field, returning false. On success
 // it returns the edited connection plus the add/edit metadata.

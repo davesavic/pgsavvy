@@ -78,6 +78,26 @@ func TestParseDSNIntoConnection(t *testing.T) {
 	})
 }
 
+// TestDSNHasInlinePassword covers inline-password detection across URL and
+// kv-form DSNs (used by the paste-DSN warning).
+func TestDSNHasInlinePassword(t *testing.T) {
+	cases := []struct {
+		dsn  string
+		want bool
+	}{
+		{"postgres://u:pw@h/db", true},
+		{"postgres://u@h/db", false},
+		{"host=h user=u password=pw dbname=db", true},
+		{"host=h user=u dbname=db", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := DSNHasInlinePassword(c.dsn); got != c.want {
+			t.Errorf("DSNHasInlinePassword(%q) = %v, want %v", c.dsn, got, c.want)
+		}
+	}
+}
+
 // TestParseDSNIntoConnection_RoundTripsThroughBuildKVDSN asserts the parser is
 // the inverse of buildKVDSN for the discrete fields (sans password).
 func TestParseDSNIntoConnection_RoundTripsThroughBuildKVDSN(t *testing.T) {

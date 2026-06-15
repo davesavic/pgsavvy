@@ -288,6 +288,21 @@ func ParseDSNIntoConnection(dsn string) (models.Connection, error) {
 	}, nil
 }
 
+// DSNHasInlinePassword reports whether a DSN carries an inline password
+// (URL-form userinfo or kv-form password=). The connection form uses it to
+// decide whether to warn that a pasted password was dropped. pgconn.ParseConfig
+// extracts the password into cfg.Password for both DSN forms.
+func DSNHasInlinePassword(dsn string) bool {
+	if dsn == "" {
+		return false
+	}
+	cfg, err := pgconn.ParseConfig(dsn)
+	if err != nil || cfg == nil {
+		return false
+	}
+	return cfg.Password != ""
+}
+
 // sslModeFromDSN extracts the literal sslmode from a DSN. URL-form reads the
 // query parameter; kv-form reads the token. Empty string when absent (pgx's
 // "prefer" default applies and we do not want to persist a default we did not

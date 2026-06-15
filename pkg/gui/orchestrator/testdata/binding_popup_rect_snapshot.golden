@@ -36,6 +36,7 @@ binding	scope=conflict_dialog	key=o	mode=normal
 binding	scope=conflict_dialog	key=r	mode=normal
 binding	scope=connection_manager	key=<cr>	mode=normal
 binding	scope=connection_manager	key=<esc>	mode=normal
+binding	scope=connection_manager	key=<leader>p	mode=normal
 binding	scope=connection_manager	key=<s-tab>	mode=normal
 binding	scope=connection_manager	key=<tab>	mode=normal
 binding	scope=connection_manager	key=G	mode=normal

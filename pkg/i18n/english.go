@@ -261,6 +261,10 @@ type ActionTranslations struct {
 	// Reconnect.
 	Reconnect string
 
+	// PasteDSN populates the connection form's discrete fields from a DSN on
+	// the clipboard.
+	PasteDSN string
+
 	// SearchPathQuickSet.
 	SearchPathQuickSet string
 
@@ -488,6 +492,7 @@ func EnglishTranslationSet() *TranslationSet {
 			ToggleShowHidden: "Toggle Show Hidden",
 
 			Reconnect:           "Reconnect",
+			PasteDSN:            "Paste DSN as fields",
 			SearchPathQuickSet:  "Set search_path",
 			StatementTimeoutSet: "Set statement timeout",
 

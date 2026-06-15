@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/gui/clipboard"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
@@ -121,6 +122,14 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 			DriversFn:          drivers.Names,
 			OnSaveConnection:   g.saveConnectionForm,
 			OnDeleteConnection: g.deleteConnectionFromModal,
+			// paste-DSN: read the host clipboard and surface the
+			// dropped-password warning via a toast.
+			ReadClipboard: clipboard.NewSystemClipboard().Read,
+			ShowToast: func(msg string) {
+				if g.toastHelp != nil {
+					g.toastHelp.Show(msg, 3*time.Second)
+				}
+			},
 			StackDepth: func() int {
 				if g.tree == nil {
 					return 1

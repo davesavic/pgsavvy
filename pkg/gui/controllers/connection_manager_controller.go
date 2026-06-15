@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
@@ -83,6 +84,14 @@ type ConnectionManagerDeps struct {
 	// config.DeleteConnection, and refreshes the modal list. A nil callback
 	// makes Delete a no-op.
 	OnDeleteConnection func(connName string) error
+
+	// ReadClipboard returns the host clipboard contents for the paste-DSN
+	// action. nil → paste is a no-op.
+	ReadClipboard func() (string, error)
+
+	// ShowToast surfaces a transient notice (e.g. the dropped-password warning
+	// after a paste). nil → no toast.
+	ShowToast func(string)
 
 	// StackDepth returns the current focus-stack depth. Used by
 	// QuitOrClose to distinguish startup root (depth 1 → quit) from
@@ -390,6 +399,26 @@ func (cm *ConnectionManagerController) Toggle(_ commands.ExecCtx) error {
 	return nil
 }
 
+// PasteDSN reads a DSN from the clipboard and populates the form's discrete
+// fields (form mode only). A pasted inline password is dropped — never stored —
+// and a toast warns the user. Unparseable input stamps an inline error and
+// leaves the fields untouched.
+func (cm *ConnectionManagerController) PasteDSN(_ commands.ExecCtx) error {
+	if !cm.inFormMode() || cm.deps.Ctx == nil || cm.deps.ReadClipboard == nil {
+		return nil
+	}
+	raw, err := cm.deps.ReadClipboard()
+	if err != nil || strings.TrimSpace(raw) == "" {
+		cm.deps.Ctx.FormSetError("clipboard is empty")
+		return nil
+	}
+	hadPassword, ok := cm.deps.Ctx.FormApplyDSN(strings.TrimSpace(raw))
+	if ok && hadPassword && cm.deps.ShowToast != nil {
+		cm.deps.ShowToast("Password not stored — you'll be prompted on connect")
+	}
+	return nil
+}
+
 // Retry handles r → re-attempt the most recent profile. Only fires from the
 // error sub-phase; inert during the active dial (where only Esc cancels) and
 // in list mode or when unwired.
@@ -494,6 +523,15 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Description: tr.Actions.ToggleField,
 		},
 		{
+			// <leader>p — paste a DSN into the discrete fields. Kept off the
+			// options bar (no ShowInBar) so it doesn't crowd the 8-entry cap.
+			Sequence:    []types.ChordKey{{Special: types.KeyLeader}, {Code: 'p'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CONNECTION_MANAGER,
+			ActionID:    commands.ConnectionManagerPasteDSN,
+			Description: tr.Actions.PasteDSN,
+		},
+		{
 			Sequence:    []types.ChordKey{{Special: types.KeyTab}},
 			Mode:        types.ModeNormal,
 			Scope:       types.CONNECTION_MANAGER,
@@ -596,6 +634,11 @@ func (cm *ConnectionManagerController) RegisterActions(reg *commands.Registry) {
 		ID:          commands.ConnectionManagerDelete,
 		Description: "Delete connection",
 		Handler:     cm.Delete,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerPasteDSN,
+		Description: "Paste DSN as fields",
+		Handler:     cm.PasteDSN,
 	})
 }
 

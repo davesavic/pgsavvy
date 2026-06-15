@@ -162,6 +162,7 @@ const (
 	ConnectionManagerFieldEdit = "connection_manager.field_edit"
 	ConnectionManagerToggle    = "connection_manager.toggle"
 	ConnectionManagerDelete    = "connection_manager.delete"
+	ConnectionManagerPasteDSN  = "connection_manager.paste_dsn"
 
 	// RelationshipPanel family — owned by RelationshipPanelController.
 	//   RelationshipPanelToggle - <leader>gr opens / closes the right-docked
@@ -779,6 +780,7 @@ func AllActionIDs() []string {
 		ConnectionManagerFieldEdit,
 		ConnectionManagerToggle,
 		ConnectionManagerDelete,
+		ConnectionManagerPasteDSN,
 		TipDismiss,
 		CellEditEnter,
 		CellEditCommit,
