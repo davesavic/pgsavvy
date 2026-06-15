@@ -102,7 +102,7 @@ tasks:
       - 'echo "release: not yet wired"'
 
   demo:
-    desc: Record the pgsavvy demo GIF (docs/demo.gif) via VHS against the docker fixture.
+    desc: Record the pgsavvy demo GIFs (docs/demo*.gif) via VHS against the docker fixture.
     deps: [build]
     env:
       XDG_CONFIG_HOME: '{{.ROOT_DIR}}/.demo/config'
@@ -113,24 +113,28 @@ tasks:
       - sh: 'command -v vhs >/dev/null 2>&1'
         msg: 'vhs not found on PATH; install github.com/charmbracelet/vhs.'
     cmds:
-      # Start from pristine state every run: pgsavvy persists the editor buffer
-      # under $XDG_STATE_HOME, which would otherwise be restored and then
-      # re-typed by the tape, duplicating the query.
-      - rm -rf "$XDG_CONFIG_HOME/pgsavvy" "$XDG_STATE_HOME/pgsavvy"
-      - mkdir -p "$XDG_CONFIG_HOME/pgsavvy" "$XDG_STATE_HOME/pgsavvy"
       - |
-        cat > "$XDG_CONFIG_HOME/pgsavvy/connections.yml" <<'YAML'
+        set -eu
+        cfg="$XDG_CONFIG_HOME/pgsavvy"
+        mkdir -p "$cfg"
+        cat > "$cfg/connections.yml" <<'YAML'
         connections:
           - name: demo
             driver: postgres
             dsn: postgres://pgsavvy@localhost:5432/pgsavvy_test?sslmode=disable
             password_command: echo pgsavvy
         YAML
-      - |
-        # Disable completion auto-trigger so the recorded keystrokes are
-        # deterministic (manual <c-x><c-o> is unaffected for real users).
-        cat > "$XDG_CONFIG_HOME/pgsavvy/config.yml" <<'YAML'
-        editor:
-          autocomplete: false
-        YAML
-      - vhs docs/demo.tape
+        # Record one tape from pristine state. pgsavvy persists the editor
+        # buffer under $XDG_STATE_HOME, which would otherwise be restored and
+        # re-typed by the tape (duplicating the query), so wipe it each run.
+        # $2 toggles completion auto-trigger: off for deterministic typing,
+        # on for the autocomplete showcase.
+        record() {
+          rm -rf "$XDG_STATE_HOME/pgsavvy"
+          mkdir -p "$XDG_STATE_HOME/pgsavvy"
+          printf 'editor:\n  autocomplete: %s\n' "$2" > "$cfg/config.yml"
+          vhs "$1"
+        }
+        record docs/demo.tape false
+        record docs/demo-autocomplete.tape true
+        record docs/demo-relationships.tape false
