@@ -10,12 +10,12 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"go.uber.org/goleak"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/session"
-	"github.com/davesavic/dbsavvy/pkg/tasks"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/tasks"
 )
 
 // These are end-to-end regression tests: a parked >200-row

@@ -3,7 +3,7 @@ package editor_test
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/editor"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
 )
 
 // TestInsertAfterDeleteLastLine reproduces the "stuck in insert mode,

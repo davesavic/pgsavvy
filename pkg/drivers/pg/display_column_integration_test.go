@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 const displayValueTimeout = 2 * time.Second

@@ -5,7 +5,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // searchState carries the in-grid plain-substring SEARCH.

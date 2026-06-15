@@ -12,8 +12,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // openIntegrationSession opens a *pg.Session against the fixture. Mirrors

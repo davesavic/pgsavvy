@@ -14,9 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
-	"github.com/davesavic/dbsavvy/pkg/logs"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/logs"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // queryNonceCounter is the process-global monotonic source for QueryID.Nonce.

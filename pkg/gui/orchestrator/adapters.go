@@ -11,19 +11,19 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/dbsavvy/pkg/common"
-	"github.com/davesavic/dbsavvy/pkg/config"
-	"github.com/davesavic/dbsavvy/pkg/drivers"
-	"github.com/davesavic/dbsavvy/pkg/gui"
-	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/gui/editor"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/query"
-	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/gui"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 // schemasPickerAdapter exposes the SCHEMAS rail's selected schema name

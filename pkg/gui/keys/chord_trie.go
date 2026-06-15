@@ -3,7 +3,7 @@ package keys
 import (
 	"fmt"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 )
 
 // trieNode is the unexported node of a ChordTrie. After Builder.Build

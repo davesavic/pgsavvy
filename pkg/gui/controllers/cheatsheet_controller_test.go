@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // TestBuildCheatsheetTabsHumanLabels asserts the tab bar shows readable

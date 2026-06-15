@@ -8,10 +8,10 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/spf13/afero"
 
-	"github.com/davesavic/dbsavvy/pkg/common"
-	"github.com/davesavic/dbsavvy/pkg/config"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
-	"github.com/davesavic/dbsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
 )
 
 // cancelingPrompter is a ChainedPrompter that immediately cancels every

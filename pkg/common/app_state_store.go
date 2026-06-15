@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/davesavic/dbsavvy/pkg/logs"
+	"github.com/davesavic/pgsavvy/pkg/logs"
 )
 
 // DebounceWindow is the idle period after the last MutateAndSave call before a

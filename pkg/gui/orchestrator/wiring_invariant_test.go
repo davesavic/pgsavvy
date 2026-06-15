@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/context"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // TestWiringInvariant is the source-of-truth checklist for Context wiring.

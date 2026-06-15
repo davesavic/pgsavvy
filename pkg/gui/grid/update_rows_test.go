@@ -3,7 +3,7 @@ package grid
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 func TestUpdateRowsByPK(t *testing.T) {

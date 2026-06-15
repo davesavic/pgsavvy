@@ -3,8 +3,8 @@ package grid
 import (
 	"reflect"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // gutterModifiedMarker is the single-character glyph rendered in the row

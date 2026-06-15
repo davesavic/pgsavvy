@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // Severity ranks a Finding's importance. Higher = more severe. The explicit

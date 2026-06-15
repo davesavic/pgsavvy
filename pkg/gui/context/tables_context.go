@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/grid"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // TablesContext renders the table list in the left-rail TABLES slot. It

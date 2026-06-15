@@ -11,7 +11,7 @@ import (
 
 	"github.com/99designs/keyring"
 	"github.com/adrg/xdg"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // withXDGDataHome rewires xdg.DataHome to a tmp path for the duration of t.

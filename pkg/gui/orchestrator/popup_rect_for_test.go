@@ -3,9 +3,9 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/gui/editor"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // TestPopupRectFor_TableInspect locks in the 60% × 60% rect for the

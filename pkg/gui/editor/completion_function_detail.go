@@ -1,6 +1,6 @@
 package editor
 
-import "github.com/davesavic/dbsavvy/pkg/models"
+import "github.com/davesavic/pgsavvy/pkg/models"
 
 // FunctionDetailProvider is the synchronous-read + async-warm surface the
 // completion path queries for a SELECTED function's signature detail. It is the

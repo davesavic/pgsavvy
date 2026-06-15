@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/gui"
-	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 )
 
 // ChoiceHelper pushes the SELECTION popup (TEMPORARY_POPUP).

@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // pendingEditRegistry maps (connID, baseTable) → *models.PendingEditSet.

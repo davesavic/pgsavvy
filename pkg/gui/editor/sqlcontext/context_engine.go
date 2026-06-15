@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
 )
 
 // Clause identifies the SQL clause the cursor sits in. It is the

@@ -10,8 +10,8 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/stretchr/testify/require"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/editor"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // serializedQuerier models the per-Session worker contract: every LoadX is

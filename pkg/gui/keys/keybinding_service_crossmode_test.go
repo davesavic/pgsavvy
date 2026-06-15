@@ -3,9 +3,9 @@ package keys
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/config"
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // motionMask mirrors the controller's motionModeMask (operator-pending +

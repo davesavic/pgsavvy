@@ -3,7 +3,7 @@ package context
 import (
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // searchPrefix is the leading glyph rendered before the typed query on

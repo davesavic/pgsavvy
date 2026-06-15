@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/crypto/ssh/knownhosts"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // hostAddr splits "host:port" and returns the host.

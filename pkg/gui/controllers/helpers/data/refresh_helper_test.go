@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
 )
 
 // Nil-closure tests confirm the controller-friendly contract: a

@@ -13,10 +13,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
-	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
-	helpers "github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
+	helpers "github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 const cellApplyEnvDSN = "DBSAVVY_TEST_PG"

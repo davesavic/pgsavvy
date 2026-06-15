@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // TestSortActiveTab_JoinResultIsSortable verifies the sortability guard passes

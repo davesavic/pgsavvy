@@ -5,9 +5,9 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/gui/grid"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // cellEditorPicker satisfies controllers.GridStatePicker by resolving

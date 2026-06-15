@@ -3,9 +3,9 @@ package cheatsheet
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	"github.com/davesavic/dbsavvy/pkg/gui/keys"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/keys"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // buildTrie is a tiny per-(mode,scope) helper for tests: takes a slice

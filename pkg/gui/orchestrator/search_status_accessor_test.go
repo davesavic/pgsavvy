@@ -3,10 +3,10 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // newSearchAccessorFixture builds a Gui whose active result tab holds a

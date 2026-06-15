@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // TestTablesContext_HandleRenderWritesRows guards against regression: the

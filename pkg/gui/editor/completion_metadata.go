@@ -1,6 +1,6 @@
 package editor
 
-import "github.com/davesavic/dbsavvy/pkg/models"
+import "github.com/davesavic/pgsavvy/pkg/models"
 
 // SchemaMetadata is the synchronous, race-safe read surface the completion
 // sources query for schema metadata. It is satisfied by the background-warmed

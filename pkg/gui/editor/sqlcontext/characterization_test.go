@@ -3,7 +3,7 @@ package sqlcontext
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
 )
 
 // TestSQLContextCharacterization pins the highlight.Tokenize behaviour

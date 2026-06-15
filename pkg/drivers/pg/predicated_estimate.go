@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // EstimatePredicatedRows resolves the planner's row estimate for the inbound

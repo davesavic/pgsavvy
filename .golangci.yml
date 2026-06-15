@@ -16,13 +16,13 @@ linters:
           files:
             - '**/pkg/models/**'
           deny:
-            - pkg: github.com/davesavic/dbsavvy/pkg/gui
+            - pkg: github.com/davesavic/pgsavvy/pkg/gui
               desc: pkg/models must not depend on the gui layer (Appendix A)
-            - pkg: github.com/davesavic/dbsavvy/pkg/drivers
+            - pkg: github.com/davesavic/pgsavvy/pkg/drivers
               desc: pkg/models must not depend on the drivers layer (Appendix A)
-            - pkg: github.com/davesavic/dbsavvy/pkg/session
+            - pkg: github.com/davesavic/pgsavvy/pkg/session
               desc: pkg/models must not depend on the session layer (Appendix A)
-            - pkg: github.com/davesavic/dbsavvy/pkg/query
+            - pkg: github.com/davesavic/pgsavvy/pkg/query
               desc: pkg/models must not depend on the query layer (Appendix A)
         drivers-root:
           files:
@@ -32,7 +32,7 @@ linters:
               desc: pkg/drivers root must stay engine-neutral (epic dbsavvy-921 D9); pgx imports belong in pkg/drivers/pg.
             - pkg: github.com/jackc/pgconn
               desc: pkg/drivers root must stay engine-neutral (epic dbsavvy-921 D9); pgconn imports belong in pkg/drivers/pg.
-            - pkg: github.com/davesavic/dbsavvy/pkg/drivers/pg
+            - pkg: github.com/davesavic/pgsavvy/pkg/drivers/pg
               desc: pkg/drivers root must not depend on a concrete driver implementation (epic dbsavvy-921 D9).
         drivers-all:
           files:
@@ -44,7 +44,7 @@ linters:
           files:
             - '**/pkg/gui/context/**'
           deny:
-            - pkg: github.com/davesavic/dbsavvy/pkg/gui/controllers
+            - pkg: github.com/davesavic/pgsavvy/pkg/gui/controllers
               desc: pkg/gui/context/** must not depend on pkg/gui/controllers (epic dbsavvy-fow D7); the controllers->context direction stays allowed.
 
 formatters:

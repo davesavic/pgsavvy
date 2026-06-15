@@ -11,9 +11,9 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"go.uber.org/goleak"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/tasks"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/tasks"
 )
 
 // stubRowStream is a deterministic drivers.RowStream used by every

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // SchemaMetadataStore is a pure, race-safe, two-tier in-memory cache of schema

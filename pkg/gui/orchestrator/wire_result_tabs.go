@@ -3,13 +3,13 @@ package orchestrator
 import (
 	"context"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/i18n"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/tasks"
+	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/tasks"
 )
 
 // wireResultTabs builds the ResultTabsHelper and the wiring that depends on it:

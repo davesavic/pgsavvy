@@ -7,12 +7,12 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	"github.com/davesavic/dbsavvy/pkg/gui/editor"
-	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
-	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
+	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
+	"github.com/davesavic/pgsavvy/pkg/gui/orchestrator"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 func TestRunLayoutGatesLimitOverlay(t *testing.T) {

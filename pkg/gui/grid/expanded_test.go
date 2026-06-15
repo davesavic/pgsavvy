@@ -8,7 +8,7 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/stretchr/testify/require"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // makeView builds a *View pre-loaded with cols + rows for tests.

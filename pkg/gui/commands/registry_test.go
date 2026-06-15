@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // --- Registry: happy path -----------------------------------------------

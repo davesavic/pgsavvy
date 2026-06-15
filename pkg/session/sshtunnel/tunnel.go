@@ -16,9 +16,9 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/davesavic/dbsavvy/pkg/logs"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/logs"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 // logCat is the telemetry category for sshtunnel events.

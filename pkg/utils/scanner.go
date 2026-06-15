@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 
-	"github.com/davesavic/dbsavvy/pkg/constants"
+	"github.com/davesavic/pgsavvy/pkg/constants"
 )
 
 // ScanLinesAndTruncateWhenLongerThanBuffer is a bufio.SplitFunc that behaves

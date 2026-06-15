@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	"github.com/davesavic/dbsavvy/pkg/gui/status"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/i18n"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/status"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // ConnectionManagerMode is the modal's two-state render mode.

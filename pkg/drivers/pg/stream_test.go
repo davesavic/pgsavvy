@@ -16,9 +16,9 @@ import (
 
 	"go.uber.org/goleak"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
-	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 func TestPgStreamQueryIDPopulatedBeforeFirstNext(t *testing.T) {

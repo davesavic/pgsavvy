@@ -5,10 +5,10 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/davesavic/dbsavvy/pkg/config"
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // TestConnectionManagerDeleteInactive deletes a connection that is NOT the

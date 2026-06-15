@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/theme/builtin"
+	"github.com/davesavic/pgsavvy/pkg/theme/builtin"
 )
 
 func TestApply_DefaultDark_SetsActiveBorderToHighContrast(t *testing.T) {

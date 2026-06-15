@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/editor/sqlcontext"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor/sqlcontext"
 )
 
 // maxTriggerResults bounds the deduped suggestion set that Engine.Trigger

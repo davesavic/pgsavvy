@@ -3,8 +3,8 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // newConflictHookFixture builds a tabs helper whose active grid renders

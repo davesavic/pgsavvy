@@ -7,7 +7,7 @@ import (
 	"github.com/gdamore/tcell/v3"
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // DebugLogger is the minimal logging surface keys helpers depend on.

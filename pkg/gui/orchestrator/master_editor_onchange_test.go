@@ -6,9 +6,9 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/keys"
-	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/keys"
+	"github.com/davesavic/pgsavvy/pkg/gui/orchestrator"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // newOnChangeRig builds a SEARCH_LINE master editor with an empty trie

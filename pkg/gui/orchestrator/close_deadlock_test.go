@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 // eofRowStream reports EOF on the first Next, so a ResultBufferManager

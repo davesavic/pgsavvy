@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 func TestPgExplain_AnalyzeFalse_ReturnsPlan(t *testing.T) {

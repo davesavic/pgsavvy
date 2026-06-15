@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // TestExactCountSQL_SimpleFK quotes identifiers and binds one $1.

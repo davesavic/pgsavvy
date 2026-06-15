@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // recordingExecer is a pgConnExecer that captures the executed SQL and can

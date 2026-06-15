@@ -1,8 +1,8 @@
 package context
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/gui/editor"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // QueryEditorContext is the real top-right MAIN_CONTEXT pane that

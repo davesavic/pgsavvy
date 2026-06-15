@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // fakeApplyHook records Apply invocations and returns the configured

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/query"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/query"
 )
 
 func newTestHistory(rows []query.HistoryRow, drv types.GuiDriver) *HistoryContext {

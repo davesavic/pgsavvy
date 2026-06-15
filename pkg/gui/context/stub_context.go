@@ -1,7 +1,7 @@
 package context
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // StubContext is the placeholder Context implementation used for the six

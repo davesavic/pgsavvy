@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/common"
-	"github.com/davesavic/dbsavvy/pkg/i18n"
-	"github.com/davesavic/dbsavvy/pkg/theme"
-	"github.com/davesavic/dbsavvy/pkg/theme/builtin"
-	"github.com/davesavic/dbsavvy/pkg/utils"
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/theme/builtin"
+	"github.com/davesavic/pgsavvy/pkg/utils"
 )
 
 // TestFoundationSmoke wires every foundation package together via its public

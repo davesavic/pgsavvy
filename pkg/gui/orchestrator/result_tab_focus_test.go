@@ -3,8 +3,8 @@ package orchestrator_test
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // TestTabCycleRepointsFocusToActiveTab: with a

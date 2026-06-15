@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 )
 
 // ExCommand / ExRegistry hold the colon-prefixed ex-commands the user

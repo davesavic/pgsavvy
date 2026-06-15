@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/popup"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/popup"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // stubReversePanel is a minimal popup.Panel for the picker tests.

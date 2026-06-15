@@ -11,7 +11,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 func TestListForeignKeys_FixtureUserRoles(t *testing.T) {

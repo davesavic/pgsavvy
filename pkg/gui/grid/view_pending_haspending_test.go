@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // TestHasPendingEdits covers the three states the sort flow gates on:

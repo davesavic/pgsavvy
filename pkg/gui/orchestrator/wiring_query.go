@@ -10,8 +10,8 @@
 package orchestrator
 
 import (
-	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
-	"github.com/davesavic/dbsavvy/pkg/gui/editor"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
 )
 
 // editorBufferAdapter satisfies controllers.EditorBufferReader by

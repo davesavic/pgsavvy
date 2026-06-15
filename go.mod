@@ -1,4 +1,4 @@
-module github.com/davesavic/dbsavvy
+module github.com/davesavic/pgsavvy
 
 go 1.25.0
 

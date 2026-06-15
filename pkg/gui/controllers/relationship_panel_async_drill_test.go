@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/query"
-	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 // asyncChildTabs models the PRODUCTION reverse-open timing: OpenResultTab opens

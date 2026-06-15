@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/davesavic/dbsavvy/pkg/common"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/query"
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query"
 )
 
 func newHideTestHelper(t *testing.T) (*ResultTabsHelper, *common.AppStateStore) {

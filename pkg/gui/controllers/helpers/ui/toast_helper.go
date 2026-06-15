@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/logs"
-	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/logs"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 // ToastLevel classifies a toast for styling purposes. The current

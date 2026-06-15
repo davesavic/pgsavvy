@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 )
 
 func newBufLogger() (*slog.Logger, *bytes.Buffer) {

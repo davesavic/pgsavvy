@@ -6,10 +6,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/query"
-	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 // The interfaces below capture only the methods T7a controllers actually

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/davesavic/dbsavvy/pkg/config"
-	"github.com/davesavic/dbsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // applyTestTheme installs a known theme so assertions are deterministic.

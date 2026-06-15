@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
 )
 
 // SplitStatements splits buf on SQL-aware semicolons and returns the

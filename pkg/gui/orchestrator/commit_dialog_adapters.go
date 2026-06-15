@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
-	"github.com/davesavic/dbsavvy/pkg/gui"
-	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/logs"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/gui"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/logs"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // connHelperAcquirer satisfies helpers.SessionAcquirer by re-resolving

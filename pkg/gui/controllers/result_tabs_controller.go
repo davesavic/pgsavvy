@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/common"
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/gui/grid"
-	"github.com/davesavic/dbsavvy/pkg/gui/keys"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
+	"github.com/davesavic/pgsavvy/pkg/gui/keys"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // ResultTabsManager is the narrow surface ResultTabsController dispatches

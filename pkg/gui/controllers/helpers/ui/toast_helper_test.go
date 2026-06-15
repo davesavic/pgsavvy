@@ -9,8 +9,8 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // updateRecordingDriver captures driver.Update closures and lets the

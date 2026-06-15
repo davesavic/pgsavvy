@@ -7,14 +7,14 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/clipboard"
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	"github.com/davesavic/dbsavvy/pkg/gui/context"
-	"github.com/davesavic/dbsavvy/pkg/gui/editor"
-	"github.com/davesavic/dbsavvy/pkg/gui/editor/sqlcontext"
-	"github.com/davesavic/dbsavvy/pkg/gui/keys"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/clipboard"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor/sqlcontext"
+	"github.com/davesavic/pgsavvy/pkg/gui/keys"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // VimEditorController owns the motion / operator / textobject

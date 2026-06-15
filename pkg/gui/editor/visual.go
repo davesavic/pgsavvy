@@ -1,6 +1,6 @@
 package editor
 
-import "github.com/davesavic/dbsavvy/pkg/gui/types"
+import "github.com/davesavic/pgsavvy/pkg/gui/types"
 
 // visual.go holds the Buffer-level Selection primitives the
 // VimEditorController drives once the Matcher flips

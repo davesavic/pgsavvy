@@ -1,7 +1,7 @@
 package keys
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 )
 
 // Runtime is the aggregate that bundles every keybinding-system

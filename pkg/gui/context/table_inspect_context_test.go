@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/popup"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/popup"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // stubInspectPanel is a minimal popup.Panel impl for tests: returns a

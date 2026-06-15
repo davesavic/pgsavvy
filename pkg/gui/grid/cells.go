@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // ANSI SGR sequences shared with pkg/gui/orchestrator/status_render.go.

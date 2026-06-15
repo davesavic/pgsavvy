@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/dbsavvy/pkg/i18n"
-	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 // defaultNoticeToastTTL is the lifetime applied to NOTICE/WARNING

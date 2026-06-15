@@ -3,8 +3,8 @@ package context
 import (
 	"errors"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // ErrNoConflicts is returned by Open when called with a nil/empty

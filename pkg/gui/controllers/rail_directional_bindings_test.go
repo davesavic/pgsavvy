@@ -3,9 +3,9 @@ package controllers
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
 )
 
 // railDirectionalBindings publishes Ctrl+H/J/K/L on the

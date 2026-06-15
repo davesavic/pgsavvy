@@ -3,8 +3,8 @@ package popup
 import (
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // Panel is a body provider plus key-handling unit owned by a TabbedPopup tab.

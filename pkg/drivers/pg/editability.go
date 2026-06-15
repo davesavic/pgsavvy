@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // Frozen DisabledReason strings. Consumed verbatim by A5/B5/B6/Z1.

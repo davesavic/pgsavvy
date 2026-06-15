@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/goleak"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // benchMatcherInsert constructs a Matcher in ModeInsert with no bindings

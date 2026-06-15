@@ -12,9 +12,9 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/session"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 // promptStub captures the most recent Prompt call and exposes the

@@ -9,9 +9,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/theme"
-	"github.com/davesavic/dbsavvy/pkg/theme/builtin"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/theme/builtin"
 )
 
 // resetThemeForTest ensures every cell test starts with the default-dark

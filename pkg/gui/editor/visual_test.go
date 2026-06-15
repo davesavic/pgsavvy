@@ -3,7 +3,7 @@ package editor
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 func TestEnterVisualCharSeedsSelectionAtCursor(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // RowSource produces rows for a single export run.

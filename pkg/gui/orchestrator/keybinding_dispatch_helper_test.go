@@ -13,15 +13,15 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/davesavic/dbsavvy/pkg/common"
-	"github.com/davesavic/dbsavvy/pkg/config"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers"
-	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
-	"github.com/davesavic/dbsavvy/pkg/gui/keys"
-	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/i18n"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
+	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
+	"github.com/davesavic/pgsavvy/pkg/gui/keys"
+	"github.com/davesavic/pgsavvy/pkg/gui/orchestrator"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // kbSmoke bundles the live components built during setupKbSmoke. Step

@@ -9,7 +9,7 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 
-	"github.com/davesavic/dbsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // TokenKind classifies a SQL token for downstream styling or analysis.

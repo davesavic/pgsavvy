@@ -10,7 +10,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
-	"github.com/davesavic/dbsavvy/pkg/utils"
+	"github.com/davesavic/pgsavvy/pkg/utils"
 )
 
 // knownHostsMu serializes the read-check-append critical section of the TOFU

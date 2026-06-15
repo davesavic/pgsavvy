@@ -1,8 +1,8 @@
 package controllers
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/gui/keys"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/keys"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // AllDefaultBindings returns the union of every controller's

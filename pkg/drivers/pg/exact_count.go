@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // CountPredicatedRows resolves the EXACT number of inbound child rows

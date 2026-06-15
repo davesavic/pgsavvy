@@ -3,7 +3,7 @@ package sqlcontext
 import (
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
 )
 
 // scopeTables extracts the tables the statement brings into scope by

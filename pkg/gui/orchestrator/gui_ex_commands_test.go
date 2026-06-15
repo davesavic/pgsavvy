@@ -3,7 +3,7 @@ package orchestrator_test
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 )
 
 // TestSetRunnerWiredToSetHandler guards the setExHandler triple-use:

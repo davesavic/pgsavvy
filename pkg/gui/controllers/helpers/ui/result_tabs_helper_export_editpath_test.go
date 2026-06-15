@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/popup"
+	"github.com/davesavic/pgsavvy/pkg/gui/popup"
 )
 
 // newPathMenuOnFile builds an export menu whose cursor sits on the Path

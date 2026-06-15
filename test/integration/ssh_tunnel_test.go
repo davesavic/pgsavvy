@@ -26,9 +26,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/goleak"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/session/sshtunnel"
+	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/session/sshtunnel"
 )
 
 const (

@@ -3,10 +3,10 @@ package controllers
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/query"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/query"
 )
 
 // fakeHistoryTree records Pop invocations for the history controller.

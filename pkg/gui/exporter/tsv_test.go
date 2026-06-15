@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 func TestTSV_HeaderAndRows_NoQuotingNeeded(t *testing.T) {

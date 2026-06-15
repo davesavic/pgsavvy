@@ -3,8 +3,8 @@ package status
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
 )
 
 func TestLabelForMode_NormalEditable(t *testing.T) {

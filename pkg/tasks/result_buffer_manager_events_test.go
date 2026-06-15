@@ -12,9 +12,9 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/stretchr/testify/require"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/tasks"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/tasks"
 )
 
 func newBufLogger() (*slog.Logger, *bytes.Buffer) {

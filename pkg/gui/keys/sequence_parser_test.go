@@ -3,7 +3,7 @@ package keys
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 func TestSequenceFromShorthand_LeaderTr(t *testing.T) {

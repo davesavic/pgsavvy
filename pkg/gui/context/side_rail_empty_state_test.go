@@ -3,7 +3,7 @@ package context
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // railEmptyHook returns a RailEmptyText closure that maps each side-rail

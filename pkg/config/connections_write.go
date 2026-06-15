@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/session"
-	"github.com/davesavic/dbsavvy/pkg/utils"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/utils"
 )
 
 // ErrDuplicateConnectionName is returned by AppendConnection when the new

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
 )
 
 // PostgreSQL system OIDs used for type-aware encoding. Keeping a tiny local

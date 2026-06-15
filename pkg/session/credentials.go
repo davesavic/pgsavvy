@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // Prompter is the interactive callback used by ResolvePassword when every

@@ -9,10 +9,10 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"go.uber.org/goleak"
 
-	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
-	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
-	"github.com/davesavic/dbsavvy/pkg/gui/orchestrator"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
+	"github.com/davesavic/pgsavvy/pkg/gui/orchestrator"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // contentOnlySignalDriver wraps the recorder and signals a buffered

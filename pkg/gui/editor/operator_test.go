@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/editor"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
 )
 
 // bufFrom constructs an editor.Buffer with newline-split text. Used by

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 type fakeContext struct {

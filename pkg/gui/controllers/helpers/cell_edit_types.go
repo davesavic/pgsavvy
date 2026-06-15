@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // cell_edit_types.go: per-type entry helpers for the inline cell editor.

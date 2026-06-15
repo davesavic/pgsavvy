@@ -3,7 +3,7 @@ package drivers
 import (
 	"context"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // ConnectionProfile is the connection-profile shape consumed by Driver.Open.

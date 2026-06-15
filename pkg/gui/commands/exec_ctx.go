@@ -1,6 +1,6 @@
 package commands
 
-import "github.com/davesavic/dbsavvy/pkg/gui/types"
+import "github.com/davesavic/pgsavvy/pkg/gui/types"
 
 // ExecCtx carries the per-dispatch context a Handler may need.
 //

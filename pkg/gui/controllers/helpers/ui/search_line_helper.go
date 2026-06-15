@@ -3,8 +3,8 @@ package ui
 import (
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/gui"
-	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 )
 
 // SearchLineHelper drives the SEARCH_LINE TEMPORARY_POPUP lifecycle: it

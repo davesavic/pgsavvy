@@ -1,7 +1,7 @@
 package grid
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // fkHeaderPrefix is the glyph (U+2192 RIGHTWARDS ARROW + space) prepended to

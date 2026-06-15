@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/grid"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // SchemasContext renders the schema list in the left-rail SCHEMAS slot.

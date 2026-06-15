@@ -3,7 +3,7 @@ package exporter
 import (
 	"io"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // Format renders a sequence of rows into a destination writer.

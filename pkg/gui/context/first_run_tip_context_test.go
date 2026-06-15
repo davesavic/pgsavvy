@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 func newTestFirstRunTip(text func() (string, string), drv types.GuiDriver) *FirstRunTipContext {

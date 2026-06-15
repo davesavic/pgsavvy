@@ -3,7 +3,7 @@ package keys
 import (
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // WarnLogger is the minimal logging surface the mouse helper uses to

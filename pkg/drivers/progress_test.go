@@ -3,7 +3,7 @@ package drivers_test
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
 )
 
 // recordingReporter captures the stages reported to it, in order.

@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // keybindingProvider is the method set every controller that contributes

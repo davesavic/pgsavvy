@@ -6,7 +6,7 @@ import (
 	"math"
 	"slices"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // parsePlanJSON parses the JSON document returned by `EXPLAIN (FORMAT JSON)`

@@ -12,7 +12,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 func TestDescribeFunction_OverloadedReturnsAllOverloads(t *testing.T) {

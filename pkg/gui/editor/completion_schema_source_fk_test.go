@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // FK-aware JOIN ranking. FK edges are read SYNCHRONOUSLY from the

@@ -8,9 +8,9 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/session"
-	"github.com/davesavic/dbsavvy/pkg/utils"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/utils"
 )
 
 // authMethods builds the ordered list of ssh.AuthMethod values from cfg.

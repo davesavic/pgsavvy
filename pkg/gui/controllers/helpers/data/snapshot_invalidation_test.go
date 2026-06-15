@@ -8,7 +8,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/stretchr/testify/require"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // TestSnapshotInvalidation_StoreInvalidateSchema covers SchemaMetadataStore

@@ -1,8 +1,8 @@
 package types
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/common"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // IGuiCommon is the minimum aggregator surface every gui-layer collaborator

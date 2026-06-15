@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 )
 
 func TestToastShowOrUpdate_NewKeyEmitsToastAndTags(t *testing.T) {

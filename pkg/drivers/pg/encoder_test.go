@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
 )
 
 // maliciousStringer's String() returns text that would close a naive string

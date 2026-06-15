@@ -3,7 +3,7 @@ package pg
 import (
 	"context"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // TableLoader is the package-private machinery behind Session.ListTables. It

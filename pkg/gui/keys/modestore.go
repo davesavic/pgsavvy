@@ -5,8 +5,8 @@ import (
 	"maps"
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/logs"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/logs"
 )
 
 // ModeStore is the canonical per-context modal-state store. It maps a

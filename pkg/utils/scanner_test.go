@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/constants"
+	"github.com/davesavic/pgsavvy/pkg/constants"
 )
 
 func TestScanLines_BasicLines(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // redactRecord builds a slog.Record with the given message + attrs, runs it

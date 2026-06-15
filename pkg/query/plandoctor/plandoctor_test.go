@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // analyzedPlan builds a *models.Plan from a hand-constructed root node, marks it

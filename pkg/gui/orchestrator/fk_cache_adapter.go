@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers/pg"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // relationshipPreviewTimeout bounds each outbound display-value lookup. Short

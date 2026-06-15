@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // syncBuf is a goroutine-safe bytes.Buffer for capturing log output.

@@ -3,7 +3,7 @@ package keys
 import (
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // WhichKeyNotifier is the interface the Matcher uses to drive the

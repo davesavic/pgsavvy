@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	guicontext "github.com/davesavic/dbsavvy/pkg/gui/context"
-	"github.com/davesavic/dbsavvy/pkg/gui/editor/highlight"
-	"github.com/davesavic/dbsavvy/pkg/gui/grid"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // Render budgets for the 80×24 terminal target. Tight numbers mirror

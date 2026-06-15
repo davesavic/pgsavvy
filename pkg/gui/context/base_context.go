@@ -1,7 +1,7 @@
 package context
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // BaseContext is the concrete root for every Context in the dbsavvy TUI.

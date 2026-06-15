@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // LiveViewCount returns the number of live gocui views. RunLayout reads it to

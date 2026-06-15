@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // Typed presentation-field population: Schema/Function/Keywords

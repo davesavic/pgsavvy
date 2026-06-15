@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // IndexesContext renders the index list in the left-rail INDEXES slot.

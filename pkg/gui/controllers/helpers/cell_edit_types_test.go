@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // TestCellEditTypes_CategoryOf walks every TypeName the dispatcher

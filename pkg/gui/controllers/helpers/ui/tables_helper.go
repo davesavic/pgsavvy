@@ -3,8 +3,8 @@ package ui
 import (
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/i18n"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // tableDoubleClickTTL is the duration the table-data-editor-deferred

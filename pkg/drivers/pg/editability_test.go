@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // stubIntrospector returns the configured rows / err, ignoring the supplied

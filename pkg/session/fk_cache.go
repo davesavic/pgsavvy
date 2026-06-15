@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // FKLoader resolves the foreign keys defined on (schema, table) on a cache

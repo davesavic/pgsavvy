@@ -1,7 +1,7 @@
 // Package builtin holds the bundled ThemeConfig presets shipped with dbsavvy.
 package builtin
 
-import "github.com/davesavic/dbsavvy/pkg/config"
+import "github.com/davesavic/pgsavvy/pkg/config"
 
 // DefaultDark returns the built-in dark theme used when the user has not
 // supplied a configuration. Every exported field is populated with a

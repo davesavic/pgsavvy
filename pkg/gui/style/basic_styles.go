@@ -1,6 +1,6 @@
 package style
 
-import "github.com/davesavic/dbsavvy/pkg/gui/types"
+import "github.com/davesavic/pgsavvy/pkg/gui/types"
 
 // TextStyle is a value-typed, immutable description of how a fragment of
 // text should be rendered. Every Set* method returns a fresh TextStyle and

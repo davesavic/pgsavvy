@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 func TestTUIRefusePrompter_PromptPasswordReturnsSentinel(t *testing.T) {

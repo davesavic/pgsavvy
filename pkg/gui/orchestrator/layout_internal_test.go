@@ -5,10 +5,10 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/theme"
-	"github.com/davesavic/dbsavvy/pkg/theme/builtin"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/theme/builtin"
 )
 
 // newFramedView returns a real *gocui.View with Frame=true and FrameColor

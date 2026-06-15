@@ -3,8 +3,8 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // TestPopupRectFor_RelationshipPanelDocked verifies the docked rect anchors

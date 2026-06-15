@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
 )
 
 // StatementTimeoutMessage is the verbatim cancel-reason surfaced when a

@@ -1,7 +1,7 @@
 package context
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/gui/popup"
+	"github.com/davesavic/pgsavvy/pkg/gui/popup"
 )
 
 // TableInspectContext renders the tabbed columns/indexes inspect popup

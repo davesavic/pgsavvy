@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 )
 
 func noopExHandler(_ []string, _ commands.ExecCtx) error { return nil }

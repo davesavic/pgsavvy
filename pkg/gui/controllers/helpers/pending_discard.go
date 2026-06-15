@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // DiscardConfirmThreshold is the size above which DiscardAll prompts

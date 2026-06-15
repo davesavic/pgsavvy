@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // fakeDetailProvider is a test double for FunctionDetailProvider. It records

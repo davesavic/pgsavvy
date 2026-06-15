@@ -3,7 +3,7 @@ package context
 import (
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // whichKeyMaxRowWidth is the visible column budget for one popup row

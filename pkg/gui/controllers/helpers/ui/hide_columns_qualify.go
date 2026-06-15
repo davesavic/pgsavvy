@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/davesavic/dbsavvy/pkg/models"
+import "github.com/davesavic/pgsavvy/pkg/models"
 
 // qualifyHideColumnNames builds the per-column labels shown in the
 // <leader>gH hide-cols overlay. When the result spans more than one

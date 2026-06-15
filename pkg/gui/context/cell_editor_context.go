@@ -1,8 +1,8 @@
 package context
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // CellEditorContext is the TEMPORARY_POPUP that renders a single-line

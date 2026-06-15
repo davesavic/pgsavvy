@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // ANSI SGR sequences for the side-rail search highlighter. These mirror the

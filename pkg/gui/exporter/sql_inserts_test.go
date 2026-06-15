@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // fakeEncoder is a minimal drivers.Encoder for unit tests; no Postgres dep.

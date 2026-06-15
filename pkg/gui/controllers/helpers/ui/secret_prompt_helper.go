@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 // secretPromptOpener is the narrow surface SecretPromptHelper needs to push a

@@ -1,8 +1,8 @@
 package context
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/gui/popup"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/popup"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // FKReversePickerContextKey aliases types.FK_REVERSE_PICKER. The

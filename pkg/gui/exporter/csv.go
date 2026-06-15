@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/grid"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // csvFormat implements Format for RFC 4180 CSV output.

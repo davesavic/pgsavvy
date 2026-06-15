@@ -1,8 +1,8 @@
 package ui
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/common"
-	"github.com/davesavic/dbsavvy/pkg/gui"
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/gui"
 )
 
 // TipHelper owns the first-run tip popup dismissal. The popup itself is

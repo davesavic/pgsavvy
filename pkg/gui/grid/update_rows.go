@@ -1,6 +1,6 @@
 package grid
 
-import "github.com/davesavic/dbsavvy/pkg/models"
+import "github.com/davesavic/pgsavvy/pkg/models"
 
 // UpdateRowsByPK overwrites buffered cell values with refetched
 // post-commit data, matching rows on the grid's row identity and columns

@@ -39,7 +39,7 @@ var driverSessionMethods = []string{
 // ("No completion code path calls drivers.Session methods directly") as a
 // failing-on-regression source scan. It reads every non-test completion_*.go in
 // this package and asserts that none of them:
-//   - imports github.com/davesavic/dbsavvy/pkg/drivers, or
+//   - imports github.com/davesavic/pgsavvy/pkg/drivers, or
 //   - calls any drivers.Session metadata method.
 //
 // A future edit that reintroduces a direct session call from a completion source
@@ -49,7 +49,7 @@ func TestCompletion_NoDirectSession_GrepGuard(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, files, "expected completion_*.go sources in package editor")
 
-	const driversImport = "github.com/davesavic/dbsavvy/pkg/drivers"
+	const driversImport = "github.com/davesavic/pgsavvy/pkg/drivers"
 
 	fset := token.NewFileSet()
 	scanned := 0

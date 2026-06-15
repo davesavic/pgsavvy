@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 func TestModeStore_Set_EmitsModeSetEvent(t *testing.T) {

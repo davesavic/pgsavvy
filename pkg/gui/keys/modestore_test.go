@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 func TestModeStore_Get_EmptyReturnsNormal(t *testing.T) {

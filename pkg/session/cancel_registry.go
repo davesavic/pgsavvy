@@ -3,7 +3,7 @@ package session
 import (
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // CancelRegistry maps an active session to its in-flight RunHandle so a

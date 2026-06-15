@@ -3,8 +3,8 @@ package ui
 import (
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/editor"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // YankFlashHelper arms the transient post-yank highlight (Neovim on_yank

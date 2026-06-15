@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"github.com/gdamore/tcell/v3"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // cursorStyleForMode maps the editor's current Mode to the terminal caret

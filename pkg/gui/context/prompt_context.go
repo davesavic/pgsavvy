@@ -3,7 +3,7 @@ package context
 import (
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // PromptState is the renderer-facing surface PromptContext.HandleRender

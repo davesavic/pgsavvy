@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // TestConfirmSQLPreviewPreservesShortStatement locks the regression:

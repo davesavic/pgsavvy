@@ -6,7 +6,7 @@ import (
 
 	"github.com/adrg/xdg"
 
-	"github.com/davesavic/dbsavvy/pkg/constants"
+	"github.com/davesavic/pgsavvy/pkg/constants"
 )
 
 // GetConfigDir returns the per-user config directory for dbsavvy

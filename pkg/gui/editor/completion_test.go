@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // stubSource is a hand-rolled Source for engine tests. Returns its

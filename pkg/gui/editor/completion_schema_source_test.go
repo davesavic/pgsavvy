@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // fakeMeta is a synchronous, in-memory SchemaMetadata fake. Tests pre-populate

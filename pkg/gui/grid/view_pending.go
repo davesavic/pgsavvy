@@ -1,6 +1,6 @@
 package grid
 
-import "github.com/davesavic/dbsavvy/pkg/models"
+import "github.com/davesavic/pgsavvy/pkg/models"
 
 // SetPendingEdits installs the per-View staged-edit set used by the dirty-cell
 // renderer and the status indicator. Pass nil to clear. The pointer is stored

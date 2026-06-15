@@ -1,7 +1,7 @@
 package keys
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // ChordBinding mirrors types.ChordBinding. The canonical

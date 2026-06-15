@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
-	"github.com/davesavic/dbsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/config"
 )
 
 func newBuildInfo() *BuildInfo {

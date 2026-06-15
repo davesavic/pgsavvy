@@ -3,7 +3,7 @@ package exporter
 import (
 	"io"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // tsvFormat implements Format for tab-separated values output.

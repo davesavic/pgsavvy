@@ -1,7 +1,7 @@
 package context
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // ContextTree is the registry of every Context the dbsavvy TUI knows

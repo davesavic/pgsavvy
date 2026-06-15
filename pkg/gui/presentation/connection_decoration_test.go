@@ -3,11 +3,11 @@ package presentation
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/config"
-	"github.com/davesavic/dbsavvy/pkg/i18n"
-	"github.com/davesavic/dbsavvy/pkg/models"
-	"github.com/davesavic/dbsavvy/pkg/theme"
-	"github.com/davesavic/dbsavvy/pkg/theme/builtin"
+	"github.com/davesavic/pgsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/theme/builtin"
 )
 
 func restoreDefaultTheme(t *testing.T) {

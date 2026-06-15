@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/data"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 )
 
 // ErrPromptBusy is returned by PromptString / PromptChoice when another

@@ -3,8 +3,8 @@ package orchestrator
 import (
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/commands"
-	"github.com/davesavic/dbsavvy/pkg/query"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/query"
 )
 
 // SetSchemaLoadTimeoutForTest shrinks (and returns a restorer for) the

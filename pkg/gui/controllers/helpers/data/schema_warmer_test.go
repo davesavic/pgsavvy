@@ -11,7 +11,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/stretchr/testify/require"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // fakeQuerier is a synchronous, race-safe stand-in for the serialized

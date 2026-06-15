@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/davesavic/dbsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/config"
 )
 
 func TestCommon_UserConfigStore_RoundTrip(t *testing.T) {

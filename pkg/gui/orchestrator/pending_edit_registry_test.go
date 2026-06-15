@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 func TestPendingEditRegistry_ForReturnsSameInstance(t *testing.T) {

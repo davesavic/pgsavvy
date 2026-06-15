@@ -3,8 +3,8 @@ package context
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/internal/testfake"
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // newRelationshipPanelForTest builds a RELATIONSHIP_PANEL context bound to

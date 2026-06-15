@@ -5,9 +5,9 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/davesavic/dbsavvy/pkg/common"
-	"github.com/davesavic/dbsavvy/pkg/gui"
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/gui"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 )
 
 func TestDismissStartupTipStampsAndPops(t *testing.T) {

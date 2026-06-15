@@ -3,7 +3,7 @@ package status
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
 )
 
 // TestBuildStatusLine_SpinnerAdvancesByFrameNotBusyCount verifies the

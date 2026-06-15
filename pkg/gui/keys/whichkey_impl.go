@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // WhichKey is the concrete WhichKeyNotifier the Matcher drives from

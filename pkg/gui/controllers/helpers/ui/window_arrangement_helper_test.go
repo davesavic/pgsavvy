@@ -3,7 +3,7 @@ package ui_test
 import (
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 )
 
 func TestGetWindowDimensionsReturnsAllRequiredKeys(t *testing.T) {

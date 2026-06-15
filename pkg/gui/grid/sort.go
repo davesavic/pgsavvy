@@ -1,7 +1,7 @@
 package grid
 
 import (
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // sortState carries the in-grid column sort.

@@ -5,7 +5,7 @@ import (
 
 	"github.com/gdamore/tcell/v3"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // cursorStyleForMode is the pure mode→shape mapping that drives the

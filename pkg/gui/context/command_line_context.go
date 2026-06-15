@@ -3,7 +3,7 @@ package context
 import (
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // CommandLineContext renders the colon ex-command line at the bottom of

@@ -3,7 +3,7 @@ package context
 import (
 	"sync"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // RelationshipPanelContext renders the <leader>gr right-docked FK-

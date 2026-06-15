@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/drivers"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // sqlInsertsFormat implements Format by emitting one INSERT statement per row.

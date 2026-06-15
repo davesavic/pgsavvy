@@ -3,8 +3,8 @@ package cheatsheet
 import (
 	"strings"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
-	"github.com/davesavic/dbsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
 )
 
 // Render produces the deterministic, terminal-styling-free text dump of

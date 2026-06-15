@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/davesavic/dbsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 func TestSettingsSnapshot_GetSetDelete(t *testing.T) {

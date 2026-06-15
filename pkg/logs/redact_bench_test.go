@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // BenchmarkRedactingHandler_AllocsPerOp measures allocations per emission

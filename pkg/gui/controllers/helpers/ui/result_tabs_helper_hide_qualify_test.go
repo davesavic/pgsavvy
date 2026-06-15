@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/davesavic/dbsavvy/pkg/common"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 func newHideQualifyHelper(t *testing.T, resolve func(context.Context, []uint32) (map[uint32]string, error)) *ResultTabsHelper {

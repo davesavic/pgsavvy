@@ -3,7 +3,7 @@ package session
 import (
 	"errors"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // defaultSSHPort is the port a tunnel falls back to when the profile leaves

@@ -3,8 +3,8 @@ package editor
 import (
 	"context"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/editor/sqlcontext"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor/sqlcontext"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // SchemaSourceName is the stable Name() for the schema-aware

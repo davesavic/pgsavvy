@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	helpers "github.com/davesavic/dbsavvy/pkg/gui/controllers/helpers"
-	"github.com/davesavic/dbsavvy/pkg/models"
+	helpers "github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // --- Fakes ---------------------------------------------------------------

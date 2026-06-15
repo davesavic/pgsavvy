@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/davesavic/dbsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // displayColumnTextTypes are the substrings that mark a column's DataType as

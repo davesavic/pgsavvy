@@ -3,7 +3,7 @@ package testfake
 import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/dbsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // ExpectedBinding is one (view, key, mod) tuple the bootstrap is expected
