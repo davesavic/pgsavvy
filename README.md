@@ -24,6 +24,16 @@ Active development. PostgreSQL is the only supported driver so far; breaking cha
 - **Theming & i18n** — configurable colors (named/hex, truecolor-capable) and locale-aware translations with English fallback.
 - **Session logs** — per-session structured JSON logs with secret redaction and automatic retention.
 
+## In action
+
+**SQL omni-completion** — auto-triggered table/column suggestions sourced from schema objects, functions, and history (`<c-n>`/`<c-p>` to navigate, `<c-y>` to accept):
+
+![pgsavvy omni-completion](docs/demo-autocomplete.gif)
+
+**Foreign-key navigation** — open the relationship panel (`<leader>gr`) to see a row's parents and children, then follow a foreign key into the referenced row with `gd` (and `<c-o>` to jump back):
+
+![pgsavvy foreign-key navigation](docs/demo-relationships.gif)
+
 ## Install
 
 ### go install
