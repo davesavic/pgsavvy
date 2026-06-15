@@ -1,12 +1,12 @@
 # Customizing keybindings
 
-dbsavvy lets you remap almost every key from a YAML config file. This page
+pgsavvy lets you remap almost every key from a YAML config file. This page
 explains the config schema, how user bindings interact with the shipped
 defaults, how to discover the action IDs you can bind, and which keys are
 deliberately fixed and cannot be changed.
 
-> Config file location: `$XDG_CONFIG_HOME/dbsavvy/config.yml`
-> (typically `~/.config/dbsavvy/config.yml`). See the
+> Config file location: `$XDG_CONFIG_HOME/pgsavvy/config.yml`
+> (typically `~/.config/pgsavvy/config.yml`). See the
 > [Config File notes](review/cross_cutting.md#config-file) for how the file
 > is created and overlaid onto the built-in defaults.
 
@@ -56,7 +56,7 @@ not added on top of the defaults, it becomes the whole list.
 
 That means: if you write a `keybindings:` section, you must re-include every
 binding you still want, **including a quit binding**. Omitting `app.quit`
-leaves the app with no key-driven exit — and dbsavvy now refuses to start in
+leaves the app with no key-driven exit — and pgsavvy now refuses to start in
 that state (see [Recovering from a lockout](#recovering-from-a-lockout)).
 
 (The shipped defaults that do *not* come from this list — e.g. the `:`
@@ -250,7 +250,7 @@ editor.paste
 ## Recovering from a lockout
 
 Because user `keybindings:` replace the defaults wholesale, it is possible
-to write a config with no exit. dbsavvy guards against this:
+to write a config with no exit. pgsavvy guards against this:
 
 - **A config with no `app.quit` binding fails startup.** Validation is a
   hard error (not a warning): the app refuses to open the TUI and prints a
@@ -269,7 +269,7 @@ If you ever find yourself stuck, these escapes always work:
 - **External `kill -INT` / `kill -TERM`** from another process also exits.
 
 To recover permanently, **edit or remove your config file**
-(`~/.config/dbsavvy/config.yml`) to restore a valid set of bindings, then
+(`~/.config/pgsavvy/config.yml`) to restore a valid set of bindings, then
 restart. There is no `--ignore-config` flag.
 
 ---

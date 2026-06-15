@@ -1,6 +1,11 @@
-# dbsavvy
+# pgsavvy
 
-A vim-style TUI database client built like [lazygit](https://github.com/jesseduffield/lazygit) — fast keyboard navigation, modal panes, and a focused workflow for browsing and querying relational databases from the terminal.
+[![CI](https://github.com/davesavic/pgsavvy/actions/workflows/ci.yml/badge.svg)](https://github.com/davesavic/pgsavvy/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+A vim-style TUI PostgreSQL client built like [lazygit](https://github.com/jesseduffield/lazygit) — fast keyboard navigation, modal panes, and a focused workflow for browsing and querying your database from the terminal. The name is short for "PostgreSQL savvy".
+
+![pgsavvy demo](docs/demo.gif)
 
 ## Status
 
@@ -19,14 +24,35 @@ Active development. PostgreSQL is the only supported driver so far; breaking cha
 - **Theming & i18n** — configurable colors (named/hex, truecolor-capable) and locale-aware translations with English fallback.
 - **Session logs** — per-session structured JSON logs with secret redaction and automatic retention.
 
+## Install
+
+### go install
+
+```sh
+go install github.com/davesavic/pgsavvy@latest
+```
+
+### Build from source
+
+```sh
+git clone https://github.com/davesavic/pgsavvy.git
+cd pgsavvy
+task build       # produces bin/pgsavvy with -ldflags-injected version metadata
+```
+
+### Release binaries
+
+Prebuilt binaries are published on the [Releases](https://github.com/davesavic/pgsavvy/releases) page — download the archive for your platform and put the `pgsavvy` binary on your `PATH`.
+
+See the [install & usage guide](docs/INSTALL.md) for full details.
+
 ## Quick Start
 
 ```sh
-task build       # produces bin/dbsavvy with -ldflags-injected version metadata
-bin/dbsavvy      # starts the TUI and opens the connection manager
+pgsavvy          # starts the TUI and opens the connection manager
 ```
 
-On first run, create a connection profile in the connection manager (or edit `~/.config/dbsavvy/connections.yml` directly), then connect. Press `?` for the keybinding cheatsheet; see `docs/keybindings.md` for the full reference.
+On first run, create a connection profile in the connection manager (or edit `~/.config/pgsavvy/connections.yml` directly), then connect. Press `?` for the keybinding cheatsheet; see [docs/keybindings.md](docs/keybindings.md) for the full reference.
 
 ## Configuration
 
@@ -34,12 +60,12 @@ XDG Base Directory layout:
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `config.yml` | `~/.config/dbsavvy/` | Keybindings, theme, UI/query settings |
-| `connections.yml` | `~/.config/dbsavvy/` | Connection profiles |
-| `state.yml` | `~/.local/state/dbsavvy/` | App state (last connection, view modes, …) |
-| Session logs | `~/.local/state/dbsavvy/sessions/` | Per-session JSON debug logs (redacted) |
+| `config.yml` | `~/.config/pgsavvy/` | Keybindings, theme, UI/query settings |
+| `connections.yml` | `~/.config/pgsavvy/` | Connection profiles |
+| `state.yml` | `~/.local/state/pgsavvy/` | App state (last connection, view modes, …) |
+| Session logs | `~/.local/state/pgsavvy/sessions/` | Per-session JSON debug logs (redacted) |
 
-Useful environment variables: `DBSAVVY_LOG_DIR` (override log directory), `DBSAVVY_DISABLE_SESSION_LOG=1` (stderr-only logging), standard `XDG_*` overrides.
+Useful environment variables: `PGSAVVY_LOG_DIR` (override log directory), `PGSAVVY_DISABLE_SESSION_LOG=1` (stderr-only logging), standard `XDG_*` overrides. See [docs/INSTALL.md](docs/INSTALL.md#environment-variables) for the full list.
 
 ## Requirements
 
@@ -48,22 +74,18 @@ Useful environment variables: `DBSAVVY_LOG_DIR` (override log directory), `DBSAV
 - [golangci-lint](https://golangci-lint.run) v2 — `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.7.0`
 - [Docker Compose](https://docs.docker.com/compose/) — optional, only needed for the Postgres / SSH-tunnel integration fixtures
 
-### Optional dev tooling
-
-- `gofumpt` — IDE save-on-format hook. Not required for `task fmt` or CI; golangci-lint v2 bundles `gofumpt` and `goimports` as built-in formatters.
-
 ## Development
 
 ```sh
 task --list            # all available tasks
-task build             # compile to bin/dbsavvy
+task build             # compile to bin/pgsavvy
 task test              # unit tests (forwards args: task test -- -run TestX)
 task lint              # golangci-lint v2
 task fmt               # gofumpt + goimports via golangci-lint formatters
 task vulncheck         # pinned govulncheck
 
 task pg:up             # bring up the Postgres integration fixture
-task test:integration  # integration tests (requires DBSAVVY_TEST_PG + fixture)
+task test:integration  # integration tests (requires PGSAVVY_TEST_PG + fixture)
 task test:all          # unit + integration
 task pg:down           # tear down the fixture (removes container + volume)
 
@@ -71,7 +93,7 @@ task sshtunnel:up      # SSH bastion + private Postgres fixture (tunnel tests)
 task sshtunnel:down
 ```
 
-Integration tests are gated by `DBSAVVY_TEST_PG`; `internal/pgprobe` fail-loud checks reachability before the suite runs so it can't silently skip.
+Integration tests are gated by `PGSAVVY_TEST_PG`; `internal/pgprobe` fail-loud checks reachability before the suite runs so it can't silently skip. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor workflow.
 
 ### Integration fixture gotcha
 
@@ -83,10 +105,10 @@ task pg:down && task pg:up
 
 ## Documentation
 
-- `docs/keybindings.md` — full keybinding reference
-- `docs/QA_TEST_SUITE.md` — manual QA test suite
-- `docs/review/` — per-pane behavior review notes
-- `docs/dev/` — developer notes (dispatch, filesystem)
+- [docs/INSTALL.md](docs/INSTALL.md) — install & usage guide
+- [docs/keybindings.md](docs/keybindings.md) — full keybinding reference
+- [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow for contributors
+- [SECURITY.md](SECURITY.md) — vulnerability disclosure
 
 ## License
 
