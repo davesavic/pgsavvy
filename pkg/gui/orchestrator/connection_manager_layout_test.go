@@ -102,6 +102,34 @@ func TestConnectionManagerRendersWithoutConnections(t *testing.T) {
 	}
 }
 
+// TestFirstRunTipRendersAndFocusesOnZeroConnectionStartup asserts the
+// zero-connection startup path: wireWithDriver pushes FIRST_RUN_TIP
+// (PERSISTENT_POPUP) atop CONNECTION_MANAGER, and the layout pass must
+// actually create + render the tip view and route gocui focus to it.
+// Regression for pgsavvy-klan: PERSISTENT_POPUP had no Tier-3 SetView path
+// and no popup rect, so the tip view was never created (showed nothing) and
+// Tier-4 SetCurrentView targeted a nonexistent view (no focus).
+func TestFirstRunTipRendersAndFocusesOnZeroConnectionStartup(t *testing.T) {
+	g, rec := buildTestGui(t)
+	// buildTestGui wires with an empty ConnectionsProvider, so startup pushes
+	// CONNECTION_MANAGER then FIRST_RUN_TIP on top.
+	if got := g.ContextTree().Current().GetKey(); got != types.FIRST_RUN_TIP {
+		t.Fatalf("focus stack top = %q, want %q (precondition)", got, types.FIRST_RUN_TIP)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if !rec.HasSetView(string(types.FIRST_RUN_TIP)) {
+		t.Fatal("FIRST_RUN_TIP SetView not invoked; tip popup would be invisible")
+	}
+	if got := strings.TrimSpace(rec.GetViewBuffer(string(types.FIRST_RUN_TIP))); got == "" {
+		t.Fatal("FIRST_RUN_TIP view content empty; tip body not rendered")
+	}
+	if got := rec.SetCurrentViewLog; len(got) == 0 || got[len(got)-1] != string(types.FIRST_RUN_TIP) {
+		t.Fatalf("final SetCurrentView = %v, want last entry %q (tip must hold focus)", got, types.FIRST_RUN_TIP)
+	}
+}
+
 // TestConnectionManagerRootExitNeverPopsBottom asserts the root-exit
 // invariant the modal's <esc> close path relies on: at stack depth 1 the
 // focus stack's Pop is a guarded no-op — it returns ErrPopAtBottom and leaves

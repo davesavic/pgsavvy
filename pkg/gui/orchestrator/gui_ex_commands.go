@@ -247,3 +247,20 @@ func (g *Gui) handleCrossDBEx(_ []string, _ commands.ExecCtx) error {
 	g.toaster("cross-database attach not supported — create a separate connection profile")
 	return nil
 }
+
+// handleShowTipEx is the :tip handler. It re-displays the first-run welcome
+// tip on demand (e.g. to re-check it after it's been dismissed), independent
+// of the startup gate (the seen-stamp / zero-connections predicate only gates
+// the automatic boot-time push). The command line is popped first so
+// dismissing the tip returns to the underlying context instead of a stranded
+// command line. No-op if the tip is already on top.
+func (g *Gui) handleShowTipEx(_ []string, _ commands.ExecCtx) error {
+	if g.registry == nil || g.registry.FirstRunTip == nil || g.tree == nil {
+		return nil
+	}
+	_ = g.tree.PopIfTop(types.COMMAND_LINE)
+	if top := g.tree.Current(); top != nil && top.GetKey() == types.FIRST_RUN_TIP {
+		return nil
+	}
+	return g.tree.Push(g.registry.FirstRunTip)
+}

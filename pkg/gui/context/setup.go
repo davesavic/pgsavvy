@@ -316,8 +316,9 @@ func contextSpecs() []contextSpec {
 		// subsequent popup pushes don't auto-evict it.
 		{
 			key: types.FIRST_RUN_TIP, kind: types.PERSISTENT_POPUP, inFlatten: true,
-			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewFirstRunTipContext(b, d) },
-			assign: func(t *ContextTree, c types.IBaseContext) { t.FirstRunTip = c.(*FirstRunTipContext) },
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.5, HeightFrac: 0.4},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewFirstRunTipContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.FirstRunTip = c.(*FirstRunTipContext) },
 		},
 
 		// QUERY_EDITOR is the live top-right MAIN_CONTEXT pane,

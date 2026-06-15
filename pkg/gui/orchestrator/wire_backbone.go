@@ -711,6 +711,29 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 	_ = g.driver.SetKeybinding(string(types.FIRST_RUN_TIP), gocui.NewKeyName(gocui.KeyEsc), gocui.ModNone, dismissTip)
 	_ = g.driver.SetKeybinding(string(types.FIRST_RUN_TIP), gocui.NewKeyName(gocui.KeyEnter), gocui.ModNone, dismissTip)
 
+	// `a` / `?` on the FIRST_RUN_TIP view fulfil the tip's "Press ? ... Press a
+	// to add your first connection" copy. Both are otherwise-scoped bindings
+	// (CONNECTION_MANAGER `a`, GLOBAL-trie `?`) that never fire while the tip
+	// owns input through its direct view shims. Each dismisses the tip, then
+	// dispatches the real action. dismissTip's Pop fires the new top's
+	// HandleFocus first; the dispatched action runs last so its state wins
+	// (e.g. CONNECTION_MANAGER lands in ModeForm, not the HandleFocus-reset
+	// ModeList).
+	dismissTipThen := func(actionID string) func() error {
+		return func() error {
+			if err := dismissTip(); err != nil {
+				return err
+			}
+			cmd, ok := g.keybindingSystem.cmdRegistry.Get(actionID)
+			if !ok || cmd == nil || cmd.Handler == nil {
+				return nil
+			}
+			return cmd.Handler(commands.ExecCtx{})
+		}
+	}
+	_ = g.driver.SetKeybinding(string(types.FIRST_RUN_TIP), gocui.NewKeyRune('a'), gocui.ModNone, dismissTipThen(commands.ConnectionManagerAdd))
+	_ = g.driver.SetKeybinding(string(types.FIRST_RUN_TIP), gocui.NewKeyRune('?'), gocui.ModNone, dismissTipThen(commands.HelpCheatsheet))
+
 	// COMMAND_LINE action commands. The CommandLineContext doubles as
 	// the holder (it implements types.IBaseContext + ReadAndClearBuffer).
 	cmdDeps := keys.CommandLineCommandDeps{
@@ -837,6 +860,10 @@ func (g *Gui) wireExCommands(defaults []*types.ChordBinding, svc *keys.Keybindin
 		Description: "Cross-database attach (not supported)",
 		Handler:     g.handleCrossDBEx,
 	})
+
+	// :tip — re-show the first-run welcome tip on demand (independent of the
+	// startup seen-stamp / zero-connections gate). Handler in gui_ex_commands.go.
+	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "tip", Description: "Show the first-run welcome tip", Handler: g.handleShowTipEx})
 }
 
 // wireKeyDispatch installs the master editor / per-key dispatch, wires the mouse,

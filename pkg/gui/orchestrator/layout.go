@@ -266,9 +266,12 @@ func (g *Gui) RunLayout(w, h int) error {
 	applyFocusFrameColors(rails, focusedName, frameAttr(theme.Current().ActiveBorder), frameAttr(theme.Current().InactiveBorder))
 
 	// Tier 3: focus-stack-driven popups (TEMPORARY_POPUP +
-	// DISPLAY_CONTEXT). Walk bottom→top so SetViewOnTop ordering matches
-	// the stack ordering. Contexts that aren't on the stack get their
-	// view DeleteView'd so empty popup rects don't occlude side panels.
+	// DISPLAY_CONTEXT + PERSISTENT_POPUP). Walk bottom→top so SetViewOnTop
+	// ordering matches the stack ordering. Contexts that aren't on the stack
+	// get their view DeleteView'd so empty popup rects don't occlude side
+	// panels. PERSISTENT_POPUP (FIRST_RUN_TIP) differs from TEMPORARY_POPUP
+	// only in focus-stack push semantics (it survives subsequent popup
+	// pushes); its view is created/rendered/torn-down through this same path.
 	onStack := map[types.ContextKey]struct{}{}
 	if g.tree != nil {
 		for _, ctx := range g.tree.Stack() {
@@ -276,7 +279,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				continue
 			}
 			kind := ctx.GetKind()
-			if kind != types.TEMPORARY_POPUP && kind != types.DISPLAY_CONTEXT {
+			if kind != types.TEMPORARY_POPUP && kind != types.DISPLAY_CONTEXT && kind != types.PERSISTENT_POPUP {
 				continue
 			}
 			name := ctx.GetViewName()
@@ -566,6 +569,15 @@ func (g *Gui) RunLayout(w, h int) error {
 				}
 				view.FrameColor = frameAttr(border)
 			}
+			// FIRST_RUN_TIP styling: the welcome tip is the focused modal while
+			// on top, so paint the active border (popups are skipped by the
+			// Tier-1 applyFocusFrameColors pass). Wrap reflows the prose body to
+			// the box width. The frame carries no title — HandleRender renders
+			// the tip's own title as the body's first line.
+			if ctx.GetKey() == types.FIRST_RUN_TIP && view != nil {
+				view.Wrap = true
+				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+			}
 			_ = ctx.HandleRender()
 			if ctx.GetKey() == types.CHEATSHEET && view != nil {
 				applyCheatsheetScroll(view, ctx)
@@ -581,19 +593,21 @@ func (g *Gui) RunLayout(w, h int) error {
 		}
 	}
 
-	// Tear down any TEMPORARY_POPUP / DISPLAY_CONTEXT views that aren't
-	// currently on the focus stack. WHICH_KEY, LIMIT and SUGGESTIONS are
-	// managed by their dedicated overlay paths (notifier-driven /
-	// tiny-terminal branch / IsVisible-driven respectively) and excluded
+	// Tear down any TEMPORARY_POPUP / DISPLAY_CONTEXT / PERSISTENT_POPUP views
+	// that aren't currently on the focus stack. WHICH_KEY, LIMIT and
+	// SUGGESTIONS are managed by their dedicated overlay paths (notifier-driven
+	// / tiny-terminal branch / IsVisible-driven respectively) and excluded
 	// here — SUGGESTIONS in particular is never pushed onto the focus
 	// stack (frozen design) so the teardown must not delete
-	// its view out from under renderSuggestionsOverlay.
+	// its view out from under renderSuggestionsOverlay. PERSISTENT_POPUP
+	// (FIRST_RUN_TIP) is included so dismissing the tip (a Pop) deletes its
+	// view instead of leaving it drawn over the connection manager.
 	for _, ctx := range g.registry.Flatten() {
 		if ctx == nil {
 			continue
 		}
 		kind := ctx.GetKind()
-		if kind != types.TEMPORARY_POPUP && kind != types.DISPLAY_CONTEXT {
+		if kind != types.TEMPORARY_POPUP && kind != types.DISPLAY_CONTEXT && kind != types.PERSISTENT_POPUP {
 			continue
 		}
 		key := ctx.GetKey()
@@ -888,6 +902,14 @@ func (g *Gui) layoutConnectionManagerMain(dims map[string]ui.Dimensions, rails m
 		cm.SetLabelWrapWidth(v.InnerWidth())
 	}
 	_ = cm.HandleRender()
+	// Pin the marked row on screen when the body overflows the box: the form's
+	// focused field (ModeForm) and the selected connection (ModeList) both bake a
+	// "> " gutter and can overflow. A no-op for the connecting/empty bodies, which
+	// render no marker. Mirrors the Tier-3 scroll passes for the other scrollable
+	// contexts (RELATIONSHIP_PANEL/CHEATSHEET/TABLE_INSPECT).
+	if v != nil {
+		applyConnectionManagerScroll(v)
+	}
 	// The QUERY_EDITOR view from prior frames still exists in the dims["main"]
 	// rect (it is never DeleteView'd). Lift the modal above it so the box is
 	// actually visible while it owns the slot. Mirrors layoutConnectingMain.
@@ -1426,6 +1448,44 @@ func applyRelationshipPanelScroll(view *gocui.View, focused bool) {
 		view.SetOriginY(0)
 		return
 	}
+	lines := view.ViewBufferLines()
+	sel := -1
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, "> ") {
+			sel = i
+			break
+		}
+	}
+	if sel < 0 {
+		return
+	}
+	height := view.InnerHeight()
+	if height <= 0 {
+		return
+	}
+	oy := view.OriginY()
+	if sel < oy {
+		oy = sel
+	} else if sel >= oy+height {
+		oy = sel - height + 1
+	}
+	if maxOY := max(len(lines)-height, 0); oy > maxOY {
+		oy = maxOY
+	}
+	view.SetOriginY(oy)
+}
+
+// applyConnectionManagerScroll keeps the marked row on screen while the modal
+// body overflows the centered box. Both the add/edit form (focused field) and
+// the connection list (selected row) render their whole body in one SetContent
+// and bake a "> " gutter onto the active row, so the layout locates that row in
+// the wrap-applied view lines and scrolls the vertical origin just enough to
+// keep it visible — without this the cursor walks off the bottom edge as soon
+// as the rows (e.g. the SSH section expanded, a short terminal, or many saved
+// connections) exceed the box's inner height. Called after HandleRender so
+// ViewBufferLines reflects the freshly written body. Mirrors
+// applyRelationshipPanelScroll's focused path.
+func applyConnectionManagerScroll(view *gocui.View) {
 	lines := view.ViewBufferLines()
 	sel := -1
 	for i, ln := range lines {

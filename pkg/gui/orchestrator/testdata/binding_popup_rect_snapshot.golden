@@ -377,7 +377,7 @@ popuprect	key=confirmation	x0=25	y0=25	x1=75	y1=75
 popuprect	key=conflict_dialog	x0=20	y0=20	x1=80	y1=80
 popuprect	key=connection_manager	none
 popuprect	key=export_menu	x0=25	y0=25	x1=75	y1=75
-popuprect	key=first_run_tip	none
+popuprect	key=first_run_tip	x0=25	y0=30	x1=75	y1=70
 popuprect	key=fk_reverse_picker	x0=20	y0=20	x1=80	y1=80
 popuprect	key=global	none
 popuprect	key=hide_overlay	x0=25	y0=25	x1=75	y1=75
