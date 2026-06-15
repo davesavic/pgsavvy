@@ -119,6 +119,7 @@ tasks:
         connections:
           - name: demo
             driver: postgres
-            dsn: postgres://pgsavvy:pgsavvy@localhost:5432/pgsavvy_test?sslmode=disable
+            dsn: postgres://pgsavvy@localhost:5432/pgsavvy_test?sslmode=disable
+            password_command: echo pgsavvy
         YAML
       - vhs docs/demo.tape
