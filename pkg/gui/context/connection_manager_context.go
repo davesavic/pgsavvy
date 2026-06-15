@@ -216,6 +216,12 @@ func (c *ConnectionManagerContext) FormSetStatus(msg string) {
 // dial the connection being edited without saving it.
 func (c *ConnectionManagerContext) FormConnection() models.Connection { return c.form.conn }
 
+// SetLabelWrapWidth records the modal's inner column count so the form clips
+// its inline err/status line to a single physical row. The layout pass
+// (layoutConnectionManagerMain) calls this each frame with the live view's
+// InnerWidth, mirroring PromptContext, so the clip tracks terminal resizes.
+func (c *ConnectionManagerContext) SetLabelWrapWidth(w int) { c.form.msgWidth = w }
+
 // FormToggleFocused flips the focused toggle or cycles the driver selector
 // (space / i on a non-text field).
 func (c *ConnectionManagerContext) FormToggleFocused() { c.form.toggleFocused() }

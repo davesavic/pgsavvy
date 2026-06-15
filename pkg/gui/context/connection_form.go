@@ -10,6 +10,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/session"
 	"github.com/davesavic/pgsavvy/pkg/theme"
+	"github.com/mattn/go-runewidth"
 )
 
 // connFieldKind classifies how a form row is edited:
@@ -120,6 +121,13 @@ type connForm struct {
 	// under the focused field. Mutually exclusive with err: setting either
 	// clears the other.
 	status string
+
+	// msgWidth is the modal's inner column count, injected by the layout each
+	// frame (SetLabelWrapWidth). The inline err/status line is clipped to it so
+	// a long message stays on ONE physical row instead of wrapping (the modal
+	// has Wrap=true) and displacing the field rows below. Zero ⇔ width unknown
+	// (recorder/test path without injection) ⇒ no clipping (back-compat).
+	msgWidth int
 
 	// sshEnabled and sshAuth are TRANSIENT (never persisted): they gate the
 	// SSH section's visibility and drive how the auth picker maps onto
@@ -669,14 +677,50 @@ func (f *connForm) render() string {
 			marker = "> "
 		}
 		fmt.Fprintf(&b, "%s%-18s %s\n", marker, s.label+":", f.displayValue(s))
+		// Inline err/status sit under the focused field with more rows below,
+		// so they MUST stay one physical row: the modal has Wrap=true, and a
+		// long message would otherwise reflow to multiple lines and push the
+		// rows below it. Clip to the inner width minus the 4-space indent
+		// (pgsavvy-xta7). The async row-shift this causes is repainted by
+		// orchestrator.resyncOnModalContentChange (a full Screen.Sync evicts
+		// the cells the shift orphans, which incremental Show() leaves behind).
 		if f.err != "" && s.id == focused.id {
-			fmt.Fprintf(&b, "    %s\n", f.err)
+			fmt.Fprintf(&b, "    %s\n", clipInline(f.err, f.msgWidth-inlineMsgReserve))
 		}
 		if f.status != "" && s.id == focused.id {
-			fmt.Fprintf(&b, "    %s\n", f.status)
+			fmt.Fprintf(&b, "    %s\n", clipInline(f.status, f.msgWidth-inlineMsgReserve))
 		}
 	}
 	return b.String()
+}
+
+// inlineMsgReserve is the width of the leading indent the inline err/status row
+// carries ("    "), subtracted from the inner width so the message text fits on
+// one physical line.
+const inlineMsgReserve = 4
+
+// clipInline truncates an inline message to fit w terminal columns on a single
+// physical row, cutting on a rune boundary and appending "…" (1 column) when it
+// trims. A non-positive w means the width is unknown (no injection yet), so the
+// message is returned unchanged. Mirrors grid.truncateToWidth.
+func clipInline(s string, w int) string {
+	if w <= 0 || runewidth.StringWidth(s) <= w {
+		return s
+	}
+	if w == 1 {
+		return "…"
+	}
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		rw := runewidth.RuneWidth(r)
+		if used+rw > w-1 { // reserve the last column for the ellipsis
+			break
+		}
+		b.WriteRune(r)
+		used += rw
+	}
+	return b.String() + "…"
 }
 
 // colorPreviewSGR returns the ANSI foreground escape used to tint the colour

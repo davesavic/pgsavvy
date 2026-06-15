@@ -789,20 +789,28 @@ func (g *Gui) resyncOnViewTeardown() {
 }
 
 // resyncOnModalContentChange forces a one-shot full Screen.Sync() on frames
-// where the CONNECTION_MANAGER modal is open in ModeConnecting and its rendered
-// body changed since the previous frame. The connect lifecycle churns the body
-// in place (list row -> "Connecting…" -> "already connected" + retry hints);
-// some of those transitions draw the body one row shifted for a frame, and
-// tcell's incremental Show() never re-emits the cells the shifted frame
-// vacated, so the bodies otherwise stack as ghosts that "move up" on every
-// retry. The view buffer is always correct, so a Sync() (full re-emit from the
-// correct back buffer) evicts the ghosts. Gated on an actual body change so
-// steady-state connecting/error frames keep the cheap diff path, and scoped to
-// ModeConnecting so benign list/form navigation never triggers a full repaint.
+// where the CONNECTION_MANAGER modal body shifts rows in place. tcell's
+// incremental Show() never re-emits the cells a row-shifted frame vacated, so
+// the prior body otherwise stacks as a ghost; the view buffer is always
+// correct, so a Sync() (full re-emit from the correct back buffer) evicts it.
 // Sibling of resyncOnViewTeardown, which covers only the view-count-shrink
 // (modal close) case.
+//
+// Two in-place-shift sources are covered:
+//   - ModeConnecting: the connect lifecycle churns the body (list row ->
+//     "Connecting…" -> "already connected" + retry hints); ANY body change can
+//     leave a one-row-shifted ghost, so Sync on any change.
+//   - ModeForm: the test-connection inline pass/fail line appears/disappears
+//     UNDER the focused field ASYNCHRONOUSLY (in a frame separate from the
+//     keypress), shifting every row below it. Only a LINE-COUNT change orphans
+//     cells, so Sync on that alone — in-place edits and focus/marker moves keep
+//     the cheap diff path so steady-state form navigation never full-repaints.
 func (g *Gui) resyncOnModalContentChange() {
-	if !g.modalIsTopMain() || g.registry.ConnectionManager.Mode() != guicontext.ModeConnecting {
+	mode := guicontext.ModeList
+	if g.modalIsTopMain() {
+		mode = g.registry.ConnectionManager.Mode()
+	}
+	if mode != guicontext.ModeConnecting && mode != guicontext.ModeForm {
 		g.prevModalBody = ""
 		return
 	}
@@ -811,11 +819,14 @@ func (g *Gui) resyncOnModalContentChange() {
 		return
 	}
 	body := g.driver.GetViewBuffer(name)
-	if body == g.prevModalBody {
+	prev := g.prevModalBody
+	if body == prev {
 		return
 	}
 	g.prevModalBody = body
-	if gocui.Screen != nil {
+	rowShift := mode == guicontext.ModeConnecting ||
+		strings.Count(body, "\n") != strings.Count(prev, "\n")
+	if rowShift && gocui.Screen != nil {
 		gocui.Screen.Sync()
 	}
 }
@@ -870,6 +881,11 @@ func (g *Gui) layoutConnectionManagerMain(dims map[string]ui.Dimensions, rails m
 		// gocui's Wrap is whitespace-aware, so no manual wrapLabel plumbing
 		// is needed here (unlike PROMPT, which wraps an editable buffer).
 		v.Wrap = true
+		// Tell the form the inner width so it clips its single inline
+		// err/status row to one physical line — Wrap would otherwise reflow a
+		// long test-connection error and corrupt the field rows below it
+		// (pgsavvy-xta7).
+		cm.SetLabelWrapWidth(v.InnerWidth())
 	}
 	_ = cm.HandleRender()
 	// The QUERY_EDITOR view from prior frames still exists in the dims["main"]
