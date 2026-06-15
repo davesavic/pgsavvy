@@ -125,6 +125,11 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 			// paste-DSN: read the host clipboard and surface the
 			// dropped-password warning via a toast.
 			ReadClipboard: clipboard.NewSystemClipboard().Read,
+			// test-connection: dial the in-progress (unsaved) profile via the
+			// decoupled drivers.Get → Open primitive and publish pass/fail
+			// inline, without disturbing the live active session. The closure
+			// owns the dedicated test-gen/cancel/stale guard + worker dispatch.
+			TestConnection: connectInv.testConnection,
 			ShowToast: func(msg string) {
 				if g.toastHelp != nil {
 					g.toastHelp.Show(msg, 3*time.Second)

@@ -265,6 +265,10 @@ type ActionTranslations struct {
 	// the clipboard.
 	PasteDSN string
 
+	// TestConnection dials the in-progress connection form and reports
+	// pass/fail inline without establishing the real session.
+	TestConnection string
+
 	// SearchPathQuickSet.
 	SearchPathQuickSet string
 
@@ -493,6 +497,7 @@ func EnglishTranslationSet() *TranslationSet {
 
 			Reconnect:           "Reconnect",
 			PasteDSN:            "Paste DSN as fields",
+			TestConnection:      "Test connection",
 			SearchPathQuickSet:  "Set search_path",
 			StatementTimeoutSet: "Set statement timeout",
 

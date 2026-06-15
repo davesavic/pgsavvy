@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
@@ -21,6 +22,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/editor"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/logs"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/query"
 	"github.com/davesavic/pgsavvy/pkg/session"
@@ -125,6 +127,17 @@ type connectInvoker struct {
 	// current is the profile of the most recent UI attempt, so Retry can
 	// re-dial it from the error state.
 	current *models.Connection
+
+	// testGen is a DEDICATED supersession token for the form's test-connection
+	// action, kept SEPARATE from connectionState.connectGen so a real connect
+	// and an in-progress test never cancel each other. Bumped on every test
+	// attempt; the worker's late inline publish is dropped when its captured
+	// gen no longer matches (mirrors isStaleConnect, but on its own counter).
+	testGen atomic.Uint64
+	// testCancelFn aborts the in-flight test dial's ctx. Set when a test
+	// attempt starts, cleared+called when a newer test supersedes it. Guarded
+	// by mu (the same lock that guards cancelFn/current).
+	testCancelFn context.CancelFunc
 }
 
 func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection) error {
@@ -348,6 +361,129 @@ func (c *connectInvoker) startModalAttempt(profile *models.Connection) {
 		c.g.registry.ConnectionManager.SetMode(guicontext.ModeConnecting)
 	}
 	c.startAttempt(profile)
+}
+
+// testConnection dials the IN-PROGRESS (unsaved) profile and publishes the
+// pass/fail result INLINE in the connection form, WITHOUT touching the live
+// active session (it bypasses ConnectHelper.Connect entirely and uses the
+// decoupled drivers.Get → Open primitive, immediately closing the returned
+// Connection). It does NOT pop the modal and is fully independent of save.
+//
+// Threading + supersession mirror startAttempt but on a DEDICATED test
+// generation (c.testGen) + cancel (c.testCancelFn) so a real connect and a
+// test never cancel each other. MUST be invoked on the MainLoop: the testGen
+// bump runs there so a later test attempt's bump is strictly higher and the
+// in-flight worker is reliably superseded. The blocking dial runs on the
+// tracked OnWorker pool (no bare goroutine); the inline publish marshals back
+// via OnUIThread guarded by the testGen staleness check.
+func (c *connectInvoker) testConnection(profile *models.Connection) {
+	if c == nil || c.g == nil || profile == nil {
+		return
+	}
+	logger := c.g.deps.Common.Logger()
+	logs.Event(logger, "db", "conn_test",
+		slog.String("phase", "attempt"),
+		slog.String("redacted_dsn", session.RedactConnectionString(profile.DSN)),
+	)
+
+	gen := c.testGen.Add(1)
+	// Cancel-only, no deadline: the pg driver's connectTimeout bounds the
+	// network phase; cancel drives supersession. Supersede any prior in-flight
+	// test so two `t` presses don't race two dials onto the same form.
+	ctx, cancel := context.WithCancel(context.Background())
+	c.mu.Lock()
+	if c.testCancelFn != nil {
+		c.testCancelFn()
+	}
+	c.testCancelFn = cancel
+	c.mu.Unlock()
+
+	c.g.OnWorker(func(_ gocui.Task) error {
+		defer cancel()
+		err := dialProbe(ctx, profile)
+		c.publishTestResult(gen, profile, err)
+		return err
+	})
+}
+
+// dialProbe performs the decoupled reachability+auth dial for the test action:
+// drivers.Get → factory → Open (which opens any SSH tunnel, creates the pool,
+// pings, and runs SELECT version(), closing the tunnel on every error path) →
+// immediately Close the returned Connection so NO session is retained. It never
+// touches the live ConnectHelper, pool, or active session. Returns the dial
+// error verbatim (the caller redacts before surfacing/logging).
+func dialProbe(ctx context.Context, profile *models.Connection) error {
+	factory, err := drivers.Get(profile.Driver)
+	if err != nil {
+		return err
+	}
+	drv, err := factory(ctx)
+	if err != nil {
+		return err
+	}
+	conn, err := drv.Open(ctx, *profile, nil)
+	if err != nil {
+		return err
+	}
+	// Success: keep no session. Close the freshly-opened Connection (which
+	// closes the pool and any SSH tunnel) and discard it.
+	return conn.Close()
+}
+
+// publishTestResult marshals the test-connection outcome onto the UI thread and
+// stamps the inline pass/fail line on the form, guarded by the testGen
+// staleness check (mirrors connectInvoker.isStaleConnect on the dedicated test
+// counter). A superseded test (the form closed, switched mode, or a newer test
+// started) publishes NOTHING. The outcome is logged with the DSN redacted.
+func (c *connectInvoker) publishTestResult(gen uint64, profile *models.Connection, dialErr error) {
+	logger := c.g.deps.Common.Logger()
+	if dialErr != nil {
+		logs.Event(logger, "db", "conn_test",
+			slog.String("phase", "outcome"),
+			slog.Bool("ok", false),
+			slog.String("redacted_dsn", session.RedactConnectionString(profile.DSN)),
+			slog.String("err", session.RedactConnectionString(dialErr.Error())),
+		)
+	} else {
+		logs.Event(logger, "db", "conn_test",
+			slog.String("phase", "outcome"),
+			slog.Bool("ok", true),
+			slog.String("redacted_dsn", session.RedactConnectionString(profile.DSN)),
+		)
+	}
+
+	c.runOnUIThread(func() error {
+		if c.testStale(gen) {
+			return nil
+		}
+		cm := c.g.registry.ConnectionManager
+		if cm == nil || cm.Mode() != guicontext.ModeForm {
+			return nil
+		}
+		if dialErr != nil {
+			cm.FormSetError(testFailMessage(dialErr))
+			return nil
+		}
+		cm.FormSetStatus("connection ok")
+		return nil
+	})
+}
+
+// testStale reports whether a test-connection that captured gen has been
+// superseded by a newer test attempt. Always false when g is nil (test wiring
+// without a Gui), matching isStaleConnect.
+func (c *connectInvoker) testStale(gen uint64) bool {
+	if c == nil || c.g == nil {
+		return false
+	}
+	return c.testGen.Load() != gen
+}
+
+// testFailMessage builds the user-facing inline failure line for a failed test
+// dial. Credentials are redacted then control bytes stripped before reaching
+// the form (mirrors publishConnectError), so a raw DSN/password never surfaces.
+func testFailMessage(err error) string {
+	return config.SafeText(session.RedactConnectionString("test failed: " + err.Error()))
 }
 
 // connectingStateSink is the narrow connecting/error write surface shared by

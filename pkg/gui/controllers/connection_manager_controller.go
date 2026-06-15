@@ -89,6 +89,13 @@ type ConnectionManagerDeps struct {
 	// action. nil → paste is a no-op.
 	ReadClipboard func() (string, error)
 
+	// TestConnection dials the in-progress (unsaved) connection from the form
+	// and publishes the pass/fail result INLINE in the form. The closure owns
+	// threading (worker dial + UI-thread publish) and the stale-write guard;
+	// it does NOT return synchronously, mirroring the async Connect closure.
+	// nil → the test action is a no-op.
+	TestConnection func(*models.Connection)
+
 	// ShowToast surfaces a transient notice (e.g. the dropped-password warning
 	// after a paste). nil → no toast.
 	ShowToast func(string)
@@ -419,6 +426,21 @@ func (cm *ConnectionManagerController) PasteDSN(_ commands.ExecCtx) error {
 	return nil
 }
 
+// TestConnection handles `t` in form mode: it dials the in-progress (unsaved)
+// connection being edited and reports pass/fail INLINE in the form, without
+// establishing the real session, touching the live active connection, or
+// popping the modal. The injected closure owns threading + the inline publish;
+// this handler only gates on form mode and forwards a copy of the in-progress
+// connection. No-op outside form mode or when unwired.
+func (cm *ConnectionManagerController) TestConnection(_ commands.ExecCtx) error {
+	if !cm.inFormMode() || cm.deps.Ctx == nil || cm.deps.TestConnection == nil {
+		return nil
+	}
+	conn := cm.deps.Ctx.FormConnection()
+	cm.deps.TestConnection(&conn)
+	return nil
+}
+
 // Retry handles r → re-attempt the most recent profile. Only fires from the
 // error sub-phase; inert during the active dial (where only Esc cancels) and
 // in list mode or when unwired.
@@ -532,6 +554,16 @@ func (cm *ConnectionManagerController) GetKeybindings(_ types.KeybindingsOpts) [
 			Description: tr.Actions.PasteDSN,
 		},
 		{
+			// `t` — test the in-progress connection in form mode. Kept off the
+			// options bar (no ShowInBar) so it doesn't crowd the cap; the
+			// handler is mode-gated to form mode (no-op elsewhere).
+			Sequence:    []types.ChordKey{{Code: 't'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.CONNECTION_MANAGER,
+			ActionID:    commands.ConnectionManagerTestConnection,
+			Description: tr.Actions.TestConnection,
+		},
+		{
 			Sequence:    []types.ChordKey{{Special: types.KeyTab}},
 			Mode:        types.ModeNormal,
 			Scope:       types.CONNECTION_MANAGER,
@@ -639,6 +671,11 @@ func (cm *ConnectionManagerController) RegisterActions(reg *commands.Registry) {
 		ID:          commands.ConnectionManagerPasteDSN,
 		Description: "Paste DSN as fields",
 		Handler:     cm.PasteDSN,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          commands.ConnectionManagerTestConnection,
+		Description: "Test connection",
+		Handler:     cm.TestConnection,
 	})
 }
 

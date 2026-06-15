@@ -48,6 +48,7 @@ binding	scope=connection_manager	key=j	mode=normal
 binding	scope=connection_manager	key=k	mode=normal
 binding	scope=connection_manager	key=q	mode=normal
 binding	scope=connection_manager	key=r	mode=normal
+binding	scope=connection_manager	key=t	mode=normal
 binding	scope=connection_manager	key=␣	mode=normal
 binding	scope=export_menu	key=<cr>	mode=normal
 binding	scope=export_menu	key=<down>	mode=normal

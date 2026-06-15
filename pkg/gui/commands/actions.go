@@ -164,6 +164,13 @@ const (
 	ConnectionManagerDelete    = "connection_manager.delete"
 	ConnectionManagerPasteDSN  = "connection_manager.paste_dsn"
 
+	// ConnectionManagerTestConnection — owned by ConnectionManagerController.
+	// CONNECTION_MANAGER-scoped (form mode). `t` dials the IN-PROGRESS
+	// (unsaved) connection being edited and reports pass/fail INLINE in the
+	// form WITHOUT establishing the real session or disturbing the live active
+	// connection. Saving is independent of the test result.
+	ConnectionManagerTestConnection = "connection_manager.test_connection"
+
 	// RelationshipPanel family — owned by RelationshipPanelController.
 	//   RelationshipPanelToggle - <leader>gr opens / closes the right-docked
 	//                             FK sidebar (RESULT_GRID scope).

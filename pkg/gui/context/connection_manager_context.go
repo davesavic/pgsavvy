@@ -193,11 +193,28 @@ func (c *ConnectionManagerContext) FormFocusedValidator(tr *i18n.TranslationSet)
 func (c *ConnectionManagerContext) FormSetFocusedValue(v string) {
 	c.form.setTextValue(c.form.focusedSpec().id, v)
 	c.form.err = ""
+	c.form.status = ""
 }
 
 // FormSetError stamps an inline error string rendered under the focused
 // field. Used when a PROMPT-popup submit fails validation.
-func (c *ConnectionManagerContext) FormSetError(msg string) { c.form.err = msg }
+func (c *ConnectionManagerContext) FormSetError(msg string) {
+	c.form.err = msg
+	c.form.status = ""
+}
+
+// FormSetStatus stamps a transient inline status line (e.g. the test-connection
+// pass/fail result) rendered under the focused field. Setting it clears any
+// inline error so the two never render at once.
+func (c *ConnectionManagerContext) FormSetStatus(msg string) {
+	c.form.status = msg
+	c.form.err = ""
+}
+
+// FormConnection returns a COPY of the form's in-progress (unsaved) connection,
+// reflecting every field edited so far. Used by the test-connection action to
+// dial the connection being edited without saving it.
+func (c *ConnectionManagerContext) FormConnection() models.Connection { return c.form.conn }
 
 // FormToggleFocused flips the focused toggle or cycles the driver selector
 // (space / i on a non-text field).

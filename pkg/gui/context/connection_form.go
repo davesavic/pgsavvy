@@ -116,6 +116,11 @@ type connForm struct {
 	focus int // index into the FOCUSABLE field list (functional rows only)
 	err   string
 
+	// status is a transient inline line (test-connection pass/fail) rendered
+	// under the focused field. Mutually exclusive with err: setting either
+	// clears the other.
+	status string
+
 	// sshEnabled and sshAuth are TRANSIENT (never persisted): they gate the
 	// SSH section's visibility and drive how the auth picker maps onto
 	// Connection.SSHTunnel at save time. Derived from the loaded tunnel on
@@ -666,6 +671,9 @@ func (f *connForm) render() string {
 		fmt.Fprintf(&b, "%s%-18s %s\n", marker, s.label+":", f.displayValue(s))
 		if f.err != "" && s.id == focused.id {
 			fmt.Fprintf(&b, "    %s\n", f.err)
+		}
+		if f.status != "" && s.id == focused.id {
+			fmt.Fprintf(&b, "    %s\n", f.status)
 		}
 	}
 	return b.String()
