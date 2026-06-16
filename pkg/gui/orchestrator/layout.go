@@ -907,7 +907,7 @@ func (g *Gui) layoutConnectionManagerMain(dims map[string]ui.Dimensions, rails m
 	// wasted work that also animates a checklist the user can't see. The frozen
 	// frame resumes when the prompt is dismissed. Scoped to ModeConnecting so
 	// form/list prompts (paste-DSN, etc.) keep their live modal body.
-	if !(g.promptOnTop() && cm.Mode() == guicontext.ModeConnecting) {
+	if !g.promptOnTop() || cm.Mode() != guicontext.ModeConnecting {
 		_ = cm.HandleRender()
 	}
 	// Pin the marked row on screen when the body overflows the box: the form's
