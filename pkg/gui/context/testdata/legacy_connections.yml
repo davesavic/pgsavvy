@@ -1,0 +1,6 @@
+connections:
+  - name: demo
+    driver: postgres
+    dsn: postgres://pgsavvy@localhost:5432/pgsavvy_test?sslmode=disable
+    password_command: echo pgsavvy
+    icon: "🐘"

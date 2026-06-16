@@ -27,7 +27,7 @@ jobs:
           version: v2.7.0
 
       - run: task build
-      - run: task test ./...
+      - run: task test
       - run: task lint
       - run: task vulncheck
 

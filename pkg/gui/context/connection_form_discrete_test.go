@@ -123,11 +123,11 @@ func TestForm_OpenEditLazyParsesLegacyDSN(t *testing.T) {
 	}
 }
 
-// TestForm_BackwardCompatDemoFixtureLoads loads the repo's real demo
-// connections.yml (a dsn-only profile) through the production loader and the
-// edit form, proving legacy files still load and migrate into discrete rows.
+// TestForm_BackwardCompatDemoFixtureLoads loads a legacy dsn-only
+// connections.yml (mirroring the demo profile) through the production loader and
+// the edit form, proving legacy files still load and migrate into discrete rows.
 func TestForm_BackwardCompatDemoFixtureLoads(t *testing.T) {
-	const fixture = "../../../.demo/config/pgsavvy/connections.yml"
+	const fixture = "testdata/legacy_connections.yml"
 	conns, err := config.LoadConnections(afero.NewOsFs(), fixture)
 	if err != nil {
 		t.Fatalf("LoadConnections(%s): %v", fixture, err)
