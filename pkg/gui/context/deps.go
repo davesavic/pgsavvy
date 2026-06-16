@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
@@ -51,14 +52,13 @@ func railEmptyPlaceholder(deps depsAlias, rail types.ContextKey) string {
 	return deps.RailEmptyText(rail)
 }
 
-// scrollSideRailIntoView pins the gocui view origin (oy) so the row at
-// `cursor` stays inside the visible viewport. Side rails render their
-// full item slice into the buffer via SetContent and use a "> " text
-// marker for selection; gocui's own scroll origin is independent of
-// that marker, so without this call the cursor scrolls off-screen as
-// soon as the list overflows while the scrollbar still reads as
-// top-pinned. Nil-safe when GuiDriver is unset or the
-// view isn't yet realized (unit tests, pre-layout).
+// scrollSideRailIntoView pins the gocui view origin (oy/ox) so the row at
+// `cursor` stays inside the visible viewport on both axes. Side rails render
+// their full item slice into the buffer via SetContent and use a "> " text
+// marker for selection; gocui's own scroll origin is independent of that
+// marker, so without this call the cursor scrolls off-screen as soon as the
+// list overflows while the scrollbar still reads as top-pinned. Nil-safe when
+// GuiDriver is unset or the view isn't yet realized (unit tests, pre-layout).
 func scrollSideRailIntoView(deps depsAlias, viewName string, cursor int) {
 	if deps.GuiDriver == nil {
 		return
@@ -68,7 +68,43 @@ func scrollSideRailIntoView(deps depsAlias, viewName string, cursor int) {
 		if err != nil || v == nil {
 			return nil
 		}
-		v.FocusPoint(0, cursor, true)
+		focusRailRow(v, cursor)
 		return nil
 	})
+}
+
+// focusRailRow pins the rail view's vertical origin to keep row `cursor`
+// visible (FocusPoint, which only adjusts oy) and its horizontal origin to
+// reveal the END of that row when the row is wider than the pane. Without the
+// horizontal axis a table/column name longer than the rail width clips past
+// the right border with no way to read the remainder. Split out from
+// scrollSideRailIntoView so it can be unit-tested against a real *gocui.View.
+func focusRailRow(v *gocui.View, cursor int) {
+	v.FocusPoint(0, cursor, true)
+	v.SetOriginX(railHorizontalOrigin(selectedRailRowWidth(v, cursor), v.InnerWidth()))
+}
+
+// selectedRailRowWidth returns the terminal-column width of the rail row at
+// `cursor`. BufferLines() returns ANSI-free rows (gocui decodes color into
+// per-cell attributes), so runewidth measures true display columns including
+// the "> " marker. Returns 0 when the row is out of range so the caller falls
+// back to a left-anchored origin.
+func selectedRailRowWidth(v *gocui.View, cursor int) int {
+	lines := v.BufferLines()
+	if cursor < 0 || cursor >= len(lines) {
+		return 0
+	}
+	return runewidth.StringWidth(lines[cursor])
+}
+
+// railHorizontalOrigin returns the horizontal scroll origin that keeps the
+// END of a `lineWidth`-column rail row visible inside an `inner`-column
+// viewport. When the row fits (or the viewport width is unknown) the origin
+// resets to 0 so the leading "> " marker and name start stay anchored left;
+// otherwise it anchors the row's tail to the right edge.
+func railHorizontalOrigin(lineWidth, inner int) int {
+	if inner <= 0 || lineWidth <= inner {
+		return 0
+	}
+	return lineWidth - inner
 }
