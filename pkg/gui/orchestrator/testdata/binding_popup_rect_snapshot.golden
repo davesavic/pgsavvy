@@ -91,12 +91,16 @@ binding	scope=hide_overlay	key=j	mode=normal
 binding	scope=hide_overlay	key=k	mode=normal
 binding	scope=hide_overlay	key=q	mode=normal
 binding	scope=hide_overlay	key=␣	mode=normal
+binding	scope=history	key=$	mode=normal
+binding	scope=history	key=0	mode=normal
 binding	scope=history	key=<cr>	mode=normal
 binding	scope=history	key=<esc>	mode=normal
 binding	scope=history	key=G	mode=normal
 binding	scope=history	key=gg	mode=normal
+binding	scope=history	key=h	mode=normal
 binding	scope=history	key=j	mode=normal
 binding	scope=history	key=k	mode=normal
+binding	scope=history	key=l	mode=normal
 binding	scope=menu	key=<cr>	mode=normal
 binding	scope=menu	key=<esc>	mode=normal
 binding	scope=plan	key=1	mode=normal
@@ -303,7 +307,9 @@ binding	scope=result_grid	key=n	mode=normal
 binding	scope=result_grid	key=w	mode=normal
 binding	scope=result_grid	key=y	mode=normal
 binding	scope=result_grid	key=yy	mode=normal
+binding	scope=schemas	key=$	mode=normal
 binding	scope=schemas	key=/	mode=normal
+binding	scope=schemas	key=0	mode=normal
 binding	scope=schemas	key=1	mode=normal
 binding	scope=schemas	key=2	mode=normal
 binding	scope=schemas	key=3	mode=normal
@@ -320,8 +326,10 @@ binding	scope=schemas	key=H	mode=normal
 binding	scope=schemas	key=N	mode=normal
 binding	scope=schemas	key=U	mode=normal
 binding	scope=schemas	key=gg	mode=normal
+binding	scope=schemas	key=h	mode=normal
 binding	scope=schemas	key=j	mode=normal
 binding	scope=schemas	key=k	mode=normal
+binding	scope=schemas	key=l	mode=normal
 binding	scope=schemas	key=n	mode=normal
 binding	scope=schemas	key=r	mode=normal
 binding	scope=search_line	key=<cr>	mode=command
@@ -349,7 +357,9 @@ binding	scope=table_inspect	key=j	mode=normal
 binding	scope=table_inspect	key=k	mode=normal
 binding	scope=table_inspect	key=l	mode=normal
 binding	scope=table_inspect	key=q	mode=normal
+binding	scope=tables	key=$	mode=normal
 binding	scope=tables	key=/	mode=normal
+binding	scope=tables	key=0	mode=normal
 binding	scope=tables	key=1	mode=normal
 binding	scope=tables	key=2	mode=normal
 binding	scope=tables	key=3	mode=normal
@@ -363,9 +373,11 @@ binding	scope=tables	key=<tab>	mode=normal
 binding	scope=tables	key=G	mode=normal
 binding	scope=tables	key=N	mode=normal
 binding	scope=tables	key=gg	mode=normal
+binding	scope=tables	key=h	mode=normal
 binding	scope=tables	key=i	mode=normal
 binding	scope=tables	key=j	mode=normal
 binding	scope=tables	key=k	mode=normal
+binding	scope=tables	key=l	mode=normal
 binding	scope=tables	key=n	mode=normal
 binding	scope=tables	key=r	mode=normal
 popuprect	key=cell_editor	x0=20	y0=47	x1=80	y1=52

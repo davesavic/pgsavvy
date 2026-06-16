@@ -62,6 +62,7 @@ func (l *ListControllerTrait[T]) Down(_ commands.ExecCtx) error {
 		return nil
 	}
 	l.cursor.SetCursor(l.cursor.Cursor() + 1)
+	l.resetPan()
 	return nil
 }
 
@@ -71,6 +72,7 @@ func (l *ListControllerTrait[T]) Up(_ commands.ExecCtx) error {
 		return nil
 	}
 	l.cursor.SetCursor(l.cursor.Cursor() - 1)
+	l.resetPan()
 	return nil
 }
 
@@ -80,6 +82,7 @@ func (l *ListControllerTrait[T]) First(_ commands.ExecCtx) error {
 		return nil
 	}
 	l.cursor.SetCursor(0)
+	l.resetPan()
 	return nil
 }
 
@@ -93,6 +96,7 @@ func (l *ListControllerTrait[T]) Last(_ commands.ExecCtx) error {
 		return nil
 	}
 	l.cursor.SetCursor(n - 1)
+	l.resetPan()
 	return nil
 }
 
@@ -137,6 +141,26 @@ func (l *ListControllerTrait[T]) RegisterActions(reg *commands.Registry) {
 		ID:          listActionID(commands.ListJumpLast, l.viewName),
 		Description: "Jump list cursor to last row (" + l.viewName + ")",
 		Handler:     l.Last,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          listActionID(commands.RailPanLeft, l.viewName),
+		Description: "Scroll rail left (" + l.viewName + ")",
+		Handler:     l.PanLeft,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          listActionID(commands.RailPanRight, l.viewName),
+		Description: "Scroll rail right (" + l.viewName + ")",
+		Handler:     l.PanRight,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          listActionID(commands.RailPanStart, l.viewName),
+		Description: "Scroll rail to start (" + l.viewName + ")",
+		Handler:     l.PanStart,
+	})
+	_ = reg.Register(&commands.Command{
+		ID:          listActionID(commands.RailPanEnd, l.viewName),
+		Description: "Scroll rail to end (" + l.viewName + ")",
+		Handler:     l.PanEnd,
 	})
 }
 
@@ -183,6 +207,34 @@ func (l *ListControllerTrait[T]) baseBindings() []*types.ChordBinding {
 			Scope:       scope,
 			ActionID:    listActionID(commands.ListJumpLast, l.viewName),
 			Description: tr.Actions.JumpLast,
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'h'}},
+			Mode:        types.ModeNormal,
+			Scope:       scope,
+			ActionID:    listActionID(commands.RailPanLeft, l.viewName),
+			Description: tr.Actions.PanLeft,
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'l'}},
+			Mode:        types.ModeNormal,
+			Scope:       scope,
+			ActionID:    listActionID(commands.RailPanRight, l.viewName),
+			Description: tr.Actions.PanRight,
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: '0'}},
+			Mode:        types.ModeNormal,
+			Scope:       scope,
+			ActionID:    listActionID(commands.RailPanStart, l.viewName),
+			Description: tr.Actions.PanStart,
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: '$'}},
+			Mode:        types.ModeNormal,
+			Scope:       scope,
+			ActionID:    listActionID(commands.RailPanEnd, l.viewName),
+			Description: tr.Actions.PanEnd,
 		},
 	}
 }

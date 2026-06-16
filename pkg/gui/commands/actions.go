@@ -50,6 +50,14 @@ const (
 	ListJumpFirst = "list.jump.first"
 	ListJumpLast  = "list.jump.last"
 
+	// RailPanLeft / RailPanRight / RailPanStart / RailPanEnd — published by
+	// ListControllerTrait (shared by every side-rail). `h`/`l`/`0`/`$` scroll
+	// the rail horizontally so names wider than the pane can be read in full.
+	RailPanLeft  = "rail.pan.left"
+	RailPanRight = "rail.pan.right"
+	RailPanStart = "rail.pan.start"
+	RailPanEnd   = "rail.pan.end"
+
 	// Rail-switch family — published by every side-rail controller via
 	// railSwitchBindings (pkg/gui/controllers/shared.go). Digits 1..4
 	// jump to a specific rail; `<tab>` cycles to the next rail.
@@ -603,6 +611,10 @@ func AllActionIDs() []string {
 		ListConfirm,
 		ListJumpFirst,
 		ListJumpLast,
+		RailPanLeft,
+		RailPanRight,
+		RailPanStart,
+		RailPanEnd,
 		RailSwitchSchemas,
 		RailSwitchTables,
 		RailSwitchQueryEditor,

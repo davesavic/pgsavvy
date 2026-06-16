@@ -165,10 +165,11 @@ func TestHistoryGetKeybindings_NavConfirmCloseOnly(t *testing.T) {
 	c := NewHistoryController(nil, CoreDeps{}, ctx, &historyEditorBuffer{}, &fakeHistoryTree{}, nil)
 	got := c.GetKeybindings(types.KeybindingsOpts{})
 
-	// Expected sequences: j, k, gg, G, <cr>, <esc>. Exactly six bindings,
-	// no per-character or on-change bindings.
-	if len(got) != 6 {
-		t.Fatalf("len(bindings) = %d, want 6 (j,k,gg,G,<cr>,<esc>)", len(got))
+	// Expected sequences: j, k, gg, G, the h/l/0/$ horizontal-pan bindings
+	// shared by every list rail, <cr>, <esc>. Exactly ten bindings, no
+	// per-character or on-change bindings.
+	if len(got) != 10 {
+		t.Fatalf("len(bindings) = %d, want 10 (j,k,gg,G,h,l,0,$,<cr>,<esc>)", len(got))
 	}
 
 	for _, b := range got {
@@ -195,7 +196,7 @@ func TestHistoryGetKeybindings_NavConfirmCloseOnly(t *testing.T) {
 	for _, b := range got {
 		seen[seqKey(b)] = true
 	}
-	for _, want := range []string{"j", "k", "gg", "G", "<cr>", "<esc>"} {
+	for _, want := range []string{"j", "k", "gg", "G", "h", "l", "0", "$", "<cr>", "<esc>"} {
 		if !seen[want] {
 			t.Errorf("missing binding for sequence %q", want)
 		}

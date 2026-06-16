@@ -303,6 +303,13 @@ type ActionTranslations struct {
 	JumpFirst string
 	JumpLast  string
 
+	// Pan* describe the `h`/`l`/`0`/`$` rail horizontal-scroll bindings
+	// that reveal names wider than the pane.
+	PanLeft  string
+	PanRight string
+	PanStart string
+	PanEnd   string
+
 	// RefreshRail is the description for the `r` per-rail refresh
 	// binding.
 	RefreshRail string
@@ -520,6 +527,11 @@ func EnglishTranslationSet() *TranslationSet {
 			Cancel:    "Cancel",
 			JumpFirst: "Jump to first",
 			JumpLast:  "Jump to last",
+
+			PanLeft:  "Scroll left",
+			PanRight: "Scroll right",
+			PanStart: "Scroll to start",
+			PanEnd:   "Scroll to end",
 
 			RefreshRail: "Refresh",
 		},
