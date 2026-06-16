@@ -27,10 +27,12 @@ jobs:
         run: |
           set -euo pipefail
           goreleaser release --snapshot --clean
+          # Asset names embed goreleaser's {{.Tag}}, which is the pushed tag
+          # (GITHUB_REF_NAME, e.g. v0.1.0) — NOT the snapshot default v0.0.0.
           missing=0
           for os in linux darwin windows; do
             for arch in amd64 arm64; do
-              name="pgsavvy_v0.0.0_${os}_${arch}"
+              name="pgsavvy_${GITHUB_REF_NAME}_${os}_${arch}"
               if [ "$os" = "windows" ]; then
                 name="${name}.exe"
               fi
