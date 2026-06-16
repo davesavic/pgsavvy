@@ -901,7 +901,15 @@ func (g *Gui) layoutConnectionManagerMain(dims map[string]ui.Dimensions, rails m
 		// (pgsavvy-xta7).
 		cm.SetLabelWrapWidth(v.InnerWidth())
 	}
-	_ = cm.HandleRender()
+	// Freeze the modal body while a credential prompt occludes a CONNECTING
+	// modal: the masked password prompt is driven by this same full-layout
+	// pass, so re-advancing the spinner glyph underneath it every frame is
+	// wasted work that also animates a checklist the user can't see. The frozen
+	// frame resumes when the prompt is dismissed. Scoped to ModeConnecting so
+	// form/list prompts (paste-DSN, etc.) keep their live modal body.
+	if !(g.promptOnTop() && cm.Mode() == guicontext.ModeConnecting) {
+		_ = cm.HandleRender()
+	}
 	// Pin the marked row on screen when the body overflows the box: the form's
 	// focused field (ModeForm) and the selected connection (ModeList) both bake a
 	// "> " gutter and can overflow. A no-op for the connecting/empty bodies, which

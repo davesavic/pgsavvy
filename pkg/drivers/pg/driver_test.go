@@ -3,9 +3,13 @@ package pg
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/99designs/keyring"
+	"github.com/adrg/xdg"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -183,3 +187,137 @@ func TestInterfaceAssertions(t *testing.T) {
 
 // Compile-only assurance that session.Prompter satisfies our usage shape.
 var _ session.Prompter = stubPrompter{}
+
+// TestPasswordPrompterTrioStoreLoadClear locks the trio's nil-guard contract:
+// never-set → nil; Set(p) → p; Set(nil) → nil. Mirrors the secret-prompter
+// trio's shape. t.Cleanup restores whatever was installed before the test so
+// the package-global does not leak across tests.
+func TestPasswordPrompterTrioStoreLoadClear(t *testing.T) {
+	prev := globalPasswordPrompter.Load()
+	t.Cleanup(func() { globalPasswordPrompter.Store(prev) })
+
+	// Force a known clear baseline for the boundary assertion.
+	globalPasswordPrompter.Store(nil)
+	require.Nil(t, passwordPrompter(), "passwordPrompter() must be nil when never set / cleared")
+
+	p := &staticPrompter{password: "x"}
+	SetPasswordPrompter(p)
+	require.Same(t, p, passwordPrompter(), "SetPasswordPrompter(p) must store p")
+
+	SetPasswordPrompter(nil)
+	require.Nil(t, passwordPrompter(), "SetPasswordPrompter(nil) must clear")
+}
+
+// TestOpenUsesInstalledGlobalPrompterResult proves the global prompter's
+// RESULT is carried into resolution (not merely that the global is consulted):
+// a creds-less profile pointed at an UNREACHABLE host resolves the password via
+// the installed global, then Open progresses PAST credential resolution to the
+// dial/ping phase and fails there — NOT at the no-credential refusal sentinel.
+//
+// Assertion choice: asserting the exact password byte reached pgx's dial config
+// is not observable without a live server (the password is consumed inside
+// pgxpool dial). We therefore assert (a) the global recording prompter WAS
+// invoked, and (b) Open failed at the DIAL phase ("pg: ping:" / "pg: open:"),
+// proving resolution succeeded with the prompted value rather than short-
+// circuiting on errNoCredentialMechanism. A nil/empty result would have
+// surfaced the refusal sentinel before any dial.
+func TestOpenUsesInstalledGlobalPrompterResult(t *testing.T) {
+	prev := globalPasswordPrompter.Load()
+	t.Cleanup(func() { globalPasswordPrompter.Store(prev) })
+
+	recorder := &staticPrompter{password: "pw-from-prompt"}
+	SetPasswordPrompter(recorder)
+
+	// Driver's startup prompter is the TUI refuser; if the global were ignored
+	// the final step would refuse and Open would never dial.
+	d := &Driver{prompter: session.TUIRefusePrompter{}}
+
+	// Unreachable host (port 1) with NO inline creds, NO command, NO keyring,
+	// NO pgpass → the final waterfall step is the only credential source.
+	profile := drivers.ConnectionProfile{
+		Name: "unreachable",
+		DSN:  "postgres://u@127.0.0.1:1/pgsavvy_unit_test",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	conn, err := d.Open(ctx, profile, nil)
+	require.Nil(t, conn)
+	require.Error(t, err)
+	require.NotEmpty(t, recorder.lastHint, "global prompter must have been invoked")
+	require.False(t, session.IsKeyringPassphraseRequiredInTUI(err),
+		"must not be the keyring refusal")
+	require.NotErrorIs(t, err, context.DeadlineExceeded,
+		"resolution must not stall; failure must come from the dial phase")
+	require.Contains(t, err.Error(), "pg:",
+		"Open must progress past resolution to a dial/ping error, not the refusal sentinel")
+}
+
+// TestOpenNoSourceRefusalPreservedWithoutGlobal asserts the no-credential
+// refusal is unchanged when no global is installed: a creds-less profile with a
+// TUIRefusePrompter startup prompter returns the refusal sentinel and never
+// dials.
+func TestOpenNoSourceRefusalPreservedWithoutGlobal(t *testing.T) {
+	prev := globalPasswordPrompter.Load()
+	t.Cleanup(func() { globalPasswordPrompter.Store(prev) })
+	globalPasswordPrompter.Store(nil) // boundary: global never set
+
+	require.Nil(t, passwordPrompter(), "precondition: no global installed")
+
+	d := &Driver{prompter: session.TUIRefusePrompter{}}
+	profile := drivers.ConnectionProfile{
+		Name: "no-creds",
+		DSN:  "postgres://u@127.0.0.1:1/pgsavvy_unit_test",
+	}
+
+	conn, err := d.Open(context.Background(), profile, nil)
+	require.Nil(t, conn)
+	require.True(t, session.IsInteractivePromptUnsupported(err),
+		"creds-less Open under TUIRefusePrompter must surface the prompt-refusal sentinel; got %v", err)
+}
+
+// TestOpenKeyringRefusesUnderInstalledGlobal is R1: a keyring_ref profile that
+// requires a passphrase still returns errKeyringPassphraseRequiredInTUI even
+// when a global password prompter is installed — proving the keyring step uses
+// the Driver's startup (refusing) prompter, NOT the global.
+func TestOpenKeyringRefusesUnderInstalledGlobal(t *testing.T) {
+	// Isolate XDG so the keyring lives in a temp dir, and ensure the env
+	// passphrase is unset so passphraseFunc reaches the prompter type-switch.
+	tmp := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmp)
+	xdg.Reload()
+	t.Cleanup(func() { xdg.Reload() })
+	t.Setenv("PGSAVVY_KEYRING_PASSPHRASE", "")
+
+	// Seed a keyring item so kr.Get triggers the passphrase func (an empty
+	// keyring would fail with key-not-found before any passphrase prompt).
+	dir := filepath.Join(tmp, "pgsavvy", "keyring")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	kr, err := keyring.Open(keyring.Config{
+		AllowedBackends:  []keyring.BackendType{keyring.FileBackend},
+		ServiceName:      "pgsavvy",
+		FileDir:          dir,
+		FilePasswordFunc: keyring.FixedStringPrompt("seed-phrase"),
+	})
+	require.NoError(t, err)
+	require.NoError(t, kr.Set(keyring.Item{Key: "prod-db", Data: []byte("kr-secret")}))
+
+	// Install a global that would happily return a password IF it were ever
+	// consulted for the keyring step — it must NOT be.
+	prev := globalPasswordPrompter.Load()
+	t.Cleanup(func() { globalPasswordPrompter.Store(prev) })
+	SetPasswordPrompter(&staticPrompter{password: "should-not-be-used"})
+
+	d := &Driver{prompter: session.TUIRefusePrompter{}}
+	profile := drivers.ConnectionProfile{
+		Name:       "prod-db",
+		KeyringRef: "prod-db",
+		DSN:        "postgres://u@127.0.0.1:1/pgsavvy_unit_test",
+	}
+
+	conn, err := d.Open(context.Background(), profile, nil)
+	require.Nil(t, conn)
+	require.True(t, session.IsKeyringPassphraseRequiredInTUI(err),
+		"keyring passphrase refusal must be preserved under an installed global; got %v", err)
+}

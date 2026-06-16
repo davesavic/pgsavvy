@@ -60,6 +60,14 @@ type Deps struct {
 	// driver-wiring authority, mirroring pg.SetGlobalLogger.
 	SetSecretPrompter func(session.SecretPrompter)
 
+	// SetPasswordPrompter, when non-nil, receives the TUI password prompter
+	// for the final database-credential step. The app entry-point passes
+	// pg.SetPasswordPrompter here; the install wraps the SAME hoisted
+	// SecretPromptHelper as SetSecretPrompter (via passwordPromptAdapter), so
+	// SSH and DB prompts share one masked-popup instance. Mirrors
+	// SetSecretPrompter; the driver takes a session.Prompter.
+	SetPasswordPrompter func(session.Prompter)
+
 	// Store owns AppState mutations + debounced persistence.
 	Store *common.AppStateStore
 

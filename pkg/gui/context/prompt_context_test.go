@@ -160,3 +160,44 @@ func TestPromptContext_CursorXY_NilState(t *testing.T) {
 		t.Error("CursorXY ok=true with nil state; want false")
 	}
 }
+
+// TestPromptContextFocusLostResetsMasked guards the shared popup surface: the
+// single `masked` flag set by SecretPromptHelper must not survive a dismiss,
+// or a later PLAIN prompt would render as bullets. HandleFocusLost clears it.
+func TestPromptContextFocusLostResetsMasked(t *testing.T) {
+	c := newTestPrompt(nil, &captureDriver{})
+	c.SetBuffer("hunter2")
+
+	// While active and masked, the buffer renders as bullets.
+	c.SetMasked(true)
+	if !c.masked {
+		t.Fatal("masked=false after SetMasked(true); want true")
+	}
+	masked := c.renderBuffer()
+	if masked == "hunter2" {
+		t.Errorf("renderBuffer returned cleartext while masked; got %q", masked)
+	}
+
+	// Focus-lost (dismiss/pop) returns the shared surface to unmasked.
+	if err := c.HandleFocusLost(types.OnFocusLostOpts{}); err != nil {
+		t.Fatalf("HandleFocusLost: %v", err)
+	}
+	if c.masked {
+		t.Fatal("masked=true after HandleFocusLost; want false")
+	}
+
+	// Idempotence: a second focus-lost on an already-unmasked prompt is safe.
+	if err := c.HandleFocusLost(types.OnFocusLostOpts{}); err != nil {
+		t.Fatalf("HandleFocusLost (idempotent): %v", err)
+	}
+	if c.masked {
+		t.Fatal("masked=true after idempotent HandleFocusLost; want false")
+	}
+
+	// A subsequent PLAIN prompt (no SetMasked call) renders cleartext on the
+	// now-reset surface.
+	c.SetBuffer("plaintext")
+	if got := c.renderBuffer(); got != "plaintext" {
+		t.Errorf("renderBuffer = %q after reset; want cleartext %q", got, "plaintext")
+	}
+}

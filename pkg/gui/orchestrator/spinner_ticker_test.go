@@ -363,6 +363,73 @@ func TestSpinnerTicker_RepaintsConnectingModal(t *testing.T) {
 	g.WaitWorkers()
 }
 
+// TestSpinnerTicker_SuppressedWhileCredentialPromptOnTop proves the contained
+// fix: while the CONNECTION_MANAGER modal is mid-connect (ModeConnecting) AND a
+// credential prompt popup is on top of the focus stack, a spinner tick must NOT
+// re-render the modal underneath. The masked DB/SSH password prompt is driven by
+// the full-layout pass; a concurrent content-only repaint of the modal beneath
+// it is the fragile window that can strand the prompt's input/redraw mid-connect.
+// Once the prompt is popped, the spinner resumes repainting.
+func TestSpinnerTicker_SuppressedWhileCredentialPromptOnTop(t *testing.T) {
+	clk := newFakeClock()
+	drv := &modalRepaintDriver{RecorderGuiDriver: testfake.NewRecorderGuiDriver()}
+	g := buildTestGuiWithDriverAndClock(t, drv, clk)
+	defer func() { _ = g.Close() }()
+
+	if _, err := drv.SetView(string(types.CONNECTION_MANAGER), 0, 0, 10, 10, 0); err != nil &&
+		err != gocui.ErrUnknownView {
+		t.Fatalf("SetView(connection_manager): %v", err)
+	}
+
+	cm := g.Registry().ConnectionManager
+	if cm == nil {
+		t.Fatal("ConnectionManager modal not wired")
+	}
+	cm.ConnectingState().SetConnectingStaged("prod", nil)
+	cm.SetMode(guicontext.ModeConnecting)
+
+	// Stack: [modal, prompt] — the credential prompt sits on top of the
+	// connecting modal, exactly as Open's masked prompt does mid-dial.
+	if err := g.ContextTree().Push(cm); err != nil {
+		t.Fatalf("push modal: %v", err)
+	}
+	if err := g.ContextTree().Push(g.Registry().Prompt); err != nil {
+		t.Fatalf("push prompt: %v", err)
+	}
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+	g.OnWorker(func(_ gocui.Task) error {
+		close(started)
+		<-release
+		return nil
+	})
+	<-started
+
+	const ticks = 3
+	for range ticks {
+		clk.tickAll()
+	}
+	// Expect ZERO modal writes while the prompt owns the top of the stack.
+	settleNoModalWrites(drv, 50*time.Millisecond)
+	if got := drv.modalWrites.Load(); got != 0 {
+		t.Fatalf("prompt-on-top: modal writes=%d after %d ticks, want 0", got, ticks)
+	}
+
+	// Pop the prompt: the spinner must resume repainting the modal.
+	if err := g.ContextTree().Pop(); err != nil {
+		t.Fatalf("pop prompt: %v", err)
+	}
+	clk.tickAll()
+	waitModalWrites(t, drv, 1)
+	if got := drv.modalWrites.Load(); got < 1 {
+		t.Fatalf("after prompt popped: modal writes=%d, want >= 1", got)
+	}
+
+	close(release)
+	g.WaitWorkers()
+}
+
 // waitModalWrites polls until the modal write counter reaches want or a 1s
 // deadline elapses — the drain goroutine schedules the repaint asynchronously
 // onto the (inline) driver, so the counter lands shortly after tickAll.

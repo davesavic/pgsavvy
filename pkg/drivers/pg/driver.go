@@ -102,6 +102,37 @@ func secretPrompter() session.SecretPrompter {
 	return nil
 }
 
+// globalPasswordPrompter is the package-level DB-password prompter, installed
+// late by SetPasswordPrompter from the app entry-point AFTER the GUI (and its
+// prompt popup) is wired — mirroring globalSecretPrompter above. It backs ONLY
+// the FINAL waterfall step of Open's credential resolution; the keyring
+// passphrase sub-step always stays on the Driver's startup prompter so its
+// TUI-refusal contract (errKeyringPassphraseRequiredInTUI) is preserved. When
+// unset, Load returns nil and Open's final step falls back to d.prompter.
+var globalPasswordPrompter atomic.Pointer[session.Prompter]
+
+// SetPasswordPrompter installs the interactive DB-password prompter used by
+// Open's final credential-waterfall step once a live GUI prompt exists. Pass
+// nil to clear it (Open then uses the Driver's startup prompter). Safe to call
+// multiple times (last write wins).
+func SetPasswordPrompter(p session.Prompter) {
+	if p == nil {
+		globalPasswordPrompter.Store(nil)
+		return
+	}
+	globalPasswordPrompter.Store(&p)
+}
+
+// passwordPrompter returns the installed final-step prompter or nil. nil means
+// Open uses the Driver's startup prompter for the final step (today's
+// behaviour).
+func passwordPrompter() session.Prompter {
+	if p := globalPasswordPrompter.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
 // pgCapabilities is the single-source-of-truth Capabilities value for the
 // Postgres driver. Tests assert deep-equality against this var rather than a
 // literal so a future field addition can't silently drift the public surface.
@@ -175,7 +206,15 @@ func (d *Driver) Open(ctx context.Context, profile drivers.ConnectionProfile, re
 		logs.Event(log, "db", "conn_open_done", attrs...)
 	}
 
-	password, err := session.ResolvePassword(ctx, profile, d.prompter)
+	// The keyring passphrase sub-step always uses the Driver's startup prompter
+	// (d.prompter) so its TUI-refusal contract is preserved. The FINAL
+	// interactive step uses the installed global prompter when one exists,
+	// else falls back to d.prompter.
+	finalPrompter := d.prompter
+	if g := passwordPrompter(); g != nil {
+		finalPrompter = g
+	}
+	password, err := session.ResolvePasswordWithPrompters(ctx, profile, d.prompter, finalPrompter)
 	if err != nil {
 		emitDone(err)
 		return nil, err

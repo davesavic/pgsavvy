@@ -213,7 +213,31 @@ func (g *Gui) repaintConnectingModal() {
 	if cm.Mode() != guicontext.ModeConnecting {
 		return
 	}
+	// Suppress the spinner repaint while the credential prompt sits on top of
+	// the modal mid-connect. The masked DB/SSH password prompt (both use the
+	// PROMPT context) is driven by the full-layout pass; a concurrent
+	// content-only repaint of the modal beneath it is the fragile window that
+	// can strand the prompt's input/redraw. The spinner resumes once the
+	// prompt is dismissed/submitted.
+	if g.promptOnTop() {
+		return
+	}
 	_ = cm.HandleRender()
+}
+
+// promptOnTop reports whether the credential prompt popup currently owns the top
+// of the focus stack. The connecting-modal spinner repaint is suppressed while
+// it does — across BOTH the spinner-ticker path (repaintConnectingModal) and the
+// full-layout path (layoutConnectionManagerMain) — so the masked DB/SSH password
+// prompt, which is driven by the full-layout pass, never fights a concurrent
+// re-render of the modal beneath it. The spinner resumes the moment the prompt
+// is dismissed or submitted.
+func (g *Gui) promptOnTop() bool {
+	if g == nil || g.tree == nil {
+		return false
+	}
+	top := g.tree.Current()
+	return top != nil && top.GetKey() == types.PROMPT
 }
 
 // OnUIThread schedules fn for execution on the gocui MainLoop with a

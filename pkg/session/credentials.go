@@ -66,6 +66,28 @@ var (
 //
 // See DESIGN.md §11.2.
 func ResolvePassword(ctx context.Context, profile models.Connection, prompter Prompter) (string, error) {
+	// The single-prompter form threads the SAME prompter to both the keyring
+	// passphrase sub-step and the final interactive step — the historical
+	// behaviour. Callers that must route the FINAL step through a different
+	// prompter (e.g. a live GUI prompter installed after startup) while keeping
+	// the keyring step on the original (refusing) prompter use
+	// ResolvePasswordWithPrompters directly.
+	return ResolvePasswordWithPrompters(ctx, profile, prompter, prompter)
+}
+
+// ResolvePasswordWithPrompters is ResolvePassword with the keyring-passphrase
+// sub-step and the final interactive step driven by SEPARATE prompters.
+//
+// keyringPrompter backs step 3 (the keyring file-backend passphrase); it MUST
+// remain the startup prompter so the TUI keyring-refusal contract
+// (errKeyringPassphraseRequiredInTUI) is preserved even when a live final
+// prompter is installed. finalPrompter backs step 5 (the last-resort
+// interactive password prompt) and may be a live, post-GUI prompter.
+//
+// All other waterfall semantics (order, empty-fallthrough, typed-error
+// short-circuit, auto-discovery sentinel) are identical to ResolvePassword,
+// which delegates here with keyringPrompter == finalPrompter.
+func ResolvePasswordWithPrompters(ctx context.Context, profile models.Connection, keyringPrompter, finalPrompter Prompter) (string, error) {
 	// 1. Inline plaintext. Empty value falls through (explicit AC).
 	if profile.Password != "" {
 		return profile.Password, nil
@@ -82,9 +104,10 @@ func ResolvePassword(ctx context.Context, profile models.Connection, prompter Pr
 		}
 	}
 
-	// 3. keyring (file backend only).
+	// 3. keyring (file backend only). Uses keyringPrompter so the TUI refusal
+	// contract is preserved independently of the final-step prompter.
 	if profile.KeyringRef != "" {
-		pw, err := resolveKeyring(ctx, profile.KeyringRef, prompter)
+		pw, err := resolveKeyring(ctx, profile.KeyringRef, keyringPrompter)
 		if err != nil {
 			return "", fmt.Errorf("session: keyring: %w", err)
 		}
@@ -105,12 +128,12 @@ func ResolvePassword(ctx context.Context, profile models.Connection, prompter Pr
 	}
 
 	// 5. Prompter.
-	if prompter != nil {
+	if finalPrompter != nil {
 		hint := "password"
 		if profile.Name != "" {
-			hint = fmt.Sprintf("password for %s", profile.Name)
+			hint = fmt.Sprintf("Password for %s", profile.Name)
 		}
-		pw, err := prompter.PromptPassword(ctx, hint)
+		pw, err := finalPrompter.PromptPassword(ctx, hint)
 		if err != nil {
 			return "", fmt.Errorf("session: prompt: %w", err)
 		}

@@ -19,10 +19,11 @@ import (
 // as potentially carrying credential text. Currently only the
 // credentials prompt; expand here when new sensitive contexts ship.
 var sensitiveScopes = map[types.ContextKey]struct{}{
-	// "credentials_prompt" is a forward-declared sentinel for the future
-	// credentials prompt context (not yet defined as a types.ContextKey
-	// constant). The literal must match the eventual constant value.
-	types.ContextKey("credentials_prompt"): {},
+	// PROMPT is the single-line prompt popup. It backs the masked
+	// DB-credential prompt AND the paste-DSN prompt (whose DSN can embed a
+	// password), so every keysym typed into it must be redacted before it
+	// reaches the cat=input log. mode + scope still log (AD-21).
+	types.PROMPT: {},
 }
 
 // MasterEditorOption mutates a *masterEditor before NewMasterEditor

@@ -139,6 +139,7 @@ func Start(build *BuildInfo, args []string) error {
 		ConnectionsProvider: connectionsProvider,
 		DriverNamesFn:       drivers.Names,
 		SetSecretPrompter:   pg.SetSecretPrompter,
+		SetPasswordPrompter: pg.SetPasswordPrompter,
 	})
 
 	// Signal handler asks the MainLoop to quit (M15c: never call Flush

@@ -218,16 +218,23 @@ func (g *Gui) wireUIHelpers(tr *i18n.TranslationSet) {
 	g.searchLineHelp = ui.NewSearchLineHelper(g.tree, g.registry.SearchLine)
 	g.choiceHelp = ui.NewChoiceHelper(g.tree, g.registry.Selection)
 
-	// SSH masked secret prompt: now that the prompt popup
-	// (g.promptHelp), its masker (g.registry.Prompt), and the UI scheduler
-	// (g.OnUIThread) are all live, build the TUI SecretPrompter and hand it to
-	// the pg driver via the app-provided hook.
-	if g.deps.SetSecretPrompter != nil {
+	// Masked prompts: now that the prompt popup (g.promptHelp), its masker
+	// (g.registry.Prompt), and the UI scheduler (g.OnUIThread) are all live,
+	// build ONE TUI SecretPromptHelper and hand it to the pg driver via the
+	// app-provided hooks. The SSH passphrase prompt and the final
+	// database-credential prompt share this single instance (the latter via
+	// passwordPromptAdapter), so both surface through the same masked popup.
+	if g.deps.SetSecretPrompter != nil || g.deps.SetPasswordPrompter != nil {
 		secretPrompter := ui.NewSecretPromptHelper(g.promptHelp, g.registry.Prompt, g.OnUIThread)
 		if g.deps.Common != nil {
 			secretPrompter.SetLogger(g.deps.Common.Logger())
 		}
-		g.deps.SetSecretPrompter(secretPrompter)
+		if g.deps.SetSecretPrompter != nil {
+			g.deps.SetSecretPrompter(secretPrompter)
+		}
+		if g.deps.SetPasswordPrompter != nil {
+			g.deps.SetPasswordPrompter(passwordPromptAdapter{h: secretPrompter})
+		}
 	}
 	g.toastHelp = ui.NewToastHelper(g.driver)
 	if g.deps.Common != nil {

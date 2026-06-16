@@ -156,7 +156,10 @@ func TestDispatch_Passthrough_EmitsDispatchResult(t *testing.T) {
 // AD-21: a keystroke landing in a sensitive scope must emit the key
 // event with the keysym replaced by "<redacted>". mode + scope remain.
 func TestDispatch_RedactsKeysymInSensitiveScope(t *testing.T) {
-	sensitiveScope := types.ContextKey("credentials_prompt")
+	// The PROMPT scope is sensitive: it backs the masked DB-credential prompt
+	// (and the paste-DSN prompt, whose DSN can embed a password), so typed
+	// keysyms must never reach the log.
+	sensitiveScope := types.PROMPT
 	rig := newLoggedRig(t, keys.NewTrieSet(), sensitiveScope, types.ModeInsert)
 
 	v := gocui.NewView("test", 0, 0, 10, 10, gocui.OutputNormal)
@@ -182,7 +185,7 @@ func TestDispatch_RedactsKeysymInSensitiveScope(t *testing.T) {
 // AD-21: redaction also applies in Normal mode (defensive — sensitive
 // scope means redact regardless of mode).
 func TestDispatch_RedactsKeysymInSensitiveScopeNormalMode(t *testing.T) {
-	sensitiveScope := types.ContextKey("credentials_prompt")
+	sensitiveScope := types.PROMPT
 	rig := newLoggedRig(t, keys.NewTrieSet(), sensitiveScope, types.ModeNormal)
 
 	if _, err := rig.disp.Dispatch(nil, gocui.NewKeyRune('s')); err != nil {

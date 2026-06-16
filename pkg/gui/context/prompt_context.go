@@ -120,6 +120,7 @@ func (p *PromptContext) HandleFocusLost(_ types.OnFocusLostOpts) error {
 	}
 	p.buf = ""
 	p.view = nil
+	p.masked = false
 	return nil
 }
 
