@@ -292,8 +292,9 @@ func (c *ConnectionManagerContext) OpenEditForm(conn models.Connection, existing
 
 // renderRows produces the row text for the current Items slice, mirroring
 // ConnectionsContext: the cursor row is prefixed with "> ", others with "  ";
-// each row is "<icon> <name>  <host>/<db>" via deps.PerRowDecorationHook +
-// deps.RowSuffix (active-connection marker + parsed endpoint).
+// each row is "<icon> <label>  <host>/<db>  [tags]" via
+// deps.PerRowDecorationHook (label falls back to Name) + deps.RowSuffix
+// (active-connection marker + parsed endpoint) + rowTags.
 func (c *ConnectionManagerContext) renderRows() string {
 	var b strings.Builder
 	for i, item := range c.items {
@@ -311,7 +312,7 @@ func (c *ConnectionManagerContext) renderRows() string {
 			if label == "" {
 				label = conn.Name
 			}
-			label += c.rowSuffix(conn)
+			label += c.rowSuffix(conn) + rowTags(conn)
 			if sgr := theme.AnsiFgSGR(color); sgr != "" {
 				label = sgr + label + theme.AnsiReset
 			}
@@ -322,9 +323,19 @@ func (c *ConnectionManagerContext) renderRows() string {
 			}
 			continue
 		}
-		fmt.Fprintf(&b, "%s%s%s\n", marker, conn.Name, c.rowSuffix(conn))
+		fmt.Fprintf(&b, "%s%s%s%s\n", marker, conn.Name, c.rowSuffix(conn), rowTags(conn))
 	}
 	return b.String()
+}
+
+// rowTags renders a connection's tags as a bracketed, comma-separated suffix
+// (e.g. "  [prod, postgres]"), prefixed with two spaces so it reads as a
+// separate column. Empty when the connection has no tags.
+func rowTags(conn *models.Connection) string {
+	if len(conn.Tags) == 0 {
+		return ""
+	}
+	return "  [" + strings.Join(conn.Tags, ", ") + "]"
 }
 
 // rowSuffix returns the parsed "host/database" endpoint prefixed with two

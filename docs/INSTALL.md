@@ -87,6 +87,27 @@ Useful per-profile options include `read_only`, `confirm_writes`,
 `confirm_ddl`, `statement_timeout`, `hidden_schemas`, `role`, and presentation
 fields (`label`, `color`, `icon`, `tags`).
 
+`icon` is a free-form glyph rendered as a prefix beside the connection in the
+picker, title bars, and commit dialog. Any string works — an emoji, a Nerd Font
+glyph, or a plain symbol:
+
+```yaml
+connections:
+  - name: prod
+    driver: postgres
+    dsn: postgres://app@db.prod:5432/app?sslmode=require
+    label: Production
+    color: red
+    icon: "🚨"        # emoji
+
+  - name: local
+    driver: postgres
+    dsn: postgres://postgres@localhost:5432/postgres?sslmode=disable
+    icon: ""        # Nerd Font glyph (requires a patched terminal font)
+```
+
+When a connection is the active one, the picker shows `●` in place of its icon.
+
 ## Configuration files
 
 pgsavvy follows the XDG Base Directory layout:

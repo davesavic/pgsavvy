@@ -66,6 +66,10 @@ func (BuiltinSnippetProvider) Snippets() []Snippet {
 			Name: "delete_from",
 			Body: "DELETE FROM table_name\nWHERE condition;",
 		},
+		{
+			Name: "create_table",
+			Body: "CREATE TABLE table_name (\n  id BIGSERIAL PRIMARY KEY,\n  col1 TYPE,\n  col2 TYPE\n);",
+		},
 	}
 }
 

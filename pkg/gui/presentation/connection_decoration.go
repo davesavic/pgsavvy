@@ -95,12 +95,13 @@ func NewPresentationHook() func(conn *models.Connection) (types.TextStyle, strin
 // A nil connection produces three empty strings so the caller's nil
 // branch keeps working.
 //
-// The label returned is Profile.Name (the stable, user-supplied key in
-// connections.yml), NOT Profile.Label. The CONNECTIONS rail's purpose is
-// to disambiguate profiles by handle; Profile.Label is reserved for the
-// status-bar / title-bar header decoration (see HeaderTextFor). Returning
-// Name here keeps two profiles with the same Label (e.g. both labelled
-// "localhost") visually distinct in the rail.
+// The label returned is Profile.Label when set, falling back to
+// Profile.Name (the stable, user-supplied key in connections.yml) when
+// Label is empty. This mirrors the status-bar / title-bar header
+// decoration (see HeaderTextFor) so a profile's friendly label shows
+// consistently across chrome. Two profiles deliberately given the same
+// Label will render identically here; Name (the unique key) plus the
+// host/db suffix remain the disambiguators.
 //
 // activeID is a LIVE accessor for the currently-active connection's name
 // (g.activeConnID). It is called on every render so the marker tracks
@@ -120,7 +121,11 @@ func NewPerRowDecorationHook(activeID func() string) func(conn *models.Connectio
 				icon = "●"
 			}
 		}
-		return icon, conn.Name, ResolveColor(conn.Color)
+		label := conn.Label
+		if label == "" {
+			label = conn.Name
+		}
+		return icon, label, ResolveColor(conn.Color)
 	}
 }
 

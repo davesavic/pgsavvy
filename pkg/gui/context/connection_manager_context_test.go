@@ -78,6 +78,51 @@ func TestConnectionManagerContext_RendersRowsWithHostDbAndMarker(t *testing.T) {
 	}
 }
 
+// TestConnectionManagerContext_RendersTags asserts that a connection's tags
+// render as a bracketed, comma-separated suffix on the row, after the host/db
+// endpoint, on both the decoration-hook path and the bare fallback path.
+// Connections without tags carry no bracket.
+func TestConnectionManagerContext_RendersTags(t *testing.T) {
+	drv := &captureDriver{}
+	hook := func(c *models.Connection) (string, string, string) {
+		return "", c.Name, ""
+	}
+	c := newTestConnectionManager(drv, hook, nil)
+	c.SetItems([]any{
+		&models.Connection{Name: "alpha", Tags: []string{"prod", "postgres"}},
+		&models.Connection{Name: "beta"},
+	})
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(drv.lastContent, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("rendered %d lines, want 2; body=%q", len(lines), drv.lastContent)
+	}
+	if !strings.Contains(lines[0], "[prod, postgres]") {
+		t.Errorf("tagged row missing tag suffix: %q", lines[0])
+	}
+	if strings.Contains(lines[1], "[") {
+		t.Errorf("untagged row must carry no tag bracket: %q", lines[1])
+	}
+}
+
+// TestConnectionManagerContext_RendersTagsBareFallback asserts tags render on
+// the no-decoration-hook fallback path (row = name + suffix + tags).
+func TestConnectionManagerContext_RendersTagsBareFallback(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestConnectionManager(drv, nil, nil)
+	c.SetItems([]any{
+		&models.Connection{Name: "alpha", Tags: []string{"staging"}},
+	})
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	if !strings.Contains(drv.lastContent, "[staging]") {
+		t.Errorf("bare row missing tag suffix: %q", drv.lastContent)
+	}
+}
+
 // TestConnectionManagerContext_RendersRowColour asserts that when the
 // decoration hook returns a recognised colour name, the row's label is wrapped
 // in the matching ANSI foreground SGR + reset so the connection renders tinted.

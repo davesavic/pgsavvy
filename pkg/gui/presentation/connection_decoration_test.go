@@ -155,33 +155,28 @@ func TestNewPerRowDecorationHook(t *testing.T) {
 		t.Fatalf("nil conn -> (%q,%q,%q), want all empty", icon, label, color)
 	}
 
-	// The rail label is Profile.Name (not Profile.Label): the picker's
-	// purpose is to disambiguate profiles by their stable handle. A
-	// non-empty Profile.Label is ignored here; status-bar / title-bar
-	// rendering owns the Label-via-HeaderTextFor path.
+	// The row label is Profile.Label when set, mirroring the status-bar /
+	// title-bar header (HeaderTextFor) so the friendly label shows
+	// consistently across chrome.
 	conn := &models.Connection{Icon: "★", Name: "local-pg", Label: "lbl", Color: "#abc"}
 	icon, label, color = h(conn)
-	if icon != "★" || label != "local-pg" || color != "#abc" {
-		t.Fatalf("got (%q,%q,%q), want (★,local-pg,#abc)", icon, label, color)
+	if icon != "★" || label != "lbl" || color != "#abc" {
+		t.Fatalf("got (%q,%q,%q), want (★,lbl,#abc)", icon, label, color)
 	}
 }
 
-// TestNewPerRowDecorationHook_NameUsedWhenLabelMatchesHost guards the
-// regression: a profile saved with name='local-pg' and a
-// DSN-derived label='localhost' (the host portion of the DSN — typical
-// of an auto-populated or user-set label) must render as 'local-pg' in
-// the CONNECTIONS rail. Two profiles sharing a host but differing in
-// name remain visually distinguishable.
-func TestNewPerRowDecorationHook_NameUsedWhenLabelMatchesHost(t *testing.T) {
+// TestNewPerRowDecorationHook_NameFallbackWhenLabelEmpty checks the
+// fallback: a profile with no Label renders its Name, so profiles that
+// never set a friendly label keep their stable handle in the picker.
+func TestNewPerRowDecorationHook_NameFallbackWhenLabelEmpty(t *testing.T) {
 	h := NewPerRowDecorationHook(func() string { return "" })
 	conn := &models.Connection{
-		Name:  "local-pg",
-		DSN:   "postgres://pgsavvy:pgsavvy@localhost:5432/pgsavvy_test",
-		Label: "localhost",
+		Name: "local-pg",
+		DSN:  "postgres://pgsavvy:pgsavvy@localhost:5432/pgsavvy_test",
 	}
 	_, label, _ := h(conn)
 	if label != "local-pg" {
-		t.Fatalf("rail label = %q, want %q (must use Profile.Name, not Profile.Label)", label, "local-pg")
+		t.Fatalf("row label = %q, want %q (Name fallback when Label empty)", label, "local-pg")
 	}
 }
 
