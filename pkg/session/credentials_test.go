@@ -160,6 +160,35 @@ func TestPgpassReadsCorrectLine(t *testing.T) {
 	}
 }
 
+func TestPgpassMatchesDiscreteFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pgpass")
+	content := strings.Join([]string{
+		"other-host:5432:weddingsavvy:wsuser:wrong",
+		"172.28.0.10:5432:weddingsavvy:wsuser:right-pw",
+		"*:*:*:*:fallback",
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Modern connection form persists discrete fields and leaves DSN empty.
+	profile := models.Connection{
+		Name:       "wedding savvy",
+		Host:       "172.28.0.10",
+		Port:       5432,
+		User:       "wsuser",
+		Database:   "weddingsavvy",
+		PgpassPath: path,
+	}
+	got, err := ResolvePassword(context.Background(), profile, nil)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "right-pw" {
+		t.Fatalf("got %q want right-pw", got)
+	}
+}
+
 func TestPgpassWildcardLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "pgpass")

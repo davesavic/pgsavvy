@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -118,7 +119,7 @@ func ResolvePasswordWithPrompters(ctx context.Context, profile models.Connection
 
 	// 4. Explicit pgpass.
 	if profile.PgpassPath != "" {
-		pw, err := resolveExplicitPgpass(profile.PgpassPath, profile.DSN)
+		pw, err := resolveExplicitPgpass(profile.PgpassPath, profile)
 		if err != nil {
 			return "", fmt.Errorf("session: pgpass: %w", err)
 		}
@@ -150,9 +151,9 @@ func ResolvePasswordWithPrompters(ctx context.Context, profile models.Connection
 }
 
 // resolveExplicitPgpass enforces the libpq mode policy and returns the
-// matching password from path for the host/port/dbname/user encoded in dsn.
+// matching password from path for the host/port/dbname/user of profile.
 // See epic D15 and D20.
-func resolveExplicitPgpass(path, dsn string) (string, error) {
+func resolveExplicitPgpass(path string, profile models.Connection) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
@@ -161,7 +162,7 @@ func resolveExplicitPgpass(path, dsn string) (string, error) {
 		return "", fmt.Errorf("%w: %s mode=%04o", errPgpassInsecureMode, path, info.Mode().Perm())
 	}
 
-	host, port, dbname, user, err := parseDSNFields(dsn)
+	host, port, dbname, user, err := pgpassMatchFields(profile)
 	if err != nil {
 		return "", fmt.Errorf("parse dsn: %w", err)
 	}
@@ -227,6 +228,23 @@ func pgpassFieldMatches(pattern, value string) bool {
 		return true
 	}
 	return pattern == value
+}
+
+// pgpassMatchFields returns the host/port/dbname/user used to match a pgpass
+// entry. Discrete fields win when a Host is present — the modern connection
+// form persists them and leaves DSN empty (the save normalizer even drops DSN
+// when discrete fields exist), so reading only the DSN would break pgpass for
+// every form-created connection. A legacy DSN-only profile falls back to
+// parseDSNFields. This mirrors connectionStringFor's source-of-truth choice.
+func pgpassMatchFields(profile models.Connection) (host, port, dbname, user string, err error) {
+	if profile.Host == "" {
+		return parseDSNFields(profile.DSN)
+	}
+	port = "5432"
+	if profile.Port != 0 {
+		port = strconv.Itoa(profile.Port)
+	}
+	return profile.Host, port, profile.Database, profile.User, nil
 }
 
 // parseDSNFields extracts the four pgpass-match fields from a Postgres DSN.
