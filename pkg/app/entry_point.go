@@ -49,6 +49,14 @@ type BuildInfo struct {
 // (store.Flush → store.Close → driver.Close) is enforced by
 // orchestrator.Gui.Close.
 func Start(build *BuildInfo, args []string) error {
+	// Route the `update` subcommand BEFORE flag parsing and before
+	// orchestrator.NewGui — self-update never runs inside the gocui alt-screen.
+	// args is os.Args[1:], so args[0]=="update" cannot collide with the
+	// --version/--log-dir flags or the bare-TUI path.
+	if len(args) > 0 && args[0] == "update" {
+		return runUpdate(build, args[1:])
+	}
+
 	flags := flag.NewFlagSet("pgsavvy", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	showVersion := flags.Bool("version", false, "print version and exit")

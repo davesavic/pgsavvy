@@ -1,0 +1,55 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          install-only: true
+
+      - name: Pre-publish validation (snapshot)
+        run: |
+          set -euo pipefail
+          goreleaser release --snapshot --clean
+          missing=0
+          for os in linux darwin windows; do
+            for arch in amd64 arm64; do
+              name="pgsavvy_v0.0.0_${os}_${arch}"
+              if [ "$os" = "windows" ]; then
+                name="${name}.exe"
+              fi
+              if ! jq -e --arg n "$name" '.[]|select(.extra.Format=="binary" and .name==$n)' dist/artifacts.json >/dev/null; then
+                echo "missing expected asset: $name"
+                missing=1
+              fi
+            done
+          done
+          if [ ! -f dist/checksums.txt ]; then
+            echo "missing checksums.txt"
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "pre-publish validation failed"
+            exit 1
+          fi
+
+      - name: Release
+        run: goreleaser release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

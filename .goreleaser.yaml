@@ -1,0 +1,22 @@
+version: 2
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -X main.version={{.Tag}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.buildSource=release
+
+archives:
+  - formats: [binary]
+    name_template: "pgsavvy_{{.Tag}}_{{.Os}}_{{.Arch}}"
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256

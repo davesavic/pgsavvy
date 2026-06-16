@@ -16,6 +16,10 @@ go install github.com/davesavic/pgsavvy@latest
 This places a `pgsavvy` binary in `$(go env GOPATH)/bin` (add it to your
 `PATH`).
 
+> **Note:** `go install` builds carry no embedded version metadata, so
+> `pgsavvy --version` reports a placeholder and `pgsavvy update` (see below)
+> refuses to self-update. Use a release binary if you want in-place updates.
+
 ### Build from source
 
 ```sh
@@ -29,9 +33,39 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full development toolchain.
 ### Release binaries
 
 Prebuilt binaries are published on the
-[GitHub Releases](https://github.com/davesavic/pgsavvy/releases) page. Download
-the archive for your platform, extract the `pgsavvy` binary, and put it on your
-`PATH`.
+[GitHub Releases](https://github.com/davesavic/pgsavvy/releases) page. Each
+asset is the raw `pgsavvy` binary for one OS/arch (named
+`pgsavvy_<tag>_<os>_<arch>`, plus `.exe` on Windows) alongside a
+`checksums.txt`. Download the binary for your platform, make it executable, and
+put it on your `PATH`:
+
+```sh
+# example for linux/amd64; adjust the asset name for your platform
+curl -fsSLo pgsavvy https://github.com/davesavic/pgsavvy/releases/latest/download/pgsavvy_<tag>_linux_amd64
+chmod +x pgsavvy
+mv pgsavvy ~/.local/bin/   # or anywhere on your PATH
+```
+
+## Updating (`pgsavvy update`)
+
+A release binary can update itself in place:
+
+```sh
+pgsavvy update
+```
+
+This downloads the matching asset from the latest GitHub Release, verifies its
+SHA256 against `checksums.txt`, and atomically replaces the running executable.
+Re-run `pgsavvy` afterwards to use the new version.
+
+- `pgsavvy update` takes no arguments — a stray flag or version is rejected.
+- Already on the latest release? It prints an up-to-date message and exits.
+- Builds without release metadata (`go install`, dev/source builds) refuse to
+  self-update.
+- Package-manager / read-only installs (Homebrew, Nix) refuse and tell you to
+  update via that manager instead.
+- On Windows the previous executable is left beside the new one as a hidden
+  `.old` file (a running `.exe` cannot be deleted).
 
 ## First run
 

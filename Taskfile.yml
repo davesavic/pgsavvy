@@ -97,9 +97,14 @@ tasks:
       - govulncheck ./...
 
   release:
-    desc: Cut a release (stub until release pipeline lands).
+    desc: Cut a release via goreleaser (requires a tag at HEAD + GITHUB_TOKEN).
     cmds:
-      - 'echo "release: not yet wired"'
+      - goreleaser release --clean
+
+  release:snapshot:
+    desc: Build a local snapshot release via goreleaser (no publish; for verification).
+    cmds:
+      - goreleaser release --snapshot --clean
 
   demo:
     desc: Record the pgsavvy demo GIFs (docs/demo*.gif) via VHS against the docker fixture.

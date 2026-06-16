@@ -5,6 +5,7 @@ import (
 	"os"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -81,6 +82,102 @@ func TestAppState_SaveLoad_RoundTrip_MemMapFs(t *testing.T) {
 	require.NoError(t, b.Load(fs, path))
 	require.Equal(t, []string{"public", "_internal"}, b.HiddenSchemas["conn1"])
 	require.Equal(t, []string{"x"}, b.HiddenColumns["conn1"]["tbl"])
+}
+
+// goldenOldStateYAML is a representative state.yml as written by an OLDER
+// binary (note version: 0.1.0), with every recognized AppState field populated
+// — including the nested maps. It is a raw on-disk literal (not a marshaled
+// struct) because that most faithfully simulates a file produced by a prior
+// binary. The guarantee under test: loading it through the CURRENT AppState
+// struct and saving it back drops no recognized field (self-update relevance —
+// see AppState.Version godoc).
+const goldenOldStateYAML = `last_connection_id: conn-prod
+recent_connection_ids:
+    - conn-prod
+    - conn-staging
+last_buffer_uuids:
+    conn-prod: 11111111-1111-4111-8111-111111111111
+    conn-staging: 22222222-2222-4222-8222-222222222222
+last_theme: dracula
+last_result_view_mode: expanded
+startup_tips_seen_at: 2024-01-02T03:04:05Z
+version: 0.1.0
+statement_timeout_override:
+    conn-prod: 30s
+    conn-staging: 10s
+hidden_schemas:
+    conn-prod:
+        - pg_catalog
+        - information_schema
+hidden_columns:
+    conn-prod:
+        users:
+            - password_hash
+            - ssn
+        orders:
+            - internal_note
+last_session_settings:
+    conn-prod:
+        search_path: public
+        timezone: UTC
+last_schema_name:
+    conn-prod: public
+last_table_name:
+    conn-prod: users
+`
+
+func TestAppState_GoldenOldState_RoundTripDropsNoField(t *testing.T) {
+	tipsSeen, err := time.Parse(time.RFC3339, "2024-01-02T03:04:05Z")
+	require.NoError(t, err)
+
+	want := AppState{
+		LastConnectionID:    "conn-prod",
+		RecentConnectionIDs: []string{"conn-prod", "conn-staging"},
+		LastBufferUUIDs: map[string]string{
+			"conn-prod":    "11111111-1111-4111-8111-111111111111",
+			"conn-staging": "22222222-2222-4222-8222-222222222222",
+		},
+		LastTheme:          "dracula",
+		LastResultViewMode: "expanded",
+		StartupTipsSeenAt:  tipsSeen,
+		Version:            "0.1.0",
+		StatementTimeoutOverride: map[string]string{
+			"conn-prod":    "30s",
+			"conn-staging": "10s",
+		},
+		HiddenSchemas: map[string][]string{
+			"conn-prod": {"pg_catalog", "information_schema"},
+		},
+		HiddenColumns: map[string]map[string][]string{
+			"conn-prod": {
+				"users":  {"password_hash", "ssn"},
+				"orders": {"internal_note"},
+			},
+		},
+		LastSessionSettings: map[string]map[string]string{
+			"conn-prod": {"search_path": "public", "timezone": "UTC"},
+		},
+		LastSchemaName: map[string]string{"conn-prod": "public"},
+		LastTableName:  map[string]string{"conn-prod": "users"},
+	}
+
+	fs := afero.NewMemMapFs()
+	const oldPath = "/old-state.yml"
+	require.NoError(t, afero.WriteFile(fs, oldPath, []byte(goldenOldStateYAML), 0o600))
+
+	// Load the older file through the current struct: no panic, no error.
+	var loaded AppState
+	require.NoError(t, loaded.Load(fs, oldPath))
+	require.Equal(t, want, loaded, "older state.yml must load into the current struct without dropping fields")
+
+	// Save it back to a new path with the current binary, reload, and assert
+	// every recognized field survives the round-trip.
+	const newPath = "/new-state.yml"
+	require.NoError(t, loaded.Save(fs, newPath))
+
+	var reloaded AppState
+	require.NoError(t, reloaded.Load(fs, newPath))
+	require.Equal(t, want, reloaded, "Load→Save→Load round-trip must not drop any recognized field")
 }
 
 func TestAppState_Save_TmpAbsentAfterSuccess(t *testing.T) {

@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -10,11 +11,124 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adrg/xdg"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/pgsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/update"
 )
+
+// withTempStateDir points XDG_STATE_HOME at a temp dir for the duration of a
+// test so the update lockfile and update log land somewhere disposable rather
+// than the developer's real state dir.
+func withTempStateDir(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	xdg.Reload()
+	t.Cleanup(func() { xdg.Reload() })
+}
+
+// TestStart_UpdateRouting_RefusesDevBuildBeforeTUI validates that
+// `pgsavvy update` on a non-release build routes to runUpdate (returning before
+// orchestrator.NewGui — i.e. no alt-screen), refuses with the not-a-release-build
+// error, and propagates a non-nil error (→ main.go log.Fatal, non-zero exit).
+func TestStart_UpdateRouting_RefusesDevBuildBeforeTUI(t *testing.T) {
+	withTempStateDir(t)
+	// Version "dev" triggers pkg/update's provenance refusal BEFORE any
+	// network call (newBuildInfo()'s "test" would NOT), so this test never
+	// touches GitHub and never enters the TUI.
+	build := &BuildInfo{Version: "dev", BuildSource: "task"}
+
+	err := Start(build, []string{"update"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, update.ErrNonReleaseBuild,
+		"update routing must reach pkg/update.Run and surface its refusal")
+}
+
+// TestStart_UpdateRouting_EmptyVersionRefuses mirrors the dev case for the
+// empty-version build (also a non-release per pkg/update.checkProvenance).
+func TestStart_UpdateRouting_EmptyVersionRefuses(t *testing.T) {
+	withTempStateDir(t)
+	build := &BuildInfo{Version: "", BuildSource: "release"}
+
+	err := Start(build, []string{"update"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, update.ErrNonReleaseBuild)
+}
+
+// TestStart_UpdateRejectsArguments validates that ANY non-empty args[1:] —
+// a stray flag OR a stray positional — fails with the usage error before any
+// network/apply work, and does not enter the TUI.
+func TestStart_UpdateRejectsArguments(t *testing.T) {
+	withTempStateDir(t)
+	build := &BuildInfo{Version: "v1.0.0", BuildSource: "release"}
+
+	for _, arg := range []string{"--force", "v1.2.3"} {
+		t.Run(arg, func(t *testing.T) {
+			err := Start(build, []string{"update", arg})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "does not accept arguments",
+				"a stray %q must be rejected with the usage error", arg)
+			require.False(t, errors.Is(err, update.ErrNonReleaseBuild),
+				"arg rejection must happen before pkg/update.Run")
+		})
+	}
+}
+
+// TestStart_VersionFlagUnchanged validates the routing addition did not
+// disturb the --version early-return: it still prints `pgsavvy <ver> (<source>)`
+// and returns nil (no TUI). Guards against args[0]=="update" collision concerns.
+func TestStart_VersionFlagUnchanged(t *testing.T) {
+	build := &BuildInfo{Version: "v9.9.9", BuildSource: "release"}
+
+	out := withStdoutCaptured(t, func() {
+		require.NoError(t, Start(build, []string{"--version"}))
+	})
+	require.Equal(t, "pgsavvy v9.9.9 (release)", out)
+}
+
+// TestRunUpdate_ConcurrentLockRefuses validates the exclusive lockfile: when
+// the lock already exists under the state dir, a second `pgsavvy update` exits
+// with "update in progress" before any download/apply.
+func TestRunUpdate_ConcurrentLockRefuses(t *testing.T) {
+	stateDir := t.TempDir()
+
+	// Pre-create the lock so the next acquisition collides.
+	release, err := acquireUpdateLock(stateDir)
+	require.NoError(t, err)
+	defer release()
+
+	_, err = acquireUpdateLock(stateDir)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "update in progress")
+}
+
+// TestManagedInstallReason covers the managed/symlink refusal predicate.
+func TestManagedInstallReason(t *testing.T) {
+	const refusal = "managed or read-only install — update via your package manager"
+
+	tests := []struct {
+		name              string
+		invoked, resolved string
+		wantRefusal       bool
+	}{
+		{"plain user install", "/home/u/bin/pgsavvy", "/home/u/bin/pgsavvy", false},
+		{"symlink (invoked != resolved)", "/usr/local/bin/pgsavvy", "/usr/local/Cellar/pgsavvy/1.0/bin/pgsavvy", true},
+		{"homebrew prefix", "/opt/homebrew/bin/pgsavvy", "/opt/homebrew/bin/pgsavvy", true},
+		{"nix store", "/nix/store/abc-pgsavvy/bin/pgsavvy", "/nix/store/abc-pgsavvy/bin/pgsavvy", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := managedInstallReason(tc.invoked, tc.resolved)
+			if tc.wantRefusal {
+				require.Equal(t, refusal, got)
+				return
+			}
+			require.Empty(t, got)
+		})
+	}
+}
 
 func newBuildInfo() *BuildInfo {
 	return &BuildInfo{Version: "test", Commit: "deadbeef", Date: "2026-05-21", BuildSource: "test"}
@@ -231,6 +345,28 @@ func TestRequireQuitBinding(t *testing.T) {
 		}
 		require.NoError(t, requireQuitBinding(cfg, configPath))
 	})
+}
+
+// withStdoutCaptured redirects os.Stdout to a pipe for the duration of fn and
+// returns whatever was written (trimmed). Used to assert --version output.
+func withStdoutCaptured(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	orig := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
+
+	done := make(chan []byte, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- b
+	}()
+
+	fn()
+	require.NoError(t, w.Close())
+	captured := <-done
+	return string(bytes.TrimSpace(captured))
 }
 
 // withStderrCaptured redirects os.Stderr to a pipe for the duration of fn and

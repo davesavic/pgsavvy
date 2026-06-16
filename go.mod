@@ -17,11 +17,13 @@ require (
 	github.com/jesseduffield/lazycore v0.0.0-20221012050358-03d2e40243c5
 	github.com/jesseduffield/lazygit v0.61.2-0.20260511142836-c49350362005
 	github.com/mattn/go-runewidth v0.0.23
+	github.com/minio/selfupdate v0.6.0
 	github.com/mjibson/sqlfmt v0.5.0
 	github.com/spf13/afero v1.15.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.36.0
+	golang.org/x/mod v0.37.0
 	golang.org/x/sys v0.44.0
 	golang.org/x/term v0.43.0
 	golang.org/x/text v0.36.0
@@ -30,6 +32,7 @@ require (
 )
 
 require (
+	aead.dev/minisign v0.2.0 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/biogo/store v0.0.0-20201120204734-aad293a2328f // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
@@ -77,7 +80,7 @@ require (
 	github.com/twpayne/go-geom v1.4.2 // indirect
 	github.com/twpayne/go-kml v1.5.2 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/tools v0.43.0 // indirect
+	golang.org/x/tools v0.45.0 // indirect
 	google.golang.org/genproto v0.0.0-20220505152158-f39f71e6c8f3 // indirect
 	google.golang.org/grpc v1.46.0 // indirect
 	google.golang.org/protobuf v1.28.0 // indirect

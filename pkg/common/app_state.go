@@ -19,12 +19,17 @@ import (
 // defensive snapshot but cannot protect against a mutator racing with the
 // marshal — see Save's godoc for the contract.
 type AppState struct {
-	LastConnectionID         string                         `yaml:"last_connection_id"`
-	RecentConnectionIDs      []string                       `yaml:"recent_connection_ids"`
-	LastBufferUUIDs          map[string]string              `yaml:"last_buffer_uuids"`
-	LastTheme                string                         `yaml:"last_theme"`
-	LastResultViewMode       string                         `yaml:"last_result_view_mode"`
-	StartupTipsSeenAt        time.Time                      `yaml:"startup_tips_seen_at"`
+	LastConnectionID    string            `yaml:"last_connection_id"`
+	RecentConnectionIDs []string          `yaml:"recent_connection_ids"`
+	LastBufferUUIDs     map[string]string `yaml:"last_buffer_uuids"`
+	LastTheme           string            `yaml:"last_theme"`
+	LastResultViewMode  string            `yaml:"last_result_view_mode"`
+	StartupTipsSeenAt   time.Time         `yaml:"startup_tips_seen_at"`
+	// Version is currently inert: it is round-tripped on save but never
+	// compared or migrated (there is no migration mechanism). It matters for
+	// self-update, which lets a user jump N versions in one step — so an older
+	// state.yml must survive a Load→Save through this struct without dropping
+	// recognized fields. See app_state_test.go golden round-trip test.
 	Version                  string                         `yaml:"version"`
 	StatementTimeoutOverride map[string]string              `yaml:"statement_timeout_override"`
 	HiddenSchemas            map[string][]string            `yaml:"hidden_schemas"`
