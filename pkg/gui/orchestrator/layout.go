@@ -121,6 +121,17 @@ func (g *Gui) RunLayout(w, h int) error {
 			rails[name] = v
 			v.Title = ctx.GetTitle()
 		}
+		// Attach the SIDE_CONTEXT's master editor to its view BY VIEW NAME
+		// every frame so keystrokes route through the chord Matcher under the
+		// context's fixed scope (D1). The SCHEMA_RAIL container is the only
+		// side context that registers a master editor (built in
+		// installKeyDispatch alongside RESULT_GRID/PLAN); its scope token
+		// ("schema-rail") differs from its view name ("schemas-tables"), so the
+		// editor is looked up by GetKey() but attached to the GetViewName()
+		// view. SetMasterEditor is idempotent.
+		if ed, ok := g.keybindingSystem.masterEditors[ctx.GetKey()]; ok {
+			_ = g.driver.SetMasterEditor(name, ed)
+		}
 		_ = ctx.HandleRender()
 	}
 
@@ -264,6 +275,30 @@ func (g *Gui) RunLayout(w, h int) error {
 		}
 	}
 	applyFocusFrameColors(rails, focusedName, frameAttr(theme.Current().ActiveBorder), frameAttr(theme.Current().InactiveBorder))
+
+	// Consolidated-rail native tab colours: paint the active tab label
+	// theme.ActiveBorder and the inactive tab theme.InactiveBorder. gocui's
+	// drawTitle reads SelFgColor/FgColor every frame and the active-tab index
+	// changes between frames, so these are re-applied here (in the focus-colour
+	// pass) rather than once at wiring time. The theme→gocui.Attribute
+	// resolution stays in the orchestrator (the driver does not import theme).
+	// Suppressed under the CONNECTION_MANAGER modal (Tier-1 is skipped, so the
+	// container view is not live this frame); otherwise applied every frame
+	// regardless of focus, mirroring the per-frame SetViewTabs marker publish.
+	// The driver call is a no-op error when the view does not exist yet.
+	if !modalTop {
+		// The inactive colour is written to the view's FgColor, which gocui
+		// ALSO uses as the default foreground for the view's CONTENT (plain
+		// cells fall back to v.FgColor). Passing InactiveBorder here greyed out
+		// every list row. ColorDefault keeps content at the terminal foreground;
+		// the active tab stays distinguished by SelFgColor (ActiveBorder) plus
+		// its "[...]" bracket marker, so the inactive label needs no dim colour.
+		_ = g.driver.SetViewTabColors(
+			guicontext.SchemaRailViewName,
+			frameAttr(theme.Current().ActiveBorder),
+			gocui.ColorDefault,
+		)
+	}
 
 	// Tier 3: focus-stack-driven popups (TEMPORARY_POPUP +
 	// DISPLAY_CONTEXT + PERSISTENT_POPUP). Walk bottom→top so SetViewOnTop

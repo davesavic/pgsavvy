@@ -9,10 +9,10 @@ import (
 )
 
 // railDirectionalBindings publishes Ctrl+H/J/K/L on the
-// scope appropriate for each pane. Connections/Schemas get Up/Down/Right-
-// to-QueryEditor; Tables gets Up/Down/Right-to-Results (physically
-// adjacent); QueryEditor gets Left(=LastRail)/Down(=Results); result
-// grid gets Left(=Tables)/Up(=QueryEditor). Anything else gets nothing.
+// scope appropriate for each pane. The consolidated SCHEMA_RAIL gets
+// Right(=QueryEditor); QueryEditor gets Left(=LastRail=SCHEMA_RAIL)/
+// Down(=Results); result grid / plan get Left(=LastRail=SCHEMA_RAIL)/
+// Up(=QueryEditor). Anything else gets nothing.
 func TestRailDirectionalBindings_PerScope(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 
@@ -30,22 +30,19 @@ func TestRailDirectionalBindings_PerScope(t *testing.T) {
 		scope types.ContextKey
 		want  []want
 	}{
-		{"schemas", types.SCHEMAS, []want{
-			{ctrlK, commands.RailSwitchUp},
-			{ctrlJ, commands.RailSwitchDown},
+		{"schema_rail", types.SCHEMA_RAIL, []want{
 			{ctrlL, commands.RailSwitchQueryEditor},
-		}},
-		{"tables", types.TABLES, []want{
-			{ctrlK, commands.RailSwitchUp},
-			{ctrlJ, commands.RailSwitchDown},
-			{ctrlL, commands.RailSwitchResults},
 		}},
 		{"query_editor", types.QUERY_EDITOR, []want{
 			{ctrlH, commands.RailSwitchLastRail},
 			{ctrlJ, commands.RailSwitchResults},
 		}},
 		{"result_grid", types.RESULT_GRID, []want{
-			{ctrlH, commands.RailSwitchTables},
+			{ctrlH, commands.RailSwitchLastRail},
+			{ctrlK, commands.RailSwitchQueryEditor},
+		}},
+		{"plan", types.PLAN, []want{
+			{ctrlH, commands.RailSwitchLastRail},
 			{ctrlK, commands.RailSwitchQueryEditor},
 		}},
 		{"global (no bindings)", types.GLOBAL, nil},

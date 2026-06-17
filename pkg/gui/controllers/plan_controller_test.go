@@ -116,11 +116,10 @@ func TestPlanController_GetKeybindings_PublishesNavigationEscape(t *testing.T) {
 	ctrl := NewPlanController(nil, CoreDeps{}, nil)
 	bindings := ctrl.GetKeybindings(types.KeybindingsOpts{})
 	want := map[string]bool{
-		commands.RailSwitchSchemas:     false, // 1
-		commands.RailSwitchTables:      false, // 2
 		commands.RailSwitchQueryEditor: false, // 3
 		commands.RailSwitchResults:     false, // 4
 		commands.RailSwitchNext:        false, // <tab>
+		commands.RailSwitchLastRail:    false, // <c-h> back to SCHEMA_RAIL
 		commands.ResultTabNext:         false, // gt
 		commands.ResultTabPrev:         false, // gT
 	}

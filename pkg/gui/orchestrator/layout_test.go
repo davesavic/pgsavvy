@@ -145,19 +145,31 @@ func TestRunLayoutDisablesCaretOnConfirmationPopup(t *testing.T) {
 	}
 }
 
+// TestRunLayoutCreatesSideRails asserts the consolidated single-rail
+// topology (pgsavvy-i42s.4): the SCHEMAS/TABLES rails are multiplexed into
+// the single SCHEMA_RAIL container view "schemas-tables". Exactly that one
+// rail view is laid out; the retired per-rail views "schemas"/"tables" are
+// never SetView'd (they have no layout dims and the leaves are not
+// flattened, so the Tier-1 loop never reaches them).
 func TestRunLayoutCreatesSideRails(t *testing.T) {
 	g, rec := buildTestGui(t)
-	// Pop CONNECTION_MANAGER first so the layout pass paints the side rails.
-	_ = g.ContextTree().Push(g.Registry().Schemas)
+	// Push the SCHEMA_RAIL container so the layout pass paints the rail
+	// (popping the CONNECTION_MANAGER modal that suppresses Tier-1).
+	_ = g.ContextTree().Push(g.Registry().SchemaRail)
 	if err := g.RunLayout(120, 40); err != nil {
 		t.Fatalf("RunLayout: %v", err)
 	}
+	if !rec.HasSetView("schemas-tables") {
+		t.Errorf("consolidated rail view %q not laid out at 120x40", "schemas-tables")
+	}
+	// The retired per-rail views must NOT be laid out under the container
+	// topology.
 	for _, name := range []string{
 		string(types.SCHEMAS),
 		string(types.TABLES),
 	} {
-		if !rec.HasSetView(name) {
-			t.Errorf("side rail %q not laid out at 120x40", name)
+		if rec.HasSetView(name) {
+			t.Errorf("retired rail view %q must not be laid out (consolidated into schemas-tables)", name)
 		}
 	}
 }

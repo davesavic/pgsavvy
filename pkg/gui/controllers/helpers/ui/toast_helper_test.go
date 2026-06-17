@@ -60,8 +60,19 @@ func (d *updateRecordingDriver) DeleteView(_ string) error               { retur
 func (d *updateRecordingDriver) SetManager(_ ...types.Manager)           {}
 func (d *updateRecordingDriver) SetCaretEnabled(_ bool)                  {}
 func (d *updateRecordingDriver) SetViewCursor(_ string, _, _ int) error  { return nil }
-func (d *updateRecordingDriver) MainLoop() error                         { return nil }
-func (d *updateRecordingDriver) Close() error                            { return nil }
+func (d *updateRecordingDriver) SetViewTabs(_ string, _ []string, _ int) error {
+	return nil
+}
+
+func (d *updateRecordingDriver) SetTabClickBinding(_ string, _ func(int) error) error {
+	return nil
+}
+
+func (d *updateRecordingDriver) SetViewTabColors(_ string, _, _ gocui.Attribute) error {
+	return nil
+}
+func (d *updateRecordingDriver) MainLoop() error { return nil }
+func (d *updateRecordingDriver) Close() error    { return nil }
 
 // runUpdates invokes every queued closure (FIFO) and clears the buffer.
 func (d *updateRecordingDriver) runUpdates(t *testing.T) {

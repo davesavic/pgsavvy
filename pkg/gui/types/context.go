@@ -102,8 +102,14 @@ type PopupRectSpec struct {
 type ContextKey string
 
 const (
-	SCHEMAS           ContextKey = "schemas"
-	TABLES            ContextKey = "tables"
+	SCHEMAS ContextKey = "schemas"
+	TABLES  ContextKey = "tables"
+	// SCHEMA_RAIL is the SIDE_CONTEXT container that multiplexes the SCHEMAS
+	// and TABLES leaves into the single "schemas-tables" view (BREAKING token
+	// consumed by the rail keybinding re-scoping in .5). The container owns
+	// the active-tab index; the leaves carry inFlatten=false and render only
+	// when the container calls them.
+	SCHEMA_RAIL       ContextKey = "schema-rail"
 	COLUMNS           ContextKey = "columns"
 	INDEXES           ContextKey = "indexes"
 	QUERY_EDITOR      ContextKey = "query_editor"
@@ -178,6 +184,7 @@ func AllContextKeys() []ContextKey {
 	return []ContextKey{
 		SCHEMAS,
 		TABLES,
+		SCHEMA_RAIL,
 		COLUMNS,
 		INDEXES,
 		QUERY_EDITOR,

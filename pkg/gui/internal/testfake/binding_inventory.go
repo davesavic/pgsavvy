@@ -22,24 +22,15 @@ type ExpectedBinding struct {
 // Coverage targets: j, k, <CR>, H, U, leader, digit 1..4, <tab>,
 // ?, <c-c>, :, a — across every relevant view.
 var ExpectedBindings = []ExpectedBinding{
-	// Schemas rail. <leader>H's first key is space (the configured leader).
-	{View: "schemas", Key: gocui.NewKeyRune('j'), Mod: gocui.ModNone},
-	{View: "schemas", Key: gocui.NewKeyRune('k'), Mod: gocui.ModNone},
-	{View: "schemas", Key: gocui.NewKeyName(gocui.KeyEnter), Mod: gocui.ModNone},
-	{View: "schemas", Key: gocui.NewKeyRune('H'), Mod: gocui.ModNone},
-	{View: "schemas", Key: gocui.NewKeyRune('U'), Mod: gocui.ModNone},
-	{View: "schemas", Key: gocui.NewKeyRune(' '), Mod: gocui.ModNone},
-	{View: "schemas", Key: gocui.NewKeyRune('1'), Mod: gocui.ModNone},
-	{View: "schemas", Key: gocui.NewKeyRune('2'), Mod: gocui.ModNone},
-	{View: "schemas", Key: gocui.NewKeyRune('3'), Mod: gocui.ModNone},
-	{View: "schemas", Key: gocui.NewKeyRune('4'), Mod: gocui.ModNone},
-	{View: "schemas", Key: gocui.NewKeyName(gocui.KeyTab), Mod: gocui.ModNone},
-
-	// Tables rail.
-	{View: "tables", Key: gocui.NewKeyRune('j'), Mod: gocui.ModNone},
-	{View: "tables", Key: gocui.NewKeyRune('k'), Mod: gocui.ModNone},
-	{View: "tables", Key: gocui.NewKeyName(gocui.KeyEnter), Mod: gocui.ModNone},
-	{View: "tables", Key: gocui.NewKeyName(gocui.KeyTab), Mod: gocui.ModNone},
+	// NOTE (pgsavvy-i42s.4): the SCHEMAS/TABLES side rails were consolidated
+	// into the single SCHEMA_RAIL container view "schemas-tables", which
+	// dispatches every keystroke through its master editor (like
+	// QUERY_EDITOR/RESULT_GRID) under the FIXED scope SCHEMA_RAIL — so the
+	// rails no longer receive per-key SetKeybinding shims on "schemas"/"tables".
+	// Republishing the rail nav/leader bindings under the SCHEMA_RAIL scope is
+	// pgsavvy-i42s.5; the per-rail-view entries below were removed when the
+	// views were retired. Only the always-on Esc-abort + emergency-quit shims
+	// remain on "schemas-tables" (covered by whichkey_esc_abort_test.go).
 
 	// Menu popup bindings.
 	{View: "menu", Key: gocui.NewKeyName(gocui.KeyEnter), Mod: gocui.ModNone},

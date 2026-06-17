@@ -15,8 +15,11 @@ func TestNewContextTreeReturnsAllContexts(t *testing.T) {
 	// SEARCH_LINE (TEMPORARY_POPUP) takes the count 26→27.
 	// RELATIONSHIP_PANEL (DISPLAY_CONTEXT) takes it 27→28.
 	// SAVED_QUERY (PERSISTENT_POPUP) takes it 28→29.
-	if len(flat) != 29 {
-		t.Fatalf("Flatten() len = %d, want 29 (21 live + 4 stub + 2 main + 2 persistent)", len(flat))
+	// SCHEMA_RAIL replaced the two flattened SCHEMAS/TABLES side contexts
+	// with a single flattened container (the leaves are now inFlatten=false
+	// named-only fields), taking it 29→28.
+	if len(flat) != 28 {
+		t.Fatalf("Flatten() len = %d, want 28 (20 live + 4 stub + 2 main + 2 persistent)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -30,8 +33,10 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 	tree := NewContextTree(types.ContextTreeDeps{})
 
 	allKeys := []types.ContextKey{
-		// Live (15 — 2 side + 9 temp popup + 1 global + 3 display + 1 persistent popup; messages panel removed).
-		types.SCHEMAS, types.TABLES,
+		// Live (14 — 1 side container + 9 temp popup + 1 global + 3 display + 1
+		// persistent popup; SCHEMAS/TABLES are now named-only leaves and not
+		// retrievable via ByKey, replaced by the SCHEMA_RAIL container).
+		types.SCHEMA_RAIL,
 		types.MENU, types.CONFIRMATION, types.PROMPT, types.SELECTION, types.SUGGESTIONS, types.COMMAND_LINE, types.HIDE_OVERLAY, types.EXPORT_MENU, types.TABLE_INSPECT,
 		types.GLOBAL, types.LIMIT, types.WHICH_KEY, types.CHEATSHEET,
 		types.FIRST_RUN_TIP,
@@ -39,8 +44,8 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 		types.QUERY_EDITOR, types.CONNECTION_MANAGER, types.TABLE_DATA_EDITOR, types.RESULT_GRID,
 		types.PLAN, types.HISTORY,
 	}
-	if len(allKeys) != 22 {
-		t.Fatalf("test bug: allKeys len = %d, want 22", len(allKeys))
+	if len(allKeys) != 21 {
+		t.Fatalf("test bug: allKeys len = %d, want 21", len(allKeys))
 	}
 	for _, k := range allKeys {
 		c := tree.ByKey(k)
@@ -61,9 +66,9 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		kind types.ContextKind
 	}
 	cases := []want{
-		// 2 SIDE_CONTEXT (CONNECTIONS removed).
-		{types.SCHEMAS, types.SIDE_CONTEXT},
-		{types.TABLES, types.SIDE_CONTEXT},
+		// 1 SIDE_CONTEXT: the SCHEMA_RAIL container (SCHEMAS/TABLES are
+		// named-only leaves, not retrievable via ByKey).
+		{types.SCHEMA_RAIL, types.SIDE_CONTEXT},
 		// 9 TEMPORARY_POPUP.
 		{types.MENU, types.TEMPORARY_POPUP},
 		{types.CONFIRMATION, types.TEMPORARY_POPUP},
@@ -91,8 +96,8 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.RESULT_GRID, types.STUB},
 		{types.PLAN, types.STUB},
 	}
-	if len(cases) != 22 {
-		t.Fatalf("test bug: cases len = %d, want 22", len(cases))
+	if len(cases) != 21 {
+		t.Fatalf("test bug: cases len = %d, want 21", len(cases))
 	}
 	for _, c := range cases {
 		got := tree.ByKey(c.key)
@@ -112,7 +117,9 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		counts[c.GetKind()]++
 	}
 	want := map[types.ContextKind]int{
-		types.SIDE_CONTEXT: 2,
+		// SCHEMA_RAIL container is the only flattened SIDE_CONTEXT; SCHEMAS and
+		// TABLES are inFlatten=false leaves.
+		types.SIDE_CONTEXT: 1,
 		// CellEditor, CommitDialog, ConflictDialog and
 		// FKReversePicker take TEMPORARY_POPUP from 9→13.
 		// SEARCH_LINE takes it 13→14.

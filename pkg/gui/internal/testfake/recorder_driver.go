@@ -47,6 +47,27 @@ type SetViewCursorCall struct {
 	X, Y int
 }
 
+// SetViewTabsCall records one SetViewTabs invocation. ActiveIdx is the
+// clamped index actually stored on the view (not the raw caller arg).
+type SetViewTabsCall struct {
+	Name      string
+	Labels    []string
+	ActiveIdx int
+}
+
+// SetViewTabColorsCall records one SetViewTabColors invocation.
+type SetViewTabColorsCall struct {
+	Name                 string
+	ActiveFg, InactiveFg gocui.Attribute
+}
+
+// tabClickRecord pairs a view name with its registered tab-click handler
+// so tests can fire it by index via FeedTabClick.
+type tabClickRecord struct {
+	View    string
+	Handler func(idx int) error
+}
+
 // KbRecord is the public shape returned by AllKeybindings.
 type KbRecord struct {
 	View    string
@@ -88,6 +109,10 @@ type RecorderGuiDriver struct {
 
 	bindings []KbRecord
 	clicks   []ClickRecord
+
+	setViewTabsCalls      []SetViewTabsCall
+	setViewTabColorsCalls []SetViewTabColorsCall
+	tabClicks             []tabClickRecord
 
 	editors map[string]gocui.Editor
 
@@ -470,6 +495,102 @@ func (r *RecorderGuiDriver) AllClicks() []ClickRecord {
 	out := make([]ClickRecord, len(r.clicks))
 	copy(out, r.clicks)
 	return out
+}
+
+// SetViewTabs records the labels and the clamped active index. Unknown
+// views return gocui.ErrUnknownView without recording (mirrors the
+// production driver's view lookup), so callers can assert error handling.
+func (r *RecorderGuiDriver) SetViewTabs(name string, labels []string, activeIdx int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.views[name]; !ok {
+		return gocui.ErrUnknownView
+	}
+	cp := append([]string(nil), labels...)
+	r.setViewTabsCalls = append(r.setViewTabsCalls, SetViewTabsCall{
+		Name:      name,
+		Labels:    cp,
+		ActiveIdx: clampTabIndexFake(activeIdx, len(labels)),
+	})
+	return nil
+}
+
+// clampTabIndexFake mirrors the production driver's clamp into
+// [0, n-1] (0 when n == 0) so recorded ActiveIdx matches what a real view
+// would store.
+func clampTabIndexFake(idx, n int) int {
+	if n == 0 || idx < 0 {
+		return 0
+	}
+	if idx >= n {
+		return n - 1
+	}
+	return idx
+}
+
+// SetTabClickBinding records handler for view so FeedTabClick can fire it.
+func (r *RecorderGuiDriver) SetTabClickBinding(name string, handler func(idx int) error) error {
+	r.mu.Lock()
+	r.tabClicks = append(r.tabClicks, tabClickRecord{View: name, Handler: handler})
+	r.mu.Unlock()
+	return nil
+}
+
+// SetViewTabColors records the active/inactive foreground colors. Unknown
+// views return gocui.ErrUnknownView without recording.
+func (r *RecorderGuiDriver) SetViewTabColors(name string, activeFg, inactiveFg gocui.Attribute) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.views[name]; !ok {
+		return gocui.ErrUnknownView
+	}
+	r.setViewTabColorsCalls = append(r.setViewTabColorsCalls, SetViewTabColorsCall{
+		Name:       name,
+		ActiveFg:   activeFg,
+		InactiveFg: inactiveFg,
+	})
+	return nil
+}
+
+// AllSetViewTabsCalls returns a defensive copy of the SetViewTabs log.
+func (r *RecorderGuiDriver) AllSetViewTabsCalls() []SetViewTabsCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]SetViewTabsCall, len(r.setViewTabsCalls))
+	copy(out, r.setViewTabsCalls)
+	return out
+}
+
+// AllSetViewTabColorsCalls returns a defensive copy of the
+// SetViewTabColors log.
+func (r *RecorderGuiDriver) AllSetViewTabColorsCalls() []SetViewTabColorsCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]SetViewTabColorsCall, len(r.setViewTabColorsCalls))
+	copy(out, r.setViewTabColorsCalls)
+	return out
+}
+
+// errTabClickNotFound is returned by FeedTabClick when no tab-click
+// handler has been registered for the named view.
+var errTabClickNotFound = errors.New("recorder: no tab-click binding for view")
+
+// FeedTabClick fires the first tab-click handler registered for view with
+// idx. Returns errTabClickNotFound when none is registered.
+func (r *RecorderGuiDriver) FeedTabClick(view string, idx int) error {
+	r.mu.Lock()
+	var handler func(idx int) error
+	for i := range r.tabClicks {
+		if r.tabClicks[i].View == view {
+			handler = r.tabClicks[i].Handler
+			break
+		}
+	}
+	r.mu.Unlock()
+	if handler == nil {
+		return errTabClickNotFound
+	}
+	return handler(idx)
 }
 
 func (r *RecorderGuiDriver) Update(fn func() error) {

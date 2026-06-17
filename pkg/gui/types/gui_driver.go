@@ -78,6 +78,23 @@ type GuiDriver interface {
 	// doesn't exist or where the driver records calls instead.
 	SetViewCursor(viewName string, x, y int) error
 
+	// SetViewTabs sets the native in-border tab labels and active index
+	// on the named view (gocui View.Tabs / View.TabIndex). labels are
+	// taken verbatim; activeIdx is clamped into [0, len(labels)-1] (0 when
+	// empty) so an out-of-range index never panics. Unknown view → error.
+	SetViewTabs(name string, labels []string, activeIdx int) error
+
+	// SetTabClickBinding registers handler to fire with the clicked tab
+	// index when the user clicks a native in-border tab on the named view
+	// (wraps gocui Gui.SetTabClickBinding).
+	SetTabClickBinding(name string, handler func(idx int) error) error
+
+	// SetViewTabColors sets the active (SelFgColor) and inactive (FgColor)
+	// tab-label foreground colors on the named view. Takes resolved
+	// gocui.Attribute values — the driver does not resolve themes. Unknown
+	// view → error.
+	SetViewTabColors(name string, activeFg, inactiveFg gocui.Attribute) error
+
 	// MainLoop runs the gocui event loop and blocks until Close is
 	// called or an unrecoverable error occurs.
 	MainLoop() error

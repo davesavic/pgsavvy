@@ -78,6 +78,13 @@ func TestWiringInvariant(t *testing.T) {
 		// pushed/rendered on their own.
 		types.COLUMNS: "superseded by TABLE_INSPECT popup; deferred, not flattened",
 		types.INDEXES: "superseded by TABLE_INSPECT popup; deferred, not flattened",
+		// SCHEMAS/TABLES are the SCHEMA_RAIL container's leaves: they retain
+		// ContextTree struct fields but carry inFlatten=false (the container is
+		// the only flattened side context and the only renderer of the shared
+		// "schemas-tables" view; the leaves render only when the container calls
+		// them).
+		types.SCHEMAS: "SCHEMA_RAIL container leaf; not flattened (container renders the shared view)",
+		types.TABLES:  "SCHEMA_RAIL container leaf; not flattened (container renders the shared view)",
 	}
 
 	// popupRectAllowlist: popup-kind keys (TEMPORARY_POPUP/DISPLAY_CONTEXT)
@@ -193,8 +200,10 @@ func contextSpecKeysFromTree(tree *context.ContextTree) []types.ContextKey {
 	for _, c := range tree.Flatten() {
 		out = append(out, c.GetKey())
 	}
-	// Named-only fields excluded from Flatten() (inFlatten=false).
-	out = append(out, tree.Columns.GetKey(), tree.Indexes.GetKey())
+	// Named-only fields excluded from Flatten() (inFlatten=false): the
+	// COLUMNS/INDEXES deferred rails and the SCHEMAS/TABLES leaves the
+	// SCHEMA_RAIL container multiplexes.
+	out = append(out, tree.Columns.GetKey(), tree.Indexes.GetKey(), tree.Schemas.GetKey(), tree.Tables.GetKey())
 	return out
 }
 

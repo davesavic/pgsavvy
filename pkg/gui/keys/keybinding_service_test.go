@@ -481,6 +481,7 @@ func allContextKeyKinds() map[types.ContextKey]types.ContextKind {
 	return map[types.ContextKey]types.ContextKind{
 		types.SCHEMAS:            types.SIDE_CONTEXT,
 		types.TABLES:             types.SIDE_CONTEXT,
+		types.SCHEMA_RAIL:        types.SIDE_CONTEXT,
 		types.COLUMNS:            types.STUB,
 		types.INDEXES:            types.STUB,
 		types.QUERY_EDITOR:       types.MAIN_CONTEXT,
@@ -624,6 +625,11 @@ func TestAllKnownContextsDelta(t *testing.T) {
 	}
 	wantAfter[types.CONNECTION_MANAGER] = struct{}{}
 	wantAfter[types.CHEATSHEET] = struct{}{}
+	// SCHEMA_RAIL is the consolidated side-rail container shipped by
+	// pgsavvy-i42s.4; it is a new SIDE_CONTEXT member of the scope:all
+	// expansion (the SCHEMAS/TABLES leaves remain in AllContextKeys and the
+	// kind map, so they also still appear).
+	wantAfter[types.SCHEMA_RAIL] = struct{}{}
 	delete(wantAfter, types.WHICH_KEY)
 	delete(wantAfter, types.LIMIT)
 

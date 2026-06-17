@@ -20,9 +20,12 @@ type attachable interface {
 // view slots.
 func viewName(k types.ContextKey) string { return string(k) }
 
-// railSwitchBindings returns the digit-1..5 + <tab> bindings every side
-// rail (and the QUERY_EDITOR main pane) registers so the user can hop
-// between SCHEMAS/TABLES/QUERY_EDITOR/RESULTS from any of them.
+// railSwitchBindings returns the digit-3/4 + <tab> bindings the
+// QUERY_EDITOR / RESULT_GRID / PLAN panes register so the user can hop
+// between the QueryEditor / results pane (and cycle) from any of them.
+// The SCHEMA_RAIL container does NOT use this helper — it owns its own
+// bindings via SchemaRailController (digits '1'/'2' were dropped in
+// pgsavvy-i42s.5; the rail is reached via Ctrl+H / <tab> instead).
 // The handlers are registered ONCE per process via
 // RegisterRailSwitchActions; the per-controller bindings just publish
 // ActionID strings the Matcher resolves through the commands.Registry.
@@ -32,28 +35,14 @@ func viewName(k types.ContextKey) string { return string(k) }
 // children top-to-bottom), so QueryEditor sits ABOVE Results — the
 // j/k axis covers that edge, not h/l:
 //
-//   - on the five side rails: Ctrl+K = prev rail, Ctrl+J = next rail,
-//     Ctrl+L = QueryEditor. The Up/Down handlers no-op at the ends.
-//   - on QUERY_EDITOR: Ctrl+H = last-focused rail, Ctrl+J = active
+//   - on QUERY_EDITOR: Ctrl+H = SCHEMA_RAIL, Ctrl+J = active
 //     result tab. Mode defaults to ModeNormal so Insert mode keeps
 //     Ctrl+H = Backspace and Ctrl+J = LineFeed via gocui DefaultEditor.
-//   - on RESULT_GRID: Ctrl+H = last-focused rail (rails are left of
+//   - on RESULT_GRID / PLAN: Ctrl+H = SCHEMA_RAIL (the rail is left of
 //     the whole main column, not just the editor), Ctrl+K = QueryEditor.
 func railSwitchBindings(view string, tr *i18n.TranslationSet) []*types.ChordBinding {
 	scope := types.ContextKey(view)
 	out := []*types.ChordBinding{
-		{
-			Sequence:    []types.ChordKey{{Code: '1'}},
-			Scope:       scope,
-			ActionID:    commands.RailSwitchSchemas,
-			Description: tr.Actions.RailSchemas,
-		},
-		{
-			Sequence:    []types.ChordKey{{Code: '2'}},
-			Scope:       scope,
-			ActionID:    commands.RailSwitchTables,
-			Description: tr.Actions.RailTables,
-		},
 		{
 			Sequence:    []types.ChordKey{{Code: '3'}},
 			Scope:       scope,
@@ -70,7 +59,7 @@ func railSwitchBindings(view string, tr *i18n.TranslationSet) []*types.ChordBind
 			Sequence:    []types.ChordKey{{Special: types.KeyTab}},
 			Scope:       scope,
 			ActionID:    commands.RailSwitchNext,
-			Description: tr.Actions.RailSchemas,
+			Description: tr.Actions.RailQueryEditor,
 		},
 	}
 	out = append(out, railDirectionalBindings(scope, tr)...)
@@ -88,17 +77,12 @@ func railDirectionalBindings(scope types.ContextKey, tr *i18n.TranslationSet) []
 	ctrlK := types.ChordKey{Code: 'k', Mod: types.ChordModCtrl}
 	ctrlL := types.ChordKey{Code: 'l', Mod: types.ChordModCtrl}
 	switch scope {
-	case types.SCHEMAS:
+	case types.SCHEMA_RAIL:
+		// The consolidated rail is the single side context: Ctrl+L escapes
+		// right into the QueryEditor main pane. Ctrl+K/J vertical rail-stack
+		// navigation was dropped with '1'/'2' (there is no stack any more).
 		return []*types.ChordBinding{
-			{Sequence: []types.ChordKey{ctrlK}, Scope: scope, ActionID: commands.RailSwitchUp, Description: tr.Actions.RailUp},
-			{Sequence: []types.ChordKey{ctrlJ}, Scope: scope, ActionID: commands.RailSwitchDown, Description: tr.Actions.RailDown},
 			{Sequence: []types.ChordKey{ctrlL}, Scope: scope, ActionID: commands.RailSwitchQueryEditor, Description: tr.Actions.RailQueryEditor},
-		}
-	case types.TABLES:
-		return []*types.ChordBinding{
-			{Sequence: []types.ChordKey{ctrlK}, Scope: scope, ActionID: commands.RailSwitchUp, Description: tr.Actions.RailUp},
-			{Sequence: []types.ChordKey{ctrlJ}, Scope: scope, ActionID: commands.RailSwitchDown, Description: tr.Actions.RailDown},
-			{Sequence: []types.ChordKey{ctrlL}, Scope: scope, ActionID: commands.RailSwitchResults, Description: tr.Actions.RailResults},
 		}
 	case types.QUERY_EDITOR:
 		return []*types.ChordBinding{
@@ -107,9 +91,10 @@ func railDirectionalBindings(scope types.ContextKey, tr *i18n.TranslationSet) []
 		}
 	case types.RESULT_GRID, types.PLAN:
 		// PLAN tabs occupy the same physical result pane as the grid, so they
-		// reuse the grid's directional mapping.
+		// reuse the grid's directional mapping. Ctrl+H lands on the SCHEMA_RAIL
+		// container (RailSwitchLastRail), not a leaf.
 		return []*types.ChordBinding{
-			{Sequence: []types.ChordKey{ctrlH}, Scope: scope, ActionID: commands.RailSwitchTables, Description: tr.Actions.RailTables},
+			{Sequence: []types.ChordKey{ctrlH}, Scope: scope, ActionID: commands.RailSwitchLastRail, Description: tr.Actions.RailLastRail},
 			{Sequence: []types.ChordKey{ctrlK}, Scope: scope, ActionID: commands.RailSwitchQueryEditor, Description: tr.Actions.RailQueryEditor},
 		}
 	}
@@ -122,14 +107,16 @@ func railDirectionalBindings(scope types.ContextKey, tr *i18n.TranslationSet) []
 // the digit-6 / cycle-to-results path falls through to a no-op.
 type ResultsContextResolver func() types.IBaseContext
 
-// RegisterRailSwitchActions registers the seven rail-switch action IDs
-// with reg, each wired to Push() the named context onto the focus
-// stack. tree owns the focus stack; ctxTree holds the static Context
-// instances; resolveResults resolves the dynamic result-tab context.
-// 1/2/3/4 jump to Schemas/Tables/Columns/Indexes; 5 jumps to the
-// QueryEditor main pane; 6 jumps to the active result tab; Tab cycles
-// connections→schemas→tables→columns→indexes→query_editor→results
-// →connections.
+// RegisterRailSwitchActions registers the rail-switch action IDs with reg,
+// each wired to Push() the named context onto the focus stack. tree owns the
+// focus stack; ctxTree holds the static Context instances; resolveResults
+// resolves the dynamic result-tab context.
+// digit 3 jumps to the QueryEditor main pane; digit 4 jumps to the active
+// result tab; Ctrl+H (RailSwitchLastRail) returns focus to the consolidated
+// SCHEMA_RAIL container; Tab cycles schema_rail→query_editor→results
+// →schema_rail. The '1'/'2' leaf jumps and the Ctrl+K/J vertical rail-stack
+// navigation were removed (the SCHEMA_RAIL container is the single side
+// context and owns its own '['/']' tab cycle via SchemaRailController).
 //
 // Push (not Replace) is used because the QueryEditor / result tabs are
 // MAIN_CONTEXT while the rails are SIDE_CONTEXT — ContextTree.Push has
@@ -150,13 +137,9 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 	if tree == nil || ctxTree == nil {
 		noop := func(commands.ExecCtx) error { return nil }
 		for _, id := range []string{
-			commands.RailSwitchSchemas,
-			commands.RailSwitchTables,
 			commands.RailSwitchQueryEditor,
 			commands.RailSwitchResults,
 			commands.RailSwitchNext,
-			commands.RailSwitchUp,
-			commands.RailSwitchDown,
 			commands.RailSwitchLastRail,
 		} {
 			_ = reg.Register(&commands.Command{ID: id, Description: id, Handler: noop})
@@ -164,96 +147,28 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 		return
 	}
 
-	// last-focused rail tracking for the editor's Ctrl+H
-	// round-trip. Updated by pushRail whenever the push lands on one
-	// of the three SIDE_CONTEXT rails; consumed by RailSwitchLastRail.
-	// Defaults to SCHEMAS so the very first Ctrl+H from the editor
-	// (before any rail has been focused this session) lands somewhere
-	// sensible. Rail-switch handlers all run on the gocui dispatch
-	// goroutine, so this needs no mutex.
-	railOrder := []types.IBaseContext{
-		ctxTree.Schemas,
-		ctxTree.Tables,
-	}
-	lastRailKey := types.SCHEMAS
-	railKeys := map[types.ContextKey]struct{}{
-		types.SCHEMAS: {},
-		types.TABLES:  {},
-	}
+	// The consolidated SCHEMA_RAIL container is the single side context.
+	// Ctrl+H from the editor / result pane (RailSwitchLastRail) and <tab>
+	// cycle both push it (NEVER a leaf — the leaves are never on the focus
+	// stack). railContainer is nil-safe: a nil push is a no-op.
+	railContainer := ctxTree.SchemaRail
 	pushRail := func(target types.IBaseContext) error {
 		if target == nil {
 			return nil
 		}
-		if err := tree.Push(target); err != nil {
-			return err
-		}
-		if _, ok := railKeys[target.GetKey()]; ok {
-			lastRailKey = target.GetKey()
-		}
-		return nil
+		return tree.Push(target)
 	}
 
-	jumpTo := func(target types.IBaseContext) func(commands.ExecCtx) error {
-		return func(commands.ExecCtx) error {
-			return pushRail(target)
-		}
-	}
-
-	_ = reg.Register(&commands.Command{ID: commands.RailSwitchSchemas, Description: commands.RailSwitchSchemas, Handler: jumpTo(ctxTree.Schemas)})
-	_ = reg.Register(&commands.Command{ID: commands.RailSwitchTables, Description: commands.RailSwitchTables, Handler: jumpTo(ctxTree.Tables)})
-	_ = reg.Register(&commands.Command{ID: commands.RailSwitchQueryEditor, Description: commands.RailSwitchQueryEditor, Handler: jumpTo(ctxTree.QueryEditor)})
-
-	// directional rail navigation handlers (Ctrl+K/J/H on
-	// QUERY_EDITOR / side rails). Up/Down walk the vertical rail stack
-	// based on the current focus; no-op at the ends and when the
-	// current focus is not a rail. LastRail consults the lastRailKey
-	// tracker pushRail maintains.
-	indexOfCurrentRail := func() int {
-		cur := tree.Current()
-		if cur == nil {
-			return -1
-		}
-		name := cur.GetViewName()
-		for i, r := range railOrder {
-			if r != nil && r.GetViewName() == name {
-				return i
-			}
-		}
-		return -1
-	}
 	_ = reg.Register(&commands.Command{
-		ID:          commands.RailSwitchUp,
-		Description: commands.RailSwitchUp,
-		Handler: func(commands.ExecCtx) error {
-			i := indexOfCurrentRail()
-			if i <= 0 {
-				return nil
-			}
-			return pushRail(railOrder[i-1])
-		},
+		ID:          commands.RailSwitchQueryEditor,
+		Description: commands.RailSwitchQueryEditor,
+		Handler:     func(commands.ExecCtx) error { return pushRail(ctxTree.QueryEditor) },
 	})
-	_ = reg.Register(&commands.Command{
-		ID:          commands.RailSwitchDown,
-		Description: commands.RailSwitchDown,
-		Handler: func(commands.ExecCtx) error {
-			i := indexOfCurrentRail()
-			if i < 0 || i >= len(railOrder)-1 {
-				return nil
-			}
-			return pushRail(railOrder[i+1])
-		},
-	})
+
 	_ = reg.Register(&commands.Command{
 		ID:          commands.RailSwitchLastRail,
 		Description: commands.RailSwitchLastRail,
-		Handler: func(commands.ExecCtx) error {
-			for _, r := range railOrder {
-				if r != nil && r.GetKey() == lastRailKey {
-					return pushRail(r)
-				}
-			}
-			return pushRail(ctxTree.Schemas)
-		},
+		Handler:     func(commands.ExecCtx) error { return pushRail(railContainer) },
 	})
 
 	_ = reg.Register(&commands.Command{
@@ -269,12 +184,13 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 		},
 	})
 
-	// Tab cycles linearly through every rail plus the QueryEditor main
-	// pane and the active result tab. The result entry is a closure that
-	// resolves dynamically — if no tab is open, cycle skips that slot.
-	// Lookup the next entry from the current view name; if the current
-	// view is not in the cycle (e.g. focus is on a popup that somehow
-	// leaked Tab through), fall through to Schemas as a safe default.
+	// Tab cycles linearly through the consolidated SCHEMA_RAIL container,
+	// the QueryEditor main pane, and the active result tab. The result entry
+	// is a closure that resolves dynamically — if no tab is open, cycle skips
+	// that slot. Lookup the next entry from the current view name; if the
+	// current view is not in the cycle (e.g. focus is on a popup that somehow
+	// leaked Tab through), fall through to the rail container as a safe
+	// default.
 	type cycleEntry struct {
 		// resolve returns the next IBaseContext to push, or nil when the
 		// entry is currently unavailable (e.g. results when no tab open).
@@ -286,13 +202,17 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 	}
 	staticEntry := func(c types.IBaseContext) cycleEntry {
 		return cycleEntry{
-			resolve:  func() types.IBaseContext { return c },
-			viewName: func() string { return c.GetViewName() },
+			resolve: func() types.IBaseContext { return c },
+			viewName: func() string {
+				if c == nil {
+					return ""
+				}
+				return c.GetViewName()
+			},
 		}
 	}
 	cycle := []cycleEntry{
-		staticEntry(ctxTree.Schemas),
-		staticEntry(ctxTree.Tables),
+		staticEntry(railContainer),
 		staticEntry(ctxTree.QueryEditor),
 		{
 			resolve: func() types.IBaseContext {
@@ -319,7 +239,7 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 		Handler: func(commands.ExecCtx) error {
 			cur := tree.Current()
 			if cur == nil {
-				return pushRail(ctxTree.Schemas)
+				return pushRail(railContainer)
 			}
 			curName := cur.GetViewName()
 			for i := range cycle {
@@ -337,7 +257,7 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 				}
 				return nil
 			}
-			return pushRail(ctxTree.Schemas)
+			return pushRail(railContainer)
 		},
 	})
 }

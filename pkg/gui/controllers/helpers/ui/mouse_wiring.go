@@ -24,6 +24,12 @@ type MouseWiringDeps struct {
 	Matcher     *keys.Matcher
 	TableDouble *TablesHelper
 	TablePicker TablePicker
+	// RailActiveTabIsTables reports whether the consolidated rail's active
+	// tab is Tables. The former TABLES-view double-click is re-homed onto
+	// the consolidated "schemas-tables" container view, gated on this
+	// active-tab identity instead of the now-dead "tables" view name.
+	// Nil-safe: a nil accessor disables the double-click stub.
+	RailActiveTabIsTables func() bool
 }
 
 // TablePicker is the cursor accessor for the TABLES rail. The mouse
@@ -70,10 +76,17 @@ func WireMouse(deps MouseWiringDeps) error {
 	return nil
 }
 
+// railTablesTabActive reports whether the consolidated rail's active tab is
+// Tables, used to re-home the former TABLES double-click onto the container
+// view. Nil-safe: a missing accessor reports false.
+func railTablesTabActive(deps MouseWiringDeps) bool {
+	return deps.RailActiveTabIsTables != nil && deps.RailActiveTabIsTables()
+}
+
 // wireOneView registers the standard mouse bundle on one view: left
 // click (focus), wheel-up / wheel-down (scroll-by-1; shift+wheel
-// scroll-by-page), and — for the TABLES view only — a double-click
-// dispatcher that calls TablesHelper.DoubleClickStub.
+// scroll-by-page), and — for the consolidated rail's Tables tab — a
+// double-click dispatcher that calls TablesHelper.DoubleClickStub.
 func wireOneView(deps MouseWiringDeps, ctx types.IBaseContext, view string) error {
 	cancelArm := func() {
 		if deps.Matcher != nil {
@@ -90,9 +103,14 @@ func wireOneView(deps MouseWiringDeps, ctx types.IBaseContext, view string) erro
 				return err
 			}
 		}
-		// On the TABLES rail, a double-click consumes the focus push
-		// AND invokes the deferred-edit stub toast (per AC).
-		if view == string(types.TABLES) && opts.IsDoubleClick && deps.TableDouble != nil {
+		// On the consolidated rail's Tables tab, a double-click consumes the
+		// focus push AND invokes the deferred-edit stub toast (per AC). The
+		// gate is the container view "schemas-tables" AND the active-tab
+		// identity (Tables) — NOT the retired "tables" view name. Both checks
+		// are required: pushFocus is registered on every non-stub view, so
+		// without the view gate a double-click in any other view (e.g. the
+		// query editor) would fire the table stub whenever Tables is active.
+		if view == guicontext.SchemaRailViewName && opts.IsDoubleClick && deps.TableDouble != nil && railTablesTabActive(deps) {
 			var sel *models.Table
 			if deps.TablePicker != nil {
 				sel = deps.TablePicker.SelectedTable()

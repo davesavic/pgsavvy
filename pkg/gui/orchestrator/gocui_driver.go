@@ -140,6 +140,54 @@ func (d *gocuiDriver) SetViewCursor(viewName string, x, y int) error {
 	return nil
 }
 
+// SetViewTabs sets the native in-border tab labels and active index on
+// the named view. labels are caller-supplied verbatim (a caller may bake
+// an active marker into them — the driver is agnostic). activeIdx is
+// clamped into [0, len(labels)-1] (0 when labels is empty) so an
+// out-of-range index never causes an out-of-bounds render.
+func (d *gocuiDriver) SetViewTabs(name string, labels []string, activeIdx int) error {
+	v, err := d.g.View(name)
+	if err != nil {
+		return err
+	}
+	v.Tabs = labels
+	v.TabIndex = clampTabIndex(activeIdx, len(labels))
+	return nil
+}
+
+// clampTabIndex returns idx clamped into [0, n-1], or 0 when n == 0.
+func clampTabIndex(idx, n int) int {
+	if n == 0 {
+		return 0
+	}
+	if idx < 0 {
+		return 0
+	}
+	if idx >= n {
+		return n - 1
+	}
+	return idx
+}
+
+// SetTabClickBinding registers a handler invoked with the clicked tab
+// index when the user clicks a native in-border tab on the named view.
+func (d *gocuiDriver) SetTabClickBinding(name string, handler func(idx int) error) error {
+	return d.g.SetTabClickBinding(name, handler)
+}
+
+// SetViewTabColors sets the active (SelFgColor) and inactive (FgColor)
+// tab-label foreground colors on the named view. Takes resolved
+// gocui.Attribute values — the driver does not resolve themes.
+func (d *gocuiDriver) SetViewTabColors(name string, activeFg, inactiveFg gocui.Attribute) error {
+	v, err := d.g.View(name)
+	if err != nil {
+		return err
+	}
+	v.SelFgColor = activeFg
+	v.FgColor = inactiveFg
+	return nil
+}
+
 func (d *gocuiDriver) MainLoop() error {
 	return d.g.MainLoop()
 }

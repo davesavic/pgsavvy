@@ -58,24 +58,47 @@ const (
 	RailPanStart = "rail.pan.start"
 	RailPanEnd   = "rail.pan.end"
 
-	// Rail-switch family — published by every side-rail controller via
-	// railSwitchBindings (pkg/gui/controllers/shared.go). Digits 1..4
-	// jump to a specific rail; `<tab>` cycles to the next rail.
-	RailSwitchSchemas     = "rail.switch.schemas"
-	RailSwitchTables      = "rail.switch.tables"
+	// Rail-switch family — published by the SchemaRailController and the
+	// QUERY_EDITOR / RESULT_GRID / PLAN controllers via railSwitchBindings
+	// (pkg/gui/controllers/shared.go). Digits 3/4 jump to the QueryEditor /
+	// results pane; `<tab>` cycles to the next pane.
 	RailSwitchQueryEditor = "rail.switch.query_editor"
 	RailSwitchResults     = "rail.switch.results"
 	RailSwitchNext        = "rail.switch.next"
 
-	// Directional rail navigation. Bound to Ctrl+K/J on the
-	// five side rails (move focus up/down through the vertical stack;
-	// no-op at the ends). RailSwitchLastRail is bound to Ctrl+H on the
-	// QueryEditor — returns focus to the most-recently-focused rail so
-	// Ctrl+L→editor / Ctrl+H→back-to-rail round-trips. Defaults to Schemas
-	// before any rail has been focused.
-	RailSwitchUp       = "rail.switch.up"
-	RailSwitchDown     = "rail.switch.down"
+	// RailSwitchLastRail returns focus to the SCHEMA_RAIL container. Bound
+	// to Ctrl+H on the QueryEditor / RESULT_GRID / PLAN so
+	// Ctrl+L→editor / Ctrl+H→back-to-rail round-trips. The consolidated rail
+	// is the single side-context, so there is no per-rail vertical stack any
+	// more (the old Ctrl+K/J up/down navigation was dropped with '1'/'2').
 	RailSwitchLastRail = "rail.switch.last_rail"
+
+	// RailTabNext / RailTabPrev cycle the SCHEMA_RAIL container's active tab
+	// (Schemas ⇄ Tables) with edge-wrap. Bound to `]` / `[` under
+	// SCHEMA_RAIL. Owned by SchemaRailController.
+	RailTabNext = "rail.tab.next"
+	RailTabPrev = "rail.tab.prev"
+
+	// SchemaRail family — owned by SchemaRailController. The consolidated
+	// SCHEMA_RAIL container publishes every rail chord exactly once and
+	// dispatches to the active leaf (Schemas / Tables): the nav chords drive
+	// whichever leaf's cursor is active; SchemaRailConfirm / SchemaRailRefresh
+	// dispatch by ActiveTab; the tab-unique chords (inspect / hide / unhide /
+	// toggle-show-hidden) no-op when the owning tab is not active.
+	SchemaRailUp               = "schema_rail.up"
+	SchemaRailDown             = "schema_rail.down"
+	SchemaRailJumpFirst        = "schema_rail.jump.first"
+	SchemaRailJumpLast         = "schema_rail.jump.last"
+	SchemaRailPanLeft          = "schema_rail.pan.left"
+	SchemaRailPanRight         = "schema_rail.pan.right"
+	SchemaRailPanStart         = "schema_rail.pan.start"
+	SchemaRailPanEnd           = "schema_rail.pan.end"
+	SchemaRailConfirm          = "schema_rail.confirm"
+	SchemaRailRefresh          = "schema_rail.refresh"
+	SchemaRailInspect          = "schema_rail.inspect"
+	SchemaRailHide             = "schema_rail.hide"
+	SchemaRailUnhide           = "schema_rail.unhide"
+	SchemaRailToggleShowHidden = "schema_rail.toggle_show_hidden"
 
 	// RailRefresh — published per-rail by the five side-rail controllers
 	// (Connections / Schemas / Tables / Columns / Indexes). Bound to `r`
@@ -630,14 +653,26 @@ func AllActionIDs() []string {
 		RailPanRight,
 		RailPanStart,
 		RailPanEnd,
-		RailSwitchSchemas,
-		RailSwitchTables,
 		RailSwitchQueryEditor,
 		RailSwitchResults,
 		RailSwitchNext,
-		RailSwitchUp,
-		RailSwitchDown,
 		RailSwitchLastRail,
+		RailTabNext,
+		RailTabPrev,
+		SchemaRailUp,
+		SchemaRailDown,
+		SchemaRailJumpFirst,
+		SchemaRailJumpLast,
+		SchemaRailPanLeft,
+		SchemaRailPanRight,
+		SchemaRailPanStart,
+		SchemaRailPanEnd,
+		SchemaRailConfirm,
+		SchemaRailRefresh,
+		SchemaRailInspect,
+		SchemaRailHide,
+		SchemaRailUnhide,
+		SchemaRailToggleShowHidden,
 		RailRefresh,
 		MenuConfirm,
 		MenuCancel,

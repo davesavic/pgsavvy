@@ -745,14 +745,23 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		// not the side rail. Push the rail first (SIDE_CONTEXT) so it is
 		// populated and rendered, then push the query editor (MAIN_CONTEXT)
 		// on top so it holds focus and the cursor starts there.
-		if tableItems != nil && c.g != nil && c.g.registry != nil && c.g.registry.Tables != nil {
-			if err := c.g.tree.Push(c.g.registry.Tables); err != nil {
-				return err
-			}
-		} else if c.g != nil && c.g.registry != nil && c.g.registry.Schemas != nil &&
-			len(c.g.registry.Schemas.Items()) != 0 {
-			if err := c.g.tree.Push(c.g.registry.Schemas); err != nil {
-				return err
+		// Push the SCHEMA_RAIL container (NOT a leaf): the leaves are never on
+		// the focus stack — the container mutates its active-tab index. The
+		// initial tab mirrors the prior leaf push: Tables when tables loaded,
+		// otherwise Schemas.
+		if c.g != nil && c.g.registry != nil && c.g.registry.SchemaRail != nil {
+			rail := c.g.registry.SchemaRail
+			switch {
+			case tableItems != nil:
+				rail.SetActiveTab(guicontext.SchemaRailTabTables)
+				if err := c.g.tree.Push(rail); err != nil {
+					return err
+				}
+			case c.g.registry.Schemas != nil && len(c.g.registry.Schemas.Items()) != 0:
+				rail.SetActiveTab(guicontext.SchemaRailTabSchemas)
+				if err := c.g.tree.Push(rail); err != nil {
+					return err
+				}
 			}
 		}
 		if c.g != nil && c.g.registry != nil && c.g.registry.QueryEditor != nil {

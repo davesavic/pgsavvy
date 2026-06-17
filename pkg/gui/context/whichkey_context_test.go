@@ -66,8 +66,13 @@ func (stubDriver) DeleteView(string) error                           { return ni
 func (stubDriver) SetManager(...types.Manager)                       {}
 func (stubDriver) SetCaretEnabled(bool)                              {}
 func (stubDriver) SetViewCursor(string, int, int) error              { return nil }
-func (stubDriver) MainLoop() error                                   { return nil }
-func (stubDriver) Close() error                                      { return nil }
+func (stubDriver) SetViewTabs(string, []string, int) error           { return nil }
+func (stubDriver) SetTabClickBinding(string, func(int) error) error  { return nil }
+func (stubDriver) SetViewTabColors(string, gocui.Attribute, gocui.Attribute) error {
+	return nil
+}
+func (stubDriver) MainLoop() error { return nil }
+func (stubDriver) Close() error    { return nil }
 
 // helper: build a fresh context wired to the supplied fakes.
 func newTestWhichKey(notifier types.WhichKeyState, rows func(types.ContextKey, []types.ChordKey) []types.ChildRow, drv types.GuiDriver) *WhichKeyContext {

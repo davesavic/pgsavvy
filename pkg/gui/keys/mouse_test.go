@@ -45,8 +45,19 @@ func (m *mouseFakeDriver) DeleteView(_ string) error                 { return ni
 func (m *mouseFakeDriver) SetManager(_ ...types.Manager)             {}
 func (m *mouseFakeDriver) SetCaretEnabled(_ bool)                    {}
 func (m *mouseFakeDriver) SetViewCursor(_ string, _, _ int) error    { return nil }
-func (m *mouseFakeDriver) MainLoop() error                           { return nil }
-func (m *mouseFakeDriver) Close() error                              { return nil }
+func (m *mouseFakeDriver) SetViewTabs(_ string, _ []string, _ int) error {
+	panic("not used")
+}
+
+func (m *mouseFakeDriver) SetTabClickBinding(_ string, _ func(int) error) error {
+	panic("not used")
+}
+
+func (m *mouseFakeDriver) SetViewTabColors(_ string, _, _ gocui.Attribute) error {
+	panic("not used")
+}
+func (m *mouseFakeDriver) MainLoop() error { return nil }
+func (m *mouseFakeDriver) Close() error    { return nil }
 
 type warnRecorder struct{ msgs []string }
 

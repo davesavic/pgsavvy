@@ -103,8 +103,6 @@ binding	scope=history	key=k	mode=normal
 binding	scope=history	key=l	mode=normal
 binding	scope=menu	key=<cr>	mode=normal
 binding	scope=menu	key=<esc>	mode=normal
-binding	scope=plan	key=1	mode=normal
-binding	scope=plan	key=2	mode=normal
 binding	scope=plan	key=3	mode=normal
 binding	scope=plan	key=4	mode=normal
 binding	scope=plan	key=<c-a>	mode=normal
@@ -131,8 +129,6 @@ binding	scope=query_editor	key=)	mode=normal
 binding	scope=query_editor	key=.	mode=normal
 binding	scope=query_editor	key=0	mode=mode(0x3c)
 binding	scope=query_editor	key=0	mode=normal
-binding	scope=query_editor	key=1	mode=normal
-binding	scope=query_editor	key=2	mode=normal
 binding	scope=query_editor	key=3	mode=normal
 binding	scope=query_editor	key=4	mode=normal
 binding	scope=query_editor	key=<	mode=mode(0x3c)
@@ -261,8 +257,6 @@ binding	scope=relationship_panel	key=k	mode=normal
 binding	scope=result_grid	key=$	mode=normal
 binding	scope=result_grid	key=/	mode=normal
 binding	scope=result_grid	key=0	mode=normal
-binding	scope=result_grid	key=1	mode=normal
-binding	scope=result_grid	key=2	mode=normal
 binding	scope=result_grid	key=3	mode=normal
 binding	scope=result_grid	key=4	mode=normal
 binding	scope=result_grid	key=<c-d>	mode=normal
@@ -320,16 +314,32 @@ binding	scope=saved_query	key=h	mode=normal
 binding	scope=saved_query	key=j	mode=normal
 binding	scope=saved_query	key=k	mode=normal
 binding	scope=saved_query	key=l	mode=normal
+binding	scope=schema-rail	key=$	mode=normal
+binding	scope=schema-rail	key=/	mode=normal
+binding	scope=schema-rail	key=0	mode=normal
+binding	scope=schema-rail	key=<c-l>	mode=normal
+binding	scope=schema-rail	key=<cr>	mode=normal
+binding	scope=schema-rail	key=<esc>	mode=normal
+binding	scope=schema-rail	key=<leader>H	mode=normal
+binding	scope=schema-rail	key=G	mode=normal
+binding	scope=schema-rail	key=H	mode=normal
+binding	scope=schema-rail	key=N	mode=normal
+binding	scope=schema-rail	key=U	mode=normal
+binding	scope=schema-rail	key=[	mode=normal
+binding	scope=schema-rail	key=]	mode=normal
+binding	scope=schema-rail	key=gg	mode=normal
+binding	scope=schema-rail	key=h	mode=normal
+binding	scope=schema-rail	key=i	mode=normal
+binding	scope=schema-rail	key=j	mode=normal
+binding	scope=schema-rail	key=k	mode=normal
+binding	scope=schema-rail	key=l	mode=normal
+binding	scope=schema-rail	key=n	mode=normal
+binding	scope=schema-rail	key=r	mode=normal
 binding	scope=schemas	key=$	mode=normal
 binding	scope=schemas	key=/	mode=normal
 binding	scope=schemas	key=0	mode=normal
-binding	scope=schemas	key=1	mode=normal
-binding	scope=schemas	key=2	mode=normal
 binding	scope=schemas	key=3	mode=normal
 binding	scope=schemas	key=4	mode=normal
-binding	scope=schemas	key=<c-j>	mode=normal
-binding	scope=schemas	key=<c-k>	mode=normal
-binding	scope=schemas	key=<c-l>	mode=normal
 binding	scope=schemas	key=<cr>	mode=normal
 binding	scope=schemas	key=<esc>	mode=normal
 binding	scope=schemas	key=<leader>H	mode=normal
@@ -373,13 +383,8 @@ binding	scope=table_inspect	key=q	mode=normal
 binding	scope=tables	key=$	mode=normal
 binding	scope=tables	key=/	mode=normal
 binding	scope=tables	key=0	mode=normal
-binding	scope=tables	key=1	mode=normal
-binding	scope=tables	key=2	mode=normal
 binding	scope=tables	key=3	mode=normal
 binding	scope=tables	key=4	mode=normal
-binding	scope=tables	key=<c-j>	mode=normal
-binding	scope=tables	key=<c-k>	mode=normal
-binding	scope=tables	key=<c-l>	mode=normal
 binding	scope=tables	key=<cr>	mode=normal
 binding	scope=tables	key=<esc>	mode=normal
 binding	scope=tables	key=<tab>	mode=normal
@@ -416,6 +421,7 @@ popuprect	key=query_editor	none
 popuprect	key=relationship_panel	x0=60	y0=0	x1=99	y1=99
 popuprect	key=result_grid	none
 popuprect	key=saved_query	x0=20	y0=20	x1=80	y1=80
+popuprect	key=schema-rail	none
 popuprect	key=schemas	none
 popuprect	key=search_line	x0=0	y0=99	x1=100	y1=101
 popuprect	key=selection	x0=25	y0=25	x1=75	y1=75

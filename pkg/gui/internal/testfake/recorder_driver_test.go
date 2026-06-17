@@ -134,3 +134,151 @@ func TestRecorder_FeedChord_NonDispatcherEditor(t *testing.T) {
 		t.Fatalf("err = %v, want ErrEditorNotDispatcher", err)
 	}
 }
+
+// makeView creates the named view in the recorder so SetViewTabs /
+// SetViewTabColors find it (they look the view up like the real driver).
+func makeView(t *testing.T, r *testfake.RecorderGuiDriver, name string) {
+	t.Helper()
+	if _, err := r.SetView(name, 0, 0, 10, 5, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		t.Fatalf("SetView(%q): %v", name, err)
+	}
+}
+
+func TestSetViewTabs(t *testing.T) {
+	r := testfake.NewRecorderGuiDriver()
+	makeView(t, r, "results")
+
+	labels := []string{"q1", "q2", "q3"}
+	if err := r.SetViewTabs("results", labels, 1); err != nil {
+		t.Fatalf("SetViewTabs: %v", err)
+	}
+
+	calls := r.AllSetViewTabsCalls()
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(calls))
+	}
+	c := calls[0]
+	if c.Name != "results" {
+		t.Errorf("Name = %q, want results", c.Name)
+	}
+	if len(c.Labels) != 3 || c.Labels[0] != "q1" || c.Labels[2] != "q3" {
+		t.Errorf("Labels = %v, want [q1 q2 q3]", c.Labels)
+	}
+	if c.ActiveIdx != 1 {
+		t.Errorf("ActiveIdx = %d, want 1", c.ActiveIdx)
+	}
+}
+
+func TestSetViewTabs_UnknownViewErrors(t *testing.T) {
+	r := testfake.NewRecorderGuiDriver()
+	err := r.SetViewTabs("nope", []string{"a"}, 0)
+	if !errors.Is(err, gocui.ErrUnknownView) {
+		t.Fatalf("err = %v, want ErrUnknownView", err)
+	}
+	if got := len(r.AllSetViewTabsCalls()); got != 0 {
+		t.Errorf("recorded %d calls for unknown view, want 0", got)
+	}
+}
+
+func TestSetViewTabs_EmptyLabels(t *testing.T) {
+	r := testfake.NewRecorderGuiDriver()
+	makeView(t, r, "v")
+	if err := r.SetViewTabs("v", nil, 5); err != nil {
+		t.Fatalf("SetViewTabs: %v", err)
+	}
+	calls := r.AllSetViewTabsCalls()
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(calls))
+	}
+	if len(calls[0].Labels) != 0 {
+		t.Errorf("Labels = %v, want empty", calls[0].Labels)
+	}
+	if calls[0].ActiveIdx != 0 {
+		t.Errorf("ActiveIdx = %d, want 0 (clamped for empty)", calls[0].ActiveIdx)
+	}
+}
+
+func TestSetViewTabs_OutOfRangeActiveIdxClamps(t *testing.T) {
+	r := testfake.NewRecorderGuiDriver()
+	makeView(t, r, "v")
+
+	if err := r.SetViewTabs("v", []string{"a", "b"}, 99); err != nil {
+		t.Fatalf("SetViewTabs high: %v", err)
+	}
+	if err := r.SetViewTabs("v", []string{"a", "b"}, -3); err != nil {
+		t.Fatalf("SetViewTabs low: %v", err)
+	}
+	calls := r.AllSetViewTabsCalls()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %d, want 2", len(calls))
+	}
+	if calls[0].ActiveIdx != 1 {
+		t.Errorf("high idx clamp = %d, want 1", calls[0].ActiveIdx)
+	}
+	if calls[1].ActiveIdx != 0 {
+		t.Errorf("low idx clamp = %d, want 0", calls[1].ActiveIdx)
+	}
+}
+
+func TestSetTabClick(t *testing.T) {
+	r := testfake.NewRecorderGuiDriver()
+
+	got := -1
+	if err := r.SetTabClickBinding("results", func(idx int) error {
+		got = idx
+		return nil
+	}); err != nil {
+		t.Fatalf("SetTabClickBinding: %v", err)
+	}
+
+	if err := r.FeedTabClick("results", 2); err != nil {
+		t.Fatalf("FeedTabClick: %v", err)
+	}
+	if got != 2 {
+		t.Errorf("handler fired with idx %d, want 2", got)
+	}
+}
+
+func TestSetTabClick_UnknownViewErrors(t *testing.T) {
+	r := testfake.NewRecorderGuiDriver()
+	if err := r.FeedTabClick("nope", 0); err == nil {
+		t.Fatal("FeedTabClick on unregistered view: want error, got nil")
+	}
+}
+
+func TestSetViewTabColors(t *testing.T) {
+	r := testfake.NewRecorderGuiDriver()
+	makeView(t, r, "results")
+
+	active := gocui.Attribute(42)
+	inactive := gocui.Attribute(7)
+	if err := r.SetViewTabColors("results", active, inactive); err != nil {
+		t.Fatalf("SetViewTabColors: %v", err)
+	}
+
+	calls := r.AllSetViewTabColorsCalls()
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(calls))
+	}
+	c := calls[0]
+	if c.Name != "results" {
+		t.Errorf("Name = %q, want results", c.Name)
+	}
+	if c.ActiveFg != active {
+		t.Errorf("ActiveFg = %v, want %v", c.ActiveFg, active)
+	}
+	if c.InactiveFg != inactive {
+		t.Errorf("InactiveFg = %v, want %v", c.InactiveFg, inactive)
+	}
+}
+
+func TestSetViewTabColors_UnknownViewErrors(t *testing.T) {
+	r := testfake.NewRecorderGuiDriver()
+	err := r.SetViewTabColors("nope", gocui.Attribute(1), gocui.Attribute(2))
+	if !errors.Is(err, gocui.ErrUnknownView) {
+		t.Fatalf("err = %v, want ErrUnknownView", err)
+	}
+	if got := len(r.AllSetViewTabColorsCalls()); got != 0 {
+		t.Errorf("recorded %d calls for unknown view, want 0", got)
+	}
+}

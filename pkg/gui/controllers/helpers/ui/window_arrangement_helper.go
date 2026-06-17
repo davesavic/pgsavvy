@@ -14,8 +14,7 @@ type Dimensions = boxlayout.Dimensions
 // future work may extend the list (e.g. result-tabs N) but must NOT
 // drop any of these without a coordinated update of every consumer.
 var requiredWindows = []string{
-	"schemas",
-	"tables",
+	"schemas-tables",
 	"main",
 	"secondary",
 	"status",
@@ -37,9 +36,7 @@ var requiredWindows = []string{
 //	├── "options"  size=1            (top bar — "[Connection: prod-pg]")
 //	├── body ROW (weight 1)
 //	│   └── upper COLUMN (weight 1)
-//	│       ├── left rail ROW size=24
-//	│       │   ├── "schemas"     weight=1
-//	│       │   └── "tables"      weight=1
+//	│       ├── "schemas-tables" size=24   (full-height left rail)
 //	│       └── right ROW (weight 1)
 //	│           ├── "main"      weight=1
 //	│           └── "secondary" weight=1
@@ -63,14 +60,7 @@ func GetWindowDimensions(width, height int) map[string]Dimensions {
 						Direction: boxlayout.COLUMN,
 						Weight:    1,
 						Children: []*boxlayout.Box{
-							{
-								Direction: boxlayout.ROW,
-								Size:      24,
-								Children: []*boxlayout.Box{
-									{Window: "schemas", Weight: 1},
-									{Window: "tables", Weight: 1},
-								},
-							},
+							{Window: "schemas-tables", Size: 24},
 							{
 								Direction: boxlayout.ROW,
 								Weight:    1,

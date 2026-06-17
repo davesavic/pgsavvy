@@ -298,6 +298,11 @@ type ActionTranslations struct {
 	RailDown     string
 	RailLastRail string
 
+	// RailTabNext / RailTabPrev describe the `]` / `[` SCHEMA_RAIL tab
+	// cycle (Schemas ⇄ Tables, edge-wrapping).
+	RailTabNext string
+	RailTabPrev string
+
 	// Cursor movement and confirmation primitives used by every side
 	// rail controller. Added by T7a to satisfy the M11i rule
 	// that every KeyBinding.Description sources from Tr.Actions.*.
@@ -529,6 +534,9 @@ func EnglishTranslationSet() *TranslationSet {
 			RailUp:       "Previous rail",
 			RailDown:     "Next rail",
 			RailLastRail: "Last rail",
+
+			RailTabNext: "Next tab",
+			RailTabPrev: "Previous tab",
 
 			Down:      "Down",
 			Up:        "Up",

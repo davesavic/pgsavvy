@@ -15,11 +15,17 @@ import (
 // flattened slice (built once by NewContextTree from the single
 // contextSpecs table) for the cases where ordered iteration is preferable.
 type ContextTree struct {
-	// Live SIDE_CONTEXT instances.
-	Schemas *SchemasContext
-	Tables  *TablesContext
-	Columns *ColumnsContext
-	Indexes *IndexesContext
+	// Live SIDE_CONTEXT instances. SchemaRail is the container that
+	// multiplexes Schemas + Tables into the single "schemas-tables" view;
+	// it is the only flattened side context for the consolidated rail.
+	// Schemas/Tables retain typed fields but carry inFlatten=false (they
+	// render only when SchemaRail calls them) and resolve GetViewName() to
+	// "schemas-tables".
+	SchemaRail *SchemaRailContext
+	Schemas    *SchemasContext
+	Tables     *TablesContext
+	Columns    *ColumnsContext
+	Indexes    *IndexesContext
 
 	// Live TEMPORARY_POPUP instances.
 	Menu         *MenuContext
@@ -140,16 +146,34 @@ type contextSpec struct {
 // superseded by TABLE_INSPECT).
 func contextSpecs() []contextSpec {
 	return []contextSpec{
-		// Side rail (Kind = SIDE_CONTEXT).
+		// Side rail (Kind = SIDE_CONTEXT). SCHEMAS/TABLES are the leaves the
+		// SCHEMA_RAIL container multiplexes: inFlatten=false (so the layout
+		// Tier-1 loop never calls them directly — only the container does) and
+		// viewName overridden to "schemas-tables" so HandleRender writes the
+		// shared view. Their typed fields survive for the container + helpers.
 		{
-			key: types.SCHEMAS, kind: types.SIDE_CONTEXT, title: "Schemas", inFlatten: true,
+			key: types.SCHEMAS, kind: types.SIDE_CONTEXT, title: "Schemas", viewName: "schemas-tables", inFlatten: false,
 			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewSchemasContext(b, d) },
 			assign: func(t *ContextTree, c types.IBaseContext) { t.Schemas = c.(*SchemasContext) },
 		},
 		{
-			key: types.TABLES, kind: types.SIDE_CONTEXT, title: "Tables", inFlatten: true,
+			key: types.TABLES, kind: types.SIDE_CONTEXT, title: "Tables", viewName: "schemas-tables", inFlatten: false,
 			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewTablesContext(b, d) },
 			assign: func(t *ContextTree, c types.IBaseContext) { t.Tables = c.(*TablesContext) },
+		},
+		// SCHEMA_RAIL container: the ONLY flattened side context for the
+		// consolidated rail and the ONLY renderer of "schemas-tables". Ordered
+		// after its leaves so the assign closure can inject them (t.Schemas /
+		// t.Tables are set by the rows above). Non-editable: the master editor
+		// for the SCHEMA_RAIL scope is constructed in installKeyDispatch and
+		// attached to "schemas-tables" by the Tier-1 layout pass.
+		{
+			key: types.SCHEMA_RAIL, kind: types.SIDE_CONTEXT, title: "Schemas", viewName: "schemas-tables", inFlatten: true,
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewSchemaRailContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) {
+				t.SchemaRail = c.(*SchemaRailContext)
+				t.SchemaRail.SetLeaves(t.Schemas, t.Tables)
+			},
 		},
 		// COLUMNS/INDEXES: named fields retained, Kind=STUB, excluded from
 		// Flatten() (superseded by TABLE_INSPECT popup).
@@ -424,10 +448,11 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 }
 
 // Flatten returns every Context (live + stub) in a stable order. Order is
-// defined by contextSpecs (entries with inFlatten=true): side rail (2) ->
+// defined by contextSpecs (entries with inFlatten=true): side rail (1 —
+// the SCHEMA_RAIL container; SCHEMAS/TABLES are inFlatten=false leaves) ->
 // temporary popups (13) -> global/display (4) -> persistent popups
-// (1) -> main + stubs (6). Total length is always 26 (COLUMNS/INDEXES are
-// excluded, matching the historical contract).
+// (1) -> main + stubs (6). SCHEMAS/TABLES/COLUMNS/INDEXES are excluded
+// (named-field-only), matching the container/leaf contract.
 func (t *ContextTree) Flatten() []types.IBaseContext {
 	return t.all
 }

@@ -396,9 +396,14 @@ func (g *Gui) wireNavDeps(connectInv *connectInvoker, tablePicker tablesPickerAd
 				g.schemaWarmer.LoadEager(schema)
 			}
 
-			// Push the refreshed TABLES context onto the focus stack so the
-			// user lands there after picking a schema.
-			return connectInv.g.tree.Push(g.registry.Tables)
+			// Switch the consolidated rail to the Tables tab and push the
+			// SCHEMA_RAIL container (NOT the leaf) so the user lands on the
+			// refreshed tables after picking a schema.
+			if g.registry.SchemaRail == nil {
+				return nil
+			}
+			g.registry.SchemaRail.SetActiveTab(guicontext.SchemaRailTabTables)
+			return connectInv.g.tree.Push(g.registry.SchemaRail)
 		})
 	}
 	// <CR> on a table row loads the COLUMNS and INDEXES rails for
@@ -900,8 +905,29 @@ func (g *Gui) wireKeyDispatch(trieSet *keys.TrieSet, cfg *config.UserConfig, tab
 			Matcher:     g.keybindingSystem.matcher,
 			TableDouble: g.tablesHelp,
 			TablePicker: tablePicker,
+			RailActiveTabIsTables: func() bool {
+				return g.registry != nil && g.registry.SchemaRail != nil &&
+					g.registry.SchemaRail.ActiveTab() == guicontext.SchemaRailTabTables
+			},
 		}); err != nil {
 			return fmt.Errorf("gui: wire mouse: %w", err)
+		}
+
+		// Consolidated-rail native tab clicks. gocui dispatches a click on the
+		// border-row tab labels through SetTabClickBinding with the precomputed
+		// tab index (NOT via the body-relative ViewMouseBinding path). The
+		// callback fires off the MainLoop, so the active-tab mutation is
+		// marshalled back through OnUIThread (which also schedules a re-layout
+		// so the new marker/colours paint). Installed once here.
+		if g.registry != nil && g.registry.SchemaRail != nil {
+			rail := g.registry.SchemaRail
+			_ = g.driver.SetTabClickBinding(guicontext.SchemaRailViewName, func(idx int) error {
+				g.OnUIThread(func() error {
+					rail.SetActiveTab(idx)
+					return nil
+				})
+				return nil
+			})
 		}
 	}
 

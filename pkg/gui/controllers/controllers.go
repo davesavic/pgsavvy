@@ -16,8 +16,13 @@ import (
 // Returned by AttachControllers; T10 (bootstrap) keeps the bundle so
 // individual controllers remain accessible after wiring completes.
 type Controllers struct {
-	Schemas      *SchemasController
-	Tables       *TablesController
+	Schemas *SchemasController
+	Tables  *TablesController
+	// SchemaRail owns EVERY SCHEMA_RAIL binding (the consolidated
+	// "schemas-tables" view), published once and dispatched to the active leaf
+	// (Schemas / Tables). The Schemas/Tables controllers keep their handler
+	// methods; SchemaRail delegates to them.
+	SchemaRail   *SchemaRailController
 	Menu         *MenuController
 	Prompt       *PromptController
 	Selection    *SelectionController
@@ -124,6 +129,15 @@ func AttachControllers(
 
 	schemas := NewSchemasController(c, helpers.CoreDeps, helpers.NavDeps, helpers.UIDeps, &tree.Schemas.SideListContext, helpers.Schemas)
 	tables := NewTablesController(c, helpers.CoreDeps, helpers.NavDeps, &tree.Tables.SideListContext, helpers.Tables)
+	// SchemaRail dispatches to the leaf controllers' handler methods by active
+	// tab. It carries its own baseController for the tr() helper. tree.SchemaRail
+	// may be nil in partial test wiring; the controller nil-checks it.
+	schemaRail := NewSchemaRailController(
+		newBase(c, HelperBag{CoreDeps: helpers.CoreDeps, NavDeps: helpers.NavDeps, UIDeps: helpers.UIDeps}),
+		tree.SchemaRail,
+		schemas,
+		tables,
+	)
 	menu := NewMenuController(c, helpers.CoreDeps, helpers.UIDeps)
 	prompt := NewPromptController(c, helpers.CoreDeps, helpers.UIDeps)
 	selection := NewSelectionController(c, helpers.CoreDeps, helpers.UIDeps)
@@ -205,6 +219,7 @@ func AttachControllers(
 	bundle := &Controllers{
 		Schemas:           schemas,
 		Tables:            tables,
+		SchemaRail:        schemaRail,
 		Menu:              menu,
 		Prompt:            prompt,
 		Selection:         selection,
@@ -234,6 +249,7 @@ func AttachControllers(
 	attachTargets := map[string]attachable{
 		"Schemas":           &tree.Schemas.BaseContext,
 		"Tables":            &tree.Tables.BaseContext,
+		"SchemaRail":        &tree.SchemaRail.BaseContext,
 		"Menu":              &tree.Menu.BaseContext,
 		"Prompt":            &tree.Prompt.BaseContext,
 		"Selection":         &tree.Selection.BaseContext,
@@ -333,6 +349,7 @@ func (b *Controllers) entries() []controllerEntry {
 	candidates := []controllerEntry{
 		{name: "Schemas", ctrl: b.Schemas, attach: true},
 		{name: "Tables", ctrl: b.Tables, attach: true},
+		{name: "SchemaRail", ctrl: b.SchemaRail, attach: true},
 		{name: "Menu", ctrl: b.Menu, attach: true},
 		{name: "Prompt", ctrl: b.Prompt, attach: true},
 		{name: "Selection", ctrl: b.Selection, attach: true},

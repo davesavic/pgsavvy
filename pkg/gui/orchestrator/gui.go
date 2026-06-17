@@ -813,6 +813,10 @@ func (g *Gui) railForScope(scope types.ContextKey) *guicontext.SideListContext {
 		return nil
 	}
 	switch scope {
+	case types.SCHEMA_RAIL:
+		if g.registry.SchemaRail != nil {
+			return g.registry.SchemaRail.ActiveLeaf()
+		}
 	case types.TABLES:
 		if g.registry.Tables != nil {
 			return &g.registry.Tables.SideListContext
@@ -1222,6 +1226,19 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 	// it; build the editor here and let RunLayout's Tier-1.5 pass pick it for
 	// plan tabs by the active tab's context key.
 	g.keybindingSystem.masterEditors[types.PLAN] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, types.PLAN, WithSessionLog(g.deps.Common.Logger()), WithEmergencyQuit(g.emergencyQuit))
+	// SCHEMA_RAIL master editor. The container is a non-editable
+	// SIDE_CONTEXT, so the Flatten loop above installs per-key SetKeybinding
+	// shims for it but does NOT build a master editor (only editable keys do).
+	// The dispatch model (D1) routes every keystroke on the consolidated rail
+	// through this editor under the FIXED scope SCHEMA_RAIL, so it must exist
+	// for the container to be dispatchable; RunLayout's Tier-1 pass attaches
+	// it to the "schemas-tables" view BY VIEW NAME. The editor's scope token
+	// is "schema-rail" while the view is "schemas-tables": NewMasterEditor
+	// hardcodes viewName = string(scope), so the timer-driven flushRunes path
+	// targets a non-existent "schema-rail" view. That mismatch is intentional
+	// and harmless — the rail is non-editable, so the ModeInsert flush path is
+	// never exercised.
+	g.keybindingSystem.masterEditors[types.SCHEMA_RAIL] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, types.SCHEMA_RAIL, WithSessionLog(g.deps.Common.Logger()), WithEmergencyQuit(g.emergencyQuit))
 	return nil
 }
 

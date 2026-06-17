@@ -71,8 +71,13 @@ func (cmdLineStubDriver) DeleteView(string) error                           { re
 func (cmdLineStubDriver) SetManager(...types.Manager)                       {}
 func (cmdLineStubDriver) SetCaretEnabled(bool)                              {}
 func (cmdLineStubDriver) SetViewCursor(string, int, int) error              { return nil }
-func (cmdLineStubDriver) MainLoop() error                                   { return nil }
-func (cmdLineStubDriver) Close() error                                      { return nil }
+func (cmdLineStubDriver) SetViewTabs(string, []string, int) error           { return nil }
+func (cmdLineStubDriver) SetTabClickBinding(string, func(int) error) error  { return nil }
+func (cmdLineStubDriver) SetViewTabColors(string, gocui.Attribute, gocui.Attribute) error {
+	return nil
+}
+func (cmdLineStubDriver) MainLoop() error { return nil }
+func (cmdLineStubDriver) Close() error    { return nil }
 
 func newTestCommandLine(drv types.GuiDriver, modes types.ModeSetter) *CommandLineContext {
 	base := NewBaseContext(BaseContextOpts{

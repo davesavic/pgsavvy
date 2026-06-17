@@ -13,6 +13,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/common"
 	"github.com/davesavic/pgsavvy/pkg/config"
 	"github.com/davesavic/pgsavvy/pkg/drivers"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/pgsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
@@ -37,9 +38,11 @@ import (
 // empty when the user aborts via Esc.
 
 // assertEditorOverRail verifies the post-connect focus stack: the
-// QUERY_EDITOR is the focused top, with the expected side rail populated
-// directly beneath it.
-func assertEditorOverRail(t *testing.T, g *orchestrator.Gui, rail types.ContextKey) {
+// QUERY_EDITOR is the focused top, with the consolidated SCHEMA_RAIL
+// container directly beneath it (the SCHEMAS/TABLES leaves are never pushed
+// — the container multiplexes them via its active-tab index). wantTab is
+// the expected active tab the connection-open path selected.
+func assertEditorOverRail(t *testing.T, g *orchestrator.Gui, wantTab int) {
 	t.Helper()
 	if got := g.ContextTree().Current().GetKey(); got != types.QUERY_EDITOR {
 		t.Fatalf("top after connect = %v; want QUERY_EDITOR", got)
@@ -48,8 +51,11 @@ func assertEditorOverRail(t *testing.T, g *orchestrator.Gui, rail types.ContextK
 	if len(stack) < 2 {
 		t.Fatalf("stack depth = %d after connect; want >= 2 (rail + editor)", len(stack))
 	}
-	if got := stack[len(stack)-2].GetKey(); got != rail {
-		t.Fatalf("context below editor = %v; want %v", got, rail)
+	if got := stack[len(stack)-2].GetKey(); got != types.SCHEMA_RAIL {
+		t.Fatalf("context below editor = %v; want %v", got, types.SCHEMA_RAIL)
+	}
+	if got := g.Registry().SchemaRail.ActiveTab(); got != wantTab {
+		t.Fatalf("SCHEMA_RAIL active tab = %d; want %d", got, wantTab)
 	}
 }
 
@@ -180,7 +186,7 @@ func TestPickerStartupFlow_SuccessLandsInQueryEditorOverSchemas(t *testing.T) {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	assertEditorOverRail(t, g, types.SCHEMAS)
+	assertEditorOverRail(t, g, guicontext.SchemaRailTabSchemas)
 	if got := g.ActiveConnIDForTest(); got != profile.Name {
 		t.Fatalf("activeConnID = %q after success; want %q", got, profile.Name)
 	}
@@ -209,7 +215,7 @@ func TestPickerStartupFlow_SuccessLandsInQueryEditorOverTablesWithSavedState(t *
 		t.Fatalf("Connect: %v", err)
 	}
 
-	assertEditorOverRail(t, g, types.TABLES)
+	assertEditorOverRail(t, g, guicontext.SchemaRailTabTables)
 	if got := g.ActiveConnIDForTest(); got != profile.Name {
 		t.Fatalf("activeConnID = %q; want %q", got, profile.Name)
 	}
@@ -241,7 +247,7 @@ func TestPickerStartupFlow_FailureThenRetrySucceeds(t *testing.T) {
 		t.Fatalf("retry Connect: %v", err)
 	}
 
-	assertEditorOverRail(t, g, types.SCHEMAS)
+	assertEditorOverRail(t, g, guicontext.SchemaRailTabSchemas)
 	if got := g.ActiveConnIDForTest(); got != profile.Name {
 		t.Fatalf("activeConnID = %q after retry; want %q", got, profile.Name)
 	}

@@ -10,6 +10,23 @@ deliberately fixed and cannot be changed.
 
 ---
 
+## Breaking changes
+
+- **The Schemas and Tables rails were consolidated into one `schema-rail`
+  scope.** The two side rails now share a single tabbed view (`Schemas` /
+  `Tables`). Bindings that used to target `scope: schemas` or `scope: tables`
+  must migrate to **`scope: schema-rail`**. There is no alias — an unknown
+  scope is a fatal config error (validated by `config.ValidateUserConfig`),
+  so configs referencing `scope: schemas` / `scope: tables` will no longer
+  load.
+- **The digit rail-jumps `1` (schemas) and `2` (tables) were removed**, along
+  with the `Ctrl+K` / `Ctrl+J` vertical rail-stack navigation between the two
+  rails. Switch tabs with **`]`** (next) and **`[`** (previous) instead — both
+  wrap at the edges. Reach the consolidated rail from a main pane with
+  `Ctrl+H`, or cycle panes with `<tab>`.
+
+---
+
 ## The `keybindings:` schema
 
 Keybindings live under the top-level `keybindings:` list. Each entry is one
@@ -68,7 +85,7 @@ appear in the default `keybindings:` list are replaced.)
 
 `scope:` selects where a binding is active.
 
-- **A context name** (e.g. `scope: query_editor`, `scope: schemas`,
+- **A context name** (e.g. `scope: query_editor`, `scope: schema-rail`,
   `scope: confirmation`) targets exactly that context. The binding only
   fires when that context is focused.
 - **`scope: global`** registers the binding at the global fall-through
@@ -300,20 +317,37 @@ real config's `keybindings:` list replaces the defaults wholesale, so a
 complete config must also re-include a quit binding (and anything else you
 want to keep).
 
-### Rail (side-list) — Schemas / Tables
+### Rail (side-list) — consolidated `schema-rail`
 
-Make `r` refresh and `<cr>` confirm on the schemas rail:
+The Schemas and Tables rails share one `schema-rail` scope (a tabbed view).
+`r` refreshes and `<cr>` confirms on whichever tab is active; both dispatch to
+the active tab automatically. The action IDs are `schema_rail.refresh` /
+`schema_rail.confirm`:
 
 ```yaml
 keybindings:
   - mode: n
-    scope: schemas
+    scope: schema-rail
     key: r
-    action: rail.refresh
+    action: schema_rail.refresh
   - mode: n
-    scope: schemas
+    scope: schema-rail
     key: <cr>
-    action: list.confirm
+    action: schema_rail.confirm
+```
+
+Switch tabs with `]` / `[` (both wrap at the edges). To remap them:
+
+```yaml
+keybindings:
+  - mode: n
+    scope: schema-rail
+    key: "]"
+    action: rail.tab.next
+  - mode: n
+    scope: schema-rail
+    key: "["
+    action: rail.tab.prev
 ```
 
 ### Editor (query editor / vim motion)
