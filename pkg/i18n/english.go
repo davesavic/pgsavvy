@@ -215,6 +215,11 @@ type ActionTranslations struct {
 	// History popup.
 	HistoryOpen string
 
+	// Saved-query picker popup.
+	OpenSavedQueries string
+	DeleteSavedQuery string
+	SaveQuery        string
+
 	// Relationship panel (<leader>gr FK-exploration sidebar).
 	RelationshipPanelToggle string
 	RelationshipPanelEnter  string
@@ -469,6 +474,10 @@ func EnglishTranslationSet() *TranslationSet {
 			TableInspectClose:   "Close",
 
 			HistoryOpen: "Open query history",
+
+			OpenSavedQueries: "Open saved queries",
+			DeleteSavedQuery: "Delete saved query",
+			SaveQuery:        "Save query",
 
 			RelationshipPanelToggle: "Toggle relationship panel",
 			RelationshipPanelEnter:  "Focus relationship panel",

@@ -53,6 +53,12 @@ type Controllers struct {
 	// RegisterActions + AllDefaultBindings include its bindings.
 	History *HistoryController
 
+	// SavedQuery is constructed by the orchestrator alongside History: it
+	// takes a Pop-capable handle on the focus-stack (*gui.ContextTree) which
+	// this package cannot import. The bundle still owns it so RegisterActions
+	// + AllDefaultBindings include its bindings.
+	SavedQuery *SavedQueryController
+
 	// Reconnect owns the <leader>R GLOBAL binding and the reconnect
 	// dialog.
 	Reconnect *ReconnectController
@@ -349,6 +355,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "ConflictDialog", ctrl: b.ConflictDialog, attach: true},
 		{name: "FKReversePicker", ctrl: b.FKReversePicker, attach: true},
 		{name: "History", ctrl: b.History, attach: true},
+		{name: "SavedQuery", ctrl: b.SavedQuery, attach: true},
 		{name: "Cheatsheet", ctrl: b.Cheatsheet, attach: true},
 		{name: "SearchLine", ctrl: b.SearchLine, attach: true},
 		{name: "RelationshipPanel", ctrl: b.RelationshipPanel, attach: true},

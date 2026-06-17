@@ -122,6 +122,10 @@ const (
 	// onChange seam per keystroke. TEMPORARY_POPUP, editable.
 	SEARCH_LINE ContextKey = "search_line"
 	HISTORY     ContextKey = "history"
+	// SAVED_QUERY is the <leader>o saved-query picker popup. TEMPORARY_POPUP
+	// kind; lists named queries from queries.yml, <cr> inserts the selected
+	// SQL at the editor cursor, dd deletes.
+	SAVED_QUERY ContextKey = "saved_query"
 	WHICH_KEY   ContextKey = "which_key"
 	GLOBAL      ContextKey = "global"
 	LIMIT       ContextKey = "limit"
@@ -188,6 +192,7 @@ func AllContextKeys() []ContextKey {
 		COMMAND_LINE,
 		SEARCH_LINE,
 		HISTORY,
+		SAVED_QUERY,
 		WHICH_KEY,
 		GLOBAL,
 		LIMIT,

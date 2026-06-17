@@ -495,6 +495,7 @@ func allContextKeyKinds() map[types.ContextKey]types.ContextKind {
 		types.COMMAND_LINE:       types.TEMPORARY_POPUP,
 		types.SEARCH_LINE:        types.TEMPORARY_POPUP,
 		types.HISTORY:            types.TEMPORARY_POPUP,
+		types.SAVED_QUERY:        types.PERSISTENT_POPUP,
 		types.WHICH_KEY:          types.DISPLAY_CONTEXT,
 		types.GLOBAL:             types.GLOBAL_CONTEXT,
 		types.LIMIT:              types.DISPLAY_CONTEXT,

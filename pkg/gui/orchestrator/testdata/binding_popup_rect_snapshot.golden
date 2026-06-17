@@ -155,8 +155,10 @@ binding	scope=query_editor	key=<leader>e	mode=normal
 binding	scope=query_editor	key=<leader>f	mode=mode(0x1c)
 binding	scope=query_editor	key=<leader>f	mode=normal
 binding	scope=query_editor	key=<leader>h	mode=normal
+binding	scope=query_editor	key=<leader>o	mode=normal
 binding	scope=query_editor	key=<leader>r	mode=mode(0x1c)
 binding	scope=query_editor	key=<leader>r	mode=normal
+binding	scope=query_editor	key=<leader>s	mode=normal
 binding	scope=query_editor	key=<leader>tR	mode=normal
 binding	scope=query_editor	key=<leader>tb	mode=normal
 binding	scope=query_editor	key=<leader>tc	mode=normal
@@ -307,6 +309,17 @@ binding	scope=result_grid	key=n	mode=normal
 binding	scope=result_grid	key=w	mode=normal
 binding	scope=result_grid	key=y	mode=normal
 binding	scope=result_grid	key=yy	mode=normal
+binding	scope=saved_query	key=$	mode=normal
+binding	scope=saved_query	key=0	mode=normal
+binding	scope=saved_query	key=<cr>	mode=normal
+binding	scope=saved_query	key=<esc>	mode=normal
+binding	scope=saved_query	key=G	mode=normal
+binding	scope=saved_query	key=dd	mode=normal
+binding	scope=saved_query	key=gg	mode=normal
+binding	scope=saved_query	key=h	mode=normal
+binding	scope=saved_query	key=j	mode=normal
+binding	scope=saved_query	key=k	mode=normal
+binding	scope=saved_query	key=l	mode=normal
 binding	scope=schemas	key=$	mode=normal
 binding	scope=schemas	key=/	mode=normal
 binding	scope=schemas	key=0	mode=normal
@@ -402,6 +415,7 @@ popuprect	key=prompt	x0=18	y0=46	x1=82	y1=54
 popuprect	key=query_editor	none
 popuprect	key=relationship_panel	x0=60	y0=0	x1=99	y1=99
 popuprect	key=result_grid	none
+popuprect	key=saved_query	x0=20	y0=20	x1=80	y1=80
 popuprect	key=schemas	none
 popuprect	key=search_line	x0=0	y0=99	x1=100	y1=101
 popuprect	key=selection	x0=25	y0=25	x1=75	y1=75

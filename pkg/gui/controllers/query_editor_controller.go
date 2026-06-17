@@ -71,6 +71,14 @@ type QueryEditorController struct {
 	// query-editor DML path carries no parsed target table, so the wired closure
 	// drops ALL cached counts. Nil-safe (no-op when unwired).
 	onDMLCommit func()
+
+	// saveHelper persists a named query to queries.yml (name prompt +
+	// overwrite-confirm). savePrompter is the blocking ChainedPrompter the
+	// helper drives. Both are wired post-construction via SetSaveQuery so the
+	// constructor signature stays stable; handleSave no-ops (one toast) when
+	// either is unwired.
+	saveHelper   *data.SaveQueryHelper
+	savePrompter data.ChainedPrompter
 }
 
 // SetOnDMLCommit wires the post-DML-commit hook (relationship-count eviction).
@@ -78,6 +86,15 @@ type QueryEditorController struct {
 // the path a no-op.
 func (q *QueryEditorController) SetOnDMLCommit(fn func()) {
 	q.onDMLCommit = fn
+}
+
+// SetSaveQuery wires the <leader>s save flow: the SaveQueryHelper (name
+// prompt + overwrite-confirm + persist) and the blocking ChainedPrompter it
+// drives. Wired post-construction so the constructor signature stays stable.
+// Leaving either nil leaves handleSave a single-toast no-op.
+func (q *QueryEditorController) SetSaveQuery(helper *data.SaveQueryHelper, prompter data.ChainedPrompter) {
+	q.saveHelper = helper
+	q.savePrompter = prompter
 }
 
 // NewQueryEditorController constructs the controller. c may be nil
@@ -142,6 +159,8 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		{"<leader>f", commands.QueryFormat, tr.Actions.QueryFormat, defaultMode, false},
 		{"<leader>f", commands.QueryFormat, tr.Actions.QueryFormat, visualRunModes, false},
 		{"<leader>h", commands.HistoryOpen, tr.Actions.HistoryOpen, defaultMode, false},
+		{"<leader>o", commands.QuerySavedOpen, tr.Actions.OpenSavedQueries, defaultMode, false},
+		{"<leader>s", commands.QuerySave, tr.Actions.SaveQuery, defaultMode, false},
 	}
 	out := make([]*types.ChordBinding, 0, len(specs)+6)
 	for _, s := range specs {
@@ -238,6 +257,13 @@ func (q *QueryEditorController) RegisterActions(reg *commands.Registry) {
 		Tag:         "Query",
 		Handler:     q.handleFormat,
 	})
+
+	_ = reg.Register(&commands.Command{
+		ID:          commands.QuerySave,
+		Description: "Save query",
+		Tag:         "Query",
+		Handler:     q.handleSave,
+	})
 }
 
 // AttachToContext registers GetKeybindings on the supplied context.
@@ -294,6 +320,95 @@ func (q *QueryEditorController) runOne(ec commands.ExecCtx, newTx bool) error {
 		}
 	})
 	return nil
+}
+
+// handleSave dispatches <leader>s. It captures the current query text
+// (visual selection if a Visual mode is active, else the statement under the
+// cursor), trims it, and — when non-empty — hands it to the SaveQueryHelper
+// on a worker goroutine. The helper drives the blocking name prompt + the
+// overwrite-confirm choice; the success/error toast is marshalled back onto
+// the UI thread.
+//
+// The blocking ChainedPrompter on a worker is the ONLY safe Prompt->Confirm
+// shape here: nesting ConfirmHelper.Confirm inside PromptHelper.onSubmit
+// double-pops the focus stack (both helpers issue an unconditional
+// tree.Pop()).
+func (q *QueryEditorController) handleSave(ec commands.ExecCtx) error {
+	sql := strings.TrimSpace(q.captureSaveText(ec))
+	if sql == "" {
+		q.toast("no statement to save")
+		return nil
+	}
+	if q.saveHelper == nil || q.savePrompter == nil {
+		q.toast("save unavailable")
+		return nil
+	}
+	if q.helpers.OnWorker == nil {
+		// No worker scheduler wired: the blocking prompt would dead-lock the
+		// UI goroutine. Toast rather than risk it.
+		q.toast("save unavailable")
+		return nil
+	}
+	q.helpers.OnWorker(func(_ gocui.Task) error {
+		name, err := q.saveHelper.WalkSaveQuery(context.Background(), q.savePrompter, sql)
+		q.toastFromWorker(saveToastMessage(name, err))
+		return nil
+	})
+	return nil
+}
+
+// captureSaveText returns the text <leader>s will persist: the visual
+// selection when a Visual mode is active, otherwise the statement under the
+// cursor. Mirrors runOne's mode split. The result is NOT trimmed here (the
+// caller trims once); a multi-statement visual selection is returned verbatim
+// as one blob (NOT split — a saved query is a single entry).
+func (q *QueryEditorController) captureSaveText(ec commands.ExecCtx) string {
+	if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
+		if q.helpers.EditorBuffer == nil {
+			return ""
+		}
+		text, ok := q.helpers.EditorBuffer.SelectionText()
+		if !ok {
+			return ""
+		}
+		return text
+	}
+	return q.statementUnderCursor()
+}
+
+// toastFromWorker surfaces msg on the UI thread when called from a worker
+// goroutine, falling back to a direct toast when no OnUIThread scheduler is
+// wired (test path: OnWorker runs inline so a direct toast is already on the
+// caller goroutine). Empty msg is a no-op (a clean cancel surfaces nothing).
+func (q *QueryEditorController) toastFromWorker(msg string) {
+	if msg == "" {
+		return
+	}
+	if q.helpers.OnUIThread == nil {
+		q.toast(msg)
+		return
+	}
+	q.helpers.OnUIThread(func() error {
+		q.toast(msg)
+		return nil
+	})
+}
+
+// saveToastMessage maps a WalkSaveQuery result to the toast text. A clean
+// cancel (name=="" && err==nil) returns "" (no toast). The empty-name
+// sentinel maps to a single name-required toast; any other error surfaces its
+// message; success confirms with the saved name.
+func saveToastMessage(name string, err error) string {
+	if err != nil {
+		if errors.Is(err, data.SaveQueryEmptyNameErr()) {
+			return "query name must not be empty"
+		}
+		return "save failed: " + err.Error()
+	}
+	if name == "" {
+		return ""
+	}
+	return "saved query \"" + name + "\""
 }
 
 // RunSQL executes a single externally-supplied statement through the

@@ -346,6 +346,21 @@ const (
 	// UI thread and pushes the popup.
 	HistoryOpen = "history.open"
 
+	// QuerySavedOpen opens the SAVED_QUERY picker popup from the
+	// QUERY_EDITOR (`<leader>o` in Normal mode). Loads queries.yml off the
+	// UI thread and pushes the popup.
+	QuerySavedOpen = "query.saved.open"
+
+	// QuerySavedDelete deletes the saved query under the cursor (dd) after a
+	// confirmation, then re-reads queries.yml.
+	QuerySavedDelete = "query.saved.delete"
+
+	// QuerySave captures the current query text (visual selection or the
+	// statement under cursor) from the QUERY_EDITOR (`<leader>s` in Normal
+	// mode), prompts for a name, and persists it to queries.yml —
+	// overwrite-confirming on a name collision.
+	QuerySave = "query.save"
+
 	// Plan family — owned by PlanController. All PLAN-
 	// scoped; published only when a plan tab is the focused context.
 	//   PlanToggle        - <CR> toggles collapse on the cursor node
@@ -707,6 +722,9 @@ func AllActionIDs() []string {
 		TableInspectPrevTab,
 		TableInspectClose,
 		HistoryOpen,
+		QuerySavedOpen,
+		QuerySavedDelete,
+		QuerySave,
 		PlanToggle,
 		PlanExpandAll,
 		PlanCollapseAll,

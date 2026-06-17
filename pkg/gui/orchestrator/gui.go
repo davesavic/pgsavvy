@@ -76,6 +76,11 @@ type Deps struct {
 	// closure reads it on each invocation.
 	ConnectionsPath string
 
+	// QueriesPath is the absolute path to queries.yml. The saved-query
+	// picker reads it (via config.LoadQueries) when opened and rewrites it
+	// (via config.DeleteQuery) on a dd delete.
+	QueriesPath string
+
 	// ConnectionsProvider returns the freshly-loaded connection profiles.
 	// Called by the empty-state hook and (in later epics) by the
 	// connection picker's refresh path. Nil collapses to an empty slice.
@@ -750,6 +755,48 @@ func (g *Gui) registerHistoryOpen() {
 				}
 				g.OnUIThreadContentOnly(func() error {
 					historyCtx.SetRows(rows)
+					return nil
+				})
+				return nil
+			})
+			return nil
+		},
+	})
+}
+
+// registerSavedQueryOpen registers the QuerySavedOpen action handler. It
+// pushes the SAVED_QUERY popup on the UI thread, loads queries.yml on a
+// worker goroutine, and publishes the rows back on the UI thread via
+// OnUIThreadContentOnly. SetRows / Push are NEVER called from the worker
+// (data race under -race). Mirrors registerHistoryOpen's threading shape.
+func (g *Gui) registerSavedQueryOpen() {
+	savedCtx := g.registry.SavedQuery
+	fs := fsFromCommon(g.deps.Common)
+	path := g.deps.QueriesPath
+
+	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
+		ID:          commands.QuerySavedOpen,
+		Description: "Open saved queries",
+		Tag:         "Query",
+		Handler: func(_ commands.ExecCtx) error {
+			// Re-open semantics: if the popup is already on top, reload in
+			// place rather than stacking a second copy.
+			cur := g.tree.Current()
+			if cur == nil || cur.GetKey() != types.SAVED_QUERY {
+				savedCtx.SetRows(nil)
+				if err := g.tree.Push(savedCtx); err != nil {
+					return err
+				}
+			}
+
+			g.OnWorker(func(_ gocui.Task) error {
+				rows, err := config.LoadQueries(fs, path)
+				if err != nil {
+					g.deps.Common.Logger().Warn("gui: load saved queries", "err", err)
+					return nil
+				}
+				g.OnUIThreadContentOnly(func() error {
+					savedCtx.SetRows(rows)
 					return nil
 				})
 				return nil

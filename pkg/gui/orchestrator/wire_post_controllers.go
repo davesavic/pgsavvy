@@ -236,6 +236,25 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 		g.controllers.History = historyCtrl
 	}
 
+	// build the SAVED_QUERY popup controller and attach it to its context so
+	// its j/k/gg/G/<cr>/dd/<esc> bindings reach the trie via
+	// AllDefaultBindings. Constructed here — not in AttachControllers —
+	// because it needs a Pop-capable handle on the focus-stack
+	// (*gui.ContextTree). refocus is nil: ContextTree.Pop already fires
+	// HandleFocus on the new stack top (the query editor). The editor buffer
+	// adapter receives the inserted SQL; fs + QueriesPath address queries.yml
+	// for the dd delete/refresh; the Confirm helper gates the delete.
+	if g.registry != nil && g.registry.SavedQuery != nil && g.tree != nil {
+		savedCtx := g.registry.SavedQuery
+		savedCtrl := controllers.NewSavedQueryController(
+			g.deps.Common, helperBag.CoreDeps, helperBag.UIDeps, savedCtx,
+			newEditorBufferAdapter(g.registry.QueryEditor), g.tree, nil,
+			fsFromCommon(g.deps.Common), g.deps.QueriesPath,
+		)
+		savedCtrl.AttachToContext(&savedCtx.BaseContext)
+		g.controllers.SavedQuery = savedCtrl
+	}
+
 	// build the CHEATSHEET popup controller and attach it
 	// to the context so the [, ], <tab>, <esc>, q bindings reach the trie
 	// via AllDefaultBindings. Constructed here — not in AttachControllers
@@ -314,6 +333,18 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 		if g.controllers.QueryEditor != nil {
 			g.controllers.QueryEditor.SetOnDMLCommit(panelCtrl.EvictAllExactCounts)
 		}
+	}
+
+	// <leader>s save flow: the SaveQueryHelper (name prompt + overwrite-
+	// confirm + persist to queries.yml) driven by a blocking
+	// chainedPrompterAdapter on a worker goroutine. fs + QueriesPath address
+	// queries.yml; the adapter wraps the prompt/choice popups so the
+	// Prompt->Confirm chain never nests ConfirmHelper inside
+	// PromptHelper.onSubmit (which double-pops the focus stack).
+	if g.controllers.QueryEditor != nil {
+		saveHelper := data.NewSaveQueryHelper(g.deps.Common, fsFromCommon(g.deps.Common), g.deps.QueriesPath)
+		savePrompter := newChainedPrompterAdapter(g.promptHelp, g.choiceHelp, g.OnUIThread)
+		g.controllers.QueryEditor.SetSaveQuery(saveHelper, savePrompter)
 	}
 }
 

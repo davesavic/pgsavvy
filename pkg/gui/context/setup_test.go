@@ -14,8 +14,9 @@ func TestNewContextTreeReturnsAllContexts(t *testing.T) {
 	flat := tree.Flatten()
 	// SEARCH_LINE (TEMPORARY_POPUP) takes the count 26→27.
 	// RELATIONSHIP_PANEL (DISPLAY_CONTEXT) takes it 27→28.
-	if len(flat) != 28 {
-		t.Fatalf("Flatten() len = %d, want 28 (21 live + 4 stub + 2 main + 1 persistent)", len(flat))
+	// SAVED_QUERY (PERSISTENT_POPUP) takes it 28→29.
+	if len(flat) != 29 {
+		t.Fatalf("Flatten() len = %d, want 29 (21 live + 4 stub + 2 main + 2 persistent)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -129,9 +130,10 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		// HISTORY was promoted from STUB to TEMPORARY_POPUP, so
 		// STUB drops 4→3.
 		types.STUB: 3,
-		// FIRST_RUN_TIP is the first
-		// PERSISTENT_POPUP shipped by the app.
-		types.PERSISTENT_POPUP: 1,
+		// FIRST_RUN_TIP is the first PERSISTENT_POPUP shipped by the app;
+		// SAVED_QUERY is the second (persistent so the dd delete-confirm
+		// doesn't auto-pop the picker — see setup.go).
+		types.PERSISTENT_POPUP: 2,
 	}
 	for k, w := range want {
 		if counts[k] != w {

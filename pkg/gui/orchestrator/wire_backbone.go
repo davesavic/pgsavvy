@@ -611,6 +611,13 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 		g.registerHistoryOpen()
 	}
 
+	// QuerySavedOpen — `<leader>o` in the QUERY_EDITOR opens the saved-query
+	// picker popup. Pushes on the UI thread, loads queries.yml off-thread,
+	// mutates the context on the UI thread.
+	if g.registry != nil && g.registry.SavedQuery != nil && g.tree != nil {
+		g.registerSavedQueryOpen()
+	}
+
 	// rail highlight+jump search (/ n N <esc>) on SCHEMAS
 	// and TABLES. Single action IDs; the handler resolves the focused
 	// rail from ctx.Scope. Needs the registry + SearchLine helper.

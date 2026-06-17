@@ -84,6 +84,7 @@ func Start(build *BuildInfo, args []string) error {
 	}
 
 	connectionsPath := filepath.Join(configDir, "connections.yml")
+	queriesPath := filepath.Join(configDir, "queries.yml")
 	statePath := filepath.Join(stateDir, "state.yml")
 	configPath := filepath.Join(configDir, "config.yml")
 
@@ -144,6 +145,7 @@ func Start(build *BuildInfo, args []string) error {
 		Common:              c,
 		Store:               store,
 		ConnectionsPath:     connectionsPath,
+		QueriesPath:         queriesPath,
 		ConnectionsProvider: connectionsProvider,
 		DriverNamesFn:       drivers.Names,
 		SetSecretPrompter:   pg.SetSecretPrompter,

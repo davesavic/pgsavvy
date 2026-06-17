@@ -81,6 +81,10 @@ type ContextTree struct {
 	// TEMPORARY_POPUP kind.
 	History *HistoryContext
 
+	// SavedQuery is the <leader>o saved-query picker popup.
+	// TEMPORARY_POPUP kind.
+	SavedQuery *SavedQueryContext
+
 	// Stub instances for the remaining deferred Contexts; Layout
 	// filters these by Kind == STUB so they never reach SetView.
 	TableDataEditor *StubContext
@@ -268,6 +272,20 @@ func contextSpecs() []contextSpec {
 				return NewHistoryContext(b, d)
 			},
 			assign: func(t *ContextTree, c types.IBaseContext) { t.History = c.(*HistoryContext) },
+		},
+		{
+			// PERSISTENT_POPUP (not TEMPORARY) so the dd delete-confirm
+			// (a TEMPORARY_POPUP CONFIRMATION pushed on top) does NOT
+			// auto-pop the picker: persistent popups survive a subsequent
+			// popup push, so after the confirm pops the picker is still on
+			// the stack and RefreshRows re-renders with the cursor clamped.
+			// Closing stays explicit — the controller Pops on <cr>/<esc>.
+			key: types.SAVED_QUERY, kind: types.PERSISTENT_POPUP, title: "Saved Queries", inFlatten: true,
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.6, HeightFrac: 0.6},
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewSavedQueryContext(b, d)
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.SavedQuery = c.(*SavedQueryContext) },
 		},
 
 		// GLOBAL / DISPLAY.
