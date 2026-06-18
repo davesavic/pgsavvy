@@ -122,6 +122,7 @@ func TestPlanController_GetKeybindings_PublishesNavigationEscape(t *testing.T) {
 		commands.RailSwitchLastRail:    false, // <c-h> back to SCHEMA_RAIL
 		commands.ResultTabNext:         false, // gt
 		commands.ResultTabPrev:         false, // gT
+		commands.ResultTabClose:        false, // <leader>X
 	}
 	for _, b := range bindings {
 		if _, ok := want[b.ActionID]; ok {

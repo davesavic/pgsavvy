@@ -134,6 +134,13 @@ func (p *PlanController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordB
 			ActionID:    commands.ResultTabPrev,
 			Description: tr.Actions.ResultTabPrev,
 		},
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Special: types.KeyLeader}, {Code: 'X'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.PLAN,
+			ActionID:    commands.ResultTabClose,
+			Description: tr.Actions.ResultTabClose,
+		},
 	)
 	return out
 }
