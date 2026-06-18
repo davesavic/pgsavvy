@@ -92,7 +92,7 @@ func (s *SchemasContext) HandleRender() error {
 	writeView(deps, func() error {
 		return deps.GuiDriver.SetContent(viewName, body)
 	})
-	scrollSideRailIntoView(deps, viewName, s.cursor)
+	scrollSideRailIntoView(deps, viewName, s.RenderedCursorRow())
 	return nil
 }
 

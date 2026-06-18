@@ -64,8 +64,13 @@ func railEmptyPlaceholder(deps depsAlias, rail types.ContextKey) string {
 // the rail's manual h/l/0/$ pan handlers (controllers.ListControllerTrait),
 // which adjust the view's horizontal origin (ox) directly. FocusPoint only
 // touches oy, so a user's pan offset survives across renders.
-func scrollSideRailIntoView(deps depsAlias, viewName string, cursor int) {
-	if deps.GuiDriver == nil {
+//
+// `row` is the BUFFER-LINE index of the selection, not the raw items index:
+// rails that skip hidden rows (Schemas) paint the cursor on a compacted line,
+// so callers pass RenderedCursorRow(). A negative row (cursor parked on a
+// hidden, unpainted row) has no line to focus, so the origin is left as-is.
+func scrollSideRailIntoView(deps depsAlias, viewName string, row int) {
+	if deps.GuiDriver == nil || row < 0 {
 		return
 	}
 	deps.GuiDriver.Update(func() error {
@@ -73,7 +78,7 @@ func scrollSideRailIntoView(deps depsAlias, viewName string, cursor int) {
 		if err != nil || v == nil {
 			return nil
 		}
-		v.FocusPoint(0, cursor, true)
+		v.FocusPoint(0, row, true)
 		return nil
 	})
 }

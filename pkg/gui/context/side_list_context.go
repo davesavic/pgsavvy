@@ -116,6 +116,36 @@ func (s *SideListContext) SelectedItem() any {
 	return s.items[s.cursor]
 }
 
+// RenderedCursorRow returns the BUFFER-LINE index of the selected row as it
+// is actually painted, which differs from Cursor() whenever earlier rows are
+// filtered out. renderRows walks items[] by raw index but skips rows the
+// visibility predicate rejects (the Schemas rail's hidden-schema filter), so a
+// lookup keyed by the raw cursor index — e.g. BufferLines()[cursor] when
+// measuring a row's width for horizontal pan — addresses the wrong (or an
+// out-of-range) line once any preceding row is hidden. This counts only the
+// visible rows before the cursor, matching the paint order. With no filter
+// installed (visible == nil) every row renders and this equals Cursor().
+// Returns -1 when the cursor sits on a hidden row: no "> " marker is painted,
+// so there is no rendered selection to address (callers treat -1 as "no row").
+func (s *SideListContext) RenderedCursorRow() int {
+	if s.visible == nil {
+		return s.cursor
+	}
+	if s.cursor < 0 || s.cursor >= len(s.items) {
+		return s.cursor
+	}
+	if !s.visible(s.cursor) {
+		return -1
+	}
+	row := 0
+	for i := 0; i < s.cursor; i++ {
+		if s.visible(i) {
+			row++
+		}
+	}
+	return row
+}
+
 // SetRailNameAccessor injects the name extractor used by the search
 // engine. The two search-enabled rails (Schemas, Tables) set this from
 // their constructors; rails that never search leave it nil and the engine
