@@ -764,8 +764,12 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 				}
 			}
 		}
-		if c.g != nil && c.g.registry != nil && c.g.registry.QueryEditor != nil {
-			return c.g.tree.Push(c.g.registry.QueryEditor)
+		// Push the QUERY_RAIL container (NOT the QUERY_EDITOR leaf — leaves
+		// are never on the focus stack; tkt5.2 topology flip). The container
+		// defaults to the editor tab (active index 0), so first-connect focus
+		// lands on the editor as before.
+		if c.g != nil && c.g.registry != nil && c.g.registry.QueryRail != nil {
+			return c.g.tree.Push(c.g.registry.QueryRail)
 		}
 		return nil
 	})

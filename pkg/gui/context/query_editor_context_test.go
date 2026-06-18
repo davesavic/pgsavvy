@@ -177,9 +177,15 @@ func TestQueryEditorContext_RegisteredInTreeAsMainContext(t *testing.T) {
 	if tree.QueryEditor.GetKind() != types.MAIN_CONTEXT {
 		t.Fatalf("tree.QueryEditor.GetKind() = %v, want MAIN_CONTEXT", tree.QueryEditor.GetKind())
 	}
-	// ByKey lookup must round-trip through the IBaseContext slot.
-	if got := tree.ByKey(types.QUERY_EDITOR); got == nil || got.GetKey() != types.QUERY_EDITOR {
-		t.Fatalf("ByKey(QUERY_EDITOR) = %v, want a Context with that key", got)
+	// tkt5.2 topology flip: QUERY_EDITOR is now a QUERY_RAIL container leaf
+	// (inFlatten=false), so it is NOT retrievable via ByKey (which walks
+	// Flatten()) — mirroring SCHEMAS/TABLES under SCHEMA_RAIL. The QUERY_RAIL
+	// container is the flattened, ByKey-retrievable entry instead.
+	if got := tree.ByKey(types.QUERY_EDITOR); got != nil {
+		t.Fatalf("ByKey(QUERY_EDITOR) = %v, want nil (leaf, not flattened)", got)
+	}
+	if got := tree.ByKey(types.QUERY_RAIL); got == nil || got.GetKey() != types.QUERY_RAIL {
+		t.Fatalf("ByKey(QUERY_RAIL) = %v, want the container context", got)
 	}
 }
 

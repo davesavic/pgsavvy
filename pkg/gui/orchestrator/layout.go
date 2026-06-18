@@ -147,7 +147,7 @@ func (g *Gui) RunLayout(w, h int) error {
 	// participates in the focus-frame swap below.
 	if modalTop {
 		g.layoutConnectionManagerMain(dims, rails)
-	} else if g.registry != nil && g.registry.QueryEditor != nil {
+	} else if g.registry != nil && g.registry.QueryRail != nil {
 		// The CONNECTION_MANAGER modal is a MAIN_CONTEXT, so the Tier-3
 		// cleanup loop below (TEMPORARY_POPUP / DISPLAY_CONTEXT only) never
 		// tears its view down. Once the modal leaves the focus stack its
@@ -161,8 +161,24 @@ func (g *Gui) RunLayout(w, h int) error {
 				_ = g.driver.DeleteView(name)
 			}
 		}
-		qec := g.registry.QueryEditor
-		name := qec.GetViewName()
+		// The QUERY_RAIL container multiplexes the editor leaf and the
+		// SAVED_QUERY / HISTORY list leaves into the single shared rail view
+		// (QueryRailViewName == "query_editor"). Render ownership is split:
+		//   - The editor-buffer paint (highlight + selection/yank overlays +
+		//     FocusPoint + horizontal scroll) stays HERE in layout, gated on
+		//     the editor leaf being the active tab. The editor leaf's
+		//     HandleRender is a no-op (BaseContext), so it can't paint the
+		//     buffer; only this block knows how to render the canonical
+		//     *editor.Buffer.
+		//   - container.HandleRender() ALWAYS publishes the native tab strip
+		//     (SetViewTabs, active marked) + restores the list tab origin on
+		//     the switch frame + delegates to the active leaf's body render.
+		//     The list leaves DO paint their rows into the shared view; the
+		//     editor leaf's no-op makes the editor tab single-painted (only
+		//     the layout buffer paint above runs).
+		container := g.registry.QueryRail
+		activeKey := container.ActiveLeafKey()
+		name := container.GetViewName()
 		if d, ok := dims["main"]; ok && name != "" && d.X1 > d.X0 && d.Y1 > d.Y0 {
 			v, err := g.driver.SetView(name, d.X0, d.Y0, d.X1, d.Y1, 0)
 			freshView := errors.Is(err, gocui.ErrUnknownView)
@@ -171,44 +187,52 @@ func (g *Gui) RunLayout(w, h int) error {
 			}
 			if v != nil {
 				rails[name] = v
-				v.Title = qec.GetTitle()
-				// Sync the view from the canonical *editor.Buffer every
-				// frame, not just on fresh creation. Normal-mode motions
-				// (h/j/k/l, w/e/b, gg/G, …) in VimEditorController mutate
-				// buf.Cursor without ever touching v, so without this the
-				// rendered caret stays pinned to its last Insert-mode
-				// position. FocusPoint also pins v.oy so the cursor row
-				// stays inside the viewport — typing or motion past the
-				// view's bottom would otherwise scroll the cursor off
-				// screen with the origin stuck at 0 (mirrors the side-rail
+				// Editor tab: paint the buffer from the QUERY_EDITOR leaf and
+				// title it from that leaf. Sync the view from the canonical
+				// *editor.Buffer every frame, not just on fresh creation.
+				// Normal-mode motions (h/j/k/l, w/e/b, gg/G, …) in
+				// VimEditorController mutate buf.Cursor without ever touching v,
+				// so without this the rendered caret stays pinned to its last
+				// Insert-mode position. FocusPoint also pins v.oy so the cursor
+				// row stays inside the viewport — typing or motion past the
+				// view's bottom would otherwise scroll the cursor off screen
+				// with the origin stuck at 0 (mirrors the side-rail
 				// scrollSideRailIntoView fix).
-				if buf := qec.Buffer(); buf != nil {
-					content := highlight.Highlight(buf.String())
-					if sel := buf.SelectionSnapshot(); sel != nil {
-						content = editor.ApplySelectionOverlay(content, *sel)
+				if activeKey == types.QUERY_EDITOR && g.registry.QueryEditor != nil {
+					qec := g.registry.QueryEditor
+					v.Title = qec.GetTitle()
+					if buf := qec.Buffer(); buf != nil {
+						content := highlight.Highlight(buf.String())
+						if sel := buf.SelectionSnapshot(); sel != nil {
+							content = editor.ApplySelectionOverlay(content, *sel)
+						}
+						if flash := buf.YankFlashSnapshot(); flash != nil {
+							content = editor.ApplyYankFlashOverlay(content, *flash)
+						}
+						v.SetContent(content)
+						cur := buf.CursorPos()
+						v.FocusPoint(cur.Col, cur.Line, true)
+						// FocusPoint pins only the vertical origin; without
+						// this the editor never scrolls horizontally, so
+						// lines wider than the pane clip past the right
+						// border and the caret vanishes.
+						scrollEditorColumnIntoView(v, cur.Col)
 					}
-					if flash := buf.YankFlashSnapshot(); flash != nil {
-						content = editor.ApplyYankFlashOverlay(content, *flash)
-					}
-					v.SetContent(content)
-					cur := buf.CursorPos()
-					v.FocusPoint(cur.Col, cur.Line, true)
-					// FocusPoint pins only the vertical origin; without
-					// this the editor never scrolls horizontally, so
-					// lines wider than the pane clip past the right
-					// border and the caret vanishes.
-					scrollEditorColumnIntoView(v, cur.Col)
 				}
 			}
-			// Attach the VimEditor master editor every frame.
-			// gocuiDriver.SetMasterEditor flips v.Editable=true and
-			// stashes v.Editor, so the gocui dispatch loop routes keys
-			// here (gui.go:1576). SetMasterEditor is idempotent;
+			// Scoped master-editor swap: attach masterEditors[activeKey] to the
+			// shared rail view every frame, mirroring the result-tabs swap.
+			// Editor tab → QUERY_EDITOR VimEditor (editable); list tab → that
+			// leaf's scoped master editor (HISTORY / SAVED_QUERY). gocuiDriver's
+			// SetMasterEditor flips v.Editable + stashes v.Editor so the gocui
+			// dispatch loop routes keys under the active leaf's scope. Idempotent;
 			// production and recorder-driver paths converge by name.
-			if ed, ok := g.keybindingSystem.masterEditors[qec.GetKey()]; ok {
+			if ed, ok := g.keybindingSystem.masterEditors[activeKey]; ok {
 				_ = g.driver.SetMasterEditor(name, ed)
 			}
-			_ = qec.HandleRender()
+			// Publish the tab strip + restore list origin + render the active
+			// leaf body (list tabs paint their rows; the editor leaf no-ops).
+			_ = container.HandleRender()
 			_, _ = g.driver.SetViewOnTop(name)
 		}
 	}
@@ -295,6 +319,18 @@ func (g *Gui) RunLayout(w, h int) error {
 		// its "[...]" bracket marker, so the inactive label needs no dim colour.
 		_ = g.driver.SetViewTabColors(
 			guicontext.SchemaRailViewName,
+			frameAttr(theme.Current().ActiveBorder),
+			gocui.ColorDefault,
+		)
+		// Same treatment for the QUERY_RAIL container view: the active tab
+		// (Query Editor / Saved Queries / History) gets ActiveBorder via
+		// SelFgColor; the inactive colour goes to FgColor, which gocui reuses
+		// as the content default — ColorDefault keeps list rows at the terminal
+		// foreground (the active tab stays distinguished by SelFgColor + its
+		// "[...]" marker). Re-applied every frame in the focus-colour pass
+		// because the active-tab index changes between frames.
+		_ = g.driver.SetViewTabColors(
+			guicontext.QueryRailViewName,
 			frameAttr(theme.Current().ActiveBorder),
 			gocui.ColorDefault,
 		)
@@ -563,19 +599,6 @@ func (g *Gui) RunLayout(w, h int) error {
 				view.Title = ctx.GetTitle()
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
-			// HISTORY styling: the query-history browse popup
-			// is the focused modal while on top, so give it the same
-			// focused-modal treatment as TABLE_INSPECT — surface its
-			// "History" frame title and paint the active border (popups are
-			// skipped by the Tier-1 applyFocusFrameColors pass; gocui only
-			// resets FrameColor when the view is freshly created, so this
-			// runs after SetView every frame). No Wrap: the body is
-			// pre-formatted with a "> " cursor marker that reflow would
-			// mangle.
-			if ctx.GetKey() == types.HISTORY && view != nil {
-				view.Title = ctx.GetTitle()
-				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
-			}
 			// CHEATSHEET styling + scroll: the keybinding
 			// cheatsheet is the focused modal while on top, so give it the
 			// same "Keybindings" frame title + active border as HISTORY
@@ -781,7 +804,14 @@ func (g *Gui) RunLayout(w, h int) error {
 			// their kinds untouched so those togglers stay authoritative.
 			switch top.GetKind() {
 			case types.SIDE_CONTEXT, types.MAIN_CONTEXT, types.EXTRAS_CONTEXT:
-				enabled := top.GetKey() == types.QUERY_EDITOR
+				// QUERY_EDITOR is the only tiled editable context. Post
+				// topology flip it never sits on the focus stack directly —
+				// the QUERY_RAIL container does, with QUERY_EDITOR as a leaf —
+				// so also enable the caret when the container's active leaf is
+				// the editor. A list leaf (SAVED_QUERY / HISTORY) keeps it off.
+				enabled := top.GetKey() == types.QUERY_EDITOR ||
+					(top.GetKey() == types.QUERY_RAIL && g.registry.QueryRail != nil &&
+						g.registry.QueryRail.ActiveLeafKey() == types.QUERY_EDITOR)
 				g.driver.SetCaretEnabled(enabled)
 				// Drive the caret shape from the editor's current mode so
 				// the user sees a neovim-style distinction: a blinking bar

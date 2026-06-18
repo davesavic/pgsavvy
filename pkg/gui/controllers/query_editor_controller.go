@@ -79,6 +79,30 @@ type QueryEditorController struct {
 	// either is unwired.
 	saveHelper   *data.SaveQueryHelper
 	savePrompter data.ChainedPrompter
+
+	// onAfterRun fires (on the UI thread, right after a statement is
+	// dispatched successfully) so the History tab can mark its list stale — a
+	// new history row was appended, so the next History-tab activation reloads.
+	// Nil-safe (no-op when unwired).
+	onAfterRun func()
+
+	// onAfterSave fires (on the UI thread, after a successful <leader>s save)
+	// so the Saved Queries tab can mark its list stale. Nil-safe.
+	onAfterSave func()
+}
+
+// SetOnAfterRun wires the post-dispatch hook (History-tab staleness). Wired
+// post-construction so the constructor signature stays stable. Nil leaves the
+// path a no-op.
+func (q *QueryEditorController) SetOnAfterRun(fn func()) {
+	q.onAfterRun = fn
+}
+
+// SetOnAfterSave wires the post-save hook (Saved-Queries-tab staleness). Wired
+// post-construction so the constructor signature stays stable. Nil leaves the
+// path a no-op.
+func (q *QueryEditorController) SetOnAfterSave(fn func()) {
+	q.onAfterSave = fn
 }
 
 // SetOnDMLCommit wires the post-DML-commit hook (relationship-count eviction).
@@ -162,7 +186,7 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		{"<leader>o", commands.QuerySavedOpen, tr.Actions.OpenSavedQueries, defaultMode, false},
 		{"<leader>s", commands.QuerySave, tr.Actions.SaveQuery, defaultMode, false},
 	}
-	out := make([]*types.ChordBinding, 0, len(specs)+6)
+	out := make([]*types.ChordBinding, 0, len(specs)+8)
 	for _, s := range specs {
 		seq, err := keys.SequenceFromShorthand(s.shorthand)
 		if err != nil {
@@ -185,6 +209,29 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 	// of the editor back to a side rail. Scoped to QUERY_EDITOR; the
 	// same set lives under each rail's scope via the rail controllers.
 	out = append(out, railSwitchBindings(string(types.QUERY_EDITOR), tr)...)
+
+	// QUERY_RAIL tab cycle (`]` next / `[` prev, edge-wrapping). Normal mode
+	// ONLY — Insert mode must keep literal `[`/`]` for SQL like `int[]`. The
+	// handlers live in RegisterQueryRailTabActions; the same pair is published
+	// under SAVED_QUERY / HISTORY by their leaf controllers.
+	out = append(out,
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Code: ']'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.QUERY_EDITOR,
+			ActionID:    commands.QueryRailTabNext,
+			Description: tr.Actions.QueryRailTabNext,
+			ShowInBar:   true,
+		},
+		&types.ChordBinding{
+			Sequence:    []types.ChordKey{{Code: '['}},
+			Mode:        types.ModeNormal,
+			Scope:       types.QUERY_EDITOR,
+			ActionID:    commands.QueryRailTabPrev,
+			Description: tr.Actions.QueryRailTabPrev,
+			ShowInBar:   true,
+		},
+	)
 	return out
 }
 
@@ -352,9 +399,33 @@ func (q *QueryEditorController) handleSave(ec commands.ExecCtx) error {
 	q.helpers.OnWorker(func(_ gocui.Task) error {
 		name, err := q.saveHelper.WalkSaveQuery(context.Background(), q.savePrompter, sql)
 		q.toastFromWorker(saveToastMessage(name, err))
+		// A successful save (non-empty name, no error) wrote a new/updated
+		// entry to queries.yml, so flag the Saved Queries tab stale. Marshalled
+		// to the UI thread (this runs on a worker).
+		if err == nil && name != "" {
+			q.afterSaveFromWorker()
+		}
 		return nil
 	})
 	return nil
+}
+
+// afterSaveFromWorker fires the onAfterSave hook on the UI thread (this is
+// called from the save worker goroutine). Mirrors toastFromWorker's
+// marshalling; falls back to a direct call when no OnUIThread scheduler is
+// wired (test path: OnWorker runs inline). Nil-safe when the hook is unwired.
+func (q *QueryEditorController) afterSaveFromWorker() {
+	if q.onAfterSave == nil {
+		return
+	}
+	if q.helpers.OnUIThread == nil {
+		q.onAfterSave()
+		return
+	}
+	q.helpers.OnUIThread(func() error {
+		q.onAfterSave()
+		return nil
+	})
 }
 
 // captureSaveText returns the text <leader>s will persist: the visual
@@ -729,6 +800,11 @@ func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) 
 	if err != nil {
 		q.surfaceErr(stmt, err)
 		return false
+	}
+	// A dispatched run appends a history row, so flag the History tab stale
+	// (it reloads lazily on its next activation). Nil-safe.
+	if q.onAfterRun != nil {
+		q.onAfterRun()
 	}
 	attached := false
 	if q.helpers.Notice != nil {

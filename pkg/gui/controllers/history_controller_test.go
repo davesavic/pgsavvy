@@ -9,11 +9,6 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/query"
 )
 
-// fakeHistoryTree records Pop invocations for the history controller.
-type fakeHistoryTree struct{ pops int }
-
-func (f *fakeHistoryTree) Pop() error { f.pops++; return nil }
-
 // historyEditorBuffer is the EditorBufferReader test double for this
 // internal-package test. It mirrors the controllers_test package's
 // fakeEditorBuffer (which is unreachable from package controllers):
@@ -32,27 +27,25 @@ func (f *historyEditorBuffer) InsertAtCursor(text string) error {
 	return nil
 }
 
-// newHistoryContext builds a HISTORY context seeded with rows.
+// newHistoryContext builds a HISTORY leaf context seeded with rows. SetReload
+// with a no-op clears the initial stale flag so HandleFocus does not race the
+// test (the context starts stale by design).
 func newHistoryContext(rows []query.HistoryRow) *guicontext.HistoryContext {
 	base := guicontext.NewBaseContext(guicontext.BaseContextOpts{
 		Key:      guicontext.HistoryContextKey,
 		ViewName: string(guicontext.HistoryContextKey),
-		Kind:     types.TEMPORARY_POPUP,
+		Kind:     types.MAIN_CONTEXT,
 	})
 	c := guicontext.NewHistoryContext(base, types.ContextTreeDeps{})
 	c.SetRows(rows)
 	return c
 }
 
-func TestHistoryConfirm_InsertsSelectedSQL(t *testing.T) {
+func TestHistoryConfirm_InsertsSelectedSQLAndSwitches(t *testing.T) {
 	ctx := newHistoryContext([]query.HistoryRow{{SQL: "SELECT now()"}})
 	buf := &historyEditorBuffer{}
-	tree := &fakeHistoryTree{}
-	refocused := 0
-	c := NewHistoryController(nil, CoreDeps{}, ctx, buf, tree, func() error {
-		refocused++
-		return nil
-	})
+	switches := 0
+	c := NewHistoryController(nil, CoreDeps{}, ctx, buf, func() { switches++ })
 
 	if err := c.Confirm(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Confirm err = %v", err)
@@ -60,25 +53,22 @@ func TestHistoryConfirm_InsertsSelectedSQL(t *testing.T) {
 	if len(buf.Inserted) != 1 || buf.Inserted[0] != "SELECT now()" {
 		t.Errorf("Inserted = %#v, want [\"SELECT now()\"]", buf.Inserted)
 	}
-	if tree.pops != 1 {
-		t.Errorf("tree.pops = %d, want 1", tree.pops)
-	}
-	if refocused != 1 {
-		t.Errorf("refocused = %d, want 1", refocused)
+	if switches != 1 {
+		t.Errorf("tab switches = %d, want 1", switches)
 	}
 }
 
-func TestHistoryClose_PopsOnlyNoInsert(t *testing.T) {
+func TestHistoryClose_SwitchesNoInsert(t *testing.T) {
 	ctx := newHistoryContext([]query.HistoryRow{{SQL: "SELECT now()"}})
 	buf := &historyEditorBuffer{}
-	tree := &fakeHistoryTree{}
-	c := NewHistoryController(nil, CoreDeps{}, ctx, buf, tree, nil)
+	switches := 0
+	c := NewHistoryController(nil, CoreDeps{}, ctx, buf, func() { switches++ })
 
 	if err := c.Close(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Close err = %v", err)
 	}
-	if tree.pops != 1 {
-		t.Errorf("tree.pops = %d, want 1", tree.pops)
+	if switches != 1 {
+		t.Errorf("tab switches = %d, want 1", switches)
 	}
 	if len(buf.Inserted) != 0 {
 		t.Errorf("Inserted = %#v, want none", buf.Inserted)
@@ -88,8 +78,8 @@ func TestHistoryClose_PopsOnlyNoInsert(t *testing.T) {
 func TestHistoryConfirm_EmptyListIsNoOp(t *testing.T) {
 	ctx := newHistoryContext(nil)
 	buf := &historyEditorBuffer{}
-	tree := &fakeHistoryTree{}
-	c := NewHistoryController(nil, CoreDeps{}, ctx, buf, tree, nil)
+	switches := 0
+	c := NewHistoryController(nil, CoreDeps{}, ctx, buf, func() { switches++ })
 
 	if err := c.Confirm(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Confirm err = %v", err)
@@ -97,34 +87,8 @@ func TestHistoryConfirm_EmptyListIsNoOp(t *testing.T) {
 	if len(buf.Inserted) != 0 {
 		t.Errorf("Inserted = %#v, want none", buf.Inserted)
 	}
-	if tree.pops != 0 {
-		t.Errorf("tree.pops = %d, want 0", tree.pops)
-	}
-}
-
-// Double <cr>: after the first Confirm pops the popup, the orchestrator
-// has dismissed the HISTORY context. We model the popped state by
-// clearing the rows (the popup no longer holds a selection); a second
-// Confirm must not insert again.
-func TestHistoryConfirm_DoubleEnterInsertsOnce(t *testing.T) {
-	ctx := newHistoryContext([]query.HistoryRow{{SQL: "SELECT now()"}})
-	buf := &historyEditorBuffer{}
-	tree := &fakeHistoryTree{}
-	c := NewHistoryController(nil, CoreDeps{}, ctx, buf, tree, nil)
-
-	if err := c.Confirm(commands.ExecCtx{}); err != nil {
-		t.Fatalf("first Confirm err = %v", err)
-	}
-	// Popup popped → its rows are gone; Selected() now returns false.
-	ctx.SetRows(nil)
-	if err := c.Confirm(commands.ExecCtx{}); err != nil {
-		t.Fatalf("second Confirm err = %v", err)
-	}
-	if len(buf.Inserted) != 1 {
-		t.Errorf("Inserted = %#v, want exactly one insert", buf.Inserted)
-	}
-	if tree.pops != 1 {
-		t.Errorf("tree.pops = %d, want 1", tree.pops)
+	if switches != 0 {
+		t.Errorf("tab switches = %d, want 0 (empty selection is a no-op)", switches)
 	}
 }
 
@@ -132,7 +96,7 @@ func TestHistoryNavigation_ClampsAtBounds(t *testing.T) {
 	ctx := newHistoryContext([]query.HistoryRow{
 		{SQL: "a"}, {SQL: "b"}, {SQL: "c"},
 	})
-	c := NewHistoryController(nil, CoreDeps{}, ctx, &historyEditorBuffer{}, &fakeHistoryTree{}, nil)
+	c := NewHistoryController(nil, CoreDeps{}, ctx, &historyEditorBuffer{}, func() {})
 
 	// Up at the top clamps to 0.
 	if err := c.Up(commands.ExecCtx{}); err != nil {
@@ -162,14 +126,15 @@ func TestHistoryNavigation_ClampsAtBounds(t *testing.T) {
 
 func TestHistoryGetKeybindings_NavConfirmCloseOnly(t *testing.T) {
 	ctx := newHistoryContext(nil)
-	c := NewHistoryController(nil, CoreDeps{}, ctx, &historyEditorBuffer{}, &fakeHistoryTree{}, nil)
+	c := NewHistoryController(nil, CoreDeps{}, ctx, &historyEditorBuffer{}, func() {})
 	got := c.GetKeybindings(types.KeybindingsOpts{})
 
 	// Expected sequences: j, k, gg, G, the h/l/0/$ horizontal-pan bindings
-	// shared by every list rail, <cr>, <esc>. Exactly ten bindings, no
-	// per-character or on-change bindings.
-	if len(got) != 10 {
-		t.Fatalf("len(bindings) = %d, want 10 (j,k,gg,G,h,l,0,$,<cr>,<esc>)", len(got))
+	// shared by every list rail, <cr>, <esc>, plus the QUERY_RAIL `]`/`[`
+	// tab-cycle pair. Exactly twelve bindings, no per-character or on-change
+	// bindings.
+	if len(got) != 12 {
+		t.Fatalf("len(bindings) = %d, want 12 (j,k,gg,G,h,l,0,$,<cr>,<esc>,],[)", len(got))
 	}
 
 	for _, b := range got {
@@ -196,7 +161,7 @@ func TestHistoryGetKeybindings_NavConfirmCloseOnly(t *testing.T) {
 	for _, b := range got {
 		seen[seqKey(b)] = true
 	}
-	for _, want := range []string{"j", "k", "gg", "G", "h", "l", "0", "$", "<cr>", "<esc>"} {
+	for _, want := range []string{"j", "k", "gg", "G", "h", "l", "0", "$", "<cr>", "<esc>", "]", "["} {
 		if !seen[want] {
 			t.Errorf("missing binding for sequence %q", want)
 		}
@@ -214,7 +179,7 @@ func TestHistoryGetKeybindings_NavConfirmCloseOnly(t *testing.T) {
 func TestHistoryRegisterActions_ResolveThroughRegistry(t *testing.T) {
 	reg := commands.NewRegistry()
 	ctx := newHistoryContext(nil)
-	c := NewHistoryController(nil, CoreDeps{}, ctx, &historyEditorBuffer{}, &fakeHistoryTree{}, nil)
+	c := NewHistoryController(nil, CoreDeps{}, ctx, &historyEditorBuffer{}, func() {})
 	c.RegisterActions(reg)
 
 	if !reg.Has(HistoryClose) {
@@ -230,5 +195,35 @@ func TestHistoryRegisterActions_ResolveThroughRegistry(t *testing.T) {
 		if !reg.Has(id) {
 			t.Errorf("registry missing trait action %q", id)
 		}
+	}
+}
+
+// TestHistoryHandleFocus_LoadsOnceWhenStale verifies the leaf reloads on its
+// first activation (stale by construction) and not again until MarkStale.
+func TestHistoryHandleFocus_LoadsOnceWhenStale(t *testing.T) {
+	base := guicontext.NewBaseContext(guicontext.BaseContextOpts{
+		Key:      guicontext.HistoryContextKey,
+		ViewName: string(guicontext.HistoryContextKey),
+		Kind:     types.MAIN_CONTEXT,
+	})
+	ctx := guicontext.NewHistoryContext(base, types.ContextTreeDeps{})
+	reloads := 0
+	ctx.SetReload(func() { reloads++ })
+
+	// First focus: stale → reloads.
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
+	if reloads != 1 {
+		t.Fatalf("reloads after first focus = %d, want 1", reloads)
+	}
+	// Second focus: not stale → no reload.
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
+	if reloads != 1 {
+		t.Fatalf("reloads after second focus = %d, want 1 (not stale)", reloads)
+	}
+	// After MarkStale: reloads again.
+	ctx.MarkStale()
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
+	if reloads != 2 {
+		t.Fatalf("reloads after MarkStale+focus = %d, want 2", reloads)
 	}
 }

@@ -109,9 +109,16 @@ const (
 	// consumed by the rail keybinding re-scoping in .5). The container owns
 	// the active-tab index; the leaves carry inFlatten=false and render only
 	// when the container calls them.
-	SCHEMA_RAIL       ContextKey = "schema-rail"
-	COLUMNS           ContextKey = "columns"
-	INDEXES           ContextKey = "indexes"
+	SCHEMA_RAIL ContextKey = "schema-rail"
+	COLUMNS     ContextKey = "columns"
+	INDEXES     ContextKey = "indexes"
+	// QUERY_RAIL is the MAIN_CONTEXT container that multiplexes the
+	// QUERY_EDITOR, SAVED_QUERY and HISTORY leaves into the single
+	// "query_editor" view (many-contexts-ONE-view topology, mirroring
+	// SCHEMA_RAIL). The container is the only entry pushed onto the focus
+	// stack; the three leaves carry inFlatten=false and render only when the
+	// container calls the active leaf.
+	QUERY_RAIL        ContextKey = "query_rail"
 	QUERY_EDITOR      ContextKey = "query_editor"
 	TABLE_DATA_EDITOR ContextKey = "table_data_editor"
 	RESULT_GRID       ContextKey = "result_grid"
@@ -127,10 +134,16 @@ const (
 	// (PopupSizeCommandLine) but renders a "/" prefix and fires an
 	// onChange seam per keystroke. TEMPORARY_POPUP, editable.
 	SEARCH_LINE ContextKey = "search_line"
-	HISTORY     ContextKey = "history"
-	// SAVED_QUERY is the <leader>o saved-query picker popup. TEMPORARY_POPUP
-	// kind; lists named queries from queries.yml, <cr> inserts the selected
-	// SQL at the editor cursor, dd deletes.
+	// HISTORY is the recent-query browser tab of the QUERY_RAIL container
+	// (reached via <leader>h or the `[`/`]` tab cycle). MAIN_CONTEXT leaf
+	// sharing the "query_editor" view; <cr> inserts the selected SQL at the
+	// editor cursor and returns to the editor tab.
+	HISTORY ContextKey = "history"
+	// SAVED_QUERY is the saved-query picker tab of the QUERY_RAIL container
+	// (reached via <leader>o or the `[`/`]` tab cycle). MAIN_CONTEXT leaf
+	// sharing the "query_editor" view; lists named queries from queries.yml,
+	// <cr> inserts the selected SQL at the editor cursor and returns to the
+	// editor tab, dd deletes.
 	SAVED_QUERY ContextKey = "saved_query"
 	WHICH_KEY   ContextKey = "which_key"
 	GLOBAL      ContextKey = "global"
@@ -187,6 +200,7 @@ func AllContextKeys() []ContextKey {
 		SCHEMA_RAIL,
 		COLUMNS,
 		INDEXES,
+		QUERY_RAIL,
 		QUERY_EDITOR,
 		TABLE_DATA_EDITOR,
 		RESULT_GRID,

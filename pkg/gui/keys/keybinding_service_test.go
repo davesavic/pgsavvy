@@ -484,6 +484,7 @@ func allContextKeyKinds() map[types.ContextKey]types.ContextKind {
 		types.SCHEMA_RAIL:        types.SIDE_CONTEXT,
 		types.COLUMNS:            types.STUB,
 		types.INDEXES:            types.STUB,
+		types.QUERY_RAIL:         types.MAIN_CONTEXT,
 		types.QUERY_EDITOR:       types.MAIN_CONTEXT,
 		types.TABLE_DATA_EDITOR:  types.STUB,
 		types.RESULT_GRID:        types.STUB,
@@ -630,6 +631,11 @@ func TestAllKnownContextsDelta(t *testing.T) {
 	// expansion (the SCHEMAS/TABLES leaves remain in AllContextKeys and the
 	// kind map, so they also still appear).
 	wantAfter[types.SCHEMA_RAIL] = struct{}{}
+	// QUERY_RAIL is the consolidated query-pane container shipped by
+	// pgsavvy-tkt5.2; it is a new MAIN_CONTEXT member of the scope:all
+	// expansion (the QUERY_EDITOR leaf remains in AllContextKeys and the kind
+	// map, so it also still appears).
+	wantAfter[types.QUERY_RAIL] = struct{}{}
 	delete(wantAfter, types.WHICH_KEY)
 	delete(wantAfter, types.LIMIT)
 

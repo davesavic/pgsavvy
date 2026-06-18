@@ -34,11 +34,18 @@ const (
 // the popup never paints a blank/garbled body.
 const historyEmptyLine = "no query history yet"
 
-// HistoryContext is the non-editable TEMPORARY_POPUP that browses a window
-// of recent query-history rows. It is a thin list state holder modeled on
-// FKReversePickerContext (embeds BaseContext by value, owns deps, writes
-// the body via the GuiDriver). It satisfies the controllers.SideListCursor
-// surface (Cursor / SetCursor / Items) so T4's list trait can drive j/k/G.
+// HistoryContext is the non-editable MAIN_CONTEXT leaf of the QUERY_RAIL
+// container that browses a window of recent query-history rows. It is a thin
+// list state holder modeled on FKReversePickerContext (embeds BaseContext by
+// value, owns deps, writes the body via the GuiDriver). It satisfies the
+// controllers.SideListCursor surface (Cursor / SetCursor / Items) so the list
+// trait can drive j/k/G.
+//
+// Freshness is load-once + invalidate-on-write: the leaf starts stale, so the
+// FIRST tab activation (HandleFocus) fires the injected reload hook; thereafter
+// it reloads ONLY after MarkStale (set when a query is run). It never reloads
+// on every focus — that would arm the busy spinner on every tab switch and
+// stack goroutines.
 type HistoryContext struct {
 	BaseContext
 
@@ -46,12 +53,64 @@ type HistoryContext struct {
 
 	rows   []query.HistoryRow
 	cursor int
+
+	// stale gates the reload-on-focus. Initialized true so the first
+	// activation loads. Set true again on a write (MarkStale); cleared after a
+	// reload fires.
+	stale bool
+
+	// reload is the async load hook injected by the orchestrator (it owns the
+	// history store + threading). Nil-safe: an unwired leaf simply never
+	// reloads.
+	reload func()
 }
 
 // NewHistoryContext builds a context bound to the supplied BaseContext (the
-// caller sets Key / ViewName / Kind via BaseContextOpts).
+// caller sets Key / ViewName / Kind via BaseContextOpts). The leaf starts
+// stale so the first activation loads.
 func NewHistoryContext(base BaseContext, deps Deps) *HistoryContext {
-	return &HistoryContext{BaseContext: base, deps: deps}
+	return &HistoryContext{BaseContext: base, deps: deps, stale: true}
+}
+
+// SetReload injects the async reload hook (orchestrator-owned: it closes over
+// the history store + threading). Nil-safe everywhere it is read.
+func (c *HistoryContext) SetReload(fn func()) { c.reload = fn }
+
+// MarkStale flags the list for a reload on the next activation. Called when a
+// query is run (a new history row was appended), so switching to the History
+// tab afterwards reflects the new row.
+func (c *HistoryContext) MarkStale() { c.stale = true }
+
+// HandleFocus reloads the list ONLY when stale (load-once + invalidate-on-write),
+// clearing the flag first so a reload error does not re-arm an endless reload.
+// The reload hook is async (worker load → UI-thread refresh); the actual rows
+// land later via RefreshRows.
+func (c *HistoryContext) HandleFocus(_ types.OnFocusOpts) error {
+	if !c.stale {
+		return nil
+	}
+	c.stale = false
+	if c.reload != nil {
+		c.reload()
+	}
+	return nil
+}
+
+// RefreshRows replaces the list WITHOUT zeroing the cursor: the cursor is
+// clamped to the new bounds so a background reload landing never jumps the user
+// to the top. Mirrors SavedQueryContext.RefreshRows.
+func (c *HistoryContext) RefreshRows(rows []query.HistoryRow) {
+	c.rows = rows
+	if len(rows) == 0 {
+		c.cursor = 0
+		return
+	}
+	if c.cursor >= len(rows) {
+		c.cursor = len(rows) - 1
+	}
+	if c.cursor < 0 {
+		c.cursor = 0
+	}
 }
 
 // SetRows loads the window (caller supplies it newest-first) and resets the

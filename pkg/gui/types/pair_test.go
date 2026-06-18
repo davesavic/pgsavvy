@@ -3,8 +3,8 @@ package types
 import "testing"
 
 func TestPairNormalKeys(t *testing.T) {
-	if PairNormal.Main != QUERY_EDITOR {
-		t.Errorf("PairNormal.Main = %q, want %q", PairNormal.Main, QUERY_EDITOR)
+	if PairNormal.Main != QUERY_RAIL {
+		t.Errorf("PairNormal.Main = %q, want %q", PairNormal.Main, QUERY_RAIL)
 	}
 	if PairNormal.Secondary != ResultTabActiveKey {
 		t.Errorf("PairNormal.Secondary = %q, want %q", PairNormal.Secondary, ResultTabActiveKey)
@@ -15,8 +15,8 @@ func TestPairPlanFocusKeys(t *testing.T) {
 	if PairPlanFocus.Main != PLAN {
 		t.Errorf("PairPlanFocus.Main = %q, want %q", PairPlanFocus.Main, PLAN)
 	}
-	if PairPlanFocus.Secondary != QUERY_EDITOR {
-		t.Errorf("PairPlanFocus.Secondary = %q, want %q", PairPlanFocus.Secondary, QUERY_EDITOR)
+	if PairPlanFocus.Secondary != QUERY_RAIL {
+		t.Errorf("PairPlanFocus.Secondary = %q, want %q", PairPlanFocus.Secondary, QUERY_RAIL)
 	}
 }
 

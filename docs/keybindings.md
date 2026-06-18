@@ -367,6 +367,45 @@ keybindings:
     action: motion.line_down
 ```
 
+### Query rail (editor / saved queries / history tabs)
+
+The query pane is a tabbed container with three tabs: **Query Editor**, **Saved
+Queries**, and **History**. Switching tabs is in-place — no popups. From the
+editor, `<leader>h` switches to the History tab (`history.open`) and `<leader>o`
+switches to the Saved Queries tab (`query.saved.open`):
+
+```yaml
+keybindings:
+  - mode: n
+    scope: query_editor
+    key: <leader>h
+    action: history.open
+  - mode: n
+    scope: query_editor
+    key: <leader>o
+    action: query.saved.open
+```
+
+On a list tab, `<cr>` inserts the selected query's SQL at the editor cursor and
+returns to the Query Editor tab (it does **not** run the query); `<esc>` returns
+to the Query Editor tab. On the Saved Queries tab, `dd` deletes the selected
+entry after a confirmation.
+
+Cycle tabs with `]` (next) / `[` (previous) — both wrap at the edges, and are
+bound in every query-rail scope (`query_editor`, `saved_query`, `history`):
+
+```yaml
+keybindings:
+  - mode: n
+    scope: query_editor
+    key: "]"
+    action: queryrail.tab.next
+  - mode: n
+    scope: query_editor
+    key: "["
+    action: queryrail.tab.prev
+```
+
 ### Dialog (confirmation popup)
 
 Bind `y` to confirm and `n` to cancel in the confirmation dialog:

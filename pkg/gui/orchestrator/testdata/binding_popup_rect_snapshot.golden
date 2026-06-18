@@ -96,6 +96,8 @@ binding	scope=history	key=0	mode=normal
 binding	scope=history	key=<cr>	mode=normal
 binding	scope=history	key=<esc>	mode=normal
 binding	scope=history	key=G	mode=normal
+binding	scope=history	key=[	mode=normal
+binding	scope=history	key=]	mode=normal
 binding	scope=history	key=gg	mode=normal
 binding	scope=history	key=h	mode=normal
 binding	scope=history	key=j	mode=normal
@@ -187,6 +189,8 @@ binding	scope=query_editor	key=P	mode=normal
 binding	scope=query_editor	key=V	mode=normal
 binding	scope=query_editor	key=W	mode=mode(0x3c)
 binding	scope=query_editor	key=W	mode=normal
+binding	scope=query_editor	key=[	mode=normal
+binding	scope=query_editor	key=]	mode=normal
 binding	scope=query_editor	key=^	mode=mode(0x3c)
 binding	scope=query_editor	key=^	mode=normal
 binding	scope=query_editor	key=a	mode=normal
@@ -308,6 +312,8 @@ binding	scope=saved_query	key=0	mode=normal
 binding	scope=saved_query	key=<cr>	mode=normal
 binding	scope=saved_query	key=<esc>	mode=normal
 binding	scope=saved_query	key=G	mode=normal
+binding	scope=saved_query	key=[	mode=normal
+binding	scope=saved_query	key=]	mode=normal
 binding	scope=saved_query	key=dd	mode=normal
 binding	scope=saved_query	key=gg	mode=normal
 binding	scope=saved_query	key=h	mode=normal
@@ -411,16 +417,17 @@ popuprect	key=first_run_tip	x0=25	y0=30	x1=75	y1=70
 popuprect	key=fk_reverse_picker	x0=20	y0=20	x1=80	y1=80
 popuprect	key=global	none
 popuprect	key=hide_overlay	x0=25	y0=25	x1=75	y1=75
-popuprect	key=history	x0=20	y0=20	x1=80	y1=80
+popuprect	key=history	none
 popuprect	key=indexes	none
 popuprect	key=limit	none
 popuprect	key=menu	x0=25	y0=25	x1=75	y1=75
 popuprect	key=plan	none
 popuprect	key=prompt	x0=18	y0=46	x1=82	y1=54
 popuprect	key=query_editor	none
+popuprect	key=query_rail	none
 popuprect	key=relationship_panel	x0=60	y0=0	x1=99	y1=99
 popuprect	key=result_grid	none
-popuprect	key=saved_query	x0=20	y0=20	x1=80	y1=80
+popuprect	key=saved_query	none
 popuprect	key=schema-rail	none
 popuprect	key=schemas	none
 popuprect	key=search_line	x0=0	y0=99	x1=100	y1=101

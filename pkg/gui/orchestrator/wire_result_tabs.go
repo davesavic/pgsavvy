@@ -221,8 +221,8 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 				_ = g.tree.Push(next)
 				return
 			}
-			if g.registry != nil && g.registry.QueryEditor != nil {
-				_ = g.tree.Push(g.registry.QueryEditor)
+			if g.registry != nil && g.registry.QueryRail != nil {
+				_ = g.tree.Push(g.registry.QueryRail)
 			}
 		})
 		// a user-initiated tab switch (gt/gT cycle, <leader>1..9

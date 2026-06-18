@@ -38,14 +38,16 @@ import (
 // empty when the user aborts via Esc.
 
 // assertEditorOverRail verifies the post-connect focus stack: the
-// QUERY_EDITOR is the focused top, with the consolidated SCHEMA_RAIL
-// container directly beneath it (the SCHEMAS/TABLES leaves are never pushed
-// — the container multiplexes them via its active-tab index). wantTab is
-// the expected active tab the connection-open path selected.
+// QUERY_RAIL container is the focused top (tkt5.2 topology flip — the
+// QUERY_EDITOR is now a non-flattened leaf the container multiplexes, never
+// pushed directly), with the consolidated SCHEMA_RAIL container directly
+// beneath it (the SCHEMAS/TABLES leaves are never pushed — the container
+// multiplexes them via its active-tab index). wantTab is the expected active
+// tab the connection-open path selected.
 func assertEditorOverRail(t *testing.T, g *orchestrator.Gui, wantTab int) {
 	t.Helper()
-	if got := g.ContextTree().Current().GetKey(); got != types.QUERY_EDITOR {
-		t.Fatalf("top after connect = %v; want QUERY_EDITOR", got)
+	if got := g.ContextTree().Current().GetKey(); got != types.QUERY_RAIL {
+		t.Fatalf("top after connect = %v; want QUERY_RAIL", got)
 	}
 	stack := g.ContextTree().Stack()
 	if len(stack) < 2 {

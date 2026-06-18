@@ -207,6 +207,13 @@ func (g *Gui) wireContextRegistry(tr *i18n.TranslationSet, provider func() []mod
 		},
 	}
 	g.registry = guicontext.NewContextTree(ctxDeps)
+	// Wire the session logger into the QUERY_RAIL container so its
+	// tab_switch event is emitted (ContextTreeDeps carries no logger; the
+	// container exposes a dedicated SetLogger seam mirroring its test
+	// wiring). Nil-safe: SetLogger / logs.Event guard a nil logger.
+	if g.registry.QueryRail != nil && g.deps.Common != nil {
+		g.registry.QueryRail.SetLogger(g.deps.Common.Logger())
+	}
 }
 
 // wireUIHelpers builds the UI helpers that need the driver / registry.
@@ -609,17 +616,19 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 		g.registerTableInspectOpen(connectInv)
 	}
 
-	// HistoryOpen — `<leader>h` in the QUERY_EDITOR opens
-	// the recent-query browser popup. Pushes on the UI thread, loads
-	// Recent(N) off-thread, mutates the context on the UI thread.
-	if g.registry != nil && g.registry.History != nil && g.tree != nil {
+	// HistoryOpen — `<leader>h` in the QUERY_EDITOR switches the QUERY_RAIL
+	// container to the History tab. The leaf lazily loads Recent(N) off-thread
+	// on its first activation (and after a query run), refreshing on the UI
+	// thread.
+	if g.registry != nil && g.registry.History != nil {
 		g.registerHistoryOpen()
 	}
 
-	// QuerySavedOpen — `<leader>o` in the QUERY_EDITOR opens the saved-query
-	// picker popup. Pushes on the UI thread, loads queries.yml off-thread,
-	// mutates the context on the UI thread.
-	if g.registry != nil && g.registry.SavedQuery != nil && g.tree != nil {
+	// QuerySavedOpen — `<leader>o` in the QUERY_EDITOR switches the QUERY_RAIL
+	// container to the Saved Queries tab. The leaf lazily loads queries.yml
+	// off-thread on its first activation (and after a save/delete), refreshing
+	// on the UI thread.
+	if g.registry != nil && g.registry.SavedQuery != nil {
 		g.registerSavedQueryOpen()
 	}
 
@@ -643,6 +652,15 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 		return g.resultTabsH.ActiveContext()
 	}
 	controllers.RegisterRailSwitchActions(g.keybindingSystem.cmdRegistry, g.tree, g.registry, resolveResults)
+
+	// QUERY_RAIL `[`/`]` tab-cycle handlers. The container lives in the
+	// context tree; pass it only when wired so the handlers receive a genuine
+	// nil interface (not a typed-nil *QueryRailContext) when it is absent.
+	var queryRail controllers.QueryRailTabber
+	if g.registry != nil && g.registry.QueryRail != nil {
+		queryRail = g.registry.QueryRail
+	}
+	controllers.RegisterQueryRailTabActions(g.keybindingSystem.cmdRegistry, queryRail)
 
 	// Cheatsheet popup: capture the focused scope, build a TabbedPopup
 	// with one tab per scope (focused + global), install it on the
@@ -924,6 +942,23 @@ func (g *Gui) wireKeyDispatch(trieSet *keys.TrieSet, cfg *config.UserConfig, tab
 			_ = g.driver.SetTabClickBinding(guicontext.SchemaRailViewName, func(idx int) error {
 				g.OnUIThread(func() error {
 					rail.SetActiveTab(idx)
+					return nil
+				})
+				return nil
+			})
+		}
+
+		// QUERY_RAIL container native tab clicks. Same shape as the schema-rail
+		// binding above: gocui dispatches a border-row tab click through
+		// SetTabClickBinding with the precomputed index; the callback fires off
+		// the MainLoop, so the active-tab switch is marshalled back through
+		// OnUIThread (which also schedules the re-layout that repaints the new
+		// marker/colours). Installed once here.
+		if g.registry != nil && g.registry.QueryRail != nil {
+			queryRail := g.registry.QueryRail
+			_ = g.driver.SetTabClickBinding(guicontext.QueryRailViewName, func(idx int) error {
+				g.OnUIThread(func() error {
+					queryRail.SetActiveTab(idx)
 					return nil
 				})
 				return nil

@@ -15,7 +15,11 @@ import (
 // inside the pane (QueryEditor <-> RESULT_GRID) keep the active stream
 // alive.
 func isResultPaneKey(k types.ContextKey) bool {
-	return k == types.QUERY_EDITOR || k == types.RESULT_GRID
+	// QUERY_RAIL is the flattened container that now owns the query-editor
+	// pane (tkt5.2 topology flip); it — not the bare QUERY_EDITOR leaf — is
+	// what lands on the focus stack, so recognise it here. QUERY_EDITOR is
+	// retained for any path that still resolves the leaf key directly.
+	return k == types.QUERY_RAIL || k == types.QUERY_EDITOR || k == types.RESULT_GRID
 }
 
 // installResultTabsSwapHook wires a ContextTree swap hook that cancels

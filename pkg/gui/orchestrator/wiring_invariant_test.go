@@ -85,6 +85,14 @@ func TestWiringInvariant(t *testing.T) {
 		// them).
 		types.SCHEMAS: "SCHEMA_RAIL container leaf; not flattened (container renders the shared view)",
 		types.TABLES:  "SCHEMA_RAIL container leaf; not flattened (container renders the shared view)",
+		// QUERY_EDITOR/SAVED_QUERY/HISTORY are the QUERY_RAIL container's
+		// leaves (tkt5.2 topology flip): inFlatten=false, sharing the
+		// "query_editor" view; the QUERY_RAIL container is the only flattened
+		// main context for the consolidated query pane and the only entry
+		// pushed onto the focus stack.
+		types.QUERY_EDITOR: "QUERY_RAIL container leaf; not flattened (container renders the shared view)",
+		types.SAVED_QUERY:  "QUERY_RAIL container leaf; not flattened (container renders the shared view)",
+		types.HISTORY:      "QUERY_RAIL container leaf; not flattened (container renders the shared view)",
 	}
 
 	// popupRectAllowlist: popup-kind keys (TEMPORARY_POPUP/DISPLAY_CONTEXT)
@@ -204,6 +212,11 @@ func contextSpecKeysFromTree(tree *context.ContextTree) []types.ContextKey {
 	// COLUMNS/INDEXES deferred rails and the SCHEMAS/TABLES leaves the
 	// SCHEMA_RAIL container multiplexes.
 	out = append(out, tree.Columns.GetKey(), tree.Indexes.GetKey(), tree.Schemas.GetKey(), tree.Tables.GetKey())
+	// QUERY_EDITOR/SAVED_QUERY/HISTORY are the QUERY_RAIL container's leaves
+	// (inFlatten=false, tkt5.2 topology flip): retained as named fields but
+	// excluded from Flatten() (the container is the only flattened main
+	// context and the only entry pushed onto the focus stack).
+	out = append(out, tree.QueryEditor.GetKey(), tree.SavedQuery.GetKey(), tree.History.GetKey())
 	return out
 }
 

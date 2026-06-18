@@ -79,6 +79,15 @@ const (
 	RailTabNext = "rail.tab.next"
 	RailTabPrev = "rail.tab.prev"
 
+	// QueryRailTabNext / QueryRailTabPrev cycle the QUERY_RAIL container's
+	// active tab (QueryEditor ⇄ SavedQuery ⇄ History) with edge-wrap. Bound to
+	// `]` / `[` under each leaf's OWN scope (QUERY_EDITOR / SAVED_QUERY /
+	// HISTORY), Normal mode only. Handlers registered at the orchestrator level
+	// (RegisterQueryRailTabActions) since the container is not owned by a
+	// single controller.
+	QueryRailTabNext = "queryrail.tab.next"
+	QueryRailTabPrev = "queryrail.tab.prev"
+
 	// SchemaRail family — owned by SchemaRailController. The consolidated
 	// SCHEMA_RAIL container publishes every rail chord exactly once and
 	// dispatches to the active leaf (Schemas / Tables): the nav chords drive
@@ -364,14 +373,15 @@ const (
 	TableInspectPrevTab = "table_inspect.prev_tab"
 	TableInspectClose   = "table_inspect.close"
 
-	// HistoryOpen opens the HISTORY recent-query browser popup from the
-	// QUERY_EDITOR (`<leader>h` in Normal mode). Loads Recent(N) off the
-	// UI thread and pushes the popup.
+	// HistoryOpen switches the QUERY_RAIL container to the History tab from
+	// the QUERY_EDITOR (`<leader>h` in Normal mode). The History leaf loads
+	// Recent(N) lazily on its first activation (and after a query run).
 	HistoryOpen = "history.open"
 
-	// QuerySavedOpen opens the SAVED_QUERY picker popup from the
-	// QUERY_EDITOR (`<leader>o` in Normal mode). Loads queries.yml off the
-	// UI thread and pushes the popup.
+	// QuerySavedOpen switches the QUERY_RAIL container to the Saved Queries
+	// tab from the QUERY_EDITOR (`<leader>o` in Normal mode). The Saved Queries
+	// leaf loads queries.yml lazily on its first activation (and after a
+	// save/delete).
 	QuerySavedOpen = "query.saved.open"
 
 	// QuerySavedDelete deletes the saved query under the cursor (dd) after a
@@ -659,6 +669,8 @@ func AllActionIDs() []string {
 		RailSwitchLastRail,
 		RailTabNext,
 		RailTabPrev,
+		QueryRailTabNext,
+		QueryRailTabPrev,
 		SchemaRailUp,
 		SchemaRailDown,
 		SchemaRailJumpFirst,

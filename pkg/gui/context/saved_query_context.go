@@ -25,11 +25,17 @@ const savedQueryReturnGlyph = "⏎"
 // queries so the popup never paints a blank/garbled body.
 const savedQueryEmptyLine = "no saved queries yet"
 
-// SavedQueryContext is the non-editable TEMPORARY_POPUP that browses the
-// named queries persisted in queries.yml. It is a thin list state holder
-// modeled on HistoryContext (embeds BaseContext by value, owns deps, writes
-// the body via the GuiDriver). It satisfies the controllers.SideListCursor
-// surface (Cursor / SetCursor / Items) so the list trait can drive j/k/G.
+// SavedQueryContext is the non-editable MAIN_CONTEXT leaf of the QUERY_RAIL
+// container that browses the named queries persisted in queries.yml. It is a
+// thin list state holder modeled on HistoryContext (embeds BaseContext by
+// value, owns deps, writes the body via the GuiDriver). It satisfies the
+// controllers.SideListCursor surface (Cursor / SetCursor / Items) so the list
+// trait can drive j/k/G.
+//
+// Freshness is load-once + invalidate-on-write: the leaf starts stale, so the
+// FIRST tab activation (HandleFocus) fires the injected reload hook; thereafter
+// it reloads ONLY after MarkStale (set on a <leader>s save or a dd-delete). It
+// never reloads on every focus.
 type SavedQueryContext struct {
 	BaseContext
 
@@ -37,12 +43,46 @@ type SavedQueryContext struct {
 
 	rows   []models.SavedQuery
 	cursor int
+
+	// stale gates the reload-on-focus. Initialized true so the first
+	// activation loads. Set true again on a write (MarkStale); cleared after a
+	// reload fires.
+	stale bool
+
+	// reload is the async load hook injected by the orchestrator (it owns the
+	// queries.yml path + threading). Nil-safe: an unwired leaf simply never
+	// reloads.
+	reload func()
 }
 
 // NewSavedQueryContext builds a context bound to the supplied BaseContext
-// (the caller sets Key / ViewName / Kind via BaseContextOpts).
+// (the caller sets Key / ViewName / Kind via BaseContextOpts). The leaf starts
+// stale so the first activation loads.
 func NewSavedQueryContext(base BaseContext, deps Deps) *SavedQueryContext {
-	return &SavedQueryContext{BaseContext: base, deps: deps}
+	return &SavedQueryContext{BaseContext: base, deps: deps, stale: true}
+}
+
+// SetReload injects the async reload hook (orchestrator-owned: it closes over
+// the queries.yml path + threading). Nil-safe everywhere it is read.
+func (c *SavedQueryContext) SetReload(fn func()) { c.reload = fn }
+
+// MarkStale flags the list for a reload on the next activation. Called on a
+// <leader>s save (a new/updated entry was written) and on a dd-delete, so
+// switching to the Saved Queries tab afterwards reflects the change.
+func (c *SavedQueryContext) MarkStale() { c.stale = true }
+
+// HandleFocus reloads the list ONLY when stale (load-once + invalidate-on-write),
+// clearing the flag first so a reload error does not re-arm an endless reload.
+// The reload hook is async (worker load → UI-thread refresh).
+func (c *SavedQueryContext) HandleFocus(_ types.OnFocusOpts) error {
+	if !c.stale {
+		return nil
+	}
+	c.stale = false
+	if c.reload != nil {
+		c.reload()
+	}
+	return nil
 }
 
 // SetRows loads the saved-query list and resets the cursor to the top.

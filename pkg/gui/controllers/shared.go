@@ -162,7 +162,7 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 	_ = reg.Register(&commands.Command{
 		ID:          commands.RailSwitchQueryEditor,
 		Description: commands.RailSwitchQueryEditor,
-		Handler:     func(commands.ExecCtx) error { return pushRail(ctxTree.QueryEditor) },
+		Handler:     func(commands.ExecCtx) error { return pushRail(ctxTree.QueryRail) },
 	})
 
 	_ = reg.Register(&commands.Command{
@@ -180,7 +180,7 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 					return tree.Push(target)
 				}
 			}
-			return tree.Push(ctxTree.QueryEditor)
+			return tree.Push(ctxTree.QueryRail)
 		},
 	})
 
@@ -213,7 +213,7 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 	}
 	cycle := []cycleEntry{
 		staticEntry(railContainer),
-		staticEntry(ctxTree.QueryEditor),
+		staticEntry(ctxTree.QueryRail),
 		{
 			resolve: func() types.IBaseContext {
 				if resolveResults == nil {
@@ -260,4 +260,59 @@ func RegisterRailSwitchActions(reg *commands.Registry, tree *gui.ContextTree, ct
 			return pushRail(railContainer)
 		},
 	})
+}
+
+// queryRailTabCount is the number of tabs in the QUERY_RAIL container
+// (QueryEditor, SavedQuery, History) — the modulus the cycle handlers wrap
+// over. Mirrors schemaRailTabCount.
+const queryRailTabCount = 3
+
+// QUERY_RAIL tab indices. The order is declared in pkg/gui/context/setup.go
+// where the container is built (QueryEditor / SavedQuery / History). The
+// leaf controllers' <cr>/<esc> switch back to QueryRailEditorTab; <leader>h /
+// <leader>o switch to the History / Saved tabs respectively.
+const (
+	QueryRailEditorTab  = 0
+	QueryRailSavedTab   = 1
+	QueryRailHistoryTab = 2
+)
+
+// QueryRailTabber is the minimal seam RegisterQueryRailTabActions needs from
+// the QUERY_RAIL container: read the active tab and set it. *QueryRailContext
+// satisfies it. Exported so the orchestrator can build a genuinely-nil
+// interface value at the callsite (avoiding the typed-nil trap) and so tests
+// can inject a fake without the concrete container.
+type QueryRailTabber interface {
+	ActiveTab() int
+	SetActiveTab(int)
+}
+
+// RegisterQueryRailTabActions registers the QUERY_RAIL tab-cycle handlers
+// (QueryRailTabNext / QueryRailTabPrev) with reg. The handlers compute the
+// edge-wrapped index over queryRailTabCount then call SetActiveTab. The
+// container is captured by reference; a nil container makes both handlers
+// no-ops. Mirrors RegisterRailSwitchActions' decoupled-registration pattern —
+// the per-leaf bindings just publish the ActionID strings.
+//
+// Idempotent: ErrDuplicateAction from a re-registration is swallowed.
+func RegisterQueryRailTabActions(reg *commands.Registry, rail QueryRailTabber) {
+	if reg == nil {
+		return
+	}
+	next := func(commands.ExecCtx) error {
+		if rail == nil {
+			return nil
+		}
+		rail.SetActiveTab((rail.ActiveTab() + 1) % queryRailTabCount)
+		return nil
+	}
+	prev := func(commands.ExecCtx) error {
+		if rail == nil {
+			return nil
+		}
+		rail.SetActiveTab((rail.ActiveTab() - 1 + queryRailTabCount) % queryRailTabCount)
+		return nil
+	}
+	_ = reg.Register(&commands.Command{ID: commands.QueryRailTabNext, Description: "Next query-rail tab", Handler: next})
+	_ = reg.Register(&commands.Command{ID: commands.QueryRailTabPrev, Description: "Previous query-rail tab", Handler: prev})
 }

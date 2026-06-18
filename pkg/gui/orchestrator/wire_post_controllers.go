@@ -217,38 +217,47 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 		g.controllers.TableInspect = inspectCtrl
 	}
 
-	// build the HISTORY popup controller and attach it to
-	// its context so its j/k/gg/G/<cr>/<esc> bindings reach the trie via
-	// AllDefaultBindings. Constructed here — not in AttachControllers —
-	// because it needs a Pop-capable handle on the focus-stack
-	// (*gui.ContextTree). refocus is nil: ContextTree.Pop already fires
-	// HandleFocus on the new stack top (the query editor), so no explicit
-	// focus call is needed after the <cr> insert pops the popup (mirrors
-	// the FKReversePicker / TableInspect close path which rely on Pop
-	// alone). The editor buffer adapter receives the inserted SQL.
-	if g.registry != nil && g.registry.History != nil && g.tree != nil {
+	// switchToEditorTab flips the QUERY_RAIL container back to the editor tab.
+	// Shared by the HISTORY/SAVED_QUERY leaf controllers' <cr>/<esc> handlers:
+	// the list leaves are container tabs, not popups, so they switch tabs
+	// rather than pop the focus stack. Nil-safe when the container is unwired.
+	switchToEditorTab := func() {
+		if g.registry == nil || g.registry.QueryRail == nil {
+			return
+		}
+		g.registry.QueryRail.SetActiveTab(controllers.QueryRailEditorTab)
+	}
+
+	// build the HISTORY leaf controller and attach it to its context so its
+	// j/k/gg/G/<cr>/<esc> bindings reach the trie via AllDefaultBindings.
+	// Constructed here — not in AttachControllers — because it closes over the
+	// QUERY_RAIL container (switchToEditorTab) which the controllers package
+	// must not import. <cr> inserts the SQL then switches to the editor tab;
+	// <esc> switches to the editor tab. Neither pops the focus stack. The
+	// editor buffer adapter receives the inserted SQL.
+	if g.registry != nil && g.registry.History != nil {
 		historyCtx := g.registry.History
 		historyCtrl := controllers.NewHistoryController(
 			g.deps.Common, helperBag.CoreDeps, historyCtx,
-			newEditorBufferAdapter(g.registry.QueryEditor), g.tree, nil,
+			newEditorBufferAdapter(g.registry.QueryEditor), switchToEditorTab,
 		)
 		historyCtrl.AttachToContext(&historyCtx.BaseContext)
 		g.controllers.History = historyCtrl
 	}
 
-	// build the SAVED_QUERY popup controller and attach it to its context so
+	// build the SAVED_QUERY leaf controller and attach it to its context so
 	// its j/k/gg/G/<cr>/dd/<esc> bindings reach the trie via
 	// AllDefaultBindings. Constructed here — not in AttachControllers —
-	// because it needs a Pop-capable handle on the focus-stack
-	// (*gui.ContextTree). refocus is nil: ContextTree.Pop already fires
-	// HandleFocus on the new stack top (the query editor). The editor buffer
-	// adapter receives the inserted SQL; fs + QueriesPath address queries.yml
-	// for the dd delete/refresh; the Confirm helper gates the delete.
-	if g.registry != nil && g.registry.SavedQuery != nil && g.tree != nil {
+	// because it closes over the QUERY_RAIL container (switchToEditorTab). <cr>
+	// inserts the SQL then switches to the editor tab; <esc> switches to the
+	// editor tab; neither pops. The editor buffer adapter receives the inserted
+	// SQL; fs + QueriesPath address queries.yml for the dd delete/refresh; the
+	// Confirm helper gates the delete.
+	if g.registry != nil && g.registry.SavedQuery != nil {
 		savedCtx := g.registry.SavedQuery
 		savedCtrl := controllers.NewSavedQueryController(
 			g.deps.Common, helperBag.CoreDeps, helperBag.UIDeps, savedCtx,
-			newEditorBufferAdapter(g.registry.QueryEditor), g.tree, nil,
+			newEditorBufferAdapter(g.registry.QueryEditor), switchToEditorTab,
 			fsFromCommon(g.deps.Common), g.deps.QueriesPath,
 		)
 		savedCtrl.AttachToContext(&savedCtx.BaseContext)
@@ -345,6 +354,18 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 		saveHelper := data.NewSaveQueryHelper(g.deps.Common, fsFromCommon(g.deps.Common), g.deps.QueriesPath)
 		savePrompter := newChainedPrompterAdapter(g.promptHelp, g.choiceHelp, g.OnUIThread)
 		g.controllers.QueryEditor.SetSaveQuery(saveHelper, savePrompter)
+
+		// Invalidate-on-write: a query run marks the History tab stale; a save
+		// marks the Saved Queries tab stale. The leaves reload lazily on their
+		// next activation (load-once + invalidate-on-write). Nil-safe.
+		if g.registry != nil && g.registry.History != nil {
+			historyCtx := g.registry.History
+			g.controllers.QueryEditor.SetOnAfterRun(historyCtx.MarkStale)
+		}
+		if g.registry != nil && g.registry.SavedQuery != nil {
+			savedCtx := g.registry.SavedQuery
+			g.controllers.QueryEditor.SetOnAfterSave(savedCtx.MarkStale)
+		}
 	}
 }
 

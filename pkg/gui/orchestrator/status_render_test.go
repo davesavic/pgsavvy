@@ -303,3 +303,85 @@ func TestRenderStatusLine_SearchSegmentAbsentWhenProviderNil(t *testing.T) {
 		t.Fatalf("status buffer = %q; want no search segment when provider nil", buf)
 	}
 }
+
+// activeLeafContainer is a focus-stack context whose OWN key is the
+// container key (QUERY_RAIL) but which exposes ActiveLeafKey() — mirroring
+// QueryRailContext. status_render must redirect BOTH the ModeStore lookup
+// and the options-bar scope to the active leaf's key.
+type activeLeafContainer struct {
+	*guicontext.StubContext
+	leafKey types.ContextKey
+}
+
+func (a activeLeafContainer) ActiveLeafKey() types.ContextKey { return a.leafKey }
+
+// renderWithActiveLeaf drives RenderStatusLine through its default branch
+// with a focused activeLeafContainer (own key QUERY_RAIL), a Matcher whose
+// trie carries the supplied bindings, and a ModeStore that maps the LEAF key
+// to leafMode. Returns the resulting AppStatusViewName buffer.
+func renderWithActiveLeaf(t *testing.T, leafKey types.ContextKey, leafMode types.Mode, bindings []optionsBarBinding) string {
+	t.Helper()
+	rec := newStatusRenderRecorder(t)
+
+	tree := gui.NewContextTree()
+	container := activeLeafContainer{
+		StubContext: guicontext.NewStubContext(types.QUERY_RAIL, string(types.QUERY_RAIL)),
+		leafKey:     leafKey,
+	}
+	if err := tree.Push(container); err != nil {
+		t.Fatalf("push container: %v", err)
+	}
+
+	ms := keys.NewModeStore()
+	ms.Set(leafKey, leafMode)
+
+	matcher, err := keys.NewMatcher(buildOptionsBarTrieSet(t, bindings), keys.MatcherConfig{Modes: ms})
+	if err != nil {
+		t.Fatalf("NewMatcher: %v", err)
+	}
+	rt := keys.NewRuntime(nil, matcher, ms, nil, nil)
+
+	RenderStatusLine(StatusRenderDeps{
+		Driver:    rec,
+		Tree:      tree,
+		KbRuntime: rt,
+		Tr:        i18n.EnglishTranslationSet(),
+	})
+	return rec.GetViewBuffer(AppStatusViewName)
+}
+
+// TestRenderStatusLine_ActiveLeafSourcesEditorModeAndOptions covers tkt5.4
+// step A for the editor tab: the focused container exposes QUERY_EDITOR as
+// its active leaf, with Insert mode set against the LEAF key. The status bar
+// must show the editor's INSERT label (proving the ModeStore lookup was
+// redirected) and the editor-scope hint (proving the options scope was
+// redirected), NOT the container's empty QUERY_RAIL output.
+func TestRenderStatusLine_ActiveLeafSourcesEditorModeAndOptions(t *testing.T) {
+	buf := renderWithActiveLeaf(t, types.QUERY_EDITOR, types.ModeInsert, []optionsBarBinding{
+		{seq: "f", mode: types.ModeInsert, scope: types.QUERY_EDITOR, tag: "Query", description: "Format", showInBar: true},
+	})
+	tr := i18n.EnglishTranslationSet()
+	if !strings.Contains(buf, tr.ModeInsert) {
+		t.Fatalf("status buffer = %q; want editor INSERT label %q", buf, tr.ModeInsert)
+	}
+	if !strings.Contains(buf, "Format") {
+		t.Fatalf("status buffer = %q; want editor-scope option 'Format'", buf)
+	}
+}
+
+// TestRenderStatusLine_ActiveLeafSourcesListModeAndOptions covers tkt5.4
+// step A for a list tab: the active leaf is HISTORY in Normal mode. The
+// status bar must show the NORMAL label and the HISTORY-scope hint sourced
+// from the active leaf's scope.
+func TestRenderStatusLine_ActiveLeafSourcesListModeAndOptions(t *testing.T) {
+	buf := renderWithActiveLeaf(t, types.HISTORY, types.ModeNormal, []optionsBarBinding{
+		{seq: "<cr>", mode: types.ModeNormal, scope: types.HISTORY, tag: "Query", description: "Load", showInBar: true},
+	})
+	tr := i18n.EnglishTranslationSet()
+	if !strings.Contains(buf, tr.ModeNormal) {
+		t.Fatalf("status buffer = %q; want NORMAL label %q", buf, tr.ModeNormal)
+	}
+	if !strings.Contains(buf, "Load") {
+		t.Fatalf("status buffer = %q; want history-scope option 'Load'", buf)
+	}
+}

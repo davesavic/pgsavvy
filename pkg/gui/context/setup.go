@@ -72,9 +72,19 @@ type ContextTree struct {
 	// Live PERSISTENT_POPUP instances.
 	FirstRunTip *FirstRunTipContext
 
+	// QueryRail is the MAIN_CONTEXT container that multiplexes the
+	// QueryEditor + SavedQuery + History leaves into the single
+	// "query_editor" view; it is the only flattened main context for the
+	// consolidated query pane and the only entry pushed onto the focus
+	// stack. The three leaves carry inFlatten=false and render only when
+	// QueryRail calls the active leaf.
+	QueryRail *QueryRailContext
+
 	// QueryEditor is the live top-right MAIN_CONTEXT pane that hosts
 	// the vim-style SQL editor. Promoted from StubContext; subsequent
 	// child tasks fill in the *editor.Buffer / *editor.RepeatStore behind it.
+	// Now a QUERY_RAIL container leaf (inFlatten=false): it renders only
+	// when the container calls it and is never pushed onto the focus stack.
 	QueryEditor *QueryEditorContext
 
 	// ConnectionManager is the centered modal MAIN_CONTEXT connection
@@ -83,12 +93,14 @@ type ContextTree struct {
 	// bordered box over a blank background.
 	ConnectionManager *ConnectionManagerContext
 
-	// History is the <leader>h recent-query browser popup.
-	// TEMPORARY_POPUP kind.
+	// History is the <leader>h recent-query browser tab of the QUERY_RAIL
+	// container. MAIN_CONTEXT leaf (inFlatten=false): rendered only when the
+	// container calls it, never pushed onto the focus stack.
 	History *HistoryContext
 
-	// SavedQuery is the <leader>o saved-query picker popup.
-	// TEMPORARY_POPUP kind.
+	// SavedQuery is the <leader>o saved-query picker tab of the QUERY_RAIL
+	// container. MAIN_CONTEXT leaf (inFlatten=false): rendered only when the
+	// container calls it, never pushed onto the focus stack.
 	SavedQuery *SavedQueryContext
 
 	// Stub instances for the remaining deferred Contexts; Layout
@@ -290,22 +302,24 @@ func contextSpecs() []contextSpec {
 			assign: func(t *ContextTree, c types.IBaseContext) { t.FKReversePicker = c.(*FKReversePickerContext) },
 		},
 		{
-			key: types.HISTORY, kind: types.TEMPORARY_POPUP, title: "History", inFlatten: true,
-			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.6, HeightFrac: 0.6},
+			// HISTORY is now a QUERY_RAIL container leaf (tkt5.2 topology
+			// flip): inFlatten=false, MAIN_CONTEXT, sharing the "query_editor"
+			// view. It renders only when the container calls it and is never
+			// pushed onto the focus stack. popupRect is dropped (it is no
+			// longer a popup).
+			key: types.HISTORY, kind: types.MAIN_CONTEXT, title: "History", viewName: QueryRailViewName, inFlatten: false,
 			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
 				return NewHistoryContext(b, d)
 			},
 			assign: func(t *ContextTree, c types.IBaseContext) { t.History = c.(*HistoryContext) },
 		},
 		{
-			// PERSISTENT_POPUP (not TEMPORARY) so the dd delete-confirm
-			// (a TEMPORARY_POPUP CONFIRMATION pushed on top) does NOT
-			// auto-pop the picker: persistent popups survive a subsequent
-			// popup push, so after the confirm pops the picker is still on
-			// the stack and RefreshRows re-renders with the cursor clamped.
-			// Closing stays explicit — the controller Pops on <cr>/<esc>.
-			key: types.SAVED_QUERY, kind: types.PERSISTENT_POPUP, title: "Saved Queries", inFlatten: true,
-			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.6, HeightFrac: 0.6},
+			// SAVED_QUERY is now a QUERY_RAIL container leaf (tkt5.2 topology
+			// flip): inFlatten=false, MAIN_CONTEXT, sharing the "query_editor"
+			// view. It drops its former PERSISTENT_POPUP kind + popupRect —
+			// it is a normal rail leaf now, rendered only when the container
+			// calls it and never pushed onto the focus stack.
+			key: types.SAVED_QUERY, kind: types.MAIN_CONTEXT, title: "Saved Queries", viewName: QueryRailViewName, inFlatten: false,
 			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
 				return NewSavedQueryContext(b, d)
 			},
@@ -363,17 +377,41 @@ func contextSpecs() []contextSpec {
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.FirstRunTip = c.(*FirstRunTipContext) },
 		},
 
-		// QUERY_EDITOR is the live top-right MAIN_CONTEXT pane,
-		// promoted from stub to a real
-		// BaseContext-embedding type; modes + matcher come straight from
+		// QUERY_EDITOR is now a QUERY_RAIL container leaf (tkt5.2 topology
+		// flip): inFlatten=false so the layout Tier never calls it directly
+		// (only the container does) and the master-editor build loop skips it
+		// (relocated out-of-loop in installKeyDispatch). It keeps MAIN_CONTEXT
+		// kind and the "query_editor" view; modes + matcher come straight from
 		// the dependency bag so focus/blur can drive the ModeStore +
 		// Matcher.Cancel contract documented on the type.
 		{
-			key: types.QUERY_EDITOR, kind: types.MAIN_CONTEXT, title: "Query Editor", inFlatten: true,
+			key: types.QUERY_EDITOR, kind: types.MAIN_CONTEXT, title: "Query Editor", viewName: QueryRailViewName, inFlatten: false,
 			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
 				return NewQueryEditorContext(b, d, d.ModeStore, d.Matcher)
 			},
 			assign: func(t *ContextTree, c types.IBaseContext) { t.QueryEditor = c.(*QueryEditorContext) },
+		},
+		// QUERY_RAIL container: the ONLY flattened main context for the
+		// consolidated query pane and the ONLY entry pushed onto the focus
+		// stack for it. Ordered after its three leaves (QUERY_EDITOR /
+		// SAVED_QUERY / HISTORY rows above) so the assign closure can inject
+		// them positionally. Default active tab is 0 (the editor). Tab order:
+		// editor (managesOwnOrigin), saved queries, history. Non-editable: the
+		// master editor for QUERY_EDITOR/HISTORY/SAVED_QUERY scopes is built
+		// out-of-loop in installKeyDispatch.
+		{
+			key: types.QUERY_RAIL, kind: types.MAIN_CONTEXT, title: "Query Editor", viewName: QueryRailViewName, inFlatten: true,
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewQueryRailContext(b, d,
+					QueryRailTabSpec{Label: "Query Editor", LeafKey: types.QUERY_EDITOR, ManagesOwnOrigin: true},
+					QueryRailTabSpec{Label: "Saved Queries", LeafKey: types.SAVED_QUERY},
+					QueryRailTabSpec{Label: "History", LeafKey: types.HISTORY},
+				)
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) {
+				t.QueryRail = c.(*QueryRailContext)
+				t.QueryRail.SetLeaves(t.QueryEditor, t.SavedQuery, t.History)
+			},
 		},
 
 		// CONNECTION_MANAGER is the centered modal MAIN_CONTEXT.

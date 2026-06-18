@@ -193,6 +193,13 @@ func (c *QueryEditorContext) saveBufferIfDirty() error {
 	return nil
 }
 
+// FlushDirty dispatches a buffer save when the live buffer is Dirty,
+// using the same save path as HandleFocusLost. It is the flush seam the
+// QUERY_RAIL container calls on the editor leaf so a MAIN_CONTEXT push
+// (e.g. opening the connection manager) does not silently drop unsaved
+// edits while a list tab is active. Nil-safe via saveBufferIfDirty.
+func (c *QueryEditorContext) FlushDirty() error { return c.saveBufferIfDirty() }
+
 // GetKind overrides BaseContext.GetKind to publish MAIN_CONTEXT. The
 // embedded BaseContext was constructed with kind=MAIN_CONTEXT already,
 // but the override keeps the contract explicit at the receiver so

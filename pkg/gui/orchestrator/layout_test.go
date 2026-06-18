@@ -98,6 +98,57 @@ func TestRunLayoutEnablesCaretOnQueryEditorFocus(t *testing.T) {
 	}
 }
 
+// TestRunLayoutEnablesCaretOnQueryRailEditorTab regresses the "no visible
+// cursor in the query panel" bug introduced by the QUERY_RAIL topology flip.
+// In production the focus stack holds the QUERY_RAIL container (a
+// MAIN_CONTEXT), never the QUERY_EDITOR leaf directly. The caret toggle in
+// RunLayout keyed only on top.GetKey() == QUERY_EDITOR, so with the container
+// on top it always evaluated false and SetCaretEnabled(false) was called every
+// frame — no caret rendered even though the editor tab was active and the view
+// cursor was positioned. The toggle must look through the container to its
+// active leaf.
+func TestRunLayoutEnablesCaretOnQueryRailEditorTab(t *testing.T) {
+	g, rec := buildTestGui(t)
+	rail := g.Registry().QueryRail
+	if rail == nil {
+		t.Fatal("registry.QueryRail is nil")
+	}
+	// Default active tab is 0 (the editor leaf).
+	if err := g.ContextTree().Push(rail); err != nil {
+		t.Fatalf("Push(queryRail): %v", err)
+	}
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if !rec.CaretEnabled {
+		t.Fatalf("CaretEnabled = false with QUERY_RAIL on top and the editor tab active; caret would not render. log=%v", rec.AllCaretEnabledLog())
+	}
+}
+
+// TestRunLayoutDisablesCaretOnQueryRailListTab locks the inverse: when the
+// QUERY_RAIL container has a non-editable list leaf active (SAVED_QUERY /
+// HISTORY), the caret must stay off so no cursor bleeds onto the list rows.
+func TestRunLayoutDisablesCaretOnQueryRailListTab(t *testing.T) {
+	g, rec := buildTestGui(t)
+	rail := g.Registry().QueryRail
+	if rail == nil {
+		t.Fatal("registry.QueryRail is nil")
+	}
+	// Switch to the Saved Queries tab (index 1): a non-editable leaf.
+	rail.SetActiveTab(1)
+	if err := g.ContextTree().Push(rail); err != nil {
+		t.Fatalf("Push(queryRail): %v", err)
+	}
+	// Pre-stain the caret so "layout never touched it" also fails.
+	rec.SetCaretEnabled(true)
+	if err := g.RunLayout(120, 40); err != nil {
+		t.Fatalf("RunLayout: %v", err)
+	}
+	if rec.CaretEnabled {
+		t.Fatalf("CaretEnabled = true with a QUERY_RAIL list tab active; caret must stay off. log=%v", rec.AllCaretEnabledLog())
+	}
+}
+
 // TestRunLayoutDisablesCaretOnSideRailFocus locks the inverse: when a
 // SIDE_CONTEXT (here CONNECTIONS, the bootstrap top) is focused, the
 // layout must keep the gocui caret off so a stale enabled state from a

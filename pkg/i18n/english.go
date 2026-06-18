@@ -303,6 +303,11 @@ type ActionTranslations struct {
 	RailTabNext string
 	RailTabPrev string
 
+	// QueryRailTabNext / QueryRailTabPrev describe the `]` / `[` QUERY_RAIL
+	// tab cycle (QueryEditor ⇄ SavedQuery ⇄ History, edge-wrapping).
+	QueryRailTabNext string
+	QueryRailTabPrev string
+
 	// Cursor movement and confirmation primitives used by every side
 	// rail controller. Added by T7a to satisfy the M11i rule
 	// that every KeyBinding.Description sources from Tr.Actions.*.
@@ -478,9 +483,9 @@ func EnglishTranslationSet() *TranslationSet {
 			TableInspectPrevTab: "Previous tab",
 			TableInspectClose:   "Close",
 
-			HistoryOpen: "Open query history",
+			HistoryOpen: "History tab",
 
-			OpenSavedQueries: "Open saved queries",
+			OpenSavedQueries: "Saved queries tab",
 			DeleteSavedQuery: "Delete saved query",
 			SaveQuery:        "Save query",
 
@@ -537,6 +542,9 @@ func EnglishTranslationSet() *TranslationSet {
 
 			RailTabNext: "Next tab",
 			RailTabPrev: "Previous tab",
+
+			QueryRailTabNext: "Next tab",
+			QueryRailTabPrev: "Previous tab",
 
 			Down:      "Down",
 			Up:        "Up",

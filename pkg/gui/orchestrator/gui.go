@@ -718,89 +718,97 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 // filter) while bounding the single-statement read + render cost.
 const historyRecentLimit = 500
 
-// registerHistoryOpen registers the HistoryOpen action handler. When the
-// store is unopened (g.history nil) the handler is a no-op (no popup,
-// no toast — the editor stays put). Otherwise it pushes the HISTORY
-// popup on the UI thread, loads Recent(N) on a worker goroutine, and
-// publishes the rows back on the UI thread via OnUIThreadContentOnly.
-// SetRows / Push are NEVER called from the worker (data race under
-// -race). Mirrors registerTableInspectOpen's threading shape.
+// registerHistoryOpen wires the HISTORY tab: the HistoryOpen action handler
+// switches the QUERY_RAIL container to the History tab (no popup push), and
+// the leaf's reload hook lazily loads Recent(N). The reload runs only when the
+// leaf is stale (first activation + after a query run); it loads on a worker
+// goroutine and publishes back on the UI thread via OnUIThreadContentOnly
+// (RefreshRows preserves the cursor; SetRows/RefreshRows are NEVER called from
+// the worker — data race under -race). On load error it surfaces a toast and
+// leaves the prior rows intact.
 func (g *Gui) registerHistoryOpen() {
 	historyCtx := g.registry.History
 
-	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
-		ID:          commands.HistoryOpen,
-		Description: "Open query history",
-		Handler: func(_ commands.ExecCtx) error {
-			if g.queryState.history == nil {
+	historyCtx.SetReload(func() {
+		store := g.queryState.history
+		if store == nil {
+			return
+		}
+		g.OnWorker(func(_ gocui.Task) error {
+			rows, err := store.Recent(context.Background(), historyRecentLimit)
+			if err != nil {
+				g.deps.Common.Logger().Warn("gui: history recent", "err", err)
+				if g.toastHelp != nil {
+					g.OnUIThreadContentOnly(func() error {
+						g.toastHelp.Show("could not load query history", 3*time.Second)
+						return nil
+					})
+				}
 				return nil
 			}
-
-			// Re-open semantics: if the popup is already on top, reload in
-			// place rather than stacking a second copy.
-			cur := g.tree.Current()
-			if cur == nil || cur.GetKey() != types.HISTORY {
-				historyCtx.SetRows(nil)
-				if err := g.tree.Push(historyCtx); err != nil {
-					return err
-				}
-			}
-
-			store := g.queryState.history
-			g.OnWorker(func(_ gocui.Task) error {
-				rows, err := store.Recent(context.Background(), historyRecentLimit)
-				if err != nil {
-					g.deps.Common.Logger().Warn("gui: history recent", "err", err)
-					return nil
-				}
-				g.OnUIThreadContentOnly(func() error {
-					historyCtx.SetRows(rows)
-					return nil
-				})
+			g.OnUIThreadContentOnly(func() error {
+				historyCtx.RefreshRows(rows)
 				return nil
 			})
+			return nil
+		})
+	})
+
+	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
+		ID:          commands.HistoryOpen,
+		Description: "Switch to history tab",
+		Handler: func(_ commands.ExecCtx) error {
+			if g.registry == nil || g.registry.QueryRail == nil {
+				return nil
+			}
+			g.registry.QueryRail.SetActiveTab(controllers.QueryRailHistoryTab)
 			return nil
 		},
 	})
 }
 
-// registerSavedQueryOpen registers the QuerySavedOpen action handler. It
-// pushes the SAVED_QUERY popup on the UI thread, loads queries.yml on a
-// worker goroutine, and publishes the rows back on the UI thread via
-// OnUIThreadContentOnly. SetRows / Push are NEVER called from the worker
-// (data race under -race). Mirrors registerHistoryOpen's threading shape.
+// registerSavedQueryOpen wires the SAVED_QUERY tab: the QuerySavedOpen action
+// handler switches the QUERY_RAIL container to the Saved Queries tab (no popup
+// push), and the leaf's reload hook lazily loads queries.yml. The reload runs
+// only when the leaf is stale (first activation + after a save/delete); it
+// loads on a worker goroutine and publishes back on the UI thread via
+// OnUIThreadContentOnly (RefreshRows preserves the cursor). On load error it
+// surfaces a toast and leaves the prior rows intact.
 func (g *Gui) registerSavedQueryOpen() {
 	savedCtx := g.registry.SavedQuery
 	fs := fsFromCommon(g.deps.Common)
 	path := g.deps.QueriesPath
 
-	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
-		ID:          commands.QuerySavedOpen,
-		Description: "Open saved queries",
-		Tag:         "Query",
-		Handler: func(_ commands.ExecCtx) error {
-			// Re-open semantics: if the popup is already on top, reload in
-			// place rather than stacking a second copy.
-			cur := g.tree.Current()
-			if cur == nil || cur.GetKey() != types.SAVED_QUERY {
-				savedCtx.SetRows(nil)
-				if err := g.tree.Push(savedCtx); err != nil {
-					return err
+	savedCtx.SetReload(func() {
+		g.OnWorker(func(_ gocui.Task) error {
+			rows, err := config.LoadQueries(fs, path)
+			if err != nil {
+				g.deps.Common.Logger().Warn("gui: load saved queries", "err", err)
+				if g.toastHelp != nil {
+					g.OnUIThreadContentOnly(func() error {
+						g.toastHelp.Show("could not load saved queries", 3*time.Second)
+						return nil
+					})
 				}
+				return nil
 			}
-
-			g.OnWorker(func(_ gocui.Task) error {
-				rows, err := config.LoadQueries(fs, path)
-				if err != nil {
-					g.deps.Common.Logger().Warn("gui: load saved queries", "err", err)
-					return nil
-				}
-				g.OnUIThreadContentOnly(func() error {
-					savedCtx.SetRows(rows)
-					return nil
-				})
+			g.OnUIThreadContentOnly(func() error {
+				savedCtx.RefreshRows(rows)
 				return nil
 			})
+			return nil
+		})
+	})
+
+	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
+		ID:          commands.QuerySavedOpen,
+		Description: "Switch to saved queries tab",
+		Tag:         "Query",
+		Handler: func(_ commands.ExecCtx) error {
+			if g.registry == nil || g.registry.QueryRail == nil {
+				return nil
+			}
+			g.registry.QueryRail.SetActiveTab(controllers.QueryRailSavedTab)
 			return nil
 		},
 	})
@@ -1127,32 +1135,6 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 			// the context is on the focus stack — re-Push creates a fresh
 			// view, and gocui's SetMasterEditor is idempotent.
 			switch key {
-			case types.QUERY_EDITOR:
-				if g.registry.QueryEditor != nil {
-					ve := editor.NewVimEditor(g.registry.QueryEditor, g.keybindingSystem.matcher, key, editor.WithSessionLog(g.deps.Common.Logger()), editor.WithGuiDriver(g.driver), editor.WithEmergencyQuit(g.emergencyQuit))
-					// Wire the Tab/Enter popup-navigation seam
-					// to the controller so the insert path can drive the
-					// completion popup.
-					if g.controllers != nil && g.controllers.VimEditor != nil {
-						ve.SetCompletionKey(g.controllers.VimEditor.CompletionKey)
-						// As-you-type auto-trigger, gated at boot
-						// by editor.autocomplete (default true). When false we do
-						// NOT install the callback, so typing never opens the
-						// popup — manual <c-x><c-o> stays available regardless
-						// (it routes through RefilterOrTrigger, not this seam).
-						if cfg := g.deps.Common.Cfg(); cfg != nil && cfg.Editor.Autocomplete {
-							ve.SetAutoCompleter(g.controllers.VimEditor.AutoTrigger)
-						}
-						// Table-accept alias insertion
-						// is DEFAULT-ON; opt out via `editor.autocomplete_alias:
-						// false`. The controller defaults the flag on, so we only
-						// need to flip it off here.
-						if cfg := g.deps.Common.Cfg(); cfg != nil && !cfg.Editor.AutocompleteAlias {
-							g.controllers.VimEditor.SetAliasOnAccept(false)
-						}
-					}
-					g.keybindingSystem.masterEditors[key] = ve
-				}
 			case types.SEARCH_LINE:
 				// The SEARCH_LINE editor fires the
 				// per-keystroke onChange seam so SearchPrompt's OnChange
@@ -1239,6 +1221,47 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 	// and harmless — the rail is non-editable, so the ModeInsert flush path is
 	// never exercised.
 	g.keybindingSystem.masterEditors[types.SCHEMA_RAIL] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, types.SCHEMA_RAIL, WithSessionLog(g.deps.Common.Logger()), WithEmergencyQuit(g.emergencyQuit))
+
+	// QUERY_EDITOR master editor (VimEditor). QUERY_EDITOR is now a
+	// QUERY_RAIL container leaf (inFlatten=false, tkt5.2 topology flip), so
+	// the Flatten loop above skips it; build its VimEditor here — preserving
+	// ALL the completion-popup (Tab/Enter) wiring verbatim — so RunLayout's
+	// per-frame pass can attach it to the shared "query_editor" view while
+	// the editor tab is active. The editor remains editable
+	// (QUERY_EDITOR.IsEditable()); the QUERY_RAIL container is non-editable.
+	if g.registry.QueryEditor != nil {
+		ve := editor.NewVimEditor(g.registry.QueryEditor, g.keybindingSystem.matcher, types.QUERY_EDITOR, editor.WithSessionLog(g.deps.Common.Logger()), editor.WithGuiDriver(g.driver), editor.WithEmergencyQuit(g.emergencyQuit))
+		// Wire the Tab/Enter popup-navigation seam
+		// to the controller so the insert path can drive the
+		// completion popup.
+		if g.controllers != nil && g.controllers.VimEditor != nil {
+			ve.SetCompletionKey(g.controllers.VimEditor.CompletionKey)
+			// As-you-type auto-trigger, gated at boot
+			// by editor.autocomplete (default true). When false we do
+			// NOT install the callback, so typing never opens the
+			// popup — manual <c-x><c-o> stays available regardless
+			// (it routes through RefilterOrTrigger, not this seam).
+			if cfg := g.deps.Common.Cfg(); cfg != nil && cfg.Editor.Autocomplete {
+				ve.SetAutoCompleter(g.controllers.VimEditor.AutoTrigger)
+			}
+			// Table-accept alias insertion
+			// is DEFAULT-ON; opt out via `editor.autocomplete_alias:
+			// false`. The controller defaults the flag on, so we only
+			// need to flip it off here.
+			if cfg := g.deps.Common.Cfg(); cfg != nil && !cfg.Editor.AutocompleteAlias {
+				g.controllers.VimEditor.SetAliasOnAccept(false)
+			}
+		}
+		g.keybindingSystem.masterEditors[types.QUERY_EDITOR] = ve
+	}
+	// HISTORY / SAVED_QUERY master editors. Both are QUERY_RAIL container
+	// leaves (non-editable list tabs, inFlatten=false), so the Flatten loop
+	// skips them; build each under its OWN scope so the rail's leaf-scoped
+	// bindings dispatch correctly when that tab is active. Mirrors the
+	// SCHEMA_RAIL manual build: a per-key SetKeybinding model where the
+	// container view receives the active leaf's editor by view name.
+	g.keybindingSystem.masterEditors[types.HISTORY] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, types.HISTORY, WithSessionLog(g.deps.Common.Logger()), WithEmergencyQuit(g.emergencyQuit))
+	g.keybindingSystem.masterEditors[types.SAVED_QUERY] = NewMasterEditor(ngocui, g.keybindingSystem.matcher, types.SAVED_QUERY, WithSessionLog(g.deps.Common.Logger()), WithEmergencyQuit(g.emergencyQuit))
 	return nil
 }
 

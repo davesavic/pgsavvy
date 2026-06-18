@@ -29,7 +29,7 @@ type MainContextPair struct {
 // resolves it to the concrete result_tab_<i> ContextKey of whichever
 // tab is currently active.
 var PairNormal = MainContextPair{
-	Main:      QUERY_EDITOR,
+	Main:      QUERY_RAIL,
 	Secondary: ContextKey("result_tab_active"),
 }
 
@@ -39,7 +39,7 @@ var PairNormal = MainContextPair{
 // reading the plan.
 var PairPlanFocus = MainContextPair{
 	Main:      PLAN,
-	Secondary: QUERY_EDITOR,
+	Secondary: QUERY_RAIL,
 }
 
 // ResultTabActiveKey is the sentinel ContextKey that PairNormal's

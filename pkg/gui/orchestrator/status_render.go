@@ -165,6 +165,21 @@ func RenderStatusLine(d StatusRenderDeps) {
 	)
 	if focused != nil {
 		key := focused.GetKey()
+		// When the focused context is a tabbed container (e.g. QUERY_RAIL),
+		// its OWN key carries no ModeStore entry and no scoped bindings — the
+		// active LEAF does. Redirect both the mode lookup AND the options-bar
+		// scope to the active leaf's key so the editor tab shows vim modes +
+		// editor hints and the list tabs show Normal + list hints (not empty
+		// container-scoped output). Containers that don't expose an active
+		// leaf, or that return the empty key, keep their own key.
+		type activeLeafKeyed interface {
+			ActiveLeafKey() types.ContextKey
+		}
+		if al, ok := focused.(activeLeafKeyed); ok {
+			if leafKey := al.ActiveLeafKey(); leafKey != "" {
+				key = leafKey
+			}
+		}
 		mode := d.KbRuntime.ModeStore.Get(key)
 		// Always show the mode label, regardless of whether
 		// the focused context is editable. The status bar's mode banner
