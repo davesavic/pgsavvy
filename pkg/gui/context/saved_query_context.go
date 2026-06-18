@@ -3,6 +3,7 @@ package context
 import (
 	"strings"
 
+	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
@@ -185,10 +186,23 @@ func formatSavedQueryBody(rows []models.SavedQuery, cursor int) string {
 	return b.String()
 }
 
-// formatSavedQueryRow renders a single row's cell: name followed by a
-// collapsed, truncated SQL preview.
+// savedQueryNameBold / savedQueryReset wrap the row's name so it reads as the
+// label, visually separated from the syntax-highlighted SQL preview. Bold is
+// emitted unconditionally (even under NO_COLOR): it is a weight attribute, not
+// a colour, and is the only name/SQL distinction left when highlight.Highlight
+// falls back to plain text in monochrome.
+const (
+	savedQueryNameBold = "\x1b[1m"
+	savedQueryReset    = "\x1b[0m"
+)
+
+// formatSavedQueryRow renders a single row's cell: a bold name followed by a
+// collapsed, truncated, syntax-highlighted SQL preview. The SQL is truncated
+// BEFORE highlighting so the rune cap never slices an ANSI escape mid-sequence.
 func formatSavedQueryRow(r models.SavedQuery) string {
-	return r.Name + "  " + truncateSavedQuerySQL(r.SQL, savedQueryDisplayWidth)
+	name := savedQueryNameBold + r.Name + savedQueryReset
+	sql := highlight.Highlight(truncateSavedQuerySQL(r.SQL, savedQueryDisplayWidth))
+	return name + "  " + sql
 }
 
 // truncateSavedQuerySQL collapses CR/LF runs into a return glyph and trims the

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/query"
 )
@@ -194,12 +195,15 @@ func formatHistoryBody(rows []query.HistoryRow, cursor int, now time.Time) strin
 	return b.String()
 }
 
-// formatHistoryRow renders a single row's cell: SQL + glyph + relative
-// time + duration.
+// formatHistoryRow renders a single row's cell: a syntax-highlighted SQL
+// preview + glyph + relative time + duration. The SQL is truncated BEFORE
+// highlighting so the rune cap never slices an ANSI escape mid-sequence, and
+// highlight.Highlight emits a trailing reset so the metadata after it renders
+// in the default style.
 func formatHistoryRow(r query.HistoryRow, now time.Time) string {
 	return fmt.Sprintf(
 		"%s %s %s  %s",
-		truncateHistorySQL(r.SQL, historyDisplayWidth),
+		highlight.Highlight(truncateHistorySQL(r.SQL, historyDisplayWidth)),
 		historyGlyph(r.Succeeded),
 		formatRelativeTime(now, time.UnixMilli(r.ExecutedAt)),
 		formatHistoryDuration(r.DurationMS),
