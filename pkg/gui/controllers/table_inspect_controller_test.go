@@ -1,35 +1,28 @@
 package controllers_test
 
 import (
-	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	"github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
-	"github.com/davesavic/pgsavvy/pkg/gui/popup"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
-	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
-// newInspectContext builds a TABLE_INSPECT context wired with a
-// TabbedPopup containing `n` stub tabs so NextTab / PrevTab can advance.
-func newInspectContext(t *testing.T, n int) *context.TableInspectContext {
+// newInspectContext builds a TABLE_INSPECT context (composed over
+// TabbedRailContext with the two fixed Columns/Indexes tabs) so NextTab /
+// PrevTab can advance. The `n` parameter is retained for call-site stability; the
+// composed context always has exactly two tabs.
+func newInspectContext(t *testing.T, _ int) *context.TableInspectContext {
 	t.Helper()
 	base := context.NewBaseContext(context.BaseContextOpts{
 		Key:      types.TABLE_INSPECT,
-		ViewName: string(types.TABLE_INSPECT),
+		ViewName: context.TableInspectViewName,
 		Kind:     types.TEMPORARY_POPUP,
 		Title:    "Table inspect",
 	})
-	ctx := context.NewTableInspectContext(base, types.ContextTreeDeps{})
-	tabs := make([]popup.Tab, 0, n)
-	for range n {
-		tabs = append(tabs, popup.Tab{Title: "tab"})
-	}
-	ctx.SetState(popup.NewTabbedPopup(tabs))
-	return ctx
+	return context.NewTableInspectContext(base, types.ContextTreeDeps{})
 }
 
 // fakeTree records Pop() invocations for the Close action test.
@@ -100,16 +93,24 @@ func TestTableInspectController_HorizontalScroll_MovesOrigin(t *testing.T) {
 	}
 }
 
-func TestTableInspectController_TabChange_ResetsScroll(t *testing.T) {
+func TestTableInspectController_TabChange_PreservesPerTabScroll(t *testing.T) {
 	ic := newInspectContext(t, 2)
 	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, ic, nil)
+	// Tab 0 scrolled; switching to tab 1 lands at (0,0) (independent store), and
+	// switching back restores tab 0's offset (per-tab scroll, not reset).
 	ic.SetScrollX(20)
 	ic.SetScrollY(5)
 	if err := ctrl.NextTab(commands.ExecCtx{}); err != nil {
 		t.Fatalf("NextTab: %v", err)
 	}
 	if x, y := ic.ScrollX(), ic.ScrollY(); x != 0 || y != 0 {
-		t.Errorf("after NextTab scroll = (%d,%d), want (0,0)", x, y)
+		t.Errorf("tab1 scroll = (%d,%d), want (0,0) (independent)", x, y)
+	}
+	if err := ctrl.PrevTab(commands.ExecCtx{}); err != nil {
+		t.Fatalf("PrevTab: %v", err)
+	}
+	if x, y := ic.ScrollX(), ic.ScrollY(); x != 20 || y != 5 {
+		t.Errorf("tab0 scroll after switch-back = (%d,%d), want (20,5)", x, y)
 	}
 }
 
@@ -146,29 +147,43 @@ func TestTableInspectController_GetKeybindings_ActionIDs(t *testing.T) {
 	}
 }
 
-func TestTableInspectController_NextTabAction_AdvancesState(t *testing.T) {
+func TestTableInspectController_NextTabAction_AdvancesActiveTab(t *testing.T) {
 	ic := newInspectContext(t, 2)
 	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, ic, nil)
-	if got := ic.State().Active(); got != 0 {
-		t.Fatalf("pre-NextTab Active() = %d, want 0", got)
+	if got := ic.ActiveTab(); got != 0 {
+		t.Fatalf("pre-NextTab ActiveTab() = %d, want 0", got)
 	}
 	if err := ctrl.NextTab(commands.ExecCtx{}); err != nil {
 		t.Fatalf("NextTab: %v", err)
 	}
-	if got := ic.State().Active(); got != 1 {
-		t.Errorf("post-NextTab Active() = %d, want 1", got)
+	if got := ic.ActiveTab(); got != 1 {
+		t.Errorf("post-NextTab ActiveTab() = %d, want 1", got)
+	}
+	// Wrap-around: NextTab from the last tab returns to 0.
+	if err := ctrl.NextTab(commands.ExecCtx{}); err != nil {
+		t.Fatalf("NextTab (wrap): %v", err)
+	}
+	if got := ic.ActiveTab(); got != 0 {
+		t.Errorf("post-NextTab wrap ActiveTab() = %d, want 0", got)
 	}
 }
 
-func TestTableInspectController_PrevTabAction_RewindsState(t *testing.T) {
+func TestTableInspectController_PrevTabAction_RewindsActiveTab(t *testing.T) {
 	ic := newInspectContext(t, 2)
-	ic.State().SetActive(1)
+	ic.SetActiveTab(1)
 	ctrl := controllers.NewTableInspectController(nil, controllers.CoreDeps{}, ic, nil)
 	if err := ctrl.PrevTab(commands.ExecCtx{}); err != nil {
 		t.Fatalf("PrevTab: %v", err)
 	}
-	if got := ic.State().Active(); got != 0 {
-		t.Errorf("post-PrevTab Active() = %d, want 0", got)
+	if got := ic.ActiveTab(); got != 0 {
+		t.Errorf("post-PrevTab ActiveTab() = %d, want 0", got)
+	}
+	// Wrap-around: PrevTab from tab 0 goes to the last tab (1).
+	if err := ctrl.PrevTab(commands.ExecCtx{}); err != nil {
+		t.Fatalf("PrevTab (wrap): %v", err)
+	}
+	if got := ic.ActiveTab(); got != 1 {
+		t.Errorf("post-PrevTab wrap ActiveTab() = %d, want 1", got)
 	}
 }
 
@@ -193,177 +208,5 @@ func TestTableInspectController_NextPrevAction_NoStateNoPanic(t *testing.T) {
 	}
 	if err := ctrl.Close(commands.ExecCtx{}); err != nil {
 		t.Errorf("Close nil tree: %v", err)
-	}
-}
-
-func TestColumnsPanel_EmptyState(t *testing.T) {
-	p := controllers.NewColumnsPanel(nil)
-	if got := p.Body(); got != "(no columns)" {
-		t.Errorf("nil ctx Body() = %q, want %q", got, "(no columns)")
-	}
-}
-
-func TestIndexesPanel_EmptyState(t *testing.T) {
-	p := controllers.NewIndexesPanel(nil)
-	if got := p.Body(); got != "(no indexes)" {
-		t.Errorf("nil ctx Body() = %q, want %q", got, "(no indexes)")
-	}
-}
-
-func TestColumnsPanel_SafeText_StripsEscapes(t *testing.T) {
-	base := context.NewBaseContext(context.BaseContextOpts{
-		Key:      types.COLUMNS,
-		ViewName: string(types.COLUMNS),
-		Kind:     types.SIDE_CONTEXT,
-	})
-	cc := context.NewColumnsContext(base, types.ContextTreeDeps{})
-	cc.SetItems([]any{&models.Column{
-		Name:     "id\x1b[2J",
-		DataType: "int\x1b[31m",
-		Default:  "0\x1b[0m",
-		Nullable: false,
-	}})
-	p := controllers.NewColumnsPanel(cc)
-	body := p.Body()
-	if strings.ContainsRune(body, '\x1b') {
-		t.Errorf("Body() contains ESC byte: %q", body)
-	}
-	if !strings.Contains(body, "id") || !strings.Contains(body, "int") {
-		t.Errorf("Body() missing expected sanitized content: %q", body)
-	}
-}
-
-func TestIndexesPanel_SafeText_StripsEscapes(t *testing.T) {
-	base := context.NewBaseContext(context.BaseContextOpts{
-		Key:      types.INDEXES,
-		ViewName: string(types.INDEXES),
-		Kind:     types.SIDE_CONTEXT,
-	})
-	ic := context.NewIndexesContext(base, types.ContextTreeDeps{})
-	ic.SetItems([]any{&models.Index{
-		Name:    "idx_pk\x1b[2J",
-		Columns: []string{"a\x1b[31m"},
-		Method:  "btree\x1b[0m",
-	}})
-	p := controllers.NewIndexesPanel(ic)
-	body := p.Body()
-	if strings.ContainsRune(body, '\x1b') {
-		t.Errorf("Body() contains ESC byte: %q", body)
-	}
-	if !strings.Contains(body, "idx_pk") {
-		t.Errorf("Body() missing expected sanitized name: %q", body)
-	}
-}
-
-func TestPanels_HandleKey_AlwaysFalse(t *testing.T) {
-	cp := controllers.NewColumnsPanel(nil)
-	ip := controllers.NewIndexesPanel(nil)
-	// Sample of bare-rune and special chord keys; HandleKey must reject all.
-	var zeroKey types.Key
-	if cp.HandleKey(zeroKey) {
-		t.Errorf("ColumnsPanel.HandleKey returned true")
-	}
-	if ip.HandleKey(zeroKey) {
-		t.Errorf("IndexesPanel.HandleKey returned true")
-	}
-}
-
-func TestColumnsPanel_FormatsNonNullAndDefault(t *testing.T) {
-	base := context.NewBaseContext(context.BaseContextOpts{
-		Key:      types.COLUMNS,
-		ViewName: string(types.COLUMNS),
-		Kind:     types.SIDE_CONTEXT,
-	})
-	cc := context.NewColumnsContext(base, types.ContextTreeDeps{})
-	cc.SetItems([]any{
-		&models.Column{Name: "id", DataType: "int", Nullable: false, Default: "nextval()"},
-		&models.Column{Name: "note", DataType: "text", Nullable: true},
-	})
-	p := controllers.NewColumnsPanel(cc)
-	body := p.Body()
-	if !strings.Contains(body, "NOT NULL") {
-		t.Errorf("Body() should contain NOT NULL marker for non-nullable column: %q", body)
-	}
-	if !strings.Contains(body, "default=nextval()") {
-		t.Errorf("Body() should contain default=nextval(): %q", body)
-	}
-	if strings.Count(body, "\n") != 2 {
-		t.Errorf("Body() expected header + two rows (2 newlines): %q", body)
-	}
-}
-
-func TestColumnsPanel_AlignsColumnsWithHeader(t *testing.T) {
-	base := context.NewBaseContext(context.BaseContextOpts{
-		Key:      types.COLUMNS,
-		ViewName: string(types.COLUMNS),
-		Kind:     types.SIDE_CONTEXT,
-	})
-	cc := context.NewColumnsContext(base, types.ContextTreeDeps{})
-	cc.SetItems([]any{
-		&models.Column{Name: "id", DataType: "bigint", Nullable: false},
-		&models.Column{Name: "created_at", DataType: "timestamptz", Nullable: false},
-	})
-	p := controllers.NewColumnsPanel(cc)
-	lines := strings.Split(p.Body(), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected header + 2 rows, got %d lines: %q", len(lines), lines)
-	}
-	if !strings.HasPrefix(lines[0], "NAME") {
-		t.Errorf("first line should be header starting with NAME: %q", lines[0])
-	}
-	// The type column must begin at the same offset on every data row.
-	if off1, off2 := strings.Index(lines[1], "bigint"), strings.Index(lines[2], "timestamptz"); off1 != off2 {
-		t.Errorf("type column not aligned: bigint@%d timestamptz@%d (%q / %q)", off1, off2, lines[1], lines[2])
-	}
-}
-
-func TestIndexesPanel_FormatsUniqueAndColumns(t *testing.T) {
-	base := context.NewBaseContext(context.BaseContextOpts{
-		Key:      types.INDEXES,
-		ViewName: string(types.INDEXES),
-		Kind:     types.SIDE_CONTEXT,
-	})
-	ic := context.NewIndexesContext(base, types.ContextTreeDeps{})
-	ic.SetItems([]any{&models.Index{
-		Name:     "u_email",
-		IsUnique: true,
-		Columns:  []string{"email"},
-		Method:   "btree",
-	}})
-	p := controllers.NewIndexesPanel(ic)
-	body := p.Body()
-	if !strings.Contains(body, "UNIQUE") {
-		t.Errorf("Body() should contain UNIQUE marker: %q", body)
-	}
-	if !strings.Contains(body, "(email)") {
-		t.Errorf("Body() should contain (email): %q", body)
-	}
-	if !strings.Contains(body, "btree") {
-		t.Errorf("Body() should contain method `btree`: %q", body)
-	}
-}
-
-func TestIndexesPanel_AlignsColumnsWithHeader(t *testing.T) {
-	base := context.NewBaseContext(context.BaseContextOpts{
-		Key:      types.INDEXES,
-		ViewName: string(types.INDEXES),
-		Kind:     types.SIDE_CONTEXT,
-	})
-	ic := context.NewIndexesContext(base, types.ContextTreeDeps{})
-	ic.SetItems([]any{
-		&models.Index{Name: "idx_data", Columns: []string{"data"}, Method: "gin"},
-		&models.Index{Name: "users_pkey", IsPrimary: true, IsUnique: true, Columns: []string{"id"}, Method: "btree"},
-	})
-	p := controllers.NewIndexesPanel(ic)
-	lines := strings.Split(p.Body(), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected header + 2 rows, got %d lines: %q", len(lines), lines)
-	}
-	if !strings.HasPrefix(lines[0], "NAME") {
-		t.Errorf("first line should be header starting with NAME: %q", lines[0])
-	}
-	// The columns list must begin at the same offset on every data row.
-	if off1, off2 := strings.Index(lines[1], "(data)"), strings.Index(lines[2], "(id)"); off1 != off2 {
-		t.Errorf("columns not aligned: (data)@%d (id)@%d (%q / %q)", off1, off2, lines[1], lines[2])
 	}
 }

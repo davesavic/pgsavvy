@@ -188,14 +188,18 @@ func contextSpecs() []contextSpec {
 			},
 		},
 		// COLUMNS/INDEXES: named fields retained, Kind=STUB, excluded from
-		// Flatten() (superseded by TABLE_INSPECT popup).
+		// Flatten() (the TABLE_INSPECT container is the only renderer of the
+		// shared view). viewName overridden to TableInspectViewName so their
+		// HandleRender SetContent targets the SAME view the container's
+		// SetViewTabs and the layout popup use — without it the leaf writes land
+		// on a phantom "columns"/"indexes" view and the popup renders blank.
 		{
-			key: types.COLUMNS, kind: types.STUB, title: "Columns", inFlatten: false,
+			key: types.COLUMNS, kind: types.STUB, title: "Columns", viewName: TableInspectViewName, inFlatten: false,
 			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewColumnsContext(b, d) },
 			assign: func(t *ContextTree, c types.IBaseContext) { t.Columns = c.(*ColumnsContext) },
 		},
 		{
-			key: types.INDEXES, kind: types.STUB, title: "Indexes", inFlatten: false,
+			key: types.INDEXES, kind: types.STUB, title: "Indexes", viewName: TableInspectViewName, inFlatten: false,
 			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewIndexesContext(b, d) },
 			assign: func(t *ContextTree, c types.IBaseContext) { t.Indexes = c.(*IndexesContext) },
 		},
@@ -267,11 +271,19 @@ func contextSpecs() []contextSpec {
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewExportMenuContext(b, d) },
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.ExportMenu = c.(*ExportMenuContext) },
 		},
+		// TABLE_INSPECT container: the ONLY renderer of TableInspectViewName.
+		// viewName set explicitly (it would otherwise fall back to
+		// string(key)) so the container's SetViewTabs + the leaves' SetContent
+		// + the layout popup all target the same view. Ordered after its
+		// COLUMNS/INDEXES leaves so the assign closure can inject them.
 		{
-			key: types.TABLE_INSPECT, kind: types.TEMPORARY_POPUP, title: "Table inspect", inFlatten: true,
+			key: types.TABLE_INSPECT, kind: types.TEMPORARY_POPUP, title: "Table inspect", viewName: TableInspectViewName, inFlatten: true,
 			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.6, HeightFrac: 0.6},
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewTableInspectContext(b, d) },
-			assign:    func(t *ContextTree, c types.IBaseContext) { t.TableInspect = c.(*TableInspectContext) },
+			assign: func(t *ContextTree, c types.IBaseContext) {
+				t.TableInspect = c.(*TableInspectContext)
+				t.TableInspect.SetLeaves(t.Columns, t.Indexes)
+			},
 		},
 		{
 			key: types.CELL_EDITOR, kind: types.TEMPORARY_POPUP, title: "Cell editor", inFlatten: true,

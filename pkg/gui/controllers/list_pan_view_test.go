@@ -7,9 +7,9 @@ import "testing"
 // satisfy via the promoted BaseContext.GetViewName.
 type viewNamedCursor struct{ view string }
 
-func (viewNamedCursor) Cursor() int       { return 0 }
-func (viewNamedCursor) SetCursor(int)      {}
-func (viewNamedCursor) Items() []any       { return nil }
+func (viewNamedCursor) Cursor() int           { return 0 }
+func (viewNamedCursor) SetCursor(int)         {}
+func (viewNamedCursor) Items() []any          { return nil }
 func (c viewNamedCursor) GetViewName() string { return c.view }
 
 // Regression for the tabbed-rail refactor: both SCHEMA_RAIL leaves render into

@@ -69,6 +69,10 @@ func TestTableInspectOpen_PushesPopupWhenTableSelected(t *testing.T) {
 	if sch, name := g.Registry().TableInspect.Target(); sch != "public" || name != "users" {
 		t.Fatalf("Target = (%q,%q), want (public,users)", sch, name)
 	}
+	// Open lands on the first (Columns) tab.
+	if got := g.Registry().TableInspect.ActiveTab(); got != 0 {
+		t.Fatalf("ActiveTab after open = %d, want 0", got)
+	}
 }
 
 func TestTableInspectOpen_NoOpWhenNoSelection(t *testing.T) {
@@ -128,6 +132,9 @@ func TestTableInspectOpen_ReOpenReTargets(t *testing.T) {
 		t.Fatalf("first open: top = %q, want %q", got, types.TABLE_INSPECT)
 	}
 
+	// Move off the first tab so the re-open's SetActiveTab(0) is observable.
+	g.Registry().TableInspect.SetActiveTab(1)
+
 	// Swap the selected table without closing the popup.
 	tblB := &models.Table{Schema: "public", Name: "orders"}
 	g.Registry().Tables.SetItems([]any{tblB})
@@ -143,5 +150,9 @@ func TestTableInspectOpen_ReOpenReTargets(t *testing.T) {
 	}
 	if sch, name := g.Registry().TableInspect.Target(); sch != "public" || name != "orders" {
 		t.Fatalf("Target after re-open = (%q,%q), want (public,orders)", sch, name)
+	}
+	// Re-open resets to the first (Columns) tab.
+	if got := g.Registry().TableInspect.ActiveTab(); got != 0 {
+		t.Fatalf("ActiveTab after re-open = %d, want 0", got)
 	}
 }

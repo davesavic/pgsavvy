@@ -36,7 +36,6 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/editor"
 	"github.com/davesavic/pgsavvy/pkg/gui/keys"
-	"github.com/davesavic/pgsavvy/pkg/gui/popup"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/logs"
@@ -651,8 +650,6 @@ func (g *Gui) persistTrackedSetting(ctx context.Context, settingKey, settingValu
 
 func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 	inspectCtx := g.registry.TableInspect
-	columnsCtx := g.registry.Columns
-	indexesCtx := g.registry.Indexes
 
 	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
 		ID:          commands.TableInspectOpen,
@@ -669,19 +666,16 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 			sch, tname := tbl.Schema, tbl.Name
 
 			// Re-open semantics (AD-24): if popup already on top, re-target.
+			// SetTarget resets per-tab scroll; SetActiveTab(0) returns to the
+			// Columns tab. (T2: composition over TabbedRailContext; the popup
+			// state/leaf wiring now lives in setup.go, not here.)
 			cur := g.tree.Current()
 			if cur != nil && cur.GetKey() == types.TABLE_INSPECT {
 				inspectCtx.SetTarget(sch, tname)
-				if s := inspectCtx.State(); s != nil {
-					s.SetActive(0)
-				}
+				inspectCtx.SetActiveTab(0)
 			} else {
-				state := popup.NewTabbedPopup([]popup.Tab{
-					{Title: "Columns", Panel: controllers.NewColumnsPanel(columnsCtx)},
-					{Title: "Indexes", Panel: controllers.NewIndexesPanel(indexesCtx)},
-				})
 				inspectCtx.SetTarget(sch, tname)
-				inspectCtx.SetState(state)
+				inspectCtx.SetActiveTab(0)
 				if err := g.tree.Push(inspectCtx); err != nil {
 					return err
 				}

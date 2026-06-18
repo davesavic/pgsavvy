@@ -72,12 +72,12 @@ func TestWiringInvariant(t *testing.T) {
 	// cites why.
 	presenceAllowlist := map[types.ContextKey]string{
 		// COLUMNS/INDEXES retain ContextTree struct fields (Kind=STUB) but
-		// are intentionally absent from Flatten(): the standalone
-		// columns/indexes side rails were superseded by the TABLE_INSPECT
-		// tabbed popup, so they are deferred and never
-		// pushed/rendered on their own.
-		types.COLUMNS: "superseded by TABLE_INSPECT popup; deferred, not flattened",
-		types.INDEXES: "superseded by TABLE_INSPECT popup; deferred, not flattened",
+		// are intentionally absent from Flatten(): they are the TABLE_INSPECT
+		// container's tab leaves (inFlatten=false). The container renders the
+		// shared inspect view and delegates to the active leaf, so the leaves
+		// are never pushed/flattened on their own.
+		types.COLUMNS: "TABLE_INSPECT container leaf; not flattened (container renders the shared view)",
+		types.INDEXES: "TABLE_INSPECT container leaf; not flattened (container renders the shared view)",
 		// SCHEMAS/TABLES are the SCHEMA_RAIL container's leaves: they retain
 		// ContextTree struct fields but carry inFlatten=false (the container is
 		// the only flattened side context and the only renderer of the shared

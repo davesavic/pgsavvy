@@ -370,21 +370,20 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 			t.Fatalf("Target = (%q,%q), want (%q,%q)", sch, tbl, schemaPick, first.Name)
 		}
 
-		// Tab cycling: NextTab advances to Indexes (1), PrevTab returns to Columns (0).
-		state := inspect.State()
-		if state == nil {
-			t.Fatal("popup state is nil")
+		// Tab cycling: advancing reaches Indexes (1), rewinding returns to
+		// Columns (0). The popup now composes over TabbedRailContext, so the
+		// active tab lives on the context (ActiveTab/SetActiveTab) rather than a
+		// separate TabbedPopup state.
+		if got := inspect.ActiveTab(); got != 0 {
+			t.Fatalf("ActiveTab() initial = %d, want 0", got)
 		}
-		if got := state.Active(); got != 0 {
-			t.Fatalf("Active() initial = %d, want 0", got)
+		inspect.SetActiveTab(1)
+		if got := inspect.ActiveTab(); got != 1 {
+			t.Fatalf("ActiveTab() after advance = %d, want 1", got)
 		}
-		state.NextTab()
-		if got := state.Active(); got != 1 {
-			t.Fatalf("Active() after NextTab = %d, want 1", got)
-		}
-		state.PrevTab()
-		if got := state.Active(); got != 0 {
-			t.Fatalf("Active() after PrevTab = %d, want 0", got)
+		inspect.SetActiveTab(0)
+		if got := inspect.ActiveTab(); got != 0 {
+			t.Fatalf("ActiveTab() after rewind = %d, want 0", got)
 		}
 
 		// Close via Pop (the Close action handler does the same).

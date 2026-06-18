@@ -175,6 +175,11 @@ func (t *TabbedRailContext) flushInactiveDirty() {
 // ActiveTab returns the current active-tab index.
 func (t *TabbedRailContext) ActiveTab() int { return t.activeTab }
 
+// TabCount returns the number of declared tabs. Consumers (e.g. the
+// TableInspect controller's NextTab/PrevTab wrap-around) use this instead of
+// hardcoding a tab count.
+func (t *TabbedRailContext) TabCount() int { return len(t.tabs) }
+
 // ActiveLeafKey returns the active leaf's ContextKey, or the empty key when
 // there are no tabs.
 func (t *TabbedRailContext) ActiveLeafKey() types.ContextKey {

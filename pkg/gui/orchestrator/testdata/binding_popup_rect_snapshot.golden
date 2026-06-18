@@ -112,6 +112,7 @@ binding	scope=plan	key=<c-h>	mode=normal
 binding	scope=plan	key=<c-k>	mode=normal
 binding	scope=plan	key=<c-x>	mode=normal
 binding	scope=plan	key=<cr>	mode=normal
+binding	scope=plan	key=<leader>X	mode=normal
 binding	scope=plan	key=<tab>	mode=normal
 binding	scope=plan	key=H	mode=normal
 binding	scope=plan	key=gT	mode=normal

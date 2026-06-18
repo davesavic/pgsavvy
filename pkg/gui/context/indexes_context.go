@@ -1,11 +1,15 @@
 package context
 
 import (
-	"fmt"
 	"strings"
 
+	"github.com/davesavic/pgsavvy/pkg/config"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+// indexHeader is the fixed header row prepended to the aligned index
+// table rendered in the inspect popup's INDEXES leaf.
+var indexHeader = []string{"NAME", "FLAGS", "COLUMNS", "METHOD"}
 
 // IndexesContext renders the index list in the left-rail INDEXES slot.
 type IndexesContext struct {
@@ -19,62 +23,79 @@ func NewIndexesContext(base BaseContext, deps Deps) *IndexesContext {
 	}
 }
 
-// HandleRender writes the index rows into the INDEXES view. Mirrors
-// the other SIDE_CONTEXT renderers.
+// HandleRender writes the aligned index table into the INDEXES view: a
+// fixed header row followed by one SafeText-sanitized, column-aligned row
+// per index, or the "(no indexes)" empty-state. This is the INDEXES leaf
+// of the TABLE_INSPECT tabbed popup, rendered via the container.
+//
+// Unlike the other SIDE_CONTEXT renderers, this performs NO view-origin
+// write (no scrollSideRailIntoView/FocusPoint/SetOrigin). Inspect has no
+// cursor-move bindings, so the cursor stays 0; writing origin every frame
+// would pin it to row 0 and fight applyTableInspectScroll, the single
+// intended origin owner (layout.go).
+//
+// The rail-style disconnected-dim path is intentionally NOT carried over:
+// inspect always rendered the panel's aligned table, never the rail-style
+// renderRows, so dropping dim is a no-op for inspect.
 func (idx *IndexesContext) HandleRender() error {
 	deps := idx.deps
 	viewName := idx.GetViewName()
-	body := idx.renderRows()
-	if body == "" {
-		body = railEmptyPlaceholder(deps, idx.GetKey())
-	}
+	body := renderIndexesTable(idx.items)
 	writeView(deps, func() error {
 		return deps.GuiDriver.SetContent(viewName, body)
 	})
-	scrollSideRailIntoView(deps, viewName, idx.cursor)
 	return nil
 }
 
-func (idx *IndexesContext) renderRows() string {
-	if len(idx.items) == 0 {
-		return ""
-	}
-	// dim items when the session is disconnected.
-	dim := idx.deps.IsDisconnected != nil && idx.deps.IsDisconnected()
-
-	var b strings.Builder
-	for i, item := range idx.items {
-		marker := "  "
-		if i == idx.cursor {
-			marker = "> "
-		}
-		name := indexName(item)
-		if name == "" {
-			if dim {
-				fmt.Fprintf(&b, "%s\x1b[2m%v\x1b[0m\n", marker, item)
-			} else {
-				fmt.Fprintf(&b, "%s%v\n", marker, item)
-			}
-			continue
-		}
-		if dim {
-			fmt.Fprintf(&b, "%s\x1b[2m%s\x1b[0m\n", marker, name)
-		} else {
-			fmt.Fprintf(&b, "%s%s\n", marker, name)
+// renderIndexesTable builds the aligned index table (header + rows), or
+// the empty-state placeholder when no indexes are present.
+func renderIndexesTable(items []any) string {
+	rows := make([][]string, 0, len(items)+1)
+	for _, it := range items {
+		if ix := asIndex(it); ix != nil {
+			rows = append(rows, indexCells(ix))
 		}
 	}
-	return b.String()
+	if len(rows) == 0 {
+		return "(no indexes)"
+	}
+	return alignRows(append([][]string{indexHeader}, rows...))
 }
 
-func indexName(item any) string {
-	switch v := item.(type) {
+func asIndex(it any) *models.Index {
+	switch v := it.(type) {
 	case *models.Index:
-		if v == nil {
-			return ""
-		}
-		return v.Name
+		return v
 	case models.Index:
-		return v.Name
+		return &v
 	}
-	return ""
+	return nil
+}
+
+// indexCells renders a single index as the cells of an aligned row:
+// {name, flags, columns, method}. Flags are "PK"/"UNIQUE" (space-joined);
+// columns are wrapped in parentheses. Every DB-supplied string passes
+// through config.SafeText.
+func indexCells(idx *models.Index) []string {
+	flags := make([]string, 0, 2)
+	if idx.IsPrimary {
+		flags = append(flags, "PK")
+	}
+	if idx.IsUnique {
+		flags = append(flags, "UNIQUE")
+	}
+	cols := ""
+	if len(idx.Columns) > 0 {
+		safeCols := make([]string, 0, len(idx.Columns))
+		for _, col := range idx.Columns {
+			safeCols = append(safeCols, config.SafeText(col))
+		}
+		cols = "(" + strings.Join(safeCols, ", ") + ")"
+	}
+	return []string{
+		config.SafeText(idx.Name),
+		strings.Join(flags, " "),
+		cols,
+		config.SafeText(idx.Method),
+	}
 }

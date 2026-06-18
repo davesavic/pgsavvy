@@ -64,8 +64,11 @@ func TestTablesContext_EmptyStatePlaceholder(t *testing.T) {
 	}
 }
 
-// TestColumnsContext_EmptyStatePlaceholder asserts the COLUMNS rail renders
-// the dim "(select a table)" placeholder when empty.
+// TestColumnsContext_EmptyStatePlaceholder asserts the COLUMNS leaf
+// renders the inspect-popup empty-state "(no columns)" when empty.
+// COLUMNS is a STUB feeding the TABLE_INSPECT popup (setup.go), not a
+// side rail, so it renders the aligned-table empty-state rather than the
+// railEmptyPlaceholder "(select a table)".
 func TestColumnsContext_EmptyStatePlaceholder(t *testing.T) {
 	drv := &captureDriver{}
 	base := NewBaseContext(BaseContextOpts{Key: types.COLUMNS, ViewName: string(types.COLUMNS), Kind: types.SIDE_CONTEXT})
@@ -73,13 +76,15 @@ func TestColumnsContext_EmptyStatePlaceholder(t *testing.T) {
 	if err := c.HandleRender(); err != nil {
 		t.Fatalf("HandleRender: %v", err)
 	}
-	if drv.lastContent != "(select a table)" {
-		t.Errorf("empty COLUMNS rail = %q, want %q", drv.lastContent, "(select a table)")
+	if drv.lastContent != "(no columns)" {
+		t.Errorf("empty COLUMNS leaf = %q, want %q", drv.lastContent, "(no columns)")
 	}
 }
 
-// TestIndexesContext_EmptyStatePlaceholder asserts the INDEXES rail renders
-// the dim "(select a table)" placeholder when empty.
+// TestIndexesContext_EmptyStatePlaceholder asserts the INDEXES leaf
+// renders the inspect-popup empty-state "(no indexes)" when empty.
+// INDEXES is a STUB feeding the TABLE_INSPECT popup (setup.go), not a
+// side rail.
 func TestIndexesContext_EmptyStatePlaceholder(t *testing.T) {
 	drv := &captureDriver{}
 	base := NewBaseContext(BaseContextOpts{Key: types.INDEXES, ViewName: string(types.INDEXES), Kind: types.SIDE_CONTEXT})
@@ -87,14 +92,16 @@ func TestIndexesContext_EmptyStatePlaceholder(t *testing.T) {
 	if err := c.HandleRender(); err != nil {
 		t.Fatalf("HandleRender: %v", err)
 	}
-	if drv.lastContent != "(select a table)" {
-		t.Errorf("empty INDEXES rail = %q, want %q", drv.lastContent, "(select a table)")
+	if drv.lastContent != "(no indexes)" {
+		t.Errorf("empty INDEXES leaf = %q, want %q", drv.lastContent, "(no indexes)")
 	}
 }
 
-// TestSideRailEmptyState_NilHookFallsThroughToBlank asserts every rail with
-// no RailEmptyText hook wired renders the prior blank output and does not
-// panic (nil-safety AC).
+// TestSideRailEmptyState_NilHookFallsThroughToBlank asserts the SCHEMAS
+// and TABLES rails with no RailEmptyText hook wired render the prior blank
+// output and do not panic (nil-safety AC). COLUMNS/INDEXES are excluded:
+// they are STUB leaves feeding the TABLE_INSPECT popup and now render the
+// aligned-table empty-state ("(no columns)"/"(no indexes)"), not blank.
 func TestSideRailEmptyState_NilHookFallsThroughToBlank(t *testing.T) {
 	cases := []struct {
 		key    types.ContextKey
@@ -105,12 +112,6 @@ func TestSideRailEmptyState_NilHookFallsThroughToBlank(t *testing.T) {
 		}},
 		{types.TABLES, func(d Deps) error {
 			return NewTablesContext(NewBaseContext(BaseContextOpts{Key: types.TABLES, ViewName: string(types.TABLES), Kind: types.SIDE_CONTEXT}), d).HandleRender()
-		}},
-		{types.COLUMNS, func(d Deps) error {
-			return NewColumnsContext(NewBaseContext(BaseContextOpts{Key: types.COLUMNS, ViewName: string(types.COLUMNS), Kind: types.SIDE_CONTEXT}), d).HandleRender()
-		}},
-		{types.INDEXES, func(d Deps) error {
-			return NewIndexesContext(NewBaseContext(BaseContextOpts{Key: types.INDEXES, ViewName: string(types.INDEXES), Kind: types.SIDE_CONTEXT}), d).HandleRender()
 		}},
 	}
 	for _, tc := range cases {
