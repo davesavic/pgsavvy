@@ -181,6 +181,30 @@ func RenderStatusLine(d StatusRenderDeps) {
 			}
 		}
 		mode := d.KbRuntime.ModeStore.Get(key)
+
+		// Options-bar collection scope. Defaults to `key` (the active-leaf
+		// redirect above), which matches the QUERY_RAIL leaves — each
+		// registers its ShowInBar bindings under its OWN leaf scope, so the
+		// per-leaf scope yields the right hint set directly.
+		//
+		// The SCHEMA_RAIL diverges: it registers EVERY tab's bindings under
+		// the single SCHEMA_RAIL dispatch scope (key dispatch stays there),
+		// while its leaf scopes (SCHEMAS/TABLES) are empty. Collecting under
+		// the leaf scope would blank the bar. So a container may declare a
+		// distinct OptionsBarScope() (= SCHEMA_RAIL) to source hints from the
+		// dispatch scope; per-tab visibility (hide Inspect off the Tables
+		// tab) is then applied by the existing OptionsBarFilter below.
+		// Containers without OptionsBarScope() keep their per-leaf scope, so
+		// QUERY_RAIL behavior is unchanged.
+		optionsScope := key
+		type optionsBarScoped interface {
+			OptionsBarScope() types.ContextKey
+		}
+		if os, ok := focused.(optionsBarScoped); ok {
+			if s := os.OptionsBarScope(); s != "" {
+				optionsScope = s
+			}
+		}
 		// Always show the mode label, regardless of whether
 		// the focused context is editable. The status bar's mode banner
 		// is part of the always-on baseline (QA 1.1 / 3.1 / 5.1) so the
@@ -202,7 +226,7 @@ func RenderStatusLine(d StatusRenderDeps) {
 			actionFilter = f.OptionsBarFilter()
 		}
 
-		options = CollectOptionsForScope(trieSet, mode, key, d.Tr, actionFilter)
+		options = CollectOptionsForScope(trieSet, mode, optionsScope, d.Tr, actionFilter)
 	}
 
 	var conn *models.Connection

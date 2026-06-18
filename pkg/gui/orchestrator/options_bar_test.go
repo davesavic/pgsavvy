@@ -20,6 +20,10 @@ type optionsBarBinding struct {
 	tag         string
 	description string
 	showInBar   bool
+	// actionID overrides the derived command ID (tag+"."+seq) when set.
+	// Tests that exercise an OptionsBarFilter keying off a real command ID
+	// (e.g. commands.SchemaRailInspect) set this so the filter matches.
+	actionID string
 }
 
 // buildOptionsBarTrieSet routes each binding through the per-(mode,
@@ -38,8 +42,12 @@ func buildOptionsBarTrieSet(t *testing.T, bindings []optionsBarBinding) *keys.Tr
 		if err != nil {
 			t.Fatalf("SequenceFromShorthand(%q): %v", b.seq, err)
 		}
+		id := b.tag + "." + b.seq
+		if b.actionID != "" {
+			id = b.actionID
+		}
 		cmd := &commands.Command{
-			ID:          b.tag + "." + b.seq,
+			ID:          id,
 			Description: b.description,
 			Tag:         b.tag,
 			Handler:     func(commands.ExecCtx) error { return nil },

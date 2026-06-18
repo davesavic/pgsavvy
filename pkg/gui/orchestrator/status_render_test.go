@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/gui"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
@@ -314,6 +315,97 @@ type activeLeafContainer struct {
 }
 
 func (a activeLeafContainer) ActiveLeafKey() types.ContextKey { return a.leafKey }
+
+// schemaRailLike is a focus-stack container modeling the SCHEMA_RAIL: its
+// OWN key is SCHEMA_RAIL, it exposes the active leaf key (SCHEMAS/TABLES) for
+// the mode-lookup redirect, declares OptionsBarScope()=SCHEMA_RAIL so hints
+// are COLLECTED from the dispatch scope (where every tab's bindings live),
+// and uses OptionsBarFilter to hide the Tables-only Inspect off the Schemas
+// tab. inspectVisible toggles the active tab's filter result.
+type schemaRailLike struct {
+	*guicontext.StubContext
+	leafKey        types.ContextKey
+	inspectVisible bool
+}
+
+func (s schemaRailLike) ActiveLeafKey() types.ContextKey   { return s.leafKey }
+func (s schemaRailLike) OptionsBarScope() types.ContextKey { return types.SCHEMA_RAIL }
+func (s schemaRailLike) OptionsBarFilter() func(string) bool {
+	return func(id string) bool {
+		if id == commands.SchemaRailInspect {
+			return s.inspectVisible
+		}
+		return true
+	}
+}
+
+// renderSchemaRailTab drives RenderStatusLine with a SCHEMA_RAIL-like
+// container on the given tab. All bindings register under SCHEMA_RAIL (the
+// dispatch scope); the leaf scopes (SCHEMAS/TABLES) carry none — mirroring
+// the real rail. Returns the rendered status buffer.
+func renderSchemaRailTab(t *testing.T, leafKey types.ContextKey, inspectVisible bool) string {
+	t.Helper()
+	rec := newStatusRenderRecorder(t)
+
+	tree := gui.NewContextTree()
+	container := schemaRailLike{
+		StubContext:    guicontext.NewStubContext(types.SCHEMA_RAIL, string(types.SCHEMA_RAIL)),
+		leafKey:        leafKey,
+		inspectVisible: inspectVisible,
+	}
+	if err := tree.Push(container); err != nil {
+		t.Fatalf("push container: %v", err)
+	}
+
+	ms := keys.NewModeStore()
+	// All schema-rail bindings dispatch under SCHEMA_RAIL in Normal mode.
+	bindings := []optionsBarBinding{
+		{seq: "<cr>", mode: types.ModeNormal, scope: types.SCHEMA_RAIL, tag: "Nav", description: "Confirm", showInBar: true},
+		{seq: "]", mode: types.ModeNormal, scope: types.SCHEMA_RAIL, tag: "Tab", description: "Next tab", showInBar: true},
+		{seq: "i", mode: types.ModeNormal, scope: types.SCHEMA_RAIL, tag: "Inspect", description: "Inspect", showInBar: true, actionID: commands.SchemaRailInspect},
+	}
+	matcher, err := keys.NewMatcher(buildOptionsBarTrieSet(t, bindings), keys.MatcherConfig{Modes: ms})
+	if err != nil {
+		t.Fatalf("NewMatcher: %v", err)
+	}
+	rt := keys.NewRuntime(nil, matcher, ms, nil, nil)
+
+	RenderStatusLine(StatusRenderDeps{
+		Driver:    rec,
+		Tree:      tree,
+		KbRuntime: rt,
+		Tr:        i18n.EnglishTranslationSet(),
+	})
+	return rec.GetViewBuffer(AppStatusViewName)
+}
+
+// TestRenderStatusLine_SchemaRailPerLeafHints covers pgsavvy-2t77.5: the
+// SCHEMA_RAIL registers all bindings under one dispatch scope, so the status
+// bar sources hints from OptionsBarScope()=SCHEMA_RAIL (not the empty leaf
+// scope) and applies OptionsBarFilter for per-tab Inspect visibility.
+//
+//   - Schemas tab: tab-agnostic hints, NO Inspect.
+//   - Tables tab: tab-agnostic hints PLUS Inspect.
+//
+// Mode dispatch is unaffected (collection scope only); this proves the
+// schema bar no longer blanks after the active-leaf redirect.
+func TestRenderStatusLine_SchemaRailPerLeafHints(t *testing.T) {
+	schemas := renderSchemaRailTab(t, types.SCHEMAS, false)
+	if !strings.Contains(schemas, "Confirm") || !strings.Contains(schemas, "Next tab") {
+		t.Fatalf("Schemas tab buffer = %q; want tab-agnostic hints (Confirm, Next tab)", schemas)
+	}
+	if strings.Contains(schemas, "Inspect") {
+		t.Fatalf("Schemas tab buffer = %q; want NO Inspect hint", schemas)
+	}
+
+	tables := renderSchemaRailTab(t, types.TABLES, true)
+	if !strings.Contains(tables, "Confirm") || !strings.Contains(tables, "Next tab") {
+		t.Fatalf("Tables tab buffer = %q; want tab-agnostic hints (Confirm, Next tab)", tables)
+	}
+	if !strings.Contains(tables, "Inspect") {
+		t.Fatalf("Tables tab buffer = %q; want Inspect hint", tables)
+	}
+}
 
 // renderWithActiveLeaf drives RenderStatusLine through its default branch
 // with a focused activeLeafContainer (own key QUERY_RAIL), a Matcher whose

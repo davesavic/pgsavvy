@@ -328,21 +328,36 @@ func contextTypesDeclaringHandleRender(t *testing.T) map[string]bool {
 		t.Fatalf("parse context package: %v", err)
 	}
 	declared := map[string]bool{}
+	// embeds maps a struct type name to the set of pointer-embedded struct
+	// type names it promotes methods from (e.g. QueryRailContext embeds
+	// *TabbedRailContext). A type that does not declare its own HandleRender
+	// but embeds a type that does inherits a NON-no-op HandleRender via Go
+	// promotion, which the structural heuristic must treat as "declared".
+	embeds := map[string][]string{}
 	for _, pkg := range pkgs {
 		for _, f := range pkg.Files {
 			for _, d := range f.Decls {
-				fn, ok := d.(*ast.FuncDecl)
-				if !ok || fn.Recv == nil || fn.Name.Name != "HandleRender" {
-					continue
-				}
-				if len(fn.Recv.List) == 0 {
-					continue
-				}
-				if star, ok := fn.Recv.List[0].Type.(*ast.StarExpr); ok {
-					if id, ok := star.X.(*ast.Ident); ok {
-						declared[id.Name] = true
+				if fn, ok := d.(*ast.FuncDecl); ok {
+					if fn.Recv == nil || fn.Name.Name != "HandleRender" || len(fn.Recv.List) == 0 {
+						continue
 					}
+					if star, ok := fn.Recv.List[0].Type.(*ast.StarExpr); ok {
+						if id, ok := star.X.(*ast.Ident); ok {
+							declared[id.Name] = true
+						}
+					}
+					continue
 				}
+				collectEmbeddedStructs(d, embeds)
+			}
+		}
+	}
+	// Propagate promotion: a type embedding a HandleRender-declaring type
+	// (transitively) declares it too.
+	for name, parents := range embeds {
+		for _, p := range parents {
+			if declared[p] {
+				declared[name] = true
 			}
 		}
 	}
@@ -350,4 +365,36 @@ func contextTypesDeclaringHandleRender(t *testing.T) map[string]bool {
 		t.Fatal("parsed context package but found no HandleRender declarations")
 	}
 	return declared
+}
+
+// collectEmbeddedStructs records, for a struct type decl, the names of its
+// pointer-embedded struct fields (e.g. *TabbedRailContext) so promoted
+// HandleRender methods are attributed to the embedding type.
+func collectEmbeddedStructs(d ast.Decl, embeds map[string][]string) {
+	gd, ok := d.(*ast.GenDecl)
+	if !ok || gd.Tok != token.TYPE {
+		return
+	}
+	for _, spec := range gd.Specs {
+		ts, ok := spec.(*ast.TypeSpec)
+		if !ok {
+			continue
+		}
+		st, ok := ts.Type.(*ast.StructType)
+		if !ok {
+			continue
+		}
+		for _, field := range st.Fields.List {
+			if len(field.Names) != 0 {
+				continue // named field, not embedded
+			}
+			star, ok := field.Type.(*ast.StarExpr)
+			if !ok {
+				continue
+			}
+			if id, ok := star.X.(*ast.Ident); ok {
+				embeds[ts.Name.Name] = append(embeds[ts.Name.Name], id.Name)
+			}
+		}
+	}
 }
