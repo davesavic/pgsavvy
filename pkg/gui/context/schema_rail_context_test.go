@@ -7,6 +7,7 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
@@ -281,4 +282,40 @@ func TestSchemaRail_SetActiveTabClamps(t *testing.T) {
 // suffices).
 func containsRow(body, name string) bool {
 	return strings.Contains(body, name)
+}
+
+// TestSchemaRailContext_OptionsBarFilterScopesInspectToTablesTab locks the
+// fix for the leaked status-bar hint: SchemaRailInspect (the `i` "inspect
+// table" binding) is tab-unique to Tables, so the options bar must NOT
+// advertise it while the Schemas tab is active. Tab-agnostic ShowInBar
+// actions stay visible on both tabs.
+func TestSchemaRailContext_OptionsBarFilterScopesInspectToTablesTab(t *testing.T) {
+	tree := newRailTree(&railTestDriver{})
+	rail := tree.SchemaRail
+	if rail.ActiveTab() != SchemaRailTabSchemas {
+		t.Fatalf("precondition: active tab = %d, want Schemas (%d)", rail.ActiveTab(), SchemaRailTabSchemas)
+	}
+
+	schemasFilter := rail.OptionsBarFilter()
+	if schemasFilter == nil {
+		t.Fatal("Schemas tab OptionsBarFilter() = nil, want a predicate that hides Tables-only actions")
+	}
+	if schemasFilter(commands.SchemaRailInspect) {
+		t.Error("Schemas tab advertises SchemaRailInspect, want it hidden")
+	}
+	for _, id := range []string{
+		commands.SchemaRailConfirm,
+		commands.RailTabNext,
+		commands.RailTabPrev,
+	} {
+		if !schemasFilter(id) {
+			t.Errorf("Schemas tab hides tab-agnostic %q, want it visible", id)
+		}
+	}
+
+	rail.SetActiveTab(SchemaRailTabTables)
+	tablesFilter := rail.OptionsBarFilter()
+	if tablesFilter == nil || !tablesFilter(commands.SchemaRailInspect) {
+		t.Error("Tables tab hides SchemaRailInspect, want it visible")
+	}
 }

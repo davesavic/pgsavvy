@@ -1,6 +1,9 @@
 package context
 
-import "github.com/davesavic/pgsavvy/pkg/gui/types"
+import (
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+)
 
 // SchemaRailTabSchemas / SchemaRailTabTables are the fixed active-tab
 // indices the SCHEMA_RAIL container multiplexes. The default tab is
@@ -197,6 +200,25 @@ func (s *SchemaRailContext) restoreActiveOrigin() {
 		return
 	}
 	v.SetOrigin(saved[0], saved[1])
+}
+
+// OptionsBarFilter returns a predicate that hides tab-unique ShowInBar
+// actions when their owning tab is not active, so the status bar advertises
+// only the active tab's hints rather than the union of all tabs. The
+// SCHEMA_RAIL scope registers every tab's bindings under one scope, so
+// without this filter SchemaRailInspect (the Tables-only `i` "inspect table"
+// binding) leaks onto the Schemas tab. Inspect is currently the only
+// tab-unique binding flagged ShowInBar; all other shown bindings are
+// tab-agnostic and pass through. The status bar renderer type-asserts to
+// this method each frame.
+func (s *SchemaRailContext) OptionsBarFilter() func(string) bool {
+	onTables := s.activeTab == SchemaRailTabTables
+	return func(id string) bool {
+		if id == commands.SchemaRailInspect {
+			return onTables
+		}
+		return true
+	}
 }
 
 // clampSchemaRailTab clamps an arbitrary index into the valid tab range.
