@@ -33,6 +33,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/pgsavvy/pkg/gui/orchestrator"
@@ -525,18 +526,24 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 	t.Run("step11_mouse_double_click_toast", func(t *testing.T) {
 		// The TABLES double-click goes through the WireMouse helper,
 		// which only registers when cfg.UI.Mouse.Enabled is true (default).
-		// FeedMouse replays the recorded handler synchronously.
-		err := s.rec.FeedMouse(string(types.TABLES), types.MouseLeft, types.ModNone, types.ViewMouseBindingOpts{
+		// Since the rail consolidation the binding is re-homed onto the
+		// SCHEMA_RAIL container view ("schemas-tables") and gated on the
+		// Tables tab being active (railTablesTabActive), so we activate that
+		// tab first and feed the double-click to the container view rather
+		// than the former standalone TABLES view. FeedMouse replays the
+		// recorded handler synchronously.
+		s.g.Registry().SchemaRail.SetActiveTab(guicontext.SchemaRailTabTables)
+		err := s.rec.FeedMouse(guicontext.SchemaRailViewName, types.MouseLeft, types.ModNone, types.ViewMouseBindingOpts{
 			X:             0,
 			Y:             0,
 			Key:           types.MouseLeft,
 			IsDoubleClick: true,
 		})
 		if err != nil {
-			t.Fatalf("FeedMouse(tables, MouseLeft, double): %v", err)
+			t.Fatalf("FeedMouse(schema-rail, MouseLeft, double): %v", err)
 		}
 		// The wired handler pushes the TABLES context, then (because
-		// IsDoubleClick && view == TABLES) invokes DoubleClickStub, which
+		// IsDoubleClick && the Tables tab is active) invokes DoubleClickStub, which
 		// calls toast.Show(Tr.TableDataEditDeferred). The toast string
 		// must now contain the i18n message.
 		// We can't reach the orchestrator's private toast helper here;
@@ -583,19 +590,22 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 		if after <= before {
 			t.Fatalf("RunLayout did not fire on SetSize: before=%d after=%d", before, after)
 		}
-		// At normal size the schemas rail view must be (re)created. Check the
-		// SetView calls from THIS layout pass (after the resize) rather than
-		// all-time history, which would already contain schemas from the
-		// earlier connect/navigate steps and pass tautologically.
+		// At normal size the schemas rail view must be (re)created. Since the
+		// rail consolidation the side rails share one SCHEMA_RAIL container
+		// view ("schemas-tables") — that is the name SetView fires for, not the
+		// former standalone SCHEMAS view. Check the SetView calls from THIS
+		// layout pass (after the resize) rather than all-time history, which
+		// would already contain the rail from the earlier connect/navigate
+		// steps and pass tautologically.
 		found := false
 		for _, c := range calls[before:] {
-			if c.Name == string(types.SCHEMAS) {
+			if c.Name == guicontext.SchemaRailViewName {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Fatal("expected schemas rail SetView after resize back")
+			t.Fatal("expected schema rail SetView after resize back")
 		}
 	})
 
