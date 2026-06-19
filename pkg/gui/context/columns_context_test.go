@@ -137,6 +137,119 @@ func TestColumnsContext_HandleRenderNullableOmitsMarker(t *testing.T) {
 	}
 }
 
+// TestColumnsContext_HandleRenderDescriptionColumn asserts a DESCRIPTION
+// header appears when at least one column is documented, the documented
+// row shows its comment, and an undocumented row stays column-aligned with
+// a blank description cell.
+func TestColumnsContext_HandleRenderDescriptionColumn(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestColumns(drv)
+	c.SetItems([]any{
+		models.Column{Name: "id", DataType: "integer", Nullable: false, Description: "primary id"},
+		models.Column{Name: "name", DataType: "text", Nullable: true},
+	})
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	body := drv.lastContent
+	lines := strings.Split(body, "\n")
+	header := lines[0]
+	if !strings.Contains(header, "DESCRIPTION") {
+		t.Errorf("header %q missing DESCRIPTION", header)
+	}
+	if !strings.Contains(lines[1], "primary id") {
+		t.Errorf("id row %q missing description", lines[1])
+	}
+	// The DESCRIPTION column starts at the same offset on header and on the
+	// documented row; the undocumented row simply has no text there.
+	descOff := strings.Index(header, "DESCRIPTION")
+	if got := strings.Index(lines[1], "primary id"); got != descOff {
+		t.Errorf("DESCRIPTION not aligned: header offset %d, row offset %d (header=%q row=%q)",
+			descOff, got, header, lines[1])
+	}
+	if strings.Contains(lines[2], "primary id") {
+		t.Errorf("name row %q should have a blank description", lines[2])
+	}
+}
+
+// TestColumnsContext_HandleRenderNoDescriptionColumn asserts that when no
+// column is documented the DESCRIPTION column is suppressed: exactly four
+// columns and no trailing whitespace on any line.
+func TestColumnsContext_HandleRenderNoDescriptionColumn(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestColumns(drv)
+	c.SetItems([]any{
+		models.Column{Name: "id", DataType: "integer", Nullable: false},
+		models.Column{Name: "name", DataType: "text", Nullable: true},
+	})
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	body := drv.lastContent
+	if strings.Contains(body, "DESCRIPTION") {
+		t.Errorf("undocumented table must not render DESCRIPTION: %q", body)
+	}
+	for _, line := range strings.Split(body, "\n") {
+		if line != strings.TrimRight(line, " ") {
+			t.Errorf("line has trailing whitespace: %q", line)
+		}
+	}
+}
+
+// TestColumnsContext_HandleRenderDescriptionTruncated asserts a long
+// description is truncated with an ellipsis.
+func TestColumnsContext_HandleRenderDescriptionTruncated(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestColumns(drv)
+	long := strings.Repeat("a", 100)
+	c.SetItems([]any{
+		models.Column{Name: "id", DataType: "integer", Description: long},
+	})
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	body := drv.lastContent
+	if !strings.Contains(body, "…") {
+		t.Errorf("long description should be truncated with ellipsis: %q", body)
+	}
+	if strings.Contains(body, long) {
+		t.Errorf("long description should not appear in full: %q", body)
+	}
+}
+
+// TestColumnsContext_HandleRenderDescriptionSingleLine asserts a multi-line
+// comment is rendered on a single line (newlines collapsed to spaces).
+func TestColumnsContext_HandleRenderDescriptionSingleLine(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestColumns(drv)
+	c.SetItems([]any{
+		models.Column{Name: "id", DataType: "integer", Description: "line1\nline2"},
+	})
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	body := drv.lastContent
+	if !strings.Contains(body, "line1 line2") {
+		t.Errorf("multi-line description should render as one line: %q", body)
+	}
+}
+
+// TestColumnsContext_HandleRenderDescriptionSafeText asserts a control byte
+// in a description is sanitized rather than written raw.
+func TestColumnsContext_HandleRenderDescriptionSafeText(t *testing.T) {
+	drv := &captureDriver{}
+	c := newTestColumns(drv)
+	c.SetItems([]any{
+		models.Column{Name: "id", DataType: "integer", Description: "ev\x1bil"},
+	})
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	if strings.Contains(drv.lastContent, "\x1b") {
+		t.Errorf("body retains raw ESC: %q", drv.lastContent)
+	}
+}
+
 // TestColumnsContext_HandleRenderNoOrigin asserts the leaf render does
 // not write the view origin (SetViewOrigin must not be called).
 func TestColumnsContext_HandleRenderNoOrigin(t *testing.T) {

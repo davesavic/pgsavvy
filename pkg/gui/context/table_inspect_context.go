@@ -1,6 +1,13 @@
 package context
 
-import "github.com/davesavic/pgsavvy/pkg/gui/types"
+import (
+	"strconv"
+	"strings"
+
+	"github.com/davesavic/pgsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
+)
 
 // TableInspectViewName is the single gocui view the TABLE_INSPECT container and
 // both leaves (COLUMNS, INDEXES) render into (many-contexts-ONE-view topology).
@@ -37,6 +44,12 @@ type TableInspectContext struct {
 	schema  string
 	table   string
 
+	// tbl is the live target table reference (set per open via SetStats). Its
+	// atomic counters are read LIVE in StatsLine each frame so the subtitle
+	// reflects the async stats enrichment after the popup opens. nil until the
+	// first SetStats; reset on every reopen so a stale prior table never shows.
+	tbl *models.Table
+
 	// scroll holds the per-tab (x, y) view origin offsets (columns / lines),
 	// sized to the tab count and indexed by the embedded core's ActiveTab().
 	// This context owns only the top/left clamp (>= 0); the layout pass
@@ -47,9 +60,10 @@ type TableInspectContext struct {
 }
 
 // NewTableInspectContext builds a TableInspectContext bound to TABLE_INSPECT as
-// a thin adapter over a TabbedRailContext core with exactly two tabs (Columns,
-// Indexes). Leaf references are injected via the promoted SetLeaves at wiring
-// time (setup.go). The active tab defaults to Columns (0).
+// a thin adapter over a TabbedRailContext core with four tabs (Columns,
+// Indexes, Foreign Keys, Constraints). Leaf references are injected via the
+// promoted SetLeaves at wiring time (setup.go). The active tab defaults to
+// Columns (0).
 func NewTableInspectContext(base BaseContext, deps Deps) *TableInspectContext {
 	core := NewTabbedRailContext(base, deps, TabbedRailOpts{
 		// FireFocusHooks=false: both leaves share the single TABLE_INSPECT
@@ -65,12 +79,32 @@ func NewTableInspectContext(base BaseContext, deps Deps) *TableInspectContext {
 		// never survives to be restored.)
 		TabSpec{Label: "Columns", LeafKey: types.COLUMNS, ManagesOwnOrigin: true},
 		TabSpec{Label: "Indexes", LeafKey: types.INDEXES, ManagesOwnOrigin: true},
+		TabSpec{Label: "Foreign Keys", LeafKey: types.FOREIGN_KEYS, ManagesOwnOrigin: true},
+		TabSpec{Label: "Constraints", LeafKey: types.CONSTRAINTS, ManagesOwnOrigin: true},
 	)
-	return &TableInspectContext{
+	c := &TableInspectContext{
 		TabbedRailContext: core,
 		deps:              deps,
 		scroll:            make([][2]int, core.TabCount()),
 	}
+	// Pin the table's stats line as the first body line above the active leaf.
+	// The 4-tab top border (Columns/Indexes/Foreign Keys/Constraints) leaves no
+	// room for a right-aligned subtitle, so the stats live in the body instead.
+	// bodyHeaderLine returns "" until a target is set, so the hook is inert for
+	// the unwired/no-target case (leaf-only render).
+	core.SetBodyHeader(c.bodyHeaderLine)
+	return c
+}
+
+// bodyHeaderLine is the stats provider fed to the core's body-header hook. It
+// returns "" before a target is set so the core renders leaf-only; once a
+// target exists it returns StatsLine ("schema.table" plus "~N rows · size" once
+// the async stats land).
+func (c *TableInspectContext) bodyHeaderLine() string {
+	if c.schema == "" && c.table == "" {
+		return ""
+	}
+	return c.StatsLine()
 }
 
 // HandleRender writes "Loading…" into the view while a columns/indexes fetch is
@@ -175,4 +209,70 @@ func (c *TableInspectContext) SetTarget(schema, table string) {
 	for i := range c.scroll {
 		c.scroll[i] = [2]int{0, 0}
 	}
+}
+
+// SetStats records the live target table reference whose atomic stats counters
+// StatsLine reads each frame. Stored as a reference (NOT copied ints) because
+// EstimatedRows/SizeBytes enrich ASYNC after the popup opens; a captured int
+// snapshot would never reflect the later fill. Called on every open so a stale
+// prior table is never shown.
+func (c *TableInspectContext) SetStats(tbl *models.Table) { c.tbl = tbl }
+
+// StatsLine composes the popup's top-border subtitle: "schema.table" always,
+// optionally followed by "  ~<N> rows · <size>". Stats are read LIVE via the
+// atomic counters' Load() each frame (see SetStats). The stats segment is
+// suppressed (schema.table only) when rows < 0 (never-analyzed reltuples=-1) or
+// rows == 0 && bytes == 0 (async fill not yet landed) so the popup never renders
+// the "~0 rows · 0 B" lie.
+func (c *TableInspectContext) StatsLine() string {
+	base := config.SafeText(c.schema) + "." + config.SafeText(c.table)
+	if c.tbl == nil {
+		return base
+	}
+	rows := c.tbl.EstimatedRows.Load()
+	bytes := c.tbl.SizeBytes.Load()
+	if rows < 0 || (rows == 0 && bytes == 0) {
+		return base
+	}
+	return base + "  ~" + humanizeRows(rows) + " rows · " + bytesHuman(bytes)
+}
+
+// humanizeRows renders a row estimate compactly: < 1000 exact, >= 1000 -> "1.2k",
+// >= 1e6 -> "1.2M". Negatives clamp to "0". Mirrors
+// controllers.humanizeEstimate (reimplemented here to avoid a cross-package
+// import).
+func humanizeRows(n int64) string {
+	if n < 1000 {
+		if n < 0 {
+			return "0"
+		}
+		return strconv.FormatInt(n, 10)
+	}
+	if n < 1_000_000 {
+		return trimRows(float64(n)/1000) + "k"
+	}
+	return trimRows(float64(n)/1_000_000) + "M"
+}
+
+// trimRows renders v to one decimal place, dropping a trailing ".0" so
+// 1200 -> "1.2", 12000 -> "12".
+func trimRows(v float64) string {
+	return strings.TrimSuffix(strconv.FormatFloat(v, 'f', 1, 64), ".0")
+}
+
+// bytesHuman renders a byte count base-1024: bytes < 1024 as exact "N B" (no
+// decimal); KB and up with exactly one decimal place (B/KB/MB/GB/TB).
+func bytesHuman(n int64) string {
+	if n < 1024 {
+		return strconv.FormatInt(n, 10) + " B"
+	}
+	units := []string{"KB", "MB", "GB", "TB"}
+	v := float64(n) / 1024
+	for _, u := range units {
+		if v < 1024 || u == "TB" {
+			return strconv.FormatFloat(v, 'f', 1, 64) + " " + u
+		}
+		v /= 1024
+	}
+	return strconv.FormatFloat(v, 'f', 1, 64) + " TB"
 }

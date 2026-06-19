@@ -31,12 +31,21 @@ import (
 // stub every other Session/Connection method with zero values.
 
 type wireFakeSession struct {
-	id           models.SessionID
-	schemas      []models.Schema
-	indexes      []models.Index
-	columns      []models.Column
-	schemasErr   error
-	schemasBlock chan struct{}
+	id             models.SessionID
+	schemas        []models.Schema
+	indexes        []models.Index
+	columns        []models.Column
+	constraints    []models.Constraint
+	outboundFKs    []models.ForeignKey
+	inboundFKs     []models.ForeignKey
+	constraintsErr error
+	outboundFKErr  error
+	inboundFKErr   error
+	statsRows      int64
+	statsBytes     int64
+	statsErr       error
+	schemasErr     error
+	schemasBlock   chan struct{}
 }
 
 func (s *wireFakeSession) Close() error         { return nil }
@@ -72,15 +81,31 @@ func (s *wireFakeSession) ListIndexes(_ context.Context, _, _ string) ([]models.
 }
 
 func (s *wireFakeSession) ListConstraints(_ context.Context, _, _ string) ([]models.Constraint, error) {
-	return nil, nil
+	if s.constraintsErr != nil {
+		return nil, s.constraintsErr
+	}
+	return s.constraints, nil
 }
 
 func (s *wireFakeSession) ListForeignKeys(_ context.Context, _, _ string) ([]models.ForeignKey, error) {
-	return nil, nil
+	if s.outboundFKErr != nil {
+		return nil, s.outboundFKErr
+	}
+	return s.outboundFKs, nil
 }
 
 func (s *wireFakeSession) ListInboundForeignKeys(_ context.Context, _, _ string) ([]models.ForeignKey, error) {
-	return nil, nil
+	if s.inboundFKErr != nil {
+		return nil, s.inboundFKErr
+	}
+	return s.inboundFKs, nil
+}
+
+func (s *wireFakeSession) TableStats(_ context.Context, _, _ string) (int64, int64, error) {
+	if s.statsErr != nil {
+		return 0, 0, s.statsErr
+	}
+	return s.statsRows, s.statsBytes, nil
 }
 
 func (s *wireFakeSession) ListFunctions(_ context.Context) ([]string, error) {
@@ -121,6 +146,19 @@ type wireFakeConn struct {
 	schemas  []models.Schema
 	indexes  []models.Index
 	columns  []models.Column
+	// constraints/outboundFKs/inboundFKs and their *Err siblings feed the
+	// FOREIGN_KEYS / CONSTRAINTS leaf population fakes (x637 table-inspect).
+	constraints    []models.Constraint
+	outboundFKs    []models.ForeignKey
+	inboundFKs     []models.ForeignKey
+	constraintsErr error
+	outboundFKErr  error
+	inboundFKErr   error
+	// statsRows/statsBytes/statsErr feed the table-inspect stats worker
+	// (T5 per-table TableStats fetch).
+	statsRows  int64
+	statsBytes int64
+	statsErr   error
 	// openHook fires from wireFakeDriver.Open during the dial, before the
 	// connection is returned. The supersession test uses it
 	// to bump the Gui's connectGen mid-dial (simulating a newer activation
@@ -155,12 +193,21 @@ func (c *wireFakeConn) Cancel(_ context.Context, _ models.QueryID) error { retur
 func (c *wireFakeConn) AcquireSession(_ context.Context) (drivers.Session, error) {
 	n := c.acquired.Add(1)
 	return &wireFakeSession{
-		id:           models.SessionID(n),
-		schemas:      c.schemas,
-		indexes:      c.indexes,
-		columns:      c.columns,
-		schemasErr:   c.schemasErr,
-		schemasBlock: c.schemasBlock,
+		id:             models.SessionID(n),
+		schemas:        c.schemas,
+		indexes:        c.indexes,
+		columns:        c.columns,
+		constraints:    c.constraints,
+		outboundFKs:    c.outboundFKs,
+		inboundFKs:     c.inboundFKs,
+		constraintsErr: c.constraintsErr,
+		outboundFKErr:  c.outboundFKErr,
+		inboundFKErr:   c.inboundFKErr,
+		statsRows:      c.statsRows,
+		statsBytes:     c.statsBytes,
+		statsErr:       c.statsErr,
+		schemasErr:     c.schemasErr,
+		schemasBlock:   c.schemasBlock,
 	}, nil
 }
 

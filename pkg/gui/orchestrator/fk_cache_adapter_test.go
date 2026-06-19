@@ -61,6 +61,10 @@ func (s *fkGuardSession) ListInboundForeignKeys(context.Context, string, string)
 	return s.rev, nil
 }
 
+func (s *fkGuardSession) TableStats(context.Context, string, string) (int64, int64, error) {
+	return 0, 0, nil
+}
+
 // Remaining drivers.Session surface: trivial stubs (unexercised by these
 // tests). Stream is never reached — the parked guard is simulated directly
 // via acquire() and the tab is opened with a nil RunHandle.

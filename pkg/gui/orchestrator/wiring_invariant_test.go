@@ -78,6 +78,11 @@ func TestWiringInvariant(t *testing.T) {
 		// are never pushed/flattened on their own.
 		types.COLUMNS: "TABLE_INSPECT container leaf; not flattened (container renders the shared view)",
 		types.INDEXES: "TABLE_INSPECT container leaf; not flattened (container renders the shared view)",
+		// FOREIGN_KEYS/CONSTRAINTS are the remaining TABLE_INSPECT container tab
+		// leaves (Kind=STUB, inFlatten=false): retained as ContextTree fields but
+		// intentionally absent from Flatten() for the same reason as COLUMNS/INDEXES.
+		types.FOREIGN_KEYS: "TABLE_INSPECT container leaf; not flattened (container renders the shared view)",
+		types.CONSTRAINTS:  "TABLE_INSPECT container leaf; not flattened (container renders the shared view)",
 		// SCHEMAS/TABLES are the SCHEMA_RAIL container's leaves: they retain
 		// ContextTree struct fields but carry inFlatten=false (the container is
 		// the only flattened side context and the only renderer of the shared
@@ -212,6 +217,9 @@ func contextSpecKeysFromTree(tree *context.ContextTree) []types.ContextKey {
 	// COLUMNS/INDEXES deferred rails and the SCHEMAS/TABLES leaves the
 	// SCHEMA_RAIL container multiplexes.
 	out = append(out, tree.Columns.GetKey(), tree.Indexes.GetKey(), tree.Schemas.GetKey(), tree.Tables.GetKey())
+	// FOREIGN_KEYS/CONSTRAINTS: the remaining TABLE_INSPECT container tab leaves
+	// (inFlatten=false), retained as named fields but excluded from Flatten().
+	out = append(out, tree.ForeignKeys.GetKey(), tree.Constraints.GetKey())
 	// QUERY_EDITOR/SAVED_QUERY/HISTORY are the QUERY_RAIL container's leaves
 	// (inFlatten=false, tkt5.2 topology flip): retained as named fields but
 	// excluded from Flatten() (the container is the only flattened main

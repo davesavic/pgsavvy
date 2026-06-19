@@ -484,6 +484,8 @@ func allContextKeyKinds() map[types.ContextKey]types.ContextKind {
 		types.SCHEMA_RAIL:        types.SIDE_CONTEXT,
 		types.COLUMNS:            types.STUB,
 		types.INDEXES:            types.STUB,
+		types.FOREIGN_KEYS:       types.STUB,
+		types.CONSTRAINTS:        types.STUB,
 		types.QUERY_RAIL:         types.MAIN_CONTEXT,
 		types.QUERY_EDITOR:       types.MAIN_CONTEXT,
 		types.TABLE_DATA_EDITOR:  types.STUB,

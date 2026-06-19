@@ -101,8 +101,8 @@ func TestTableInspectContext_Composition(t *testing.T) {
 	if got := c.GetViewName(); got != TableInspectViewName {
 		t.Errorf("outer.GetViewName() = %q, want %q", got, TableInspectViewName)
 	}
-	if got := c.TabCount(); got != 2 {
-		t.Fatalf("TabCount() = %d, want 2 (Columns, Indexes)", got)
+	if got := c.TabCount(); got != 4 {
+		t.Fatalf("TabCount() = %d, want 4 (Columns, Indexes, Foreign Keys, Constraints)", got)
 	}
 }
 
@@ -189,6 +189,64 @@ func TestTableInspectContext_HandleRender_DelegatesToActiveLeaf(t *testing.T) {
 	body = drv.GetViewBuffer(TableInspectViewName)
 	if !strings.Contains(body, "pk_users") {
 		t.Errorf("indexes body = %q; want index name", body)
+	}
+}
+
+// TestTableInspectContext_HandleRender_StatsHeader proves the stats (estimated
+// rows/size) render as the FIRST body line above the active leaf's content once
+// loading is off — the body-header topology that replaced the colliding
+// top-border subtitle (the 4-tab strip left no room for it). The leaf content
+// must still follow beneath the header.
+func TestTableInspectContext_HandleRender_StatsHeader(t *testing.T) {
+	drv := newRecorderWithInspectView()
+	c := newTestTableInspect(drv)
+	c.SetLoading(false)
+	c.SetTarget("public", "users")
+
+	tbl := &models.Table{Schema: "public", Name: "users"}
+	tbl.EstimatedRows.Store(12000)
+	tbl.SizeBytes.Store(4194304)
+	c.SetStats(tbl)
+
+	cols := c.TabbedRailContext.tabs[0].leaf.(*ColumnsContext)
+	cols.SetItems([]any{&models.Column{Name: "id", DataType: "int"}})
+
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	body := drv.GetViewBuffer(TableInspectViewName)
+	lines := strings.Split(body, "\n")
+	if len(lines) < 3 {
+		t.Fatalf("body has %d lines, want >= 3 (header, blank, leaf): %q", len(lines), body)
+	}
+	if !strings.Contains(lines[0], "public.users") || !strings.Contains(lines[0], "~12k rows") {
+		t.Errorf("first body line = %q; want stats header with table + ~12k rows", lines[0])
+	}
+	if lines[1] != "" {
+		t.Errorf("second body line = %q; want blank line separating header from table", lines[1])
+	}
+	if !strings.Contains(body, "NAME") || !strings.Contains(body, "id") {
+		t.Errorf("body missing leaf content below header: %q", body)
+	}
+}
+
+// TestTableInspectContext_HandleRender_NoTargetNoHeader proves the body-header
+// hook stays inert until a target is set: with no schema/table, HandleRender
+// renders ONLY the leaf body (no leading "." header line).
+func TestTableInspectContext_HandleRender_NoTargetNoHeader(t *testing.T) {
+	drv := newRecorderWithInspectView()
+	c := newTestTableInspect(drv)
+	c.SetLoading(false)
+
+	cols := c.TabbedRailContext.tabs[0].leaf.(*ColumnsContext)
+	cols.SetItems([]any{&models.Column{Name: "id", DataType: "int"}})
+
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender: %v", err)
+	}
+	body := drv.GetViewBuffer(TableInspectViewName)
+	if !strings.HasPrefix(body, "NAME") {
+		t.Errorf("body = %q; want leaf content with no stats header (prefix NAME)", body)
 	}
 }
 
@@ -342,4 +400,103 @@ func TestTableInspectContext_SatisfiesScroller(t *testing.T) {
 		SetScrollY(int)
 	}
 	var _ tableInspectScroller = newTestTableInspect(nil)
+}
+
+// TestBytesHuman asserts the base-1024 humanizer: bytes < 1024 render exact
+// with no decimal; KB and up render with exactly one decimal place.
+func TestBytesHuman(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want string
+	}{
+		{512, "512 B"},
+		{1536, "1.5 KB"},
+		{4194304, "4.0 MB"},
+		{2147483648, "2.0 GB"},
+		{0, "0 B"},
+	}
+	for _, tc := range cases {
+		if got := bytesHuman(tc.in); got != tc.want {
+			t.Errorf("bytesHuman(%d) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestHumanizeRows asserts the compact row-estimate formatter, mirroring
+// controllers.humanizeEstimate's style (12000 -> "12k").
+func TestHumanizeRows(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1200, "1.2k"},
+		{12000, "12k"},
+		{1_500_000, "1.5M"},
+		{-1, "0"},
+	}
+	for _, tc := range cases {
+		if got := humanizeRows(tc.in); got != tc.want {
+			t.Errorf("humanizeRows(%d) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestStatsLine_Suppression asserts the stats segment is omitted (schema.table
+// only) for never-analyzed (rows = -1) and not-yet-loaded (rows = 0 && bytes =
+// 0) tables, so the popup never renders the "~0 rows · 0 B" lie.
+func TestStatsLine_Suppression(t *testing.T) {
+	c := newTestTableInspect(nil)
+	c.SetTarget("public", "users")
+
+	// No table set yet: schema.table only.
+	if got := c.StatsLine(); got != "public.users" {
+		t.Errorf("nil tbl: StatsLine() = %q, want %q", got, "public.users")
+	}
+
+	neverAnalyzed := &models.Table{Schema: "public", Name: "users"}
+	neverAnalyzed.EstimatedRows.Store(-1)
+	c.SetStats(neverAnalyzed)
+	if got := c.StatsLine(); got != "public.users" {
+		t.Errorf("rows=-1: StatsLine() = %q, want %q", got, "public.users")
+	}
+
+	notLoaded := &models.Table{Schema: "public", Name: "users"}
+	notLoaded.EstimatedRows.Store(0)
+	notLoaded.SizeBytes.Store(0)
+	c.SetStats(notLoaded)
+	if got := c.StatsLine(); got != "public.users" {
+		t.Errorf("rows=0&&bytes=0: StatsLine() = %q, want %q", got, "public.users")
+	}
+}
+
+// TestStatsLine_Composed asserts a loaded table renders the schema.table plus a
+// ~N-rows form and a humanized size, read LIVE from the atomic counters.
+func TestStatsLine_Composed(t *testing.T) {
+	c := newTestTableInspect(nil)
+	c.SetTarget("public", "users")
+
+	tbl := &models.Table{Schema: "public", Name: "users"}
+	tbl.EstimatedRows.Store(12000)
+	tbl.SizeBytes.Store(4194304)
+	c.SetStats(tbl)
+
+	got := c.StatsLine()
+	if !strings.HasPrefix(got, "public.users") {
+		t.Errorf("StatsLine() = %q, want prefix %q", got, "public.users")
+	}
+	if !strings.Contains(got, "~12k rows") {
+		t.Errorf("StatsLine() = %q, want it to contain %q", got, "~12k rows")
+	}
+	if !strings.Contains(got, "4.0 MB") {
+		t.Errorf("StatsLine() = %q, want it to contain %q", got, "4.0 MB")
+	}
+
+	// LIVE read: a later async enrichment must reflect without re-calling
+	// SetStats (proves a reference, not a captured snapshot, is stored).
+	tbl.EstimatedRows.Store(2_000_000)
+	if got := c.StatsLine(); !strings.Contains(got, "~2M rows") {
+		t.Errorf("live re-read: StatsLine() = %q, want it to contain %q", got, "~2M rows")
+	}
 }

@@ -30,6 +30,9 @@ type fakeSession struct {
 	describeFuncCalls atomic.Int32
 	describeFuncErr   error
 	describeFuncOut   []models.FunctionDetail
+
+	statsRows  int64
+	statsBytes int64
 }
 
 func (s *fakeSession) Close() error {
@@ -98,6 +101,10 @@ func (s *fakeSession) ListForeignKeys(_ context.Context, _, _ string) ([]models.
 
 func (s *fakeSession) ListInboundForeignKeys(_ context.Context, _, _ string) ([]models.ForeignKey, error) {
 	return nil, nil
+}
+
+func (s *fakeSession) TableStats(_ context.Context, _, _ string) (int64, int64, error) {
+	return s.statsRows, s.statsBytes, nil
 }
 
 func (s *fakeSession) ListFunctions(_ context.Context) ([]string, error) {
@@ -456,6 +463,34 @@ func TestConnectHelperConnectionAndSessionAccessors(t *testing.T) {
 	h.Disconnect()
 	if h.Connection() != nil || h.Session() != nil {
 		t.Fatal("accessors must return nil after Disconnect")
+	}
+}
+
+func TestConnectHelperLoadTableStatsReturnsSessionStats(t *testing.T) {
+	sess := &fakeSession{statsRows: 4200, statsBytes: 98304}
+	conn := &fakeConnection{sess: sess}
+	drv := &fakeDriver{conn: conn}
+	registerFake(t, "fake-stats", drv)
+
+	h := NewConnectHelper()
+	if _, _, err := h.Connect(context.Background(), &models.Connection{Name: "p", Driver: "fake-stats"}, nil); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(h.Disconnect)
+
+	rows, bytes, err := h.LoadTableStats(context.Background(), "public", "users")
+	if err != nil {
+		t.Fatalf("LoadTableStats: %v", err)
+	}
+	if rows != 4200 || bytes != 98304 {
+		t.Fatalf("LoadTableStats = (%d, %d), want (4200, 98304)", rows, bytes)
+	}
+}
+
+func TestConnectHelperLoadTableStatsBeforeConnect(t *testing.T) {
+	h := NewConnectHelper()
+	if _, _, err := h.LoadTableStats(context.Background(), "public", "users"); err == nil {
+		t.Fatal("expected error when LoadTableStats called before Connect")
 	}
 }
 

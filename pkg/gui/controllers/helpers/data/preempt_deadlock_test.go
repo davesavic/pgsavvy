@@ -159,6 +159,10 @@ func (b *blockingSession) ListInboundForeignKeys(context.Context, string, string
 	return nil, nil
 }
 
+func (b *blockingSession) TableStats(context.Context, string, string) (int64, int64, error) {
+	return 0, 0, nil
+}
+
 func (b *blockingSession) ListFunctions(context.Context) ([]string, error) { return nil, nil }
 
 func (b *blockingSession) DescribeFunction(context.Context, string, string) ([]models.FunctionDetail, error) {

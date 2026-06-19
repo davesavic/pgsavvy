@@ -58,6 +58,11 @@ type Session interface {
 	// edges into the supplied table. Drives the `gD` reverse-FK picker
 	// (stub #2).
 	ListInboundForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error)
+	// TableStats returns the estimated row count (reltuples) and total
+	// on-disk size in bytes for a single (schema, table). Drives the
+	// table-inspect popup's stats subtitle. Returns (0, 0, nil) when the
+	// relation no longer exists.
+	TableStats(ctx context.Context, schema, table string) (rows int64, sizeBytes int64, err error)
 	ListFunctions(ctx context.Context) ([]string, error)
 	DescribeFunction(ctx context.Context, schema, name string) ([]models.FunctionDetail, error)
 

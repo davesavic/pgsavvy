@@ -10,7 +10,14 @@ import (
 
 // columnHeader is the fixed header row prepended to the aligned column
 // table rendered in the inspect popup's COLUMNS leaf.
-var columnHeader = []string{"NAME", "TYPE", "NULL", "DEFAULT"}
+var columnHeader = []string{"NAME", "TYPE", "NULL", "DEFAULT", "DESCRIPTION"}
+
+// descMaxRunes caps the rendered DESCRIPTION cell width; longer values are
+// truncated to descMaxRunes-1 runes plus an ellipsis.
+const descMaxRunes = 40
+
+// descCol is the cell index of the DESCRIPTION column within a column row.
+const descCol = 4
 
 // ColumnsContext renders the column list in the left-rail COLUMNS slot.
 type ColumnsContext struct {
@@ -41,12 +48,16 @@ func NewColumnsContext(base BaseContext, deps Deps) *ColumnsContext {
 func (c *ColumnsContext) HandleRender() error {
 	deps := c.deps
 	viewName := c.GetViewName()
-	body := renderColumnsTable(c.items)
+	body := c.BodyText()
 	writeView(deps, func() error {
 		return deps.GuiDriver.SetContent(viewName, body)
 	})
 	return nil
 }
+
+// BodyText returns the aligned column table the leaf renders, so the
+// TABLE_INSPECT container can compose a stats header above it (bodyTextRenderer).
+func (c *ColumnsContext) BodyText() string { return renderColumnsTable(c.items) }
 
 // renderColumnsTable builds the aligned column table (header + rows), or
 // the empty-state placeholder when no columns are present.
@@ -60,7 +71,33 @@ func renderColumnsTable(items []any) string {
 	if len(rows) == 0 {
 		return "(no columns)"
 	}
-	return alignRows(append([][]string{columnHeader}, rows...))
+	header := columnHeader
+	if !anyDescription(rows) {
+		header = stripDescription(header)
+		for i := range rows {
+			rows[i] = stripDescription(rows[i])
+		}
+	}
+	return alignRows(append([][]string{header}, rows...))
+}
+
+// anyDescription reports whether any data row carries a non-empty
+// DESCRIPTION cell (index descCol).
+func anyDescription(rows [][]string) bool {
+	for _, row := range rows {
+		if descCol < len(row) && row[descCol] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// stripDescription drops the DESCRIPTION cell (index descCol) from a row.
+func stripDescription(row []string) []string {
+	if descCol >= len(row) {
+		return row
+	}
+	return row[:descCol]
 }
 
 func asColumn(it any) *models.Column {
@@ -90,7 +127,30 @@ func columnCells(c *models.Column) []string {
 		config.SafeText(c.DataType),
 		null,
 		def,
+		columnDescription(c.Description),
 	}
+}
+
+// columnDescription renders a column comment as a single sanitized,
+// width-capped DESCRIPTION cell: newlines/tabs collapse to spaces (so a
+// multi-line comment reads as one line), control bytes are stripped via
+// SafeText, and the result is truncated to descMaxRunes with an ellipsis.
+func columnDescription(s string) string {
+	if s == "" {
+		return ""
+	}
+	oneLine := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(s)
+	return truncateRunes(config.SafeText(oneLine), descMaxRunes)
+}
+
+// truncateRunes returns s unchanged when it fits within max display runes;
+// otherwise it returns the first max-1 runes plus an ellipsis.
+func truncateRunes(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:max-1]) + "…"
 }
 
 // alignRows renders rows as a fixed-width table: each column is padded to

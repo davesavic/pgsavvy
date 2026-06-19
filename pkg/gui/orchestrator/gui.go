@@ -603,9 +603,9 @@ func (g *Gui) wireWithDriver() error {
 //   - Either pushes the TABLE_INSPECT popup onto the focus stack, OR
 //     (when the popup is already on top) re-targets it without a second
 //     Push (AD-24 re-open semantics).
-//   - Marks the context loading and fans out TWO OnWorker dispatches —
-//     one for columns, one for indexes. Whichever finishes second flips
-//     loading=false on the UI thread.
+//   - Marks the context loading and fans out FIVE OnWorker dispatches —
+//     columns, indexes, foreign keys, constraints, and table stats.
+//     Whichever finishes last flips loading=false on the UI thread.
 //
 // schemaSearchPathSQL builds the SET statement and the human-readable
 // snapshot value for making schema the active search_path, keeping public as
@@ -681,9 +681,38 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 				}
 			}
 
+			// Subtitle stats (x637.5): store the live table reference so the
+			// popup's top border shows "~N rows · size", read LIVE each frame
+			// from tbl's atomic counters as the stats enrich async. Set on every
+			// open so a stale prior table never shows.
+			inspectCtx.SetStats(tbl)
+
+			// Clear-on-reopen (FM2): blank all four leaves (items AND error
+			// flags) BEFORE spawning the refetch workers so a failed refetch
+			// never leaves the prior table's rows/error line on screen. The
+			// FK/constraint error flags MUST be reset too, else table_a's error
+			// line persists over table_b until its own fetch resolves.
+			g.registry.Columns.SetItems(nil)
+			g.registry.Indexes.SetItems(nil)
+			g.registry.ForeignKeys.SetForeignKeys(nil, nil)
+			g.registry.ForeignKeys.SetError("outbound", false)
+			g.registry.ForeignKeys.SetError("inbound", false)
+			g.registry.Constraints.SetConstraints(nil)
+			g.registry.Constraints.SetError(false)
+
 			inspectCtx.SetLoading(true)
 			var ack atomic.Int32
-			ack.Store(2)
+			ack.Store(5)
+			// FIFO invariant: correctness relies on each populate enqueuing its
+			// SetItems publish via runOnUIThread BEFORE the worker's deferred
+			// done() enqueues the SetLoading(false) reveal. Both land on the same
+			// gocui MainLoop FIFO queue, so the data is published before the
+			// popup reveals it. Do NOT refactor to a single post-done() closure.
+			//
+			// The stats worker stores onto tbl's atomics INSIDE an
+			// OnUIThreadContentOnly closure, which forces a content-only repaint
+			// after the values land so StatsLine re-reads them regardless of gate
+			// ordering.
 			done := func() {
 				if ack.Add(-1) == 0 {
 					g.OnUIThreadContentOnly(func() error {
@@ -700,6 +729,33 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 			g.OnWorker(func(_ gocui.Task) error {
 				defer done()
 				connectInv.populateIndexesRail(context.Background(), sch, tname)
+				return nil
+			})
+			g.OnWorker(func(_ gocui.Task) error {
+				defer done()
+				connectInv.populateForeignKeysRail(context.Background(), g.registry.ForeignKeys, sch, tname)
+				return nil
+			})
+			g.OnWorker(func(_ gocui.Task) error {
+				defer done()
+				connectInv.populateConstraintsRail(context.Background(), g.registry.Constraints, sch, tname)
+				return nil
+			})
+			g.OnWorker(func(_ gocui.Task) error {
+				defer done()
+				rows, bytes, err := connectInv.helper.LoadTableStats(context.Background(), sch, tname)
+				if err != nil {
+					logs.Event(g.deps.Common.Logger(), "db", "load_table_stats",
+						slog.String("schema", sch),
+						slog.String("table", tname),
+						slog.String("err", err.Error()))
+					return nil
+				}
+				g.OnUIThreadContentOnly(func() error {
+					tbl.EstimatedRows.Store(rows)
+					tbl.SizeBytes.Store(bytes)
+					return nil
+				})
 				return nil
 			})
 			return nil
@@ -1113,6 +1169,15 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 
 	g.keybindingSystem.masterEditors = map[types.ContextKey]gocui.Editor{}
 
+	// Views an editable context renders into. In the many-contexts-ONE-view
+	// topology (QUERY_RAIL: editable QUERY_EDITOR + list leaves share one
+	// view), such a view always has a master editor attached, which already
+	// delivers Escape to the Matcher. The non-editable Esc-abort shim must
+	// be skipped there — gocui checks view keybindings before the Editor, so
+	// the shim would shadow Escape and visual.exit / mode.normal would never
+	// fire from the editor leaf.
+	editableViews := g.registry.EditableViewNames()
+
 	for _, ctx := range g.registry.Flatten() {
 		if ctx == nil || ctx.GetKind() == types.STUB {
 			continue
@@ -1159,10 +1224,18 @@ func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 		// chord — the which-key overlay — can never be aborted from a list
 		// rail. Install an explicit Esc shim that routes into the Matcher;
 		// its existing chord-abort path drops the pending prefix and hides
-		// the overlay. Editable views are unaffected: their Editor already
-		// delivers Escape to the Matcher.
-		if err := g.installEscAbortShim(key, view); err != nil {
-			return err
+		// the overlay.
+		//
+		// EXCEPTION: a view shared with an editable leaf (many-contexts-ONE-
+		// view topology, e.g. QUERY_RAIL) always has a master editor attached
+		// that already delivers Escape to the Matcher. gocui checks view
+		// keybindings before the Editor, so an Esc shim here would shadow the
+		// editor and Escape would never reach it — that is exactly what broke
+		// visual.exit / mode.normal in the query editor. Skip it.
+		if !editableViews[view] {
+			if err := g.installEscAbortShim(key, view); err != nil {
+				return err
+			}
 		}
 		// R5: un-rebindable emergency Ctrl-C exit. A non-editable view
 		// only receives keys it has a shim for; if the user removed/moved
@@ -1715,6 +1788,27 @@ func (g *Gui) PopulateColumnsRailForTest(schema, table string) {
 	}
 	inv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryState.queryRunner, history: g.queryState.history}
 	inv.populateColumnsRail(context.Background(), schema, table)
+}
+
+// PopulateForeignKeysRailForTest drives populateForeignKeysRail against the
+// supplied ForeignKeysContext for (schema, table). Test-only — exercised by
+// adapters_test.go to assert the FOREIGN_KEYS leaf population path.
+func (g *Gui) PopulateForeignKeysRailForTest(fkCtx *guicontext.ForeignKeysContext, schema, table string) {
+	if g == nil {
+		return
+	}
+	inv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryState.queryRunner, history: g.queryState.history}
+	inv.populateForeignKeysRail(context.Background(), fkCtx, schema, table)
+}
+
+// PopulateConstraintsRailForTest drives populateConstraintsRail against the
+// supplied ConstraintsContext for (schema, table). Test-only.
+func (g *Gui) PopulateConstraintsRailForTest(conCtx *guicontext.ConstraintsContext, schema, table string) {
+	if g == nil {
+		return
+	}
+	inv := &connectInvoker{g: g, helper: g.connectHelper, runner: g.queryState.queryRunner, history: g.queryState.history}
+	inv.populateConstraintsRail(context.Background(), conCtx, schema, table)
 }
 
 // OnWorkerCountForTest returns the cumulative OnWorker invocation count

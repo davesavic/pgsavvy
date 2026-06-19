@@ -26,6 +26,11 @@ type ContextTree struct {
 	Tables     *TablesContext
 	Columns    *ColumnsContext
 	Indexes    *IndexesContext
+	// ForeignKeys/Constraints are the remaining TABLE_INSPECT container tab
+	// leaves (Kind=STUB, inFlatten=false): they retain typed fields but render
+	// only when the container delegates to the active tab.
+	ForeignKeys *ForeignKeysContext
+	Constraints *ConstraintsContext
 
 	// Live TEMPORARY_POPUP instances.
 	Menu         *MenuContext
@@ -203,6 +208,16 @@ func contextSpecs() []contextSpec {
 			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewIndexesContext(b, d) },
 			assign: func(t *ContextTree, c types.IBaseContext) { t.Indexes = c.(*IndexesContext) },
 		},
+		{
+			key: types.FOREIGN_KEYS, kind: types.STUB, title: "Foreign Keys", viewName: TableInspectViewName, inFlatten: false,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewForeignKeysContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.ForeignKeys = c.(*ForeignKeysContext) },
+		},
+		{
+			key: types.CONSTRAINTS, kind: types.STUB, title: "Constraints", viewName: TableInspectViewName, inFlatten: false,
+			build:  func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewConstraintsContext(b, d) },
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Constraints = c.(*ConstraintsContext) },
+		},
 
 		// Popups (Kind = TEMPORARY_POPUP).
 		{
@@ -282,7 +297,7 @@ func contextSpecs() []contextSpec {
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewTableInspectContext(b, d) },
 			assign: func(t *ContextTree, c types.IBaseContext) {
 				t.TableInspect = c.(*TableInspectContext)
-				t.TableInspect.SetLeaves(t.Columns, t.Indexes)
+				t.TableInspect.SetLeaves(t.Columns, t.Indexes, t.ForeignKeys, t.Constraints)
 			},
 		},
 		{
@@ -505,6 +520,33 @@ func NewContextTree(deps types.ContextTreeDeps) *ContextTree {
 // (named-field-only), matching the container/leaf contract.
 func (t *ContextTree) Flatten() []types.IBaseContext {
 	return t.all
+}
+
+// EditableViewNames returns the set of gocui view names that an editable
+// context renders into. It consults the editable leaf fields directly (not
+// Flatten) because QUERY_EDITOR is a non-flattened leaf of QUERY_RAIL.
+//
+// The orchestrator uses this to skip the non-editable Esc-abort shim on a
+// view shared with an editable leaf (many-contexts-ONE-view topology): the
+// leaf's master editor already delivers Escape to the Matcher, and gocui
+// checks view keybindings before the Editor, so a shim there would shadow
+// Escape.
+func (t *ContextTree) EditableViewNames() map[string]bool {
+	out := map[string]bool{}
+	add := func(c types.IBaseContext, present bool) {
+		if !present {
+			return
+		}
+		if vn := c.GetViewName(); vn != "" {
+			out[vn] = true
+		}
+	}
+	add(t.QueryEditor, t.QueryEditor != nil)
+	add(t.Prompt, t.Prompt != nil)
+	add(t.CommandLine, t.CommandLine != nil)
+	add(t.SearchLine, t.SearchLine != nil)
+	add(t.CellEditor, t.CellEditor != nil)
+	return out
 }
 
 // ByKey returns the Context registered under the given key, or nil when

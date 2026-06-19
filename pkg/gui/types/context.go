@@ -183,6 +183,13 @@ const (
 	// orchestrator's Tier-4 focus pass retains the underlying tab view
 	// while this key is top of the stack.
 	RELATIONSHIP_PANEL ContextKey = "relationship_panel"
+	// FOREIGN_KEYS is the foreign-key relationships leaf of the
+	// TABLE_INSPECT tabbed popup. Renders outbound ("References ->") and
+	// inbound ("Referenced by <-") FK rows as text.
+	FOREIGN_KEYS ContextKey = "foreign_keys"
+	// CONSTRAINTS is the constraints leaf of the TABLE_INSPECT tabbed
+	// popup. Renders check/unique/etc. constraint definitions as text.
+	CONSTRAINTS ContextKey = "constraints"
 )
 
 // AllContextKeys returns every ContextKey constant declared above.
@@ -228,6 +235,8 @@ func AllContextKeys() []ContextKey {
 		FK_REVERSE_PICKER,
 		CONNECTION_MANAGER,
 		RELATIONSHIP_PANEL,
+		FOREIGN_KEYS,
+		CONSTRAINTS,
 	}
 }
 

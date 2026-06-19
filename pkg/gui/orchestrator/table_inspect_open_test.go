@@ -15,6 +15,14 @@ import (
 // the TABLES rail with a single *models.Table (selected by default).
 // Returns the Gui plus the seeded table.
 func connectAndSelectTable(t *testing.T, sch, name string) (*orchestrator.Gui, *models.Table) {
+	return connectAndSelectTableOpt(t, sch, name, nil)
+}
+
+// connectAndSelectTableOpt is connectAndSelectTable with an optional conn
+// mutation applied BEFORE Connect (the fake session caches the conn's error
+// fields at AcquireSession time, so per-leaf load failures must be configured
+// up front).
+func connectAndSelectTableOpt(t *testing.T, sch, name string, opt func(c *wireFakeConn)) (*orchestrator.Gui, *models.Table) {
 	t.Helper()
 	g, _ := buildTestGuiWithHistory(t)
 
@@ -26,6 +34,9 @@ func connectAndSelectTable(t *testing.T, sch, name string) (*orchestrator.Gui, *
 	}
 	conn.indexes = []models.Index{
 		{Name: "users_pkey", Schema: sch, Table: name},
+	}
+	if opt != nil {
+		opt(conn)
 	}
 
 	bag := g.HelperBagForTest()
@@ -89,7 +100,7 @@ func TestTableInspectOpen_NoOpWhenNoSelection(t *testing.T) {
 	}
 }
 
-func TestTableInspectOpen_DispatchesTwoWorkers(t *testing.T) {
+func TestTableInspectOpen_DispatchesFiveWorkers(t *testing.T) {
 	g, _ := connectAndSelectTable(t, "public", "users")
 
 	before := g.OnWorkerCountForTest()
@@ -97,8 +108,8 @@ func TestTableInspectOpen_DispatchesTwoWorkers(t *testing.T) {
 	g.WaitForWorkersForTest()
 	after := g.OnWorkerCountForTest()
 
-	if got := after - before; got != 2 {
-		t.Fatalf("OnWorker enqueue count = %d, want 2 (columns + indexes)", got)
+	if got := after - before; got != 5 {
+		t.Fatalf("OnWorker enqueue count = %d, want 5 (columns + indexes + foreign keys + constraints + stats)", got)
 	}
 }
 

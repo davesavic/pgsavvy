@@ -598,6 +598,22 @@ func (g *Gui) RunLayout(w, h int) error {
 			if ctx.GetKey() == types.TABLE_INSPECT && view != nil {
 				view.Title = ctx.GetTitle()
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+				// Paint the active tab label theme.ActiveBorder via SelFgColor,
+				// mirroring the SCHEMA_RAIL/QUERY_RAIL native-tab colouring above.
+				// That block is gated on !modalTop and so is suppressed while this
+				// popup is the top modal; the active-tab colour is therefore wired
+				// here, in the per-frame TABLE_INSPECT styling pass. Inactive label
+				// stays ColorDefault so the leaf list content is not dimmed.
+				_ = g.driver.SetViewTabColors(
+					guicontext.TableInspectViewName,
+					frameAttr(theme.Current().ActiveBorder),
+					gocui.ColorDefault,
+				)
+				// Stats (x637.5) render as the first BODY line (the inspect
+				// container's bodyHeader), NOT a top-border subtitle: the 4-tab
+				// strip (Columns/Indexes/Foreign Keys/Constraints) leaves no room
+				// on the single top-border line, so a right-aligned subtitle was
+				// always blanked by the collision guard once the leaves rendered.
 			}
 			// CHEATSHEET styling + scroll: the keybinding
 			// cheatsheet is the focused modal while on top, so give it the

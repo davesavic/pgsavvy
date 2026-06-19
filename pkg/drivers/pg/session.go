@@ -362,6 +362,31 @@ func (s *Session) ListConstraints(ctx context.Context, schema, table string) ([]
 	return out, nil
 }
 
+// TableStats returns the estimated row count (reltuples) and total on-disk
+// size in bytes for the single relation (schema, table). It runs the same
+// table_stats.sql used by enrichWithStats over single-element arrays. When the
+// relation no longer exists no row is returned and (0, 0, nil) is reported so
+// the inspect subtitle suppresses the stats segment rather than erroring.
+func (s *Session) TableStats(ctx context.Context, schema, table string) (rows int64, sizeBytes int64, err error) {
+	defer s.guard()()
+	s.parent.warnIfPostgresGE18()
+	qr, err := s.conn.Query(ctx, sqlTableStats, []string{schema}, []string{table})
+	if err != nil {
+		return 0, 0, wrapPgError(err)
+	}
+	defer qr.Close()
+	for qr.Next() {
+		var sch, name string
+		if err := qr.Scan(&sch, &name, &rows, &sizeBytes); err != nil {
+			return 0, 0, wrapPgError(err)
+		}
+	}
+	if err := qr.Err(); err != nil {
+		return 0, 0, wrapPgError(err)
+	}
+	return rows, sizeBytes, nil
+}
+
 // volatilityFromChar maps pg_proc.provolatile (i/s/v) to the human-readable
 // volatility label stored on models.FunctionDetail. Unknown chars pass through
 // unchanged so a future Postgres value is visible rather than silently dropped.

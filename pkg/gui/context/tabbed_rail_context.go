@@ -52,7 +52,17 @@ type TabbedRailContext struct {
 	// the stale per-tab origin so it never follows the cursor. A
 	// managesOwnOrigin tab skips restore entirely.
 	restorePending bool
+
+	// bodyHeader, when set and non-empty, prepends its line above the active
+	// leaf's body. Opt-in (nil for QueryRail/SchemaRail): TABLE_INSPECT pins
+	// its stats line here because the 4-tab top border has no room for a
+	// subtitle. Requires the active leaf to expose BodyText (bodyTextRenderer).
+	bodyHeader func() string
 }
+
+// bodyTextRenderer is the seam a leaf exposes so the container can compose a
+// header above the leaf's body (see bodyHeader).
+type bodyTextRenderer interface{ BodyText() string }
 
 // tab is one tab in the container: the human label, the leaf's stable key
 // (for ActiveLeafKey + the tab_switch event), the live leaf reference
@@ -131,6 +141,10 @@ func (t *TabbedRailContext) SetLeaves(leaves ...types.IBaseContext) {
 // SetLogger injects the session logger used for the tab_switch event.
 // Nil-safe everywhere it is read.
 func (t *TabbedRailContext) SetLogger(log *slog.Logger) { t.log = log }
+
+// SetBodyHeader installs the optional body-header provider (see bodyHeader).
+// Pass nil to render leaf-only.
+func (t *TabbedRailContext) SetBodyHeader(fn func() string) { t.bodyHeader = fn }
 
 // HandleFocus delegates to the active leaf's HandleFocus so the incoming
 // container runs the active leaf's focus protocol. ALWAYS delegates —
@@ -287,6 +301,18 @@ func (t *TabbedRailContext) HandleRender() error {
 	leaf := t.tabs[t.activeTab].leaf
 	if leaf == nil {
 		return nil
+	}
+	// Compose the optional header above the leaf body when one is active and
+	// the leaf exposes BodyText; otherwise the leaf renders itself.
+	if br, ok := leaf.(bodyTextRenderer); ok && t.bodyHeader != nil {
+		if header := t.bodyHeader(); header != "" {
+			// Blank line between the header and the leaf body so the stats line
+			// is not crammed against the table header row.
+			writeView(t.deps, func() error {
+				return t.deps.GuiDriver.SetContent(t.GetViewName(), header+"\n\n"+br.BodyText())
+			})
+			return nil
+		}
 	}
 	return leaf.HandleRender()
 }

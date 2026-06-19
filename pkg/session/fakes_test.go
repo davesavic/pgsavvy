@@ -130,6 +130,10 @@ func (s *fakeSess) ListInboundForeignKeys(context.Context, string, string) ([]mo
 	return nil, nil
 }
 
+func (s *fakeSess) TableStats(context.Context, string, string) (int64, int64, error) {
+	return 0, 0, nil
+}
+
 func (s *fakeSess) ListFunctions(context.Context) ([]string, error) {
 	return nil, nil
 }

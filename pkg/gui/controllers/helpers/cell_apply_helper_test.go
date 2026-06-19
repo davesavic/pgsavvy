@@ -107,6 +107,10 @@ func (f *fakeSession) ListInboundForeignKeys(context.Context, string, string) ([
 	panic("ListInboundForeignKeys not used")
 }
 
+func (f *fakeSession) TableStats(context.Context, string, string) (int64, int64, error) {
+	panic("TableStats not used")
+}
+
 func (f *fakeSession) ListFunctions(context.Context) ([]string, error) {
 	panic("ListFunctions not used")
 }

@@ -1177,6 +1177,113 @@ func (c *connectInvoker) populateIndexesRail(ctx context.Context, schema, table 
 	})
 }
 
+// populateForeignKeysRail loads BOTH the outbound (LoadForeignKeys) and
+// inbound (LoadInboundForeignKeys) foreign keys for (schema, table) in a
+// single invocation, then pushes both directions onto the
+// ForeignKeysContext on the UI thread so the FOREIGN_KEYS leaf renders on
+// the next layout frame.
+//
+// Unlike populateColumnsRail/populateIndexesRail, this function NEVER
+// early-returns on a fetch error leaving stale prior-table data: each
+// direction's items are always published (an empty slice for a direction
+// that errored), and SetError flags ONLY the failed direction. On a
+// partial failure (one direction ok, the other errored) the OK direction's
+// items are still set. The function always returns cleanly so a caller's
+// ack-gate defer can rely on the return.
+//
+// The contexts are passed in (rather than reached via the registry) because
+// the FOREIGN_KEYS/CONSTRAINTS tree fields are wired later; the caller owns
+// resolving the context.
+func (c *connectInvoker) populateForeignKeysRail(ctx context.Context, fkCtx *guicontext.ForeignKeysContext, schema, table string) {
+	if c == nil || c.g == nil || c.helper == nil || fkCtx == nil {
+		return
+	}
+	if schema == "" || table == "" {
+		return
+	}
+	logger := c.g.deps.Common.Logger()
+
+	outbound, err := c.helper.LoadForeignKeys(ctx, schema, table)
+	outboundErr := err != nil
+	if outboundErr {
+		outbound = nil
+		logs.Event(logger, "db", "load_foreign_keys",
+			slog.String("schema", schema),
+			slog.String("table", table),
+			slog.String("direction", "outbound"),
+			slog.String("err", err.Error()),
+		)
+	}
+
+	inbound, err := c.helper.LoadInboundForeignKeys(ctx, schema, table)
+	inboundErr := err != nil
+	if inboundErr {
+		inbound = nil
+		logs.Event(logger, "db", "load_foreign_keys",
+			slog.String("schema", schema),
+			slog.String("table", table),
+			slog.String("direction", "inbound"),
+			slog.String("err", err.Error()),
+		)
+	}
+
+	c.runOnUIThread(func() error {
+		fkCtx.SetForeignKeys(outbound, inbound)
+		fkCtx.SetError("outbound", outboundErr)
+		fkCtx.SetError("inbound", inboundErr)
+		return nil
+	})
+}
+
+// populateConstraintsRail loads the constraints for (schema, table) via
+// ConnectHelper.LoadConstraints, filters them to the CHECK and UNIQUE kinds
+// (PRIMARY KEY / FOREIGN KEY / NOT NULL are excluded — the FK leaf and the
+// columns rail cover those), then pushes the result onto the
+// ConstraintsContext on the UI thread.
+//
+// Unlike populateColumnsRail/populateIndexesRail, this function NEVER
+// early-returns on a fetch error leaving stale prior-table data: on error
+// it sets an empty slice AND flags SetError(true), then returns cleanly.
+//
+// The context is passed in (rather than reached via the registry) because
+// the CONSTRAINTS tree field is wired later; the caller owns resolving it.
+func (c *connectInvoker) populateConstraintsRail(ctx context.Context, conCtx *guicontext.ConstraintsContext, schema, table string) {
+	if c == nil || c.g == nil || c.helper == nil || conCtx == nil {
+		return
+	}
+	if schema == "" || table == "" {
+		return
+	}
+	logger := c.g.deps.Common.Logger()
+
+	all, err := c.helper.LoadConstraints(ctx, schema, table)
+	if err != nil {
+		logs.Event(logger, "db", "load_constraints",
+			slog.String("schema", schema),
+			slog.String("table", table),
+			slog.String("err", err.Error()),
+		)
+		c.runOnUIThread(func() error {
+			conCtx.SetConstraints(nil)
+			conCtx.SetError(true)
+			return nil
+		})
+		return
+	}
+
+	items := make([]models.Constraint, 0, len(all))
+	for i := range all {
+		if all[i].Kind == "CHECK" || all[i].Kind == "UNIQUE" {
+			items = append(items, all[i])
+		}
+	}
+	c.runOnUIThread(func() error {
+		conCtx.SetConstraints(items)
+		conCtx.SetError(false)
+		return nil
+	})
+}
+
 // loadQueryEditorBuffer is the I/O phase of the post-Connect
 // hook. It resolves (or generates) the persistent buffer UUID for the
 // active connection via AppStateStore.GetOrCreateBufferUUID and loads the

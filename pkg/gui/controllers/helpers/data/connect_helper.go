@@ -336,6 +336,69 @@ func (h *ConnectHelper) LoadForeignKeys(ctx context.Context, schema, table strin
 	return out, nil
 }
 
+// LoadInboundForeignKeys wraps drivers.Session.ListInboundForeignKeys.
+func (h *ConnectHelper) LoadInboundForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
+	var out []models.ForeignKey
+	err := h.submit(ctx, func(ctx context.Context) error {
+		sess, err := h.requireSession()
+		if err != nil {
+			return err
+		}
+		result, err := sess.ListInboundForeignKeys(ctx, schema, table)
+		if err != nil {
+			return err
+		}
+		out = result
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// LoadConstraints wraps drivers.Session.ListConstraints.
+func (h *ConnectHelper) LoadConstraints(ctx context.Context, schema, table string) ([]models.Constraint, error) {
+	var out []models.Constraint
+	err := h.submit(ctx, func(ctx context.Context) error {
+		sess, err := h.requireSession()
+		if err != nil {
+			return err
+		}
+		result, err := sess.ListConstraints(ctx, schema, table)
+		if err != nil {
+			return err
+		}
+		out = result
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// LoadTableStats wraps drivers.Session.TableStats.
+func (h *ConnectHelper) LoadTableStats(ctx context.Context, schema, table string) (int64, int64, error) {
+	var rows, sizeBytes int64
+	err := h.submit(ctx, func(ctx context.Context) error {
+		sess, err := h.requireSession()
+		if err != nil {
+			return err
+		}
+		r, b, err := sess.TableStats(ctx, schema, table)
+		if err != nil {
+			return err
+		}
+		rows, sizeBytes = r, b
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return rows, sizeBytes, nil
+}
+
 // LoadFunctions wraps drivers.Session.ListFunctions (FUNCTION-routine names
 // only). Mirrors LoadColumns so the eager function-name warm routes through the
 // SAME serialized worker queue rather than calling sess.ListFunctions on a raw

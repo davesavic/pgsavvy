@@ -40,12 +40,16 @@ func NewIndexesContext(base BaseContext, deps Deps) *IndexesContext {
 func (idx *IndexesContext) HandleRender() error {
 	deps := idx.deps
 	viewName := idx.GetViewName()
-	body := renderIndexesTable(idx.items)
+	body := idx.BodyText()
 	writeView(deps, func() error {
 		return deps.GuiDriver.SetContent(viewName, body)
 	})
 	return nil
 }
+
+// BodyText returns the aligned index table the leaf renders, so the
+// TABLE_INSPECT container can compose a stats header above it (bodyTextRenderer).
+func (idx *IndexesContext) BodyText() string { return renderIndexesTable(idx.items) }
 
 // renderIndexesTable builds the aligned index table (header + rows), or
 // the empty-state placeholder when no indexes are present.

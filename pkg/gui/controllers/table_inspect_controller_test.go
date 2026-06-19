@@ -160,6 +160,7 @@ func TestTableInspectController_NextTabAction_AdvancesActiveTab(t *testing.T) {
 		t.Errorf("post-NextTab ActiveTab() = %d, want 1", got)
 	}
 	// Wrap-around: NextTab from the last tab returns to 0.
+	ic.SetActiveTab(ic.TabCount() - 1)
 	if err := ctrl.NextTab(commands.ExecCtx{}); err != nil {
 		t.Fatalf("NextTab (wrap): %v", err)
 	}
@@ -178,12 +179,12 @@ func TestTableInspectController_PrevTabAction_RewindsActiveTab(t *testing.T) {
 	if got := ic.ActiveTab(); got != 0 {
 		t.Errorf("post-PrevTab ActiveTab() = %d, want 0", got)
 	}
-	// Wrap-around: PrevTab from tab 0 goes to the last tab (1).
+	// Wrap-around: PrevTab from tab 0 goes to the last tab.
 	if err := ctrl.PrevTab(commands.ExecCtx{}); err != nil {
 		t.Fatalf("PrevTab (wrap): %v", err)
 	}
-	if got := ic.ActiveTab(); got != 1 {
-		t.Errorf("post-PrevTab wrap ActiveTab() = %d, want 1", got)
+	if got, want := ic.ActiveTab(), ic.TabCount()-1; got != want {
+		t.Errorf("post-PrevTab wrap ActiveTab() = %d, want %d", got, want)
 	}
 }
 
