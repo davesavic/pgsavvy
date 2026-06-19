@@ -11,15 +11,35 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
 	"golang.org/x/mod/semver"
 )
 
-// httpTimeout bounds every request; an explicit client is used so requests can
-// never hang forever the way http.DefaultClient/http.Get would.
-const httpTimeout = 30 * time.Second
+// httpPhaseTimeout bounds the connect, TLS-handshake, and response-header phases
+// of every request so a stalled server can never hang us forever. It is
+// deliberately NOT a total request timeout: the binary asset is tens of MiB, so
+// capping the whole exchange (http.Client.Timeout) would abort a slow but
+// healthy body download mid-stream. A var (not const) so tests can shrink it.
+var httpPhaseTimeout = 30 * time.Second
+
+// newHTTPClient builds the client used for all update requests. It guards the
+// pre-body phases via the transport but leaves body-read time unbounded, so a
+// large, slow-but-progressing download completes instead of failing with
+// "Client.Timeout exceeded while reading body".
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: httpPhaseTimeout}).DialContext,
+			TLSHandshakeTimeout:   httpPhaseTimeout,
+			ResponseHeaderTimeout: httpPhaseTimeout,
+			IdleConnTimeout:       httpPhaseTimeout,
+		},
+	}
+}
 
 // Sentinel errors let the caller (and tests) distinguish each actionable
 // condition via errors.Is.
@@ -90,7 +110,7 @@ func Run(opts Options) (*Result, error) {
 	}
 	u := &Updater{
 		opts:    opts,
-		client:  &http.Client{Timeout: httpTimeout},
+		client:  newHTTPClient(),
 		apiBase: apiBase,
 	}
 	return u.run()

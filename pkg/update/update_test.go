@@ -1,6 +1,7 @@
 package update
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -312,6 +314,43 @@ func TestRun_ServerError_Surfaced(t *testing.T) {
 	require.Nil(t, res)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "500")
+}
+
+// TestDownload_SlowProgressingBody_NotCappedByTotalTimeout reproduces the
+// `pgsavvy update` failure: a 51 MiB asset cannot finish inside a 30s total
+// http.Client.Timeout, so the body read aborts with "context deadline exceeded
+// (Client.Timeout ... while reading body)". The server below delivers headers
+// instantly, then trickles the body in chunks whose total elapsed time exceeds
+// httpPhaseTimeout while each individual gap stays well under it. With a total
+// request timeout this fails; with phase-only timeouts (the fix) it succeeds.
+func TestDownload_SlowProgressingBody_NotCappedByTotalTimeout(t *testing.T) {
+	prev := httpPhaseTimeout
+	httpPhaseTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { httpPhaseTimeout = prev })
+
+	want := []byte("SLOW-BUT-HEALTHY-DOWNLOAD-PAYLOAD")
+	gap := 40 * time.Millisecond // < phase timeout per chunk; > phase timeout in total
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		flusher, ok := w.(http.Flusher)
+		require.True(t, ok)
+		flusher.Flush() // headers arrive immediately, before the slow body
+		for _, b := range want {
+			time.Sleep(gap)
+			_, _ = w.Write([]byte{b})
+			flusher.Flush()
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	u := &Updater{client: newHTTPClient()}
+	var got bytes.Buffer
+	err := u.download(srv.URL, assetMaxBytes, &got)
+
+	require.NoError(t, err)
+	require.NotErrorIs(t, err, ErrDownloadInterrupted)
+	require.Equal(t, want, got.Bytes())
 }
 
 func TestParseChecksums_BinaryModeMarkerAndDuplicate(t *testing.T) {
