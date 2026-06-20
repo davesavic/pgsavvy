@@ -8,7 +8,7 @@ running, the test and lint workflow, and how to propose changes.
 
 - [Go 1.26](https://go.dev/dl/) or newer
 - [go-task](https://taskfile.dev) v3 — `go install github.com/go-task/task/v3/cmd/task@latest`
-- [golangci-lint](https://golangci-lint.run) v2 — `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.7.0`
+- [golangci-lint](https://golangci-lint.run) v2 — `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`
 - [Docker Compose](https://docs.docker.com/compose/) — only for the integration-test fixtures
 
 ## Getting the source

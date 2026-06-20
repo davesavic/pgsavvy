@@ -331,7 +331,7 @@ func contextKeyConstsDeclared(t *testing.T) map[string]string {
 func contextTypesDeclaringHandleRender(t *testing.T) map[string]bool {
 	t.Helper()
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, "../context", nil, 0)
+	pkgs, err := parser.ParseDir(fset, "../context", nil, 0) //nolint:staticcheck // SA1019: ParseDir is adequate for this single-package AST scan; go/packages is unnecessary here
 	if err != nil {
 		t.Fatalf("parse context package: %v", err)
 	}

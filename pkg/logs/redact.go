@@ -151,7 +151,7 @@ func (r *defaultRedactor) redactValue(v reflect.Value, env map[string]struct{}, 
 		v = v.Elem()
 	}
 	// Unwrap pointer.
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return nil
 		}

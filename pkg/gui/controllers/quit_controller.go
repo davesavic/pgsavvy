@@ -92,13 +92,13 @@ func (q *QuitController) showTxQuitDialog() error {
 	savepoints := runner.SavepointNames()
 
 	var body strings.Builder
-	body.WriteString(fmt.Sprintf("Transaction open (%d statement", stmtCount))
+	fmt.Fprintf(&body, "Transaction open (%d statement", stmtCount)
 	if stmtCount != 1 {
 		body.WriteByte('s')
 	}
 	body.WriteByte(')')
 	if len(savepoints) > 0 {
-		body.WriteString(fmt.Sprintf("\nSavepoints: %s", strings.Join(savepoints, ", ")))
+		fmt.Fprintf(&body, "\nSavepoints: %s", strings.Join(savepoints, ", "))
 	}
 
 	choices := []string{

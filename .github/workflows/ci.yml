@@ -24,7 +24,7 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.7.0
+          version: v2.12.2
 
       - run: task build
       - run: task test

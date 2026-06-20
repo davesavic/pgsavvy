@@ -44,7 +44,7 @@ func TestAnalyzeNilSafe(t *testing.T) {
 
 func TestNoForbiddenImports(t *testing.T) {
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", nil, parser.ImportsOnly)
+	pkgs, err := parser.ParseDir(fset, ".", nil, parser.ImportsOnly) //nolint:staticcheck // SA1019: ParseDir is adequate for this imports-only scan; go/packages is unnecessary here
 	if err != nil {
 		t.Fatal(err)
 	}

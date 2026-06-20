@@ -65,7 +65,7 @@ func TestAllDefaultBindingsIncludesEveryProviderController(t *testing.T) {
 	cv := reflect.ValueOf(c).Elem()
 	for name := range providerFields {
 		fv := cv.FieldByName(name)
-		if fv.Kind() != reflect.Ptr {
+		if fv.Kind() != reflect.Pointer {
 			t.Fatalf("provider field %s is not a pointer (%s); guard assumes *XController fields", name, fv.Kind())
 		}
 		fv.Set(reflect.New(fv.Type().Elem()))
