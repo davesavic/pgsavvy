@@ -78,7 +78,7 @@ type Controllers struct {
 
 	// Cheatsheet is constructed by the orchestrator (it needs a Pop-
 	// capable focus-stack handle outside this package). The help popup
-	// was promoted to TabbedPopup; the controller owns the
+	// was promoted to TabbedRailContext; the controller owns the
 	// [, ], <tab>, <esc>, q bindings on CHEATSHEET scope.
 	Cheatsheet *CheatsheetController
 

@@ -119,7 +119,7 @@ Action IDs are stable, dot-namespaced strings of the form `family.name`
 To find the ID you want:
 
 - Open the **in-app cheatsheet** (`help.cheatsheet`, default `?`) to see the
-  active bindings and their actions.
+  active bindings and their actions (see below).
 - Browse the **action catalog** in source at
   `pkg/gui/commands/actions.go` — every bindable action ID is declared there
   with a comment describing what it does and its default key.
@@ -127,6 +127,36 @@ To find the ID you want:
 When you set `action:` to an ID that does not exist, config validation
 rejects it at startup with an "unknown action" error, so typos are caught
 early.
+
+### The in-app cheatsheet (`?`)
+
+The cheatsheet is a **context-aware tabbed popup**: its tabs are the
+**functional categories** of the bindings active in the pane you opened it
+from — **Editing, Query, Results, Cells, Session, General**. Only categories
+that actually have bindings in the current context appear, **except General,
+which is always present** (it carries global and uncategorized keys, and in
+an empty context shows a "(no bindings)" message, so the popup is never
+blank). Focus a different pane before pressing `?` to see that pane's
+categories.
+
+Each tab body is two columns (key | description), split into a *current
+context* section and a *Global* section, with per-mode sub-headers
+(Normal/Insert/Visual/…). The footer legend marks `✱` overrides and `★`
+custom bindings; default bindings show no glyph.
+
+Cheatsheet keys (Normal mode):
+
+| Key | Action |
+|-----|--------|
+| `<tab>` or `]` | next tab |
+| `[` | previous tab |
+| `j` / `<down>`, `k` / `<up>` | scroll down / up |
+| `<c-d>` / `<c-u>` | half-page down / up |
+| `gg` / `G` | jump to top / bottom |
+| `<esc>` or `q` | close |
+
+Scroll position is tracked **per tab** — switching tabs and returning
+restores where you were.
 
 ---
 

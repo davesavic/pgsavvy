@@ -2,6 +2,7 @@ package context
 
 import (
 	"bytes"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -427,5 +428,228 @@ func TestTabbedRail_ActiveLeafKeyTracksActiveTab(t *testing.T) {
 	rail.SetActiveTab(1)
 	if got := rail.ActiveLeafKey(); got != types.HISTORY {
 		t.Errorf("ActiveLeafKey after switch = %q, want %q", got, types.HISTORY)
+	}
+}
+
+// newRuntimeRail builds an EMPTY container (no specs) for the runtime SetTabs
+// tests. FireFocusHooks=false: runtime display leaves carry no focus protocol.
+func newRuntimeRail(drv types.GuiDriver) *TabbedRailContext {
+	base := NewBaseContext(BaseContextOpts{
+		Key:      types.QUERY_EDITOR,
+		ViewName: queryRailViewName,
+		Kind:     types.MAIN_CONTEXT,
+	})
+	return NewTabbedRailContext(base, Deps{GuiDriver: drv}, TabbedRailOpts{FireFocusHooks: false})
+}
+
+// TestTabbedRail_SetTabsRebuilds proves SetTabs replaces the tab set wholesale,
+// resets to tab 0, clears prior per-tab origins, and leaves trailing specs
+// unwired when fewer leaves are supplied (a nil active leaf renders as a no-op).
+func TestTabbedRail_SetTabsRebuilds(t *testing.T) {
+	v := gocui.NewView(queryRailViewName, 0, 0, 20, 10, gocui.OutputNormal)
+	drv := testfake.NewRecorderGuiDriver()
+	drv.SetRealView(queryRailViewName, v)
+	rail := newRuntimeRail(drv)
+
+	// First generation: 2 tabs, both wired. Pan tab 0 and switch so tab 0's
+	// origin is saved into its slot.
+	rail.SetTabs(
+		[]TabSpec{{Label: "A", LeafKey: types.HISTORY}, {Label: "B", LeafKey: types.SAVED_QUERY}},
+		[]types.IBaseContext{newFakeLeaf(types.HISTORY), newFakeLeaf(types.SAVED_QUERY)},
+	)
+	_ = rail.HandleRender()
+	v.SetOrigin(9, 0)
+	rail.SetActiveTab(1) // saves A's origin (9) into tab 0's slot
+
+	// Second generation REPLACES the first: 1 tab only. Old tabs must be gone,
+	// active reset to 0, and the rebuilt tab's origin cleared (fresh struct).
+	rail.SetTabs(
+		[]TabSpec{{Label: "Only", LeafKey: types.HISTORY}},
+		[]types.IBaseContext{newFakeLeaf(types.HISTORY)},
+	)
+	if got := rail.TabCount(); got != 1 {
+		t.Fatalf("TabCount after rebuild = %d, want 1 (full replace)", got)
+	}
+	if got := rail.ActiveTab(); got != 0 {
+		t.Fatalf("ActiveTab after rebuild = %d, want 0", got)
+	}
+	// The rebuilt tab's saved origin is the zero value: a switch-induced restore
+	// would re-apply (0,0), not the stale 9. With one tab there is nothing to
+	// switch to, so just assert the slot is fresh via a re-render not crashing.
+	if err := rail.HandleRender(); err != nil {
+		t.Fatalf("HandleRender after rebuild: %v", err)
+	}
+
+	// Third generation: 2 specs but only 1 leaf — the trailing tab is unwired.
+	// Render must be a no-op on a nil active leaf if we move there.
+	rail.SetTabs(
+		[]TabSpec{{Label: "X", LeafKey: types.HISTORY}, {Label: "Y", LeafKey: types.SAVED_QUERY}},
+		[]types.IBaseContext{newFakeLeaf(types.HISTORY)}, // only leaf 0
+	)
+	rail.SetActiveTab(1) // active tab 1 has a nil leaf
+	if err := rail.HandleRender(); err != nil {
+		t.Fatalf("HandleRender on nil-leaf active tab: %v", err)
+	}
+}
+
+// TestTabbedRail_SetTabsResetsActiveTab is the critical panic guard: shrinking
+// the tab set while activeTab points past the new length must NOT panic in
+// HandleRender (which indexes t.tabs[t.activeTab] behind only a len==0 guard).
+func TestTabbedRail_SetTabsResetsActiveTab(t *testing.T) {
+	drv := testfake.NewRecorderGuiDriver()
+	drv.SetRealView(queryRailViewName, gocui.NewView(queryRailViewName, 0, 0, 20, 10, gocui.OutputNormal))
+	rail := newRuntimeRail(drv)
+
+	rail.SetTabs(
+		[]TabSpec{
+			{Label: "A", LeafKey: types.HISTORY},
+			{Label: "B", LeafKey: types.SAVED_QUERY},
+			{Label: "C", LeafKey: types.HISTORY},
+		},
+		[]types.IBaseContext{newFakeLeaf(types.HISTORY), newFakeLeaf(types.SAVED_QUERY), newFakeLeaf(types.HISTORY)},
+	)
+	rail.SetActiveTab(2) // active on the last tab
+
+	rail.SetTabs(
+		[]TabSpec{{Label: "Solo", LeafKey: types.HISTORY}},
+		[]types.IBaseContext{newFakeLeaf(types.HISTORY)},
+	)
+	if got := rail.ActiveTab(); got != 0 {
+		t.Fatalf("ActiveTab after shrink = %d, want 0", got)
+	}
+	// The proof: this must not panic with index-out-of-range.
+	if err := rail.HandleRender(); err != nil {
+		t.Fatalf("HandleRender after shrink: %v", err)
+	}
+	calls := drv.AllSetViewTabsCalls()
+	last := calls[len(calls)-1]
+	if last.ActiveIdx != 0 || len(last.Labels) != 1 || last.Labels[0] != "[Solo]" {
+		t.Errorf("post-shrink tab strip = %v idx %d, want [[Solo]] idx 0", last.Labels, last.ActiveIdx)
+	}
+}
+
+// TestTabbedRail_DynamicLeafRenders is the render-proof: a DisplayLeafContext
+// built at runtime (NOT registered in setup.go) and injected via SetTabs renders
+// its body into EXACTLY the container's view, and the tab strip marks it active.
+func TestTabbedRail_DynamicLeafRenders(t *testing.T) {
+	const containerView = queryRailViewName
+	drv := testfake.NewRecorderGuiDriver()
+	// SetView registers the container view (so the leaf's SetContent targets a
+	// known view). The first call returns gocui.ErrUnknownView as the
+	// "new-view-created" sentinel — that is the success path, not a failure.
+	if _, err := drv.SetView(containerView, 0, 0, 20, 10, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		t.Fatalf("SetView: %v", err)
+	}
+	rail := newRuntimeRail(drv)
+
+	leafBase := NewBaseContext(BaseContextOpts{Key: types.HISTORY, ViewName: "ignored", Kind: types.MAIN_CONTEXT})
+	const body = "dynamic-body-line"
+	leaf := NewDisplayLeafContext(leafBase, Deps{GuiDriver: drv}, rail.GetViewName(), body)
+
+	if leaf.GetViewName() != rail.GetViewName() {
+		t.Fatalf("leaf view %q != container view %q", leaf.GetViewName(), rail.GetViewName())
+	}
+
+	rail.SetTabs(
+		[]TabSpec{{Label: "Cheat", LeafKey: types.HISTORY}},
+		[]types.IBaseContext{leaf},
+	)
+	if err := rail.HandleRender(); err != nil {
+		t.Fatalf("HandleRender returned %v, want nil", err)
+	}
+
+	// The body landed in EXACTLY the container view.
+	if got := drv.GetViewBuffer(containerView); got != body {
+		t.Errorf("container buffer = %q, want %q", got, body)
+	}
+
+	// Tab strip published with the active label marked.
+	calls := drv.AllSetViewTabsCalls()
+	last := calls[len(calls)-1]
+	if last.Name != rail.GetViewName() || last.ActiveIdx != 0 || len(last.Labels) != 1 || last.Labels[0] != "[Cheat]" {
+		t.Errorf("SetViewTabs = name %q labels %v idx %d, want %q [[Cheat]] 0",
+			last.Name, last.Labels, last.ActiveIdx, rail.GetViewName())
+	}
+}
+
+// TestTabbedRail_NextPrevWrap proves NextTab/PrevTab wrap and are no-ops on
+// 0/1-tab containers.
+func TestTabbedRail_NextPrevWrap(t *testing.T) {
+	drv := testfake.NewRecorderGuiDriver()
+	drv.SetRealView(queryRailViewName, gocui.NewView(queryRailViewName, 0, 0, 20, 10, gocui.OutputNormal))
+
+	// Empty container: both no-op, no panic.
+	empty := newRuntimeRail(drv)
+	empty.NextTab()
+	empty.PrevTab()
+	if empty.ActiveTab() != 0 {
+		t.Errorf("empty NextTab/PrevTab moved active to %d, want 0", empty.ActiveTab())
+	}
+
+	// Single tab: wraps onto itself (no-op switch).
+	single := newRuntimeRail(drv)
+	single.SetTabs([]TabSpec{{Label: "A", LeafKey: types.HISTORY}}, []types.IBaseContext{newFakeLeaf(types.HISTORY)})
+	single.NextTab()
+	single.PrevTab()
+	if single.ActiveTab() != 0 {
+		t.Errorf("single-tab NextTab/PrevTab moved active to %d, want 0", single.ActiveTab())
+	}
+
+	// Three tabs: Next from last wraps to 0; Prev from 0 wraps to last.
+	rail := newRuntimeRail(drv)
+	rail.SetTabs(
+		[]TabSpec{{Label: "A", LeafKey: types.HISTORY}, {Label: "B", LeafKey: types.SAVED_QUERY}, {Label: "C", LeafKey: types.HISTORY}},
+		[]types.IBaseContext{newFakeLeaf(types.HISTORY), newFakeLeaf(types.SAVED_QUERY), newFakeLeaf(types.HISTORY)},
+	)
+	rail.NextTab()
+	if rail.ActiveTab() != 1 {
+		t.Fatalf("NextTab from 0 = %d, want 1", rail.ActiveTab())
+	}
+	rail.SetActiveTab(2)
+	rail.NextTab() // last -> wrap to 0
+	if rail.ActiveTab() != 0 {
+		t.Errorf("NextTab from last = %d, want 0 (wrap)", rail.ActiveTab())
+	}
+	rail.PrevTab() // 0 -> wrap to last
+	if rail.ActiveTab() != 2 {
+		t.Errorf("PrevTab from 0 = %d, want 2 (wrap)", rail.ActiveTab())
+	}
+}
+
+// TestTabbedRail_SetTabsPreservesLogger proves the session logger survives a
+// SetTabs rebuild: a subsequent tab switch still emits a tab_switch event.
+func TestTabbedRail_SetTabsPreservesLogger(t *testing.T) {
+	drv := testfake.NewRecorderGuiDriver()
+	drv.SetRealView(queryRailViewName, gocui.NewView(queryRailViewName, 0, 0, 20, 10, gocui.OutputNormal))
+	rail := newRuntimeRail(drv)
+
+	var buf bytes.Buffer
+	rail.SetLogger(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	rail.SetTabs(
+		[]TabSpec{{Label: "A", LeafKey: types.HISTORY}, {Label: "B", LeafKey: types.SAVED_QUERY}},
+		[]types.IBaseContext{newFakeLeaf(types.HISTORY), newFakeLeaf(types.SAVED_QUERY)},
+	)
+	rail.SetActiveTab(1) // real switch -> must emit one tab_switch event
+	if out := buf.String(); !strings.Contains(out, `"evt":"tab_switch"`) {
+		t.Errorf("logger lost across SetTabs: no tab_switch event in %q", out)
+	}
+}
+
+// TestDisplayLeaf_SatisfiesNeitherSeam asserts a DisplayLeafContext satisfies
+// NEITHER the dirtyFlusher NOR the bodyTextRenderer seam, so the container takes
+// the leaf-delegation render path and never enrols the leaf in
+// flushInactiveDirty. The seams are unexported, so this test must live in the
+// context package (it does).
+func TestDisplayLeaf_SatisfiesNeitherSeam(t *testing.T) {
+	leaf := NewDisplayLeafContext(
+		NewBaseContext(BaseContextOpts{Key: types.HISTORY, ViewName: "v", Kind: types.MAIN_CONTEXT}),
+		Deps{}, "v", "body",
+	)
+	if _, ok := interface{}(leaf).(dirtyFlusher); ok {
+		t.Error("DisplayLeafContext unexpectedly satisfies dirtyFlusher")
+	}
+	if _, ok := interface{}(leaf).(bodyTextRenderer); ok {
+		t.Error("DisplayLeafContext unexpectedly satisfies bodyTextRenderer")
 	}
 }

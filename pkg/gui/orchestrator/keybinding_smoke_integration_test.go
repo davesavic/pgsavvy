@@ -505,16 +505,19 @@ func TestKeybindingSystemWalkthrough(t *testing.T) {
 			_ = s.g.ContextTree().Pop()
 		})
 
-		// Verify the cheatsheet generator produces a non-empty render
-		// for the live TrieSet.
+		// Verify the cheatsheet generator + per-category renderer produce
+		// a non-empty body for the live TrieSet.
 		out := cheatsheet.Generate(cheatsheet.GenerateInput{
 			Trie:  s.g.Matcher().TrieSet(),
 			Scope: types.GLOBAL,
 			Tr:    s.tr,
 		})
-		body := cheatsheet.Render(out, s.tr, cheatsheet.ScopeLabel(types.GLOBAL, s.tr))
-		if body == "" {
-			t.Fatalf("cheatsheet.Render returned empty string for live TrieSet")
+		var body strings.Builder
+		for _, cv := range cheatsheet.Categorize(out) {
+			body.WriteString(cheatsheet.RenderCategory(cv, s.tr))
+		}
+		if strings.TrimSpace(body.String()) == "" {
+			t.Fatalf("cheatsheet.RenderCategory produced no non-empty category body for live TrieSet")
 		}
 
 		// Every new (key, scope, mode, actionID) tuple

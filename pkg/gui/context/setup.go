@@ -376,7 +376,7 @@ func contextSpecs() []contextSpec {
 			key: types.CHEATSHEET, kind: types.DISPLAY_CONTEXT, title: "Keybindings", inFlatten: true,
 			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCheatsheet},
 			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
-				return NewCheatsheetContext(b, d, d.CheatsheetRender)
+				return NewCheatsheetContext(b, d)
 			},
 			assign: func(t *ContextTree, c types.IBaseContext) { t.Cheatsheet = c.(*CheatsheetContext) },
 		},

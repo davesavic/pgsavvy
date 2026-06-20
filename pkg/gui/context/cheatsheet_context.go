@@ -3,160 +3,132 @@ package context
 import (
 	"sync"
 
-	"github.com/davesavic/pgsavvy/pkg/gui/popup"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
-// CheatsheetContext renders the auto-generated keybinding cheatsheet
-// (DISPLAY_CONTEXT). When the user presses `?` the orchestrator
-// captures the focused scope, calls SetScope(scope) on this context,
-// then pushes it onto the focus stack. The next layout pass calls
-// HandleRender which invokes the wired render closure and writes the
-// resulting body into the CHEATSHEET view via the driver.
+// CheatsheetContext is the DISPLAY_CONTEXT container that multiplexes the
+// per-category cheatsheet tabs into the single CHEATSHEET view
+// (many-contexts-ONE-view topology). It is a THIN ADAPTER over the shared
+// TabbedRailContext core: all tabbed-pane mechanics (tab switching, tab-strip
+// publishing, leaf-delegation render) live in the embedded core; this type
+// adds the captured focus scope and the per-tab vertical scroll the layout
+// pass clamps via applyCheatsheetScroll (layout.go).
 //
-// Mirrors the WhichKeyContext pattern: pkg/gui/context cannot
-// import pkg/gui/keys or pkg/cheatsheet directly (those packages would
-// pull pkg/gui/keys into the import DAG of pkg/gui/context, which the
-// architecture forbids). The orchestrator wires a closure that closes
-// over the live TrieSet + Registry + Tr.
+// When the user presses `?` the orchestrator captures the focused scope, calls
+// SetScope(scope), builds one DisplayLeafContext per cheatsheet Category, calls
+// SetTabs, then pushes the container onto the focus stack. The categorize/render
+// happens in the orchestrator (pkg/gui/context must NOT import pkg/cheatsheet);
+// the container only receives pre-rendered body strings via the leaves.
 //
-// AddKeybindingsFn is a no-op — DISPLAY_CONTEXT is read-only chrome.
-// The `<esc>` pop binding is installed on the CHEATSHEET view via
-// driver.SetKeybinding in orchestrator wireWithDriver.
+// The container constructs the core with FireFocusHooks=FALSE (every leaf lives
+// under the single CHEATSHEET scope, so a tab switch is not a focus transition)
+// and forces ManagesOwnOrigin=TRUE on every tab (see SetTabs): applyCheatsheetScroll
+// is the SOLE writer of the CHEATSHEET view origin, so the core's generic per-tab
+// origin save/restore is disabled.
+//
+// `<esc>` is a CHEATSHEET-scope TRIE binding (CheatsheetController) PLUS the
+// automatic installEscAbortShim on non-editable views — NOT a driver
+// SetKeybinding. No view-level esc binding is installed here.
 type CheatsheetContext struct {
-	BaseContext
+	*TabbedRailContext
 
-	deps   depsAlias
-	render func(scope types.ContextKey) string
+	deps Deps
 
-	mu      sync.Mutex
-	scope   types.ContextKey
-	state   *popup.TabbedPopup
-	scrollY int
+	mu    sync.Mutex
+	scope types.ContextKey
+
+	// scroll holds the per-tab vertical view offset (lines), sized to the tab
+	// count by SetTabs and indexed by the embedded core's ActiveTab(). This
+	// context owns only the top clamp (>= 0); the layout pass
+	// (applyCheatsheetScroll, layout.go) owns the bottom clamp against the
+	// rendered content extent and is the single writer of the gocui view origin.
+	scroll []int
 }
 
-// NewCheatsheetContext builds the CHEATSHEET context. render may be nil
-// at construction (orchestrator wires it post-NewContextTree); a nil
-// render renders nothing on HandleRender.
-func NewCheatsheetContext(
-	base BaseContext,
-	deps depsAlias,
-	render func(scope types.ContextKey) string,
-) *CheatsheetContext {
+// NewCheatsheetContext builds the CHEATSHEET container as a thin adapter over a
+// TabbedRailContext core with NO initial tabs (the per-category tabs are built
+// and injected at runtime via SetTabs each time `?` is pressed).
+func NewCheatsheetContext(base BaseContext, deps Deps) *CheatsheetContext {
+	core := NewTabbedRailContext(base, deps, TabbedRailOpts{
+		// FireFocusHooks=false: every leaf shares the single CHEATSHEET scope,
+		// so a tab switch is NOT a focus transition — firing per-leaf focus
+		// hooks would be spurious. The leaves are stateless body renderers.
+		FireFocusHooks: false,
+	})
 	return &CheatsheetContext{
-		BaseContext: base,
-		deps:        deps,
-		render:      render,
+		TabbedRailContext: core,
+		deps:              deps,
 	}
 }
 
-// SetScope records the focused-scope captured at the moment the user
-// pressed `?`. The orchestrator's `help.cheatsheet` handler calls this
-// BEFORE pushing the context onto the focus stack so HandleRender sees
-// the correct scope.
-//
-// Concurrent-safe; HandleRender takes the same mutex when reading.
+// SetScope records the focused-scope captured at the moment the user pressed
+// `?`. The orchestrator's HelpCheatsheet handler calls this BEFORE pushing the
+// context onto the focus stack. Concurrent-safe.
 func (c *CheatsheetContext) SetScope(scope types.ContextKey) {
 	c.mu.Lock()
 	c.scope = scope
 	c.mu.Unlock()
 }
 
-// Scope returns the most recently captured scope (the empty key when
-// SetScope has never been called).
+// Scope returns the most recently captured scope (the empty key when SetScope
+// has never been called).
 func (c *CheatsheetContext) Scope() types.ContextKey {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.scope
 }
 
-// SetRender installs the body-producing closure. The orchestrator wires
-// this post-NewContextTree once the matcher + registry are live.
-func (c *CheatsheetContext) SetRender(render func(scope types.ContextKey) string) {
-	c.render = render
-}
-
-// SetState installs a TabbedPopup state object. When
-// non-nil, HandleRender writes state.Body() into the view — replacing
-// the single-scope render-closure path. The orchestrator's
-// help.cheatsheet action builds a state with one tab per relevant scope
-// before pushing the context. nil clears the state, restoring the
-// legacy render-closure fallback.
-//
-// Concurrent-safe; HandleRender takes the same mutex when reading.
-func (c *CheatsheetContext) SetState(s *popup.TabbedPopup) {
-	c.mu.Lock()
-	c.state = s
-	c.scrollY = 0
-	c.mu.Unlock()
-}
-
-// Scroll moves the vertical view offset by delta lines, clamping at the
-// top (never negative). The upper bound is enforced by the layout pass,
-// which knows the rendered content height and viewport rows. delta < 0
-// scrolls up; delta > 0 scrolls down.
-func (c *CheatsheetContext) Scroll(delta int) {
-	c.mu.Lock()
-	c.scrollY += delta
-	if c.scrollY < 0 {
-		c.scrollY = 0
+// SetTabs rebuilds the container's tab set from a fresh spec list, forcing
+// ManagesOwnOrigin=true on every spec (applyCheatsheetScroll, layout.go, is the
+// SOLE writer of the CHEATSHEET view origin, so the core's restoreActiveOrigin
+// is a no-op), re-allocates the per-tab scroll store (zeroing every tab's offset
+// so a fresh `?` opens at the top), then delegates to the embedded core.
+func (c *CheatsheetContext) SetTabs(specs []TabSpec, leaves []types.IBaseContext) {
+	for i := range specs {
+		specs[i].ManagesOwnOrigin = true
 	}
-	c.mu.Unlock()
+	c.scroll = make([]int, len(specs))
+	c.TabbedRailContext.SetTabs(specs, leaves)
 }
 
-// SetScrollY sets the absolute vertical offset, clamping at the top. The
-// layout pass calls this to write back the offset it clamped to the
-// content's max scroll (so `G` / over-scroll settle at the last page).
+// activeScroll returns a pointer to the active tab's stored vertical offset, or
+// nil when the scroll store is empty / the active index is out of range. Guards
+// the scroll accessors against an unsized store.
+func (c *CheatsheetContext) activeScroll() *int {
+	idx := c.ActiveTab()
+	if idx < 0 || idx >= len(c.scroll) {
+		return nil
+	}
+	return &c.scroll[idx]
+}
+
+// ScrollY returns the ACTIVE tab's vertical offset (lines). Zero when the scroll
+// store is unsized.
+func (c *CheatsheetContext) ScrollY() int {
+	if s := c.activeScroll(); s != nil {
+		return *s
+	}
+	return 0
+}
+
+// SetScrollY sets the ACTIVE tab's absolute vertical offset, clamping at the top
+// (never negative). The layout pass calls this to write back the value it
+// clamped to the content's last page (so `G` / over-scroll settle on the last
+// page). No-op when the scroll store is unsized.
 func (c *CheatsheetContext) SetScrollY(y int) {
-	c.mu.Lock()
+	s := c.activeScroll()
+	if s == nil {
+		return
+	}
 	if y < 0 {
 		y = 0
 	}
-	c.scrollY = y
-	c.mu.Unlock()
+	*s = y
 }
 
-// ScrollY returns the current vertical view offset (lines).
-func (c *CheatsheetContext) ScrollY() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.scrollY
+// Scroll moves the ACTIVE tab's vertical offset by delta lines, clamping at the
+// top. The bottom bound is enforced by the layout pass, which knows the rendered
+// content height. delta < 0 scrolls up; delta > 0 scrolls down.
+func (c *CheatsheetContext) Scroll(delta int) {
+	c.SetScrollY(c.ScrollY() + delta)
 }
-
-// State returns the installed TabbedPopup or nil. Concurrent-safe.
-func (c *CheatsheetContext) State() *popup.TabbedPopup {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.state
-}
-
-// HandleRender writes the cheatsheet body into the gocui view. When a
-// TabbedPopup state has been installed (the Z1 path) the active tab's
-// body wins; otherwise HandleRender falls back to the single-scope
-// render closure so legacy callers (test fixtures, pre-Z1 wiring) keep
-// working. No-ops cleanly when both inputs are unset.
-func (c *CheatsheetContext) HandleRender() error {
-	state := c.State()
-	var body string
-	if state != nil {
-		body = state.Body()
-	}
-	if body == "" {
-		if c.render == nil {
-			return nil
-		}
-		body = c.render(c.Scope())
-	}
-	if body == "" {
-		return nil
-	}
-	viewName := c.GetViewName()
-	writeView(c.deps, func() error {
-		return c.deps.GuiDriver.SetContent(viewName, body)
-	})
-	return nil
-}
-
-// AddKeybindingsFn drops the contributor — DISPLAY_CONTEXT views are
-// read-only chrome.
-func (c *CheatsheetContext) AddKeybindingsFn(_ types.KeybindingsFn) {}

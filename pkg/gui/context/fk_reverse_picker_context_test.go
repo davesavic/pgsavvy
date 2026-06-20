@@ -4,15 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/davesavic/pgsavvy/pkg/gui/popup"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
-
-// stubReversePanel is a minimal popup.Panel for the picker tests.
-type stubReversePanel struct{ body string }
-
-func (s *stubReversePanel) Body() string             { return s.body }
-func (s *stubReversePanel) HandleKey(types.Key) bool { return false }
 
 func newTestFKReversePicker(drv types.GuiDriver) *FKReversePickerContext {
 	base := NewBaseContext(BaseContextOpts{
@@ -23,6 +16,17 @@ func newTestFKReversePicker(drv types.GuiDriver) *FKReversePickerContext {
 	})
 	deps := types.ContextTreeDeps{GuiDriver: drv}
 	return NewFKReversePickerContext(base, deps)
+}
+
+// fkReverseLeaf builds a DisplayLeafContext wired to the picker's shared view
+// carrying the supplied body — the runtime leaf the controller injects.
+func fkReverseLeaf(c *FKReversePickerContext, drv types.GuiDriver, body string) types.IBaseContext {
+	base := NewBaseContext(BaseContextOpts{
+		Key:      FKReversePickerContextKey,
+		ViewName: c.GetViewName(),
+		Kind:     types.DISPLAY_CONTEXT,
+	})
+	return NewDisplayLeafContext(base, types.ContextTreeDeps{GuiDriver: drv}, c.GetViewName(), body)
 }
 
 func TestNewFKReversePickerContext_Identity(t *testing.T) {
@@ -38,78 +42,75 @@ func TestNewFKReversePickerContext_Identity(t *testing.T) {
 	}
 }
 
-func TestFKReversePickerContext_HandleRender_DelegatesToBody(t *testing.T) {
+// HandleRender writes the ACTIVE leaf's body verbatim into the shared view.
+// AD-17 places SafeText at the leaf-body layer, not here; the container must
+// NOT re-strip the body, so newlines survive intact.
+func TestFKReversePickerContext_HandleRender_DelegatesToActiveLeafBody(t *testing.T) {
 	drv := &captureDriver{}
 	c := newTestFKReversePicker(drv)
-	pop := popup.NewTabbedPopup([]popup.Tab{
-		{Title: "orders.user_id", Panel: &stubReversePanel{body: "orders\n~50 rows"}},
-	})
-	c.SetState(pop)
+	specs := []TabSpec{{Label: "orders.user_id", LeafKey: "fk_reverse_0"}}
+	leaves := []types.IBaseContext{fkReverseLeaf(c, drv, "orders\n~50 rows")}
+	c.SetTabs(specs, leaves)
 	if err := c.HandleRender(); err != nil {
 		t.Fatalf("HandleRender: %v", err)
-	}
-	if drv.writes != 1 {
-		t.Fatalf("writes = %d, want 1", drv.writes)
 	}
 	if !strings.Contains(drv.lastContent, "orders\n~50 rows") {
-		t.Errorf("lastContent = %q; want to contain panel body", drv.lastContent)
+		t.Errorf("lastContent = %q; want to contain active leaf body", drv.lastContent)
 	}
 }
 
-// Mirrors the regression test for TableInspect: the context
-// layer must NOT strip ANSI / newlines from the composed body. AD-17
-// places SafeText at the leaf panel layer, not here.
-func TestFKReversePickerContext_HandleRender_PreservesEscapesAndNewlines(t *testing.T) {
+// Cycling the active tab re-renders the NEW active leaf's body, and the body is
+// written verbatim (newlines preserved) — the regression mirror for TableInspect.
+func TestFKReversePickerContext_HandleRender_ActiveLeafFollowsTab(t *testing.T) {
 	drv := &captureDriver{}
 	c := newTestFKReversePicker(drv)
-	pop := popup.NewTabbedPopup([]popup.Tab{
-		{Title: "orders.user_id", Panel: &stubReversePanel{body: "orders\n~50 rows"}},
-		{Title: "comments.user_id", Panel: &stubReversePanel{body: "comments\n~12 rows"}},
-	})
-	c.SetState(pop)
+	specs := []TabSpec{
+		{Label: "orders.user_id", LeafKey: "fk_reverse_0"},
+		{Label: "comments.user_id", LeafKey: "fk_reverse_1"},
+	}
+	leaves := []types.IBaseContext{
+		fkReverseLeaf(c, drv, "orders\n~50 rows"),
+		fkReverseLeaf(c, drv, "comments\n~12 rows"),
+	}
+	c.SetTabs(specs, leaves)
+
 	if err := c.HandleRender(); err != nil {
-		t.Fatalf("HandleRender: %v", err)
+		t.Fatalf("HandleRender tab 0: %v", err)
 	}
-	if !strings.ContainsRune(drv.lastContent, '\x1b') {
-		t.Errorf("lastContent missing ESC byte (active-tab color destroyed): %q", drv.lastContent)
+	if !strings.Contains(drv.lastContent, "orders\n~50 rows") {
+		t.Errorf("tab 0 body = %q; want orders body with newline preserved", drv.lastContent)
 	}
-	if !strings.Contains(drv.lastContent, "\n\n") {
-		t.Errorf("lastContent missing header/body separator newlines: %q", drv.lastContent)
+
+	c.NextTab()
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("HandleRender tab 1: %v", err)
+	}
+	if !strings.Contains(drv.lastContent, "comments\n~12 rows") {
+		t.Errorf("tab 1 body = %q; want comments body with newline preserved", drv.lastContent)
 	}
 }
 
-func TestFKReversePickerContext_HandleRender_NilStateEmptyBody(t *testing.T) {
+func TestFKReversePickerContext_HandleRender_NoTabsEmptyBody(t *testing.T) {
 	drv := &captureDriver{}
 	c := newTestFKReversePicker(drv)
 	if err := c.HandleRender(); err != nil {
 		t.Fatalf("HandleRender: %v", err)
 	}
 	if drv.lastContent != "" {
-		t.Errorf("lastContent = %q; want empty when state is nil", drv.lastContent)
+		t.Errorf("lastContent = %q; want empty with no tabs", drv.lastContent)
 	}
 }
 
 func TestFKReversePickerContext_HandleRender_NilGuiDriver_NoPanic(t *testing.T) {
 	c := newTestFKReversePicker(nil)
 	if err := c.HandleRender(); err != nil {
-		t.Fatalf("HandleRender with nil driver / nil state: %v", err)
+		t.Fatalf("HandleRender with nil driver / no tabs: %v", err)
 	}
-	c.SetState(popup.NewTabbedPopup([]popup.Tab{
-		{Title: "t", Panel: &stubReversePanel{body: "x"}},
-	}))
+	c.SetTabs(
+		[]TabSpec{{Label: "t", LeafKey: "fk_reverse_0"}},
+		[]types.IBaseContext{fkReverseLeaf(c, nil, "x")},
+	)
 	if err := c.HandleRender(); err != nil {
-		t.Fatalf("HandleRender with nil driver / non-nil state: %v", err)
-	}
-}
-
-func TestFKReversePickerContext_StateAccessors(t *testing.T) {
-	c := newTestFKReversePicker(nil)
-	if c.State() != nil {
-		t.Errorf("State() = %v; want nil at construction", c.State())
-	}
-	pop := popup.NewTabbedPopup(nil)
-	c.SetState(pop)
-	if c.State() != pop {
-		t.Error("State() did not round-trip SetState")
+		t.Fatalf("HandleRender with nil driver / one tab: %v", err)
 	}
 }

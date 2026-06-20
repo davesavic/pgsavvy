@@ -14,7 +14,6 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
-	"github.com/davesavic/pgsavvy/pkg/gui/popup"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/session"
@@ -103,18 +102,10 @@ type ReverseEntry struct {
 	PKValues []any
 }
 
-// ReversePanel renders the body of one reverse-FK tab. Stateless —
-// Body() rebuilds the rendered string on every call so changes to the
-// underlying ReverseEntry (e.g. a fresh reltuples fetch) take effect on
-// the next render.
-type ReversePanel struct {
-	entry ReverseEntry
-}
-
-// NewReversePanel constructs a panel for a single ReverseEntry.
-func NewReversePanel(e ReverseEntry) *ReversePanel { return &ReversePanel{entry: e} }
-
-// Body renders the panel body. Layout:
+// reverseBody renders the body string of one reverse-FK tab. Stateless —
+// rebuilds the rendered string on every call so changes to the underlying
+// ReverseEntry (e.g. a fresh reltuples fetch) take effect on the next
+// render. Layout:
 //
 //	<schema>.<table>(<col1>[, col2 ...])
 //	<reltuples-line>
@@ -126,31 +117,24 @@ func NewReversePanel(e ReverseEntry) *ReversePanel { return &ReversePanel{entry:
 //	reltuples <  0 → "~? rows"   (no ANALYZE since reset)
 //
 // All DB-supplied identifiers go through config.SafeText (AD-17).
-func (p *ReversePanel) Body() string {
-	if p == nil {
-		return ""
-	}
+func reverseBody(e ReverseEntry) string {
 	var b strings.Builder
-	b.WriteString(config.SafeText(p.entry.FK.Schema))
-	if p.entry.FK.Schema != "" {
+	b.WriteString(config.SafeText(e.FK.Schema))
+	if e.FK.Schema != "" {
 		b.WriteString(".")
 	}
-	b.WriteString(config.SafeText(p.entry.FK.Table))
+	b.WriteString(config.SafeText(e.FK.Table))
 	b.WriteString("(")
-	for i, c := range p.entry.FK.Columns {
+	for i, c := range e.FK.Columns {
 		if i > 0 {
 			b.WriteString(", ")
 		}
 		b.WriteString(config.SafeText(c))
 	}
 	b.WriteString(")\n")
-	b.WriteString(renderReltuples(p.entry.Reltuples))
+	b.WriteString(renderReltuples(e.Reltuples))
 	return b.String()
 }
-
-// HandleKey is the popup.Panel side of the contract; this panel does
-// not handle keys (navigation runs through the controller's bindings).
-func (p *ReversePanel) HandleKey(types.Key) bool { return false }
 
 // renderReltuples formats the reltuples float into the user-facing
 // "~N rows" / "~0 rows" / "~? rows" string.
@@ -181,9 +165,9 @@ func reverseTabTitle(fk models.ForeignKey) string {
 }
 
 // FKReversePickerController owns the FK_REVERSE_PICKER popup bindings.
-// State lives on the supplied
-// *guicontext.FKReversePickerContext and is mutated through its installed
-// *popup.TabbedPopup.
+// The tab set lives on the supplied *guicontext.FKReversePickerContext
+// (a TabbedRailContext adapter) and is mutated via its SetTabs / NextTab /
+// PrevTab / ActiveTab surface.
 //
 //   - <tab> / ]               cycle to next tab
 //   - [                       cycle to previous tab
@@ -199,9 +183,10 @@ type FKReversePickerController struct {
 	jumps  FKReverseJumpList
 	toast  FKReverseToaster
 
-	// entries is the slice the active TabbedPopup was built from. Indexed
-	// by the popup's Active() to find the entry behind `<CR>`. Reset by
-	// every Open call.
+	// entries is the slice the active tab set was built from. Indexed by
+	// the container's ActiveTab() to find the entry behind `<CR>` — tab i
+	// (label reverseTabTitle(entries[i].FK)) corresponds to entries[i].
+	// Reset by every Open call.
 	entries []ReverseEntry
 
 	// origin captures the originating tab at Open time so Select can push
@@ -239,27 +224,43 @@ func NewFKReversePickerController(c *common.Common, core CoreDeps, deps FKRevers
 	}
 }
 
-// Open installs a fresh TabbedPopup on the context, one tab per
-// inbound FK. The originating tab + cursor (row, col) are stamped so a
-// later Select pushes a faithful JumpEntry. Returns false (no popup
-// installed) when entries is empty — the caller (Z1 binding) then
+// Open rebuilds the container's tab set, one tab per inbound FK, each backed
+// by a stateless DisplayLeafContext. The originating tab + cursor (row, col)
+// are stamped so a later Select pushes a faithful JumpEntry. Returns false
+// (no tabs installed) when entries is empty — the caller (Z1 binding) then
 // surfaces the "no inbound foreign keys" DisabledReason.
+//
+// Leaves are built in the SAME ORDER as entries (entries[i] ↔ tab i ↔ label
+// reverseTabTitle(entries[i].FK)). The LeafKey is the ordinal `fk_reverse_<i>`,
+// NEVER a DB identifier: logTabSwitch emits string(leafKey) to the session log
+// and the redactor does not scrub table/column names, so an identifier leafKey
+// would leak schema/table/column names.
 func (f *FKReversePickerController) Open(entries []ReverseEntry, origin FKReverseOriginTab, cursorRow, cursorCol int) bool {
 	if f.ctx == nil || len(entries) == 0 {
 		return false
 	}
-	tabs := make([]popup.Tab, 0, len(entries))
-	for _, e := range entries {
-		tabs = append(tabs, popup.Tab{
-			Title: reverseTabTitle(e.FK),
-			Panel: NewReversePanel(e),
+	viewName := f.ctx.GetViewName()
+	leafDeps := guicontext.Deps{GuiDriver: f.helpers.Driver}
+	specs := make([]guicontext.TabSpec, 0, len(entries))
+	leaves := make([]types.IBaseContext, 0, len(entries))
+	for i, e := range entries {
+		specs = append(specs, guicontext.TabSpec{
+			Label:            reverseTabTitle(e.FK),
+			LeafKey:          types.ContextKey(fmt.Sprintf("fk_reverse_%d", i)),
+			ManagesOwnOrigin: false,
 		})
+		leafBase := guicontext.NewBaseContext(guicontext.BaseContextOpts{
+			Key:      guicontext.FKReversePickerContextKey,
+			ViewName: viewName,
+			Kind:     types.DISPLAY_CONTEXT,
+		})
+		leaves = append(leaves, guicontext.NewDisplayLeafContext(leafBase, leafDeps, viewName, reverseBody(e)))
 	}
 	f.entries = append(f.entries[:0], entries...)
 	f.origin = origin
 	f.originRow = cursorRow
 	f.originCol = cursorCol
-	f.ctx.SetState(popup.NewTabbedPopup(tabs))
+	f.ctx.SetTabs(specs, leaves)
 	return true
 }
 
@@ -270,27 +271,23 @@ func (f *FKReversePickerController) Entries() []ReverseEntry {
 	return out
 }
 
-// NextTab advances the active tab on the installed TabbedPopup state.
-// No-op when the context or state is unwired.
+// NextTab advances the active tab on the container. No-op when the context
+// is unwired.
 func (f *FKReversePickerController) NextTab(_ commands.ExecCtx) error {
 	if f.ctx == nil {
 		return nil
 	}
-	if s := f.ctx.State(); s != nil {
-		s.NextTab()
-	}
+	f.ctx.NextTab()
 	return nil
 }
 
-// PrevTab rewinds the active tab on the installed TabbedPopup state.
-// No-op when the context or state is unwired.
+// PrevTab rewinds the active tab on the container. No-op when the context
+// is unwired.
 func (f *FKReversePickerController) PrevTab(_ commands.ExecCtx) error {
 	if f.ctx == nil {
 		return nil
 	}
-	if s := f.ctx.State(); s != nil {
-		s.PrevTab()
-	}
+	f.ctx.PrevTab()
 	return nil
 }
 
@@ -313,11 +310,7 @@ func (f *FKReversePickerController) Select(_ commands.ExecCtx) error {
 	if f.ctx == nil {
 		return nil
 	}
-	state := f.ctx.State()
-	if state == nil {
-		return nil
-	}
-	idx := state.Active()
+	idx := f.ctx.ActiveTab()
 	if idx < 0 || idx >= len(f.entries) {
 		f.emitToast("fk reverse: no active tab")
 		return nil

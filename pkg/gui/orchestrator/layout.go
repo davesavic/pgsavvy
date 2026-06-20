@@ -622,9 +622,25 @@ func (g *Gui) RunLayout(w, h int) error {
 			// gocui resets FrameColor on SetView, so this runs every frame).
 			// The scroll origin is applied AFTER HandleRender below so
 			// view.LinesHeight reflects the freshly written body.
-			if ctx.GetKey() == types.CHEATSHEET && view != nil {
-				view.Title = ctx.GetTitle()
-				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+			if ctx.GetKey() == types.CHEATSHEET {
+				if view != nil {
+					view.Title = ctx.GetTitle()
+					view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+				}
+				// Paint the active category tab theme.ActiveBorder via SelFgColor,
+				// mirroring the SCHEMA_RAIL/QUERY_RAIL/TABLE_INSPECT native-tab
+				// colouring. The rail block above is gated on !modalTop and so is
+				// suppressed while this popup is the top modal; the active-tab
+				// colour is therefore wired here, in the per-frame CHEATSHEET pass.
+				// By-name (not via the local view handle) so it mirrors the rails
+				// and runs even when SetView hands back no view this frame; the
+				// driver call is a no-op when the view does not exist yet. Inactive
+				// label stays ColorDefault so the leaf body is not dimmed.
+				_ = g.driver.SetViewTabColors(
+					ctx.GetViewName(),
+					frameAttr(theme.Current().ActiveBorder),
+					gocui.ColorDefault,
+				)
 			}
 			// RELATIONSHIP_PANEL styling: a focus-retaining DISPLAY_CONTEXT with
 			// two states — FOLLOW mode (grid keeps input) and INPUT mode (Enter;
@@ -1470,7 +1486,17 @@ func applyCheatsheetScroll(view *gocui.View, ctx types.IBaseContext) {
 	oy := sc.ScrollY()
 	if oy > maxOY {
 		oy = maxOY
-		sc.SetScrollY(oy)
+		// Persist the clamp ONLY when there is real scroll room (maxOY>0): that
+		// is the legitimate case — collapsing the `G` bottom-sentinel or genuine
+		// over-scroll to the last page. When maxOY==0 the measurement is NOT
+		// trustworthy: on a tab switch the shared CHEATSHEET view still holds the
+		// PREVIOUS (shorter) tab's body for one frame, so view.LinesHeight()
+		// reports the old height. Writing the clamp back here would zero the
+		// just-restored per-tab offset; instead clamp the displayed origin only
+		// and let the next frame (fresh height) restore it.
+		if maxOY > 0 {
+			sc.SetScrollY(oy)
+		}
 	}
 	view.SetOriginY(oy)
 }
@@ -1490,6 +1516,13 @@ type tableInspectScroller interface {
 // column. Called after HandleRender so view dimensions reflect the
 // freshly written body. Clamped values are written back so the `G` and
 // `l` sentinels settle exactly on the last page / column.
+//
+// The clamp is persisted ONLY when the axis has real scroll room (maxO*>0):
+// on a tab switch the shared view holds the PREVIOUS (shorter/narrower) tab's
+// body for one frame, so LinesHeight/maxLineWidth report a stale-small extent
+// and maxO* collapses to 0. Writing that clamp back would zero the
+// just-restored per-tab offset; instead clamp the displayed origin only and
+// let the next frame (fresh extent) restore it. Mirrors applyCheatsheetScroll.
 func applyTableInspectScroll(view *gocui.View, ctx types.IBaseContext) {
 	sc, ok := ctx.(tableInspectScroller)
 	if !ok {
@@ -1499,13 +1532,17 @@ func applyTableInspectScroll(view *gocui.View, ctx types.IBaseContext) {
 	oy := sc.ScrollY()
 	if oy > maxOY {
 		oy = maxOY
-		sc.SetScrollY(oy)
+		if maxOY > 0 {
+			sc.SetScrollY(oy)
+		}
 	}
 	maxOX := max(maxLineWidth(view)-view.InnerWidth(), 0)
 	ox := sc.ScrollX()
 	if ox > maxOX {
 		ox = maxOX
-		sc.SetScrollX(ox)
+		if maxOX > 0 {
+			sc.SetScrollX(ox)
+		}
 	}
 	view.SetOrigin(ox, oy)
 }

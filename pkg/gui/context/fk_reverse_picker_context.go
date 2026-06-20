@@ -1,7 +1,6 @@
 package context
 
 import (
-	"github.com/davesavic/pgsavvy/pkg/gui/popup"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
@@ -12,48 +11,37 @@ import (
 // should reference types.FK_REVERSE_PICKER directly.
 const FKReversePickerContextKey = types.FK_REVERSE_PICKER
 
-// FKReversePickerContext renders the gD reverse FK picker as a TabbedPopup
-// (one tab per inbound FK). TEMPORARY_POPUP kind — the orchestrator's
-// layout pass gates rendering on focus-stack membership, so HandleRender
-// is only invoked while the popup is on top.
+// FKReversePickerContext renders the gD reverse FK picker as a
+// many-contexts-ONE-view tabbed pane (one tab per inbound FK). It is a
+// THIN ADAPTER over the shared TabbedRailContext core: all tabbed-pane
+// mechanics (tab switching, tab-strip publishing, leaf-delegation render)
+// live in the embedded core; the controller builds one DisplayLeafContext
+// per inbound FK and injects them via SetTabs each time the picker opens.
 //
-// The context is a thin state holder: state is owned by a
-// *popup.TabbedPopup installed via SetState. The controller owns key
-// dispatch (tab cycling, <CR> selection, close). Pattern mirrors
-// TableInspectContext.
+// TEMPORARY_POPUP kind — the orchestrator's layout pass gates rendering on
+// focus-stack membership, so HandleRender (provided by the embedded core)
+// is only invoked while the popup is on top. The body is ~2 lines, so the
+// adapter adds NO scroll (unlike CheatsheetContext).
 type FKReversePickerContext struct {
-	BaseContext
+	*TabbedRailContext
 
 	deps Deps
-
-	state *popup.TabbedPopup
 }
 
-// NewFKReversePickerContext builds a context bound to the supplied
-// BaseContext (the caller sets Key / ViewName / Kind via BaseContextOpts).
+// NewFKReversePickerContext builds the FK_REVERSE_PICKER container as a thin
+// adapter over a TabbedRailContext core with NO initial tabs (the per-FK
+// tabs are built and injected at runtime via SetTabs each time the picker
+// opens). The caller sets Key / ViewName / Kind via BaseContextOpts.
 func NewFKReversePickerContext(base BaseContext, deps Deps) *FKReversePickerContext {
-	return &FKReversePickerContext{BaseContext: base, deps: deps}
-}
-
-// SetState installs the TabbedPopup that supplies the rendered body.
-// Nil is permitted: HandleRender emits an empty body when state is unset.
-func (c *FKReversePickerContext) SetState(s *popup.TabbedPopup) { c.state = s }
-
-// State returns the installed TabbedPopup or nil.
-func (c *FKReversePickerContext) State() *popup.TabbedPopup { return c.state }
-
-// HandleRender writes the popup body into the gocui view. Panels are
-// responsible for SafeText-ing DB-supplied leaves (AD-17); the context
-// does NOT re-strip the composed body — that would destroy the active-tab
-// color escape and the inter-row newlines.
-func (c *FKReversePickerContext) HandleRender() error {
-	body := ""
-	if c.state != nil {
-		body = c.state.Body()
-	}
-	viewName := c.GetViewName()
-	writeView(c.deps, func() error {
-		return c.deps.GuiDriver.SetContent(viewName, body)
+	core := NewTabbedRailContext(base, deps, TabbedRailOpts{
+		// FireFocusHooks=false: every leaf shares the single
+		// FK_REVERSE_PICKER scope, so a tab switch is NOT a focus
+		// transition — firing per-leaf focus hooks would be spurious.
+		// The leaves are stateless body renderers.
+		FireFocusHooks: false,
 	})
-	return nil
+	return &FKReversePickerContext{
+		TabbedRailContext: core,
+		deps:              deps,
+	}
 }

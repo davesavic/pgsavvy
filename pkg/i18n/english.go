@@ -115,14 +115,21 @@ type TranslationSet struct {
 	ModeReplace         string
 
 	// Cheatsheet rendering fragments. The popup paints the legend once
-	// at the top, then a section per (Mode, Tag). ScopeAllLabel renames
-	// the "all" scope to a human-friendly label in cheatsheet output.
-	CheatsheetTitle           string
+	// at the top, then a section per (Mode, Tag).
 	CheatsheetCurrentScopeTab string
 	CheatsheetGlobalTab       string
 	CheatsheetLegend          string
 	CheatsheetEmpty           string
-	CheatsheetScopeAllLabel   string
+
+	// Per-category labels for the cheatsheet Tag→Category taxonomy
+	// (see pkg/cheatsheet/categories.go). General is the catch-all
+	// label for tags with no explicit category.
+	CheatsheetCategoryEditing string
+	CheatsheetCategoryQuery   string
+	CheatsheetCategoryResults string
+	CheatsheetCategoryCells   string
+	CheatsheetCategorySession string
+	CheatsheetCategoryGeneral string
 
 	// NOTICE/WARNING UI strings. The toast format
 	// strings accept a single %d argument (the per-run notice count);
@@ -404,12 +411,17 @@ func EnglishTranslationSet() *TranslationSet {
 		ModeCommand:         "-- COMMAND --",
 		ModeReplace:         "-- REPLACE --",
 
-		CheatsheetTitle:           "Keybindings",
 		CheatsheetCurrentScopeTab: "Current context",
 		CheatsheetGlobalTab:       "Global",
 		CheatsheetLegend:          "·=default  ✱=override  ★=custom",
 		CheatsheetEmpty:           "(no bindings)",
-		CheatsheetScopeAllLabel:   "(non-popup)",
+
+		CheatsheetCategoryEditing: "Editing",
+		CheatsheetCategoryQuery:   "Query",
+		CheatsheetCategoryResults: "Results",
+		CheatsheetCategoryCells:   "Cells",
+		CheatsheetCategorySession: "Session",
+		CheatsheetCategoryGeneral: "General",
 
 		NoticeToastFirst:      "Server NOTICE (%d)",
 		NoticeToastSubsequent: "Server NOTICE (%d)",

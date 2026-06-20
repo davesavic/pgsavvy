@@ -79,26 +79,56 @@ func (g *Gui) wireKeybindingSystem(cfg *config.UserConfig) error {
 	return nil
 }
 
-// cheatsheetRender renders the CheatsheetContext for the given scope. Reads the
-// live matcher + translation set so the cheatsheet renders the current TrieSet
-// snapshot every time `?` is pressed. Returns the empty string when the matcher
-// hasn't published a TrieSet yet (early bootstrap). Extracted from the closure
-// in wireWithDriver.
-func (g *Gui) cheatsheetRender(scope types.ContextKey) string {
-	if g.keybindingSystem.matcher == nil {
-		return ""
-	}
-	ts := g.keybindingSystem.matcher.TrieSet()
-	if ts == nil {
-		return ""
-	}
+// buildCheatsheetCategoryTabs builds the per-Category tab specs + DisplayLeafContext
+// leaves the CHEATSHEET container renders for the given focused scope. It reads the
+// live TrieSet, generates the scope-filtered output, categorizes it, and renders one
+// pre-formatted body per Category (the categorize/render lives here so pkg/gui/context
+// stays free of pkg/cheatsheet). Every leaf carries the SAME GuiDriver + CHEATSHEET
+// view name as the container so its SetContent targets the shared view.
+//
+// NEVER returns zero specs: when the matcher hasn't published a TrieSet yet, it
+// falls back to a single General tab carrying the CheatsheetEmpty body, preserving
+// the always-on-General invariant.
+func (g *Gui) buildCheatsheetCategoryTabs(scope types.ContextKey) ([]guicontext.TabSpec, []types.IBaseContext) {
 	tr := g.deps.Common.Tr
-	out := cheatsheet.Generate(cheatsheet.GenerateInput{
-		Trie:  ts,
-		Scope: scope,
-		Tr:    tr,
-	})
-	return cheatsheet.Render(out, tr, cheatsheet.ScopeLabel(scope, tr))
+	viewName := g.registry.Cheatsheet.GetViewName()
+	leafDeps := guicontext.Deps{GuiDriver: g.driver}
+	newLeaf := func(body string) *guicontext.DisplayLeafContext {
+		leafBase := guicontext.NewBaseContext(guicontext.BaseContextOpts{
+			Key:      types.CHEATSHEET,
+			ViewName: viewName,
+			Kind:     types.DISPLAY_CONTEXT,
+		})
+		return guicontext.NewDisplayLeafContext(leafBase, leafDeps, viewName, body)
+	}
+
+	var ts *keys.TrieSet
+	if g.keybindingSystem.matcher != nil {
+		ts = g.keybindingSystem.matcher.TrieSet()
+	}
+	if ts == nil {
+		// No live trie: a single always-on General tab with the empty body.
+		general := cheatsheet.CategoryView{Category: cheatsheet.CategoryGeneral}
+		spec := guicontext.TabSpec{
+			Label:   cheatsheet.LabelFor(cheatsheet.CategoryGeneral, tr),
+			LeafKey: types.ContextKey(string(cheatsheet.CategoryGeneral)),
+		}
+		return []guicontext.TabSpec{spec}, []types.IBaseContext{newLeaf(cheatsheet.RenderCategory(general, tr))}
+	}
+
+	out := cheatsheet.Generate(cheatsheet.GenerateInput{Trie: ts, Scope: scope, Tr: tr})
+	cats := cheatsheet.Categorize(out)
+	specs := make([]guicontext.TabSpec, 0, len(cats))
+	leaves := make([]types.IBaseContext, 0, len(cats))
+	for _, cv := range cats {
+		// The category name is a NON-DB constant identifier — safe as a LeafKey.
+		specs = append(specs, guicontext.TabSpec{
+			Label:   cheatsheet.LabelFor(cv.Category, tr),
+			LeafKey: types.ContextKey(string(cv.Category)),
+		})
+		leaves = append(leaves, newLeaf(cheatsheet.RenderCategory(cv, tr)))
+	}
+	return specs, leaves
 }
 
 // whichKeyRows resolves the immediate children of the current (scope, prefix),
@@ -164,12 +194,11 @@ func (g *Gui) wireContextRegistry(tr *i18n.TranslationSet, provider func() []mod
 		// endpoint. SECURITY: only the discrete host + database fields are
 		// surfaced (never the raw DSN / password); each leaf is run through
 		// config.SafeText. Malformed/empty DSN → "" → name-only row.
-		RowSuffix:        rowEndpoint,
-		LimitText:        presentation.NewLimitText(tr),
-		ModeStore:        g.keybindingSystem.modeStore,
-		WhichKey:         g.keybindingSystem.whichkey,
-		WhichKeyRows:     g.whichKeyRows,
-		CheatsheetRender: g.cheatsheetRender,
+		RowSuffix:    rowEndpoint,
+		LimitText:    presentation.NewLimitText(tr),
+		ModeStore:    g.keybindingSystem.modeStore,
+		WhichKey:     g.keybindingSystem.whichkey,
+		WhichKeyRows: g.whichKeyRows,
 		// QueryEditorContext.HandleFocusLost calls
 		// matcher.Cancel via this minimal interface to keep
 		// pkg/gui/context decoupled from pkg/gui/keys.
@@ -213,6 +242,17 @@ func (g *Gui) wireContextRegistry(tr *i18n.TranslationSet, provider func() []mod
 	// wiring). Nil-safe: SetLogger / logs.Event guard a nil logger.
 	if g.registry.QueryRail != nil && g.deps.Common != nil {
 		g.registry.QueryRail.SetLogger(g.deps.Common.Logger())
+	}
+	// Wire the session logger into the CHEATSHEET container too so its
+	// tab_switch event is emitted (mirrors the QUERY_RAIL wiring above).
+	if g.registry.Cheatsheet != nil && g.deps.Common != nil {
+		g.registry.Cheatsheet.SetLogger(g.deps.Common.Logger())
+	}
+	// Wire the session logger into the FK_REVERSE_PICKER container too so its
+	// tab_switch event is emitted. The ordinal leafKeys (fk_reverse_<i>) keep
+	// the tab_switch log identifier-free.
+	if g.registry.FKReversePicker != nil && g.deps.Common != nil {
+		g.registry.FKReversePicker.SetLogger(g.deps.Common.Logger())
 	}
 }
 
@@ -662,12 +702,13 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 	}
 	controllers.RegisterQueryRailTabActions(g.keybindingSystem.cmdRegistry, queryRail)
 
-	// Cheatsheet popup: capture the focused scope, build a TabbedPopup
-	// with one tab per scope (focused + global), install it on the
-	// CheatsheetContext, then push the context onto the focus stack.
-	// RunLayout's Tier-3 popup pass (layout.go) renders the popup on
-	// the next layout frame. Tab cycling + close run through the trie
-	// via CheatsheetController bindings.
+	// Cheatsheet popup: capture the focused scope, build one tab per cheatsheet
+	// Category (always-on General + any non-empty buckets), inject them as
+	// DisplayLeafContext leaves into the CHEATSHEET container, then push the
+	// container onto the focus stack. RunLayout's Tier-3 popup pass (layout.go)
+	// renders it on the next frame. Tab cycling + close run through the trie via
+	// CheatsheetController bindings. SetScope+SetTabs run UNCONDITIONALLY on every
+	// `?` press so a second `?` on a different focus rebuilds the tabs.
 	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
 		ID:          commands.HelpCheatsheet,
 		Description: "Show cheatsheet",
@@ -681,8 +722,11 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 				scope = top.GetKey()
 			}
 			g.registry.Cheatsheet.SetScope(scope)
-			g.registry.Cheatsheet.SetState(
-				controllers.BuildCheatsheetTabs(scope, g.cheatsheetRender),
+			specs, leaves := g.buildCheatsheetCategoryTabs(scope)
+			g.registry.Cheatsheet.SetTabs(specs, leaves)
+			logs.Event(g.deps.Common.Logger(), "input", "cheatsheet_open",
+				slog.String("scope", string(scope)),
+				slog.Int("tab_count", len(specs)),
 			)
 			return g.tree.Push(g.registry.Cheatsheet)
 		},
@@ -736,8 +780,10 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 
 	// <esc> / <cr> on the FIRST_RUN_TIP view dispatch TipDismiss directly
 	// via the driver. FIRST_RUN_TIP carries no controller bindings (it's a
-	// minimal welcome popup); the driver shim mirrors the CHEATSHEET <esc>
-	// pattern above.
+	// minimal welcome popup), so it cannot rely on a trie binding + the
+	// automatic installEscAbortShim the way the CHEATSHEET popup does
+	// (CHEATSHEET <esc> is a CheatsheetController trie binding, not a driver
+	// SetKeybinding); this view needs the explicit driver shim instead.
 	dismissTip := func() error {
 		cmd, ok := g.keybindingSystem.cmdRegistry.Get(commands.TipDismiss)
 		if !ok || cmd == nil || cmd.Handler == nil {

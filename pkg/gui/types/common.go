@@ -93,13 +93,6 @@ type ContextTreeDeps struct {
 	// nil → no rows rendered.
 	WhichKeyRows func(scope ContextKey, prefix []ChordKey) []ChildRow
 
-	// CheatsheetRender produces the rendered cheatsheet body for the
-	// supplied focused scope. Bound by the orchestrator to a
-	// closure that captures the live TrieSet + commands.Registry +
-	// TranslationSet and calls into pkg/cheatsheet. Nil-safe:
-	// CheatsheetContext.HandleRender is a no-op when nil.
-	CheatsheetRender func(scope ContextKey) string
-
 	// ModeStore is the per-context modal-state store. The COMMAND_LINE
 	// context flips it to ModeCommand on focus so the Matcher routes
 	// printable runes via the Insert/Command passthrough fast path.

@@ -8,6 +8,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
 // Concurrency N/A: every method exercised here runs on the single gocui
@@ -83,6 +84,74 @@ func TestRailMarkerParity_BothRailsUseIdenticalActiveMarkerFormat(t *testing.T) 
 	}
 	if sDrv.tabsCalls[1].labels[SchemaRailTabTables] != "[Tables]" {
 		t.Errorf("schema active marker = %q, want %q", sDrv.tabsCalls[1].labels[SchemaRailTabTables], "[Tables]")
+	}
+}
+
+// TestCheatsheetMarkerParity_UsesCoreActiveMarkerFormat extends the cross-rail
+// parity guard to the CHEATSHEET container: its per-category tabs go through the
+// SAME core tabLabels()/markActiveTab formatter as the QUERY_RAIL and SCHEMA_RAIL,
+// so the active tab reads "[Label]" and the others read the bare label. Asserted
+// by rendering the container on two different active tabs and re-deriving each
+// published label from the SAME markActiveTab function.
+func TestCheatsheetMarkerParity_UsesCoreActiveMarkerFormat(t *testing.T) {
+	const viewName = "cheatsheet"
+	drv := testfake.NewRecorderGuiDriver()
+	drv.SetRealView(viewName, gocui.NewView(viewName, 0, 0, 40, 12, gocui.OutputNormal))
+
+	base := NewBaseContext(BaseContextOpts{
+		Key:      types.CHEATSHEET,
+		ViewName: viewName,
+		Kind:     types.DISPLAY_CONTEXT,
+	})
+	c := NewCheatsheetContext(base, Deps{GuiDriver: drv})
+
+	specs := []TabSpec{
+		{Label: "Editing", LeafKey: types.CHEATSHEET},
+		{Label: "Query", LeafKey: types.CHEATSHEET},
+	}
+	leaves := []types.IBaseContext{
+		NewDisplayLeafContext(base, Deps{GuiDriver: drv}, viewName, "editing-body"),
+		NewDisplayLeafContext(base, Deps{GuiDriver: drv}, viewName, "query-body"),
+	}
+	c.SetTabs(specs, leaves)
+
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("cheatsheet HandleRender frame 1: %v", err)
+	}
+	c.SetActiveTab(1)
+	if err := c.HandleRender(); err != nil {
+		t.Fatalf("cheatsheet HandleRender frame 2: %v", err)
+	}
+
+	calls := drv.AllSetViewTabsCalls()
+	if len(calls) != 2 {
+		t.Fatalf("cheatsheet published %d tab strips, want 2", len(calls))
+	}
+
+	assertMarkerFormat := func(frame string, labels []string, active int) {
+		t.Helper()
+		for i, got := range labels {
+			want := stripMarker(got)
+			if i == active {
+				want = markActiveTab(want)
+			}
+			if got != want {
+				t.Errorf("%s: label[%d]=%q (active=%d), want %q — cheatsheet marker diverged from markActiveTab",
+					frame, i, got, active, want)
+			}
+		}
+	}
+
+	// Frame 1: tab 0 active. Frame 2: tab 1 active.
+	assertMarkerFormat("cheatsheet frame1", calls[0].Labels, 0)
+	assertMarkerFormat("cheatsheet frame2", calls[1].Labels, 1)
+
+	// Concrete bracket check: the active label is "[" + raw + "]".
+	if calls[0].Labels[0] != "[Editing]" {
+		t.Errorf("cheatsheet frame1 active marker = %q, want %q", calls[0].Labels[0], "[Editing]")
+	}
+	if calls[1].Labels[1] != "[Query]" {
+		t.Errorf("cheatsheet frame2 active marker = %q, want %q", calls[1].Labels[1], "[Query]")
 	}
 }
 
