@@ -89,6 +89,30 @@ func (g *Gui) wireKeybindingSystem(cfg *config.UserConfig) error {
 // NEVER returns zero specs: when the matcher hasn't published a TrieSet yet, it
 // falls back to a single General tab carrying the CheatsheetEmpty body, preserving
 // the always-on-General invariant.
+// cheatsheetScope resolves the scope the cheatsheet should be generated for
+// from the focused context. A tabbed-rail container (QUERY_RAIL, SCHEMA_RAIL)
+// sits on the focus stack as the Current() context, but its editable leaf's
+// bindings — including the editor/visual-mode bindings — live under the ACTIVE
+// leaf's distinct scope (many-contexts-ONE-view topology). Descending to the
+// active leaf makes the cheatsheet reflect what would actually fire (e.g.
+// QUERY_EDITOR's Visual mode), mirroring dispatch which keys off the leaf
+// scope. A nil top (empty focus stack) collapses to GLOBAL; an empty
+// ActiveLeafKey (rail with no tabs yet) falls back to the container key.
+func cheatsheetScope(top types.IBaseContext) types.ContextKey {
+	if top == nil {
+		return types.GLOBAL
+	}
+	scope := top.GetKey()
+	if rail, ok := top.(interface {
+		ActiveLeafKey() types.ContextKey
+	}); ok {
+		if leaf := rail.ActiveLeafKey(); leaf != "" {
+			return leaf
+		}
+	}
+	return scope
+}
+
 func (g *Gui) buildCheatsheetCategoryTabs(scope types.ContextKey) ([]guicontext.TabSpec, []types.IBaseContext) {
 	tr := g.deps.Common.Tr
 	viewName := g.registry.Cheatsheet.GetViewName()
@@ -717,10 +741,7 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 			if g.registry == nil || g.registry.Cheatsheet == nil {
 				return nil
 			}
-			scope := types.GLOBAL
-			if top := g.tree.Current(); top != nil {
-				scope = top.GetKey()
-			}
+			scope := cheatsheetScope(g.tree.Current())
 			g.registry.Cheatsheet.SetScope(scope)
 			specs, leaves := g.buildCheatsheetCategoryTabs(scope)
 			g.registry.Cheatsheet.SetTabs(specs, leaves)
