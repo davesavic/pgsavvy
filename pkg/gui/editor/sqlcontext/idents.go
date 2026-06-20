@@ -161,6 +161,80 @@ func skipSpace(tokens []highlight.Token, i int) int {
 	return i
 }
 
+// isComma reports whether tok is a lone comma separator. Mirroring isDot, it
+// matches by value rather than by kind to stay robust to lexer quirks.
+func isComma(tok highlight.Token) bool { return tok.Value == "," }
+
+// isTableSlotKeyword reports whether tok is a clause keyword that opens a
+// table slot (FROM / JOIN / UPDATE / INTO) — one that expects a table name
+// immediately after it.
+func isTableSlotKeyword(tok highlight.Token) bool {
+	if tok.Type != highlight.Keyword {
+		return false
+	}
+	res, ok := clauseForKeyword(tok.Value)
+	return ok && res.Expect == ExpectTables
+}
+
+// lastTableSlotOpener returns the index of the most recent token, ending at
+// or before cursor, that opens a table slot: a FROM/JOIN/UPDATE/INTO keyword
+// or a comma continuing the table list. Returns -1 when none precedes the
+// cursor. A token the cursor sits inside (a half-typed keyword) is skipped so
+// it never counts as a completed opener.
+func lastTableSlotOpener(tokens []highlight.Token, cursor int) int {
+	idx := -1
+	for i, tok := range tokens {
+		if tok.RuneOffset >= cursor {
+			break
+		}
+		if tok.RuneOffset+tok.RuneLen > cursor {
+			continue // cursor sits inside this (partial) token
+		}
+		if isTableSlotKeyword(tok) || isComma(tok) {
+			idx = i
+		}
+	}
+	return idx
+}
+
+// aliasSlot reports whether the cursor sits in the alias / trailing position
+// of a FROM/JOIN/UPDATE/INTO table reference: a complete [schema.]table name
+// has already been consumed since the last table-slot opener (keyword or
+// comma) and the cursor has moved past it. There the user is naming an alias,
+// so table suggestions are noise. It returns false while the table name is
+// still being typed (cursor abutting the qualified-name chain), in a fresh
+// slot before any name, or when no opener precedes the cursor.
+func aliasSlot(tokens []highlight.Token, cursor int) bool {
+	open := lastTableSlotOpener(tokens, cursor)
+	if open < 0 {
+		return false
+	}
+	i := skipSpace(tokens, open+1)
+	if i >= len(tokens) || tokens[i].RuneOffset >= cursor || !isIdentLike(tokens[i]) {
+		return false // nothing (or no identifier) typed yet -> fresh table slot
+	}
+	// Walk the [schema.]table dotted chain, tracking the end offset of the
+	// last token that is part of the qualified name.
+	nameEnd := tokens[i].RuneOffset + tokens[i].RuneLen
+	i++
+	for {
+		d := skipSpace(tokens, i)
+		if d >= len(tokens) || tokens[d].RuneOffset >= cursor || !isDot(tokens[d]) {
+			break
+		}
+		n := skipSpace(tokens, d+1)
+		if n >= len(tokens) || tokens[n].RuneOffset >= cursor || !isIdentLike(tokens[n]) {
+			// Trailing dot ("app.") still counts as within the qualified name.
+			nameEnd = tokens[d].RuneOffset + tokens[d].RuneLen
+			break
+		}
+		nameEnd = tokens[n].RuneOffset + tokens[n].RuneLen
+		i = n + 1
+	}
+	// Cursor past the table-name chain (whitespace/alias after it): alias slot.
+	return cursor > nameEnd
+}
+
 func isFromOrJoin(tok highlight.Token) bool {
 	if tok.Type != highlight.Keyword {
 		return false

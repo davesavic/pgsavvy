@@ -302,3 +302,37 @@ func TestInteractionBackspaceWithinPrefixRefilters(t *testing.T) {
 		t.Error("popup still visible after refilter to empty candidate set; want dismissed")
 	}
 }
+
+// TestAutoTriggerDismissesInAliasSlot reproduces the alias-position bug: after
+// typing a complete table name in a FROM clause WITHOUT accepting a
+// suggestion, pressing space (then an alias character) must dismiss the popup
+// rather than keep flooding it with tables/keywords. The fakeSource still
+// returns candidates for the empty/short prefix, so only the alias-slot
+// context guard can drive the dismissal — distinct from the
+// candidate-empty and width-gate rules covered above.
+func TestAutoTriggerDismissesInAliasSlot(t *testing.T) {
+	ctrl, _, buf, sugg, _ := newCompletionRig(t, "select * from users", 19, []string{"users", "usage"})
+
+	// Popup opens while the table name is still being typed.
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if !sugg.IsVisible() {
+		t.Fatal("popup not visible after typing the table name")
+	}
+
+	// Space -> alias slot. The popup must dismiss even though the fakeSource
+	// would match every candidate on the now-empty prefix.
+	buf.Lines = []editor.Line{{Runes: []rune("select * from users ")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 20})
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if sugg.IsVisible() {
+		t.Fatalf("popup still visible in alias slot after space; want dismissed (had %d candidates)", len(sugg.Suggestions()))
+	}
+
+	// Typing the alias character keeps it dismissed (no re-open).
+	buf.Lines = []editor.Line{{Runes: []rune("select * from users a")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 21})
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if sugg.IsVisible() {
+		t.Error("popup re-opened while typing the alias; want stay dismissed")
+	}
+}

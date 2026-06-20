@@ -271,6 +271,15 @@ func TestAutoTriggerFromContext_Cases(t *testing.T) {
 		// keyword, so these were false. Meaning changed — see Deviations.
 		{"single-quote-stop 1-rune now column ctx", `SELECT "C`, true},
 		{"trailing comma now column ctx", "SELECT a, ", true},
+		// Negative — alias position: after a complete table name in a
+		// FROM/JOIN clause the cursor names an alias, where table AND
+		// broadened keyword/snippet suggestions are noise. Suppressed at
+		// every prefix width, including the >=2-rune one the broadened gate
+		// would otherwise open on.
+		{"alias slot empty prefix", "SELECT * FROM users ", false},
+		{"alias slot 1-rune prefix", "SELECT * FROM users a", false},
+		{"alias slot 2-rune prefix overrides broadened gate", "SELECT * FROM users al", false},
+		{"comma re-opens table list (not alias)", "SELECT * FROM users, ", true},
 		// Negative — inside string literal (stripNoise drops it).
 		{"FROM inside string", "SELECT 'FROM ", false},
 		{"column ctx inside string", "SELECT * FROM t WHERE 'x", false},
@@ -294,6 +303,32 @@ func TestAutoTriggerFromContext_Cases(t *testing.T) {
 				t.Errorf("AutoTriggerFromContext(%q) = %v; want %v", tc.line, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestInAliasSlot pins the alias-position predicate the controller uses to
+// dismiss the popup: true once a complete table name has been consumed in a
+// FROM/JOIN clause (the cursor names an alias), false while the table name is
+// still being typed, in a fresh slot, after a comma, or outside a table
+// clause. Reuses bufWithCursor (defined in completion_schema_source_test.go).
+func TestInAliasSlot(t *testing.T) {
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"select * from users", false},     // still typing the table name
+		{"select * from users ", true},     // alias slot (space after table)
+		{"select * from users a", true},    // alias being typed
+		{"select * from ", false},          // fresh table slot
+		{"select * from users, ", false},   // comma re-opens the table list
+		{"select id from t where ", false}, // column clause, not a table slot
+		{"", false},                        // empty buffer
+	}
+	for _, tc := range cases {
+		b, p := bufWithCursor(tc.line)
+		if got := InAliasSlot(b, p); got != tc.want {
+			t.Errorf("InAliasSlot(%q) = %v; want %v", tc.line, got, tc.want)
+		}
 	}
 }
 

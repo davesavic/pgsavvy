@@ -574,7 +574,7 @@ func TestSchemaSource_TablePrefixFilter(t *testing.T) {
 		{"partial us narrows", "SELECT * FROM us", []string{"users", "usage"}},
 		{"case-insensitive partial US", "SELECT * FROM US", []string{"users", "usage"}},
 		{"no-match partial zz empty", "SELECT * FROM zz", nil},
-		{"full name then space re-offers (engine clause model)", "SELECT * FROM users ", []string{"users", "usage", "orders"}},
+		{"full name then space is an alias slot, offers nothing", "SELECT * FROM users ", nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

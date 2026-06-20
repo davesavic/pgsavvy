@@ -180,7 +180,30 @@ func AutoTriggerFromContext(buf *Buffer, pos Position) bool {
 	if sqlcontext.InNoise(sql, off) {
 		return false
 	}
+	// Alias slot: the cursor names an alias after a complete table name in a
+	// FROM/JOIN clause -> suppress even the broadened >=2-rune prefix gate, so
+	// typing the alias never re-opens the popup.
+	if InAliasSlot(buf, pos) {
+		return false
+	}
 	return utf8.RuneCountInString(identifierPrefixAt(buf, pos)) >= minPrefixTriggerRunes
+}
+
+// InAliasSlot reports whether the cursor sits in the alias / trailing position
+// of a FROM/JOIN table reference, where completion is noise (the user is
+// naming an alias). The controller uses it to dismiss the popup; the gate
+// above uses it to refuse the broadened prefix trigger. A dot-qualifier
+// context ("<ident>." / "<ident>.<partial>") is column completion, never an
+// alias slot, so it is excluded first. Nil buf returns false.
+func InAliasSlot(buf *Buffer, pos Position) bool {
+	if buf == nil {
+		return false
+	}
+	if IsIdentDotContext(buf, pos) {
+		return false
+	}
+	sql, off := bufferTextAndOffset(buf, pos)
+	return sqlcontext.IsAliasSlot(sql, off)
 }
 
 // IsSchemaCompletableContext reports whether the cursor sits in a

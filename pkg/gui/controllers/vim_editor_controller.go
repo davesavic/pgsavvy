@@ -290,6 +290,16 @@ func (c *VimEditorController) AutoTrigger(buf *editor.Buffer, pos editor.Positio
 			return
 		}
 	}
+	// Alias slot: the cursor names an alias after a complete table name in a
+	// FROM/JOIN clause. Completion is noise here, so dismiss any open popup
+	// and never open one. This is a context dismissal orthogonal to the
+	// candidate-empty and width-gate rules that govern the refilter-while-
+	// visible path below — without it, the empty/short alias prefix would keep
+	// the visible popup alive and flood it (Match("",x) accepts everything).
+	if editor.InAliasSlot(buf, pos) {
+		c.suggestions.Hide()
+		return
+	}
 	if !c.suggestions.IsVisible() && !editor.AutoTriggerFromContext(buf, pos) {
 		return
 	}
@@ -2428,13 +2438,13 @@ func (c *VimEditorController) modeNormalHandler() commands.Handler {
 		if c.buffer() == nil {
 			return nil
 		}
-		// The exit-insert action (any key bound to it: <esc>, jk, …) closes
-		// the completion popup AND drops to Normal in a single press. We
-		// dismiss the popup first, then fall through to the normal exit so
-		// it never strands the user in Insert (cf. stuck-in-insert
-		// regression, commit f8a6452).
+		// Completion-cancel UX: when the popup is open, the exit-insert action
+		// (<esc>, jk, …) cancels the popup ONLY and stays in Insert mode so
+		// the user keeps typing; a SECOND press, with no popup, then exits to
+		// Normal. Mirrors standard editor completion behaviour.
 		if c.suggestions != nil && c.suggestions.IsVisible() {
 			c.suggestions.Hide()
+			return nil
 		}
 		if rep := c.repeat(); rep != nil {
 			rep.PendingOpID = ""

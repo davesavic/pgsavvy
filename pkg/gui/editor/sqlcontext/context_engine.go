@@ -126,6 +126,14 @@ func Analyze(sql string, runeOffset int) ContextResult {
 	result := clauseAt(tokens, cursor)
 	result.InScopeTables = scopeTables(tokens)
 	result.Qualifier = qualifierAt(tokens, cursor, result.InScopeTables)
+	// Alias position: once a complete table name has been consumed in a
+	// FROM/JOIN/UPDATE/INTO clause (no comma re-opening the list), the cursor
+	// names an alias, where table suggestions are noise. A trailing dot
+	// qualifier ("<ident>.") is a column context, not an alias slot, so it is
+	// left alone.
+	if result.Expect == ExpectTables && !result.Qualifier.Present && aliasSlot(tokens, cursor) {
+		result.Expect = ExpectNone
+	}
 	return result
 }
 
@@ -157,6 +165,40 @@ func InNoise(sql string, runeOffset int) bool {
 	stmt := string(runes[start:end])
 
 	return cursorInNoise(highlight.Tokenize(stmt), cursor)
+}
+
+// IsAliasSlot reports whether the cursor at runeOffset within sql sits in the
+// alias / trailing position of a FROM/JOIN/UPDATE/INTO table reference, where
+// table and broadened keyword completion are noise. Statement-scoped and
+// noise-aware, mirroring Analyze. A trailing "<ident>." is a column-qualifier
+// context, not an alias slot. Never panics on partial/malformed SQL.
+func IsAliasSlot(sql string, runeOffset int) bool {
+	total := utf8.RuneCountInString(sql)
+	runeOffset = clamp(runeOffset, 0, total)
+
+	start, end := statementRangeAt(sql, runeOffset)
+	if start >= end {
+		return false
+	}
+	cursor := clamp(runeOffset, start, end) - start
+
+	runes := []rune(sql)
+	stmt := string(runes[start:end])
+
+	tokens := highlight.Tokenize(stmt)
+	if cursorInNoise(tokens, cursor) {
+		return false
+	}
+	if _, ok := dotEndingAt(tokens, cursor); ok {
+		return false // "<ident>." is a column-qualifier context
+	}
+	// Only a still-governing table clause can hold an alias slot: a later
+	// clause keyword (WHERE/ON/…) ends the FROM table region, so a cursor
+	// past it is not naming a table alias.
+	if clauseAt(tokens, cursor).Expect != ExpectTables {
+		return false
+	}
+	return aliasSlot(tokens, cursor)
 }
 
 // clauseAt walks the keyword tokens that END strictly before the cursor

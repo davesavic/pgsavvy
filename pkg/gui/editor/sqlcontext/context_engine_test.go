@@ -90,10 +90,10 @@ func TestSQLContextScenarios(t *testing.T) {
 			want:   ContextResult{Clause: ClauseNone, Expect: ExpectNone},
 		},
 		{
-			name:   "FROM still governs after a complete table name",
+			name:   "alias position after a complete table name expects nothing",
 			sql:    "SELECT * FROM users ",
 			offset: runeLen("SELECT * FROM users "),
-			want:   ContextResult{Clause: ClauseFROM, Expect: ExpectTables},
+			want:   ContextResult{Clause: ClauseFROM, Expect: ExpectNone},
 		},
 	}
 
@@ -104,6 +104,45 @@ func TestSQLContextScenarios(t *testing.T) {
 			// Qualifier are covered by the 1.2 ident tests.
 			if got.Clause != tc.want.Clause || got.Expect != tc.want.Expect {
 				t.Fatalf("Analyze(%q, %d) = %+v, want clause/expect %+v", tc.sql, tc.offset, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAnalyzeAliasSlot pins the alias-position fix: once a complete table
+// reference has been consumed in a FROM/JOIN/UPDATE/INTO clause (and no comma
+// re-opens the table list), the cursor sits in the alias / trailing position
+// where table suggestions are noise, so Expect drops to None. A table name
+// still being typed, a fresh slot right after the keyword, or a comma
+// re-opening the list all keep ExpectTables.
+func TestAnalyzeAliasSlot(t *testing.T) {
+	wantsTables := func(sql string) bool {
+		return Analyze(sql, runeLen(sql)).Expect == ExpectTables
+	}
+	cases := []struct {
+		name string
+		sql  string
+		want bool // want ExpectTables
+	}{
+		{"fresh FROM slot", "SELECT * FROM ", true},
+		{"partial table name", "SELECT * FROM us", true},
+		{"qualified table still typing", "SELECT * FROM app.users", true},
+		{"qualified table trailing dot", "SELECT * FROM app.", true},
+		{"alias slot after table+space", "SELECT * FROM users ", false},
+		{"alias being typed", "SELECT * FROM users a", false},
+		{"alias after AS", "SELECT * FROM users AS ", false},
+		{"qualified table then alias slot", "SELECT * FROM app.users ", false},
+		{"comma re-opens table list", "SELECT * FROM users, ", true},
+		{"alias slot after second table", "SELECT * FROM users, orders ", false},
+		{"JOIN fresh slot", "SELECT * FROM a JOIN ", true},
+		{"alias slot after JOIN table", "SELECT * FROM a JOIN orders ", false},
+		{"UPDATE alias slot", "UPDATE users ", false},
+		{"INSERT INTO alias slot", "INSERT INTO users ", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := wantsTables(tc.sql); got != tc.want {
+				t.Errorf("Analyze(%q).Expect==ExpectTables = %v; want %v", tc.sql, got, tc.want)
 			}
 		})
 	}
