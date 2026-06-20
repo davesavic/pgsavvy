@@ -36,11 +36,26 @@ Active development. PostgreSQL is the only supported driver so far; breaking cha
 
 ## Install
 
+### Release binaries (recommended)
+
+Prebuilt binaries are published on the [Releases](https://github.com/davesavic/pgsavvy/releases) page. Each asset is the raw `pgsavvy` binary for one OS/arch (named `pgsavvy_<tag>_<os>_<arch>`, `.exe` on Windows) alongside a `checksums.txt`. Download the binary for your platform, make it executable, and put it on your `PATH`:
+
+```sh
+# example for linux/amd64; adjust the asset name for your platform
+curl -fsSLo pgsavvy https://github.com/davesavic/pgsavvy/releases/latest/download/pgsavvy_<tag>_linux_amd64
+chmod +x pgsavvy
+mv pgsavvy ~/.local/bin/   # or anywhere on your PATH
+```
+
+**A release binary is the recommended install because it can update itself in place** with `pgsavvy update` (see [Updating](#updating) below). `go install` and source builds carry no release metadata and cannot self-update.
+
 ### go install
 
 ```sh
 go install github.com/davesavic/pgsavvy@latest
 ```
+
+> **Note:** `go install` builds carry no embedded version metadata, so `pgsavvy --version` reports a placeholder and `pgsavvy update` refuses to self-update. Install a release binary if you want in-place updates.
 
 ### Build from source
 
@@ -50,11 +65,23 @@ cd pgsavvy
 task build       # produces bin/pgsavvy with -ldflags-injected version metadata
 ```
 
-### Release binaries
-
-Prebuilt binaries are published on the [Releases](https://github.com/davesavic/pgsavvy/releases) page — download the archive for your platform and put the `pgsavvy` binary on your `PATH`.
-
 See the [install & usage guide](docs/INSTALL.md) for full details.
+
+## Updating
+
+A release binary updates itself in place:
+
+```sh
+pgsavvy update
+```
+
+This downloads the matching asset from the latest GitHub Release, verifies its SHA256 against `checksums.txt`, and atomically replaces the running executable. Re-run `pgsavvy` afterwards to use the new version.
+
+- Already on the latest release? It prints an up-to-date message and exits.
+- Builds without release metadata (`go install`, dev/source builds) refuse to self-update — install a release binary instead.
+- Package-manager / read-only installs (Homebrew, Nix) refuse and defer to that manager.
+
+See [docs/INSTALL.md](docs/INSTALL.md#updating-pgsavvy-update) for the full update reference.
 
 ## Quick Start
 
@@ -79,7 +106,7 @@ Useful environment variables: `PGSAVVY_LOG_DIR` (override log directory), `PGSAV
 
 ## Requirements
 
-- [Go 1.25](https://go.dev/dl/)
+- [Go 1.26](https://go.dev/dl/)
 - [go-task](https://taskfile.dev) v3 — `go install github.com/go-task/task/v3/cmd/task@latest`
 - [golangci-lint](https://golangci-lint.run) v2 — `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.7.0`
 - [Docker Compose](https://docs.docker.com/compose/) — optional, only needed for the Postgres / SSH-tunnel integration fixtures

@@ -6,7 +6,7 @@ running, the test and lint workflow, and how to propose changes.
 
 ## Prerequisites
 
-- [Go 1.25](https://go.dev/dl/) or newer
+- [Go 1.26](https://go.dev/dl/) or newer
 - [go-task](https://taskfile.dev) v3 — `go install github.com/go-task/task/v3/cmd/task@latest`
 - [golangci-lint](https://golangci-lint.run) v2 — `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.7.0`
 - [Docker Compose](https://docs.docker.com/compose/) — only for the integration-test fixtures

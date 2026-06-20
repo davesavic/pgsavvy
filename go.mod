@@ -1,8 +1,8 @@
 module github.com/davesavic/pgsavvy
 
-go 1.25.0
+go 1.26.0
 
-toolchain go1.25.8
+toolchain go1.26.4
 
 require (
 	github.com/99designs/keyring v1.2.2
