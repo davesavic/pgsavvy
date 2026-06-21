@@ -244,7 +244,7 @@ func TestApply_MapsEveryThemeConfigField(t *testing.T) {
 	tp := sv.Type()
 	for i := 0; i < sv.NumField(); i++ {
 		f := tp.Field(i)
-		if !f.IsExported() || sv.Field(i).Kind() != reflect.Ptr {
+		if !f.IsExported() || sv.Field(i).Kind() != reflect.Pointer {
 			continue
 		}
 		fv := sv.Field(i)
