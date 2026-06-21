@@ -11,6 +11,7 @@ import (
 
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/theme/builtin"
 )
 
 // TestCursorColumnVisibleAfterHorizontalScroll proves the horizontal
@@ -652,4 +653,70 @@ func TestRender_VerticalScroll_FollowsCursorToTail(t *testing.T) {
 
 	require.Contains(t, buf, "row-"+rowLabel(r),
 		"cursor row must be on-screen after JumpLast")
+}
+
+// --- ialt.2: header reads configured TableHeaderFg ---
+
+func headerSnapForTheme(t *testing.T) (*View, viewSnapshot) {
+	t.Helper()
+	v := NewView()
+	cols := make([]models.ColumnMeta, 0, 6)
+	vals := make([]any, 0, 6)
+	for i := range 6 {
+		cols = append(cols, models.ColumnMeta{Name: fmt.Sprintf("c%d", i), TypeName: "text"})
+		vals = append(vals, fmt.Sprintf("val%d_%s", i, strings.Repeat("x", 9)))
+	}
+	v.SetColumns(cols)
+	v.AppendRows([]models.Row{{Values: vals}})
+	v.widths = []int{14, 14, 14, 14, 14, 14}
+	return v, v.snapshot()
+}
+
+// A configured TableHeaderFg token wraps the whole header line.
+func TestRenderHeaderLine_UsesConfiguredTableHeaderFg(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
+	cfg := builtin.DefaultDark()
+	cfg.TableHeaderFg = "color118"
+	require.NoError(t, theme.Apply(cfg))
+	t.Cleanup(func() { _ = theme.Apply(builtin.DefaultDark()) })
+
+	_, snap := headerSnapForTheme(t)
+	out := renderHeaderLine(snap, 80, false, false)
+
+	require.True(t, strings.HasPrefix(out, "\x1b[38;5;118m"), "header must open with the configured SGR; got %q", out)
+	require.True(t, strings.HasSuffix(out, ansiReset), "header must close with reset; got %q", out)
+}
+
+// The blocker guard: the SGR pair must be the OUTERMOST layer, applied AFTER
+// the rune-index arrow overlay — otherwise overlayColumnArrows corrupts the
+// escape bytes. With a ◄ arrow present, the configured escape must still be
+// intact at the head of the line.
+func TestRenderHeaderLine_ColorIntactWithArrowOverlay(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
+	cfg := builtin.DefaultDark()
+	cfg.TableHeaderFg = "color118"
+	require.NoError(t, theme.Apply(cfg))
+	t.Cleanup(func() { _ = theme.Apply(builtin.DefaultDark()) })
+
+	v, _ := headerSnapForTheme(t)
+	v.JumpColLast()
+	snap := v.snapshot()
+	snap.rowOffset, snap.colOffset = v.clampOffsetsLocked(snap, 80, 24)
+	left, right := columnScrollHints(snap, 80)
+
+	out := renderHeaderLine(snap, 80, left, right)
+
+	require.Contains(t, out, "◄", "scrolled-right header must carry the ◄ arrow")
+	require.True(t, strings.HasPrefix(out, "\x1b[38;5;118m"),
+		"escape must be intact at line head (proves SGR wrapped AFTER the arrow overlay); got %q", out)
+	require.True(t, strings.HasSuffix(out, ansiReset), "header must close with reset; got %q", out)
+}
+
+func TestRenderHeaderLine_PlainUnderNoColor(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+
+	_, snap := headerSnapForTheme(t)
+	out := renderHeaderLine(snap, 80, false, false)
+
+	require.NotContains(t, out, "\x1b", "no escape under NO_COLOR; got %q", out)
 }

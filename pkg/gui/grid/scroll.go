@@ -1,6 +1,10 @@
 package grid
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/davesavic/pgsavvy/pkg/theme"
+)
 
 // Cursor motion + viewport scrolling. The View exposes imperative
 // per-step methods (MoveCursorDown / MoveCursorUp / etc) plus half-page
@@ -432,9 +436,26 @@ func renderHeaderLine(snap viewSnapshot, innerW int, moreLeft, moreRight bool) s
 		line = padRight(line, innerW)
 	}
 	// Overlay the ‹ / › scroll arrows on the header's edge cells so the
-	// user can see columns continue past the viewport. Header text carries
-	// no per-cell ANSI, so a plain rune overlay is safe here.
-	return overlayColumnArrows(line, moreLeft, moreRight)
+	// user can see columns continue past the viewport. The overlay runs on
+	// the still-plain line (rune-index replacement is only safe without ANSI
+	// bytes present), THEN tintHeaderLine wraps the result so the SGR pair is
+	// the outermost layer and the overlay can never corrupt the escape.
+	return tintHeaderLine(overlayColumnArrows(line, moreLeft, moreRight))
+}
+
+// tintHeaderLine wraps the fully-assembled header line in a single
+// TableHeaderFg SGR pair, applied as the OUTERMOST layer. Returns the bare
+// line under NO_COLOR (theme.IsMonochrome) and for empty/unknown tokens so the
+// grid never emits a malformed escape.
+func tintHeaderLine(line string) string {
+	if theme.IsMonochrome() {
+		return line
+	}
+	sgr := theme.ColorSGR(theme.Current().TableHeaderFg.Fg, theme.Fg)
+	if sgr == "" {
+		return line
+	}
+	return sgr + line + ansiReset
 }
 
 // overlayColumnArrows draws the ◄ / ► horizontal-scroll arrows one cell in
