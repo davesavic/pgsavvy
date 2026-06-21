@@ -1,6 +1,8 @@
 package config
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,5 +132,35 @@ func TestParseYAML_EditorAutocompleteAlias_Disabled(t *testing.T) {
 	}
 	if cfg.Editor.AutocompleteAlias {
 		t.Errorf("Editor.AutocompleteAlias = true after parsing %q; want false", string(src))
+	}
+}
+
+// TestThemeConfig_DroppedDeadFieldsAreGone guards the ialt epic trim: the 25
+// fields that no renderer reads must not reappear on the config surface.
+// Reflection over yaml tags means an accidental reintroduction (or an
+// off-by-one trim that left one behind) fails here rather than silently
+// re-advertising a no-op color knob.
+func TestThemeConfig_DroppedDeadFieldsAreGone(t *testing.T) {
+	dropped := []string{
+		"selected_row_bg", "selected_row_fg", "background_bg", "foreground_fg",
+		"status_bar_bg", "status_bar_fg", "command_line_bg", "command_line_fg",
+		"hint_fg", "popup_bg", "popup_fg", "menu_bg", "menu_fg",
+		"menu_selected_bg", "menu_selected_fg", "table_header_bg", "table_row_alt_bg",
+		"gutter_fg", "line_number_fg", "cursor_bg", "cursor_fg", "match_highlight",
+		"diff_added_fg", "diff_removed_fg", "diff_changed_fg",
+	}
+	present := map[string]bool{}
+	tp := reflect.TypeOf(ThemeConfig{})
+	for i := 0; i < tp.NumField(); i++ {
+		tag := tp.Field(i).Tag.Get("yaml")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		present[strings.Split(tag, ",")[0]] = true
+	}
+	for _, k := range dropped {
+		if present[k] {
+			t.Errorf("ThemeConfig still carries trimmed yaml key %q (must be removed)", k)
+		}
 	}
 }

@@ -770,7 +770,7 @@ type viewSnapshot struct {
 //
 //	row 0    : header row (column names, type styling implied)
 //	row 1..N : data rows, with the cell under the cursor / inside the
-//	           selection painted with the SelectedRowBg style
+//	           selection painted via reverse-video (applySelectionHighlight)
 //
 // Title is written into target.Title verbatim (gocui draws it into the
 // view frame). Empty title is allowed; the frame just doesn't show one.

@@ -145,7 +145,7 @@ When a connection is the active one, the picker shows `●` in place of its icon
 ### Colors
 
 The connection `color` field and every theme color field (`config.yml` under
-`theme:`, e.g. `keyword_fg`, `selected_row_bg`) accept the same color token
+`theme:`, e.g. `keyword_fg`, `table_header_fg`) accept the same color token
 vocabulary. One vocabulary resolves everywhere — inline content (grid cells,
 side rails, status bar, connection rows, suggestions, cheatsheet, editor syntax
 highlighting) **and** pane borders — and applies to both foreground and

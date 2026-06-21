@@ -127,3 +127,24 @@ func TestLoadUserConfig_UnknownTopLevelKeyTolerated(t *testing.T) {
 		t.Errorf("Leader = %q, want %q", cfg.Leader, "z")
 	}
 }
+
+// TestLoadUserConfig_TrimmedThemeKeyIsIgnored proves the trim is
+// backward-compatible: an existing config.yml that still sets one of the
+// removed theme keys (e.g. popup_bg) loads without error — the loader uses
+// plain yaml.Unmarshal, which silently ignores unknown keys — and the
+// surviving keys around it still apply.
+func TestLoadUserConfig_TrimmedThemeKeyIsIgnored(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	const path = "/cfg.yml"
+	body := "theme:\n  popup_bg: red\n  active_border: blue\n"
+	if err := afero.WriteFile(fs, path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadUserConfig(fs, []string{path})
+	if err != nil {
+		t.Fatalf("trimmed key must not error: %v", err)
+	}
+	if cfg.Theme.ActiveBorder != "blue" {
+		t.Errorf("surviving key ActiveBorder = %q, want %q", cfg.Theme.ActiveBorder, "blue")
+	}
+}

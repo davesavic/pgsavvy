@@ -156,8 +156,6 @@ type KeybindingConfig struct {
 type ThemeConfig struct {
 	ActiveBorder    string `yaml:"active_border"`
 	InactiveBorder  string `yaml:"inactive_border"`
-	SelectedRowBg   string `yaml:"selected_row_bg"`
-	SelectedRowFg   string `yaml:"selected_row_fg"`
 	NullValueFg     string `yaml:"null_value_fg"`
 	NumericFg       string `yaml:"numeric_fg"`
 	StringFg        string `yaml:"string_fg"`
@@ -165,41 +163,18 @@ type ThemeConfig struct {
 	CommentFg       string `yaml:"comment_fg"`
 	IdentifierFg    string `yaml:"identifier_fg"`
 	OperatorFg      string `yaml:"operator_fg"`
-	BackgroundBg    string `yaml:"background_bg"`
-	ForegroundFg    string `yaml:"foreground_fg"`
-	StatusBarBg     string `yaml:"status_bar_bg"`
-	StatusBarFg     string `yaml:"status_bar_fg"`
-	CommandLineBg   string `yaml:"command_line_bg"`
-	CommandLineFg   string `yaml:"command_line_fg"`
 	ErrorFg         string `yaml:"error_fg"`
 	WarningFg       string `yaml:"warning_fg"`
 	SuccessFg       string `yaml:"success_fg"`
 	InfoFg          string `yaml:"info_fg"`
-	HintFg          string `yaml:"hint_fg"`
-	PopupBg         string `yaml:"popup_bg"`
-	PopupFg         string `yaml:"popup_fg"`
 	PopupBorder     string `yaml:"popup_border"`
-	MenuBg          string `yaml:"menu_bg"`
-	MenuFg          string `yaml:"menu_fg"`
-	MenuSelectedBg  string `yaml:"menu_selected_bg"`
-	MenuSelectedFg  string `yaml:"menu_selected_fg"`
-	TableHeaderBg   string `yaml:"table_header_bg"`
 	TableHeaderFg   string `yaml:"table_header_fg"`
-	TableRowAltBg   string `yaml:"table_row_alt_bg"`
-	GutterFg        string `yaml:"gutter_fg"`
-	LineNumberFg    string `yaml:"line_number_fg"`
-	CursorBg        string `yaml:"cursor_bg"`
-	CursorFg        string `yaml:"cursor_fg"`
-	MatchHighlight  string `yaml:"match_highlight"`
 	SearchHighlight string `yaml:"search_highlight"`
 	// CurSearch is the style for the CURRENT in-grid search match (the cell
 	// the cursor sits on). Stronger than SearchHighlight so the active match
 	// stands out from the others.
-	CurSearch     string `yaml:"cur_search"`
-	DiffAddedFg   string `yaml:"diff_added_fg"`
-	DiffRemovedFg string `yaml:"diff_removed_fg"`
-	DiffChangedFg string `yaml:"diff_changed_fg"`
-	PromptFg      string `yaml:"prompt_fg"`
+	CurSearch string `yaml:"cur_search"`
+	PromptFg  string `yaml:"prompt_fg"`
 	// DirtyCellBg is the background colour painted on grid cells that have
 	// a staged PendingEdit.
 	DirtyCellBg string `yaml:"dirty_cell_bg"`
@@ -228,8 +203,6 @@ func GetDefaultConfig() *UserConfig {
 		Theme: ThemeConfig{
 			ActiveBorder:    "yellow",
 			InactiveBorder:  "gray",
-			SelectedRowBg:   "#3a3a3a",
-			SelectedRowFg:   "white",
 			NullValueFg:     "red",
 			NumericFg:       "magenta",
 			StringFg:        "green",
@@ -237,37 +210,14 @@ func GetDefaultConfig() *UserConfig {
 			CommentFg:       "gray",
 			IdentifierFg:    "white",
 			OperatorFg:      "yellow",
-			BackgroundBg:    "#1e1e1e",
-			ForegroundFg:    "white",
-			StatusBarBg:     "#2d2d2d",
-			StatusBarFg:     "white",
-			CommandLineBg:   "#1e1e1e",
-			CommandLineFg:   "white",
 			ErrorFg:         "red",
 			WarningFg:       "yellow",
 			SuccessFg:       "green",
 			InfoFg:          "cyan",
-			HintFg:          "gray",
-			PopupBg:         "#2d2d2d",
-			PopupFg:         "white",
 			PopupBorder:     "cyan",
-			MenuBg:          "#2d2d2d",
-			MenuFg:          "white",
-			MenuSelectedBg:  "cyan",
-			MenuSelectedFg:  "black",
-			TableHeaderBg:   "#3a3a3a",
 			TableHeaderFg:   "white",
-			TableRowAltBg:   "#262626",
-			GutterFg:        "gray",
-			LineNumberFg:    "gray",
-			CursorBg:        "white",
-			CursorFg:        "black",
-			MatchHighlight:  "yellow",
 			SearchHighlight: "yellow",
 			CurSearch:       "black on yellow",
-			DiffAddedFg:     "green",
-			DiffRemovedFg:   "red",
-			DiffChangedFg:   "yellow",
 			PromptFg:        "yellow",
 			DirtyCellBg:     "on #5a4410",
 			WarnBorder:      "#d97757",

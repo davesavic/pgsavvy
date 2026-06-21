@@ -29,8 +29,6 @@ type Style struct {
 type themeState struct {
 	ActiveBorder    *Style
 	InactiveBorder  *Style
-	SelectedRowBg   *Style
-	SelectedRowFg   *Style
 	NullValueFg     *Style
 	NumericFg       *Style
 	StringFg        *Style
@@ -38,37 +36,14 @@ type themeState struct {
 	CommentFg       *Style
 	IdentifierFg    *Style
 	OperatorFg      *Style
-	BackgroundBg    *Style
-	ForegroundFg    *Style
-	StatusBarBg     *Style
-	StatusBarFg     *Style
-	CommandLineBg   *Style
-	CommandLineFg   *Style
 	ErrorFg         *Style
 	WarningFg       *Style
 	SuccessFg       *Style
 	InfoFg          *Style
-	HintFg          *Style
-	PopupBg         *Style
-	PopupFg         *Style
 	PopupBorder     *Style
-	MenuBg          *Style
-	MenuFg          *Style
-	MenuSelectedBg  *Style
-	MenuSelectedFg  *Style
-	TableHeaderBg   *Style
 	TableHeaderFg   *Style
-	TableRowAltBg   *Style
-	GutterFg        *Style
-	LineNumberFg    *Style
-	CursorBg        *Style
-	CursorFg        *Style
-	MatchHighlight  *Style
 	SearchHighlight *Style
 	CurSearch       *Style // current in-grid search match (stronger than SearchHighlight)
-	DiffAddedFg     *Style
-	DiffRemovedFg   *Style
-	DiffChangedFg   *Style
 	PromptFg        *Style
 	DirtyCellBg     *Style // Z1 wires ThemeConfig + builtins
 	WarnBorder      *Style // Z1 Phase A wires ThemeConfig + builtins
@@ -105,8 +80,6 @@ func Apply(cfg *config.ThemeConfig) error {
 	next := &themeState{
 		ActiveBorder:    parseStyle(cfg.ActiveBorder),
 		InactiveBorder:  parseStyle(cfg.InactiveBorder),
-		SelectedRowBg:   parseStyle(cfg.SelectedRowBg),
-		SelectedRowFg:   parseStyle(cfg.SelectedRowFg),
 		NullValueFg:     parseStyle(cfg.NullValueFg),
 		NumericFg:       parseStyle(cfg.NumericFg),
 		StringFg:        parseStyle(cfg.StringFg),
@@ -114,37 +87,14 @@ func Apply(cfg *config.ThemeConfig) error {
 		CommentFg:       parseStyle(cfg.CommentFg),
 		IdentifierFg:    parseStyle(cfg.IdentifierFg),
 		OperatorFg:      parseStyle(cfg.OperatorFg),
-		BackgroundBg:    parseStyle(cfg.BackgroundBg),
-		ForegroundFg:    parseStyle(cfg.ForegroundFg),
-		StatusBarBg:     parseStyle(cfg.StatusBarBg),
-		StatusBarFg:     parseStyle(cfg.StatusBarFg),
-		CommandLineBg:   parseStyle(cfg.CommandLineBg),
-		CommandLineFg:   parseStyle(cfg.CommandLineFg),
 		ErrorFg:         parseStyle(cfg.ErrorFg),
 		WarningFg:       parseStyle(cfg.WarningFg),
 		SuccessFg:       parseStyle(cfg.SuccessFg),
 		InfoFg:          parseStyle(cfg.InfoFg),
-		HintFg:          parseStyle(cfg.HintFg),
-		PopupBg:         parseStyle(cfg.PopupBg),
-		PopupFg:         parseStyle(cfg.PopupFg),
 		PopupBorder:     parseStyle(cfg.PopupBorder),
-		MenuBg:          parseStyle(cfg.MenuBg),
-		MenuFg:          parseStyle(cfg.MenuFg),
-		MenuSelectedBg:  parseStyle(cfg.MenuSelectedBg),
-		MenuSelectedFg:  parseStyle(cfg.MenuSelectedFg),
-		TableHeaderBg:   parseStyle(cfg.TableHeaderBg),
 		TableHeaderFg:   parseStyle(cfg.TableHeaderFg),
-		TableRowAltBg:   parseStyle(cfg.TableRowAltBg),
-		GutterFg:        parseStyle(cfg.GutterFg),
-		LineNumberFg:    parseStyle(cfg.LineNumberFg),
-		CursorBg:        parseStyle(cfg.CursorBg),
-		CursorFg:        parseStyle(cfg.CursorFg),
-		MatchHighlight:  parseStyle(cfg.MatchHighlight),
 		SearchHighlight: parseStyle(cfg.SearchHighlight),
 		CurSearch:       parseStyle(cfg.CurSearch),
-		DiffAddedFg:     parseStyle(cfg.DiffAddedFg),
-		DiffRemovedFg:   parseStyle(cfg.DiffRemovedFg),
-		DiffChangedFg:   parseStyle(cfg.DiffChangedFg),
 		PromptFg:        parseStyle(cfg.PromptFg),
 		DirtyCellBg:     parseStyle(cfg.DirtyCellBg),
 		WarnBorder:      parseStyle(cfg.WarnBorder),

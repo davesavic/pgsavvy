@@ -398,12 +398,11 @@ func skipEscapeSequence(s string, i int) int {
 	}
 }
 
-// applySelectionHighlight wraps cell in the SelectedRowBg style. The
-// background is rendered via ANSI reverse-video because gocui's escape
-// interpreter doesn't honor 48;5;N sequences for cell-background in
-// all terminals; reverse-video swaps fg+bg and is universally
-// supported. This is the same trick lazygit uses for its selection
-// highlight when the theme background isn't set.
+// applySelectionHighlight paints the selected row via ANSI reverse-video.
+// Reverse-video is hardcoded (not themed) because gocui's escape interpreter
+// doesn't honor 48;5;N cell-background sequences across all terminals;
+// swapping fg+bg is universally supported. This is the same trick lazygit
+// uses for its selection highlight.
 func applySelectionHighlight(decorated string) string {
 	return ansiReverseVid + decorated + ansiReset
 }
