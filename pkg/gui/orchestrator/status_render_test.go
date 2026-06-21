@@ -12,6 +12,8 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/keys"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/theme/builtin"
 )
 
 // fakeToastSource implements ToastSource with explicit message/level
@@ -475,5 +477,52 @@ func TestRenderStatusLine_ActiveLeafSourcesListModeAndOptions(t *testing.T) {
 	}
 	if !strings.Contains(buf, "Load") {
 		t.Fatalf("status buffer = %q; want history-scope option 'Load'", buf)
+	}
+}
+
+// --- ialt.1: toast styler reads configured theme colors (not hardcoded) ---
+
+func TestStyleToastForLevel_ErrorUsesConfiguredErrorFg(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
+	cfg := builtin.DefaultDark()
+	cfg.ErrorFg = "color202"
+	if err := theme.Apply(cfg); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	t.Cleanup(func() { _ = theme.Apply(builtin.DefaultDark()) })
+
+	got := styleToastForLevel("boom", ui.ToastError)
+
+	if want := "\x1b[38;5;202m"; !strings.Contains(got, want) {
+		t.Fatalf("got %q; want SGR prefix %q", got, want)
+	}
+}
+
+func TestStyleToastForLevel_InfoUsesConfiguredSuccessFg(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
+	cfg := builtin.DefaultDark()
+	cfg.SuccessFg = "color118"
+	if err := theme.Apply(cfg); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	t.Cleanup(func() { _ = theme.Apply(builtin.DefaultDark()) })
+
+	got := styleToastForLevel("saved", ui.ToastInfo)
+
+	if want := "\x1b[38;5;118m"; !strings.Contains(got, want) {
+		t.Fatalf("got %q; want SGR prefix %q", got, want)
+	}
+}
+
+func TestStyleToastForLevel_PlainUnderNoColor(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+
+	got := styleToastForLevel("saved", ui.ToastInfo)
+
+	if strings.ContainsRune(got, 0x1b) {
+		t.Fatalf("got %q must not contain an ANSI escape under NO_COLOR", got)
+	}
+	if got != "saved" {
+		t.Fatalf("got %q; want plain %q", got, "saved")
 	}
 }

@@ -41,17 +41,10 @@ func SpinnerGlyph(frame int64) rune {
 	return spinnerGlyphs[idx]
 }
 
-// ANSI SGR pair used to tint the connection header (icon + label) with
-// the profile's `color:` field. The header MUST be visibly
-// distinct after connect so the user can tell at a glance which
-// connection is active. Recognised colour names map to the standard
-// 8-colour ANSI palette; hex / unknown tokens fall through to an
-// untinted header (we never emit a malformed escape).
-const (
-	ansiResetSGR    = "\x1b[0m"
-	ansiYellowFgSGR = "\x1b[33m" // WarningFg: active transaction
-	ansiRedFgSGR    = "\x1b[31m" // ErrorFg: aborted transaction
-)
+// ansiResetSGR closes an inline foreground escape so subsequent status-bar
+// sections render in the default foreground. The colors themselves are
+// resolved from the active theme at render time (tintTag / tintHeaderForConn).
+const ansiResetSGR = "\x1b[0m"
 
 // BuildStatusLine renders the plain text shown in the 2-row status slot.
 // The returned string carries two lines joined by "\n":
@@ -140,18 +133,19 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 // txIndicator renders the transaction status badge for the status bar.
 // Returns "" when no transaction is active (zero-value TxStatus or
 // committed/rolled-back). Active transactions render [TX] (no savepoints)
-// or [TX:sp1,sp2] (with savepoints) in WarningFg (yellow). Aborted
-// transactions render [TX*] in ErrorFg (red).
+// or [TX:sp1,sp2] (with savepoints) in the theme's WarningFg. Aborted
+// transactions render [TX*] in ErrorFg. Colors are resolved from the active
+// theme and suppressed under NO_COLOR (see tintTag).
 func txIndicator(st models.TxStatus, savepoints []string) string {
 	switch st {
 	case models.TxActive:
+		tag := "[TX]"
 		if len(savepoints) > 0 {
-			tag := fmt.Sprintf("[TX:%s]", strings.Join(savepoints, ","))
-			return ansiYellowFgSGR + tag + ansiResetSGR
+			tag = fmt.Sprintf("[TX:%s]", strings.Join(savepoints, ","))
 		}
-		return ansiYellowFgSGR + "[TX]" + ansiResetSGR
+		return tintTag(tag, theme.Current().WarningFg.Fg)
 	case models.TxAbortedInTx:
-		return ansiRedFgSGR + "[TX*]" + ansiResetSGR
+		return tintTag("[TX*]", theme.Current().ErrorFg.Fg)
 	default:
 		return ""
 	}
@@ -225,6 +219,20 @@ func sessionSettingsTags(m map[string]string) []string {
 // Unrecognised values (hex codes, empty, nil conn) collapse to the bare
 // header — the rendering layer never emits a malformed escape. Mirrors
 // the cell-content approach used by status_render's toast styler.
+// tintTag wraps a status-bar tag with the foreground SGR for token, honoring
+// NO_COLOR (theme.IsMonochrome) and falling back to the bare tag for empty or
+// unknown tokens so the surface never emits a malformed escape.
+func tintTag(tag, token string) string {
+	if theme.IsMonochrome() {
+		return tag
+	}
+	sgr := theme.ColorSGR(token, theme.Fg)
+	if sgr == "" {
+		return tag
+	}
+	return sgr + tag + ansiResetSGR
+}
+
 func tintHeaderForConn(header string, conn *models.Connection) string {
 	if conn == nil || conn.Color == "" {
 		return header

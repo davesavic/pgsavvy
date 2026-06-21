@@ -7,6 +7,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/theme/builtin"
 )
 
 func TestBuildStatusLine_NilTranslationSet(t *testing.T) {
@@ -450,5 +451,57 @@ func TestSearchIndicator_ActiveNoMatches(t *testing.T) {
 	want := "search: alic 0/0" + optionSep + "no matches"
 	if got != want {
 		t.Fatalf("SearchIndicator(active, total==0) = %q, want %q", got, want)
+	}
+}
+
+// --- ialt.1: tx badge reads configured theme colors (not hardcoded) ---
+
+// A non-default WarningFg token must reach the [TX] badge. Uses a 256-index
+// token (201) so a regression to the hardcoded yellow ("33") cannot green-wash
+// this — the expected escape is distinct from any default.
+func TestBuildStatusLine_TxActiveUsesConfiguredWarningFg(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
+	cfg := builtin.DefaultDark()
+	cfg.WarningFg = "color201"
+	if err := theme.Apply(cfg); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	t.Cleanup(func() { _ = theme.Apply(builtin.DefaultDark()) })
+
+	got := BuildStatusLine("", nil, nil, i18n.EnglishTranslationSet(), 0, 0, models.TxActive, nil, nil)
+
+	if want := "\x1b[38;5;201m[TX]\x1b[0m"; !strings.Contains(got, want) {
+		t.Fatalf("got %q; want substring %q", got, want)
+	}
+}
+
+// A non-default ErrorFg token must reach the aborted [TX*] badge.
+func TestBuildStatusLine_TxAbortedUsesConfiguredErrorFg(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
+	cfg := builtin.DefaultDark()
+	cfg.ErrorFg = "color202"
+	if err := theme.Apply(cfg); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	t.Cleanup(func() { _ = theme.Apply(builtin.DefaultDark()) })
+
+	got := BuildStatusLine("", nil, nil, i18n.EnglishTranslationSet(), 0, 0, models.TxAbortedInTx, nil, nil)
+
+	if want := "\x1b[38;5;202m[TX*]\x1b[0m"; !strings.Contains(got, want) {
+		t.Fatalf("got %q; want substring %q", got, want)
+	}
+}
+
+// Under NO_COLOR the tx badge renders plain — no escape bytes, badge text intact.
+func TestBuildStatusLine_TxActivePlainUnderNoColor(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+
+	got := BuildStatusLine("", nil, nil, i18n.EnglishTranslationSet(), 0, 0, models.TxActive, nil, nil)
+
+	if strings.ContainsRune(got, 0x1b) {
+		t.Fatalf("got %q must not contain an ANSI escape under NO_COLOR", got)
+	}
+	if !strings.Contains(got, "[TX]") {
+		t.Fatalf("got %q; want plain '[TX]' badge", got)
 	}
 }

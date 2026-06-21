@@ -9,6 +9,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // AppStatusViewName is the gocui view-name string the status bar
@@ -273,14 +274,23 @@ func RenderStatusLine(d StatusRenderDeps) {
 	_ = d.Driver.SetContent(AppStatusViewName, line)
 }
 
-// styleToastForLevel wraps msg with the ANSI SGR pair appropriate to
-// level. msg is assumed to already be SafeText-sanitised so it carries
-// no control bytes other than the ones this wrapper adds.
+// styleToastForLevel wraps msg with the active theme's foreground color for
+// level — ErrorFg for error toasts, SuccessFg otherwise. Color is suppressed
+// under NO_COLOR (theme.IsMonochrome) and for empty/unknown tokens, so the
+// status surface never emits a malformed escape. msg is assumed to already be
+// SafeText-sanitised so it carries no control bytes other than the ones this
+// wrapper adds.
 func styleToastForLevel(msg string, level ui.ToastLevel) string {
-	switch level {
-	case ui.ToastError:
-		return ansiRedFgSGR + msg + ansiResetSGR
-	default:
-		return ansiGreenFgSGR + msg + ansiResetSGR
+	style := theme.Current().SuccessFg
+	if level == ui.ToastError {
+		style = theme.Current().ErrorFg
 	}
+	if theme.IsMonochrome() {
+		return msg
+	}
+	sgr := theme.ColorSGR(style.Fg, theme.Fg)
+	if sgr == "" {
+		return msg
+	}
+	return sgr + msg + ansiResetSGR
 }
