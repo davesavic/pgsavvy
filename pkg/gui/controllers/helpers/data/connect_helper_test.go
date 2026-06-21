@@ -134,9 +134,10 @@ func (s *fakeSession) Explain(_ context.Context, _ models.Query, _ bool) (models
 func (s *fakeSession) Begin(_ context.Context, _ models.TxOptions) (drivers.Transaction, error) {
 	return nil, nil
 }
-func (s *fakeSession) InTransaction() bool                     { return false }
-func (s *fakeSession) CurrentTransaction() drivers.Transaction { return nil }
-func (s *fakeSession) Encoder() drivers.Encoder                { return nopEncoder{} }
+func (s *fakeSession) InTransaction() bool                       { return false }
+func (s *fakeSession) CurrentTransaction() drivers.Transaction   { return nil }
+func (s *fakeSession) LiveTxStatus() (models.TxStatus, []string) { return "", nil }
+func (s *fakeSession) Encoder() drivers.Encoder                  { return nopEncoder{} }
 
 // nopEncoder is a no-op drivers.Encoder used by the connect-helper fake
 // session. It returns "NULL" for any input — these unit tests never

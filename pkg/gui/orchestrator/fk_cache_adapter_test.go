@@ -115,9 +115,10 @@ func (s *fkGuardSession) Explain(context.Context, models.Query, bool) (models.Pl
 func (s *fkGuardSession) Begin(context.Context, models.TxOptions) (drivers.Transaction, error) {
 	return nil, nil
 }
-func (s *fkGuardSession) InTransaction() bool                     { return false }
-func (s *fkGuardSession) CurrentTransaction() drivers.Transaction { return nil }
-func (s *fkGuardSession) Encoder() drivers.Encoder                { return fkNopEncoder{} }
+func (s *fkGuardSession) InTransaction() bool                       { return false }
+func (s *fkGuardSession) CurrentTransaction() drivers.Transaction   { return nil }
+func (s *fkGuardSession) LiveTxStatus() (models.TxStatus, []string) { return "", nil }
+func (s *fkGuardSession) Encoder() drivers.Encoder                  { return fkNopEncoder{} }
 
 type fkNopEncoder struct{}
 

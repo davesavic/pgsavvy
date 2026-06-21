@@ -54,6 +54,15 @@ type pgRowStream struct {
 	// which case release() skips it.
 	cancel context.CancelFunc
 
+	// sample refreshes the parent Session's cached transaction status. It is
+	// invoked by release() ONLY on the clean drain path (EOF / terminal pgx
+	// error / explicit Close) AFTER rows.Close, so the pgconn status byte is
+	// final. It is deliberately NOT called from the ctx.Done force-close branch
+	// of Next, where a Next goroutine may still be blocked on the connection —
+	// reading pgconn there would race the protocol (Decision ⑥). nil for
+	// sessions without a sampler (e.g. tests).
+	sample func()
+
 	closed atomic.Bool
 
 	// rowsAffected captures pgx's CommandTag().RowsAffected() at release
@@ -73,13 +82,14 @@ type pgRowStream struct {
 // context.WithTimeout derived in Session.Stream), or nil when the stream has
 // no timeout. release() invokes it exactly once so the deadline timer is
 // stopped on EOF / terminal-error / explicit Close without leaking.
-func newPgRowStream(rows pgx.Rows, qid models.QueryID, releaseGuard func(), cancel context.CancelFunc) *pgRowStream {
+func newPgRowStream(rows pgx.Rows, qid models.QueryID, releaseGuard func(), cancel context.CancelFunc, sample func()) *pgRowStream {
 	return &pgRowStream{
 		rows:         rows,
 		queryID:      qid,
 		columns:      fieldDescriptionsToColumnMetas(rows.FieldDescriptions()),
 		releaseGuard: releaseGuard,
 		cancel:       cancel,
+		sample:       sample,
 	}
 }
 
@@ -114,9 +124,10 @@ func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 		return models.Row{}, false, ErrRowStreamClosed
 	}
 
-	// Fast path: context already done.
+	// Fast path: context already done. Do not sample — the connection's tx
+	// status may be mid-protocol on a cancelled context (Decision ⑥).
 	if err := ctx.Err(); err != nil {
-		s.release()
+		s.release(false)
 		return models.Row{}, false, err
 	}
 
@@ -140,8 +151,9 @@ func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 			}
 			// EOF or terminal stream error — drop the session inFlight
 			// guard now rather than stranding it until the consumer calls
-			// Close. CAS-guarded by `closed`.
-			s.release()
+			// Close. CAS-guarded by `closed`. This is the clean-drain path:
+			// the Next goroutine has returned, so sampling pgconn is safe.
+			s.release(true)
 			return models.Row{}, false, nextErr
 		}
 		vals, err := s.rows.Values()
@@ -159,8 +171,10 @@ func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 		// Context cancelled while rows.Next was blocked (dead
 		// connection or Stop). Force-close the underlying rows to
 		// unblock the goroutine. Close/release is idempotent via
-		// the CAS on closed.
-		s.release()
+		// the CAS on closed. Do NOT sample: the Next goroutine is still
+		// blocked on the connection, so reading pgconn would race the
+		// protocol (Decision ⑥).
+		s.release(false)
 		return models.Row{}, false, ctx.Err()
 	}
 }
@@ -171,7 +185,9 @@ func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 // closed flag is set BEFORE rows.Close so a concurrent Next observes the
 // sentinel rather than a pgx "rows are closed" string.
 func (s *pgRowStream) Close() error {
-	s.release()
+	// Explicit consumer Close is a clean drain — the consumer has stopped
+	// calling Next, so sampling the live tx status is safe.
+	s.release(true)
 	return nil
 }
 
@@ -180,7 +196,13 @@ func (s *pgRowStream) Close() error {
 // idempotent: the first caller to win the swap runs the cleanup; every
 // subsequent caller observes closed=true and returns without touching
 // rows.Close or releaseGuard.
-func (s *pgRowStream) release() {
+// release runs the single-shot cleanup. sample requests a refresh of the
+// parent Session's cached transaction status; pass true only on the clean
+// drain path (EOF / terminal error / explicit Close) where no Next goroutine
+// is still touching the connection, and false on the ctx.Done force-close
+// path (Decision ⑥). The sampler runs AFTER rows.Close so the trailing
+// ReadyForQuery has settled the pgconn status byte.
+func (s *pgRowStream) release(sample bool) {
 	if !s.closed.CompareAndSwap(false, true) {
 		return
 	}
@@ -198,6 +220,9 @@ func (s *pgRowStream) release() {
 	}
 	if s.releaseGuard != nil {
 		s.releaseGuard()
+	}
+	if sample && s.sample != nil {
+		s.sample()
 	}
 }
 

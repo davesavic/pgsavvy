@@ -26,12 +26,18 @@ type pgTransaction struct {
 	status     models.TxStatus
 	savepoints []string
 	stmtCount  atomic.Int64
+
+	// onTerminate is invoked (nil-guarded) after a successful Commit or
+	// Rollback so the owning Session can clear its activeTx pointer and
+	// resample the live pgconn status — see Session.Begin / Decision ①.
+	onTerminate func()
 }
 
-func newPgTransaction(tx pgx.Tx) *pgTransaction {
+func newPgTransaction(tx pgx.Tx, onTerminate func()) *pgTransaction {
 	return &pgTransaction{
-		tx:     tx,
-		status: models.TxActive,
+		tx:          tx,
+		status:      models.TxActive,
+		onTerminate: onTerminate,
 	}
 }
 
@@ -45,6 +51,9 @@ func (t *pgTransaction) Commit(ctx context.Context) error {
 		return err
 	}
 	t.status = models.TxCommitted
+	if t.onTerminate != nil {
+		t.onTerminate()
+	}
 	return nil
 }
 
@@ -58,6 +67,9 @@ func (t *pgTransaction) Rollback(ctx context.Context) error {
 		return err
 	}
 	t.status = models.TxRolledBack
+	if t.onTerminate != nil {
+		t.onTerminate()
+	}
 	return nil
 }
 

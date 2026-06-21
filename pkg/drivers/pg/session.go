@@ -48,6 +48,13 @@ type Session struct {
 	inFlight   atomic.Int32
 	openedAt   time.Time // session_open timestamp; used for session_close ms field
 	activeTx   *pgTransaction
+
+	// cachedTxStatus holds the last sampled pgconn transaction status byte
+	// ('I' idle / 'T' in-tx / 'E' in-failed-tx). sampleTxStatus refreshes it
+	// after every query so raw BEGIN/COMMIT/ROLLBACK (which never touch
+	// activeTx) are still reflected by LiveTxStatus. Stored as a uint32 so it
+	// can be read lock-free from the status-render path.
+	cachedTxStatus atomic.Uint32
 }
 
 // newSession constructs a *Session bound to pgxConn and parent. Session.ID is
@@ -69,6 +76,7 @@ func newSession(pgxConn *pgxpool.Conn, parent *Connection) *Session {
 		parent:     parent,
 		openedAt:   time.Now(),
 	}
+	s.cachedTxStatus.Store(uint32('I'))
 	parent.registerCancel(pid, secret)
 	if parent.notices != nil {
 		parent.notices.bindConn(pgc, s.id)
@@ -508,6 +516,11 @@ func (s *Session) DescribeFunction(ctx context.Context, schema, name string) ([]
 // of scope.
 func (s *Session) Execute(ctx context.Context, q models.Query) (models.Result, error) {
 	defer s.guard()()
+	// Sample the live tx status on every return path. Defers run LIFO, so
+	// registering this BEFORE `defer rows.Close()` (below) guarantees it runs
+	// AFTER rows.Close() — i.e. after the trailing ReadyForQuery is processed
+	// and pgConn's status byte is final. Ordering is load-bearing.
+	defer s.sampleTxStatus()
 
 	if q.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -580,6 +593,10 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 				cancel()
 			}
 			s.releaseInFlight()
+			// The statement round-tripped and failed (no RowStream is
+			// returned, so release() never samples). Refresh the cached tx
+			// status here: a failure inside a transaction aborts it to 'E'.
+			s.sampleTxStatus()
 			return nil, wrapPgError(err)
 		}
 	}
@@ -591,6 +608,11 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 			cancel()
 		}
 		s.releaseInFlight()
+		// Query errored before any RowStream exists (e.g. a parse/describe
+		// error like undefined_table), so release()'s sampler never runs. A
+		// failure inside a transaction aborts it to 'E'; sample so the [TX*]
+		// badge reflects it.
+		s.sampleTxStatus()
 		return nil, wrapPgError(err)
 	}
 
@@ -601,7 +623,7 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 		Nonce:      queryNonceCounter.Add(1),
 	}
 
-	return newPgRowStream(rows, qid, s.releaseInFlight, cancel), nil
+	return newPgRowStream(rows, qid, s.releaseInFlight, cancel, s.sampleTxStatus), nil
 }
 
 // searchPathStmt builds the SET search_path statement that makes unqualified
@@ -633,6 +655,9 @@ func searchPathStmt(schema string) string {
 // the whole call.
 func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (plan models.Plan, retErr error) {
 	defer s.guard()()
+	// See Execute for the LIFO ordering rationale: registered before the inner
+	// `defer rows.Close()` so the sample runs after the rows are drained.
+	defer s.sampleTxStatus()
 
 	if q.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -766,7 +791,14 @@ func (s *Session) Begin(ctx context.Context, opts models.TxOptions) (drivers.Tra
 	if err != nil {
 		return nil, wrapPgError(err)
 	}
-	t := newPgTransaction(tx)
+	// onTerminate clears activeTx and resamples the live status when the tx
+	// commits/rolls back, so a terminal driver-API tx stops shadowing the live
+	// byte (Decision ①): after end, activeTx==nil and the byte (now 'I')
+	// governs, clearing the badge.
+	t := newPgTransaction(tx, func() {
+		s.activeTx = nil
+		s.sampleTxStatus()
+	})
 	s.activeTx = t
 	return t, nil
 }
@@ -791,6 +823,43 @@ func (s *Session) CurrentTransaction() drivers.Transaction {
 		return nil
 	}
 	return s.activeTx
+}
+
+// sampleTxStatus refreshes cachedTxStatus from the live pgconn transaction
+// status. Must be called only when no query is in flight on the connection
+// (pgconn.TxStatus reads protocol state); the Execute/Explain/Stream callers
+// schedule it AFTER the rows are closed so the trailing ReadyForQuery has been
+// processed and the status byte is final. Nil-guarded for stub sessions.
+func (s *Session) sampleTxStatus() {
+	if s.pgConn == nil {
+		return
+	}
+	s.cachedTxStatus.Store(uint32(s.pgConn.TxStatus()))
+}
+
+// LiveTxStatus reports the session's current transaction status for the status
+// bar [TX] badge. A driver-API transaction (Session.Begin) takes precedence
+// while active; raw-SQL BEGIN/COMMIT/ROLLBACK are detected via the sampled
+// pgconn status byte. It reads only activeTx and the cached atomic — never
+// dereferences pgConn — so it is safe on a stub session. Savepoint names are
+// returned only for a driver-API transaction; raw-SQL transactions report a
+// nil slice (D4).
+func (s *Session) LiveTxStatus() (models.TxStatus, []string) {
+	if s.activeTx != nil {
+		switch s.activeTx.Status() {
+		case models.TxActive:
+			return models.TxActive, s.activeTx.Savepoints()
+		case models.TxAbortedInTx:
+			return models.TxAbortedInTx, s.activeTx.Savepoints()
+		}
+	}
+	switch byte(s.cachedTxStatus.Load()) {
+	case 'T':
+		return models.TxActive, nil
+	case 'E':
+		return models.TxAbortedInTx, nil
+	}
+	return "", nil
 }
 
 // Encoder returns the stateless literal encoder for this Postgres session.

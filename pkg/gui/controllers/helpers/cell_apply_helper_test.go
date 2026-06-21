@@ -133,8 +133,9 @@ func (f *fakeSession) Begin(context.Context, models.TxOptions) (drivers.Transact
 	}
 	panic("Begin not used (apply uses Execute BEGIN)")
 }
-func (f *fakeSession) InTransaction() bool                     { return false }
-func (f *fakeSession) CurrentTransaction() drivers.Transaction { return nil }
+func (f *fakeSession) InTransaction() bool                       { return false }
+func (f *fakeSession) CurrentTransaction() drivers.Transaction   { return nil }
+func (f *fakeSession) LiveTxStatus() (models.TxStatus, []string) { return "", nil }
 
 // fakeAcquirer hands out a pre-built fakeSession (or an error). Mirrors
 // drivers.Connection.AcquireSession's signature.

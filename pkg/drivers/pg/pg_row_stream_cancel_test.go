@@ -56,7 +56,7 @@ func TestPgRowStreamReleaseInvokesCancelOnce(t *testing.T) {
 	cancel := func() { cancelCalls.Add(1) }
 
 	rows := &fakeStreamRows{}
-	stream := newPgRowStream(rows, models.QueryID{}, func() {}, cancel)
+	stream := newPgRowStream(rows, models.QueryID{}, func() {}, cancel, nil)
 
 	// First Close runs the cleanup → cancel fires once.
 	if err := stream.Close(); err != nil {
@@ -83,7 +83,7 @@ func TestPgRowStreamReleaseCancelViaEOFThenClose(t *testing.T) {
 	cancel := func() { cancelCalls.Add(1) }
 
 	rows := &fakeStreamRows{remaining: 0} // immediate EOF
-	stream := newPgRowStream(rows, models.QueryID{}, func() {}, cancel)
+	stream := newPgRowStream(rows, models.QueryID{}, func() {}, cancel, nil)
 
 	if _, ok, err := stream.Next(context.Background()); ok || err != nil {
 		t.Fatalf("Next on empty stream = (ok=%v, err=%v), want (false, nil)", ok, err)
@@ -101,7 +101,7 @@ func TestPgRowStreamReleaseCancelViaEOFThenClose(t *testing.T) {
 // deadline → nil CancelFunc) releases cleanly without panicking.
 func TestPgRowStreamNilCancelIsSafe(t *testing.T) {
 	rows := &fakeStreamRows{}
-	stream := newPgRowStream(rows, models.QueryID{}, func() {}, nil)
+	stream := newPgRowStream(rows, models.QueryID{}, func() {}, nil, nil)
 	if err := stream.Close(); err != nil {
 		t.Fatalf("Close with nil cancel: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestPgRowStreamReleaseConcurrentCancelOnce(t *testing.T) {
 	cancel := func() { cancelCalls.Add(1) }
 
 	rows := &fakeStreamRows{}
-	stream := newPgRowStream(rows, models.QueryID{}, func() {}, cancel)
+	stream := newPgRowStream(rows, models.QueryID{}, func() {}, cancel, nil)
 
 	var wg sync.WaitGroup
 	for range 32 {

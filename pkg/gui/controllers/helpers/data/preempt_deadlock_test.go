@@ -187,18 +187,19 @@ func (b *blockingSession) Begin(context.Context, models.TxOptions) (drivers.Tran
 
 type nopTransaction struct{}
 
-func (nopTransaction) Commit(context.Context) error                { return nil }
-func (nopTransaction) Rollback(context.Context) error              { return nil }
-func (nopTransaction) Savepoint(context.Context, string) error     { return nil }
-func (nopTransaction) Release(context.Context, string) error       { return nil }
-func (nopTransaction) RollbackTo(context.Context, string) error    { return nil }
-func (nopTransaction) Savepoints() []string                        { return nil }
-func (nopTransaction) Status() models.TxStatus                     { return models.TxActive }
-func (nopTransaction) ObserveError(error)                          {}
-func (nopTransaction) StatementCount() int                         { return 0 }
-func (b *blockingSession) InTransaction() bool                     { return false }
-func (b *blockingSession) CurrentTransaction() drivers.Transaction { return nil }
-func (b *blockingSession) Encoder() drivers.Encoder                { return nopEncoder{} }
+func (nopTransaction) Commit(context.Context) error                  { return nil }
+func (nopTransaction) Rollback(context.Context) error                { return nil }
+func (nopTransaction) Savepoint(context.Context, string) error       { return nil }
+func (nopTransaction) Release(context.Context, string) error         { return nil }
+func (nopTransaction) RollbackTo(context.Context, string) error      { return nil }
+func (nopTransaction) Savepoints() []string                          { return nil }
+func (nopTransaction) Status() models.TxStatus                       { return models.TxActive }
+func (nopTransaction) ObserveError(error)                            {}
+func (nopTransaction) StatementCount() int                           { return 0 }
+func (b *blockingSession) InTransaction() bool                       { return false }
+func (b *blockingSession) CurrentTransaction() drivers.Transaction   { return nil }
+func (b *blockingSession) LiveTxStatus() (models.TxStatus, []string) { return "", nil }
+func (b *blockingSession) Encoder() drivers.Encoder                  { return nopEncoder{} }
 
 type nopEncoder struct{}
 

@@ -131,9 +131,10 @@ func (s *wireFakeSession) Explain(_ context.Context, _ models.Query, _ bool) (mo
 func (s *wireFakeSession) Begin(_ context.Context, _ models.TxOptions) (drivers.Transaction, error) {
 	return nil, nil
 }
-func (s *wireFakeSession) InTransaction() bool                     { return false }
-func (s *wireFakeSession) CurrentTransaction() drivers.Transaction { return nil }
-func (s *wireFakeSession) Encoder() drivers.Encoder                { return nopEncoder{} }
+func (s *wireFakeSession) InTransaction() bool                       { return false }
+func (s *wireFakeSession) CurrentTransaction() drivers.Transaction   { return nil }
+func (s *wireFakeSession) LiveTxStatus() (models.TxStatus, []string) { return "", nil }
+func (s *wireFakeSession) Encoder() drivers.Encoder                  { return nopEncoder{} }
 
 // nopEncoder is a no-op drivers.Encoder used by the wireFake test session.
 // It returns "NULL" for any input — the wiring tests never inspect literals.

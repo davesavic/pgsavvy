@@ -32,7 +32,7 @@ func (f *fakeTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTa
 
 func TestTransactionCommit(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 	require.Equal(t, models.TxActive, tx.Status())
 
 	err := tx.Commit(context.Background())
@@ -42,7 +42,7 @@ func TestTransactionCommit(t *testing.T) {
 
 func TestTransactionCommitRejectsNonActive(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 	tx.status = models.TxCommitted
 	err := tx.Commit(context.Background())
 	require.Error(t, err)
@@ -51,7 +51,7 @@ func TestTransactionCommitRejectsNonActive(t *testing.T) {
 
 func TestTransactionRollback(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 
 	err := tx.Rollback(context.Background())
 	require.NoError(t, err)
@@ -60,7 +60,7 @@ func TestTransactionRollback(t *testing.T) {
 
 func TestTransactionRollbackFromAbortedState(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 	tx.status = models.TxAbortedInTx
 
 	err := tx.Rollback(context.Background())
@@ -70,7 +70,7 @@ func TestTransactionRollbackFromAbortedState(t *testing.T) {
 
 func TestTransactionRollbackRejectsCommitted(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 	tx.status = models.TxCommitted
 
 	err := tx.Rollback(context.Background())
@@ -80,7 +80,7 @@ func TestTransactionRollbackRejectsCommitted(t *testing.T) {
 
 func TestTransactionSavepoint(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 
 	err := tx.Savepoint(context.Background(), "sp1")
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestTransactionSavepoint(t *testing.T) {
 
 func TestTransactionSavepointEmptyNameReturnsError(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 
 	err := tx.Savepoint(context.Background(), "")
 	require.Error(t, err)
@@ -101,7 +101,7 @@ func TestTransactionSavepointEmptyNameReturnsError(t *testing.T) {
 
 func TestTransactionSavepointInjectionPayloadSafelyQuoted(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 
 	err := tx.Savepoint(context.Background(), "sp1; DROP TABLE users; --")
 	require.NoError(t, err)
@@ -113,7 +113,7 @@ func TestTransactionSavepointInjectionPayloadSafelyQuoted(t *testing.T) {
 
 func TestTransactionRelease(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 
 	require.NoError(t, tx.Savepoint(context.Background(), "sp1"))
 	require.NoError(t, tx.Savepoint(context.Background(), "sp2"))
@@ -127,14 +127,14 @@ func TestTransactionRelease(t *testing.T) {
 
 func TestTransactionReleaseEmptyNameReturnsError(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 	err := tx.Release(context.Background(), "")
 	require.Error(t, err)
 }
 
 func TestTransactionRollbackTo(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 
 	require.NoError(t, tx.Savepoint(context.Background(), "sp1"))
 
@@ -145,14 +145,14 @@ func TestTransactionRollbackTo(t *testing.T) {
 
 func TestTransactionRollbackToEmptyNameReturnsError(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 	err := tx.RollbackTo(context.Background(), "")
 	require.Error(t, err)
 }
 
 func TestTransactionObserveError25P02(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 	require.Equal(t, models.TxActive, tx.Status())
 
 	tx.ObserveError(&pgconn.PgError{Code: "25P02"})
@@ -161,7 +161,7 @@ func TestTransactionObserveError25P02(t *testing.T) {
 
 func TestTransactionObserveErrorNon25P02IsNoop(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 
 	tx.ObserveError(&pgconn.PgError{Code: "42P01"})
 	require.Equal(t, models.TxActive, tx.Status())
@@ -169,21 +169,21 @@ func TestTransactionObserveErrorNon25P02IsNoop(t *testing.T) {
 
 func TestTransactionObserveErrorNilIsNoop(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 	tx.ObserveError(nil)
 	require.Equal(t, models.TxActive, tx.Status())
 }
 
 func TestTransactionObserveErrorPlainErrorIsNoop(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 	tx.ObserveError(errors.New("something"))
 	require.Equal(t, models.TxActive, tx.Status())
 }
 
 func TestTransactionStatementCount(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 	require.Equal(t, 0, tx.StatementCount())
 
 	_ = tx.Savepoint(context.Background(), "a")
@@ -195,7 +195,7 @@ func TestTransactionStatementCount(t *testing.T) {
 
 func TestTransactionSavepointsReturnsCopy(t *testing.T) {
 	ft := &fakeTx{}
-	tx := newPgTransaction(ft)
+	tx := newPgTransaction(ft, nil)
 	_ = tx.Savepoint(context.Background(), "sp1")
 
 	sp := tx.Savepoints()

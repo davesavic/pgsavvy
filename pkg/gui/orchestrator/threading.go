@@ -75,14 +75,7 @@ func (g *Gui) txStatusAccessor() func() (models.TxStatus, []string) {
 		return nil
 	}
 	return func() (models.TxStatus, []string) {
-		if !r.InTransaction() {
-			return "", nil
-		}
-		tx := r.CurrentTransaction()
-		if tx == nil {
-			return "", nil
-		}
-		return tx.Status(), tx.Savepoints()
+		return r.LiveTxStatus()
 	}
 }
 

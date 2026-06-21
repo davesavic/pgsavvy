@@ -30,6 +30,7 @@ type RunnerSession interface {
 	Begin(ctx context.Context, opts models.TxOptions) (drivers.Transaction, error)
 	InTransaction() bool
 	CurrentTransaction() drivers.Transaction
+	LiveTxStatus() (models.TxStatus, []string)
 	Cancel(qid models.QueryID) error
 	SetDisconnected(bool)
 	IsDisconnected() bool
@@ -276,6 +277,18 @@ func (r *QueryRunner) CurrentTransaction() drivers.Transaction {
 		return nil
 	}
 	return b.sess.CurrentTransaction()
+}
+
+// LiveTxStatus reports the underlying session's live transaction status for the
+// status-bar badge, or ("", nil) when no session is wired. Unlike
+// CurrentTransaction it reflects raw-SQL BEGIN/COMMIT/ROLLBACK, not just the
+// driver Begin() API.
+func (r *QueryRunner) LiveTxStatus() (models.TxStatus, []string) {
+	b := r.load()
+	if b == nil || b.sess == nil {
+		return "", nil
+	}
+	return b.sess.LiveTxStatus()
 }
 
 // TxStatementCount returns the number of statements executed in the

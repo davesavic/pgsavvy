@@ -192,6 +192,18 @@ func (s *SQLSession) InTransaction() bool { return s.inner.InTransaction() }
 // CurrentTransaction returns the in-progress driver Transaction, or nil.
 func (s *SQLSession) CurrentTransaction() drivers.Transaction { return s.inner.CurrentTransaction() }
 
+// LiveTxStatus reports the session's live transaction status for the status-bar
+// [TX] badge, detecting raw-SQL BEGIN/COMMIT/ROLLBACK as well as the driver
+// Begin() API. Returns ("", nil) when the session is disconnected so a dropped
+// connection cannot strand a phantom badge — the driver's cached status byte
+// may still read 'T' after the link dies (Decision ④).
+func (s *SQLSession) LiveTxStatus() (models.TxStatus, []string) {
+	if s.IsDisconnected() {
+		return "", nil
+	}
+	return s.inner.LiveTxStatus()
+}
+
 // SettingsSnapshot returns the session's mutable settings map.
 func (s *SQLSession) SettingsSnapshot() *SettingsSnapshot { return s.settings }
 

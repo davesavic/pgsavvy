@@ -73,6 +73,13 @@ type Session interface {
 	Begin(ctx context.Context, opts models.TxOptions) (Transaction, error)
 	InTransaction() bool
 	CurrentTransaction() Transaction
+	// LiveTxStatus reports the session's current transaction status by
+	// sampling the live connection, so raw-SQL BEGIN/COMMIT/ROLLBACK issued
+	// outside the driver Begin() API are reflected in the status-bar [TX]
+	// badge. Returns ("", nil) when no transaction is open. The second result
+	// carries the active transaction's savepoint names (nil for a raw-SQL
+	// transaction).
+	LiveTxStatus() (models.TxStatus, []string)
 
 	// Encoder returns the literal encoder for this session. It is a
 	// singleton owned by the session; the returned value is safe to retain

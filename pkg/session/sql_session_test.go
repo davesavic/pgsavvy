@@ -24,6 +24,22 @@ func newTestSession(t *testing.T, h session.HistoryRecorder) (*session.SQLSessio
 	return s, conn, sess
 }
 
+func TestSQLSessionLiveTxStatus_DisconnectGate(t *testing.T) {
+	s, _, fs := newTestSession(t, nil)
+	fs.liveTx = models.TxActive
+
+	if status, _ := s.LiveTxStatus(); status != models.TxActive {
+		t.Fatalf("connected LiveTxStatus = %q, want %q", status, models.TxActive)
+	}
+
+	// A dropped connection must not strand a phantom [TX] badge even though the
+	// driver's cached status byte may still read in-transaction (Decision ④).
+	s.SetDisconnected(true)
+	if status, sps := s.LiveTxStatus(); status != "" || sps != nil {
+		t.Fatalf("disconnected LiveTxStatus = (%q, %v), want (\"\", nil)", status, sps)
+	}
+}
+
 func TestSQLSessionExecute_RecordsHistoryOnce(t *testing.T) {
 	rec := &recordingHistory{}
 	s, _, fs := newTestSession(t, rec)

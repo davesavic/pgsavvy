@@ -97,6 +97,7 @@ type fakeSess struct {
 	beginErr   error
 	inTx       atomic.Bool
 	currentTx  drivers.Transaction
+	liveTx     models.TxStatus
 	closeCount atomic.Int32
 
 	noticeCh chan<- pgconn.Notice
@@ -171,9 +172,10 @@ func (s *fakeSess) Begin(context.Context, models.TxOptions) (drivers.Transaction
 	s.currentTx = s.beginTx
 	return s.beginTx, nil
 }
-func (s *fakeSess) InTransaction() bool                     { return s.inTx.Load() }
-func (s *fakeSess) CurrentTransaction() drivers.Transaction { return s.currentTx }
-func (s *fakeSess) Encoder() drivers.Encoder                { return nopEncoder{} }
+func (s *fakeSess) InTransaction() bool                       { return s.inTx.Load() }
+func (s *fakeSess) CurrentTransaction() drivers.Transaction   { return s.currentTx }
+func (s *fakeSess) LiveTxStatus() (models.TxStatus, []string) { return s.liveTx, nil }
+func (s *fakeSess) Encoder() drivers.Encoder                  { return nopEncoder{} }
 
 // nopEncoder is a no-op drivers.Encoder used by the SQLSession fake session.
 // It returns "NULL" for any input — these tests do not exercise literal

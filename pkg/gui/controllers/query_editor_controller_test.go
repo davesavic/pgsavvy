@@ -478,6 +478,8 @@ func (r *recordingRunnerSession) CurrentTransaction() drivers.Transaction {
 	return r.lastTx
 }
 
+func (r *recordingRunnerSession) LiveTxStatus() (models.TxStatus, []string) { return "", nil }
+
 func (r *recordingRunnerSession) Cancel(qid models.QueryID) error {
 	r.cancelCalls = append(r.cancelCalls, qid)
 	return nil
