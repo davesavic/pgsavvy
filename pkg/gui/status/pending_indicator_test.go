@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // buildSet returns a PendingEditSet with n edits installed against
@@ -64,6 +65,7 @@ func TestBuildPendingIndicator_CollapsedWhenNarrow(t *testing.T) {
 // TestBuildPendingIndicator_TintedWhenConfirmWrites proves the
 // destructive-flag tinting rule for the ConfirmWrites case.
 func TestBuildPendingIndicator_TintedWhenConfirmWrites(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
 	conn := &models.Connection{Color: "red", ConfirmWrites: true}
 	got := BuildPendingIndicator(buildSet(t, 1), conn, 80)
 	want := "\x1b[31m[1 pending]\x1b[0m"
@@ -75,6 +77,7 @@ func TestBuildPendingIndicator_TintedWhenConfirmWrites(t *testing.T) {
 // TestBuildPendingIndicator_TintedWhenReadOnly proves the ReadOnly case
 // also triggers tinting.
 func TestBuildPendingIndicator_TintedWhenReadOnly(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
 	conn := &models.Connection{Color: "yellow", ReadOnly: true}
 	got := BuildPendingIndicator(buildSet(t, 2), conn, 80)
 	if !strings.HasPrefix(got, "\x1b[33m") {
@@ -88,6 +91,7 @@ func TestBuildPendingIndicator_TintedWhenReadOnly(t *testing.T) {
 // TestBuildPendingIndicator_TintedWhenConfirmDDL proves the ConfirmDDL
 // case also triggers tinting.
 func TestBuildPendingIndicator_TintedWhenConfirmDDL(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
 	conn := &models.Connection{Color: "magenta", ConfirmDDL: true}
 	got := BuildPendingIndicator(buildSet(t, 1), conn, 80)
 	if !strings.Contains(got, "\x1b[35m") {
@@ -109,14 +113,29 @@ func TestBuildPendingIndicator_UntintedWhenNoDestructiveFlag(t *testing.T) {
 	}
 }
 
-// TestBuildPendingIndicator_UntintedWhenHexColor proves the unknown
-// colour token path: a hex value collapses to the untinted form even
-// when a destructive flag is set.
-func TestBuildPendingIndicator_UntintedWhenHexColor(t *testing.T) {
+// A hex conn.Color now tints the indicator normally (24-bit truecolor) when a
+// destructive flag is set — the unified resolver widened the accepted token
+// classes. #abcdef -> rgb(171,205,239). Authored fresh, not copied from the
+// resolver, so a base-code regression in the hex path cannot green-wash this.
+func TestBuildPendingIndicator_TintedWhenHexColor(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
+	conn := &models.Connection{Color: "#abcdef", ConfirmWrites: true}
+	got := BuildPendingIndicator(buildSet(t, 1), conn, 80)
+	want := "\x1b[38;2;171;205;239m[1 pending]\x1b[0m"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// Under NO_COLOR (theme.IsMonochrome) a hex conn.Color renders PLAIN even when
+// a destructive flag is set — the inline content-site guard suppresses the
+// widened token classes so no escape reaches the bar.
+func TestBuildPendingIndicator_HexColorPlainUnderNoColor(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
 	conn := &models.Connection{Color: "#abcdef", ConfirmWrites: true}
 	got := BuildPendingIndicator(buildSet(t, 1), conn, 80)
 	if strings.ContainsRune(got, 0x1b) {
-		t.Fatalf("got %q must not contain ANSI escape for hex colour token", got)
+		t.Fatalf("got %q must not contain ANSI escape under NO_COLOR", got)
 	}
 	if got != "[1 pending]" {
 		t.Fatalf("got %q, want %q", got, "[1 pending]")
@@ -164,6 +183,7 @@ func TestBuildPendingIndicatorCount_AggregatedTotal(t *testing.T) {
 // TestBuildPendingIndicatorCount_Tinted proves the count form honours the
 // same destructive-flag tinting as the set form.
 func TestBuildPendingIndicatorCount_Tinted(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
 	conn := &models.Connection{Color: "red", ConfirmWrites: true}
 	got := BuildPendingIndicatorCount(4, conn, 80)
 	want := "\x1b[31m[4 pending]\x1b[0m"

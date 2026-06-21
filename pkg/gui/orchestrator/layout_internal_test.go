@@ -249,7 +249,55 @@ func TestFrameAttrFallbacks(t *testing.T) {
 	if got := frameAttr(&theme.Style{Fg: ""}); got != gocui.ColorDefault {
 		t.Errorf("frameAttr(empty Fg) = %v, want ColorDefault", got)
 	}
-	if got := frameAttr(&theme.Style{Fg: "cyan"}); got != gocui.GetColor("cyan") {
-		t.Errorf("frameAttr(cyan) = %v, want GetColor(cyan) %v", got, gocui.GetColor("cyan"))
+	// cyan now resolves through ColorAttr's palette index (Get256Color(6)),
+	// NOT the old gocui.GetColor("cyan") which collapsed to ColorDefault
+	// because tcell v3 names that colour "aqua". This locks in the fix.
+	if got := frameAttr(&theme.Style{Fg: "cyan"}); got != gocui.Get256Color(6) {
+		t.Errorf("frameAttr(cyan) = %v, want Get256Color(6) %v", got, gocui.Get256Color(6))
+	}
+}
+
+// TestColorAttr pins the border colour vocabulary to the inline path's: the 16
+// named colours, "colorN" 256 indices, and #rgb/#rrggbb hex. Arbitrary W3C
+// names and malformed/out-of-range tokens collapse to gocui.ColorDefault.
+func TestColorAttr(t *testing.T) {
+	cases := []struct {
+		name  string
+		token string
+		want  gocui.Attribute
+	}{
+		{"empty", "", gocui.ColorDefault},
+		{"hex", "#ff8800", gocui.NewRGBColor(255, 136, 0)},
+		{"index256", "color42", gocui.Get256Color(42)},
+		// bright names widen the border vocabulary: these were previously
+		// ColorDefault via gocui.GetColor — intentional widening.
+		{"brightblack", "brightblack", gocui.Get256Color(8)},
+		{"brightwhite", "brightwhite", gocui.Get256Color(15)},
+		{"brightred", "brightred", gocui.Get256Color(9)},
+		{"gray", "gray", gocui.Get256Color(8)},
+		{"grey", "grey", gocui.Get256Color(8)},
+		{"red", "red", gocui.Get256Color(1)},
+		// cyan FIX: previously ColorDefault via GetColor (tcell calls it "aqua").
+		{"cyan", "cyan", gocui.Get256Color(6)},
+		// arbitrary W3C name dropped — no longer a gocui.GetColor passthrough.
+		{"navy", "navy", gocui.ColorDefault},
+		{"notacolor", "notacolor", gocui.ColorDefault},
+		// out of range, inherited from ClassifyColor.
+		{"color256", "color256", gocui.ColorDefault},
+		{"malformed hex", "#gggggg", gocui.ColorDefault},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := ColorAttr(c.token); got != c.want {
+				t.Errorf("ColorAttr(%q) = %v, want %v", c.token, got, c.want)
+			}
+		})
+	}
+
+	// gray byte-identity: gocui.GetColor("gray") historically resolved to the
+	// same Attribute as Get256Color(8), so routing gray through ColorAttr
+	// leaves default_dark's InactiveBorder byte-for-byte unchanged.
+	if got, want := ColorAttr("gray"), gocui.GetColor("gray"); got != want {
+		t.Errorf("ColorAttr(gray) = %v, want GetColor(gray) %v (border colour must be unchanged)", got, want)
 	}
 }

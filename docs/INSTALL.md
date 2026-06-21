@@ -142,6 +142,33 @@ connections:
 
 When a connection is the active one, the picker shows `●` in place of its icon.
 
+### Colors
+
+The connection `color` field and every theme color field (`config.yml` under
+`theme:`, e.g. `keyword_fg`, `selected_row_bg`) accept the same color token
+vocabulary. One vocabulary resolves everywhere — inline content (grid cells,
+side rails, status bar, connection rows, suggestions, cheatsheet, editor syntax
+highlighting) **and** pane borders — and applies to both foreground and
+background fields:
+
+| Class | Tokens | Example |
+|-------|--------|---------|
+| Named (16) | `black` `red` `green` `yellow` `blue` `magenta` `cyan` `white` and their bright variants `brightblack` `brightred` `brightgreen` `brightyellow` `brightblue` `brightmagenta` `brightcyan` `brightwhite` | `color: cyan` |
+| Gray alias | `gray` / `grey` → `brightblack` | `comment_fg: gray` |
+| 256-palette | `colorN` where `N` is `0`–`255` | `keyword_fg: color39` |
+| Hex | `#rgb` or `#rrggbb` (case-insensitive) | `color: "#ff8800"` |
+
+Tokens are case-insensitive. An empty or unrecognized token leaves the element
+untinted (theme fields fall back to the default theme).
+
+> **Terminal support:** color tokens are emitted as authored — pgsavvy does not
+> detect terminal capabilities or down-convert to a nearer color. On terminals
+> without 256-color or truecolor support, `colorN` and `#hex` tokens may render
+> incorrectly. Stick to the 16 named colors for maximum portability.
+
+Setting `NO_COLOR` (any value) disables color on the inline content path, so
+themed content renders plain regardless of the tokens above.
+
 ## Configuration files
 
 pgsavvy follows the XDG Base Directory layout:
@@ -162,6 +189,7 @@ pgsavvy follows the XDG Base Directory layout:
 | `PGSAVVY_LOG_INCLUDE_SQL=1` | Include SQL text in session logs |
 | `PGSAVVY_LOG_INCLUDE_PARAMS=1` | Include bound query parameters in session logs |
 | `PGSAVVY_KEYRING_PASSPHRASE` | Passphrase for the file-backed keyring |
+| `NO_COLOR` | Disable color on the inline content path (see [Colors](#colors)) |
 
 Standard `XDG_*` variables (`XDG_CONFIG_HOME`, `XDG_STATE_HOME`, …) relocate
 the directories above.

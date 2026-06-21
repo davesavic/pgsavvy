@@ -316,34 +316,11 @@ func TestTokenize_DollarQuotedString(t *testing.T) {
 
 // --- Internal helpers ---
 
-func TestParseHex_6Digit(t *testing.T) {
-	r, g, b, ok := parseHex("#ff8800")
-	if !ok {
-		t.Fatal("parseHex failed")
-	}
-	if r != 255 || g != 136 || b != 0 {
-		t.Fatalf("got (%d,%d,%d), want (255,136,0)", r, g, b)
-	}
-}
-
-func TestParseHex_3Digit(t *testing.T) {
-	r, g, b, ok := parseHex("#f80")
-	if !ok {
-		t.Fatal("parseHex failed")
-	}
-	if r != 0xff || g != 0x88 || b != 0x00 {
-		t.Fatalf("got (%d,%d,%d), want (255,136,0)", r, g, b)
-	}
-}
-
-func TestParseHex_Invalid(t *testing.T) {
-	_, _, _, ok := parseHex("#xyz")
-	if ok {
-		t.Fatal("expected failure for #xyz")
-	}
-}
-
-func TestColorToSGRFg_Named(t *testing.T) {
+// TestColorParamSGR_Named covers the foreground param numbers the highlighter
+// composes for each named token via theme.ColorParamSGR(_, theme.Fg) (gray/grey
+// alias to bright-black 90). It also covers the hex param path, which the
+// unified resolver now owns.
+func TestColorParamSGR_Named(t *testing.T) {
 	cases := []struct {
 		name string
 		want string
@@ -358,26 +335,31 @@ func TestColorToSGRFg_Named(t *testing.T) {
 		{"white", "37"},
 		{"gray", "90"},
 		{"grey", "90"},
+		{"#ff8800", "38;2;255;136;0"}, // 6-digit hex (was TestParseHex_6Digit)
+		{"#f80", "38;2;255;136;0"},    // 3-digit hex (was TestParseHex_3Digit)
 	}
 	for _, tc := range cases {
-		got := colorToSGRFg(tc.name)
+		got := theme.ColorParamSGR(tc.name, theme.Fg)
 		if got != tc.want {
-			t.Errorf("colorToSGRFg(%q) = %q, want %q", tc.name, got, tc.want)
+			t.Errorf("ColorParamSGR(%q, Fg) = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }
 
-func TestColorToSGRFg_Empty(t *testing.T) {
-	got := colorToSGRFg("")
+func TestColorParamSGR_Empty(t *testing.T) {
+	got := theme.ColorParamSGR("", theme.Fg)
 	if got != "" {
-		t.Errorf("colorToSGRFg(\"\") = %q, want \"\"", got)
+		t.Errorf("ColorParamSGR(\"\", Fg) = %q, want \"\"", got)
 	}
 }
 
-func TestColorToSGRFg_Unknown(t *testing.T) {
-	got := colorToSGRFg("chartreuse")
+func TestColorParamSGR_Unknown(t *testing.T) {
+	got := theme.ColorParamSGR("chartreuse", theme.Fg)
 	if got != "" {
-		t.Errorf("colorToSGRFg(\"chartreuse\") = %q, want \"\"", got)
+		t.Errorf("ColorParamSGR(\"chartreuse\", Fg) = %q, want \"\"", got)
+	}
+	if got := theme.ColorParamSGR("#xyz", theme.Fg); got != "" { // was TestParseHex_Invalid
+		t.Errorf("ColorParamSGR(\"#xyz\", Fg) = %q, want \"\"", got)
 	}
 }
 

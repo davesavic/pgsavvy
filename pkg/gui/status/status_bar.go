@@ -229,19 +229,14 @@ func tintHeaderForConn(header string, conn *models.Connection) string {
 	if conn == nil || conn.Color == "" {
 		return header
 	}
-	sgr := ansiSGRForColor(conn.Color)
+	if theme.IsMonochrome() {
+		return header
+	}
+	sgr := theme.ColorSGR(conn.Color, theme.Fg)
 	if sgr == "" {
 		return header
 	}
 	return sgr + header + ansiResetSGR
-}
-
-// ansiSGRForColor maps an 8-colour name onto its ANSI foreground SGR.
-// Unknown tokens (hex codes, names not in the standard palette, empty)
-// return "" so callers can fall back to no tinting. Delegates to the shared
-// theme.AnsiFgSGR converter.
-func ansiSGRForColor(s string) string {
-	return theme.AnsiFgSGR(s)
 }
 
 // LabelForMode maps a Mode to its i18n banner string. ModeNormal returns

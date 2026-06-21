@@ -480,14 +480,14 @@ func composeSuggestionRow(s editor.Suggestion, sanitizedName string, nameWidth i
 // tint wraps s in the named theme foreground SGR + reset, EXCEPT under
 // NO_COLOR (theme.IsMonochrome): a monochrome runtime emits s unchanged so the
 // suggestion row carries no colour codes. An
-// unknown/empty colour name (AnsiFgSGR == "") also returns s plain. The SGR is
+// unknown/empty colour name (ColorSGR == "") also returns s plain. The SGR is
 // added AFTER the caller has sanitized s and is never re-fed to
 // SanitizeCellEscapes (Design D4).
 func tint(s, color string) string {
 	if theme.IsMonochrome() {
 		return s
 	}
-	sgr := theme.AnsiFgSGR(color)
+	sgr := theme.ColorSGR(color, theme.Fg)
 	if sgr == "" {
 		return s
 	}

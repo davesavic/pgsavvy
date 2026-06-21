@@ -22,6 +22,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/logs"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // disableSessionLogEnv is the kill switch (SC#8). When set to "1", the app
@@ -136,6 +137,16 @@ func Start(build *BuildInfo, args []string) error {
 	// logs.Open has been called).
 	pg.SetGlobalLogger(log)
 
+	// Validate + apply the user's theme so config.yml colours take effect on
+	// the first frame. theme.Current() is read only at render time (after
+	// gocui.NewGui below), so applying here overrides the DefaultDark set by
+	// theme's package init() in time for the first frame. Warnings for
+	// unrenderable tokens go to stderr before gocui takes the screen, matching
+	// the config-warning surface in wire_backbone.go. NOTE: the :reload
+	// ex-command does NOT re-apply the theme — an on-disk reload is a separate
+	// follow-up (epic pgsavvy-w1gh).
+	applyUserTheme(cfg, os.Stderr)
+
 	connectionsProvider := func() []models.Connection {
 		conns, _ := config.LoadConnections(fs, connectionsPath)
 		return conns
@@ -195,6 +206,22 @@ func resolveLogDir(flagVal, envVal, stateDir string) (string, bool) {
 		return v, true
 	}
 	return stateDir, false
+}
+
+// applyUserTheme validates and applies the user's theme config, writing one
+// `config: warning: ...` line to w for each unrenderable colour token (zero
+// warnings writes nothing). It is the testable seam for the theme-wiring step:
+// production passes os.Stderr; tests pass a *bytes.Buffer to exercise the
+// apply+print path without launching gocui. The apply mutates theme.Current(),
+// which is read only at render time, so calling this before gocui.NewGui makes
+// the configured colours live for the first frame.
+func applyUserTheme(cfg *config.UserConfig, w io.Writer) {
+	for _, warn := range theme.ApplyUserConfig(&cfg.Theme) {
+		// Best-effort stderr surface; a failed warning write must not abort
+		// startup. w is a generic io.Writer (os.Stderr in prod) so errcheck
+		// cannot apply its stderr exemption here.
+		_, _ = fmt.Fprintf(w, "config: warning: %s\n", warn)
+	}
 }
 
 // wireSessionLogger builds the primary logger. Behavior:

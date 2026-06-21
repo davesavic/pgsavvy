@@ -42,25 +42,41 @@ func TestDecorateDirtyCell_StyleAppliesAnsiEscape(t *testing.T) {
 	}
 }
 
+// bgEscape composes the full background escape sgrPrefixForStyle now emits for
+// a token: "\x1b[<param>m" via the unified resolver, or "" when the token has
+// no background param. Mirrors the composition in cells.go:sgrPrefixForStyle.
+func bgEscape(token string) string {
+	param := theme.ColorParamSGR(token, theme.Bg)
+	if param == "" {
+		return ""
+	}
+	return "\x1b[" + param + "m"
+}
+
 // TestAnsiBgCode maps named background colours to their basic SGR codes and
-// `#RRGGBB` hex to truecolor (48;2;R;G;B); malformed/unknown tokens collapse
-// to "" — the same fallback policy as ansiFgCode.
+// hex to truecolor (48;2;R;G;B); malformed/unknown tokens collapse to "".
+// Exercises bgEscape (theme.ColorParamSGR(_, theme.Bg)). Two behaviour
+// WIDENINGS over the previous local helper are now asserted: bright background
+// names (100-107) resolve, and 3-digit "#rgb" hex resolves (both were
+// previously rejected).
 func TestAnsiBgCode(t *testing.T) {
 	cases := map[string]string{
 		"black":       "\x1b[40m",
 		"yellow":      "\x1b[43m",
 		"white":       "\x1b[47m",
 		"brightblack": "\x1b[100m",
+		"brightred":   "\x1b[101m",           // bright bg now resolves (was "")
+		"brightwhite": "\x1b[107m",           // bright bg now resolves (was "")
 		"#5a4410":     "\x1b[48;2;90;68;16m", // muted amber dirty tint
 		"#FFFFFF":     "\x1b[48;2;255;255;255m",
-		"#abc":        "", // wrong length
-		"#gggggg":     "", // not hex
+		"#abc":        "\x1b[48;2;170;187;204m", // 3-digit hex now resolves (was "")
+		"#gggggg":     "",                       // not hex
 		"":            "",
 		"bogus":       "",
 	}
 	for in, want := range cases {
-		if got := ansiBgCode(in); got != want {
-			t.Errorf("ansiBgCode(%q) = %q, want %q", in, got, want)
+		if got := bgEscape(in); got != want {
+			t.Errorf("bgEscape(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -236,7 +252,7 @@ func TestRenderCellWithDirty_DirtyTintsDecoratedOnly(t *testing.T) {
 	if vis != visClean {
 		t.Fatalf("visible %q must match clean %q (no glyph)", vis, visClean)
 	}
-	bg := ansiBgCode(theme.Current().DirtyCellBg.Bg)
+	bg := bgEscape(theme.Current().DirtyCellBg.Bg)
 	if bg == "" || !strings.Contains(dec, bg) {
 		t.Fatalf("decorated %q must carry the dirty tint %q", dec, bg)
 	}

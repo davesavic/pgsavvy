@@ -2,10 +2,12 @@ package theme
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/davesavic/pgsavvy/pkg/config"
 	"github.com/davesavic/pgsavvy/pkg/theme/builtin"
 )
 
@@ -208,6 +210,50 @@ func TestParseStyle_AlwaysNonNil(t *testing.T) {
 		}
 		if s.Fg != c {
 			t.Errorf("parseStyle(%q).Fg = %q, want %q", c, s.Fg, c)
+		}
+	}
+}
+
+// TestApply_MapsEveryThemeConfigField is the ThemeConfig<->themeState drift
+// guard: it sets every exported string field of config.ThemeConfig to a valid
+// sentinel ("white"), applies it, then walks the resulting themeState and
+// asserts no *Style is nil and each carries the sentinel as its Fg. This fails
+// if a new ThemeConfig field is added without a matching parseStyle(cfg.X) line
+// in Apply (theme.go) — such a field would leave its themeState slot at the nil
+// zero value.
+func TestApply_MapsEveryThemeConfigField(t *testing.T) {
+	const sentinel = "white"
+
+	// Apply mutates the process-global theme; restore the default afterwards so
+	// this test does not leak the sentinel state to later tests in the package.
+	t.Cleanup(func() { _ = Apply(builtin.DefaultDark()) })
+
+	var cfg config.ThemeConfig
+	cv := reflect.ValueOf(&cfg).Elem()
+	for i := 0; i < cv.NumField(); i++ {
+		if cv.Type().Field(i).IsExported() && cv.Field(i).Kind() == reflect.String {
+			cv.Field(i).SetString(sentinel)
+		}
+	}
+
+	if err := Apply(&cfg); err != nil {
+		t.Fatalf("Apply returned err: %v", err)
+	}
+
+	sv := reflect.ValueOf(*Current())
+	tp := sv.Type()
+	for i := 0; i < sv.NumField(); i++ {
+		f := tp.Field(i)
+		if !f.IsExported() || sv.Field(i).Kind() != reflect.Ptr {
+			continue
+		}
+		fv := sv.Field(i)
+		if fv.IsNil() {
+			t.Errorf("themeState.%s is nil after Apply; missing parseStyle(cfg.%s) line in Apply", f.Name, f.Name)
+			continue
+		}
+		if got := fv.Interface().(*Style).Fg; got != sentinel {
+			t.Errorf("themeState.%s.Fg = %q, want sentinel %q (field not wired from its ThemeConfig counterpart)", f.Name, got, sentinel)
 		}
 	}
 }

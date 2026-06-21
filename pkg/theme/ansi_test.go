@@ -2,7 +2,12 @@ package theme
 
 import "testing"
 
-func TestAnsiFgHexSGR(t *testing.T) {
+// TestColorSGR_Hex covers hex foreground tokens resolving to a 24-bit truecolor
+// escape; non-hex tokens (missing '#', wrong length, non-hex digits) still
+// resolve to "". "red" is now a valid named token under the unified resolver,
+// so it is asserted separately (it tints, unlike a hex-only check which
+// returned "").
+func TestColorSGR_Hex(t *testing.T) {
 	cases := []struct {
 		in   string
 		want string
@@ -14,12 +19,16 @@ func TestAnsiFgHexSGR(t *testing.T) {
 		{"ff4d4d", ""},  // missing '#'
 		{"#ff4d", ""},   // wrong length
 		{"#gggggg", ""}, // non-hex digits
-		{"red", ""},     // named, not hex
 		{"", ""},        // empty
 	}
 	for _, c := range cases {
-		if got := AnsiFgHexSGR(c.in); got != c.want {
-			t.Errorf("AnsiFgHexSGR(%q) = %q, want %q", c.in, got, c.want)
+		if got := ColorSGR(c.in, Fg); got != c.want {
+			t.Errorf("ColorSGR(%q, Fg) = %q, want %q", c.in, got, c.want)
 		}
+	}
+	// "red" was "" under the old hex-only helper; under the unified resolver it
+	// is a named token and tints to the basic-palette foreground escape.
+	if got, want := ColorSGR("red", Fg), "\x1b[31m"; got != want {
+		t.Errorf("ColorSGR(%q, Fg) = %q, want %q", "red", got, want)
 	}
 }

@@ -259,11 +259,17 @@ func wrapWithStyle(s string, style theme.Style) string {
 
 // sgrPrefixForStyle returns the SGR introducer for style, or "" when
 // no escape is required (zero style or unrecognised colour). Italic
-// is honored independently of foreground colour.
+// is honored independently of foreground colour. Foreground and
+// background colour resolution is delegated to the unified theme
+// resolver (ColorParamSGR); under NO_COLOR (theme.IsMonochrome) the
+// colour params are suppressed while bold/italic/underline are kept.
 func sgrPrefixForStyle(s theme.Style) string {
+	mono := theme.IsMonochrome()
 	var sb strings.Builder
-	if code := ansiFgCode(s.Fg); code != "" {
-		sb.WriteString(code)
+	if !mono {
+		if param := theme.ColorParamSGR(s.Fg, theme.Fg); param != "" {
+			sb.WriteString("\x1b[" + param + "m")
+		}
 	}
 	if s.Bold {
 		sb.WriteString(ansiBold)
@@ -274,65 +280,12 @@ func sgrPrefixForStyle(s theme.Style) string {
 	if s.Underline {
 		sb.WriteString(ansiUnderline)
 	}
-	if code := ansiBgCode(s.Bg); code != "" {
-		sb.WriteString(code)
+	if !mono {
+		if param := theme.ColorParamSGR(s.Bg, theme.Bg); param != "" {
+			sb.WriteString("\x1b[" + param + "m")
+		}
 	}
 	return sb.String()
-}
-
-// ansiFgCode maps a W3C colour name to its ANSI SGR escape. Hex
-// values and unknown tokens collapse to "" — same fallback policy as
-// promptStyledLine in the orchestrator. Delegates to the shared
-// theme.AnsiFgSGR converter.
-func ansiFgCode(fg string) string {
-	return theme.AnsiFgSGR(fg)
-}
-
-// ansiBgCode maps a colour token to its ANSI background SGR escape.
-// A `#RRGGBB` hex value becomes a truecolor sequence (48;2;R;G;B) —
-// honored by gocui because the TUI runs in OutputTrue (see gui.go).
-// W3C colour names fall back to the basic 40-47 / bright 100-107 codes.
-// Empty/unknown tokens collapse to "" — same fallback policy as
-// ansiFgCode.
-func ansiBgCode(bg string) string {
-	if code := ansiTrueColorBg(bg); code != "" {
-		return code
-	}
-	switch strings.ToLower(bg) {
-	case "black":
-		return "\x1b[40m"
-	case "red":
-		return "\x1b[41m"
-	case "green":
-		return "\x1b[42m"
-	case "yellow":
-		return "\x1b[43m"
-	case "blue":
-		return "\x1b[44m"
-	case "magenta":
-		return "\x1b[45m"
-	case "cyan":
-		return "\x1b[46m"
-	case "white":
-		return "\x1b[47m"
-	case "brightblack":
-		return "\x1b[100m"
-	default:
-		return ""
-	}
-}
-
-// ansiTrueColorBg returns the 48;2;R;G;B background escape for a
-// `#RRGGBB` token, or "" when bg isn't a well-formed 6-digit hex colour.
-func ansiTrueColorBg(bg string) string {
-	if len(bg) != 7 || bg[0] != '#' {
-		return ""
-	}
-	rgb, err := hex.DecodeString(bg[1:])
-	if err != nil {
-		return ""
-	}
-	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", rgb[0], rgb[1], rgb[2])
 }
 
 // SanitizeCellEscapes strips ANSI escape introducers and C0 control

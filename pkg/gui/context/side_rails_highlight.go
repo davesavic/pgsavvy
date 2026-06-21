@@ -1,8 +1,6 @@
 package context
 
 import (
-	"encoding/hex"
-	"fmt"
 	"strings"
 
 	"github.com/davesavic/pgsavvy/pkg/theme"
@@ -22,12 +20,17 @@ const (
 
 // railSGRPrefixForStyle returns the SGR introducer for style, or "" when no
 // escape is required. Mirrors grid/cells.go:sgrPrefixForStyle exactly: fg
-// code, then bold, italic, underline, then bg code. Regression-credit:
-// pkg/gui/grid/cells.go (sgrPrefixForStyle ~235).
+// param, then bold, italic, underline, then bg param. Foreground and
+// background colour resolution is delegated to the unified theme resolver
+// (ColorParamSGR); under NO_COLOR (theme.IsMonochrome) the colour params are
+// suppressed while bold/italic/underline are kept.
 func railSGRPrefixForStyle(s theme.Style) string {
+	mono := theme.IsMonochrome()
 	var sb strings.Builder
-	if code := railAnsiFgCode(s.Fg); code != "" {
-		sb.WriteString(code)
+	if !mono {
+		if param := theme.ColorParamSGR(s.Fg, theme.Fg); param != "" {
+			sb.WriteString("\x1b[" + param + "m")
+		}
 	}
 	if s.Bold {
 		sb.WriteString(railAnsiBold)
@@ -38,82 +41,12 @@ func railSGRPrefixForStyle(s theme.Style) string {
 	if s.Underline {
 		sb.WriteString(railAnsiUnderline)
 	}
-	if code := railAnsiBgCode(s.Bg); code != "" {
-		sb.WriteString(code)
+	if !mono {
+		if param := theme.ColorParamSGR(s.Bg, theme.Bg); param != "" {
+			sb.WriteString("\x1b[" + param + "m")
+		}
 	}
 	return sb.String()
-}
-
-// railAnsiFgCode maps a W3C colour name to its ANSI SGR foreground escape.
-// Hex/unknown tokens collapse to "". Faithful copy of
-// pkg/gui/grid/cells.go:ansiFgCode (~258).
-func railAnsiFgCode(fg string) string {
-	switch strings.ToLower(fg) {
-	case "black":
-		return "\x1b[30m"
-	case "red":
-		return "\x1b[31m"
-	case "green":
-		return "\x1b[32m"
-	case "yellow":
-		return "\x1b[33m"
-	case "blue":
-		return "\x1b[34m"
-	case "magenta":
-		return "\x1b[35m"
-	case "cyan":
-		return "\x1b[36m"
-	case "white":
-		return "\x1b[37m"
-	default:
-		return ""
-	}
-}
-
-// railAnsiBgCode maps a colour token to its ANSI background SGR escape. A
-// `#RRGGBB` hex value becomes a truecolor sequence; W3C names fall back to
-// the basic 40-47 / bright 100 codes. Faithful copy of
-// pkg/gui/grid/cells.go:ansiBgCode (~287).
-func railAnsiBgCode(bg string) string {
-	if code := railAnsiTrueColorBg(bg); code != "" {
-		return code
-	}
-	switch strings.ToLower(bg) {
-	case "black":
-		return "\x1b[40m"
-	case "red":
-		return "\x1b[41m"
-	case "green":
-		return "\x1b[42m"
-	case "yellow":
-		return "\x1b[43m"
-	case "blue":
-		return "\x1b[44m"
-	case "magenta":
-		return "\x1b[45m"
-	case "cyan":
-		return "\x1b[46m"
-	case "white":
-		return "\x1b[47m"
-	case "brightblack":
-		return "\x1b[100m"
-	default:
-		return ""
-	}
-}
-
-// railAnsiTrueColorBg returns the 48;2;R;G;B background escape for a
-// `#RRGGBB` token, or "" when bg isn't a well-formed 6-digit hex colour.
-// Faithful copy of pkg/gui/grid/cells.go:ansiTrueColorBg (~317).
-func railAnsiTrueColorBg(bg string) string {
-	if len(bg) != 7 || bg[0] != '#' {
-		return ""
-	}
-	rgb, err := hex.DecodeString(bg[1:])
-	if err != nil {
-		return ""
-	}
-	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", rgb[0], rgb[1], rgb[2])
 }
 
 // railMatchStyle returns the highlight Style for a match span: CurSearch for

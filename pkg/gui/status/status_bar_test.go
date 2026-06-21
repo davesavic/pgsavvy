@@ -6,6 +6,7 @@ import (
 
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 func TestBuildStatusLine_NilTranslationSet(t *testing.T) {
@@ -199,6 +200,7 @@ func TestBuildStatusLine_EmptyModeLabelOmitsSlot(t *testing.T) {
 // reset escape MUST follow the header so subsequent sections (options /
 // "?: more") render in the default foreground.
 func TestBuildStatusLine_ConnColorTintsHeader(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
 	tr := i18n.EnglishTranslationSet()
 	conn := &models.Connection{Icon: "*", Label: "local-pg", Color: "red"}
 
@@ -209,17 +211,34 @@ func TestBuildStatusLine_ConnColorTintsHeader(t *testing.T) {
 	}
 }
 
-// Edge: an unrecognised colour token (hex) must NOT emit an ANSI
-// escape — the header falls through to plain text so we never write a
-// malformed sequence to the cell buffer.
-func TestBuildStatusLine_ConnHexColorIsNotTinted(t *testing.T) {
+// A hex conn.Color now tints the header normally (24-bit truecolor) — the
+// unified resolver widened the accepted token classes beyond the old 8-name
+// palette. #abcdef -> rgb(171,205,239). Authored fresh (not copied from the
+// resolver), so a base-code regression in the hex path cannot green-wash this.
+func TestBuildStatusLine_ConnHexColorTintsHeader(t *testing.T) {
+	defer theme.SetMonochromeForTest(false)()
+	tr := i18n.EnglishTranslationSet()
+	conn := &models.Connection{Icon: "*", Label: "stg", Color: "#abcdef"}
+
+	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil, nil)
+
+	if want := "\x1b[38;2;171;205;239m* stg\x1b[0m"; !strings.Contains(got, want) {
+		t.Fatalf("got %q; want substring %q", got, want)
+	}
+}
+
+// Under NO_COLOR (theme.IsMonochrome) a hex conn.Color renders PLAIN — the
+// inline content-site guard suppresses the widened token classes so no escape
+// reaches the cell buffer.
+func TestBuildStatusLine_ConnHexColorPlainUnderNoColor(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
 	tr := i18n.EnglishTranslationSet()
 	conn := &models.Connection{Icon: "*", Label: "stg", Color: "#abcdef"}
 
 	got := BuildStatusLine("", conn, nil, tr, 0, 0, "", nil, nil)
 
 	if strings.ContainsRune(got, 0x1b) {
-		t.Fatalf("got %q must not contain an ANSI escape for an unrecognised colour token", got)
+		t.Fatalf("got %q must not contain an ANSI escape under NO_COLOR", got)
 	}
 	if !strings.Contains(got, "* stg") {
 		t.Fatalf("got %q; want plain '* stg' header", got)

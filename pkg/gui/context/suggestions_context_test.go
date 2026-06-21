@@ -439,7 +439,7 @@ func TestFormatSuggestionsBody_EscapeStrippedSGRSurvives(t *testing.T) {
 	}
 	// Our theme tint SGR (cyan + reset) survives — it is added AFTER
 	// sanitization and never re-sanitized.
-	if sgr := theme.AnsiFgSGR("cyan"); sgr != "" && !strings.Contains(body, sgr) {
+	if sgr := theme.ColorSGR("cyan", theme.Fg); sgr != "" && !strings.Contains(body, sgr) {
 		t.Errorf("theme tint SGR stripped; row = %q", body)
 	}
 	if !strings.Contains(body, theme.AnsiReset) {
@@ -506,7 +506,7 @@ func TestSuggestionHighlight_DetailNeverHighlighted(t *testing.T) {
 	// The detail tokens ("int4 PK NN") are appended AFTER the highlighted
 	// name. Locate where the detail run begins (the cyan tint SGR) and assert
 	// no Search SGR appears at or after that point — highlight is name-only.
-	detailTint := theme.AnsiFgSGR(detailTokenColor)
+	detailTint := theme.ColorSGR(detailTokenColor, theme.Fg)
 	if detailTint == "" {
 		t.Skip("no detail tint SGR in active theme")
 	}
@@ -759,7 +759,7 @@ func TestSignatureFooter_EscapeSanitized(t *testing.T) {
 	if !strings.Contains(plain, "text") || !strings.Contains(plain, "int4") {
 		t.Errorf("sanitized segments missing; got %q", plain)
 	}
-	if sgr := theme.AnsiFgSGR(signatureTokenColor); sgr != "" && !strings.Contains(raw, sgr) {
+	if sgr := theme.ColorSGR(signatureTokenColor, theme.Fg); sgr != "" && !strings.Contains(raw, sgr) {
 		t.Errorf("theme tint SGR stripped from footer; got %q", raw)
 	}
 }
@@ -767,7 +767,7 @@ func TestSignatureFooter_EscapeSanitized(t *testing.T) {
 func TestSignatureFooter_NoColorPath(t *testing.T) {
 	// formatSignatureLine must render content intact when the theme has no
 	// SGR for the tint colour (no-color path). Exercise the pure formatter
-	// with a colour name AnsiFgSGR does not map.
+	// with a colour name ColorSGR does not map.
 	got := formatSignatureLineForTest(t, "f", []models.FunctionDetail{
 		{Name: "f", Args: []models.FunctionArg{{Name: "x", Type: "int4"}}, ReturnType: "bool"},
 	})

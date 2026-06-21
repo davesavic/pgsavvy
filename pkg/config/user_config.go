@@ -143,9 +143,16 @@ type KeybindingConfig struct {
 	OriginLine int    `yaml:"-"`
 }
 
-// ThemeConfig holds named color strings (color name or hex). Each field is
-// parsed by pkg/theme.Apply into a concrete style; unrecognised values fall
-// back to the default theme.
+// ThemeConfig holds the colour tokens for each themeable element. Each field
+// is parsed by pkg/theme.Apply (via theme.ClassifyColor) into a concrete
+// style. A token may be: one of the 16 named ANSI colours (black, red, green,
+// yellow, blue, magenta, cyan, white and their bright* variants, e.g.
+// brightmagenta), gray/grey, a 256-palette index "colorN" (N in 0..255), or a
+// truecolor hex "#rgb"/"#rrggbb". A field may also be a compound
+// "<fg> on <bg>" and carry attributes bold/underline/italic (e.g.
+// "bold #ff8800" or "black on yellow"). Unrecognised tokens render untinted.
+// See theme.ClassifyColor and the "Colors" section of docs/INSTALL.md for the
+// full vocabulary.
 type ThemeConfig struct {
 	ActiveBorder    string `yaml:"active_border"`
 	InactiveBorder  string `yaml:"inactive_border"`
@@ -213,14 +220,57 @@ func GetDefaultConfig() *UserConfig {
 		TimeoutLen:    1 * time.Second,
 		TtimeoutLen:   50 * time.Millisecond,
 		WhichKeyDelay: 300 * time.Millisecond,
+		// Theme mirrors builtin.DefaultDark() field-for-field so the shipped
+		// config template (yaml.Marshal of this value) is self-documenting and
+		// LoadUserConfig overlays partial user theme blocks onto a full
+		// baseline. An invariant test in pkg/theme/builtin guards the two
+		// against drift. Keep this in sync with builtin.DefaultDark().
 		Theme: ThemeConfig{
-			ActiveBorder:   "white",
-			InactiveBorder: "gray",
-			SelectedRowBg:  "blue",
-			NullValueFg:    "gray",
-			NumericFg:      "cyan",
-			StringFg:       "green",
-			KeywordFg:      "magenta",
+			ActiveBorder:    "yellow",
+			InactiveBorder:  "gray",
+			SelectedRowBg:   "#3a3a3a",
+			SelectedRowFg:   "white",
+			NullValueFg:     "red",
+			NumericFg:       "magenta",
+			StringFg:        "green",
+			KeywordFg:       "blue",
+			CommentFg:       "gray",
+			IdentifierFg:    "white",
+			OperatorFg:      "yellow",
+			BackgroundBg:    "#1e1e1e",
+			ForegroundFg:    "white",
+			StatusBarBg:     "#2d2d2d",
+			StatusBarFg:     "white",
+			CommandLineBg:   "#1e1e1e",
+			CommandLineFg:   "white",
+			ErrorFg:         "red",
+			WarningFg:       "yellow",
+			SuccessFg:       "green",
+			InfoFg:          "cyan",
+			HintFg:          "gray",
+			PopupBg:         "#2d2d2d",
+			PopupFg:         "white",
+			PopupBorder:     "cyan",
+			MenuBg:          "#2d2d2d",
+			MenuFg:          "white",
+			MenuSelectedBg:  "cyan",
+			MenuSelectedFg:  "black",
+			TableHeaderBg:   "#3a3a3a",
+			TableHeaderFg:   "white",
+			TableRowAltBg:   "#262626",
+			GutterFg:        "gray",
+			LineNumberFg:    "gray",
+			CursorBg:        "white",
+			CursorFg:        "black",
+			MatchHighlight:  "yellow",
+			SearchHighlight: "yellow",
+			CurSearch:       "black on yellow",
+			DiffAddedFg:     "green",
+			DiffRemovedFg:   "red",
+			DiffChangedFg:   "yellow",
+			PromptFg:        "yellow",
+			DirtyCellBg:     "on #5a4410",
+			WarnBorder:      "#d97757",
 		},
 		Keybindings: []KeybindingConfig{
 			{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit", Description: "Quit"},

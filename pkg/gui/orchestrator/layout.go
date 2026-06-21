@@ -1688,18 +1688,50 @@ func ansiSGRForStyle(s *theme.Style) string {
 	if s == nil {
 		return ""
 	}
-	return theme.AnsiFgSGR(s.Fg)
+	if theme.IsMonochrome() {
+		return ""
+	}
+	return theme.ColorSGR(s.Fg, theme.Fg)
 }
 
-// frameAttr translates a theme.Style colour-name into the gocui.Attribute
-// the runtime stores in v.FrameColor. Nil styles and empty Fg fall back
-// to gocui.ColorDefault so the helper never injects an invalid colour
-// into a view. gocui.GetColor accepts W3C names and #RRGGBB hex.
+// ColorAttr translates a colour token into the gocui.Attribute the runtime
+// stores in v.FrameColor. It consumes theme.ClassifyColor so the border path
+// resolves the SAME token vocabulary as the inline SGR path: the 16 named
+// colours (8 basic + 8 bright), "colorN" 256-palette indices, and #rgb/#rrggbb
+// hex. Empty and unrecognised tokens (including arbitrary W3C names such as
+// "navy") fall back to gocui.ColorDefault.
+//
+// Named16 — both basic (0..7) and bright (8..15) — routes through
+// Get256Color(palette). The bright half deserves a note: the inline path emits
+// SGR 90-97 (the terminal's bright-colour palette), whereas the border path
+// emits Get256Color(8..15) (256-palette indices 8..15). On standard terminals
+// palette indices 8..15 ARE the ANSI bright colours, so the two paths render
+// identically — this equivalence is the assumption that lets both vocabularies
+// stay unified.
+func ColorAttr(token string) gocui.Attribute {
+	kind, p := theme.ClassifyColor(token)
+	switch kind {
+	case theme.Hex:
+		return gocui.NewRGBColor(int32(p.R), int32(p.G), int32(p.B))
+	case theme.Index256:
+		return gocui.Get256Color(int32(p.Index))
+	case theme.Named16:
+		return gocui.Get256Color(int32(p.Palette))
+	default:
+		return gocui.ColorDefault
+	}
+}
+
+// frameAttr translates a theme.Style colour token into the gocui.Attribute the
+// runtime stores in v.FrameColor. Nil styles and empty Fg fall back to
+// gocui.ColorDefault so the helper never injects an invalid colour into a view;
+// otherwise it delegates to ColorAttr, whose vocabulary is the 16 named
+// colours, "colorN" 256-palette indices, and #rgb/#rrggbb hex.
 func frameAttr(s *theme.Style) gocui.Attribute {
 	if s == nil || s.Fg == "" {
 		return gocui.ColorDefault
 	}
-	return gocui.GetColor(s.Fg)
+	return ColorAttr(s.Fg)
 }
 
 // promptBorderStyle picks the border colour for a PROMPT popup from its

@@ -554,7 +554,7 @@ func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
 	if !strings.Contains(line0, "bob") {
 		t.Errorf("dirty cell must render staged NewValue 'bob'; line=%q", line0)
 	}
-	tint := ansiBgCode(theme.Current().DirtyCellBg.Bg)
+	tint := bgEscape(theme.Current().DirtyCellBg.Bg)
 	if tint == "" {
 		t.Fatalf("default theme DirtyCellBg.Bg=%q produced no SGR", theme.Current().DirtyCellBg.Bg)
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
+	"github.com/davesavic/pgsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -15,12 +16,14 @@ import (
 )
 
 // themeFrameAttr mirrors orchestrator.frameAttr (unexported) so this external
-// test can compute the expected gocui.Attribute the colour pass applies.
+// test can compute the expected gocui.Attribute the colour pass applies. It
+// delegates to the exported orchestrator.ColorAttr so the mirror tracks the
+// production token-resolution vocabulary instead of duplicating the switch.
 func themeFrameAttr(s *theme.Style) gocui.Attribute {
 	if s == nil || s.Fg == "" {
 		return gocui.ColorDefault
 	}
-	return gocui.GetColor(s.Fg)
+	return orchestrator.ColorAttr(s.Fg)
 }
 
 // TestSchemaRailConsolidatedLayout asserts the many-contexts-ONE-view

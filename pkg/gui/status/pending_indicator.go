@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // pendingIndicatorCollapseWidth is the width threshold at which
@@ -60,7 +61,10 @@ func BuildPendingIndicatorCount(count int, conn *models.Connection, availableWid
 	if !connHasDestructiveFlag(conn) {
 		return body
 	}
-	sgr := ansiSGRForColor(conn.Color)
+	if theme.IsMonochrome() {
+		return body
+	}
+	sgr := theme.ColorSGR(conn.Color, theme.Fg)
 	if sgr == "" {
 		return body
 	}

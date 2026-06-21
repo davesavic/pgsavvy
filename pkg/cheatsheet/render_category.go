@@ -42,20 +42,10 @@ const (
 func styleHeader(text string, style *theme.Style) string {
 	var sgr strings.Builder
 	sgr.WriteString(ansiBold)
-	if style != nil {
-		sgr.WriteString(headerFgSGR(style.Fg))
+	if style != nil && !theme.IsMonochrome() {
+		sgr.WriteString(theme.ColorSGR(style.Fg, theme.Fg))
 	}
 	return sgr.String() + text + theme.AnsiReset
-}
-
-// headerFgSGR resolves a foreground colour token (named or "#rrggbb" hex) to
-// its SGR escape, or "" when it maps to neither — same fallback policy as the
-// grid/orchestrator tinters.
-func headerFgSGR(fg string) string {
-	if code := theme.AnsiFgSGR(fg); code != "" {
-		return code
-	}
-	return theme.AnsiFgHexSGR(fg)
 }
 
 // RenderCategory produces ONE tab-body string for a single CategoryView.

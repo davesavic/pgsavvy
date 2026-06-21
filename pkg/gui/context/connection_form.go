@@ -728,10 +728,7 @@ func clipInline(s string, w int) string {
 // ("#ff4d4d", "#abc"). Returns "" when the token is neither, so the value is
 // shown untinted.
 func colorPreviewSGR(v string) string {
-	if sgr := theme.AnsiFgSGR(v); sgr != "" {
-		return sgr
-	}
-	return theme.AnsiFgHexSGR(v)
+	return theme.ColorSGR(v, theme.Fg)
 }
 
 // displayValue renders the right-hand value column for a row.

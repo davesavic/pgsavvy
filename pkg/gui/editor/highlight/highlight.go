@@ -1,8 +1,6 @@
 package highlight
 
 import (
-	"fmt"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -206,7 +204,7 @@ func styleToSGR(s *theme.Style) string {
 	if s == nil {
 		return ""
 	}
-	fg := colorToSGRFg(s.Fg)
+	fg := theme.ColorParamSGR(s.Fg, theme.Fg)
 	if fg == "" && !s.Bold && !s.Italic && !s.Underline {
 		return ""
 	}
@@ -241,71 +239,4 @@ func styleToSGR(s *theme.Style) string {
 	}
 	b.WriteByte('m')
 	return b.String()
-}
-
-// colorToSGRFg converts a colour string (named colour or #RRGGBB hex)
-// to the numeric portion of an ANSI SGR foreground parameter. Returns
-// "" for empty or unrecognised values.
-func colorToSGRFg(c string) string {
-	if c == "" {
-		return ""
-	}
-
-	// Hex colour: #RGB or #RRGGBB -> true-colour 38;2;R;G;B
-	if c[0] == '#' {
-		r, g, b, ok := parseHex(c)
-		if !ok {
-			return ""
-		}
-		return fmt.Sprintf("38;2;%d;%d;%d", r, g, b)
-	}
-
-	// Named ANSI colours.
-	switch strings.ToLower(c) {
-	case "black":
-		return "30"
-	case "red":
-		return "31"
-	case "green":
-		return "32"
-	case "yellow":
-		return "33"
-	case "blue":
-		return "34"
-	case "magenta":
-		return "35"
-	case "cyan":
-		return "36"
-	case "white":
-		return "37"
-	case "gray", "grey":
-		return "90" // bright black
-	default:
-		return ""
-	}
-}
-
-// parseHex parses #RGB or #RRGGBB into (r, g, b, ok).
-func parseHex(s string) (r, g, b uint8, ok bool) {
-	s = strings.TrimPrefix(s, "#")
-	switch len(s) {
-	case 3:
-		rv, err1 := strconv.ParseUint(string(s[0])+string(s[0]), 16, 8)
-		gv, err2 := strconv.ParseUint(string(s[1])+string(s[1]), 16, 8)
-		bv, err3 := strconv.ParseUint(string(s[2])+string(s[2]), 16, 8)
-		if err1 != nil || err2 != nil || err3 != nil {
-			return 0, 0, 0, false
-		}
-		return uint8(rv), uint8(gv), uint8(bv), true
-	case 6:
-		rv, err1 := strconv.ParseUint(s[0:2], 16, 8)
-		gv, err2 := strconv.ParseUint(s[2:4], 16, 8)
-		bv, err3 := strconv.ParseUint(s[4:6], 16, 8)
-		if err1 != nil || err2 != nil || err3 != nil {
-			return 0, 0, 0, false
-		}
-		return uint8(rv), uint8(gv), uint8(bv), true
-	default:
-		return 0, 0, 0, false
-	}
 }

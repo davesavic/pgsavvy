@@ -313,8 +313,10 @@ func (c *ConnectionManagerContext) renderRows() string {
 				label = conn.Name
 			}
 			label += c.rowSuffix(conn) + rowTags(conn)
-			if sgr := theme.AnsiFgSGR(color); sgr != "" {
-				label = sgr + label + theme.AnsiReset
+			if !theme.IsMonochrome() {
+				if sgr := theme.ColorSGR(color, theme.Fg); sgr != "" {
+					label = sgr + label + theme.AnsiReset
+				}
 			}
 			if icon != "" {
 				fmt.Fprintf(&b, "%s%s %s\n", marker, icon, label)
