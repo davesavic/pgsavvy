@@ -14,21 +14,18 @@ Set Height 720
 Set Padding 12
 Set TypingSpeed 70ms
 
-# Launch and connect.
+# Launch + connect off-camera (Hide) so the GIF opens on the feature.
+Hide
 Type "./bin/pgsavvy"
 Enter
 Sleep 2.5s
 Enter
 Sleep 2.5s
-
-# Activate the app schema so completion has table/column metadata.
-Type "1"
-Sleep 700ms
-Enter
-Sleep 1.5s
+Show
 
 # Query editor: type a partial statement. The completion popup auto-triggers
-# after `FROM ` and lists the tables in the active search path.
+# after `FROM ` and lists the tables in the active search path (pgsavvy
+# introspects the schema on connect, so no activation step is needed).
 Type "3"
 Sleep 700ms
 Type "i"

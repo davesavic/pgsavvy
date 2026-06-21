@@ -15,24 +15,31 @@ Active development. PostgreSQL is the only supported driver so far; breaking cha
 
 - **PostgreSQL connectivity** (pgx) with connection profiles, optional SSH tunnels, and credential strategies: OS keyring, `~/.pgpass`, password command, or interactive TUI prompt.
 - **Schema browsing** — left-rail navigation across schemas, tables, columns, and indexes, with per-rail search (`/`, `n`/`N`), refresh, hidden-schema toggles, and a table-inspect modal (columns, constraints, FKs, indexes).
-- **Vim-like SQL editor** — modal editing (Normal/Insert/Visual/Visual-Block/Operator-Pending) with motions, operators, text objects (including `is`/`as` for SQL statements), registers, undo/redo, `.` repeat, counts, syntax highlighting (chroma), formatting (sqlfmt), and SQL omni-completion (`<c-x><c-o>` or auto-trigger) sourced from schema objects, functions, and history.
+
+  ![pgsavvy table-inspect modal](docs/feat-table-inspect.gif)
+- **Vim-like SQL editor** — modal editing (Normal/Insert/Visual/Visual-Block/Operator-Pending) with motions, operators, text objects (including `is`/`as` for SQL statements), registers, undo/redo, `.` repeat, counts, syntax highlighting (chroma), formatting (sqlfmt), and SQL omni-completion (`<c-x><c-o>` or auto-trigger) sourced from schema objects, functions, and history (`<c-n>`/`<c-p>` to navigate, `<c-y>` to accept).
+
+  ![pgsavvy SQL omni-completion](docs/demo-autocomplete.gif)
 - **Query execution** — run statement-at-cursor or all statements, EXPLAIN / EXPLAIN ANALYZE with an interactive plan tree and plan-doctor insights, write/DDL confirmation gates (including writable-CTE detection), per-statement timeouts, cancellation, and transaction control.
+
+  ![pgsavvy EXPLAIN plan tree](docs/feat-explain-plan.gif)
 - **Result grids** — multiple result tabs (pin/close/cycle), streamed rows with pagination and read-to-end, in-grid search and sort, hide-columns overlay, grid ↔ expanded record view, cell/row yank to clipboard, and export to CSV/TSV/JSON (clipboard or file).
+
+  ![pgsavvy result grid](docs/feat-result-grid.gif)
+- **Relationship explorer** — open a right-docked foreign-key panel (`<leader>gr`) that tracks the focused row's parents (outbound) and children (inbound), follow a foreign key into the referenced row with `gd` (opens a new result tab), and jump back with `<c-o>`.
+
+  ![pgsavvy relationship explorer](docs/feat-relationships.gif)
 - **Inline cell editing** — edit cells by value or SQL expression, stage pending edits per table, review in a commit dialog with optimistic-concurrency conflict resolution and typed-name confirmation for writes.
+
+  ![pgsavvy inline cell editing](docs/feat-cell-edit.gif)
 - **Query history** — SQLite-backed persistent history with a recall popup.
+
+  ![pgsavvy query history](docs/feat-history.gif)
 - **Discoverability** — auto-generated cheatsheet (`?`), which-key popup for `<leader>` chords, fully customizable keybindings via YAML config.
+
+  ![pgsavvy cheatsheet](docs/feat-cheatsheet.gif)
 - **Theming & i18n** — configurable colors (named/hex, truecolor-capable) and locale-aware translations with English fallback.
 - **Session logs** — per-session structured JSON logs with secret redaction and automatic retention.
-
-## In action
-
-**SQL omni-completion** — auto-triggered table/column suggestions sourced from schema objects, functions, and history (`<c-n>`/`<c-p>` to navigate, `<c-y>` to accept):
-
-![pgsavvy omni-completion](docs/demo-autocomplete.gif)
-
-**Foreign-key navigation** — open the relationship panel (`<leader>gr`) to see a row's parents and children, then follow a foreign key into the referenced row with `gd` (and `<c-o>` to jump back):
-
-![pgsavvy foreign-key navigation](docs/demo-relationships.gif)
 
 ## Install
 

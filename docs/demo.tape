@@ -18,23 +18,22 @@ Set Height 720
 Set Padding 12
 Set TypingSpeed 60ms
 
-# Launch the TUI; the connection manager opens on the demo profile.
+# Launch + connect off-camera (Hide) so the GIF opens on the live session.
+Hide
 Type "./bin/pgsavvy"
 Enter
 Sleep 2.5s
-
-# Connect to the selected profile.
 Enter
 Sleep 2.5s
+Show
+Sleep 600ms
 
-# Browse the schema rails: focus Schemas (1), activate the app schema (Enter)
-# to load its tables, then focus the Tables rail (2) and scroll.
-Type "1"
-Sleep 800ms
+# Focus the consolidated schema-rail (<tab>), activate the app schema (<cr>) —
+# which loads its tables and reveals the Tables tab — then scroll through them.
+Tab
+Sleep 1.2s
 Enter
 Sleep 1.5s
-Type "2"
-Sleep 800ms
 Type "j"
 Sleep 500ms
 Type "j"
@@ -42,8 +41,8 @@ Sleep 500ms
 Type "j"
 Sleep 1.2s
 
-# Jump to the query editor (3), enter insert mode, write a query.
-Type "3"
+# Escape the rail back into the query editor (<c-l>), enter insert mode, write a query.
+Ctrl+L
 Sleep 800ms
 Type "i"
 Type "SELECT id, email, name, created_at FROM app.users ORDER BY id LIMIT 25;"

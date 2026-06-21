@@ -142,4 +142,43 @@ tasks:
         }
         record docs/demo.tape false
         record docs/demo-autocomplete.tape true
-        record docs/demo-relationships.tape false
+
+  demo:features:
+    desc: Record the per-feature README GIFs (docs/feat-*.gif) via VHS against the docker fixture.
+    deps: [build]
+    env:
+      XDG_CONFIG_HOME: '{{.ROOT_DIR}}/.demo/config'
+      XDG_STATE_HOME: '{{.ROOT_DIR}}/.demo/state'
+    preconditions:
+      - sh: '[ "$(docker inspect -f ''{{`{{.State.Health.Status}}`}}'' pgsavvy-postgres 2>/dev/null)" = "healthy" ]'
+        msg: 'docker fixture not healthy; run `task pg:up` first.'
+      - sh: 'command -v vhs >/dev/null 2>&1'
+        msg: 'vhs not found on PATH; install github.com/charmbracelet/vhs.'
+    cmds:
+      - |
+        set -eu
+        cfg="$XDG_CONFIG_HOME/pgsavvy"
+        mkdir -p "$cfg"
+        cat > "$cfg/connections.yml" <<'YAML'
+        connections:
+          - name: demo
+            driver: postgres
+            dsn: postgres://pgsavvy@localhost:5432/pgsavvy_test?sslmode=disable
+            password_command: echo pgsavvy
+        YAML
+        # Autocomplete off for deterministic typing across all feature tapes.
+        printf 'editor:\n  autocomplete: false\n' > "$cfg/config.yml"
+        # Wipe the persisted editor buffer before each tape so a restored
+        # buffer is not re-typed (which would duplicate the query).
+        record() {
+          rm -rf "$XDG_STATE_HOME/pgsavvy"
+          mkdir -p "$XDG_STATE_HOME/pgsavvy"
+          vhs "$1"
+        }
+        record docs/feat-result-grid.tape
+        record docs/feat-relationships.tape
+        record docs/feat-explain-plan.tape
+        record docs/feat-cell-edit.tape
+        record docs/feat-table-inspect.tape
+        record docs/feat-cheatsheet.tape
+        record docs/feat-history.tape
