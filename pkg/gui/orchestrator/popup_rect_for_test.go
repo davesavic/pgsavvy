@@ -138,6 +138,25 @@ func TestPopupRectFor_FKReversePicker(t *testing.T) {
 	}
 }
 
+// TestPopupRectFor_CellViewer locks in the 70% × 70% rect for the
+// CELL_VIEWER popup. Uses a 100×100 popup-overlay canvas so 0.7 fractions
+// land at 70 in either axis.
+func TestPopupRectFor_CellViewer(t *testing.T) {
+	canvas := ui.Dimensions{X0: 0, Y0: 0, X1: 100, Y1: 100}
+	dims := map[string]ui.Dimensions{"popup-overlay": canvas}
+
+	r, ok := popupRectFor(types.CELL_VIEWER, dims, 100, 100)
+	if !ok {
+		t.Fatalf("popupRectFor(CELL_VIEWER) ok=false, want true")
+	}
+	if w := r.X1 - r.X0; w < 65 || w > 75 {
+		t.Errorf("width %d not ~70", w)
+	}
+	if h := r.Y1 - r.Y0; h < 65 || h > 75 {
+		t.Errorf("height %d not ~70", h)
+	}
+}
+
 // TestPopupRectAnchoredBelowCursor: the SUGGESTIONS popup
 // is cursor-anchored. anchoredRect derives the screen cell directly below
 // the cursor from the editor view origin (vx0,vy0), the scroll offset

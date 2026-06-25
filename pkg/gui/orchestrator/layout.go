@@ -615,6 +615,21 @@ func (g *Gui) RunLayout(w, h int) error {
 				// on the single top-border line, so a right-aligned subtitle was
 				// always blanked by the collision guard once the leaves rendered.
 			}
+			// CELL_VIEWER styling: the full cell-content viewer is the focused
+			// modal while on top, so give it the same focused-modal treatment as
+			// TABLE_INSPECT — surface its dynamic frame title (column :: type +
+			// size + mode flags) and paint the active border (popups are skipped
+			// by the Tier-1 applyFocusFrameColors pass; gocui resets FrameColor
+			// on SetView, so this runs every frame). No Wrap: the body is
+			// pre-formatted (wrapped/non-wrapped at the context level) and would
+			// be mangled by reflow. The scroll origin is applied AFTER
+			// HandleRender below so view.LinesHeight reflects the freshly
+			// written body.
+			if ctx.GetKey() == types.CELL_VIEWER && view != nil {
+				view.Title = ctx.GetTitle()
+				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+				view.Wrap = false
+			}
 			// CHEATSHEET styling + scroll: the keybinding
 			// cheatsheet is the focused modal while on top, so give it the
 			// same "Keybindings" frame title + active border as HISTORY
@@ -674,6 +689,9 @@ func (g *Gui) RunLayout(w, h int) error {
 			}
 			if ctx.GetKey() == types.TABLE_INSPECT && view != nil {
 				applyTableInspectScroll(view, ctx)
+			}
+			if ctx.GetKey() == types.CELL_VIEWER && view != nil {
+				applyCellViewerScroll(view, ctx)
 			}
 			if ctx.GetKey() == types.RELATIONSHIP_PANEL && view != nil {
 				applyRelationshipPanelScroll(view, g.relationshipPanelFocused())
@@ -1545,6 +1563,44 @@ func applyTableInspectScroll(view *gocui.View, ctx types.IBaseContext) {
 		}
 	}
 	view.SetOrigin(ox, oy)
+}
+
+// cellViewerScroller is the scroll surface CellViewerContext exposes. The
+// layout owns the vertical clamp (it alone knows the rendered content extent
+// vs the viewport); the context owns top/left clamp.
+type cellViewerScroller interface {
+	ScrollY() int
+	SetScrollY(int)
+	TotalWrappedLines() int
+}
+
+// applyCellViewerScroll pins the viewer's vertical origin to the context's
+// scroll offset, clamped to the content's last page using the context-owned
+// TotalWrappedLines() extent. Called after HandleRender so the context's
+// wrapped-line count reflects the freshly written body. The clamped value is
+// written back so the `G` sentinel and any over-scroll settle exactly on the
+// last page.
+//
+// The clamp is persisted ONLY when the axis has real scroll room (maxOY>0):
+// on a resize the shared view may momentarily hold a stale-short body for one
+// frame, so TotalWrappedLines may read small and maxOY collapses to 0.
+// Writing that clamp back would zero the just-restored scroll offset; instead
+// clamp the displayed origin only and let the next frame (fresh extent) restore
+// it. Mirrors applyTableInspectScroll / applyCheatsheetScroll.
+func applyCellViewerScroll(view *gocui.View, ctx types.IBaseContext) {
+	sc, ok := ctx.(cellViewerScroller)
+	if !ok {
+		return
+	}
+	maxOY := max(sc.TotalWrappedLines()-view.InnerHeight(), 0)
+	oy := sc.ScrollY()
+	if oy > maxOY {
+		oy = maxOY
+		if maxOY > 0 {
+			sc.SetScrollY(oy)
+		}
+	}
+	view.SetOriginY(oy)
 }
 
 // maxLineWidth returns the display width of the widest line in the view's

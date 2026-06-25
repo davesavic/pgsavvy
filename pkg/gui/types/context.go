@@ -165,6 +165,8 @@ const (
 	TABLE_INSPECT ContextKey = "table_inspect"
 	// CELL_EDITOR is the in-grid cell mini-buffer (TEMPORARY_POPUP).
 	CELL_EDITOR ContextKey = "cell_editor"
+	// CELL_VIEWER is the PERSISTENT_POPUP for viewing full cell contents.
+	CELL_VIEWER ContextKey = "cell_viewer"
 	// COMMIT_DIALOG is the pending-edit commit dialog (TEMPORARY_POPUP).
 	COMMIT_DIALOG ContextKey = "commit_dialog"
 	// CONFLICT_DIALOG is the per-conflict refresh/overwrite dialog (TEMPORARY_POPUP).
@@ -230,6 +232,7 @@ func AllContextKeys() []ContextKey {
 		FIRST_RUN_TIP,
 		TABLE_INSPECT,
 		CELL_EDITOR,
+		CELL_VIEWER,
 		COMMIT_DIALOG,
 		CONFLICT_DIALOG,
 		FK_REVERSE_PICKER,

@@ -310,6 +310,11 @@ const (
 	//                       ResultIdentity.HasRowIdentity flag.
 	ResultHideOverlay = "result.hide.overlay"
 
+	// Result view cell-content viewer. RESULT_GRID-scoped.
+	//   ResultViewCellOpen - <leader>gv opens the full cell-content viewer
+	//                        popup for the focused cell.
+	ResultViewCellOpen = "result.view.cell_open"
+
 	// Expanded view mode. RESULT_GRID-scoped.
 	//   ResultViewToggle - <leader>gx flips the active grid between
 	//                      grid and expanded view; persisted globally
@@ -735,6 +740,7 @@ func AllActionIDs() []string {
 		ResultSearchCancel,
 		ResultSortPick,
 		ResultHideOverlay,
+		ResultViewCellOpen,
 		ResultViewToggle,
 		ResultCursorDown,
 		ResultCursorUp,

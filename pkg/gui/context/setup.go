@@ -76,6 +76,9 @@ type ContextTree struct {
 
 	// Live PERSISTENT_POPUP instances.
 	FirstRunTip *FirstRunTipContext
+	// CellViewer is the full cell-content viewer popup.
+	// PERSISTENT_POPUP kind.
+	CellViewer *CellViewerContext
 
 	// QueryRail is the MAIN_CONTEXT container that multiplexes the
 	// QueryEditor + SavedQuery + History leaves into the single
@@ -402,6 +405,14 @@ func contextSpecs() []contextSpec {
 			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.5, HeightFrac: 0.4},
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewFirstRunTipContext(b, d) },
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.FirstRunTip = c.(*FirstRunTipContext) },
+		},
+		// CellViewer is the full cell-content viewer popup. PERSISTENT_POPUP
+		// so it survives subsequent popup pushes (e.g. the cell editor on `i`).
+		{
+			key: types.CELL_VIEWER, kind: types.PERSISTENT_POPUP, title: "Cell viewer", inFlatten: true,
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.7, HeightFrac: 0.7},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewCellViewerContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.CellViewer = c.(*CellViewerContext) },
 		},
 
 		// QUERY_EDITOR is now a QUERY_RAIL container leaf (tkt5.2 topology

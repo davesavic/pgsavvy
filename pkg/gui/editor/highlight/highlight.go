@@ -1,6 +1,7 @@
 package highlight
 
 import (
+	"log/slog"
 	"strings"
 	"unicode/utf8"
 
@@ -36,12 +37,22 @@ type Token struct {
 // pgLexer is the Chroma PostgreSQL lexer, resolved once at init time.
 var pgLexer chroma.Lexer
 
+// jsonLexer is the Chroma JSON lexer, resolved once at init time.
+var jsonLexer chroma.Lexer
+
 func init() {
 	pgLexer = lexers.Get("postgresql")
 	if pgLexer == nil {
 		pgLexer = lexers.Fallback
 	}
 	pgLexer = chroma.Coalesce(pgLexer)
+
+	jsonLexer = lexers.Get("json")
+	if jsonLexer == nil {
+		slog.Warn("highlight: json lexer not found, falling back to chroma.Fallback")
+		jsonLexer = lexers.Fallback
+	}
+	jsonLexer = chroma.Coalesce(jsonLexer)
 }
 
 // Highlight returns text with ANSI SGR escape sequences applied based
@@ -77,7 +88,48 @@ func Highlight(text string) string {
 		}
 	}
 
-	// Guarantee trailing reset.
+// Guarantee trailing reset.
+	b.WriteString("\x1b[0m")
+	return b.String()
+}
+
+// HighlightJSON returns text with ANSI SGR escape sequences applied based
+// on the current theme's syntax-highlight colours, using the Chroma JSON
+// lexer. The output always ends with a reset sequence (\x1b[0m) so
+// downstream rendering does not leak colour state.
+//
+// Inputs larger than 1 MiB are returned unhighlighted (with a trailing
+// reset), and an empty input returns "".
+func HighlightJSON(text string) string {
+	if text == "" {
+		return ""
+	}
+	if theme.IsMonochrome() {
+		return text
+	}
+	if len(text) > 1<<20 {
+		return text + "\x1b[0m"
+	}
+
+	iter, err := jsonLexer.Tokenise(nil, text)
+	if err != nil {
+		return text + "\x1b[0m"
+	}
+
+	var b strings.Builder
+	b.Grow(len(text) * 2)
+
+	for _, tok := range iter.Tokens() {
+		sgr := sgrForChromaToken(tok.Type)
+		if sgr != "" {
+			b.WriteString(sgr)
+			b.WriteString(tok.Value)
+			b.WriteString("\x1b[0m")
+		} else {
+			b.WriteString(tok.Value)
+		}
+	}
+
 	b.WriteString("\x1b[0m")
 	return b.String()
 }

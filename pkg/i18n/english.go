@@ -236,6 +236,7 @@ type ActionTranslations struct {
 
 	// Expanded view mode + result-grid motion.
 	ResultViewToggle      string
+	ResultViewCellOpen    string
 	ResultCursorDown      string
 	ResultCursorUp        string
 	ResultCursorLeft      string
@@ -335,6 +336,23 @@ type ActionTranslations struct {
 	// RefreshRail is the description for the `r` per-rail refresh
 	// binding.
 	RefreshRail string
+
+	// Cell-viewer in-popup bindings.
+	CellViewerScrollDown   string
+	CellViewerScrollUp     string
+	CellViewerHalfPageDown string
+	CellViewerHalfPageUp   string
+	CellViewerPageDown     string
+	CellViewerPageUp       string
+	CellViewerJumpTop      string
+	CellViewerJumpBottom   string
+	CellViewerScrollLeft   string
+	CellViewerScrollRight  string
+	CellViewerToggleWrap   string
+	CellViewerTogglePretty string
+	CellViewerYank         string
+	CellViewerEdit         string
+	CellViewerDismiss      string
 }
 
 // EnglishTranslationSet returns a freshly allocated TranslationSet populated
@@ -508,6 +526,7 @@ func EnglishTranslationSet() *TranslationSet {
 			RelationshipPanelUp:     "Select previous relationship",
 
 			ResultViewToggle:      "Toggle expanded view",
+			ResultViewCellOpen:    "View cell contents",
 			ResultCursorDown:      "Cursor down",
 			ResultCursorUp:        "Cursor up",
 			ResultCursorLeft:      "Cursor left",
@@ -571,6 +590,22 @@ func EnglishTranslationSet() *TranslationSet {
 			PanEnd:   "Scroll to end",
 
 			RefreshRail: "Refresh",
+
+			CellViewerScrollDown:   "Scroll down",
+			CellViewerScrollUp:     "Scroll up",
+			CellViewerHalfPageDown: "Half page down",
+			CellViewerHalfPageUp:   "Half page up",
+			CellViewerPageDown:     "Page down",
+			CellViewerPageUp:       "Page up",
+			CellViewerJumpTop:      "Jump to top",
+			CellViewerJumpBottom:   "Jump to bottom",
+			CellViewerScrollLeft:   "Scroll left",
+			CellViewerScrollRight:  "Scroll right",
+			CellViewerToggleWrap:   "Toggle wrap",
+			CellViewerTogglePretty: "Toggle pretty-print",
+			CellViewerYank:         "Yank cell contents",
+			CellViewerEdit:         "Edit cell",
+			CellViewerDismiss:      "Dismiss viewer",
 		},
 	}
 }

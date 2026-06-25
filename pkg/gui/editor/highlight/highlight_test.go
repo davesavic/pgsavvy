@@ -135,6 +135,98 @@ func TestHighlight_HexColor(t *testing.T) {
 	}
 }
 
+// --- HighlightJSON tests ---
+
+func TestHighlightJSON_Empty(t *testing.T) {
+	got := HighlightJSON("")
+	if got != "" {
+		t.Fatalf("HighlightJSON(\"\") = %q, want \"\"", got)
+	}
+}
+
+func TestHighlightJSON_TrailingReset(t *testing.T) {
+	applyTestTheme(t)
+	got := HighlightJSON(`{"key":"value"}`)
+	if !strings.HasSuffix(got, "\x1b[0m") {
+		t.Fatalf("HighlightJSON output does not end with reset: %q", got)
+	}
+}
+
+func TestHighlightJSON_ContainsColor(t *testing.T) {
+	applyTestTheme(t)
+	got := HighlightJSON(`{"key":"value"}`)
+	// StringFg = "green" -> SGR "32"
+	if !strings.Contains(got, "\x1b[32m") {
+		t.Fatalf("expected green SGR (\\x1b[32m) for JSON string in %q", got)
+	}
+}
+
+func TestHighlightJSON_PreservesPlainText(t *testing.T) {
+	applyTestTheme(t)
+	input := `{"key":"value"}`
+	got := HighlightJSON(input)
+	plain := stripANSI(got)
+	if plain != input {
+		t.Fatalf("stripped text = %q, want %q", plain, input)
+	}
+}
+
+func TestHighlightJSON_Monochrome(t *testing.T) {
+	applyTestTheme(t)
+	restore := theme.SetMonochromeForTest(true)
+	defer restore()
+	input := `{"key":"value"}`
+	got := HighlightJSON(input)
+	if got != input {
+		t.Fatalf("HighlightJSON in monochrome mode = %q, want %q", got, input)
+	}
+}
+
+func TestHighlightJSON_SizeGate(t *testing.T) {
+	applyTestTheme(t)
+	big := strings.Repeat("x", 1<<20+1)
+	got := HighlightJSON(big)
+	if !strings.HasSuffix(got, "\x1b[0m") {
+		t.Fatalf("size-gated output must end with reset: %q", got)
+	}
+	if !strings.HasPrefix(got, big) {
+		t.Fatalf("size-gated output must contain original text verbatim")
+	}
+}
+
+func TestHighlightJSON_HexColor(t *testing.T) {
+	err := theme.Apply(&config.ThemeConfig{
+		KeywordFg:       "blue",
+		StringFg:        "#ff8800",
+		CommentFg:       "gray",
+		NumericFg:       "magenta",
+		OperatorFg:      "yellow",
+		IdentifierFg:    "white",
+		ActiveBorder:    "yellow",
+		InactiveBorder:  "gray",
+		NullValueFg:     "red",
+		ErrorFg:         "red",
+		WarningFg:       "yellow",
+		SuccessFg:       "green",
+		InfoFg:          "cyan",
+		PopupBorder:     "cyan",
+		TableHeaderFg:   "white",
+		SearchHighlight: "yellow",
+		PromptFg:        "yellow",
+		DirtyCellBg:     "#4a3818",
+		WarnBorder:      "#d97757",
+	})
+	if err != nil {
+		t.Fatalf("theme.Apply: %v", err)
+	}
+
+	got := HighlightJSON(`{"key":"value"}`)
+	// #ff8800 -> 38;2;255;136;0. JSON string values receive StringFg.
+	if !strings.Contains(got, "38;2;255;136;0") {
+		t.Fatalf("expected true-color SGR for #ff8800 string in %q", got)
+	}
+}
+
 // --- Tokenize tests ---
 
 func TestTokenize_Empty(t *testing.T) {

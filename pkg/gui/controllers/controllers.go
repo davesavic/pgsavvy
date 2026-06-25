@@ -48,6 +48,7 @@ type Controllers struct {
 	// which this package cannot import. The bundle still owns them so
 	// RegisterActions + AllDefaultBindings include their bindings.
 	CellEditor      *CellEditorController
+	CellViewer      *CellViewerController
 	CommitDialog    *CommitDialogController
 	ConflictDialog  *ConflictDialogController
 	FKReversePicker *FKReversePickerController
@@ -368,6 +369,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "Plan", ctrl: b.Plan, attach: true},
 		{name: "TableInspect", ctrl: b.TableInspect, attach: true},
 		{name: "CellEditor", ctrl: b.CellEditor, attach: true},
+		{name: "CellViewer", ctrl: b.CellViewer, attach: true},
 		{name: "CommitDialog", ctrl: b.CommitDialog, attach: true},
 		{name: "ConflictDialog", ctrl: b.ConflictDialog, attach: true},
 		{name: "FKReversePicker", ctrl: b.FKReversePicker, attach: true},

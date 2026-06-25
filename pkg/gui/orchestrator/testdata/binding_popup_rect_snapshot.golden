@@ -6,6 +6,22 @@ binding	scope=cell_editor	key=<c-n>	mode=insert
 binding	scope=cell_editor	key=<c-t>	mode=insert
 binding	scope=cell_editor	key=<cr>	mode=insert
 binding	scope=cell_editor	key=<esc>	mode=insert
+binding	scope=cell_viewer	key=<c-b>	mode=normal
+binding	scope=cell_viewer	key=<c-c>	mode=normal
+binding	scope=cell_viewer	key=<c-d>	mode=normal
+binding	scope=cell_viewer	key=<c-f>	mode=normal
+binding	scope=cell_viewer	key=<c-u>	mode=normal
+binding	scope=cell_viewer	key=<esc>	mode=normal
+binding	scope=cell_viewer	key=G	mode=normal
+binding	scope=cell_viewer	key=f	mode=normal
+binding	scope=cell_viewer	key=g	mode=normal
+binding	scope=cell_viewer	key=h	mode=normal
+binding	scope=cell_viewer	key=i	mode=normal
+binding	scope=cell_viewer	key=j	mode=normal
+binding	scope=cell_viewer	key=k	mode=normal
+binding	scope=cell_viewer	key=l	mode=normal
+binding	scope=cell_viewer	key=w	mode=normal
+binding	scope=cell_viewer	key=y	mode=normal
 binding	scope=cheatsheet	key=<c-d>	mode=normal
 binding	scope=cheatsheet	key=<c-u>	mode=normal
 binding	scope=cheatsheet	key=<down>	mode=normal
@@ -280,6 +296,7 @@ binding	scope=result_grid	key=<leader>cu	mode=normal
 binding	scope=result_grid	key=<leader>cw	mode=normal
 binding	scope=result_grid	key=<leader>gH	mode=normal
 binding	scope=result_grid	key=<leader>gr	mode=normal
+binding	scope=result_grid	key=<leader>gv	mode=normal
 binding	scope=result_grid	key=<leader>gx	mode=normal
 binding	scope=result_grid	key=<leader>oe	mode=normal
 binding	scope=result_grid	key=<leader>s	mode=normal
@@ -406,6 +423,7 @@ binding	scope=tables	key=l	mode=normal
 binding	scope=tables	key=n	mode=normal
 binding	scope=tables	key=r	mode=normal
 popuprect	key=cell_editor	x0=20	y0=47	x1=80	y1=52
+popuprect	key=cell_viewer	x0=15	y0=15	x1=85	y1=85
 popuprect	key=cheatsheet	x0=20	y0=35	x1=80	y1=65
 popuprect	key=columns	none
 popuprect	key=command_line	x0=0	y0=99	x1=100	y1=101

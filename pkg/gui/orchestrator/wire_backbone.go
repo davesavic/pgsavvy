@@ -12,6 +12,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/common"
 	"github.com/davesavic/pgsavvy/pkg/config"
 	"github.com/davesavic/pgsavvy/pkg/gui"
+	"github.com/davesavic/pgsavvy/pkg/gui/clipboard"
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
@@ -652,6 +653,16 @@ func (g *Gui) wireInlineEditControllers(helperBag controllers.HelperBag) {
 			)
 			pickerCtrl.AttachToContext(&pickerCtx.BaseContext)
 			g.controllers.FKReversePicker = pickerCtrl
+		}
+		if viewerCtx := g.registry.CellViewer; viewerCtx != nil {
+			viewerCtrl := controllers.NewCellViewerController(
+				g.deps.Common, helperBag.CoreDeps, helperBag.UIDeps, viewerCtx, g.tree, nil,
+			)
+			viewerCtrl.AttachToContext(&viewerCtx.BaseContext)
+			viewerCtrl.SetPicker(cellEditorPicker{tabs: g.resultTabsH})
+			viewerCtrl.SetClipboard(clipboard.NewSystemClipboard())
+			viewerCtrl.SetCellEditor(g.controllers.CellEditor)
+			g.controllers.CellViewer = viewerCtrl
 		}
 	}
 }
