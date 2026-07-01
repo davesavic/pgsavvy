@@ -1,7 +1,6 @@
 package exporter
 
 import (
-	"fmt"
 	"io"
 	"strings"
 
@@ -10,28 +9,35 @@ import (
 )
 
 // csvFormat implements Format for RFC 4180 CSV output.
-type csvFormat struct{}
+type csvFormat struct {
+	cols []models.ColumnMeta
+}
 
 // NewCSV returns a streaming RFC 4180 CSV writer.
-func NewCSV() Format { return csvFormat{} }
+func NewCSV() Format { return &csvFormat{} }
 
-func (csvFormat) Name() string      { return "CSV" }
-func (csvFormat) Ext() string       { return "csv" }
-func (csvFormat) IsStreaming() bool { return true }
+func (c *csvFormat) Name() string      { return "CSV" }
+func (c *csvFormat) Ext() string       { return "csv" }
+func (c *csvFormat) IsStreaming() bool { return true }
 
-func (csvFormat) Header(cols []models.ColumnMeta, w io.Writer) error {
+func (c *csvFormat) Header(cols []models.ColumnMeta, w io.Writer) error {
+	c.cols = cols
 	return writeDelimitedRow(w, columnNames(cols), ',')
 }
 
-func (csvFormat) Row(r models.Row, w io.Writer) error {
+func (c *csvFormat) Row(r models.Row, w io.Writer) error {
 	fields := make([]string, len(r.Values))
 	for i, v := range r.Values {
-		fields[i] = stringifyAndSanitize(v)
+		if i < len(c.cols) {
+			fields[i] = stringifyAndSanitize(v, c.cols[i])
+		} else {
+			fields[i] = stringifyAndSanitize(v, models.ColumnMeta{})
+		}
 	}
 	return writeDelimitedRow(w, fields, ',')
 }
 
-func (csvFormat) Footer(w io.Writer) error { return nil }
+func (c *csvFormat) Footer(w io.Writer) error { return nil }
 
 // columnNames extracts and sanitizes column names from metadata.
 func columnNames(cols []models.ColumnMeta) []string {
@@ -42,14 +48,14 @@ func columnNames(cols []models.ColumnMeta) []string {
 	return out
 }
 
-// stringifyAndSanitize converts a cell value to its sanitized string form.
-// nil → empty string (NULL convention matches psql \copy csv default).
-func stringifyAndSanitize(v any) string {
+// stringifyAndSanitize converts a cell value to its sanitized string form
+// using column-aware formatting. nil → empty string (NULL convention
+// matches psql \copy csv default).
+func stringifyAndSanitize(v any, col models.ColumnMeta) string {
 	if v == nil {
 		return ""
 	}
-	s := fmt.Sprint(v)
-	return grid.SanitizeCellEscapes(s)
+	return grid.RenderCellText(v, col)
 }
 
 // writeDelimitedRow writes a single delimited row terminated by CRLF.

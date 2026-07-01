@@ -40,7 +40,7 @@ func (n *ndjsonFormat) Row(r models.Row, w io.Writer) error {
 	obj := make(map[string]any, len(n.cols))
 	for i, c := range n.cols {
 		if i < len(r.Values) {
-			obj[c.Name] = r.Values[i]
+			obj[c.Name] = jsonSafeValue(r.Values[i], c)
 		} else {
 			obj[c.Name] = nil
 		}

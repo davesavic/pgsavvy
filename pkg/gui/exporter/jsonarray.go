@@ -38,7 +38,7 @@ func (j *jsonArrayFormat) Row(r models.Row, _ io.Writer) error {
 	obj := make(map[string]any, len(j.cols))
 	for i, c := range j.cols {
 		if i < len(r.Values) {
-			obj[c.Name] = r.Values[i]
+			obj[c.Name] = jsonSafeValue(r.Values[i], c)
 		} else {
 			obj[c.Name] = nil
 		}

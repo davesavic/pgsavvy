@@ -101,3 +101,64 @@ func TestJSONArray_IsStreamingFalse(t *testing.T) {
 		t.Fatal("expected JSON Array to report IsStreaming()=false")
 	}
 }
+
+func TestJSONArray_JSONBColumn_EmbedsAsJSON(t *testing.T) {
+	cols := []models.ColumnMeta{{Name: "id", TypeName: "int4"}, {Name: "data", TypeName: "jsonb"}}
+	f := NewJSONArray()
+	var buf bytes.Buffer
+	if err := f.Header(cols, &buf); err != nil {
+		t.Fatalf("Header: %v", err)
+	}
+	if err := f.Row(models.Row{Values: []any{1, []byte(`{"plan":"pro"}`)}}, &buf); err != nil {
+		t.Fatalf("Row: %v", err)
+	}
+	if err := f.Footer(&buf); err != nil {
+		t.Fatalf("Footer: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, `"data":"`) {
+		t.Fatalf("jsonb embedded as base64 string, not JSON object: %q", out)
+	}
+	if !strings.Contains(out, `"data":{"plan":"pro"}`) {
+		t.Fatalf("expected embedded JSON object, got %q", out)
+	}
+}
+
+func TestJSONArray_JSONBByOID_EmbedsAsJSON(t *testing.T) {
+	cols := []models.ColumnMeta{{Name: "data", TypeOID: 3802}}
+	f := NewJSONArray()
+	var buf bytes.Buffer
+	if err := f.Header(cols, &buf); err != nil {
+		t.Fatalf("Header: %v", err)
+	}
+	if err := f.Row(models.Row{Values: []any{[]byte(`{"a":1}`)}}, &buf); err != nil {
+		t.Fatalf("Row: %v", err)
+	}
+	if err := f.Footer(&buf); err != nil {
+		t.Fatalf("Footer: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"data":{"a":1}`) {
+		t.Fatalf("expected embedded JSON via OID fallback, got %q", out)
+	}
+}
+
+func TestJSONArray_NonJSONBByteaColumn_NotTouched(t *testing.T) {
+	cols := []models.ColumnMeta{{Name: "blob", TypeName: "bytea"}}
+	f := NewJSONArray()
+	var buf bytes.Buffer
+	if err := f.Header(cols, &buf); err != nil {
+		t.Fatalf("Header: %v", err)
+	}
+	if err := f.Row(models.Row{Values: []any{[]byte{0x48, 0x65}}}, &buf); err != nil {
+		t.Fatalf("Row: %v", err)
+	}
+	if err := f.Footer(&buf); err != nil {
+		t.Fatalf("Footer: %v", err)
+	}
+	out := buf.String()
+	// Non-jsonb []byte stays as base64 via json.Marshal (default behavior).
+	if !strings.Contains(out, `"blob":"`) {
+		t.Fatal("non-jsonb []byte should still be string (base64) encoded by json.Marshal")
+	}
+}

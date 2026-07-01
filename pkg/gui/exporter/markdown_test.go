@@ -149,3 +149,27 @@ func TestMarkdown_IsStreamingFalse(t *testing.T) {
 		t.Fatal("expected Markdown to report IsStreaming()=false")
 	}
 }
+
+func TestMarkdown_JSONBColumn_RendersAsJSONText(t *testing.T) {
+	cols := []models.ColumnMeta{{Name: "id", TypeName: "int4"}, {Name: "data", TypeName: "jsonb"}}
+	f := NewMarkdown()
+	var buf bytes.Buffer
+	if err := f.Header(cols, &buf); err != nil {
+		t.Fatalf("Header: %v", err)
+	}
+	if err := f.Row(models.Row{Values: []any{1, []byte(`{"plan":"pro"}`)}}, &buf); err != nil {
+		t.Fatalf("Row: %v", err)
+	}
+	if err := f.Footer(&buf); err != nil {
+		t.Fatalf("Footer: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "[123") {
+		t.Fatalf("jsonb rendered as Go byte-array dump: %q", got)
+	}
+	// Markdown escapes | in cells, but {"plan":"pro"} has none.
+	want := "|id|data|\n|---|---|\n|1|{\"plan\":\"pro\"}|\n"
+	if got != want {
+		t.Fatalf("\n got=%q\nwant=%q", got, want)
+	}
+}

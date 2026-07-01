@@ -123,3 +123,22 @@ func TestNDJSON_IsStreamingTrue(t *testing.T) {
 		t.Fatal("expected NDJSON to report IsStreaming()=true")
 	}
 }
+
+func TestNDJSON_JSONBColumn_EmbedsAsJSON(t *testing.T) {
+	cols := []models.ColumnMeta{{Name: "id", TypeName: "int4"}, {Name: "data", TypeName: "jsonb"}}
+	f := NewNDJSON()
+	var buf bytes.Buffer
+	if err := f.Header(cols, &buf); err != nil {
+		t.Fatalf("Header: %v", err)
+	}
+	if err := f.Row(models.Row{Values: []any{1, []byte(`{"plan":"pro"}`)}}, &buf); err != nil {
+		t.Fatalf("Row: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, `"data":"`) {
+		t.Fatalf("jsonb embedded as base64 string instead of JSON object: %q", out)
+	}
+	if !strings.Contains(out, `"data":{"plan":"pro"}`) {
+		t.Fatalf("expected embedded JSON object, got %q", out)
+	}
+}

@@ -23,6 +23,15 @@ const (
 	ansiReverseVid = "\x1b[7m"
 )
 
+// Built-in PostgreSQL OIDs used as a fallback when TypeName is empty.
+// Custom types / domains built on jsonb still carry the base OID even
+// if pgtype's default Map doesn't have a name entry for them.
+const (
+	pgOIDJSON  = 114  // json
+	pgOIDJSONB = 3802 // jsonb
+	pgOIDBytea = 17   // bytea
+)
+
 // cellKind classifies a column for type-aware styling. Resolved from
 // ColumnMeta.TypeName so we stay driver-agnostic — pg, sqlite, mysql
 // can all share the same mapping by registering their TypeName strings.
@@ -45,9 +54,22 @@ func IsJSONColumn(col models.ColumnMeta) bool {
 	return classifyColumn(col) == kindJSON
 }
 
+// RenderCellText returns the unstyled, type-aware text representation of a
+// cell value. Unlike fmt.Sprint, this uses column metadata to format jsonb,
+// bytea, timestamps, arrays, etc. in a human-readable form. Exporters use
+// this so exported output matches what the user sees in the grid.
+func RenderCellText(value any, col models.ColumnMeta) string {
+	return renderCellPlain(value, col)
+}
+
 // classifyColumn maps a ColumnMeta to its display kind. Lowercased
 // TypeName lookup; unrecognised types collapse to kindUnknown which
 // renders with the default foreground.
+//
+// When TypeName is empty (pgx couldn't resolve an OID — common with
+// custom types / domains), a built-in OID fallback kicks in so jsonb,
+// json, and bytea columns still render with their proper formatter
+// instead of Go's %v byte-array dump.
 func classifyColumn(col models.ColumnMeta) cellKind {
 	switch strings.ToLower(col.TypeName) {
 	case "int2", "int4", "int8", "int", "integer", "bigint", "smallint",
@@ -62,6 +84,16 @@ func classifyColumn(col models.ColumnMeta) cellKind {
 	case "bytea", "blob", "bytes":
 		return kindBytes
 	default:
+		// OID-based fallback when TypeName is empty / unknown
+		// (pgx can decode the OID but the default pgtype.Map may
+		// not have a Name for domain / custom types built on
+		// jsonb).
+		switch col.TypeOID {
+		case pgOIDJSON, pgOIDJSONB:
+			return kindJSON
+		case pgOIDBytea:
+			return kindBytes
+		}
 		return kindUnknown
 	}
 }

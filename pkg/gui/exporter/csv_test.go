@@ -120,3 +120,43 @@ func TestCSV_EmptyResult_HeaderOnly(t *testing.T) {
 		t.Fatalf("got=%q want=%q", got, want)
 	}
 }
+
+func TestCSV_JSONBColumn_RendersAsJSONText(t *testing.T) {
+	cols := []models.ColumnMeta{{Name: "id", TypeName: "int4"}, {Name: "data", TypeName: "jsonb"}}
+	f := NewCSV()
+	var buf bytes.Buffer
+	if err := f.Header(cols, &buf); err != nil {
+		t.Fatalf("Header: %v", err)
+	}
+	if err := f.Row(models.Row{Values: []any{1, []byte(`{"plan":"pro"}`)}}, &buf); err != nil {
+		t.Fatalf("Row: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "[123") {
+		t.Fatalf("jsonb rendered as Go byte-array dump, not JSON text: %q", got)
+	}
+	want := "id,data\r\n1,\"{\"\"plan\"\":\"\"pro\"\"}\"\r\n"
+	if got != want {
+		t.Fatalf("\n got=%q\nwant=%q", got, want)
+	}
+}
+
+func TestCSV_JSONBByOID_RendersAsJSONText(t *testing.T) {
+	cols := []models.ColumnMeta{{Name: "data", TypeOID: 3802}}
+	f := NewCSV()
+	var buf bytes.Buffer
+	if err := f.Header(cols, &buf); err != nil {
+		t.Fatalf("Header: %v", err)
+	}
+	if err := f.Row(models.Row{Values: []any{[]byte(`{}`)}}, &buf); err != nil {
+		t.Fatalf("Row: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "[123 125]") {
+		t.Fatalf("jsonb-by-OID rendered as Go byte-array dump: %q", got)
+	}
+	want := "data\r\n{}\r\n"
+	if got != want {
+		t.Fatalf("\n got=%q\nwant=%q", got, want)
+	}
+}

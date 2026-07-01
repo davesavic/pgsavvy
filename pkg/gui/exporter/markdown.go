@@ -2,7 +2,6 @@ package exporter
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"strings"
 
@@ -59,7 +58,7 @@ func (m *markdownFormat) Row(r models.Row, _ io.Writer) error {
 	for i := range m.cols {
 		var s string
 		if i < len(r.Values) && r.Values[i] != nil {
-			s = escapeMarkdownCell(fmt.Sprint(r.Values[i]))
+			s = escapeMarkdownCell(grid.RenderCellText(r.Values[i], m.cols[i]))
 		}
 		m.buf.WriteString(s)
 		m.buf.WriteByte('|')

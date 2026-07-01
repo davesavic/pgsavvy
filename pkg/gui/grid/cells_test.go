@@ -206,3 +206,52 @@ func TestCapCellBytes_UnderCap(t *testing.T) {
 	require.Equal(t, in, capCellBytes(in),
 		"cells within the cap must be returned unchanged")
 }
+
+// TestClassifyColumn_OIDFallback verifies that json/jsonb/bytea columns
+// with an empty TypeName (which happens when pgx can't resolve a domain
+// or custom-type OID to a name) still classify correctly via their
+// built-in PostgreSQL OID.
+func TestClassifyColumn_OIDFallback(t *testing.T) {
+	resetThemeForTest(t)
+
+	// JSONB by OID, empty TypeName
+	col := models.ColumnMeta{Name: "cfg", TypeOID: 3802, TypeName: ""}
+	require.True(t, IsJSONColumn(col))
+	require.Equal(t, `{"a":1}`, renderCellPlain([]byte(`{"a":1}`), col),
+		"jsonb []byte with empty TypeName must render as JSON text, not Go %v")
+
+	// JSON by OID, empty TypeName
+	col = models.ColumnMeta{Name: "cfg", TypeOID: 114, TypeName: ""}
+	require.True(t, IsJSONColumn(col))
+	require.Equal(t, `{"a":1}`, renderCellPlain([]byte(`{"a":1}`), col))
+
+	// BYTEA by OID, empty TypeName
+	col = models.ColumnMeta{Name: "blob", TypeOID: 17, TypeName: ""}
+	require.False(t, IsJSONColumn(col))
+	visible := renderCellPlain([]byte{0x48, 0x65, 0x6c, 0x6c, 0x6f}, col)
+	require.Contains(t, visible, `\x`, "bytea with empty TypeName must use hex preview")
+	require.Contains(t, visible, "5B", "bytea must show byte length")
+
+	// Unknown OID, empty TypeName — should fall through to default %v
+	col = models.ColumnMeta{Name: "x", TypeOID: 99999, TypeName: ""}
+	require.False(t, IsJSONColumn(col))
+	require.Equal(t, `[72 101 108 108 111]`, renderCellPlain([]byte{72, 101, 108, 108, 111}, col),
+		"unknown OID with empty TypeName must use Go %v fallback")
+}
+
+// TestClassifyColumn_TypeNameWins verifies TypeName takes priority over OID
+// when both are set (Name-based match is the primary path).
+func TestClassifyColumn_TypeNameWins(t *testing.T) {
+	resetThemeForTest(t)
+
+	// TypeName "text" with a jsonb OID — TypeName wins (kindString).
+	col := models.ColumnMeta{Name: "x", TypeOID: 3802, TypeName: "text"}
+	require.False(t, IsJSONColumn(col))
+	// []byte in a text column still hits formatScalar.
+	require.Equal(t, `[72 101]`, renderCellPlain([]byte{72, 101}, col))
+
+	// TypeName "jsonb" with an unknown OID — TypeName wins (kindJSON).
+	col = models.ColumnMeta{Name: "x", TypeOID: 99999, TypeName: "jsonb"}
+	require.True(t, IsJSONColumn(col))
+	require.Equal(t, `{"a":1}`, renderCellPlain([]byte(`{"a":1}`), col))
+}
