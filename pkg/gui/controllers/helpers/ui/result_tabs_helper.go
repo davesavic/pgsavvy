@@ -3222,8 +3222,31 @@ func (h *ResultTabsHelper) PromptExport() {
 	}
 	bufferedThresholdExceeded := estimated > threshold
 
-	destinations := []string{"File", "Clipboard"}
-	scopes := []string{"Visible", "Loaded", "Full"}
+	destinations := []string{"Clipboard", "File"}
+	scopes := []string{"On screen", "Buffered", "All rows"}
+
+	// Snapshot row counts for scope descriptions.
+	visibleCount := len(g.VisibleRows())
+	bufferedCount := len(g.AllRows())
+	var estimatedTotal int64
+	if r := t.Runner(); r != nil {
+		estimatedTotal = r.EstimatedRows()
+	}
+
+	descriptions := make([]string, len(scopes))
+	if visibleCount == 0 && bufferedCount == 0 && estimatedTotal == 0 {
+		for i := range descriptions {
+			descriptions[i] = "No rows to export."
+		}
+	} else {
+		descriptions[0] = fmt.Sprintf("Includes %d rows currently visible on screen.", visibleCount)
+		descriptions[1] = fmt.Sprintf("Includes all %d rows in memory.", bufferedCount)
+		if estimatedTotal > 0 {
+			descriptions[2] = fmt.Sprintf("Includes the complete result (~%d rows).", estimatedTotal)
+		} else {
+			descriptions[2] = "Includes the complete result."
+		}
+	}
 
 	// When SQL-INSERTs is in the format list, gate
 	// it on the GridView's editability decision (F2's single source of
@@ -3247,6 +3270,7 @@ func (h *ResultTabsHelper) PromptExport() {
 	if sqlInsertsReason != "" {
 		m.SetSQLInsertsDisabledReason(sqlInsertsReason)
 	}
+	m.SetScopeDescriptions(descriptions)
 
 	// Prefill the File destination path from the same download-dir +
 	// DefaultFilename logic buildDestination uses, deriving the extension

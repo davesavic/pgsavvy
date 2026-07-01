@@ -31,18 +31,18 @@ func syncWorker(rec *orderRecorder) func(func(gocui.Task) error) {
 }
 
 // newExportMenuOnFile builds a CSV/File export menu with the Scope on
-// "Loaded" (index 1) and the path prefilled. Loaded scope snapshots
+// "Buffered" (index 1) and the path prefilled. Buffered scope snapshots
 // grid.AllRows, which is populated by seedTabWithRows without needing a render.
 func newExportMenuOnFile(path string) *popup.ExportMenu {
 	m := popup.NewExportMenu(
 		[]string{"CSV"},
 		[]string{"File", "Clipboard"},
-		[]string{"Visible", "Loaded", "Full"},
+		[]string{"On screen", "Buffered", "All rows"},
 		-1, false,
 	)
 	m.Prefill(path)
 	// Move the field cursor to Scope (the last navigable field, clamps
-	// there) and bump the value to "Loaded" (index 1).
+	// there) and bump the value to "Buffered" (index 1).
 	m.MoveField(+1)
 	m.MoveField(+1)
 	m.MoveField(+1)

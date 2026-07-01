@@ -13,7 +13,7 @@ func newPathMenuOnFile(initial string) *popup.ExportMenu {
 	m := popup.NewExportMenu(
 		[]string{"CSV"},
 		[]string{"File", "Clipboard"},
-		[]string{"Loaded"},
+		[]string{"Buffered"},
 		-1, false,
 	)
 	m.Prefill(initial)
@@ -144,7 +144,7 @@ func TestExportMenuEditPath_CancelLeavesPathAndReopens(t *testing.T) {
 // TestExportMenuEditPath_NoOpWhenPathFieldNotActive verifies the edit
 // prompt does not open when the cursor is not on the Path field.
 func TestExportMenuEditPath_NoOpWhenPathFieldNotActive(t *testing.T) {
-	m := popup.NewExportMenu([]string{"CSV"}, []string{"File"}, []string{"Loaded"}, -1, false)
+	m := popup.NewExportMenu([]string{"CSV"}, []string{"File"}, []string{"Buffered"}, -1, false)
 	// Cursor stays on FieldFormat — Path not active.
 	opened := false
 	h := NewResultTabsHelper(ResultTabsHelperDeps{

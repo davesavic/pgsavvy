@@ -57,7 +57,7 @@ func TestExportMenuController_EditPathDispatches(t *testing.T) {
 // TestExportMenu_IsPathFieldActive verifies the predicate is true only when
 // the Path row is the cursor AND the destination is File.
 func TestExportMenu_IsPathFieldActive(t *testing.T) {
-	m := popup.NewExportMenu([]string{"CSV"}, []string{"File", "Clipboard"}, []string{"Loaded"}, -1, false)
+	m := popup.NewExportMenu([]string{"CSV"}, []string{"File", "Clipboard"}, []string{"Buffered"}, -1, false)
 	if m.IsPathFieldActive() {
 		t.Error("IsPathFieldActive true on FieldFormat")
 	}
@@ -84,7 +84,7 @@ func TestExportMenu_IsPathFieldActive(t *testing.T) {
 func TestExportMenu_SQLInsertsGating_Editable(t *testing.T) {
 	formats := []string{"CSV", "TSV", "NDJSON", "JSON Array", "Markdown", "SQL INSERTs"}
 	destinations := []string{"File", "Clipboard", "stdout"}
-	scopes := []string{"Visible", "Loaded", "Full"}
+	scopes := []string{"On screen", "Buffered", "All rows"}
 
 	// sqlInsertsIdx=-1 mirrors PromptExport's choice when g.Editable()=true.
 	m := popup.NewExportMenu(formats, destinations, scopes, -1, false)
@@ -117,7 +117,7 @@ func TestExportMenu_SQLInsertsGating_Editable(t *testing.T) {
 func TestExportMenu_SQLInsertsGating_NotEditable(t *testing.T) {
 	formats := []string{"CSV", "TSV", "NDJSON", "JSON Array", "Markdown", "SQL INSERTs"}
 	destinations := []string{"File", "Clipboard", "stdout"}
-	scopes := []string{"Visible", "Loaded", "Full"}
+	scopes := []string{"On screen", "Buffered", "All rows"}
 
 	reason := "result spans multiple tables"
 	// sqlInsertsIdx=5 mirrors PromptExport's choice when g.Editable()=false
@@ -172,7 +172,7 @@ func TestExportMenu_SQLInsertsGating_NotEditable(t *testing.T) {
 func TestExportMenu_SQLInsertsGating_StateUpdatesOnReopen(t *testing.T) {
 	formats := []string{"CSV", "SQL INSERTs"}
 	destinations := []string{"File"}
-	scopes := []string{"Loaded"}
+	scopes := []string{"Buffered"}
 
 	// First open: editable.
 	mEditable := popup.NewExportMenu(formats, destinations, scopes, -1, false)

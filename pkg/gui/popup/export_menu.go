@@ -63,6 +63,8 @@ type ExportMenu struct {
 
 	bufferedThresholdExceeded bool
 	bufferedThresholdLabel    string
+
+	scopeDescriptions []string
 }
 
 // NewExportMenu constructs the state. formats[] should already include or
@@ -327,6 +329,15 @@ func (m *ExportMenu) SetBufferedThresholdLabel(s string) {
 	m.bufferedThresholdLabel = s
 }
 
+// SetScopeDescriptions installs the per-scope row-count descriptions
+// rendered under the Scope field line. The slice parallels scopes[]:
+// descriptions[i] belongs to scopes[i]. A nil or empty slice clears
+// descriptions (no description line rendered). Defensive-copied to
+// match the constructor convention.
+func (m *ExportMenu) SetScopeDescriptions(d []string) {
+	m.scopeDescriptions = append([]string(nil), d...)
+}
+
 // ConfirmBlockedReason returns "" when Confirm is allowed; otherwise a
 // short human-readable reason. Conditions blocking Confirm:
 //   - SQL-INSERTs selected when disabled.
@@ -400,6 +411,13 @@ func (m *ExportMenu) Body() string {
 	b.WriteString("Scope:       ")
 	b.WriteString(m.ScopeLabel())
 	b.WriteByte('\n')
+
+	if m.scopeIdx >= 0 && m.scopeIdx < len(m.scopeDescriptions) {
+		b.WriteString(m.rowPrefix(FieldScope))
+		b.WriteString("             ")
+		b.WriteString(m.scopeDescriptions[m.scopeIdx])
+		b.WriteByte('\n')
+	}
 
 	b.WriteString("\n(↑/↓ field, ←/→ value, <CR> export, <esc> cancel)")
 
