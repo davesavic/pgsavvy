@@ -207,6 +207,34 @@ func TestBuildPgxConfig_DiscreteNoPasswordEmbedded(t *testing.T) {
 	}
 }
 
+func TestBuildPgxConfig_ApplicationNameHardcoded(t *testing.T) {
+	profile := models.Connection{Name: "p", DSN: validDSN}
+	cfg, err := BuildPgxConfig(context.Background(), profile, "pw")
+	if err != nil {
+		t.Fatalf("BuildPgxConfig: %v", err)
+	}
+	if cfg.ConnConfig.RuntimeParams == nil {
+		t.Fatal("RuntimeParams is nil")
+	}
+	if got := cfg.ConnConfig.RuntimeParams["application_name"]; got != "pgsavvy" {
+		t.Errorf("RuntimeParams[application_name] = %q, want hardcoded %q", got, "pgsavvy")
+	}
+}
+
+func TestBuildPgxConfig_ApplicationNameDiscreteFields(t *testing.T) {
+	profile := models.Connection{Host: "h", Port: 5432, User: "u", Database: "db"}
+	cfg, err := BuildPgxConfig(context.Background(), profile, "")
+	if err != nil {
+		t.Fatalf("BuildPgxConfig: %v", err)
+	}
+	if cfg.ConnConfig.RuntimeParams == nil {
+		t.Fatal("RuntimeParams is nil")
+	}
+	if got := cfg.ConnConfig.RuntimeParams["application_name"]; got != "pgsavvy" {
+		t.Errorf("RuntimeParams[application_name] = %q, want hardcoded %q", got, "pgsavvy")
+	}
+}
+
 // ---------- statement_timeout validation ------------------------------------
 
 func TestBuildPgxConfig_InvalidStatementTimeoutFailsAtBuildTime(t *testing.T) {

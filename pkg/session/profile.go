@@ -127,6 +127,11 @@ func BuildPgxConfig(_ context.Context, profile models.Connection, password strin
 	cfg.MaxConnIdleTime = 5 * time.Minute
 	cfg.HealthCheckPeriod = 1 * time.Minute
 
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = make(map[string]string)
+	}
+	cfg.ConnConfig.RuntimeParams["application_name"] = "pgsavvy"
+
 	if shouldWarnInsecureSSL(connString, cfg) {
 		warnInsecureSSL(os.Stderr, profile.Name, cfg.ConnConfig.Host, sslModeForLog(connString))
 	}
