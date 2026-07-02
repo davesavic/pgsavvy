@@ -90,12 +90,15 @@ func TestResolvePasswordExhaustsToPgxAutoDiscoverySentinel(t *testing.T) {
 	}
 }
 
-func TestResolvePasswordExhaustsWithPrompterReturnsTypedError(t *testing.T) {
+func TestResolvePassword_PrompterEmptyStringReturnsEmptyPassword(t *testing.T) {
 	profile := models.Connection{Name: "p"}
 	fp := &fakePrompter{value: ""}
-	_, err := ResolvePassword(context.Background(), profile, fp)
-	if !errors.Is(err, errNoCredentialMechanism) {
-		t.Fatalf("expected errNoCredentialMechanism, got %v", err)
+	got, err := ResolvePassword(context.Background(), profile, fp)
+	if err != nil {
+		t.Fatalf("expected nil error for empty password from prompter, got %v", err)
+	}
+	if got != "" {
+		t.Fatalf("expected empty password, got %q", got)
 	}
 	if fp.calls != 1 {
 		t.Fatalf("expected prompter called once, got %d", fp.calls)

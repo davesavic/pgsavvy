@@ -176,6 +176,7 @@ func (c *SavedQueryController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			ShowInBar:   true,
 		},
 	)
+	out = append(out, railSwitchBindings(string(types.SAVED_QUERY), tr)...)
 	return out
 }
 

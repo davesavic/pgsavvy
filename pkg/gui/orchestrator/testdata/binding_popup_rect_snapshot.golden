@@ -109,8 +109,11 @@ binding	scope=hide_overlay	key=q	mode=normal
 binding	scope=hide_overlay	key=␣	mode=normal
 binding	scope=history	key=$	mode=normal
 binding	scope=history	key=0	mode=normal
+binding	scope=history	key=3	mode=normal
+binding	scope=history	key=4	mode=normal
 binding	scope=history	key=<cr>	mode=normal
 binding	scope=history	key=<esc>	mode=normal
+binding	scope=history	key=<tab>	mode=normal
 binding	scope=history	key=G	mode=normal
 binding	scope=history	key=[	mode=normal
 binding	scope=history	key=]	mode=normal
@@ -328,8 +331,11 @@ binding	scope=result_grid	key=y	mode=normal
 binding	scope=result_grid	key=yy	mode=normal
 binding	scope=saved_query	key=$	mode=normal
 binding	scope=saved_query	key=0	mode=normal
+binding	scope=saved_query	key=3	mode=normal
+binding	scope=saved_query	key=4	mode=normal
 binding	scope=saved_query	key=<cr>	mode=normal
 binding	scope=saved_query	key=<esc>	mode=normal
+binding	scope=saved_query	key=<tab>	mode=normal
 binding	scope=saved_query	key=G	mode=normal
 binding	scope=saved_query	key=[	mode=normal
 binding	scope=saved_query	key=]	mode=normal
@@ -342,10 +348,13 @@ binding	scope=saved_query	key=l	mode=normal
 binding	scope=schema-rail	key=$	mode=normal
 binding	scope=schema-rail	key=/	mode=normal
 binding	scope=schema-rail	key=0	mode=normal
+binding	scope=schema-rail	key=3	mode=normal
+binding	scope=schema-rail	key=4	mode=normal
 binding	scope=schema-rail	key=<c-l>	mode=normal
 binding	scope=schema-rail	key=<cr>	mode=normal
 binding	scope=schema-rail	key=<esc>	mode=normal
 binding	scope=schema-rail	key=<leader>H	mode=normal
+binding	scope=schema-rail	key=<tab>	mode=normal
 binding	scope=schema-rail	key=G	mode=normal
 binding	scope=schema-rail	key=H	mode=normal
 binding	scope=schema-rail	key=N	mode=normal

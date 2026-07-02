@@ -138,11 +138,7 @@ func ResolvePasswordWithPrompters(ctx context.Context, profile models.Connection
 		if err != nil {
 			return "", fmt.Errorf("session: prompt: %w", err)
 		}
-		if pw != "" {
-			return pw, nil
-		}
-		// Prompter present but returned empty → typed error.
-		return "", errNoCredentialMechanism
+		return pw, nil
 	}
 
 	// Auto-discovery sentinel: no prompter, nothing matched. Caller decides

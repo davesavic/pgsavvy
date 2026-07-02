@@ -84,6 +84,65 @@ func TestSavedQueryPublishesTabCycleBindings(t *testing.T) {
 	assertTabCycleBindings(t, c.GetKeybindings(types.KeybindingsOpts{}), types.SAVED_QUERY)
 }
 
+// TestSavedQueryPublishesRailSwitchBindings asserts the SAVED_QUERY leaf
+// publishes the `3`→QueryEditor / `4`→Results / Tab→Next rail-switch triple
+// under its OWN scope.
+func TestSavedQueryPublishesRailSwitchBindings(t *testing.T) {
+	ctx := guicontext.NewSavedQueryContext(
+		guicontext.NewBaseContext(guicontext.BaseContextOpts{Key: types.SAVED_QUERY, ViewName: string(types.SAVED_QUERY)}),
+		guicontext.Deps{},
+	)
+	c := NewSavedQueryController(nil, CoreDeps{}, UIDeps{}, ctx, nil, nil, nil, "")
+	assertRailSwitchBindings(t, c.GetKeybindings(types.KeybindingsOpts{}), types.SAVED_QUERY)
+}
+
+// assertRailSwitchBindings checks bindings contain exactly one `3`→QueryEditor,
+// one `4`→Results, and one Tab→Next, all under wantScope + Normal mode.
+func assertRailSwitchBindings(t *testing.T, bindings []*types.ChordBinding, wantScope types.ContextKey) {
+	t.Helper()
+	want := map[string]*struct {
+		key     rune
+		special types.SpecialKey
+		action  string
+	}{
+		"3":    {'3', types.KeyNone, commands.RailSwitchQueryEditor},
+		"4":    {'4', types.KeyNone, commands.RailSwitchResults},
+		"<tab>": {0, types.KeyTab, commands.RailSwitchNext},
+	}
+	for _, b := range bindings {
+		if len(b.Sequence) != 1 {
+			continue
+		}
+		k := b.Sequence[0]
+		var label string
+		switch {
+		case k.Special == types.KeyNone && k.Code >= '0' && k.Code <= '9':
+			label = string(k.Code)
+		case k.Special == types.KeyTab:
+			label = "<tab>"
+		default:
+			continue
+		}
+		exp, ok := want[label]
+		if !ok {
+			continue
+		}
+		if b.ActionID != exp.action {
+			t.Errorf("%q action = %q, want %q", label, b.ActionID, exp.action)
+		}
+		if b.Scope != wantScope {
+			t.Errorf("%q scope = %s, want %s", label, b.Scope, wantScope)
+		}
+		if b.Mode != types.ModeNormal {
+			t.Errorf("%q mode = %v, want Normal", label, b.Mode)
+		}
+		delete(want, label)
+	}
+	for label := range want {
+		t.Errorf("missing binding for %q", label)
+	}
+}
+
 // assertTabCycleBindings checks bindings contains exactly one `]`→Next and
 // one `[`→Prev, both under wantScope + Normal mode + ShowInBar.
 func assertTabCycleBindings(t *testing.T, bindings []*types.ChordBinding, wantScope types.ContextKey) {

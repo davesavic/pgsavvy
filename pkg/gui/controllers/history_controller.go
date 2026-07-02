@@ -118,6 +118,7 @@ func (c *HistoryController) GetKeybindings(_ types.KeybindingsOpts) []*types.Cho
 			ShowInBar:   true,
 		},
 	)
+	out = append(out, railSwitchBindings(string(types.HISTORY), tr)...)
 	return out
 }
 

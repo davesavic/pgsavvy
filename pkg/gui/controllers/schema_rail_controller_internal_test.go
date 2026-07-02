@@ -222,3 +222,53 @@ func TestSchemaRail_NavDrivesActiveLeafCursor(t *testing.T) {
 		t.Fatalf("SchemaRailDown on Schemas: cursor=%d, want %d", got, start+1)
 	}
 }
+
+// TestSchemaRailPublishesRailSwitchBindings asserts the SCHEMA_RAIL container
+// publishes the `3`→QueryEditor / `4`→Results / Tab→Next rail-switch triple
+// under its OWN scope.
+func TestSchemaRailPublishesRailSwitchBindings(t *testing.T) {
+	f := newRailFixture(t)
+	got := f.ctrl.GetKeybindings(types.KeybindingsOpts{})
+
+	want := map[string]struct {
+		key     rune
+		special types.SpecialKey
+		action  string
+	}{
+		"3":    {'3', types.KeyNone, commands.RailSwitchQueryEditor},
+		"4":    {'4', types.KeyNone, commands.RailSwitchResults},
+		"<tab>": {0, types.KeyTab, commands.RailSwitchNext},
+	}
+	for _, b := range got {
+		if len(b.Sequence) != 1 {
+			continue
+		}
+		k := b.Sequence[0]
+		var label string
+		switch {
+		case k.Special == types.KeyNone && k.Code >= '0' && k.Code <= '9':
+			label = string(k.Code)
+		case k.Special == types.KeyTab:
+			label = "<tab>"
+		default:
+			continue
+		}
+		exp, ok := want[label]
+		if !ok {
+			continue
+		}
+		if b.ActionID != exp.action {
+			t.Errorf("%q action = %q, want %q", label, b.ActionID, exp.action)
+		}
+		if b.Scope != types.SCHEMA_RAIL {
+			t.Errorf("%q scope = %s, want %s", label, b.Scope, types.SCHEMA_RAIL)
+		}
+		if b.Mode != types.ModeNormal {
+			t.Errorf("%q mode = %v, want Normal", label, b.Mode)
+		}
+		delete(want, label)
+	}
+	for label := range want {
+		t.Errorf("missing binding for %q", label)
+	}
+}

@@ -266,6 +266,14 @@ func (s *SchemaRailController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 
 		// Ctrl+L escape into the QueryEditor (+ no-op fall-throughs handled
 		// by railDirectionalBindings for the SCHEMA_RAIL scope).
+
+		// Rail-switch digit/tab bindings so the user can hop to the
+		// QueryEditor pane from the side rail.  Ctrl+L (above) is the
+		// directional escape;  '3'/'4'/<tab> mirror the QueryEditor/
+		// Results/Plan panes.
+		bind([]types.ChordKey{{Code: '3'}}, commands.RailSwitchQueryEditor, tr.Actions.RailQueryEditor, false),
+		bind([]types.ChordKey{{Code: '4'}}, commands.RailSwitchResults, tr.Actions.RailResults, false),
+		bind([]types.ChordKey{{Special: types.KeyTab}}, commands.RailSwitchNext, tr.Actions.RailQueryEditor, false),
 	}
 	out = append(out, railDirectionalBindings(scope, tr)...)
 

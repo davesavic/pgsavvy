@@ -131,10 +131,10 @@ func TestHistoryGetKeybindings_NavConfirmCloseOnly(t *testing.T) {
 
 	// Expected sequences: j, k, gg, G, the h/l/0/$ horizontal-pan bindings
 	// shared by every list rail, <cr>, <esc>, plus the QUERY_RAIL `]`/`[`
-	// tab-cycle pair. Exactly twelve bindings, no per-character or on-change
-	// bindings.
-	if len(got) != 12 {
-		t.Fatalf("len(bindings) = %d, want 12 (j,k,gg,G,h,l,0,$,<cr>,<esc>,],[)", len(got))
+	// tab-cycle pair, plus `3`/`4`/Tab rail-switch bindings. Exactly fifteen
+	// bindings, no per-character or on-change bindings.
+	if len(got) != 15 {
+		t.Fatalf("len(bindings) = %d, want 15", len(got))
 	}
 
 	for _, b := range got {
@@ -151,6 +151,8 @@ func TestHistoryGetKeybindings_NavConfirmCloseOnly(t *testing.T) {
 				s += "<cr>"
 			case types.KeyEsc:
 				s += "<esc>"
+			case types.KeyTab:
+				s += "<tab>"
 			default:
 				s += string(k.Code)
 			}
@@ -161,9 +163,28 @@ func TestHistoryGetKeybindings_NavConfirmCloseOnly(t *testing.T) {
 	for _, b := range got {
 		seen[seqKey(b)] = true
 	}
-	for _, want := range []string{"j", "k", "gg", "G", "h", "l", "0", "$", "<cr>", "<esc>", "]", "["} {
+	for _, want := range []string{"j", "k", "gg", "G", "h", "l", "0", "$", "<cr>", "<esc>", "]", "[", "3", "4", "<tab>"} {
 		if !seen[want] {
 			t.Errorf("missing binding for sequence %q", want)
+		}
+	}
+
+	// Verify the rail-switch action IDs are correct.
+	for _, b := range got {
+		key := seqKey(b)
+		switch key {
+		case "3":
+			if b.ActionID != commands.RailSwitchQueryEditor {
+				t.Errorf("'3' bound to %q, want %q", b.ActionID, commands.RailSwitchQueryEditor)
+			}
+		case "4":
+			if b.ActionID != commands.RailSwitchResults {
+				t.Errorf("'4' bound to %q, want %q", b.ActionID, commands.RailSwitchResults)
+			}
+		case "<tab>":
+			if b.ActionID != commands.RailSwitchNext {
+				t.Errorf("'<tab>' bound to %q, want %q", b.ActionID, commands.RailSwitchNext)
+			}
 		}
 	}
 
