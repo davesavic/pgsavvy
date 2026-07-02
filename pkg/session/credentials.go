@@ -31,9 +31,9 @@ type Prompter interface {
 // outside this package use errors.Is via wrapped sentinels exposed in later
 // tasks, or simply check error presence.
 var (
-	errNoUsableShell         = errors.New("session: no usable shell for password_command (tried $SHELL, /bin/bash, /bin/sh)")
-	errPgpassInsecureMode    = errors.New("session: pgpass file has world/group permissions; refusing to read (libpq parity)")
-	errNoTTY = errors.New("session: stdin is not a TTY; cannot prompt for password")
+	errNoUsableShell      = errors.New("session: no usable shell for password_command (tried $SHELL, /bin/bash, /bin/sh)")
+	errPgpassInsecureMode = errors.New("session: pgpass file has world/group permissions; refusing to read (libpq parity)")
+	errNoTTY              = errors.New("session: stdin is not a TTY; cannot prompt for password")
 )
 
 // ResolvePassword walks the five-step credentials waterfall for the given
