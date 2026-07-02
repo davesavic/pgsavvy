@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
@@ -96,5 +97,38 @@ func TestConfirmRunBodySingleStatementHeader(t *testing.T) {
 	}
 	if !strings.Contains(got, "update accounts set active = false") {
 		t.Fatalf("confirmRunBody missing statement:\n%s", got)
+	}
+}
+
+func TestConnNeedsTypedNameGate(t *testing.T) {
+	if connNeedsTypedNameGate(nil, true) {
+		t.Fatal("nil conn returned true")
+	}
+	if connNeedsTypedNameGate(&models.Connection{}, true) {
+		t.Fatal("empty name returned true")
+	}
+	if connNeedsTypedNameGate(&models.Connection{Name: "  "}, true) {
+		t.Fatal("TrimSpace-empty name returned true")
+	}
+	if connNeedsTypedNameGate(&models.Connection{Name: "prod"}, false) {
+		t.Fatal("needsConfirm=false returned true")
+	}
+	if !connNeedsTypedNameGate(&models.Connection{Name: "prod"}, true) {
+		t.Fatal("valid name + needsConfirm returned false")
+	}
+}
+
+func TestTypedNameMatches(t *testing.T) {
+	if !typedNameMatches("prod", "prod") {
+		t.Fatal("exact match returned false")
+	}
+	if typedNameMatches("prod", "Prod") {
+		t.Fatal("case mismatch returned true")
+	}
+	if typedNameMatches("prod", "staging") {
+		t.Fatal("wrong name returned true")
+	}
+	if !typedNameMatches("  prod  ", " prod ") {
+		t.Fatal("TrimSpace both sides returned false")
 	}
 }

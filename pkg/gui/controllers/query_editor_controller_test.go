@@ -1088,3 +1088,186 @@ func TestQueryEditorAllActionsAppearInAllActionIDs(t *testing.T) {
 		}
 	}
 }
+
+// runEditorTypedNameWith builds a query-editor controller with a wired
+// fakePrompt and returns the test harness for typed-name gate assertions.
+func runEditorTypedNameWith(t *testing.T, bufText string, conn *models.Connection) (*recordingRunnerSession, *bag) {
+	t.Helper()
+	rec := &recordingRunnerSession{}
+	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+
+	base := newBag()
+	base.HelperBag.QueryRunner = runner
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: bufText, Off: 0}
+	base.HelperBag.ResultTabs = &fakeResultTabs{}
+	base.HelperBag.ConnProfile = func() *models.Connection { return conn }
+	base.Prompt = &fakePrompt{}
+	base.HelperBag.UIDeps.Prompt = base.Prompt
+
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+	return rec, base
+}
+
+func TestQueryEditorTypedNameGatePassesCorrectName(t *testing.T) {
+	conn := &models.Connection{Name: "prod", ConfirmWrites: true}
+	rec, base := runEditorTypedNameWith(t, "UPDATE t SET a=1", conn)
+
+	if base.Prompt.calls != 1 {
+		t.Fatalf("prompt calls = %d, want 1", base.Prompt.calls)
+	}
+	if len(base.Confirm.calls) != 0 {
+		t.Fatal("confirm appeared before prompt submit")
+	}
+	if len(base.Toast.msgs) != 0 {
+		t.Fatalf("unexpected toast: %#v", base.Toast.msgs)
+	}
+
+	if err := base.Prompt.Submit("prod"); err != nil {
+		t.Fatalf("prompt submit err = %v", err)
+	}
+	if len(base.Confirm.calls) != 1 {
+		t.Fatalf("confirm calls = %d, want 1", len(base.Confirm.calls))
+	}
+	if len(rec.streamCalls) != 0 {
+		t.Fatal("statement executed before confirm yes")
+	}
+
+	if err := base.Confirm.calls[0].OnYes(); err != nil {
+		t.Fatalf("onYes err = %v", err)
+	}
+	if len(rec.streamCalls) != 1 {
+		t.Fatalf("streamCalls = %d, want 1", len(rec.streamCalls))
+	}
+	if rec.streamCalls[0].SQL != "UPDATE t SET a=1" {
+		t.Fatalf("dispatched SQL = %q", rec.streamCalls[0].SQL)
+	}
+}
+
+func TestQueryEditorTypedNameGateRejectsWrongName(t *testing.T) {
+	conn := &models.Connection{Name: "prod", ConfirmWrites: true}
+	rec, base := runEditorTypedNameWith(t, "UPDATE t SET a=1", conn)
+
+	if base.Prompt.calls != 1 {
+		t.Fatalf("prompt calls = %d, want 1", base.Prompt.calls)
+	}
+
+	if err := base.Prompt.Submit("staging"); err != nil {
+		t.Fatalf("prompt submit err = %v", err)
+	}
+
+	if len(base.Confirm.calls) != 0 {
+		t.Fatal("confirm appeared for wrong name")
+	}
+	if len(rec.streamCalls) != 0 {
+		t.Fatal("statement executed for wrong name")
+	}
+	if len(base.Toast.msgs) != 1 || base.Toast.msgs[0].Msg != "connection name doesn't match" {
+		t.Fatalf("Toast = %#v, want 'connection name doesn't match'", base.Toast.msgs)
+	}
+}
+
+func TestQueryEditorTypedNameGateCancel(t *testing.T) {
+	conn := &models.Connection{Name: "prod", ConfirmWrites: true}
+	rec, base := runEditorTypedNameWith(t, "UPDATE t SET a=1", conn)
+
+	if base.Prompt.calls != 1 {
+		t.Fatalf("prompt calls = %d, want 1", base.Prompt.calls)
+	}
+
+	if err := base.Prompt.Cancel(); err != nil {
+		t.Fatalf("prompt cancel err = %v", err)
+	}
+
+	if len(base.Confirm.calls) != 0 {
+		t.Fatal("confirm appeared after cancel")
+	}
+	if len(rec.streamCalls) != 0 {
+		t.Fatal("statement executed after cancel")
+	}
+	if len(base.Toast.msgs) != 1 || base.Toast.msgs[0].Msg != "run cancelled" {
+		t.Fatalf("Toast = %#v, want 'run cancelled'", base.Toast.msgs)
+	}
+}
+
+func TestQueryEditorTypedNameGateSkippedForEmptyName(t *testing.T) {
+	conn := &models.Connection{Name: "", ConfirmWrites: true}
+	rec, base := runEditorTypedNameWith(t, "UPDATE t SET a=1", conn)
+
+	if base.Prompt.calls != 0 {
+		t.Fatalf("prompt called = %d, want 0 (empty name)", base.Prompt.calls)
+	}
+	if len(base.Confirm.calls) != 1 {
+		t.Fatalf("confirm calls = %d, want 1", len(base.Confirm.calls))
+	}
+	if len(rec.streamCalls) != 0 {
+		t.Fatal("statement executed before confirm yes")
+	}
+
+	if err := base.Confirm.calls[0].OnYes(); err != nil {
+		t.Fatalf("onYes err = %v", err)
+	}
+	if len(rec.streamCalls) != 1 {
+		t.Fatalf("streamCalls = %d, want 1", len(rec.streamCalls))
+	}
+}
+
+func TestQueryEditorTypedNameGateDDL(t *testing.T) {
+	t.Run("correct name", func(t *testing.T) {
+		conn := &models.Connection{Name: "prod", ConfirmDDL: true}
+		rec, base := runEditorTypedNameWith(t, "CREATE TABLE t (id int)", conn)
+
+		if base.Prompt.calls != 1 {
+			t.Fatalf("prompt calls = %d, want 1", base.Prompt.calls)
+		}
+
+		if err := base.Prompt.Submit("prod"); err != nil {
+			t.Fatalf("submit err = %v", err)
+		}
+		if len(base.Confirm.calls) != 1 {
+			t.Fatalf("confirm calls = %d, want 1", len(base.Confirm.calls))
+		}
+
+		if err := base.Confirm.calls[0].OnYes(); err != nil {
+			t.Fatalf("onYes err = %v", err)
+		}
+		if len(rec.streamCalls) != 1 {
+			t.Fatalf("streamCalls = %d, want 1", len(rec.streamCalls))
+		}
+	})
+
+	t.Run("wrong name", func(t *testing.T) {
+		conn := &models.Connection{Name: "prod", ConfirmDDL: true}
+		rec, base := runEditorTypedNameWith(t, "CREATE TABLE t (id int)", conn)
+
+		if err := base.Prompt.Submit("wrong"); err != nil {
+			t.Fatalf("submit err = %v", err)
+		}
+		if len(base.Confirm.calls) != 0 {
+			t.Fatal("confirm appeared for wrong DDL name")
+		}
+		if len(rec.streamCalls) != 0 {
+			t.Fatal("DDL executed for wrong name")
+		}
+	})
+
+	t.Run("cancel", func(t *testing.T) {
+		conn := &models.Connection{Name: "prod", ConfirmDDL: true}
+		rec, base := runEditorTypedNameWith(t, "CREATE TABLE t (id int)", conn)
+
+		if err := base.Prompt.Cancel(); err != nil {
+			t.Fatalf("cancel err = %v", err)
+		}
+		if len(base.Confirm.calls) != 0 {
+			t.Fatal("confirm appeared after DDL cancel")
+		}
+		if len(rec.streamCalls) != 0 {
+			t.Fatal("DDL executed after cancel")
+		}
+	})
+}

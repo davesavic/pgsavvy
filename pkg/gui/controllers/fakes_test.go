@@ -90,6 +90,39 @@ func (f *fakeConfirm) Confirm(title, body string, onYes, onNo func() error) erro
 func (f *fakeConfirm) Yes() error { f.yes++; return nil }
 func (f *fakeConfirm) No() error  { f.no++; return nil }
 
+// fakePrompt records Prompt invocations (label, callbacks) so tests can
+// drive the submit/cancel path directly without a real gocui prompt.
+type fakePrompt struct {
+	label    string
+	onSubmit func(value string) error
+	onCancel func() error
+	calls    int
+}
+
+func (f *fakePrompt) Prompt(label, _ string, onSubmit func(string) error, onCancel func() error) error {
+	f.calls++
+	f.label = label
+	f.onSubmit = onSubmit
+	f.onCancel = onCancel
+	return nil
+}
+
+func (f *fakePrompt) Submit(value string) error {
+	if f.onSubmit == nil {
+		return nil
+	}
+	return f.onSubmit(value)
+}
+
+func (f *fakePrompt) Cancel() error {
+	if f.onCancel == nil {
+		return nil
+	}
+	return f.onCancel()
+}
+
+func (f *fakePrompt) SetResetHandler(func(initial string)) {}
+
 type (
 	fakeToast struct {
 		msgs    []toastMsg
@@ -205,6 +238,7 @@ type bag struct {
 	Schemas      *fakeSchemasInvoker
 	ConnForm     *fakeConnectionForm
 	Confirm      *fakeConfirm
+	Prompt       *fakePrompt
 	Toast        *fakeToast
 	Tip          *fakeTip
 	TableDouble  *fakeTableDouble

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -590,10 +591,33 @@ func nonEmptyStatements(stmts []string) []string {
 // synchronous run-scope bookkeeping still runs — just after the user
 // confirms. Cancelling drops the run entirely.
 func (q *QueryEditorController) confirmRun(stmts []string, proceed func()) {
-	if q.helpers.Confirm == nil || !q.runNeedsConfirm(stmts) {
+	needsConfirm := q.runNeedsConfirm(stmts)
+	if q.helpers.Confirm == nil || !needsConfirm {
 		proceed()
 		return
 	}
+
+	conn := q.helpers.ConnProfile()
+	if conn != nil && q.helpers.Prompt != nil && strings.TrimSpace(conn.Name) != "" && needsConfirm {
+		label := "type " + strconv.Quote(conn.Name) + " to confirm"
+		onSubmit := func(value string) error {
+			if strings.TrimSpace(value) == strings.TrimSpace(conn.Name) {
+				return q.helpers.Confirm.Confirm("Confirm execution", confirmRunBody(stmts), func() error {
+					proceed()
+					return nil
+				}, nil)
+			}
+			q.helpers.Toast.Show("connection name doesn't match", queryToastTTL)
+			return nil
+		}
+		onCancel := func() error {
+			q.helpers.Toast.Show("run cancelled", queryToastTTL)
+			return nil
+		}
+		_ = q.helpers.Prompt.Prompt(label, "", onSubmit, onCancel)
+		return
+	}
+
 	_ = q.helpers.Confirm.Confirm("Confirm execution", confirmRunBody(stmts), func() error {
 		proceed()
 		return nil
@@ -633,6 +657,22 @@ func (q *QueryEditorController) runNeedsConfirm(stmts []string) bool {
 		}
 	}
 	return false
+}
+
+// connNeedsTypedNameGate reports whether the confirmRun typed-name gate
+// should apply: a non-nil connection with a non-empty (TrimSpace) name and
+// a true needsConfirm result.
+func connNeedsTypedNameGate(conn *models.Connection, needsConfirm bool) bool {
+	if conn == nil || !needsConfirm {
+		return false
+	}
+	return strings.TrimSpace(conn.Name) != ""
+}
+
+// typedNameMatches compares the user input against the connection name
+// after trimming whitespace from both sides.
+func typedNameMatches(connName, input string) bool {
+	return strings.TrimSpace(input) == strings.TrimSpace(connName)
 }
 
 // confirmRunBody builds the popup body: a single highlighted statement
