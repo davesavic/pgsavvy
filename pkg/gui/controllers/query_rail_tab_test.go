@@ -105,8 +105,8 @@ func assertRailSwitchBindings(t *testing.T, bindings []*types.ChordBinding, want
 		special types.SpecialKey
 		action  string
 	}{
-		"3":    {'3', types.KeyNone, commands.RailSwitchQueryEditor},
-		"4":    {'4', types.KeyNone, commands.RailSwitchResults},
+		"3":     {'3', types.KeyNone, commands.RailSwitchQueryEditor},
+		"4":     {'4', types.KeyNone, commands.RailSwitchResults},
 		"<tab>": {0, types.KeyTab, commands.RailSwitchNext},
 	}
 	for _, b := range bindings {

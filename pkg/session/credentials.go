@@ -33,8 +33,7 @@ type Prompter interface {
 var (
 	errNoUsableShell         = errors.New("session: no usable shell for password_command (tried $SHELL, /bin/bash, /bin/sh)")
 	errPgpassInsecureMode    = errors.New("session: pgpass file has world/group permissions; refusing to read (libpq parity)")
-	errNoTTY                 = errors.New("session: stdin is not a TTY; cannot prompt for password")
-	errNoCredentialMechanism = errors.New("session: no credential mechanism produced a password")
+	errNoTTY = errors.New("session: stdin is not a TTY; cannot prompt for password")
 )
 
 // ResolvePassword walks the five-step credentials waterfall for the given
@@ -55,9 +54,9 @@ var (
 // ("", nil). Callers (e.g. pkg/session BuildPgxConfig)
 // interpret this as "let pgx auto-discover ~/.pgpass on dial".
 //
-// When prompter IS non-nil and every mechanism (including the prompter)
-// produced no password, ResolvePassword returns a wrapped
-// errNoCredentialMechanism error.
+// When prompter IS non-nil, the prompter's result is returned as-is
+// (including empty strings, which signal the user chose to submit no
+// password).
 //
 // Any mechanism that returns a typed error (e.g. errPgpassInsecureMode,
 // password_command exit != 0, keyring open failure) short-circuits the

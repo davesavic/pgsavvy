@@ -219,7 +219,7 @@ func TestPasswordPrompterTrioStoreLoadClear(t *testing.T) {
 // pgxpool dial). We therefore assert (a) the global recording prompter WAS
 // invoked, and (b) Open failed at the DIAL phase ("pg: ping:" / "pg: open:"),
 // proving resolution succeeded with the prompted value rather than short-
-// circuiting on errNoCredentialMechanism. A nil/empty result would have
+// circuiting on an empty prompter result. A nil/empty result would have
 // surfaced the refusal sentinel before any dial.
 func TestOpenUsesInstalledGlobalPrompterResult(t *testing.T) {
 	prev := globalPasswordPrompter.Load()
