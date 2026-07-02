@@ -1228,8 +1228,8 @@ func TestCommitDialogController_ShowSqlEnabledOnReadOnly(t *testing.T) {
 // AC: [Esc] cancel always visible in all gate states.
 func TestDefaultCommitDialogRender_CancelAlwaysPresent(t *testing.T) {
 	cases := []struct {
-		name string
-		conn *models.Connection
+		name  string
+		conn  *models.Connection
 		typed string
 	}{
 		{"normal", &models.Connection{Name: "dev"}, ""},

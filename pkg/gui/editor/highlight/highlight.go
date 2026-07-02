@@ -88,7 +88,7 @@ func Highlight(text string) string {
 		}
 	}
 
-// Guarantee trailing reset.
+	// Guarantee trailing reset.
 	b.WriteString("\x1b[0m")
 	return b.String()
 }

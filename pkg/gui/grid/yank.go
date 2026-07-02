@@ -431,7 +431,7 @@ func jsonString(s string) string {
 			sb.WriteString(`\t`)
 		default:
 			if b < 0x20 {
-				sb.WriteString(fmt.Sprintf(`\u%04x`, b))
+				fmt.Fprintf(&sb, `\u%04x`, b)
 			} else {
 				sb.WriteByte(b)
 			}

@@ -513,8 +513,8 @@ func allContextKeyKinds() map[types.ContextKey]types.ContextKind {
 		types.CONFLICT_DIALOG:    types.TEMPORARY_POPUP,
 		types.FK_REVERSE_PICKER:  types.TEMPORARY_POPUP,
 		types.CONNECTION_MANAGER: types.MAIN_CONTEXT,
-		types.RELATIONSHIP_PANEL:  types.DISPLAY_CONTEXT,
-		types.CELL_VIEWER:         types.PERSISTENT_POPUP,
+		types.RELATIONSHIP_PANEL: types.DISPLAY_CONTEXT,
+		types.CELL_VIEWER:        types.PERSISTENT_POPUP,
 	}
 }
 

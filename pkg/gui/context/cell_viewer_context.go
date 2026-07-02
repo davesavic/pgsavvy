@@ -31,8 +31,8 @@ type CellViewerContext struct {
 
 	scroll [2]int
 
-	view               types.View
-	totalWrappedLines  int
+	view              types.View
+	totalWrappedLines int
 }
 
 func NewCellViewerContext(base BaseContext, deps Deps) *CellViewerContext {
@@ -116,8 +116,8 @@ func (c *CellViewerContext) PrimaryKey() []any {
 	return out
 }
 
-func (c *CellViewerContext) ScrollX() int   { return c.scroll[0] }
-func (c *CellViewerContext) ScrollY() int   { return c.scroll[1] }
+func (c *CellViewerContext) ScrollX() int           { return c.scroll[0] }
+func (c *CellViewerContext) ScrollY() int           { return c.scroll[1] }
 func (c *CellViewerContext) TotalWrappedLines() int { return c.totalWrappedLines }
 
 func (c *CellViewerContext) SetScrollX(x int) {
@@ -139,7 +139,7 @@ func (c *CellViewerContext) Scroll(dx, dy int) {
 	c.SetScrollY(c.scroll[1] + dy)
 }
 
-func (c *CellViewerContext) ToggleWrap()  { c.wrap = !c.wrap }
+func (c *CellViewerContext) ToggleWrap()   { c.wrap = !c.wrap }
 func (c *CellViewerContext) TogglePretty() { c.pretty = !c.pretty }
 func (c *CellViewerContext) Wrap() bool    { return c.wrap }
 func (c *CellViewerContext) Pretty() bool  { return c.pretty }
@@ -216,7 +216,7 @@ func (c *CellViewerContext) buildTitle(parseFailed bool) string {
 	sb.WriteString(c.colname)
 	sb.WriteString(" :: ")
 	sb.WriteString(c.typename)
-	sb.WriteString(fmt.Sprintf(" (%d bytes . %d lines)", c.byteCount, c.lineCount))
+	fmt.Fprintf(&sb, " (%d bytes . %d lines)", c.byteCount, c.lineCount)
 
 	if c.wrap {
 		sb.WriteString(" [wrap]")
@@ -231,9 +231,10 @@ func (c *CellViewerContext) buildTitle(parseFailed bool) string {
 	}
 
 	plain := grid.FormatViewerBodyPlain(c.originalValue, c.column, c.pretty)
-	if plain == grid.ViewerCellNULL {
+	switch plain {
+	case grid.ViewerCellNULL:
 		sb.WriteString(" [ NULL ]")
-	} else if plain == grid.ViewerCellEmpty {
+	case grid.ViewerCellEmpty:
 		sb.WriteString(" [ empty ]")
 	}
 
@@ -241,5 +242,3 @@ func (c *CellViewerContext) buildTitle(parseFailed bool) string {
 
 	return sb.String()
 }
-
-

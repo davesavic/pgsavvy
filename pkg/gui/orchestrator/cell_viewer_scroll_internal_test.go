@@ -18,7 +18,7 @@ type testCellViewerScroller struct {
 	totalWrappedLines int
 }
 
-func (t *testCellViewerScroller) ScrollY() int          { return t.scrollY }
+func (t *testCellViewerScroller) ScrollY() int           { return t.scrollY }
 func (t *testCellViewerScroller) SetScrollY(y int)       { t.scrollY = y }
 func (t *testCellViewerScroller) TotalWrappedLines() int { return t.totalWrappedLines }
 

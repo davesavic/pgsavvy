@@ -20,8 +20,8 @@ const (
 )
 
 const (
-	maxViewerCellBytes   = 1 << 20 // 1MB synchronous gate
-	maxTruncatedPreview  = 1024    // 1KB preview
+	maxViewerCellBytes  = 1 << 20 // 1MB synchronous gate
+	maxTruncatedPreview = 1024    // 1KB preview
 )
 
 func FormatViewerBody(value any, col models.ColumnMeta, pretty bool) (body string, parseFailed bool) {
@@ -160,9 +160,9 @@ type WrappedBody struct {
 	totalBytes int
 }
 
-func (w WrappedBody) Bytes() int        { return w.totalBytes }
-func (w WrappedBody) Lines() int        { return w.totalLines }
-func (w WrappedBody) Slice() []string   { return w.lines }
+func (w WrappedBody) Bytes() int      { return w.totalBytes }
+func (w WrappedBody) Lines() int      { return w.totalLines }
+func (w WrappedBody) Slice() []string { return w.lines }
 
 func WrapWindow(body string, width, rowOffset, viewHeight int) WrappedBody {
 	if width <= 0 {

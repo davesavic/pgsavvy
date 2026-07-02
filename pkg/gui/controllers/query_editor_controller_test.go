@@ -1104,7 +1104,7 @@ func runEditorTypedNameWith(t *testing.T, bufText string, conn *models.Connectio
 	base.HelperBag.ResultTabs = &fakeResultTabs{}
 	base.HelperBag.ConnProfile = func() *models.Connection { return conn }
 	base.Prompt = &fakePrompt{}
-	base.HelperBag.UIDeps.Prompt = base.Prompt
+	base.HelperBag.Prompt = base.Prompt
 
 	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
 	reg := commands.NewRegistry()

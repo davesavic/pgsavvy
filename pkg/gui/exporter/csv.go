@@ -72,4 +72,3 @@ func writeDelimitedRow(w io.Writer, fields []string, delim byte) error {
 	_, err := io.WriteString(w, b.String())
 	return err
 }
-

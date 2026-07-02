@@ -358,7 +358,7 @@ type ResultTabsHelper struct {
 	warnThreshold int64
 	sortPickLabel string
 	doubleClickMs int
-	yankFormat   string
+	yankFormat    string
 
 	// log is the structured logger for instrumentation (e.g. the preempt
 	// cancel path). Set post-construction via SetLogger; nil-safe — logs.Event

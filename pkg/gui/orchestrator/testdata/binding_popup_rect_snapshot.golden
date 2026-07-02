@@ -322,6 +322,7 @@ binding	scope=result_grid	key=j	mode=normal
 binding	scope=result_grid	key=k	mode=normal
 binding	scope=result_grid	key=l	mode=normal
 binding	scope=result_grid	key=n	mode=normal
+binding	scope=result_grid	key=v	mode=normal
 binding	scope=result_grid	key=w	mode=normal
 binding	scope=result_grid	key=y	mode=normal
 binding	scope=result_grid	key=yy	mode=normal

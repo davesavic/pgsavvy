@@ -115,13 +115,6 @@ func (v *CellViewerController) scrollUp(_ commands.ExecCtx) error {
 	return nil
 }
 
-func (v *CellViewerController) pageSize() int {
-	if v.ctx == nil {
-		return 10
-	}
-	return v.ctx.TotalWrappedLines()
-}
-
 func (v *CellViewerController) viewHeight() int {
 	return 24
 }
