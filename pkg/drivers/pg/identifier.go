@@ -37,3 +37,14 @@ func QuoteQualified(schema, name string) string {
 	}
 	return QuoteIdent(schema) + "." + QuoteIdent(name)
 }
+
+// QuoteLiteral renders val as a PostgreSQL SQL literal suitable for inlining
+// into a statement. Delegates to the package's Encoder implementation
+// (pgEncoder.EncodeLiteral). typeOID is the source-of-truth type identifier
+// from the originating column; zero means "infer from val's Go type".
+// Follows the same exported-helper pattern as QuoteIdent / QuoteQualified so
+// callers outside the pg package can produce safe literals without reaching
+// for a full drivers.Encoder reference.
+func QuoteLiteral(val any, typeOID uint32) string {
+	return pgEncoder.EncodeLiteral(val, typeOID)
+}

@@ -38,6 +38,12 @@ type PendingEdit struct {
 	// than guessing from the Go value's shape. Display-only; not used for
 	// SQL generation or conflict detection.
 	ColumnType string
+	// TypeOID is the column's PostgreSQL type OID (e.g. 114 for json, 3802
+	// for jsonb), captured at staging time. Used by the encoder to
+	// disambiguate types whose Go representation alone is insufficient
+	// (notably json vs jsonb vs text). Zero means "infer from value's
+	// Go type".
+	TypeOID uint32
 	// OldValue is the server-loaded value at the time of staging; used for
 	// optimistic-concurrency conflict detection.
 	OldValue any

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"strconv"
+	"sync/atomic"
 
 	"github.com/davesavic/pgsavvy/pkg/common"
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
@@ -79,6 +80,11 @@ type CommitDialogController struct {
 	dryRunFn  CommitDialogDryRunHook
 	showSqlFn CommitDialogShowSqlHook
 	cancelFn  CommitDialogCancelHook
+
+	// dryRunInFlight is a re-entry guard for [d]. Set to 1 during
+	// dry-run execution; concurrent [d] presses see it and show a toast
+	// instead of issuing a second dry-run against the same snapshot.
+	dryRunInFlight atomic.Bool
 }
 
 // NewCommitDialogController constructs the controller. Every
@@ -166,7 +172,16 @@ func (e *CommitDialogController) DryRun(_ commands.ExecCtx) error {
 	if e.ctx == nil || !e.ctx.Active() {
 		return nil
 	}
+	if !e.ctx.ApplyEnabled() {
+		return nil
+	}
+	if e.dryRunInFlight.Swap(true) {
+		e.toastOpen("dry-run already in progress")
+		return nil
+	}
+	defer e.dryRunInFlight.Store(false)
 	e.ctx.SetMode(guicontext.CommitDialogDryRunResult)
+	_ = e.ctx.HandleRender()
 	if e.dryRunFn == nil {
 		// Clear any stale report so the dialog doesn't show last
 		// invocation's data after the hook is unwired (mainly a test
@@ -176,13 +191,12 @@ func (e *CommitDialogController) DryRun(_ commands.ExecCtx) error {
 	}
 	report, err := e.dryRunFn.DryRun(e.ctx.Set(), e.ctx.Connection())
 	if err != nil {
-		// Surface the error via a single-entry report so the body
-		// has something to render — keeps the user inside the dialog
-		// with actionable feedback.
 		e.ctx.SetDryRunResult([]guicontext.DryRunStmtResult{{Err: err}})
+		_ = e.ctx.HandleRender()
 		return e.wrapErr("commit.dialog.dryrun", err)
 	}
 	e.ctx.SetDryRunResult(report)
+	_ = e.ctx.HandleRender()
 	return nil
 }
 
@@ -190,18 +204,28 @@ func (e *CommitDialogController) DryRun(_ commands.ExecCtx) error {
 // Preview body modes. The OnShowSql hook fires every time the body
 // flips INTO SqlPreview (not on the toggle-back) so the audit emission
 // is once-per-render-cycle, not once-per-keypress.
+//
+// Gated behind typed-name confirmation on confirm_writes connections
+// (same as [a]/[d]). Not gated on ReadOnly — SQL preview involves no
+// writes and is always safe to show.
 func (e *CommitDialogController) ShowSql(_ commands.ExecCtx) error {
 	if e.ctx == nil || !e.ctx.Active() {
 		return nil
 	}
+	conn := e.ctx.Connection()
+	if conn != nil && conn.ConfirmWrites && e.ctx.TypedName() != conn.Name {
+		return nil
+	}
 	if e.ctx.Mode() == guicontext.CommitDialogSqlPreview {
 		e.ctx.SetMode(guicontext.CommitDialogPreview)
+		_ = e.ctx.HandleRender()
 		return nil
 	}
 	e.ctx.SetMode(guicontext.CommitDialogSqlPreview)
 	if e.showSqlFn != nil {
 		e.showSqlFn.OnShowSQL(e.ctx.Set(), e.ctx.Connection())
 	}
+	_ = e.ctx.HandleRender()
 	return nil
 }
 
@@ -342,6 +366,9 @@ func (e *CommitDialogController) applyDisabled() (string, bool) {
 	if conn.ReadOnly {
 		return "read-only connection", true
 	}
+	if conn.ConfirmWrites && conn.Name == "" {
+		return "connection name is empty — gate cannot pass", true
+	}
 	if conn.ConfirmWrites && e.ctx.TypedName() != conn.Name {
 		return "press [t] and type the connection name to enable apply", true
 	}
@@ -361,6 +388,35 @@ func (e *CommitDialogController) typeNameDisabled() (string, bool) {
 	}
 	if !conn.ConfirmWrites {
 		return "typed confirmation not required on this connection", true
+	}
+	return "", false
+}
+
+// dryRunDisabled returns the user-facing reason `[d]` should be
+// disabled on COMMIT_DIALOG. Mirrors applyDisabled — dry-run has the
+// same gates as apply.
+func (e *CommitDialogController) dryRunDisabled() (string, bool) {
+	return e.applyDisabled()
+}
+
+// showSqlDisabled returns the user-facing reason `[s]` should be
+// disabled on COMMIT_DIALOG. SQL preview is gated only behind
+// typed-name confirmation on confirm_writes connections — ReadOnly
+// and empty-set do NOT block it since previewing SQL is always safe.
+func (e *CommitDialogController) showSqlDisabled() (string, bool) {
+	if e.ctx == nil || !e.ctx.Active() {
+		return "no commit dialog active", true
+	}
+	conn := e.ctx.Connection()
+	if conn == nil {
+		return "no active connection", true
+	}
+	set := e.ctx.Set()
+	if set == nil || set.IsEmpty() {
+		return "no staged edits", true
+	}
+	if conn.ConfirmWrites && e.ctx.TypedName() != conn.Name {
+		return "press [t] and type the connection name to enable apply", true
 	}
 	return "", false
 }
@@ -454,12 +510,18 @@ func (e *CommitDialogController) RegisterActions(reg *commands.Registry) {
 		Description: "Dry-run pending edits",
 		Tag:         "Commit",
 		Handler:     e.DryRun,
+		GetDisabled: func(_ commands.ExecCtx) (string, bool) {
+			return e.dryRunDisabled()
+		},
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          CommitDialogShowSql,
 		Description: "Toggle SQL preview",
 		Tag:         "Commit",
 		Handler:     e.ShowSql,
+		GetDisabled: func(_ commands.ExecCtx) (string, bool) {
+			return e.showSqlDisabled()
+		},
 	})
 	_ = reg.Register(&commands.Command{
 		ID:          CommitDialogCancel,

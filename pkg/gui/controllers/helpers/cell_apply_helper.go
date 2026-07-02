@@ -103,6 +103,11 @@ type ApplyResult struct {
 	RowsAffected     []int
 	RefetchedRows    []models.Row
 	RefetchedColumns []models.ColumnMeta
+	// SQL carries the per-statement UPDATE text produced by the unified
+	// builder. One entry per edit; populated before execution so it is
+	// available even on error. Empty (nil) when the unified builder has
+	// not been wired (backward compat).
+	SQL []string
 }
 
 // Apply stages and commits the edits in set against the table identified
@@ -192,10 +197,12 @@ func (h *CellApplyHelper) Apply(
 
 	rowsAffected := make([]int, len(edits))
 	conflicts := make([]models.ConflictedEdit, 0)
+	sqlTexts := make([]string, len(edits))
 
 	for i := range edits {
 		e := edits[i]
-		stmt, args := buildUpdateStatement(qualified, pkCols, e, false)
+		stmt, args := BuildUpdateSQL(set.Table, pkCols, e, SQLModeParameterized)
+		sqlTexts[i] = stmt
 		res, execErr := sess.Execute(ctx, models.Query{SQL: stmt, Args: args})
 		if execErr != nil {
 			rollback(ctx, sess)
@@ -229,10 +236,8 @@ func (h *CellApplyHelper) Apply(
 	}
 
 	if dryRun {
-		// Always ROLLBACK on dry-run, even when every statement
-		// returned RowsAffected>0 — the contract is "no side effects".
 		rollback(ctx, sess)
-		return ApplyResult{RowsAffected: rowsAffected}, nil, nil
+		return ApplyResult{RowsAffected: rowsAffected, SQL: sqlTexts}, nil, nil
 	}
 
 	if _, err := sess.Execute(ctx, models.Query{SQL: "COMMIT"}); err != nil {
@@ -246,10 +251,7 @@ func (h *CellApplyHelper) Apply(
 	pkRows := distinctPKs(edits)
 	refRes, err := refetchByPK(ctx, sess, qualified, pkCols, pkRows)
 	if err != nil {
-		// COMMIT succeeded — refetch failure is non-fatal; the data
-		// is already on the server. Surface a wrapped error so the
-		// caller can choose to fall back to a full reload.
-		return ApplyResult{RowsAffected: rowsAffected}, nil,
+		return ApplyResult{RowsAffected: rowsAffected, SQL: sqlTexts}, nil,
 			fmt.Errorf("cell apply: refetch after commit: %w", err)
 	}
 
@@ -257,6 +259,7 @@ func (h *CellApplyHelper) Apply(
 		RowsAffected:     rowsAffected,
 		RefetchedColumns: refRes.cols,
 		RefetchedRows:    refRes.rows,
+		SQL:              sqlTexts,
 	}
 	return out, nil, nil
 }
@@ -321,9 +324,11 @@ func (h *CellApplyHelper) Overwrite(
 	}
 
 	rowsAffected := make([]int, len(edits))
+	sqlTexts := make([]string, len(edits))
 	for i := range edits {
 		e := edits[i]
-		stmt, args := buildUpdateStatement(qualified, pkCols, e, true)
+		stmt, args := BuildUpdateSQL(set.Table, pkCols, e, SQLModeParameterized)
+		sqlTexts[i] = stmt
 		res, execErr := sess.Execute(ctx, models.Query{SQL: stmt, Args: args})
 		if execErr != nil {
 			rollback(ctx, sess)
@@ -344,63 +349,14 @@ func (h *CellApplyHelper) Overwrite(
 	pkRows := distinctPKs(edits)
 	refRes, err := refetchByPK(ctx, sess, qualified, pkCols, pkRows)
 	if err != nil {
-		return ApplyResult{RowsAffected: rowsAffected}, fmt.Errorf("cell overwrite: refetch after commit: %w", err)
+		return ApplyResult{RowsAffected: rowsAffected, SQL: sqlTexts}, fmt.Errorf("cell overwrite: refetch after commit: %w", err)
 	}
 	return ApplyResult{
 		RowsAffected:     rowsAffected,
 		RefetchedColumns: refRes.cols,
 		RefetchedRows:    refRes.rows,
+		SQL:              sqlTexts,
 	}, nil
-}
-
-// buildUpdateStatement returns the parameterized UPDATE for a single
-// PendingEdit plus the args slice. Layout:
-//
-//	UPDATE <qual> SET "col" = $1 [or <expr>]
-//	WHERE "pk1" = $N AND ... AND "col" IS NOT DISTINCT FROM $M
-//
-// For Expression edits the SET RHS is the verbatim NewExpr (NOT
-// parameterized — this is the deliberate, documented behaviour of
-// EditKind.Expression). The args slice carries: [optional NewValue,
-// pk values..., OldValue (when !force)].
-//
-// When force is true, the IS NOT DISTINCT FROM guard is omitted so the
-// staged NewValue lands regardless of the server-side drift — used by
-// Overwrite. The OldValue is NOT appended to args in that case.
-func buildUpdateStatement(qualified string, pkCols []string, e models.PendingEdit, force bool) (string, []any) {
-	var b strings.Builder
-	args := make([]any, 0, len(pkCols)+2)
-
-	b.WriteString("UPDATE ")
-	b.WriteString(qualified)
-	b.WriteString(" SET ")
-	b.WriteString(pg.QuoteIdent(e.Column))
-	b.WriteString(" = ")
-
-	if e.Kind == models.Expression {
-		b.WriteString(e.NewExpr)
-	} else {
-		args = append(args, e.NewValue)
-		fmt.Fprintf(&b, "$%d", len(args))
-	}
-
-	b.WriteString(" WHERE ")
-	for i, pkc := range pkCols {
-		if i > 0 {
-			b.WriteString(" AND ")
-		}
-		args = append(args, e.PrimaryKey[i])
-		b.WriteString(pg.QuoteIdent(pkc))
-		fmt.Fprintf(&b, " = $%d", len(args))
-	}
-	if !force {
-		args = append(args, e.OldValue)
-		b.WriteString(" AND ")
-		b.WriteString(pg.QuoteIdent(e.Column))
-		fmt.Fprintf(&b, " IS NOT DISTINCT FROM $%d", len(args))
-	}
-
-	return b.String(), args
 }
 
 // fetchServerValue issues a parameterized SELECT for a single column on a

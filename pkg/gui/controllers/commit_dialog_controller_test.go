@@ -9,6 +9,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/theme"
@@ -604,7 +605,7 @@ func TestDefaultCommitDialogRender_ExpressionFooter(t *testing.T) {
 	}
 }
 
-// AC: SqlPreview mode emits BEGIN/COMMIT envelope + IS NOT DISTINCT FROM.
+// AC: SqlPreview mode emits BEGIN/COMMIT envelope + literal values + IS NOT DISTINCT FROM.
 func TestDefaultCommitDialogRender_SqlPreviewShape(t *testing.T) {
 	defer theme.SetMonochromeForTest(true)()
 	set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "users"}}
@@ -625,7 +626,7 @@ func TestDefaultCommitDialogRender_SqlPreviewShape(t *testing.T) {
 		"BEGIN;",
 		"COMMIT;",
 		`UPDATE "public"."users"`,
-		`SET "email" = $1`,
+		`'new'`,
 		"IS NOT DISTINCT FROM",
 	} {
 		if !strings.Contains(body, want) {
@@ -661,18 +662,22 @@ func TestDefaultCommitDialogRender_SqlPreviewExpressionInline(t *testing.T) {
 }
 
 // AC: SQL preview scrubs the connection password (ADR-28).
+// Password scrubbing is applied to PendingEdit values before literal
+// SQL embedding (pre-scrub, not post-hoc string replace).
 func TestDefaultCommitDialogRender_SqlPreviewScrubsPassword(t *testing.T) {
-	// Construct a PendingEdit whose new value happens to embed a
-	// password substring. The rendered SQL passes through
-	// BuildCommitDialogSQL which calls strings.ReplaceAll(pw, "***").
-	stmts := controllers.BuildCommitDialogSQL(stagedSet("s", "t", 1), "old")
-	if len(stmts) != 1 {
-		t.Fatalf("len(stmts) = %d, want 1", len(stmts))
+	defer theme.SetMonochromeForTest(true)()
+	set := stagedSet("s", "t", 1)
+	view := guicontext.CommitDialogView{
+		Set:  set,
+		Conn: &models.Connection{Name: "dev", Password: "old"},
+		Mode: guicontext.CommitDialogSqlPreview,
 	}
-	// The OldValue "old" sits in the test PendingEdit; if it's used
-	// as a password, every occurrence is replaced with "***".
-	if strings.Contains(stmts[0], "old") && !strings.Contains(stmts[0], "***") {
-		t.Errorf("password not scrubbed in: %s", stmts[0])
+	body := controllers.DefaultCommitDialogRender(view)
+	if strings.Contains(body, `'old'`) {
+		t.Errorf("password not scrubbed in SQL preview:\n%s", body)
+	}
+	if !strings.Contains(body, "***") {
+		t.Errorf("password scrubbing marker not found:\n%s", body)
 	}
 }
 
@@ -739,7 +744,7 @@ func TestDefaultCommitDialogRender_TypedNamePrompt(t *testing.T) {
 	}
 }
 
-// AC: Typed-name match shows the "type match — [a] to apply" banner.
+// AC: Typed-name match shows the "✓ name confirmed" banner.
 func TestDefaultCommitDialogRender_TypedNameMatch(t *testing.T) {
 	view := guicontext.CommitDialogView{
 		Set:       stagedSet("s", "t", 1),
@@ -747,7 +752,7 @@ func TestDefaultCommitDialogRender_TypedNameMatch(t *testing.T) {
 		TypedName: "prod",
 	}
 	body := controllers.DefaultCommitDialogRender(view)
-	if !strings.Contains(body, "typed-name match") {
+	if !strings.Contains(body, "✓ prod confirmed") {
 		t.Errorf("body missing match banner:\n%s", body)
 	}
 }
@@ -785,8 +790,10 @@ func TestDefaultCommitDialogRender_DryRunNilHint(t *testing.T) {
 	}
 }
 
-// AC: BuildCommitDialogSQL composite-PK quoting + multi-PK predicate.
-func TestBuildCommitDialogSQL_CompositePK(t *testing.T) {
+// AC: Literal SQL preview with composite PK uses placeholder names and
+// literal values (not $N).
+func TestDefaultCommitDialogRender_LiteralSQLCompositePK(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
 	set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "memberships"}}
 	_ = set.Add(models.PendingEdit{
 		PrimaryKey: []any{int64(1), int64(2)},
@@ -795,13 +802,20 @@ func TestBuildCommitDialogSQL_CompositePK(t *testing.T) {
 		NewValue:   "admin",
 		Kind:       models.Literal,
 	})
-	stmts := controllers.BuildCommitDialogSQL(set, "")
-	if len(stmts) != 1 {
-		t.Fatalf("len(stmts) = %d, want 1", len(stmts))
+	view := guicontext.CommitDialogView{
+		Set:  set,
+		Conn: &models.Connection{Name: "dev"},
+		Mode: guicontext.CommitDialogSqlPreview,
 	}
-	want := `UPDATE "public"."memberships" SET "role" = $1 WHERE "pk1" IS NOT DISTINCT FROM $2 AND "pk2" IS NOT DISTINCT FROM $3`
-	if stmts[0] != want {
-		t.Errorf("stmt = %q\nwant   %q", stmts[0], want)
+	body := controllers.DefaultCommitDialogRender(view)
+	if !strings.Contains(body, "'admin'") {
+		t.Errorf("missing literal new value:\n%s", body)
+	}
+	if !strings.Contains(body, "'member'") {
+		t.Errorf("missing literal old value:\n%s", body)
+	}
+	if !strings.Contains(body, `"pk1"`) || !strings.Contains(body, `"pk2"`) {
+		t.Errorf("missing PK placeholder names:\n%s", body)
 	}
 }
 
@@ -996,5 +1010,353 @@ func TestCommitDialogController_TypeNameNilPromptIsSafe(t *testing.T) {
 	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
 	if err := ctrl.TypeName(commands.ExecCtx{}); err != nil {
 		t.Fatalf("TypeName with nil prompt: %v", err)
+	}
+}
+
+// === Progressive-reveal gate tests ======================================
+
+// AC: confirm_writes + no match hides [a]/[d]/[s], shows only [t]+[Esc].
+func TestDefaultCommitDialogRender_GateHidesActionsBeforeMatch(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	view := guicontext.CommitDialogView{
+		Set:       stagedSet("s", "t", 1),
+		Conn:      &models.Connection{Name: "prod", ConfirmWrites: true},
+		TypedName: "wrong",
+	}
+	body := controllers.DefaultCommitDialogRender(view)
+	if strings.Contains(body, "[a]") {
+		t.Error("[a] should be hidden before typed-name match")
+	}
+	if strings.Contains(body, "[d]") {
+		t.Error("[d] should be hidden before typed-name match")
+	}
+	if !strings.Contains(body, "[t]") {
+		t.Error("[t] hint should be visible")
+	}
+	if !strings.Contains(body, "[Esc]") {
+		t.Error("[Esc] should always be present")
+	}
+}
+
+// AC: confirm_writes + match shows all actions with match banner.
+func TestDefaultCommitDialogRender_GateShowsAllAfterMatch(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	view := guicontext.CommitDialogView{
+		Set:       stagedSet("s", "t", 1),
+		Conn:      &models.Connection{Name: "prod", ConfirmWrites: true},
+		TypedName: "prod",
+	}
+	body := controllers.DefaultCommitDialogRender(view)
+	if !strings.Contains(body, "[a]") {
+		t.Error("[a] should be visible after match")
+	}
+	if !strings.Contains(body, "[d]") {
+		t.Error("[d] should be visible after match")
+	}
+	if !strings.Contains(body, "[s]") {
+		t.Error("[s] should be visible after match")
+	}
+}
+
+// AC: ReadOnly hides [a]/[d] but keeps [s].
+func TestDefaultCommitDialogRender_GateReadOnlyHidesApply(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	view := guicontext.CommitDialogView{
+		Set:  stagedSet("s", "t", 1),
+		Conn: &models.Connection{Name: "dev", ReadOnly: true},
+	}
+	body := controllers.DefaultCommitDialogRender(view)
+	if strings.Contains(body, "[a]") {
+		t.Error("[a] should be hidden on ReadOnly")
+	}
+	if strings.Contains(body, "[d]") {
+		t.Error("[d] should be hidden on ReadOnly")
+	}
+	if !strings.Contains(body, "[s]") {
+		t.Error("[s] should be visible on ReadOnly")
+	}
+}
+
+// AC: empty connection name + confirm_writes shows permanently disabled.
+func TestDefaultCommitDialogRender_GateEmptyNameDisabled(t *testing.T) {
+	view := guicontext.CommitDialogView{
+		Set:       stagedSet("s", "t", 1),
+		Conn:      &models.Connection{Name: "", ConfirmWrites: true},
+		TypedName: "anything",
+	}
+	body := controllers.DefaultCommitDialogRender(view)
+	if !strings.Contains(body, "gate disabled") {
+		t.Error("empty connection name should show gate disabled")
+	}
+}
+
+// === Color-coded mnemonic tests ========================================
+
+// AC: monochrome terminal uses bold-only for key mnemonics.
+func TestDefaultCommitDialogRender_MonochromeBoldFallback(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	view := guicontext.CommitDialogView{
+		Set:  stagedSet("s", "t", 1),
+		Conn: &models.Connection{Name: "dev"},
+	}
+	body := controllers.DefaultCommitDialogRender(view)
+	boldAnsi := "\x1b[1m"
+	if !strings.Contains(body, boldAnsi) {
+		t.Errorf("monochrome gate missing bold codes:\n%s", body)
+	}
+	// No color ANSI codes in monochrome mode.
+	for _, code := range []string{"\x1b[32m", "\x1b[33m", "\x1b[36m"} {
+		if strings.Contains(body, code) {
+			t.Errorf("monochrome gate contains color code %q", code)
+		}
+	}
+}
+
+// AC: non-monochrome terminal uses color codes.
+func TestDefaultCommitDialogRender_ColorKeysPresent(t *testing.T) {
+	view := guicontext.CommitDialogView{
+		Set:  stagedSet("s", "t", 1),
+		Conn: &models.Connection{Name: "dev"},
+	}
+	body := controllers.DefaultCommitDialogRender(view)
+	if !strings.Contains(body, "\x1b[32m") {
+		t.Error("non-monochrome gate missing green color code")
+	}
+}
+
+// === Literal SQL value tests ===========================================
+
+// AC: NULL renders as NULL in literal SQL preview.
+func TestDefaultCommitDialogRender_LiteralSQLNullValue(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "t"}}
+	_ = set.Add(models.PendingEdit{
+		PrimaryKey: []any{int64(1)},
+		Column:     "email",
+		OldValue:   nil,
+		NewValue:   nil,
+		Kind:       models.Literal,
+	})
+	view := guicontext.CommitDialogView{
+		Set:  set,
+		Conn: &models.Connection{Name: "dev"},
+		Mode: guicontext.CommitDialogSqlPreview,
+	}
+	body := controllers.DefaultCommitDialogRender(view)
+	if !strings.Contains(body, "NULL") {
+		t.Errorf("NULL literal not rendered:\n%s", body)
+	}
+}
+
+// AC: numeric value renders as-is in literal SQL preview.
+func TestDefaultCommitDialogRender_LiteralSQLNumericValue(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "t"}}
+	_ = set.Add(models.PendingEdit{
+		PrimaryKey: []any{int64(42)},
+		Column:     "count",
+		OldValue:   int64(5),
+		NewValue:   int64(10),
+		Kind:       models.Literal,
+	})
+	view := guicontext.CommitDialogView{
+		Set:  set,
+		Conn: &models.Connection{Name: "dev"},
+		Mode: guicontext.CommitDialogSqlPreview,
+	}
+	body := controllers.DefaultCommitDialogRender(view)
+	if !strings.Contains(body, "= 10") {
+		t.Errorf("numeric literal not rendered as-is:\n%s", body)
+	}
+	if strings.Contains(body, "'10'") {
+		t.Errorf("numeric should not be quoted:\n%s", body)
+	}
+}
+
+// === Handler gating tests ==============================================
+
+// AC: [d] DryRun is gated by ApplyEnabled on confirm_writes.
+func TestCommitDialogController_DryRunGatedByApplyEnabled(t *testing.T) {
+	ctx := newCommitDialogTestCtx()
+	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "prod", ConfirmWrites: true})
+
+	dry := &fakeDryRunHook{report: []guicontext.DryRunStmtResult{{SQL: "UPDATE x", RowsAffected: 1}}}
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
+	ctrl.SetDryRunHook(dry)
+
+	// No typed name → handler no-ops, hook NOT called.
+	_ = ctrl.DryRun(commands.ExecCtx{})
+	if dry.calls != 0 {
+		t.Errorf("DryRun hook called = %d before gate; want 0", dry.calls)
+	}
+}
+
+// AC: [s] ShowSql is gated on confirm_writes typed-name check.
+func TestCommitDialogController_ShowSqlGatedOnConfirmWrites(t *testing.T) {
+	ctx := newCommitDialogTestCtx()
+	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "prod", ConfirmWrites: true})
+
+	hook := &fakeShowSqlHook{}
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
+	ctrl.SetShowSqlHook(hook)
+
+	// No typed name → handler no-ops, hook NOT called, mode stays Preview.
+	_ = ctrl.ShowSql(commands.ExecCtx{})
+	if hook.calls != 0 {
+		t.Errorf("OnShowSQL called = %d before gate; want 0", hook.calls)
+	}
+	if ctx.Mode() != guicontext.CommitDialogPreview {
+		t.Errorf("Mode = %v, want Preview (unchanged)", ctx.Mode())
+	}
+}
+
+// AC: [s] ShowSql works on ReadOnly (SQL preview is safe).
+func TestCommitDialogController_ShowSqlEnabledOnReadOnly(t *testing.T) {
+	ctx := newCommitDialogTestCtx()
+	ctx.Open(stagedSet("s", "t", 1), &models.Connection{Name: "dev", ReadOnly: true})
+
+	hook := &fakeShowSqlHook{}
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
+	ctrl.SetShowSqlHook(hook)
+
+	_ = ctrl.ShowSql(commands.ExecCtx{})
+	if ctx.Mode() != guicontext.CommitDialogSqlPreview {
+		t.Errorf("Mode = %v, want SqlPreview (ReadOnly allows SQL preview)", ctx.Mode())
+	}
+}
+
+// AC: [Esc] cancel always visible in all gate states.
+func TestDefaultCommitDialogRender_CancelAlwaysPresent(t *testing.T) {
+	cases := []struct {
+		name string
+		conn *models.Connection
+		typed string
+	}{
+		{"normal", &models.Connection{Name: "dev"}, ""},
+		{"confirm_no_match", &models.Connection{Name: "prod", ConfirmWrites: true}, "wrong"},
+		{"confirm_match", &models.Connection{Name: "prod", ConfirmWrites: true}, "prod"},
+		{"readonly", &models.Connection{Name: "dev", ReadOnly: true}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			view := guicontext.CommitDialogView{
+				Set:       stagedSet("s", "t", 1),
+				Conn:      tc.conn,
+				TypedName: tc.typed,
+			}
+			body := controllers.DefaultCommitDialogRender(view)
+			if !strings.Contains(body, "[Esc]") {
+				t.Errorf("[Esc] missing in gate:\n%s", body)
+			}
+		})
+	}
+}
+
+// === Builder tests =====================================================
+
+// AC: BuildUpdateSQL Literal mode with string escaping.
+func TestBuildUpdateSQL_LiteralMode_StringEscape(t *testing.T) {
+	edit := models.PendingEdit{
+		PrimaryKey: []any{int64(1)},
+		Column:     "name",
+		OldValue:   "O'Brien",
+		NewValue:   "New",
+		Kind:       models.Literal,
+	}
+	stmt, args := helpers.BuildUpdateSQL(
+		models.Ref{Schema: "public", Table: "users"},
+		[]string{"id"}, edit, helpers.SQLModeLiteral,
+	)
+	if args != nil {
+		t.Errorf("Literal mode should not return args")
+	}
+	if !strings.Contains(stmt, "O''Brien") {
+		t.Errorf("embedded apostrophe not escaped: %s", stmt)
+	}
+}
+
+// AC: BuildUpdateSQL Parameterized mode preserves parameter binding.
+func TestBuildUpdateSQL_ParameterizedMode_Args(t *testing.T) {
+	edit := models.PendingEdit{
+		PrimaryKey: []any{int64(7)},
+		Column:     "email",
+		OldValue:   "old@x.com",
+		NewValue:   "new@x.com",
+		Kind:       models.Literal,
+	}
+	stmt, args := helpers.BuildUpdateSQL(
+		models.Ref{Schema: "app", Table: "users"},
+		[]string{"id"}, edit, helpers.SQLModeParameterized,
+	)
+	if !strings.Contains(stmt, "IS NOT DISTINCT FROM $3") {
+		t.Errorf("missing old value guard: %s", stmt)
+	}
+	if len(args) != 3 {
+		t.Fatalf("args len = %d, want 3", len(args))
+	}
+	if args[0] != "new@x.com" || args[1] != int64(7) || args[2] != "old@x.com" {
+		t.Errorf("args = %v, want [new@x.com, 7, old@x.com]", args)
+	}
+}
+
+// AC: BuildUpdateSQL Literal mode expression edit keeps NewExpr inline.
+func TestBuildUpdateSQL_LiteralMode_ExpressionInline(t *testing.T) {
+	edit := models.PendingEdit{
+		PrimaryKey: []any{int64(1)},
+		Column:     "ts",
+		OldValue:   "2024-01-01",
+		NewExpr:    "now()",
+		Kind:       models.Expression,
+	}
+	stmt, _ := helpers.BuildUpdateSQL(
+		models.Ref{Schema: "s", Table: "t"},
+		[]string{"id"}, edit, helpers.SQLModeLiteral,
+	)
+	if !strings.Contains(stmt, "SET \"ts\" = now()") {
+		t.Errorf("expression not inline in literal mode: %s", stmt)
+	}
+}
+
+// === DryRun full SQL test ==============================================
+
+// AC: dry-run shows full SQL (>64 chars, no truncation).
+func TestDefaultCommitDialogRender_DryRunFullSQL(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	longSQL := "UPDATE " + strings.Repeat("x", 80) + " SET y = 1"
+	view := guicontext.CommitDialogView{
+		Set:  stagedSet("s", "t", 1),
+		Conn: &models.Connection{Name: "dev"},
+		Mode: guicontext.CommitDialogDryRunResult,
+		DryRunResult: []guicontext.DryRunStmtResult{
+			{SQL: longSQL, RowsAffected: 1},
+		},
+	}
+	body := controllers.DefaultCommitDialogRender(view)
+	if !strings.Contains(body, strings.Repeat("x", 80)) {
+		t.Error("full SQL truncated — should show complete text")
+	}
+	if strings.Contains(body, "…") {
+		t.Error("dry-run SQL contains truncation ellipsis")
+	}
+}
+
+// AC: dry-run collapses newlines in SQL to spaces.
+func TestDefaultCommitDialogRender_DryRunCollapsesNewlines(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	view := guicontext.CommitDialogView{
+		Set:  stagedSet("s", "t", 1),
+		Conn: &models.Connection{Name: "dev"},
+		Mode: guicontext.CommitDialogDryRunResult,
+		DryRunResult: []guicontext.DryRunStmtResult{
+			{SQL: "UPDATE t\nSET x = 1\nWHERE id = 2", RowsAffected: 1},
+		},
+	}
+	body := controllers.DefaultCommitDialogRender(view)
+	// The rendered SQL should have spaces instead of newlines.
+	if !strings.Contains(body, "UPDATE t SET x = 1 WHERE id = 2") {
+		t.Errorf("dry-run SQL newlines not collapsed to spaces:\n%s", body)
+	}
+	if strings.Contains(body, "UPDATE t\nSET") {
+		t.Error("dry-run SQL contains newlines — should be collapsed")
 	}
 }

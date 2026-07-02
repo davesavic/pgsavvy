@@ -1,6 +1,7 @@
 package context
 
 import (
+	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
@@ -50,6 +51,12 @@ type DryRunStmtResult struct {
 //     cleared on Close (ADR-12: no confirmation memory).
 //   - DryRunResult: the report from the most recent OnDryRun invocation
 //     (nil until [d] is pressed at least once).
+//   - pkCols: the resolved PK column names for the active table,
+//     captured at Open(). Used by the SQL builder for real column
+//     names instead of pk1/pk2 placeholders.
+//   - encoder: the SQL literal encoder from the active tab's session,
+//     captured at Open(). Used to inline Go values into SQL text.
+//     Stale on connection switch (documented with toast).
 //
 // Rendering is owned by HandleRender — it delegates body assembly to
 // pkg/gui/controllers/commit_dialog_render.go so the formatting logic
@@ -88,6 +95,14 @@ type CommitDialogContext struct {
 	// is pressed; the controller writes it back via SetDryRunResult.
 	dryRunResult []DryRunStmtResult
 
+	// pkCols carries the resolved PK column names for the active table,
+	// captured at Open(). Used by the SQL builder.
+	pkCols []string
+
+	// encoder is the SQL literal encoder from the active tab's session,
+	// captured at Open(). Used to inline Go values into SQL text.
+	encoder drivers.Encoder
+
 	// renderHook is invoked by HandleRender to produce the body text.
 	// Defaults to DefaultCommitDialogRender (set by the controller via
 	// SetRenderHook). Kept as a hook so the rendering code lives in
@@ -105,6 +120,15 @@ type CommitDialogView struct {
 	Mode         CommitDialogMode
 	TypedName    string
 	DryRunResult []DryRunStmtResult
+	// PkCols carries the resolved PK column names for the active table.
+	// Populated from the orchestrator adapter at Open() time so the
+	// render path has real names (not pk1/pk2 placeholders).
+	PkCols []string
+	// Encoder produces SQL literals for the server dialect. Populated
+	// from the active tab's runner at Open() time. Used by the preview
+	// and dry-run render paths to inline literal values into SQL text.
+	// Stale on connection switch (documented with toast).
+	Encoder drivers.Encoder
 }
 
 // NewCommitDialogContext builds a CommitDialogContext bound to
@@ -127,6 +151,10 @@ func (c *CommitDialogContext) SetRenderHook(fn func(CommitDialogView) string) {
 // Open transitions the context into the active state and captures the
 // dialog's per-invocation snapshot. typedName resets to "" and mode
 // resets to Preview each time the dialog opens (ADR-12: no memory).
+//
+// When ConfirmWrites is true but Conn.Name is empty, typedName is set
+// to a sentinel value that no human input can match — the gate can never
+// pass on a connection with an empty name.
 func (c *CommitDialogContext) Open(set *models.PendingEditSet, conn *models.Connection) {
 	c.active = true
 	c.set = set
@@ -134,6 +162,9 @@ func (c *CommitDialogContext) Open(set *models.PendingEditSet, conn *models.Conn
 	c.mode = CommitDialogPreview
 	c.typedName = ""
 	c.dryRunResult = nil
+	if conn != nil && conn.ConfirmWrites && conn.Name == "" {
+		c.typedName = "\x00empty-name-sentinel"
+	}
 }
 
 // Close transitions the context back to inactive and clears the
@@ -146,6 +177,8 @@ func (c *CommitDialogContext) Close() {
 	c.mode = CommitDialogPreview
 	c.typedName = ""
 	c.dryRunResult = nil
+	c.pkCols = nil
+	c.encoder = nil
 }
 
 // Active reports whether the dialog is currently waiting for input.
@@ -185,6 +218,21 @@ func (c *CommitDialogContext) DryRunResult() []DryRunStmtResult { return c.dryRu
 // OnDryRun. Pass nil to clear (e.g. when switching modes).
 func (c *CommitDialogContext) SetDryRunResult(r []DryRunStmtResult) { c.dryRunResult = r }
 
+// PkCols returns the resolved PK column names for the active table,
+// captured at Open().
+func (c *CommitDialogContext) PkCols() []string { return c.pkCols }
+
+// SetPkCols replaces the PK column names. Called by the orchestrator
+// adapter when wiring the dialog.
+func (c *CommitDialogContext) SetPkCols(pkCols []string) { c.pkCols = pkCols }
+
+// Encoder returns the SQL literal encoder captured at Open().
+func (c *CommitDialogContext) Encoder() drivers.Encoder { return c.encoder }
+
+// SetEncoder replaces the encoder. Called by the orchestrator adapter
+// when wiring the dialog.
+func (c *CommitDialogContext) SetEncoder(enc drivers.Encoder) { c.encoder = enc }
+
 // ApplyEnabled reports whether [a] should fire. Mirrors the controller's
 // internal gate so both the registered command's Disabled predicate
 // and the dialog body (which renders "type <name> to enable" until
@@ -192,8 +240,9 @@ func (c *CommitDialogContext) SetDryRunResult(r []DryRunStmtResult) { c.dryRunRe
 //
 // Hard disables: nil connection (defensive — shouldn't happen
 // post-Open), empty set (apply would be a no-op — caller should never
-// open the dialog in this state), and read-only connection (caller
-// should hard-disable :w upstream).
+// open the dialog in this state), read-only connection (caller
+// should hard-disable :w upstream), and confirm_writes:true with an
+// empty connection name (gate can never pass — no name to match).
 //
 // Soft disable: confirm_writes:true with TypedName != Conn.Name.
 func (c *CommitDialogContext) ApplyEnabled() bool {
@@ -201,6 +250,9 @@ func (c *CommitDialogContext) ApplyEnabled() bool {
 		return false
 	}
 	if c.conn.ReadOnly {
+		return false
+	}
+	if c.conn.ConfirmWrites && c.conn.Name == "" {
 		return false
 	}
 	if c.conn.ConfirmWrites && c.typedName != c.conn.Name {
@@ -234,6 +286,8 @@ func (c *CommitDialogContext) HandleRender() error {
 		Mode:         c.mode,
 		TypedName:    c.typedName,
 		DryRunResult: c.dryRunResult,
+		PkCols:       c.pkCols,
+		Encoder:      c.encoder,
 	}
 	body := c.renderHook(view)
 	viewName := c.GetViewName()

@@ -136,12 +136,13 @@ func (h commitDryRunHook) DryRun(set *models.PendingEditSet, _ *models.Connectio
 	edits := set.Edits()
 	out := make([]guicontext.DryRunStmtResult, 0, len(res.RowsAffected))
 	for i, n := range res.RowsAffected {
-		var col string
+		sql := ""
 		if i < len(edits) {
-			col = edits[i].Column
+			stmt, _ := helpers.BuildUpdateSQL(set.Table, pkCols, edits[i], helpers.SQLModeLiteral)
+			sql = stmt
 		}
 		out = append(out, guicontext.DryRunStmtResult{
-			SQL:          fmt.Sprintf("UPDATE %s.%s SET %s = $1 ...", set.Table.Schema, set.Table.Table, col),
+			SQL:          sql,
 			RowsAffected: int64(n),
 		})
 	}

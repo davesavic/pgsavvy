@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/pgsavvy/pkg/gui/grid"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // Render budgets for the 80×24 terminal target. Tight numbers mirror
@@ -240,26 +242,60 @@ func truncateValue(s string) string {
 }
 
 // writeCommitDialogSQL renders the BEGIN/COMMIT-wrapped UPDATE
-// statements that A5's apply helper will execute. One statement per
-// column-change. Expression edits splice NewExpr inline (NOT as a $N
-// parameter); Literal edits substitute the new value with the same
-// $1 / $2 binding style the runtime uses.
+// statements using the unified builder in Literal mode — real PK column
+// names from v.PkCols, actual values inlined (not $N placeholders).
+// Password scrubbing is applied to values before embedding.
 func writeCommitDialogSQL(b *strings.Builder, v guicontext.CommitDialogView) {
 	if v.Set == nil || v.Set.IsEmpty() {
 		b.WriteString("(no staged edits)")
 		return
 	}
-	stmts := BuildCommitDialogSQL(v.Set, connectionPassword(v.Conn))
+	pw := connectionPassword(v.Conn)
+	edits := v.Set.Edits()
 	b.WriteString("BEGIN;\n")
-	shown := min(len(stmts), commitDialogMaxStmts)
+	shown := min(len(edits), commitDialogMaxStmts)
 	for i := range shown {
-		b.WriteString(highlight.Highlight(stmts[i]))
+		e := edits[i]
+		if pw != "" {
+			scrubEditPassword(&e, pw)
+		}
+		pkCols := v.PkCols
+		if len(pkCols) == 0 {
+			pkCols = pkColumnPlaceholder(len(e.PrimaryKey))
+		}
+		stmt, _ := helpers.BuildUpdateSQL(v.Set.Table, pkCols, e, helpers.SQLModeLiteral)
+		b.WriteString(highlight.Highlight(stmt))
 		b.WriteByte('\n')
 	}
-	if len(stmts) > shown {
-		fmt.Fprintf(b, "... (%d more statements)\n", len(stmts)-shown)
+	if len(edits) > shown {
+		fmt.Fprintf(b, "... (%d more statements)\n", len(edits)-shown)
 	}
 	b.WriteString("COMMIT;")
+}
+
+// scrubEditPassword replaces the connection password with "***" in a
+// PendingEdit's value fields. Applied before literal SQL embedding so
+// the password never appears in rendered output.
+func scrubEditPassword(e *models.PendingEdit, pw string) {
+	if pw == "" {
+		return
+	}
+	if s, ok := e.NewValue.(string); ok {
+		e.NewValue = strings.ReplaceAll(s, pw, "***")
+	}
+	if s, ok := e.OldValue.(string); ok {
+		e.OldValue = strings.ReplaceAll(s, pw, "***")
+	}
+}
+
+// pkColumnPlaceholder returns per-PK-column identifier names for use by
+// the SQL preview when real PK column names are not available.
+func pkColumnPlaceholder(n int) []string {
+	names := make([]string, n)
+	for i := range n {
+		names[i] = fmt.Sprintf("pk%d", i+1)
+	}
+	return names
 }
 
 // writeCommitDialogDryRun renders the per-statement rows-affected
@@ -278,7 +314,7 @@ func writeCommitDialogDryRun(b *strings.Builder, v guicontext.CommitDialogView) 
 	shown := min(total, commitDialogMaxStmts)
 	for i := range shown {
 		r := v.DryRunResult[i]
-		sql := highlight.Highlight(truncateSQL(r.SQL))
+		sql := highlight.Highlight(strings.ReplaceAll(r.SQL, "\n", " "))
 		switch {
 		case r.Err != nil:
 			fmt.Fprintf(b, "[ERR] %s: %v\n", sql, r.Err)
@@ -293,128 +329,88 @@ func writeCommitDialogDryRun(b *strings.Builder, v guicontext.CommitDialogView) 
 	}
 }
 
-// truncateSQL caps a single SQL line for the dry-run table. Wider than
-// commitDialogValueWidth because SQL is dense; still leaves room for
-// the `[N rows] ` prefix within an 80-col line.
-func truncateSQL(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	const max = 64
-	if len(s) <= max {
-		return s
+// --- Key mnemonic color helpers --------------------------------------------
+// ANSI color codes for commit dialog gate mnemonics. When theme.IsMonochrome()
+// returns true, fall back to bold-only (no color codes emitted), matching
+// the confirmHint() pattern in pkg/gui/context/confirmation_context.go.
+
+const (
+	ansiGreen   = "\x1b[32m"
+	ansiYellow  = "\x1b[33m"
+	ansiCyan    = "\x1b[36m"
+	ansiMagenta = "\x1b[35m"
+	ansiRed     = "\x1b[31m"
+	ansiBold    = "\x1b[1m"
+	ansiReset   = "\x1b[0m"
+)
+
+// coloredKey wraps a key mnemonic in the given ANSI code. On monochrome
+// terminals the color is replaced with bold-only.
+func coloredKey(key, ansi string) string {
+	if theme.IsMonochrome() {
+		return ansiBold + key + ansiReset
 	}
-	return s[:max-1] + "…"
+	return ansi + ansiBold + key + ansiReset + ansiReset
 }
 
-// writeCommitDialogGate renders the apply-enable hint. On default
-// connections this is a one-liner "[a] apply  [d] dry-run  [s] sql
-// [Esc] cancel". On confirm_writes connections a typed-name line
-// precedes it: until TypedName == Conn.Name it points at the [t]
-// prompt (echoing any prior attempt), then the apply-allowed banner
-// replaces it.
+// keyGreen wraps [a] in green.
+func keyGreen(key string) string { return coloredKey(key, ansiGreen) }
+
+// keyYellow wraps [d] in yellow.
+func keyYellow(key string) string { return coloredKey(key, ansiYellow) }
+
+// keyCyan wraps [s] in cyan.
+func keyCyan(key string) string { return coloredKey(key, ansiCyan) }
+
+// keyMagenta wraps [t] in magenta.
+func keyMagenta(key string) string { return coloredKey(key, ansiMagenta) }
+
+// keyRed wraps [Esc] / [c] in red.
+func keyRed(key string) string { return coloredKey(key, ansiRed) }
+
+// coloredLine wraps a full line in green (used for the confirmation-success
+// banner). On monochrome terminals falls back to bold.
+func coloredLine(line string) string {
+	if theme.IsMonochrome() {
+		return ansiBold + line + ansiReset
+	}
+	return ansiGreen + ansiBold + line + ansiReset + ansiReset
+}
+
+// --- Gate rendering --------------------------------------------------------
+
+// writeCommitDialogGate renders the apply-enable hint. Behavior depends on
+// connection profile:
+//
+//   - confirm_writes, before typed-name match: [t] type "name" to confirm:
+//     <typed>  [Esc] cancel  (no [a]/[d]/[s]).
+//   - confirm_writes, after match: ✓ name confirmed  [a] apply  [d] dry-run
+//     [s] sql  [Esc] cancel.
+//   - ReadOnly: [s] sql  [Esc] cancel  ([a]/[d] hidden).
+//   - Empty connection name + confirm_writes: gate permanently disabled
+//     (no name to match).
+//   - Default: [a] apply  [d] dry-run  [s] sql  [Esc] cancel.
 func writeCommitDialogGate(b *strings.Builder, v guicontext.CommitDialogView) {
 	if v.Conn != nil && v.Conn.ConfirmWrites {
+		if v.Conn.Name == "" {
+			fmt.Fprintf(b, "%s empty connection name — gate disabled\n", keyMagenta("[t]"))
+			b.WriteString(keyRed("[Esc]") + " cancel")
+			return
+		}
 		if v.TypedName != v.Conn.Name {
-			fmt.Fprintf(b, "[t] type %q to enable [a]: %s\n", v.Conn.Name, v.TypedName)
-		} else {
-			b.WriteString("typed-name match — [a] to apply\n")
+			fmt.Fprintf(b, "%s type %q to confirm: %s\n", keyMagenta("[t]"), v.Conn.Name, v.TypedName)
+			b.WriteString(keyRed("[Esc]") + " cancel")
+			return
 		}
+		fmt.Fprint(b, coloredLine(fmt.Sprintf("✓ %s confirmed", v.Conn.Name)))
+		b.WriteString("\n")
 	}
-	b.WriteString("[a] apply  [d] dry-run  [s] sql  [Esc] cancel")
-}
-
-// BuildCommitDialogSQL returns the per-column UPDATE statements the
-// dialog renders in SqlPreview mode AND the apply helper executes.
-// Exposed (capital B) so A5 can call it directly when wiring OnApply
-// — duplicate code there would risk the rendered SQL drifting from
-// the executed SQL.
-//
-// password is the connection profile's plaintext password (when set);
-// the function scrubs it from the returned SQL strings before they
-// leave the package, mirroring session.sqlPreview (ADR-28).
-//
-// NOTE: this is a local scrub stub. A5 (or a later cleanup) will likely
-// route through a shared helper; once that lands, replace this with
-// the canonical helper. Tracked under ADR-28.
-func BuildCommitDialogSQL(set *models.PendingEditSet, password string) []string {
-	if set == nil || set.IsEmpty() {
-		return nil
+	if v.Conn != nil && v.Conn.ReadOnly {
+		fmt.Fprintf(b, "%s sql  %s cancel", keyCyan("[s]"), keyRed("[Esc]"))
+		return
 	}
-	out := make([]string, 0, set.Count())
-	for _, e := range set.Edits() {
-		stmt := renderUpdateStmt(set.Table, e)
-		if password != "" {
-			stmt = strings.ReplaceAll(stmt, password, "***")
-		}
-		out = append(out, stmt)
-	}
-	return out
-}
-
-// renderUpdateStmt formats one column-level UPDATE statement:
-//
-//	UPDATE "schema"."table" SET "col" = $1 WHERE "pk1" IS NOT DISTINCT FROM $2
-//
-// For Expression edits the SET clause inlines NewExpr verbatim (NO
-// quoting, NO parameter binding) — this matches A5's eventual apply
-// path so users see the same SQL the runtime executes.
-func renderUpdateStmt(t models.Ref, e models.PendingEdit) string {
-	var b strings.Builder
-	b.WriteString("UPDATE ")
-	b.WriteString(quoteIdent(t.Schema, t.Table))
-	b.WriteString(" SET ")
-	b.WriteString(quoteOne(e.Column))
-	if e.Kind == models.Expression {
-		b.WriteString(" = ")
-		b.WriteString(e.NewExpr)
-	} else {
-		b.WriteString(" = $1")
-	}
-	// WHERE clause uses IS NOT DISTINCT FROM so NULL old-values match
-	// correctly (the standard `=` predicate is NULL-unsafe). One
-	// predicate per PK column; positional parameters continue at $2
-	// for Literal edits (so $1 is the new value) and at $1 for
-	// Expression edits (which don't consume $1).
-	if len(e.PrimaryKey) > 0 {
-		b.WriteString(" WHERE ")
-		startParam := 2
-		if e.Kind == models.Expression {
-			startParam = 1
-		}
-		for i := range e.PrimaryKey {
-			if i > 0 {
-				b.WriteString(" AND ")
-			}
-			fmt.Fprintf(&b, "%s IS NOT DISTINCT FROM $%d", quoteOne(pkColumnPlaceholder(i)), startParam+i)
-		}
-	}
-	return b.String()
-}
-
-// pkColumnPlaceholder returns the per-PK-column identifier the SQL
-// preview uses. PendingEdit carries the PK VALUES but NOT the PK
-// COLUMN NAMES — those live on the table introspection. Until the
-// dialog is wired to a table-metadata source, render generic
-// placeholders so the SQL shape is faithful even when names are
-// unknown. A5 / Z1 will widen this once they have the introspection
-// handle.
-func pkColumnPlaceholder(i int) string {
-	return fmt.Sprintf("pk%d", i+1)
-}
-
-// quoteIdent returns the standard SQL identifier quoting for a
-// schema-qualified table reference. Embedded double quotes are
-// doubled per the SQL standard.
-func quoteIdent(schema, table string) string {
-	if schema == "" {
-		return quoteOne(table)
-	}
-	return quoteOne(schema) + "." + quoteOne(table)
-}
-
-// quoteOne returns a single double-quoted identifier with embedded
-// quotes escaped.
-func quoteOne(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	fmt.Fprintf(b, "%s apply  %s dry-run  %s sql  %s cancel",
+		keyGreen("[a]"), keyYellow("[d]"), keyCyan("[s]"), keyRed("[Esc]"))
 }
 
 // connectionPassword returns the plaintext password on the connection

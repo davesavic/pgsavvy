@@ -586,6 +586,17 @@ func (g *Gui) RunLayout(w, h int) error {
 				view.Wrap = true
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
+			// COMMIT_DIALOG styling: the popup is always the
+			// focused modal while on top, so paint its border with the
+			// active-border colour (popups are skipped by the Tier-1
+			// applyFocusFrameColors pass). gocui resets FrameColor on each
+			// SetView, so this must run after SetView, every frame. Wrap
+			// reflows long SQL statement lines (generated for both [s]
+			// preview and [d] dry-run modes) to the box width.
+			if ctx.GetKey() == types.COMMIT_DIALOG && view != nil {
+				view.Wrap = true
+				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+			}
 			// TABLE_INSPECT styling: the columns/indexes
 			// inspect popup is the focused modal while on top, so give it
 			// the same focused-modal treatment as CONFIRMATION/PROMPT —
