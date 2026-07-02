@@ -2,6 +2,7 @@ package pg
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,18 +67,18 @@ type Session struct {
 func newSession(pgxConn *pgxpool.Conn, parent *Connection) *Session {
 	pgc := pgxConn.Conn().PgConn()
 	pid := pgc.PID()
-	secret := pgc.SecretKey()
+	secretKey := binary.BigEndian.Uint32(pgc.SecretKey())
 	s := &Session{
 		conn:       pgxConn,
 		id:         models.SessionID(sessionIDCounter.Add(1)),
 		backendPID: pid,
-		secretKey:  secret,
+		secretKey:  secretKey,
 		pgConn:     pgc,
 		parent:     parent,
 		openedAt:   time.Now(),
 	}
 	s.cachedTxStatus.Store(uint32('I'))
-	parent.registerCancel(pid, secret)
+	parent.registerCancel(pid, secretKey)
 	if parent.notices != nil {
 		parent.notices.bindConn(pgc, s.id)
 	}

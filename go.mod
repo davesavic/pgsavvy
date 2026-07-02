@@ -13,7 +13,7 @@ require (
 	github.com/cockroachdb/cockroachdb-parser v0.0.0-20221207165326-ea0ac1a4778b
 	github.com/gdamore/tcell/v3 v3.3.0
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.7.2
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/jesseduffield/lazycore v0.0.0-20221012050358-03d2e40243c5
 	github.com/jesseduffield/lazygit v0.61.2-0.20260511142836-c49350362005
 	github.com/mattn/go-runewidth v0.0.23
