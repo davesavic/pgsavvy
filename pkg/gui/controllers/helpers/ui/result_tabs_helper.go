@@ -253,6 +253,10 @@ type ResultTabsHelperDeps struct {
 	// default (400ms).
 	MouseDoubleClickMs int
 
+	// YankFormat is the serialization format for result-grid yank.
+	// "" falls back to "tsv".
+	YankFormat string
+
 	// Store is the *common.AppStateStore used to seed/persist the
 	// per-(connID, baseTable) hidden-column set. nil disables persistence
 	// (overlay still works session-only).
@@ -354,6 +358,7 @@ type ResultTabsHelper struct {
 	warnThreshold int64
 	sortPickLabel string
 	doubleClickMs int
+	yankFormat   string
 
 	// log is the structured logger for instrumentation (e.g. the preempt
 	// cancel path). Set post-construction via SetLogger; nil-safe — logs.Event
@@ -454,6 +459,10 @@ func NewResultTabsHelper(deps ResultTabsHelperDeps) *ResultTabsHelper {
 	if dblClick <= 0 {
 		dblClick = 400
 	}
+	yf := deps.YankFormat
+	if yf == "" {
+		yf = "tsv"
+	}
 	return &ResultTabsHelper{
 		deps:          deps,
 		maxTabs:       max,
@@ -463,6 +472,7 @@ func NewResultTabsHelper(deps ResultTabsHelperDeps) *ResultTabsHelper {
 		warnThreshold: warn,
 		sortPickLabel: sortLabel,
 		doubleClickMs: dblClick,
+		yankFormat:    yf,
 	}
 }
 
@@ -1762,6 +1772,8 @@ func (h *ResultTabsHelper) allocTab(label string) (*Tab, error) {
 	// Propagate the configured double-click window onto the grid so the
 	// header mouse-debounce uses the user's tuned value.
 	t.grid.SetMouseDoubleClickMs(h.doubleClickMs)
+	// Wire the configured yank serialization format onto the grid.
+	t.grid.SetYankFormat(h.yankFormat)
 	// Seed the grid's viewMode from AppState.LastResultViewMode so a
 	// new tab opens in the user's last-chosen mode. An
 	// empty string normalises to "grid" inside SetViewMode.
@@ -3785,6 +3797,7 @@ func (h *ResultTabsHelper) WrappedLineUp() {
 }
 func (h *ResultTabsHelper) SelectRow()   { h.withActiveGrid(func(g *grid.View) { g.EnterRowMode() }) }
 func (h *ResultTabsHelper) SelectBlock() { h.withActiveGrid(func(g *grid.View) { g.EnterBlockMode() }) }
+func (h *ResultTabsHelper) SelectCell()  { h.withActiveGrid(func(g *grid.View) { g.EnterCellMode() }) }
 
 func (h *ResultTabsHelper) ClearSelection() {
 	h.withActiveGrid(func(g *grid.View) { g.ClearSelection() })

@@ -43,6 +43,20 @@ func (v *View) FlashYankRow() uint64 {
 	})
 }
 
+// FlashYankSelection arms the post-yank highlight over rows
+// startRow..endRow (all columns) and returns the epoch. Returns 0
+// (no-op) on an empty grid.
+func (v *View) FlashYankSelection(startRow, endRow int) uint64 {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if len(v.rows) == 0 || len(v.cols) == 0 {
+		return 0
+	}
+	return v.setYankFlashLocked(yankFlashRange{
+		rowStart: startRow, rowEnd: endRow, wholeRow: true,
+	})
+}
+
 // setYankFlashLocked stores r and bumps the epoch. Caller holds v.mu.
 func (v *View) setYankFlashLocked(r yankFlashRange) uint64 {
 	cp := r

@@ -78,4 +78,24 @@ func TestResultTabsControllerYankBindings(t *testing.T) {
 	if !foundRow {
 		t.Fatal("no `yy` (ResultYankRow) binding found in RESULT_GRID scope")
 	}
+
+	var foundSelectCell bool
+	for _, kb := range ctrl.GetKeybindings(types.KeybindingsOpts{}) {
+		if kb.Scope != types.RESULT_GRID || len(kb.Sequence) != 1 {
+			continue
+		}
+		k := kb.Sequence[0]
+		if k.Code == 'v' && k.Special == types.KeyNone && k.Mod == 0 {
+			if kb.ActionID != commands.ResultSelectCell {
+				t.Fatalf("v binding ActionID = %q, want %q", kb.ActionID, commands.ResultSelectCell)
+			}
+			if kb.Mode != types.ModeNormal {
+				t.Fatalf("v binding Mode = %v, want ModeNormal", kb.Mode)
+			}
+			foundSelectCell = true
+		}
+	}
+	if !foundSelectCell {
+		t.Fatal("no `v` (ResultSelectCell) binding found in RESULT_GRID scope")
+	}
 }

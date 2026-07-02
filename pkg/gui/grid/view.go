@@ -156,6 +156,15 @@ type View struct {
 	// time.
 	mouseDoubleClickMs int
 
+	// yankFormat is the serialisation format used by Yank. Allowed values
+	// are "json", "tsv", "csv", "ndjson". Wired from config at tab
+	// construction.
+	yankFormat string
+
+	// maxClipboardBytes caps the payload size that yank methods write to
+	// the clipboard. Wired from config; defaults to 16 MiB.
+	maxClipboardBytes int64
+
 	// hiddenColSet is the per-View hide-cols state used by the <leader>gH
 	// overlay. Keys are indices into the CURRENT cols slice. SetColumns
 	// clears this map (the indices are not stable across schema attaches);
@@ -234,6 +243,8 @@ func NewView() *View {
 		lastNearTailFireAt: -1,
 		lastHeaderClick:    headerClickState{col: -1},
 		mouseDoubleClickMs: defaultMouseDoubleClickMs,
+		yankFormat:         "tsv",
+		maxClipboardBytes:  16 * 1024 * 1024, // 16 MiB default
 	}
 }
 
@@ -248,6 +259,38 @@ func (v *View) SetMouseDoubleClickMs(n int) {
 	v.mu.Lock()
 	v.mouseDoubleClickMs = n
 	v.mu.Unlock()
+}
+
+// SetYankFormat sets the format used by yank serializers. Allowed values
+// are "json", "tsv", "csv", "ndjson". Unknown values are normalised to
+// "tsv" as a defensive fallback. Wired from config at tab construction.
+func (v *View) SetYankFormat(format string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	switch format {
+	case "json", "tsv", "csv", "ndjson":
+		v.yankFormat = format
+	default:
+		v.yankFormat = "tsv"
+	}
+}
+
+// YankFormat returns the current yank serialization format.
+func (v *View) YankFormat() string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.yankFormat
+}
+
+// SetMaxClipboardBytes caps the payload size that yank methods write to
+// the clipboard. Set to <= 0 for the 16 MiB default.
+func (v *View) SetMaxClipboardBytes(n int64) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if n <= 0 {
+		n = 16 * 1024 * 1024
+	}
+	v.maxClipboardBytes = n
 }
 
 // SetTitle installs the title shown in the host gocui view's frame.

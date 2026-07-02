@@ -77,6 +77,8 @@ func (f *fakeResultTabs) ShowError(label string, err error) {
 	f.errorCalls = append(f.errorCalls, errorCall{label, err})
 }
 
+func (f *fakeResultTabs) SelectCell() {}
+
 // queryBag extends the base test bag with the query-editor wiring.
 type queryBag struct {
 	*bag

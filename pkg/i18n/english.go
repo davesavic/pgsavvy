@@ -251,6 +251,7 @@ type ActionTranslations struct {
 	ResultWrappedLineUp   string
 	ResultSelectRow       string
 	ResultSelectBlock     string
+	ResultSelectCell      string
 	ResultYankCell        string
 	ResultYankRow         string
 
@@ -539,9 +540,10 @@ func EnglishTranslationSet() *TranslationSet {
 			ResultHalfPageUp:      "Half page up",
 			ResultWrappedLineDown: "Next wrapped line",
 			ResultWrappedLineUp:   "Previous wrapped line",
-			ResultSelectRow:       "Visual row selection",
-			ResultSelectBlock:     "Visual block selection",
-			ResultYankCell:        "Yank focused cell",
+		ResultSelectRow:       "Visual row selection",
+		ResultSelectBlock:     "Visual block selection",
+		ResultSelectCell:      "Visual cell selection",
+		ResultYankCell:        "Yank focused cell",
 			ResultYankRow:         "Yank focused row (TSV)",
 
 			DeleteConnection: "Delete connection",

@@ -335,6 +335,7 @@ const (
 	ResultWrappedLineUp   = "result.wrapped_line.up"
 	ResultSelectRow       = "result.select.row"
 	ResultSelectBlock     = "result.select.block"
+	ResultSelectCell      = "result.select.cell"
 
 	// Clipboard yank. RESULT_GRID-scoped.
 	//   ResultYankCell - `y` copies the focused cell's display value.
@@ -756,6 +757,7 @@ func AllActionIDs() []string {
 		ResultWrappedLineUp,
 		ResultSelectRow,
 		ResultSelectBlock,
+		ResultSelectCell,
 		ResultYankCell,
 		ResultYankRow,
 		HideOverlayUp,

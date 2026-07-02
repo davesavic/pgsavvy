@@ -96,6 +96,15 @@ func selectionRange(snap viewSnapshot) (rowStart, colStart, rowEnd, colEnd int, 
 	}
 }
 
+// SelectionBounds returns the ordered (rowStart, colStart, rowEnd, colEnd)
+// for the active selection. When no selection is active, it returns the
+// cursor position as a single-cell bounds.
+func (v *View) SelectionBounds() (rowStart, colStart, rowEnd, colEnd int) {
+	snap := v.snapshot()
+	r0, c0, r1, c1, _ := selectionRange(snap)
+	return r0, c0, r1, c1
+}
+
 func orderInts(a, b int) (lo, hi int) {
 	if a <= b {
 		return a, b

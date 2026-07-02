@@ -276,3 +276,31 @@ func TestAllRows_ConcurrentSafety(t *testing.T) {
 	wg.Wait()
 	require.Equal(t, 500, v.RowCount(), "all producer appends must be present")
 }
+
+func TestView_SetYankFormat_ValidValues(t *testing.T) {
+	for _, f := range []string{"json", "tsv", "csv", "ndjson"} {
+		v := NewView()
+		v.SetYankFormat(f)
+		if got := v.YankFormat(); got != f {
+			t.Errorf("YankFormat() = %q after SetYankFormat(%q), want %q", got, f, f)
+		}
+	}
+}
+
+func TestView_SetYankFormat_DefaultsToTSV(t *testing.T) {
+	v := NewView()
+	if got := v.YankFormat(); got != "tsv" {
+		t.Errorf("default YankFormat() = %q, want \"tsv\"", got)
+	}
+}
+
+func TestView_SetYankFormat_NormalisesUnknown(t *testing.T) {
+	for _, f := range []string{"", "unknown", "JSON", "xml"} {
+		v := NewView()
+		v.SetYankFormat("json")
+		v.SetYankFormat(f)
+		if got := v.YankFormat(); got != "tsv" {
+			t.Errorf("YankFormat() = %q after SetYankFormat(%q), want \"tsv\"", got, f)
+		}
+	}
+}

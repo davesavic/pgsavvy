@@ -164,3 +164,9 @@ func TestThemeConfig_DroppedDeadFieldsAreGone(t *testing.T) {
 		}
 	}
 }
+
+func TestGetDefaultConfig_ResultGridYankFormat(t *testing.T) {
+	if got := GetDefaultConfig().UI.ResultGrid.YankFormat; got != "json" {
+		t.Errorf("UI.ResultGrid.YankFormat = %q, want %q", got, "json")
+	}
+}

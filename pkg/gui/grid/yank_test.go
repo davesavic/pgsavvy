@@ -151,3 +151,172 @@ func TestYankCell_PropagatesClipboardError(t *testing.T) {
 	require.True(t, ok)
 	require.ErrorIs(t, err, ErrClipboardTooLarge)
 }
+
+func TestYankSelection_JSON_RowSelection(t *testing.T) {
+	v := makeCanonical3x3(t)
+	v.SetYankFormat("json")
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.EnterRowMode()
+	v.MoveCursorDown()
+
+	val, ok, err := v.YankSelection()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "[\n  {\n    \"c0\": \"a\",\n    \"c1\": \"b\",\n    \"c2\": \"c\"\n  },\n  {\n    \"c0\": \"d\",\n    \"c1\": \"e\",\n    \"c2\": \"f\"\n  }\n]", val)
+	require.Equal(t, val, rc.lastWrite())
+}
+
+func TestYankSelection_JSON_BlockSelection(t *testing.T) {
+	v := makeCanonical3x3(t)
+	v.SetYankFormat("json")
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.EnterBlockMode()
+	v.MoveCursorDown()
+	v.MoveCursorRight()
+
+	val, ok, err := v.YankSelection()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "[\n  {\n    \"c0\": \"a\",\n    \"c1\": \"b\"\n  },\n  {\n    \"c0\": \"d\",\n    \"c1\": \"e\"\n  }\n]", val)
+	require.Equal(t, val, rc.lastWrite())
+}
+
+func TestYankSelection_JSON_CellSelection(t *testing.T) {
+	v := makeCanonical3x3(t)
+	v.SetYankFormat("json")
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.MoveCursorDown()
+	v.MoveCursorRight()
+	v.EnterCellMode()
+
+	val, ok, err := v.YankSelection()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "[\n  {\n    \"c1\": \"e\"\n  }\n]", val)
+	require.Equal(t, val, rc.lastWrite())
+}
+
+func TestYankSelection_TSV_WithHeaders_RowSelection(t *testing.T) {
+	v := makeCanonical3x3(t)
+	// Default format is tsv
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.EnterRowMode()
+	v.MoveCursorDown()
+
+	val, ok, err := v.YankSelection()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "c0\tc1\tc2\na\tb\tc\nd\te\tf", val)
+	require.Equal(t, val, rc.lastWrite())
+}
+
+func TestYankSelection_CSV_WithHeaders(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{
+		{Name: "c0", TypeName: "text"},
+		{Name: "name, with commas", TypeName: "text"},
+		{Name: "c2", TypeName: "text"},
+	})
+	v.AppendRows([]models.Row{
+		{Values: []any{"a", "b", "c"}},
+	})
+	v.SetYankFormat("csv")
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.EnterRowMode()
+
+	val, ok, err := v.YankSelection()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "c0,\"name, with commas\",c2\r\na,b,c", val)
+	require.Equal(t, val, rc.lastWrite())
+}
+
+func TestYankSelection_NDJSON_RowSelection(t *testing.T) {
+	v := makeCanonical3x3(t)
+	v.SetYankFormat("ndjson")
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.EnterRowMode()
+	v.MoveCursorDown()
+
+	val, ok, err := v.YankSelection()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "{\"c0\":\"a\",\"c1\":\"b\",\"c2\":\"c\"}\n{\"c0\":\"d\",\"c1\":\"e\",\"c2\":\"f\"}", val)
+	require.Equal(t, val, rc.lastWrite())
+}
+
+func TestYankSelection_NoSelection_FallsBackToSingleRowWithHeaders(t *testing.T) {
+	v := makeCanonical3x3(t)
+	v.SetYankFormat("json")
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.MoveCursorDown() // cursor at row 1
+	// No selection active
+
+	val, ok, err := v.YankSelection()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "[\n  {\n    \"c0\": \"d\",\n    \"c1\": \"e\",\n    \"c2\": \"f\"\n  }\n]", val)
+	require.Equal(t, val, rc.lastWrite())
+}
+
+func TestYankSelection_EmptyGrid(t *testing.T) {
+	v := NewView()
+	v.SetYankFormat("json")
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+
+	val, ok, err := v.YankSelection()
+	require.False(t, ok)
+	require.NoError(t, err)
+	require.Empty(t, val)
+	require.Empty(t, rc.lastWrite())
+}
+
+func TestYankSelection_ClipboardTooLarge(t *testing.T) {
+	v := makeCanonical3x3(t)
+	v.SetYankFormat("json")
+	v.SetMaxClipboardBytes(1) // 1 byte limit — anything is too large
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.EnterRowMode()
+
+	val, ok, err := v.YankSelection()
+	require.True(t, ok)
+	require.ErrorIs(t, err, ErrClipboardTooLarge)
+	require.NotEmpty(t, val)
+}
+
+func TestYankRowWithHeaders_JSON(t *testing.T) {
+	v := makeCanonical3x3(t)
+	v.SetYankFormat("json")
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.MoveCursorDown() // row 1
+
+	val, ok, err := v.YankRowWithHeaders()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "[\n  {\n    \"c0\": \"d\",\n    \"c1\": \"e\",\n    \"c2\": \"f\"\n  }\n]", val)
+	require.Equal(t, val, rc.lastWrite())
+}
+
+func TestYankRowWithHeaders_TSV(t *testing.T) {
+	v := makeCanonical3x3(t)
+	// Default format is tsv
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.MoveCursorDown() // row 1
+
+	val, ok, err := v.YankRowWithHeaders()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "c0\tc1\tc2\nd\te\tf", val)
+	require.Equal(t, val, rc.lastWrite())
+}

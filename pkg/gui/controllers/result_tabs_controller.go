@@ -84,6 +84,7 @@ type ResultTabsManager interface {
 	WrappedLineUp()
 	SelectRow()
 	SelectBlock()
+	SelectCell()
 	ClearSelection()
 	SelectionActive() bool
 
@@ -181,6 +182,7 @@ func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		{"K", commands.ResultWrappedLineUp, tr.Actions.ResultWrappedLineUp, types.RESULT_GRID},
 		{"V", commands.ResultSelectRow, tr.Actions.ResultSelectRow, types.RESULT_GRID},
 		{"<c-v>", commands.ResultSelectBlock, tr.Actions.ResultSelectBlock, types.RESULT_GRID},
+		{"v", commands.ResultSelectCell, tr.Actions.ResultSelectCell, types.RESULT_GRID},
 		// pgsavvy U4: clipboard yank. `y` cell, `yy` row (TSV).
 		{"y", commands.ResultYankCell, tr.Actions.ResultYankCell, types.RESULT_GRID},
 		{"yy", commands.ResultYankRow, tr.Actions.ResultYankRow, types.RESULT_GRID},
@@ -475,6 +477,7 @@ func (r *ResultTabsController) RegisterActions(reg *commands.Registry) {
 	r.registerMotionHandler(reg, commands.ResultWrappedLineUp, tr.Actions.ResultWrappedLineUp, func() { r.mgr.WrappedLineUp() })
 	r.registerMotionHandler(reg, commands.ResultSelectRow, tr.Actions.ResultSelectRow, func() { r.mgr.SelectRow() })
 	r.registerMotionHandler(reg, commands.ResultSelectBlock, tr.Actions.ResultSelectBlock, func() { r.mgr.SelectBlock() })
+	r.registerMotionHandler(reg, commands.ResultSelectCell, tr.Actions.ResultSelectCell, func() { r.mgr.SelectCell() })
 
 	// pgsavvy U4: clipboard yank handlers (`y` cell / `yy` row).
 	_ = reg.Register(&commands.Command{
@@ -838,11 +841,11 @@ func (r *ResultTabsController) pendingDiscardAllHandler(_ commands.ExecCtx) erro
 	return h.DiscardAll()
 }
 
-// yankHandler returns the dispatch handler for `y` (row=false → focused
-// cell) / `yy` (row=true → focused row TSV). It resolves the active tab's
-// grid, copies the sanitized display value via the grid's ClipboardWriter,
-// and maps the typed clipboard errors to specific toasts. An empty grid is a
-// silent no-op (no panic) per the AC.
+// yankHandler returns the dispatch handler for `y` (row=false →
+// focused cell) / `yy` (row=true → selection-aware formatted yank).
+// With an active selection `yy` calls YankSelection and flashes the
+// selection range; without a selection `yy` calls YankRowWithHeaders.
+// `y` is unchanged (YankCell).
 func (r *ResultTabsController) yankHandler(row bool) commands.Handler {
 	return func(_ commands.ExecCtx) error {
 		if r.mgr == nil {
@@ -857,14 +860,24 @@ func (r *ResultTabsController) yankHandler(row bool) commands.Handler {
 			return nil
 		}
 		var (
-			value string
-			ok    bool
-			err   error
-			what  string
+			value    string
+			ok       bool
+			err      error
+			what     string
+			selRange bool
+			rowStart int
+			rowEnd   int
 		)
 		if row {
-			value, ok, err = g.YankRow()
-			what = "row"
+			if r.mgr.SelectionActive() {
+				rowStart, _, rowEnd, _ = g.SelectionBounds()
+				value, ok, err = g.YankSelection()
+				what = fmt.Sprintf("rows as %s", formatName(g.YankFormat()))
+				selRange = true
+			} else {
+				value, ok, err = g.YankRowWithHeaders()
+				what = fmt.Sprintf("row as %s", formatName(g.YankFormat()))
+			}
 		} else {
 			value, ok, err = g.YankCell()
 			what = "cell"
@@ -872,7 +885,7 @@ func (r *ResultTabsController) yankHandler(row bool) commands.Handler {
 		if !ok {
 			return nil
 		}
-		r.flashYank(g, row)
+		r.flashYank(g, row, selRange, rowStart, rowEnd)
 		switch {
 		case errors.Is(err, grid.ErrClipboardTooLarge):
 			r.toast("clipboard: value too large")
@@ -887,18 +900,34 @@ func (r *ResultTabsController) yankHandler(row bool) commands.Handler {
 	}
 }
 
-// flashYank arms the grid's transient post-yank highlight over the just-
-// yanked cell (row=false) or row (row=true) and schedules its auto-clear
-// after yankFlashTTL — the same TTL and yellow tint the SQL editor uses for
-// its on_yank flash. The epoch returned by FlashYank*
-// makes a later yank's clear supersede this one. A nil driver (test wiring)
-// or empty grid (epoch 0) skips the scheduled clear.
-func (r *ResultTabsController) flashYank(g *grid.View, row bool) {
-	flash := g.FlashYankCell
-	if row {
-		flash = g.FlashYankRow
+func formatName(f string) string {
+	switch f {
+	case "json":
+		return "JSON"
+	case "csv":
+		return "CSV"
+	case "ndjson":
+		return "NDJSON"
+	case "tsv":
+		return "TSV"
+	default:
+		return strings.ToUpper(f)
 	}
-	epoch := flash()
+}
+
+// flashYank arms the grid's transient post-yank highlight over the just-
+// yanked cell (row=false+selRange=false), cursor row (row=true+selRange=false),
+// or selection range (selRange=true) and schedules its auto-clear after
+// yankFlashTTL.
+func (r *ResultTabsController) flashYank(g *grid.View, row bool, selRange bool, rowStart, rowEnd int) {
+	var epoch uint64
+	if selRange {
+		epoch = g.FlashYankSelection(rowStart, rowEnd)
+	} else if row {
+		epoch = g.FlashYankRow()
+	} else {
+		epoch = g.FlashYankCell()
+	}
 	drv := r.helpers.Driver
 	if epoch == 0 || drv == nil {
 		return

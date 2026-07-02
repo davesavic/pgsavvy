@@ -54,6 +54,12 @@ type EditorConfig struct {
 	FKForwardLimit int `yaml:"fk_forward_limit"`
 }
 
+// ResultGridConfig groups settings for the result grid yank + selection
+// surface. Follows the ExportConfig sub-struct pattern.
+type ResultGridConfig struct {
+	YankFormat string `yaml:"yank_format"`
+}
+
 // UIConfig groups settings that govern UI behaviour (vs. data /
 // connection settings). Today it carries the mouse-enabled toggle and the
 // result-grid pagination knobs. Future epics may add scrollback,
@@ -83,6 +89,9 @@ type UIConfig struct {
 	// Export carries the result-export knobs surfaced by the
 	// <leader>oe menu.
 	Export ExportConfig `yaml:"export"`
+
+	// ResultGrid carries the result-grid yank + selection knobs.
+	ResultGrid ResultGridConfig `yaml:"result_grid"`
 }
 
 // ExportConfig groups the user-tunable bounds for the result-export
@@ -235,6 +244,9 @@ func GetDefaultConfig() *UserConfig {
 			Export: ExportConfig{
 				BufferedRowWarnThreshold: 100_000,
 				ClipboardMaxBytes:        16 * 1024 * 1024,
+			},
+			ResultGrid: ResultGridConfig{
+				YankFormat: "json",
 			},
 		},
 		Editor: EditorConfig{

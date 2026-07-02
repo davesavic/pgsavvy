@@ -183,6 +183,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		resultTabsDeps.ResultPageSize = cfg.UI.ResultPageSize
 		resultTabsDeps.ReadToEndWarnThreshold = cfg.UI.ReadToEndWarnThreshold
 		resultTabsDeps.MouseDoubleClickMs = cfg.UI.Mouse.DoubleClickMs
+		resultTabsDeps.YankFormat = cfg.UI.ResultGrid.YankFormat
 		resultTabsDeps.ExportBufferedRowWarnThreshold = cfg.UI.Export.BufferedRowWarnThreshold
 		resultTabsDeps.ExportClipboardMaxBytes = cfg.UI.Export.ClipboardMaxBytes
 	}

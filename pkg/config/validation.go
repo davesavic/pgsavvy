@@ -55,6 +55,10 @@ var allowedModeTokens = map[string]struct{}{
 	"n": {}, "i": {}, "v": {}, "V": {}, "<c-v>": {}, "o": {}, "x": {}, "c": {},
 }
 
+var allowedYankFormats = map[string]struct{}{
+	"json": {}, "tsv": {}, "csv": {}, "ndjson": {},
+}
+
 // ValidateUserConfig validates cfg against the configured rules.
 //
 // It returns two slices: warnings are non-fatal advisories (e.g. missing
@@ -211,6 +215,10 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 		errs = append(errs, fmt.Errorf("config: ui.export.clipboard_max_bytes must be > 0, got %d", cfg.UI.Export.ClipboardMaxBytes))
 	} else if cfg.UI.Export.ClipboardMaxBytes > 1<<30 {
 		errs = append(errs, fmt.Errorf("config: ui.export.clipboard_max_bytes must be <= 1 GiB (1073741824), got %d", cfg.UI.Export.ClipboardMaxBytes))
+	}
+
+	if _, ok := allowedYankFormats[cfg.UI.ResultGrid.YankFormat]; !ok {
+		errs = append(errs, fmt.Errorf("config: ui.result_grid.yank_format must be one of [json, tsv, csv, ndjson], got %q", cfg.UI.ResultGrid.YankFormat))
 	}
 
 	return warns, errs

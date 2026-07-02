@@ -66,18 +66,10 @@ func writeDelimitedRow(w io.Writer, fields []string, delim byte) error {
 		if i > 0 {
 			b.WriteByte(delim)
 		}
-		b.WriteString(rfc4180Quote(f, delim))
+		b.WriteString(grid.Rfc4180Quote(f, delim))
 	}
 	b.WriteString("\r\n")
 	_, err := io.WriteString(w, b.String())
 	return err
 }
 
-// rfc4180Quote wraps a field in double quotes when it contains the delimiter,
-// a double quote, CR or LF. Embedded double quotes are doubled.
-func rfc4180Quote(s string, delim byte) string {
-	if !strings.ContainsAny(s, "\r\n\"") && !strings.ContainsRune(s, rune(delim)) {
-		return s
-	}
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-}

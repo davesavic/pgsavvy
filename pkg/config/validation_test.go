@@ -489,3 +489,41 @@ func TestValidateUserConfig_Export_ClipboardMaxBytesAboveGiB(t *testing.T) {
 		t.Errorf("expected clipboard_max_bytes error, got %v", errs)
 	}
 }
+
+func TestValidateUserConfig_YankFormat_Valid(t *testing.T) {
+	for _, f := range []string{"json", "tsv", "csv", "ndjson"} {
+		cfg := GetDefaultConfig()
+		cfg.UI.ResultGrid.YankFormat = f
+		_, errs := ValidateUserConfig(cfg, fullDeps())
+		if containsErrSubstr(errs, "yank_format") {
+			t.Errorf("yank_format=%q should be valid, got errors %v", f, errs)
+		}
+	}
+}
+
+func TestValidateUserConfig_YankFormat_Invalid(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.UI.ResultGrid.YankFormat = "xml"
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if !containsErrSubstr(errs, "yank_format") {
+		t.Errorf("yank_format=xml should be rejected, got %v", errs)
+	}
+}
+
+func TestValidateUserConfig_YankFormat_Empty(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.UI.ResultGrid.YankFormat = ""
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if !containsErrSubstr(errs, "yank_format") {
+		t.Errorf("yank_format=\"\" should be rejected, got %v", errs)
+	}
+}
+
+func TestValidateUserConfig_YankFormat_CaseSensitive(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.UI.ResultGrid.YankFormat = "JSON"
+	_, errs := ValidateUserConfig(cfg, fullDeps())
+	if !containsErrSubstr(errs, "yank_format") {
+		t.Errorf("yank_format=JSON should be rejected (case-sensitive), got %v", errs)
+	}
+}
