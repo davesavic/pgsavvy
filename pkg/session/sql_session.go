@@ -335,8 +335,16 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 		slog.Any("params_hashes", paramsHashes(q.Args)),
 	)
 
+	connPwd := s.connPwd
+	logger := s.logger
+	start := time.Now()
+
+	rh := protoRunHandle(q.SQL)
+	s.runActive.Store(rh)
+
 	rs, err := s.inner.Stream(ctx, q)
 	if err != nil {
+		s.runActive.Store(nil)
 		s.streamMu.Unlock()
 		s.logger.LogAttrs(ctx, slog.LevelDebug, "stream_end",
 			slog.String("evt", "stream_end"),
@@ -346,8 +354,6 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 			slog.String("term_err", err.Error()),
 			slog.Int64("ms", 0),
 		)
-		// A Stream that fails before producing a RowStream still counts as
-		// a terminated run for the recorder.
 		if !suppressLog {
 			s.recordHistory(q.SQL, 0, 0, false)
 		}
@@ -357,14 +363,9 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 		return nil, err
 	}
 
-	rh := newRunHandle(rs, q.SQL)
-	start := time.Now()
+	rh.queryID = rs.QueryID()
+	rh.rows = &wrappedRowStream{inner: rs, owner: rh}
 
-	// noticeHook emits a structured `evt=notice` line for every notice
-	// received on this run; message_preview is pre-scrubbed for the
-	// connection-password substring AND DSN-shaped strings (AC).
-	connPwd := s.connPwd
-	logger := s.logger
 	rh.noticeHook = func(n pgconn.Notice) {
 		logger.LogAttrs(context.Background(), slog.LevelDebug, "notice",
 			slog.String("evt", "notice"),
@@ -398,8 +399,6 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 			slog.String("term_err", termErrStr),
 			slog.Int64("ms", durMs),
 		)
-		// Clean EOF reports succeeded=true; any other termination is a
-		// failure for history purposes (ctx.Canceled, driver errors, ...).
 		if !suppressLog {
 			s.recordHistory(q.SQL, durMs, rh.rowsObserved.Load(), termErr == nil)
 		}
@@ -407,20 +406,14 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 			if tx := s.inner.CurrentTransaction(); tx != nil {
 				tx.ObserveError(termErr)
 			}
-			// mark session disconnected on transport-level errors
-			// so subsequent Execute/Stream/Begin calls fail fast.
 			if drivers.IsConnectionDead(termErr) {
 				s.disconnected.Store(true)
 			}
 		}
-		// The wedged worker has now exited and is releasing streamMu; lift the
-		// preempt fence at the same instant so a fenced session reopens for new
-		// queries exactly when the queue is free again.
 		s.preemptPending.Store(false)
 		s.streamMu.Unlock()
 	}
 
-	s.runActive.Store(rh)
 	s.registry.Register(sid, rh)
 	return rh, nil
 }

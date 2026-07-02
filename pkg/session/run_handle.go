@@ -81,18 +81,17 @@ type RunHandle struct {
 	noticeHook func(pgconn.Notice)
 }
 
-// newRunHandle constructs a RunHandle wrapping rs. The caller is responsible
-// for installing onFinish + cancelFn before exposing the handle (SQLSession
-// does this within Stream).
-func newRunHandle(rs drivers.RowStream, stmt string) *RunHandle {
-	rh := &RunHandle{
-		queryID: rs.QueryID(),
+// protoRunHandle constructs a minimal RunHandle without a RowStream. The
+// caller must populate queryID and rows after the driver Stream call returns.
+// SQLSession.Stream does this so that runActive is visible to the fan-out
+// goroutine before inner.Stream() — notices delivered synchronously during
+// the driver call (e.g. RAISE NOTICE in a sql function) are captured, not dropped.
+func protoRunHandle(stmt string) *RunHandle {
+	return &RunHandle{
 		stmt:    stmt,
 		done:    make(chan struct{}),
 		notices: make(chan pgconn.Notice, runNoticeBuffer),
 	}
-	rh.rows = &wrappedRowStream{inner: rs, owner: rh}
-	return rh
 }
 
 // QueryID returns the driver-stamped identifier of the in-flight query.
