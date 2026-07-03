@@ -40,11 +40,11 @@ Navigate the left-rail consolidated schema/tables browser with vim keys (`j`/`k`
 
 A full vim modal editor for SQL — Normal, Insert, Visual (char/line/block), and Operator-Pending modes. Motions cover word/WORD, line, paragraph, sentence, and screen navigation via the h/j/k/l home row. Operators — delete, yank, change, case-switch, indent — combine with motions and text objects through the standard op-pending workflow, and `.` repeat replays the last operator from the current cursor position. Text objects include `is`/`as` for SQL statements (delimited by chroma-aware token parsing, not semicolons alone) plus `iw`/`aw`, `i{`/`a{`, `i"`/`a"`, and paragraph objects. Named registers (`"a`–`"z`) and clipboard registers (`""`, `"+`, `"*`) are fully supported. Undo branches through history with redo via `<c-r>`. Syntax highlighting is powered by [Chroma](https://github.com/alecthomas/chroma) with a PostgreSQL lexer producing ANSI truecolor SGR output, and the editor formats SQL via [sqlfmt](https://github.com/wasilibs/sqlfmt) on `<leader>F`.
 
-  ![pgsavvy SQL omni-completion](docs/demo-autocomplete.gif)
-
 ### SQL Completions
 
 Omni-completion (`<c-x><c-o>`) populates a candidate popup from three sources: schema objects (tables, columns, functions), SQL functions, and query history. Auto-trigger mode fires the popup after recognised SQL contexts (`FROM `, `JOIN `, `<word>.`) without requiring a manual chord — configurable via `editor.autocomplete` in `config.yml`. When auto-complete-alias is enabled, accepting a table candidate after `FROM` inserts an editable deduplicated alias (e.g. `users u`) automatically. Multi-source completion candidates include SQL snippets that expand as a single undo node.
+
+  ![pgsavvy SQL omni-completion](docs/feat-autocomplete.gif)
 
 ### Query Execution & Transaction Control
 
@@ -64,25 +64,31 @@ EXPLAIN / EXPLAIN ANALYZE output renders as an interactive tree in a plan-dedica
 
 Query results open in numbered tabs (1–9, jumped to via `<leader>1`–`<leader>9`) with pin, close, and cycle controls. Rows stream incrementally with pagination (`]p`/`[p`, configurable page size) and a read-to-end drain that warns before fetching very large row sets. Search within the grid (`/`) highlights matches; navigate with `n`/`N`. Sort by column (`<leader>s`) cycles ascending → descending → clear. Select cells (`v`), entire rows (`V`), or rectangular blocks (`<c-v>`) for visual range highlighting. Yank a cell (`y`) or the full row as TSV (`yy`) to the system clipboard. Toggle between the grid view and an expanded record view with `<leader>gx` — persisted globally across sessions.
 
-  ![pgsavvy column visibility](docs/feat-hide-columns.gif)
-
   ![pgsavvy result grid](docs/feat-result-grid.gif)
+
+Show and hide individual columns with `<leader>gH` to focus on the data you care about.
+
+  ![pgsavvy column visibility](docs/feat-hide-columns.gif)
 
 ### Relationship Explorer
 
-Open the right-docked foreign-key panel with `<leader>gr` to see every parent and child relationship for the row under the cursor. Navigate outbound (parent) FKs forward into referenced rows with `gd`, which opens a parameterised SELECT in a new result tab. Navigate inbound (child) relationships with `gD` through a tabbed picker showing every table that references the current row's column, with composite-FK support. Jump back through the per-tab navigation history with `<c-o>` and forward with `<c-i>`. The panel tracks cursor movement within the grid so relationship lines update as you scroll, acting as a live breadcrumb.
-
-  ![pgsavvy reverse FK picker](docs/feat-fk-reverse.gif)
+Open the right-docked foreign-key panel with `<leader>gr` to see every parent and child relationship for the row under the cursor. Navigate outbound (parent) FKs forward into referenced rows with `gd`, which opens a parameterised SELECT in a new result tab. Jump back through the per-tab navigation history with `<c-o>` and forward with `<c-i>`. The panel tracks cursor movement within the grid so relationship lines update as you scroll, acting as a live breadcrumb.
 
   ![pgsavvy relationship explorer](docs/feat-relationships.gif)
 
+Navigate inbound (child) relationships with `gD` through a tabbed picker showing every table that references the current row's column, with composite-FK support.
+
+  ![pgsavvy reverse FK picker](docs/feat-fk-reverse.gif)
+
 ### Inline Cell Editing
 
-Enter cell-edit mode (`i` on a focused cell) to edit the value directly or via SQL expression. Type-aware validation runs on commit — integers, timestamps, JSON, and booleans are parsed and validated before staging. Per-type helpers insert expression templates: `<c-n>` sets NULL, `<c-t>` generates `now()`, `<c-d>` inserts `current_date`, and `<c-e>` opens the SQL expression prompt. Staged edits accumulate per table until the commit dialog is opened (`:w` or `<leader>cw`), where you can review each change, dry-run the statements (`[d]`), toggle the generated SQL preview (`[s]`), and apply with an optional typed-name confirmation gate. On conflict — the row changed between your read and commit — the conflict dialog presents the current DB values side-by-side with your edit for refresh or overwrite. Discard all pending edits for a table with `<leader>cU`, or the edit under cursor with `<leader>cu`.
-
-  ![pgsavvy commit dialog](docs/feat-commit.gif)
+Enter cell-edit mode (`i` on a focused cell) to edit the value directly or via SQL expression. Type-aware validation runs on commit — integers, timestamps, JSON, and booleans are parsed and validated before staging. Per-type helpers insert expression templates: `<c-n>` sets NULL, `<c-t>` generates `now()`, `<c-d>` inserts `current_date`, and `<c-e>` opens the SQL expression prompt.
 
   ![pgsavvy inline cell editing](docs/feat-cell-edit.gif)
+
+Staged edits accumulate per table until the commit dialog is opened (`:w` or `<leader>cw`), where you can review each change, dry-run the statements (`[d]`), toggle the generated SQL preview (`[s]`), and apply with an optional typed-name confirmation gate. On conflict — the row changed between your read and commit — the conflict dialog presents the current DB values side-by-side with your edit for refresh or overwrite. Discard all pending edits for a table with `<leader>cU`, or the edit under cursor with `<leader>cu`.
+
+  ![pgsavvy commit dialog](docs/feat-commit.gif)
 
 ### Export
 
@@ -100,15 +106,15 @@ Open the full cell-content viewer popup (`<leader>gv`) for any focused cell in a
 
 Query history persists in a local SQLite database (`$XDG_STATE_HOME/history.sqlite`) with FTS5 full-text search backing the recall popup. Open the history tab (`<leader>h`) to browse, search, and insert past queries into the editor — with content-deduplication so repeated identical queries compress to a single record.
 
+  ![pgsavvy query history](docs/feat-history.gif)
+
 Save queries for later use: capture the statement under cursor or a visual selection with `<leader>s`, give it a name, and it persists to `queries.yml` in the config directory. Open the saved queries tab (`<leader>o`) to browse, insert, and delete saved queries with standard vim navigation. Both history and saved queries share the query-rail container tab bar, cycled with `]` and `[` inside the query pane.
 
   ![pgsavvy saved queries](docs/feat-saved-queries.gif)
 
-  ![pgsavvy query history](docs/feat-history.gif)
-
 ### Session Settings
 
-Change PostgreSQL session variables on the fly: SET search_path via `<leader>p` with a pre-filled prompt, and SET statement_timeout via `<leader>tt` with duration validation and injection-resistant canonicalisation. The Ex-command line (`:`) dispatches registered commands including `:reload`, which hot-reloads the user config (keybindings, theme, UI settings) without restarting — file-backed sources are serialised so multiple invocations coalesce safely. `:set` and `:reset` give programmatic control over session variables from the command line. The connection status line shows the active profile, database, and transaction/error state.
+Change PostgreSQL session variables on the fly: `SET search_path` via `<leader>p` with a pre-filled prompt, and `SET statement_timeout` via `<leader>tt` with duration validation and injection-resistant canonicalisation. The Ex-command line (`:`) dispatches registered commands including `:reload`, which hot-reloads the user config (keybindings, theme, UI settings) without restarting — file-backed sources are serialised so multiple invocations coalesce safely. `:set` and `:reset` give programmatic control over session variables from the command line. The connection status line shows the active profile, database, and transaction/error state.
 
   ![pgsavvy session settings](docs/feat-session-settings.gif)
 
