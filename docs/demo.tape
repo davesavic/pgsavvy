@@ -28,12 +28,12 @@ Sleep 2.5s
 Show
 Sleep 600ms
 
-# Focus the consolidated schema-rail (<tab>), activate the app schema (<cr>) —
-# which loads its tables and reveals the Tables tab — then scroll through them.
+# Focus the schema-rail (Tab), switch to its Tables tab (Type "]"),
+# then scroll through the table list with j.
 Tab
 Sleep 1.2s
-Enter
-Sleep 1.5s
+Type "]"
+Sleep 1.2s
 Type "j"
 Sleep 500ms
 Type "j"
@@ -41,12 +41,30 @@ Sleep 500ms
 Type "j"
 Sleep 1.2s
 
-# Escape the rail back into the query editor (<c-l>), enter insert mode, write a query.
-Ctrl+L
+# Switch to the query editor (3), enter insert mode, write a query.
+# Auto-trigger opens the completion popup after `FROM `.
+# Navigate to `users` with Ctrl+N then accept with Ctrl+Y.
+Type "3"
 Sleep 800ms
 Type "i"
-Type "SELECT * FROM users ORDER BY id LIMIT 25;"
+Type "SELECT * FROM "
 Sleep 2.2s
+Ctrl+N
+Sleep 500ms
+Ctrl+N
+Sleep 500ms
+Ctrl+N
+Sleep 500ms
+Ctrl+N
+Sleep 500ms
+Ctrl+N
+Sleep 500ms
+Ctrl+N
+Sleep 500ms
+Ctrl+Y
+Sleep 1.2s
+Type " ORDER BY id LIMIT 25;"
+Sleep 800ms
 Escape
 Sleep 500ms
 
