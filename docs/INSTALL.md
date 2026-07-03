@@ -186,7 +186,7 @@ pgsavvy follows the XDG Base Directory layout:
 |----------|--------|
 | `PGSAVVY_LOG_DIR` | Override the session-log directory |
 | `PGSAVVY_DISABLE_SESSION_LOG=1` | Disable file logging (stderr only) |
-| `PGSAVVY_LOG_INCLUDE_SQL=1` | Include SQL text in session logs |
+| `PGSAVVY_LOG_INCLUDE_SQL=full` | Include **full** SQL text in session logs — **WARNING:** passwords in SQL (e.g. `ALTER USER ... PASSWORD '...'`) are written to disk unredacted. This is a forensic-only option. |
 | `PGSAVVY_LOG_INCLUDE_PARAMS=1` | Include bound query parameters in session logs |
 | `PGSAVVY_KEYRING_PASSPHRASE` | Passphrase for the file-backed keyring |
 | `NO_COLOR` | Disable color on the inline content path (see [Colors](#colors)) |

@@ -182,3 +182,11 @@ tasks:
         record docs/feat-table-inspect.tape
         record docs/feat-cheatsheet.tape
         record docs/feat-history.tape
+        record docs/feat-export.tape
+        record docs/feat-cell-viewer.tape
+        record docs/feat-tx.tape
+        record docs/feat-session-settings.tape
+        record docs/feat-hide-columns.tape
+        record docs/feat-commit.tape
+        record docs/feat-fk-reverse.tape
+        record docs/feat-saved-queries.tape
