@@ -32,7 +32,7 @@ Sleep 600ms
 # then scroll through the table list with j.
 Tab
 Sleep 1.2s
-Type "]"
+Enter
 Sleep 1.2s
 Type "j"
 Sleep 500ms
