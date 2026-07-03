@@ -52,7 +52,7 @@ Run the statement at cursor (`<leader>r`), all statements (`<leader>R`), or EXPL
 
 Transaction control includes BEGIN (`<leader>tb`), COMMIT (`<leader>tc`), ROLLBACK (`<leader>tr`), savepoints (`<leader>ts`), release savepoint (`<leader>tR`), and rollback to savepoint (`<leader>to`) — all with inline toast feedback and the options-bar reflecting the current transaction status.
 
-<!-- GIF_PLACEHOLDER: feat-tx.gif — transaction begin, commit, and rollback -->
+  ![pgsavvy transaction control](docs/feat-tx.gif)
 
 ### EXPLAIN Plans
 
@@ -64,7 +64,7 @@ EXPLAIN / EXPLAIN ANALYZE output renders as an interactive tree in a plan-dedica
 
 Query results open in numbered tabs (1–9, jumped to via `<leader>1`–`<leader>9`) with pin, close, and cycle controls. Rows stream incrementally with pagination (`]p`/`[p`, configurable page size) and a read-to-end drain that warns before fetching very large row sets. Search within the grid (`/`) highlights matches; navigate with `n`/`N`. Sort by column (`<leader>s`) cycles ascending → descending → clear. Select cells (`v`), entire rows (`V`), or rectangular blocks (`<c-v>`) for visual range highlighting. Yank a cell (`y`) or the full row as TSV (`yy`) to the system clipboard. Toggle between the grid view and an expanded record view with `<leader>gx` — persisted globally across sessions.
 
-<!-- GIF_PLACEHOLDER: feat-hide-columns.gif — column visibility overlay -->
+  ![pgsavvy column visibility](docs/feat-hide-columns.gif)
 
   ![pgsavvy result grid](docs/feat-result-grid.gif)
 
@@ -72,7 +72,7 @@ Query results open in numbered tabs (1–9, jumped to via `<leader>1`–`<leader
 
 Open the right-docked foreign-key panel with `<leader>gr` to see every parent and child relationship for the row under the cursor. Navigate outbound (parent) FKs forward into referenced rows with `gd`, which opens a parameterised SELECT in a new result tab. Navigate inbound (child) relationships with `gD` through a tabbed picker showing every table that references the current row's column, with composite-FK support. Jump back through the per-tab navigation history with `<c-o>` and forward with `<c-i>`. The panel tracks cursor movement within the grid so relationship lines update as you scroll, acting as a live breadcrumb.
 
-<!-- GIF_PLACEHOLDER: feat-fk-reverse.gif — reverse foreign key picker -->
+  ![pgsavvy reverse FK picker](docs/feat-fk-reverse.gif)
 
   ![pgsavvy relationship explorer](docs/feat-relationships.gif)
 
@@ -80,7 +80,7 @@ Open the right-docked foreign-key panel with `<leader>gr` to see every parent an
 
 Enter cell-edit mode (`i` on a focused cell) to edit the value directly or via SQL expression. Type-aware validation runs on commit — integers, timestamps, JSON, and booleans are parsed and validated before staging. Per-type helpers insert expression templates: `<c-n>` sets NULL, `<c-t>` generates `now()`, `<c-d>` inserts `current_date`, and `<c-e>` opens the SQL expression prompt. Staged edits accumulate per table until the commit dialog is opened (`:w` or `<leader>cw`), where you can review each change, dry-run the statements (`[d]`), toggle the generated SQL preview (`[s]`), and apply with an optional typed-name confirmation gate. On conflict — the row changed between your read and commit — the conflict dialog presents the current DB values side-by-side with your edit for refresh or overwrite. Discard all pending edits for a table with `<leader>cU`, or the edit under cursor with `<leader>cu`.
 
-<!-- GIF_PLACEHOLDER: feat-commit.gif — commit dialog with staged edits -->
+  ![pgsavvy commit dialog](docs/feat-commit.gif)
 
   ![pgsavvy inline cell editing](docs/feat-cell-edit.gif)
 
@@ -88,13 +88,13 @@ Enter cell-edit mode (`i` on a focused cell) to edit the value directly or via S
 
 Export active result-tab contents through the export menu (`<leader>oe`) with format and destination cycling. Supported formats: CSV, TSV, JSON array, NDJSON (newline-delimited JSON), Markdown table, and SQL INSERT statements. Destinations: write to a file with atomic partial-then-rename under mode 0600, copy to the system clipboard with a byte cap, or print to stdout. The export menu supports an editable file path during export.
 
-<!-- GIF_PLACEHOLDER: feat-export.gif — result export menu with format and destination -->
+  ![pgsavvy export menu](docs/feat-export.gif)
 
 ### Cell Viewer
 
 Open the full cell-content viewer popup (`<leader>gv`) for any focused cell in a result grid. Scroll the viewer with full vim scroll, page, and jump bindings within the popup. Toggle line wrapping (`w`) and pretty-print JSON cells (`p`) directly inside the viewer. Yank the cell value to the system clipboard (`y`) or bridge directly into the cell editor from the viewer (`e`).
 
-<!-- GIF_PLACEHOLDER: feat-cell-viewer.gif — full cell content viewer popup -->
+  ![pgsavvy cell viewer](docs/feat-cell-viewer.gif)
 
 ### Query History & Saved Queries
 
@@ -102,7 +102,7 @@ Query history persists in a local SQLite database (`$XDG_STATE_HOME/history.sqli
 
 Save queries for later use: capture the statement under cursor or a visual selection with `<leader>s`, give it a name, and it persists to `queries.yml` in the config directory. Open the saved queries tab (`<leader>o`) to browse, insert, and delete saved queries with standard vim navigation. Both history and saved queries share the query-rail container tab bar, cycled with `]` and `[` inside the query pane.
 
-<!-- GIF_PLACEHOLDER: feat-saved-queries.gif — saved queries browser and management -->
+  ![pgsavvy saved queries](docs/feat-saved-queries.gif)
 
   ![pgsavvy query history](docs/feat-history.gif)
 
@@ -110,7 +110,7 @@ Save queries for later use: capture the statement under cursor or a visual selec
 
 Change PostgreSQL session variables on the fly: SET search_path via `<leader>p` with a pre-filled prompt, and SET statement_timeout via `<leader>tt` with duration validation and injection-resistant canonicalisation. The Ex-command line (`:`) dispatches registered commands including `:reload`, which hot-reloads the user config (keybindings, theme, UI settings) without restarting — file-backed sources are serialised so multiple invocations coalesce safely. `:set` and `:reset` give programmatic control over session variables from the command line. The connection status line shows the active profile, database, and transaction/error state.
 
-<!-- GIF_PLACEHOLDER: feat-session-settings.gif — session settings, set, and reload -->
+  ![pgsavvy session settings](docs/feat-session-settings.gif)
 
 ### Discoverability
 
