@@ -21,6 +21,7 @@ Active development
 - [Requirements](#requirements)
 - [Development](#development)
 - [Documentation](#documentation)
+- [Alternatives](#alternatives)
 - [License](#license)
 
 ## Features
@@ -262,6 +263,16 @@ task pg:down && task pg:up
 - [docs/keybindings.md](docs/keybindings.md) — full keybinding reference
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow for contributors
 - [SECURITY.md](SECURITY.md) — vulnerability disclosure
+
+## Alternatives
+
+Other terminal-based database tools you might find useful:
+
+- **[Harlequin](https://github.com/tconbeer/harlequin)** — The SQL IDE for your terminal. Built with Python and Textual, it offers a rich data catalog, multi-tab query editor, and results viewer. Supports PostgreSQL, DuckDB, SQLite, MySQL, and dozens more via a plug-in adapter system. (6.2k stars)
+
+- **[lazysql](https://github.com/jorgerojas26/lazysql)** — A cross-platform TUI database management tool directly inspired by lazygit, written in Go. Supports PostgreSQL, MySQL, SQLite, MSSQL, and MongoDB. Features vim keybindings, multiple connections, tabs, a SQL editor, and CSV export. (4.1k stars)
+
+- **[dblab](https://github.com/danvergara/dblab)** — A fast and lightweight TUI client for PostgreSQL, MySQL, SQLite3, Oracle, and SQL Server, written in Go. Features a vim-style query editor, connection profiles with OS keyring credential storage, SSH tunnel support, and configurable keybindings. (3.2k stars)
 
 ## License
 
