@@ -45,7 +45,7 @@ Sleep 1.2s
 Ctrl+L
 Sleep 800ms
 Type "i"
-Type "SELECT * FROM "
+Type "SELECT * FROM users"
 Sleep 2.2s
 Ctrl+Y
 Sleep 1.2s
