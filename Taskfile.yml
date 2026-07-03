@@ -140,7 +140,7 @@ tasks:
           printf 'editor:\n  autocomplete: %s\n' "$2" > "$cfg/config.yml"
           vhs "$1"
         }
-        record docs/demo.tape true
+        record docs/demo.tape false
         record docs/demo-autocomplete.tape true
 
   demo:features:

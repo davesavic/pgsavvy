@@ -45,12 +45,8 @@ Sleep 1.2s
 Ctrl+L
 Sleep 800ms
 Type "i"
-Type "SELECT * FROM users"
+Type "SELECT * FROM users ORDER BY id LIMIT 25;"
 Sleep 2.2s
-Ctrl+Y
-Sleep 1.2s
-Type " ORDER BY id LIMIT 25;"
-Sleep 800ms
 Escape
 Sleep 500ms
 
