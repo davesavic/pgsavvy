@@ -56,7 +56,7 @@ func TestSettingsHandleFocusDeepCopy(t *testing.T) {
 	drv := &captureDriver{}
 	s := newTestSettings(drv, cfg)
 
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	edited := s.GetEditedConfig()
 	if edited == nil {
@@ -97,7 +97,7 @@ func TestSettingsGetFocusField(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	drv := &captureDriver{}
 	s := newTestSettings(drv, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	if s.GetFocusField() != 0 {
 		t.Errorf("initial GetFocusField() = %d, want 0", s.GetFocusField())
@@ -123,7 +123,7 @@ func TestSettingsGetFocusField(t *testing.T) {
 func TestSettingsFieldCount(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	s := newTestSettings(&captureDriver{}, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	for tab := 0; tab < settingsTabCount; tab++ {
 		s.SetActiveTab(tab)
@@ -141,7 +141,7 @@ func TestSettingsFieldCount(t *testing.T) {
 func TestSettingsSetErrorAndClear(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	s := newTestSettings(&captureDriver{}, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetError("test error")
 	st := s.formStates[s.ActiveTab()]
@@ -158,7 +158,7 @@ func TestSettingsSetErrorAndClear(t *testing.T) {
 func TestSettingsToggleFocused(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	s := newTestSettings(&captureDriver{}, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(2)
 	original := cfg.UI.Mouse.Enabled
@@ -180,7 +180,7 @@ func TestSettingsRender(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	drv := &captureDriver{}
 	s := newTestSettings(drv, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	if err := s.HandleRender(); err != nil {
 		t.Fatalf("HandleRender: %v", err)
@@ -199,7 +199,7 @@ func TestSettingsRenderThemeTab(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	drv := &captureDriver{}
 	s := newTestSettings(drv, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 	s.SetActiveTab(1)
 
 	if err := s.HandleRender(); err != nil {
@@ -218,7 +218,7 @@ func TestSettingsRenderTabs(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	drv := &captureDriver{}
 	s := newTestSettings(drv, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	for tab := 0; tab < settingsTabCount; tab++ {
 		s.SetActiveTab(tab)
@@ -235,7 +235,7 @@ func TestSettingsRenderTabs(t *testing.T) {
 func TestSettingsNilGuiDriverNoPanic(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	s := newTestSettings(nil, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 	if err := s.HandleRender(); err != nil {
 		t.Fatalf("HandleRender nil driver: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestSettingsGetFocusedFieldValue(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	cfg.Leader = " "
 	s := newTestSettings(&captureDriver{}, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(0)
 	s.SetFocusField(0)
@@ -259,7 +259,7 @@ func TestSettingsGetFocusedFieldValue(t *testing.T) {
 func TestSettingsSetFocusedFieldValue(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	s := newTestSettings(&captureDriver{}, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(0)
 	s.SetFocusField(0)
@@ -295,7 +295,7 @@ func TestSettingsSetCfg(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	s := newTestSettings(&captureDriver{}, nil)
 	s.SetCfg(func() *config.UserConfig { return cfg })
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 	if s.GetEditedConfig() == nil {
 		t.Fatal("GetEditedConfig() nil after SetCfg + HandleFocus")
 	}
@@ -304,7 +304,7 @@ func TestSettingsSetCfg(t *testing.T) {
 func TestSettingsFocusClampedWithinTab(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	s := newTestSettings(&captureDriver{}, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(0)
 	s.SetFocusField(-5)
@@ -321,7 +321,7 @@ func TestSettingsFocusClampedWithinTab(t *testing.T) {
 func TestSettingsReadOnlyField(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	s := newTestSettings(&captureDriver{}, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(0)
 	found := false
@@ -344,7 +344,7 @@ func TestSettingsDisplayToggle(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	drv := &captureDriver{}
 	s := newTestSettings(drv, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(2)
 	for i, f := range s.formStates[2].fields {
@@ -355,7 +355,7 @@ func TestSettingsDisplayToggle(t *testing.T) {
 		}
 	}
 
-	s.HandleRender()
+	_ = s.HandleRender()
 
 	if !strings.Contains(drv.lastContent, "[x]") && !strings.Contains(drv.lastContent, "[ ]") {
 		t.Error("toggle display missing [x] or [ ] marker")
@@ -367,7 +367,7 @@ func TestSettingsKeysTabEmptyRender(t *testing.T) {
 	cfg.Keybindings = nil
 	drv := &captureDriver{}
 	s := newTestSettings(drv, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(5)
 	if err := s.HandleRender(); err != nil {
@@ -387,7 +387,7 @@ func TestSettingsKeysTabRenderWithBindings(t *testing.T) {
 	}
 	drv := &captureDriver{}
 	s := newTestSettings(drv, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(5)
 	if err := s.HandleRender(); err != nil {
@@ -411,7 +411,7 @@ func TestSettingsKeysTabScrollOffset(t *testing.T) {
 	}
 	drv := &captureDriver{}
 	s := newTestSettings(drv, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(5)
 	s.SetFocusField(24)
@@ -439,7 +439,7 @@ func TestSettingsDefaultStatementTimeoutDisplay(t *testing.T) {
 	cfg.Query.DefaultStatementTimeout = func() *time.Duration { d := 30 * time.Second; return &d }()
 	drv := &captureDriver{}
 	s := newTestSettings(drv, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(4)
 	if s.FieldCount() != 1 {
@@ -456,7 +456,7 @@ func TestSettingsDefaultStatementTimeoutDisplay(t *testing.T) {
 func TestSettingsSetDefaultStatementTimeout(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	s := newTestSettings(&captureDriver{}, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(4)
 	s.SetFocusField(0)
@@ -475,7 +475,7 @@ func TestSettingsSetInvalidDuration(t *testing.T) {
 	orig := 30 * time.Second
 	cfg.Query.DefaultStatementTimeout = &orig
 	s := newTestSettings(&captureDriver{}, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(4)
 	s.SetFocusField(0)
@@ -495,7 +495,7 @@ func TestSettingsSetInvalidDuration(t *testing.T) {
 func TestSettingsTabSwitchPreservesError(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	s := newTestSettings(&captureDriver{}, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(0)
 	s.SetError("err on gen")
@@ -511,7 +511,7 @@ func TestSettingsFieldHintDisplay(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	drv := &captureDriver{}
 	s := newTestSettings(drv, cfg)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(4)
 	s.SetFocusField(0)
@@ -540,7 +540,7 @@ func TestSettingsKeysTabListsShippedDefaults(t *testing.T) {
 	}
 	drv := &captureDriver{}
 	s := newTestSettingsWithDefaults(drv, cfg, defaults)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(5)
 	if s.FieldCount() != 1 {
@@ -563,7 +563,7 @@ func TestSettingsKeysTabEditDefaultCreatesOverride(t *testing.T) {
 		{Sequence: []types.ChordKey{{Code: 'j'}}, Mode: types.ModeNormal, Scope: "TABLES", ActionID: "list.down", Description: "Move down"},
 	}
 	s := newTestSettingsWithDefaults(&captureDriver{}, cfg, defaults)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(5)
 	s.SetFocusField(0)
@@ -612,7 +612,7 @@ func TestSettingsKeysTabDeleteOverrideRevertsToDefault(t *testing.T) {
 		{Sequence: []types.ChordKey{{Code: 'j'}}, Mode: types.ModeNormal, Scope: "TABLES", ActionID: "list.down", Description: "Move down"},
 	}
 	s := newTestSettingsWithDefaults(&captureDriver{}, cfg, defaults)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(5)
 	s.SetFocusField(0)
@@ -647,7 +647,7 @@ func TestSettingsKeysTabDeleteDefaultReportsIsDefault(t *testing.T) {
 		{Sequence: []types.ChordKey{{Code: 'j'}}, Mode: types.ModeNormal, Scope: "TABLES", ActionID: "list.down"},
 	}
 	s := newTestSettingsWithDefaults(&captureDriver{}, cfg, defaults)
-	s.HandleFocus(types.OnFocusOpts{})
+	_ = s.HandleFocus(types.OnFocusOpts{})
 
 	s.SetActiveTab(5)
 	s.SetFocusField(0)

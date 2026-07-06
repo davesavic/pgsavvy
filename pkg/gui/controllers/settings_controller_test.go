@@ -35,7 +35,7 @@ func newSettingsContext(cfg *config.UserConfig) *context.SettingsContext {
 func TestSettingsControllerTabNavigation(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
 	ctrl.SetDeps(controllers.SettingsDeps{Ctx: ctx})
@@ -69,7 +69,7 @@ func TestSettingsControllerTabNavigation(t *testing.T) {
 func TestSettingsControllerFieldNavigation(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
 	ctrl.SetDeps(controllers.SettingsDeps{Ctx: ctx})
@@ -98,7 +98,7 @@ func TestSettingsControllerFieldNavigation(t *testing.T) {
 func TestSettingsControllerFieldEditValid(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	prompt := &fakePrompt{}
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
@@ -129,7 +129,7 @@ func TestSettingsControllerFieldEditInvalidValuePreserved(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	cfg.UI.Mouse.DoubleClickMs = 400
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	prompt := &fakePrompt{}
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
@@ -161,7 +161,7 @@ func TestSettingsControllerFieldToggle(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	cfg.UI.Mouse.Enabled = false
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
 	ctrl.SetDeps(controllers.SettingsDeps{Ctx: ctx})
@@ -190,7 +190,7 @@ func TestSettingsControllerConfirmValidationPass(t *testing.T) {
 		{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit"},
 	}
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	var saved *config.UserConfig
 	onSave := func(c *config.UserConfig) error {
@@ -231,7 +231,7 @@ func TestSettingsControllerConfirmValidationFail(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	cfg.Leader = "0" // invalid leader (digit)
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	saveCalled := false
 	onSave := func(_ *config.UserConfig) error {
@@ -266,7 +266,7 @@ func TestSettingsControllerConfirmValidationFail(t *testing.T) {
 func TestSettingsControllerCloseCallback(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	closed := false
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
@@ -291,7 +291,7 @@ func TestSettingsControllerKeybindingAdd(t *testing.T) {
 		{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit"},
 	}
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	prompt := &fakePrompt{}
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
@@ -328,7 +328,7 @@ func TestSettingsControllerKeybindingDeleteConfirm(t *testing.T) {
 		{Mode: "n", Scope: "global", Key: "j", Action: "list.down"},
 	}
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	confirm := &fakeConfirm{}
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
@@ -361,7 +361,7 @@ func TestSettingsControllerKeybindingDeleteCancel(t *testing.T) {
 		{Mode: "n", Scope: "global", Key: "j", Action: "list.down"},
 	}
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	confirm := &fakeConfirm{}
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
@@ -418,7 +418,7 @@ func TestSettingsControllerNilContext(t *testing.T) {
 func TestSettingsControllerCloseWithoutCallback(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
 	ctrl.SetDeps(controllers.SettingsDeps{Ctx: ctx})
@@ -436,7 +436,7 @@ func TestSettingsControllerConfirmSaveError(t *testing.T) {
 		{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit"},
 	}
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	saveErr := errors.New("disk full")
 	onSave := func(_ *config.UserConfig) error {
@@ -466,7 +466,7 @@ func TestSettingsControllerConfirmSaveError(t *testing.T) {
 func TestSettingsControllerFieldEditNoPrompt(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
 	ctrl.SetDeps(controllers.SettingsDeps{Ctx: ctx})
@@ -486,7 +486,7 @@ func TestSettingsControllerFieldEditKeysTab(t *testing.T) {
 		{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit"},
 	}
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	prompt := &fakePrompt{}
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
@@ -519,7 +519,7 @@ func TestSettingsControllerFieldEditKeysTab(t *testing.T) {
 func TestSettingsControllerFieldToggleKeysTab(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	ctx := newTestSettingsCtx(cfg)
-	ctx.HandleFocus(types.OnFocusOpts{})
+	_ = ctx.HandleFocus(types.OnFocusOpts{})
 
 	ctrl := controllers.NewSettingsController(nil, controllers.CoreDeps{}, controllers.UIDeps{})
 	ctrl.SetDeps(controllers.SettingsDeps{Ctx: ctx})

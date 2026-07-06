@@ -393,19 +393,19 @@ func (s *SettingsController) KeybindingAdd(_ commands.ExecCtx) error {
 	action := ""
 	desc := ""
 
-	prompt.Prompt("Mode", mode,
+	return prompt.Prompt("Mode", mode,
 		func(v string) error {
 			mode = v
-			prompt.Prompt("Scope", scope,
+			return prompt.Prompt("Scope", scope,
 				func(v string) error {
 					scope = v
-					prompt.Prompt("Key", key,
+					return prompt.Prompt("Key", key,
 						func(v string) error {
 							key = v
-							prompt.Prompt("Action", action,
+							return prompt.Prompt("Action", action,
 								func(v string) error {
 									action = v
-									prompt.Prompt("Description", desc,
+									return prompt.Prompt("Description", desc,
 										func(v string) error {
 											desc = v
 											cfg := ctx.GetEditedConfig()
@@ -424,23 +424,18 @@ func (s *SettingsController) KeybindingAdd(_ commands.ExecCtx) error {
 										},
 										func() error { return nil },
 									)
-									return nil
 								},
 								func() error { return nil },
 							)
-							return nil
 						},
 						func() error { return nil },
 					)
-					return nil
 				},
 				func() error { return nil },
 			)
-			return nil
 		},
 		func() error { return nil },
 	)
-	return nil
 }
 
 // editKeybinding opens the PROMPT popup seeded with the focused Keys-tab
