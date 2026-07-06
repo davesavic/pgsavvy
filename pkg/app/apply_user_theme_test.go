@@ -21,17 +21,17 @@ func TestApplyUserTheme_ConfiguredColorRendersLive(t *testing.T) {
 	restoreDefaultThemeAfter(t)
 
 	cfg := config.GetDefaultConfig() // full baseline, like the real loader
-	cfg.Theme.KeywordFg = "color82"
+	cfg.Theme.Keyword = "color82"
 
 	var buf bytes.Buffer
 	applyUserTheme(cfg, &buf)
 
-	if got := theme.Current().KeywordFg.Fg; got != "color82" {
-		t.Errorf("KeywordFg.Fg = %q, want %q", got, "color82")
+	if got := theme.Current().Keyword.Fg; got != "color82" {
+		t.Errorf("Keyword.Fg = %q, want %q", got, "color82")
 	}
 	// An unset field keeps its DefaultDark default.
-	if got := theme.Current().NullValueFg.Fg; got != "red" {
-		t.Errorf("NullValueFg.Fg = %q, want default %q", got, "red")
+	if got := theme.Current().NullValue.Fg; got != "red" {
+		t.Errorf("NullValue.Fg = %q, want default %q", got, "red")
 	}
 	if buf.Len() != 0 {
 		t.Errorf("valid theme wrote to stderr: %q", buf.String())
@@ -50,8 +50,8 @@ func TestApplyUserTheme_AllDefaultWritesNothing(t *testing.T) {
 		t.Errorf("all-default theme wrote to writer: %q", buf.String())
 	}
 	// Current() equals the DefaultDark snapshot for a representative field.
-	if got := theme.Current().KeywordFg.Fg; got != "blue" {
-		t.Errorf("KeywordFg.Fg = %q, want DefaultDark %q", got, "blue")
+	if got := theme.Current().Keyword.Fg; got != "blue" {
+		t.Errorf("Keyword.Fg = %q, want DefaultDark %q", got, "blue")
 	}
 }
 
@@ -59,7 +59,7 @@ func TestApplyUserTheme_UnknownTokenWarnsAndStillStarts(t *testing.T) {
 	restoreDefaultThemeAfter(t)
 
 	cfg := config.GetDefaultConfig()
-	cfg.Theme.KeywordFg = "notacolor"
+	cfg.Theme.Keyword = "notacolor"
 
 	var buf bytes.Buffer
 	applyUserTheme(cfg, &buf)
@@ -71,12 +71,12 @@ func TestApplyUserTheme_UnknownTokenWarnsAndStillStarts(t *testing.T) {
 	if n := strings.Count(out, "\n"); n != 1 {
 		t.Errorf("expected exactly one warning line, got %d: %q", n, out)
 	}
-	if !strings.Contains(out, "keyword_fg") || !strings.Contains(out, "notacolor") {
+	if !strings.Contains(out, "keyword") || !strings.Contains(out, "notacolor") {
 		t.Errorf("warning %q must name the field and the token", out)
 	}
 	// The app still "starts": the token applies (renders untinted downstream).
-	if got := theme.Current().KeywordFg.Fg; got != "notacolor" {
-		t.Errorf("KeywordFg.Fg = %q, want %q", got, "notacolor")
+	if got := theme.Current().Keyword.Fg; got != "notacolor" {
+		t.Errorf("Keyword.Fg = %q, want %q", got, "notacolor")
 	}
 }
 
@@ -89,7 +89,7 @@ func TestApplyUserTheme_NoColorStillSuppressesInline(t *testing.T) {
 	defer restore()
 
 	cfg := config.GetDefaultConfig()
-	cfg.Theme.KeywordFg = "color82"
+	cfg.Theme.Keyword = "color82"
 
 	var buf bytes.Buffer
 	applyUserTheme(cfg, &buf)

@@ -146,11 +146,25 @@ func (g *Gui) RunLayout(w, h int) error {
 	// the first paint). The view is added to the `rails` map so it
 	// participates in the focus-frame swap below.
 	if modalTop {
-		g.layoutConnectionManagerMain(dims, rails)
+		if g.isContextOnStack(types.SETTINGS) && g.registry.Settings != nil {
+			if g.registry.ConnectionManager != nil {
+				if name := g.registry.ConnectionManager.GetViewName(); name != "" {
+					_ = g.driver.DeleteView(name)
+				}
+			}
+			g.layoutSettingsMain(dims, rails)
+		} else {
+			if g.registry.Settings != nil {
+				if name := g.registry.Settings.GetViewName(); name != "" {
+					_ = g.driver.DeleteView(name)
+				}
+			}
+			g.layoutConnectionManagerMain(dims, rails)
+		}
 	} else if g.registry != nil && g.registry.QueryRail != nil {
-		// The CONNECTION_MANAGER modal is a MAIN_CONTEXT, so the Tier-3
-		// cleanup loop below (TEMPORARY_POPUP / DISPLAY_CONTEXT only) never
-		// tears its view down. Once the modal leaves the focus stack its
+		// The CONNECTION_MANAGER and SETTINGS modals are MAIN_CONTEXTs, so the
+		// Tier-3 cleanup loop below (TEMPORARY_POPUP / DISPLAY_CONTEXT only)
+		// never tears their views down. Once a modal leaves the focus stack its
 		// centered box still lives in g.views and gocui's flush() keeps
 		// drawing it every frame — leaving border artifacts over the editor /
 		// results / status region. DeleteView removes it from g.views so it
@@ -158,6 +172,11 @@ func (g *Gui) RunLayout(w, h int) error {
 		// the expected steady-state and is ignored.
 		if g.registry.ConnectionManager != nil {
 			if name := g.registry.ConnectionManager.GetViewName(); name != "" {
+				_ = g.driver.DeleteView(name)
+			}
+		}
+		if g.registry.Settings != nil {
+			if name := g.registry.Settings.GetViewName(); name != "" {
 				_ = g.driver.DeleteView(name)
 			}
 		}
@@ -400,7 +419,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				// the typed line; gocui's RenderTextArea writes the raw
 				// content (leading ':' + typed text) into the view buffer.
 				// We re-write the cell content via SetContent each frame so
-				// the ':' carries PromptFg styling. SetViewCursor below is a
+				// the ':' carries Prompt styling. SetViewCursor below is a
 				// separate gocui API that positions the caret independently
 				// of the buffer bytes, so the caret tracking continues to
 				// work. Under the RecorderGuiDriver SetView returns nil, so
@@ -412,7 +431,7 @@ func (g *Gui) RunLayout(w, h int) error {
 				} else if bufHolder, ok := ctx.(interface{ Buffer() string }); ok {
 					buffer = bufHolder.Buffer()
 				}
-				_ = g.driver.SetContent(name, promptStyledLine(theme.Current().PromptFg, buffer))
+				_ = g.driver.SetContent(name, promptStyledLine(theme.Current().Prompt, buffer))
 				// Anchor the visible caret to the TextArea's actual cursor
 				// each frame. gocui's DefaultEditor moves TextArea.cursor on
 				// Left/Right/Backspace/Delete/Home/End but does not call
@@ -947,11 +966,14 @@ func (g *Gui) resyncOnViewTeardown() {
 //     the cheap diff path so steady-state form navigation never full-repaints.
 func (g *Gui) resyncOnModalContentChange() {
 	mode := guicontext.ModeList
-	if g.modalIsTopMain() {
+	if g.modalIsTopMain() && g.registry.ConnectionManager != nil {
 		mode = g.registry.ConnectionManager.Mode()
 	}
 	if mode != guicontext.ModeConnecting && mode != guicontext.ModeForm {
 		g.prevModalBody = ""
+		return
+	}
+	if g.registry.ConnectionManager == nil {
 		return
 	}
 	name := g.registry.ConnectionManager.GetViewName()
@@ -971,18 +993,33 @@ func (g *Gui) resyncOnModalContentChange() {
 	}
 }
 
-// modalIsTopMain reports whether the CONNECTION_MANAGER MAIN_CONTEXT modal
-// is in the focus stack (possibly with popups stacked above it). When true,
-// layoutConnectionManagerMain owns the dims["main"] slot and BOTH the side
-// rails and the QUERY_EDITOR paint are suppressed so only the centered box
-// (and any popup above it) renders over a blank background.
+// modalIsTopMain reports whether a full-screen MAIN_CONTEXT modal
+// (CONNECTION_MANAGER or SETTINGS) is in the focus stack. When true,
+// the modal owns the dims["main"] slot and the side rails + QUERY_EDITOR
+// paint are suppressed so only the centered box (and any popup above it)
+// renders over a blank background.
 // Nil-safe across the registry / tree / context.
 func (g *Gui) modalIsTopMain() bool {
-	if g.registry == nil || g.registry.ConnectionManager == nil || g.tree == nil {
+	if g.registry == nil || g.tree == nil {
 		return false
 	}
 	for _, ctx := range g.tree.Stack() {
-		if ctx.GetKey() == types.CONNECTION_MANAGER {
+		key := ctx.GetKey()
+		if key == types.CONNECTION_MANAGER || key == types.SETTINGS {
+			return true
+		}
+	}
+	return false
+}
+
+// isContextOnStack reports whether a context with the given key is on the
+// focus stack. Nil-safe.
+func (g *Gui) isContextOnStack(key types.ContextKey) bool {
+	if g.tree == nil {
+		return false
+	}
+	for _, ctx := range g.tree.Stack() {
+		if ctx.GetKey() == key {
 			return true
 		}
 	}
@@ -997,12 +1034,15 @@ const (
 )
 
 // layoutConnectionManagerMain paints the CONNECTION_MANAGER modal as a
-// centered bordered box inside the dims["main"] slot and registers the view
+// centered bordered box inside the dims["modal-overlay"] slot and registers the view
 // in rails so it participates in the focus-frame swap. Called only when
-// modalIsTopMain reports true, so the QUERY_EDITOR paint and the side rails
-// are both suppressed for the frame.
+// the CONNECTION_MANAGER modal is top of the focus stack, so the QUERY_EDITOR
+// paint and the side rails are both suppressed for the frame.
 func (g *Gui) layoutConnectionManagerMain(dims map[string]ui.Dimensions, rails map[string]*gocui.View) {
 	cm := g.registry.ConnectionManager
+	if cm == nil {
+		return
+	}
 	name := cm.GetViewName()
 	d, ok := dims["popup-overlay"]
 	if !ok || name == "" || d.X1 <= d.X0 || d.Y1 <= d.Y0 {
@@ -1047,6 +1087,48 @@ func (g *Gui) layoutConnectionManagerMain(dims map[string]ui.Dimensions, rails m
 	// The QUERY_EDITOR view from prior frames still exists in the dims["main"]
 	// rect (it is never DeleteView'd). Lift the modal above it so the box is
 	// actually visible while it owns the slot. Mirrors layoutConnectingMain.
+	_, _ = g.driver.SetViewOnTop(name)
+}
+
+// settingsWidthFrac / settingsHeightFrac size the centered settings modal
+// as a fraction of the dims["popup-overlay"] slot.
+const (
+	settingsWidthFrac  = 0.7
+	settingsHeightFrac = 0.7
+)
+
+// layoutSettingsMain paints the SETTINGS modal as a centered bordered box
+// inside the dims["popup-overlay"] slot and registers the view in rails so
+// it participates in the focus-frame swap. Called only when the SETTINGS
+// modal is top of the focus stack.
+func (g *Gui) layoutSettingsMain(dims map[string]ui.Dimensions, rails map[string]*gocui.View) {
+	s := g.registry.Settings
+	name := s.GetViewName()
+	d, ok := dims["popup-overlay"]
+	if !ok || name == "" || d.X1 <= d.X0 || d.Y1 <= d.Y0 {
+		return
+	}
+	box := centeredRect(d, settingsWidthFrac, settingsHeightFrac)
+	v, err := g.driver.SetView(name, box.X0, box.Y0, box.X1, box.Y1, 0)
+	if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		return
+	}
+	if v != nil {
+		rails[name] = v
+		v.Title = s.GetTitle()
+		v.Wrap = true
+		v.FrameColor = frameAttr(theme.Current().ActiveBorder)
+		s.SetLabelWrapWidth(v.InnerWidth())
+	}
+	_ = s.HandleRender()
+	_ = g.driver.SetViewTabColors(
+		name,
+		frameAttr(theme.Current().ActiveBorder),
+		gocui.ColorDefault,
+	)
+	if v != nil {
+		applySettingsScroll(v)
+	}
 	_, _ = g.driver.SetViewOnTop(name)
 }
 
@@ -1706,6 +1788,38 @@ func applyConnectionManagerScroll(view *gocui.View) {
 	view.SetOriginY(oy)
 }
 
+// applySettingsScroll keeps the focused field row on screen while the settings
+// modal body overflows the centered box. The settings modal renders a "> " gutter
+// on the focused row, so the layout locates that row in the wrap-applied view
+// lines and scrolls the vertical origin just enough to keep it visible.
+func applySettingsScroll(view *gocui.View) {
+	lines := view.ViewBufferLines()
+	sel := -1
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, "> ") {
+			sel = i
+			break
+		}
+	}
+	if sel < 0 {
+		return
+	}
+	height := view.InnerHeight()
+	if height <= 0 {
+		return
+	}
+	oy := view.OriginY()
+	if sel < oy {
+		oy = sel
+	} else if sel >= oy+height {
+		oy = sel - height + 1
+	}
+	if maxOY := max(len(lines)-height, 0); oy > maxOY {
+		oy = maxOY
+	}
+	view.SetOriginY(oy)
+}
+
 // relationshipPanelFocused reports whether the user has entered the panel
 // (input mode). The Tier-3 styling/scroll passes read it to pick the border
 // colour and to decide whether to follow the selection; the Tier-4 focus guard
@@ -1730,7 +1844,7 @@ func applyFocusFrameColors(rails map[string]*gocui.View, focusedName string, act
 }
 
 // promptStyledLine builds the COMMAND_LINE cell content: a ':' prefix
-// wrapped in the PromptFg ANSI SGR escape, followed by the typed buffer
+// wrapped in the Prompt ANSI SGR escape, followed by the typed buffer
 // rendered with default styling. The ANSI reset between prompt and
 // buffer ensures the user-typed text isn't accidentally restyled.
 // gocui's escape interpreter parses the inline SGR and lifts it to

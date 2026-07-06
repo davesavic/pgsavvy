@@ -264,7 +264,7 @@ func TestBuildStatusLine_NilConnWithModeLabel(t *testing.T) {
 // --- Transaction indicator tests ---
 
 // TestBuildStatusLine_TxActiveNoSavepoints verifies [TX] rendered with
-// WarningFg (yellow ANSI) when tx is active with no savepoints.
+// Warning (yellow ANSI) when tx is active with no savepoints.
 func TestBuildStatusLine_TxActiveNoSavepoints(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxActive, nil, nil)
@@ -291,7 +291,7 @@ func TestBuildStatusLine_TxActiveEmptySavepointsRendersTX(t *testing.T) {
 }
 
 // TestBuildStatusLine_TxActiveWithSavepoints verifies [TX:sp1,sp2] is
-// rendered with WarningFg when savepoints are present.
+// rendered with Warning when savepoints are present.
 func TestBuildStatusLine_TxActiveWithSavepoints(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxActive, []string{"sp1", "sp2"}, nil)
@@ -303,7 +303,7 @@ func TestBuildStatusLine_TxActiveWithSavepoints(t *testing.T) {
 }
 
 // TestBuildStatusLine_TxAbortedInTx verifies [TX*] is rendered with
-// ErrorFg (red ANSI) when tx is in aborted_in_tx state.
+// Error (red ANSI) when tx is in aborted_in_tx state.
 func TestBuildStatusLine_TxAbortedInTx(t *testing.T) {
 	tr := i18n.EnglishTranslationSet()
 	got := BuildStatusLine("", nil, nil, tr, 0, 0, models.TxAbortedInTx, nil, nil)
@@ -456,13 +456,13 @@ func TestSearchIndicator_ActiveNoMatches(t *testing.T) {
 
 // --- ialt.1: tx badge reads configured theme colors (not hardcoded) ---
 
-// A non-default WarningFg token must reach the [TX] badge. Uses a 256-index
+// A non-default Warning token must reach the [TX] badge. Uses a 256-index
 // token (201) so a regression to the hardcoded yellow ("33") cannot green-wash
 // this — the expected escape is distinct from any default.
-func TestBuildStatusLine_TxActiveUsesConfiguredWarningFg(t *testing.T) {
+func TestBuildStatusLine_TxActiveUsesConfiguredWarning(t *testing.T) {
 	defer theme.SetMonochromeForTest(false)()
 	cfg := builtin.DefaultDark()
-	cfg.WarningFg = "color201"
+	cfg.Warning = "color201"
 	if err := theme.Apply(cfg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -475,11 +475,11 @@ func TestBuildStatusLine_TxActiveUsesConfiguredWarningFg(t *testing.T) {
 	}
 }
 
-// A non-default ErrorFg token must reach the aborted [TX*] badge.
-func TestBuildStatusLine_TxAbortedUsesConfiguredErrorFg(t *testing.T) {
+// A non-default Error token must reach the aborted [TX*] badge.
+func TestBuildStatusLine_TxAbortedUsesConfiguredError(t *testing.T) {
 	defer theme.SetMonochromeForTest(false)()
 	cfg := builtin.DefaultDark()
-	cfg.ErrorFg = "color202"
+	cfg.Error = "color202"
 	if err := theme.Apply(cfg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}

@@ -101,6 +101,9 @@ type ContextTree struct {
 	// bordered box over a blank background.
 	ConnectionManager *ConnectionManagerContext
 
+	// Settings is the 6-tabbed settings modal (MAIN_CONTEXT).
+	Settings *SettingsContext
+
 	// History is the <leader>h recent-query browser tab of the QUERY_RAIL
 	// container. MAIN_CONTEXT leaf (inFlatten=false): rendered only when the
 	// container calls it, never pushed onto the focus stack.
@@ -463,6 +466,14 @@ func contextSpecs() []contextSpec {
 				return NewConnectionManagerContext(b, d)
 			},
 			assign: func(t *ContextTree, c types.IBaseContext) { t.ConnectionManager = c.(*ConnectionManagerContext) },
+		},
+		// SETTINGS is the 6-tabbed settings modal (MAIN_CONTEXT).
+		{
+			key: types.SETTINGS, kind: types.MAIN_CONTEXT, title: "Settings", inFlatten: true,
+			build: func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext {
+				return NewSettingsContext(b, SettingsContextDeps{ContextTreeDeps: d})
+			},
+			assign: func(t *ContextTree, c types.IBaseContext) { t.Settings = c.(*SettingsContext) },
 		},
 
 		// Stubs for the four remaining deferred Contexts. ViewName matches

@@ -46,8 +46,8 @@ func TestLoadUserConfig_ScalarOverlayMergesOverDefaults(t *testing.T) {
 	if cfg.Leader != " " {
 		t.Errorf("Leader = %q, want default %q", cfg.Leader, " ")
 	}
-	if cfg.Theme.NullValueFg != "red" {
-		t.Errorf("NullValueFg = %q, want default %q", cfg.Theme.NullValueFg, "red")
+	if cfg.Theme.NullValue != "red" {
+		t.Errorf("NullValue = %q, want default %q", cfg.Theme.NullValue, "red")
 	}
 }
 

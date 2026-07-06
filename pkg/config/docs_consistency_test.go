@@ -9,7 +9,7 @@ import (
 )
 
 // themeKeyToken matches a backtick-wrapped theme color key as written in the
-// docs (e.g. `keyword_fg`, `table_header_fg`, `popup_border`, `cur_search`).
+// docs (e.g. `keyword`, `table_header`, `popup_border`, `cur_search`).
 var themeKeyToken = regexp.MustCompile("`([a-z][a-z0-9_]*_(?:fg|bg|border|highlight|search))`")
 
 // currentThemeYAMLKeys returns the set of yaml keys currently declared on

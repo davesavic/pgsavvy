@@ -142,11 +142,11 @@ func TestApply_Concurrent_ReadersAndWriter(t *testing.T) {
 	}
 }
 
-// TestApply_PromptFg pins the PromptFg wiring: Apply
-// must parse cfg.PromptFg into the themeState's PromptFg field.
-func TestApply_PromptFg(t *testing.T) {
+// TestApply_Prompt pins the Prompt wiring: Apply
+// must parse cfg.Prompt into the themeState's Prompt field.
+func TestApply_Prompt(t *testing.T) {
 	cfg := builtin.DefaultDark()
-	cfg.PromptFg = "yellow"
+	cfg.Prompt = "yellow"
 	if err := Apply(cfg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -154,27 +154,27 @@ func TestApply_PromptFg(t *testing.T) {
 	if got == nil {
 		t.Fatal("Current returned nil")
 	}
-	if got.PromptFg == nil {
-		t.Fatal("PromptFg is nil; Apply did not populate the field")
+	if got.Prompt == nil {
+		t.Fatal("Prompt is nil; Apply did not populate the field")
 	}
-	if got.PromptFg.Fg != "yellow" {
-		t.Errorf("PromptFg.Fg = %q, want %q", got.PromptFg.Fg, "yellow")
+	if got.Prompt.Fg != "yellow" {
+		t.Errorf("Prompt.Fg = %q, want %q", got.Prompt.Fg, "yellow")
 	}
 }
 
-// TestApply_PromptFgDefault asserts the built-in dark theme supplies a
-// non-empty PromptFg so RunLayout's COMMAND_LINE overlay always has a
+// TestApply_PromptDefault asserts the built-in dark theme supplies a
+// non-empty Prompt so RunLayout's COMMAND_LINE overlay always has a
 // brightenable colour to use when no user override is configured.
-func TestApply_PromptFgDefault(t *testing.T) {
+func TestApply_PromptDefault(t *testing.T) {
 	if err := Apply(builtin.DefaultDark()); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	got := Current()
-	if got == nil || got.PromptFg == nil {
-		t.Fatal("default-dark PromptFg is nil")
+	if got == nil || got.Prompt == nil {
+		t.Fatal("default-dark Prompt is nil")
 	}
-	if got.PromptFg.Fg == "" {
-		t.Fatal("default-dark PromptFg.Fg is empty; expected a colour name")
+	if got.Prompt.Fg == "" {
+		t.Fatal("default-dark Prompt.Fg is empty; expected a colour name")
 	}
 }
 
@@ -250,6 +250,12 @@ func TestApply_MapsEveryThemeConfigField(t *testing.T) {
 		fv := sv.Field(i)
 		if fv.IsNil() {
 			t.Errorf("themeState.%s is nil after Apply; missing parseStyle(cfg.%s) line in Apply", f.Name, f.Name)
+			continue
+		}
+		if f.Name == "DirtyCell" {
+			if got := fv.Interface().(*Style).Bg; got != sentinel {
+				t.Errorf("themeState.%s.Bg = %q, want sentinel %q (bg-only field not wired from its ThemeConfig counterpart)", f.Name, got, sentinel)
+			}
 			continue
 		}
 		if got := fv.Interface().(*Style).Fg; got != sentinel {

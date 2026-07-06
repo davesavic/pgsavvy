@@ -203,6 +203,14 @@ func (q *QuitController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordB
 			ActionID:    commands.ConnectionManagerOpen,
 			Description: tr.Actions.OpenConnectionManager,
 		},
+		// <leader>os opens the settings modal.
+		{
+			Sequence:    []types.ChordKey{{Special: types.KeyLeader}, {Code: 'o'}, {Code: 's'}},
+			Mode:        types.ModeNormal,
+			Scope:       types.GLOBAL,
+			ActionID:    commands.SettingsOpen,
+			Description: "Open settings",
+		},
 	}
 }
 

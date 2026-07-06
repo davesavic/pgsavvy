@@ -523,7 +523,7 @@ func TestRenderDataLine_CurrentMatchNotInvertedBySelection(t *testing.T) {
 // TestRenderDataLine_DirtyCellShowsStagedValue verifies that once a result
 // grid is wired to a PendingEditSet (SetPendingEdits) and has a row
 // identity, renderDataLine renders a staged edit's NewValue — not the
-// stale DB value — with the DirtyCellBg background tint. This is the
+// stale DB value — with the DirtyCell background tint. This is the
 // integration the A3 feature was missing: the staged set must
 // reach the render snapshot and be looked up per cell by PK + column.
 func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
@@ -555,12 +555,12 @@ func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
 	if !strings.Contains(line0, "bob") {
 		t.Errorf("dirty cell must render staged NewValue 'bob'; line=%q", line0)
 	}
-	tint := bgEscape(theme.Current().DirtyCellBg.Bg)
+	tint := bgEscape(theme.Current().DirtyCell.Bg)
 	if tint == "" {
-		t.Fatalf("default theme DirtyCellBg.Bg=%q produced no SGR", theme.Current().DirtyCellBg.Bg)
+		t.Fatalf("default theme DirtyCell.Bg=%q produced no SGR", theme.Current().DirtyCell.Bg)
 	}
 	if !strings.Contains(line0, tint) {
-		t.Errorf("dirty cell must carry the DirtyCellBg tint %q; line=%q", tint, line0)
+		t.Errorf("dirty cell must carry the DirtyCell tint %q; line=%q", tint, line0)
 	}
 	if strings.Contains(line0, "alice") {
 		t.Errorf("dirty cell must NOT render the stale value 'alice'; line=%q", line0)
@@ -655,7 +655,7 @@ func TestRender_VerticalScroll_FollowsCursorToTail(t *testing.T) {
 		"cursor row must be on-screen after JumpLast")
 }
 
-// --- ialt.2: header reads configured TableHeaderFg ---
+// --- ialt.2: header reads configured TableHeader ---
 
 func headerSnapForTheme(t *testing.T) (*View, viewSnapshot) {
 	t.Helper()
@@ -672,11 +672,11 @@ func headerSnapForTheme(t *testing.T) (*View, viewSnapshot) {
 	return v, v.snapshot()
 }
 
-// A configured TableHeaderFg token wraps the whole header line.
-func TestRenderHeaderLine_UsesConfiguredTableHeaderFg(t *testing.T) {
+// A configured TableHeader token wraps the whole header line.
+func TestRenderHeaderLine_UsesConfiguredTableHeader(t *testing.T) {
 	defer theme.SetMonochromeForTest(false)()
 	cfg := builtin.DefaultDark()
-	cfg.TableHeaderFg = "color118"
+	cfg.TableHeader = "color118"
 	require.NoError(t, theme.Apply(cfg))
 	t.Cleanup(func() { _ = theme.Apply(builtin.DefaultDark()) })
 
@@ -694,7 +694,7 @@ func TestRenderHeaderLine_UsesConfiguredTableHeaderFg(t *testing.T) {
 func TestRenderHeaderLine_ColorIntactWithArrowOverlay(t *testing.T) {
 	defer theme.SetMonochromeForTest(false)()
 	cfg := builtin.DefaultDark()
-	cfg.TableHeaderFg = "color118"
+	cfg.TableHeader = "color118"
 	require.NoError(t, theme.Apply(cfg))
 	t.Cleanup(func() { _ = theme.Apply(builtin.DefaultDark()) })
 

@@ -635,6 +635,27 @@ const (
 	TxReleaseSavepoint    = "tx.release_savepoint"
 	TxRollbackToSavepoint = "tx.rollback_to_savepoint"
 
+	// SettingsOpen — GLOBAL-scoped action that opens the
+	// SETTINGS modal (<leader>cS). The handler is registered by the
+	// orchestrator; the controller owns the 10 in-modal bindings below.
+	SettingsOpen = "settings.open"
+
+	// Settings family — owned by SettingsController.
+	// SETTINGS-scoped. [ / ] cycle tabs; j/k move field focus; i edits
+	// the focused text field (PROMPT popup); space toggles the focused
+	// toggle; Enter saves; Esc closes; a/d add/delete keybindings on
+	// the Keys tab.
+	SettingsClose           = "settings.close"
+	SettingsNextTab         = "settings.next_tab"
+	SettingsPrevTab         = "settings.prev_tab"
+	SettingsFieldUp         = "settings.field_up"
+	SettingsFieldDown       = "settings.field_down"
+	SettingsFieldEdit       = "settings.field_edit"
+	SettingsFieldToggle     = "settings.field_toggle"
+	SettingsConfirm         = "settings.confirm"
+	SettingsKeybindingAdd   = "settings.keybinding_add"
+	SettingsKeybindingDelete = "settings.keybinding_delete"
+
 	// Visual / Selection family — owned by VimEditorController.
 	// Bindings: `v` / `V` / `<c-v>` enter char/line/block visual from Normal;
 	// `<esc>` exits to Normal. SelectionExtend is the action ID covering
@@ -914,5 +935,16 @@ func AllActionIDs() []string {
 		TxSavepoint,
 		TxReleaseSavepoint,
 		TxRollbackToSavepoint,
+		SettingsOpen,
+		SettingsClose,
+		SettingsNextTab,
+		SettingsPrevTab,
+		SettingsFieldUp,
+		SettingsFieldDown,
+		SettingsFieldEdit,
+		SettingsFieldToggle,
+		SettingsConfirm,
+		SettingsKeybindingAdd,
+		SettingsKeybindingDelete,
 	}
 }

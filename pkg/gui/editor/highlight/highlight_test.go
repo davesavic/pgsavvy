@@ -13,25 +13,25 @@ import (
 func applyTestTheme(t *testing.T) {
 	t.Helper()
 	err := theme.Apply(&config.ThemeConfig{
-		KeywordFg:    "blue",
-		StringFg:     "green",
-		CommentFg:    "gray",
-		NumericFg:    "magenta",
-		OperatorFg:   "yellow",
-		IdentifierFg: "white",
+		Keyword:    "blue",
+		String:     "green",
+		Comment:    "gray",
+		Numeric:    "magenta",
+		Operator:   "yellow",
+		Identifier: "white",
 		// Fill remaining required fields with plausible values.
 		ActiveBorder:    "yellow",
 		InactiveBorder:  "gray",
-		NullValueFg:     "red",
-		ErrorFg:         "red",
-		WarningFg:       "yellow",
-		SuccessFg:       "green",
-		InfoFg:          "cyan",
+		NullValue:     "red",
+		Error:         "red",
+		Warning:       "yellow",
+		Success:       "green",
+		Info:          "cyan",
 		PopupBorder:     "cyan",
-		TableHeaderFg:   "white",
+		TableHeader:   "white",
 		SearchHighlight: "yellow",
-		PromptFg:        "yellow",
-		DirtyCellBg:     "#4a3818",
+		Prompt:        "yellow",
+		DirtyCell:     "#4a3818",
 		WarnBorder:      "#d97757",
 	})
 	if err != nil {
@@ -59,7 +59,7 @@ func TestHighlight_TrailingReset(t *testing.T) {
 func TestHighlight_ContainsKeywordColor(t *testing.T) {
 	applyTestTheme(t)
 	got := Highlight("SELECT 1")
-	// KeywordFg = "blue" -> SGR "34"
+	// Keyword = "blue" -> SGR "34"
 	if !strings.Contains(got, "\x1b[34m") {
 		t.Fatalf("expected blue SGR (\\x1b[34m) for keyword in %q", got)
 	}
@@ -68,7 +68,7 @@ func TestHighlight_ContainsKeywordColor(t *testing.T) {
 func TestHighlight_ContainsStringColor(t *testing.T) {
 	applyTestTheme(t)
 	got := Highlight("SELECT 'hello'")
-	// StringFg = "green" -> SGR "32"
+	// String = "green" -> SGR "32"
 	if !strings.Contains(got, "\x1b[32m") {
 		t.Fatalf("expected green SGR (\\x1b[32m) for string in %q", got)
 	}
@@ -77,7 +77,7 @@ func TestHighlight_ContainsStringColor(t *testing.T) {
 func TestHighlight_ContainsCommentColor(t *testing.T) {
 	applyTestTheme(t)
 	got := Highlight("-- a comment")
-	// CommentFg = "gray" -> SGR "90"
+	// Comment = "gray" -> SGR "90"
 	if !strings.Contains(got, "\x1b[90m") {
 		t.Fatalf("expected gray SGR (\\x1b[90m) for comment in %q", got)
 	}
@@ -86,7 +86,7 @@ func TestHighlight_ContainsCommentColor(t *testing.T) {
 func TestHighlight_ContainsNumericColor(t *testing.T) {
 	applyTestTheme(t)
 	got := Highlight("SELECT 42")
-	// NumericFg = "magenta" -> SGR "35"
+	// Numeric = "magenta" -> SGR "35"
 	if !strings.Contains(got, "\x1b[35m") {
 		t.Fatalf("expected magenta SGR (\\x1b[35m) for number in %q", got)
 	}
@@ -104,24 +104,24 @@ func TestHighlight_PreservesPlainText(t *testing.T) {
 
 func TestHighlight_HexColor(t *testing.T) {
 	err := theme.Apply(&config.ThemeConfig{
-		KeywordFg:       "#ff8800",
-		StringFg:        "green",
-		CommentFg:       "gray",
-		NumericFg:       "magenta",
-		OperatorFg:      "yellow",
-		IdentifierFg:    "white",
+		Keyword:       "#ff8800",
+		String:        "green",
+		Comment:       "gray",
+		Numeric:       "magenta",
+		Operator:      "yellow",
+		Identifier:    "white",
 		ActiveBorder:    "yellow",
 		InactiveBorder:  "gray",
-		NullValueFg:     "red",
-		ErrorFg:         "red",
-		WarningFg:       "yellow",
-		SuccessFg:       "green",
-		InfoFg:          "cyan",
+		NullValue:     "red",
+		Error:         "red",
+		Warning:       "yellow",
+		Success:       "green",
+		Info:          "cyan",
 		PopupBorder:     "cyan",
-		TableHeaderFg:   "white",
+		TableHeader:   "white",
 		SearchHighlight: "yellow",
-		PromptFg:        "yellow",
-		DirtyCellBg:     "#4a3818",
+		Prompt:        "yellow",
+		DirtyCell:     "#4a3818",
 		WarnBorder:      "#d97757",
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func TestHighlightJSON_TrailingReset(t *testing.T) {
 func TestHighlightJSON_ContainsColor(t *testing.T) {
 	applyTestTheme(t)
 	got := HighlightJSON(`{"key":"value"}`)
-	// StringFg = "green" -> SGR "32"
+	// String = "green" -> SGR "32"
 	if !strings.Contains(got, "\x1b[32m") {
 		t.Fatalf("expected green SGR (\\x1b[32m) for JSON string in %q", got)
 	}
@@ -196,24 +196,24 @@ func TestHighlightJSON_SizeGate(t *testing.T) {
 
 func TestHighlightJSON_HexColor(t *testing.T) {
 	err := theme.Apply(&config.ThemeConfig{
-		KeywordFg:       "blue",
-		StringFg:        "#ff8800",
-		CommentFg:       "gray",
-		NumericFg:       "magenta",
-		OperatorFg:      "yellow",
-		IdentifierFg:    "white",
+		Keyword:       "blue",
+		String:        "#ff8800",
+		Comment:       "gray",
+		Numeric:       "magenta",
+		Operator:      "yellow",
+		Identifier:    "white",
 		ActiveBorder:    "yellow",
 		InactiveBorder:  "gray",
-		NullValueFg:     "red",
-		ErrorFg:         "red",
-		WarningFg:       "yellow",
-		SuccessFg:       "green",
-		InfoFg:          "cyan",
+		NullValue:     "red",
+		Error:         "red",
+		Warning:       "yellow",
+		Success:       "green",
+		Info:          "cyan",
 		PopupBorder:     "cyan",
-		TableHeaderFg:   "white",
+		TableHeader:   "white",
 		SearchHighlight: "yellow",
-		PromptFg:        "yellow",
-		DirtyCellBg:     "#4a3818",
+		Prompt:        "yellow",
+		DirtyCell:     "#4a3818",
 		WarnBorder:      "#d97757",
 	})
 	if err != nil {
@@ -221,7 +221,7 @@ func TestHighlightJSON_HexColor(t *testing.T) {
 	}
 
 	got := HighlightJSON(`{"key":"value"}`)
-	// #ff8800 -> 38;2;255;136;0. JSON string values receive StringFg.
+	// #ff8800 -> 38;2;255;136;0. JSON string values receive String.
 	if !strings.Contains(got, "38;2;255;136;0") {
 		t.Fatalf("expected true-color SGR for #ff8800 string in %q", got)
 	}

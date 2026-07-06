@@ -234,17 +234,17 @@ func styleForKind(k TokenKind) *theme.Style {
 	cur := theme.Current()
 	switch k {
 	case Keyword:
-		return cur.KeywordFg
+		return cur.Keyword
 	case String:
-		return cur.StringFg
+		return cur.String
 	case Comment:
-		return cur.CommentFg
+		return cur.Comment
 	case Number:
-		return cur.NumericFg
+		return cur.Numeric
 	case Operator:
-		return cur.OperatorFg
+		return cur.Operator
 	case Identifier:
-		return cur.IdentifierFg
+		return cur.Identifier
 	default:
 		return nil
 	}

@@ -1,15 +1,20 @@
 package orchestrator
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/davesavic/pgsavvy/pkg/config"
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/gui/clipboard"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/pgsavvy/pkg/gui/editor"
+	"github.com/davesavic/pgsavvy/pkg/gui/keys"
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 )
 
@@ -366,6 +371,97 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 			savedCtx := g.registry.SavedQuery
 			g.controllers.QueryEditor.SetOnAfterSave(savedCtx.MarkStale)
 		}
+	}
+	// Wire SettingsController's deps + SettingsContext's live-config accessor.
+	if g.controllers != nil && g.controllers.Settings != nil && g.registry != nil && g.registry.Settings != nil {
+		g.registry.Settings.SetCfg(func() *config.UserConfig {
+			if cfg := g.deps.Common.Cfg(); cfg != nil {
+				return cfg
+			}
+			return config.GetDefaultConfig()
+		})
+		g.registry.Settings.SetDefaults(func() []*types.ChordBinding {
+			if g.controllers == nil {
+				return nil
+			}
+			return controllers.AllDefaultBindings(g.controllers)
+		})
+		g.controllers.Settings.SetDeps(controllers.SettingsDeps{
+			Ctx:     g.registry.Settings,
+			Prompt:  g.promptHelp,
+			Confirm: g.confirmHelp,
+			ShowToast: func(msg string) {
+				if g.toastHelp != nil {
+					g.toastHelp.Show(msg, 3*time.Second)
+				}
+			},
+			StackDepth: func() int {
+				if g.tree == nil {
+					return 1
+				}
+				return len(g.tree.Stack())
+			},
+			OnSaveConfig: func(cfg *config.UserConfig) error {
+				_, errs := config.ValidateUserConfig(cfg, config.ValidationDeps{
+					ActionExists: func(id string) bool { return g.keybindingSystem.cmdRegistry.Has(id) },
+					ScopeExists:  g.scopeExistsPredicate(),
+				})
+				if len(errs) > 0 {
+					return errs[0]
+				}
+				if err := config.SaveUserConfig(g.deps.Common.Fs, g.deps.UserConfigPath, cfg); err != nil {
+					return fmt.Errorf("save config: %w", err)
+				}
+				knownContexts := make([]types.ContextKey, 0)
+				for _, ctx := range g.registry.Flatten() {
+					if ctx != nil {
+						knownContexts = append(knownContexts, ctx.GetKey())
+					}
+				}
+				svc := keys.NewKeybindingService(knownContexts...)
+				defaults := controllers.AllDefaultBindings(g.controllers)
+				newTrie, warnings, buildErr := svc.Build(defaults, cfg, g.keybindingSystem.cmdRegistry, g.kindOf)
+				if buildErr != nil {
+					return fmt.Errorf("build trie: %w", buildErr)
+				}
+				g.keybindingSystem.matcher.SwapTrieSet(newTrie)
+				g.deps.Common.UserConfig.Store(cfg)
+				for _, w := range theme.ApplyUserConfig(&cfg.Theme) {
+					g.toaster("theme warning: " + w)
+				}
+				if len(warnings) > 0 && g.deps.Common != nil {
+					for _, w := range warnings {
+						g.deps.Common.Logger().Warn(fmt.Sprintf("keybindings: [%s] %s (%s)", w.Code, w.Message, w.Origin))
+					}
+				}
+				return nil
+			},
+			ValidationDeps: config.ValidationDeps{
+				ActionExists: func(id string) bool { return g.keybindingSystem.cmdRegistry.Has(id) },
+				ScopeExists:  g.scopeExistsPredicate(),
+			},
+			Close: func() {
+				if g.tree == nil {
+					return
+				}
+				prevMain := g.tree.TakeEvictedMain()
+				if err := g.tree.Pop(); err != nil {
+					if prevMain != nil {
+						_ = g.tree.Push(prevMain)
+					}
+					return
+				}
+				if prevMain != nil {
+					_ = g.tree.Push(prevMain)
+				}
+			},
+			IsPromptActive: func() bool {
+				if g.promptHelp == nil {
+					return false
+				}
+				return g.promptHelp.Active()
+			},
+		})
 	}
 }
 

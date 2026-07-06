@@ -96,6 +96,7 @@ binding	scope=global	key=<leader>8	mode=normal
 binding	scope=global	key=<leader>9	mode=normal
 binding	scope=global	key=<leader>C	mode=normal
 binding	scope=global	key=<leader>R	mode=normal
+binding	scope=global	key=<leader>os	mode=normal
 binding	scope=global	key=<leader>p	mode=normal
 binding	scope=global	key=?	mode=normal
 binding	scope=hide_overlay	key=<c-n>	mode=normal
@@ -397,6 +398,17 @@ binding	scope=selection	key=<esc>	mode=normal
 binding	scope=selection	key=<up>	mode=normal
 binding	scope=selection	key=j	mode=normal
 binding	scope=selection	key=k	mode=normal
+binding	scope=settings	key=<cr>	mode=normal
+binding	scope=settings	key=<esc>	mode=normal
+binding	scope=settings	key=<tab>	mode=normal
+binding	scope=settings	key=[	mode=normal
+binding	scope=settings	key=]	mode=normal
+binding	scope=settings	key=a	mode=normal
+binding	scope=settings	key=d	mode=normal
+binding	scope=settings	key=i	mode=normal
+binding	scope=settings	key=j	mode=normal
+binding	scope=settings	key=k	mode=normal
+binding	scope=settings	key=␣	mode=normal
 binding	scope=table_inspect	key=<c-d>	mode=normal
 binding	scope=table_inspect	key=<c-u>	mode=normal
 binding	scope=table_inspect	key=<down>	mode=normal
@@ -463,6 +475,7 @@ popuprect	key=schema-rail	none
 popuprect	key=schemas	none
 popuprect	key=search_line	x0=0	y0=99	x1=100	y1=101
 popuprect	key=selection	x0=25	y0=25	x1=75	y1=75
+popuprect	key=settings	none
 popuprect	key=suggestions	none
 popuprect	key=table_data_editor	none
 popuprect	key=table_inspect	x0=20	y0=20	x1=80	y1=80

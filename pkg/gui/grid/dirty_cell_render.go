@@ -13,12 +13,12 @@ import (
 const gutterModifiedMarker = "M"
 
 // DecorateDirtyCell returns the cell's display string wrapped in the
-// DirtyCellBg theme style when isDirty is true. When isDirty is false the
+// DirtyCell theme style when isDirty is true. When isDirty is false the
 // value is returned unchanged — callers do not need to branch.
 //
-// The style argument is the dereferenced *theme.Style for DirtyCellBg
-// (typically theme.Current().DirtyCellBg). The zero Style yields no ANSI
-// escapes, so a theme that hasn't wired DirtyCellBg yet returns the value
+// The style argument is the dereferenced *theme.Style for DirtyCell
+// (typically theme.Current().DirtyCell). The zero Style yields no ANSI
+// escapes, so a theme that hasn't wired DirtyCell yet returns the value
 // untouched. The cell-style stack already applies type-aware foreground
 // colouring upstream; this decorator only layers the dirty-state
 // background tint on top of the already-styled value. The edit is signalled
@@ -27,7 +27,7 @@ func DecorateDirtyCell(value string, isDirty bool, style theme.Style) string {
 	if !isDirty {
 		return value
 	}
-	return wrapWithStyle(value, style)
+	return wrapWithStyle(value, theme.Style{Bg: style.Bg})
 }
 
 // RowHasPendingEdit reports whether any edit in set matches the supplied

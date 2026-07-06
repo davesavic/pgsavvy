@@ -98,7 +98,7 @@ func (s *stubService) buildCount() int {
 // --- Tests -------------------------------------------------------------
 
 func TestReloadCommand_HappyPath(t *testing.T) {
-	cfg := &config.UserConfig{}
+	cfg := config.GetDefaultConfig()
 	trie := NewTrieSet()
 	svc := &stubService{trie: trie}
 	mat := &recordingMatcher{}
@@ -109,6 +109,10 @@ func TestReloadCommand_HappyPath(t *testing.T) {
 		LoadUserConfig: func() (*config.UserConfig, error) {
 			loadCount++
 			return cfg, nil
+		},
+		ValidateDeps: config.ValidationDeps{
+			ActionExists: func(string) bool { return true },
+			ScopeExists:  func(string) bool { return true },
 		},
 		Service: svc,
 		Matcher: mat,
@@ -133,8 +137,14 @@ func TestReloadCommand_HappyPath(t *testing.T) {
 		t.Errorf("SwapTrieSet got wrong trie")
 	}
 	msgs := toaster.snapshot()
-	if len(msgs) != 1 || msgs[0] != "config reloaded" {
-		t.Errorf("toaster messages = %v, want [config reloaded]", msgs)
+	if len(msgs) != 2 {
+		t.Fatalf("toaster messages = %v, want 2 messages", msgs)
+	}
+	if !strings.Contains(msgs[0], "config warning") || !strings.Contains(msgs[0], "help.cheatsheet") {
+		t.Errorf("first message %q, want config warning about help.cheatsheet", msgs[0])
+	}
+	if !strings.Contains(msgs[1], "config reloaded") || !strings.Contains(msgs[1], "1") {
+		t.Errorf("second message %q, want config reloaded (1 warning(s))", msgs[1])
 	}
 }
 
@@ -172,10 +182,14 @@ func TestReloadCommand_BuildError(t *testing.T) {
 	toaster := &recordingToaster{}
 
 	cmd := ReloadCommand(ReloadDeps{
-		LoadUserConfig: func() (*config.UserConfig, error) { return &config.UserConfig{}, nil },
-		Service:        svc,
-		Matcher:        mat,
-		Toaster:        toaster.toast,
+		LoadUserConfig: func() (*config.UserConfig, error) { return config.GetDefaultConfig(), nil },
+		ValidateDeps: config.ValidationDeps{
+			ActionExists: func(string) bool { return true },
+			ScopeExists:  func(string) bool { return true },
+		},
+		Service: svc,
+		Matcher: mat,
+		Toaster: toaster.toast,
 	})
 	if err := cmd.Handler(nil, commands.ExecCtx{}); err != nil {
 		t.Fatalf("Handler: %v", err)
@@ -184,8 +198,11 @@ func TestReloadCommand_BuildError(t *testing.T) {
 		t.Errorf("SwapTrieSet called after Build error, want not called")
 	}
 	msgs := toaster.snapshot()
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "reload failed") || !strings.Contains(msgs[0], "nil registry") {
-		t.Errorf("toaster messages = %v, want one 'reload failed: nil registry' entry", msgs)
+	if len(msgs) != 2 {
+		t.Fatalf("toaster messages = %v, want 2 messages", msgs)
+	}
+	if !strings.Contains(msgs[1], "reload failed") || !strings.Contains(msgs[1], "nil registry") {
+		t.Errorf("final message %q, want 'reload failed: nil registry'", msgs[1])
 	}
 }
 
@@ -195,10 +212,14 @@ func TestReloadCommand_BuildPanicRecovered(t *testing.T) {
 	toaster := &recordingToaster{}
 
 	cmd := ReloadCommand(ReloadDeps{
-		LoadUserConfig: func() (*config.UserConfig, error) { return &config.UserConfig{}, nil },
-		Service:        svc,
-		Matcher:        mat,
-		Toaster:        toaster.toast,
+		LoadUserConfig: func() (*config.UserConfig, error) { return config.GetDefaultConfig(), nil },
+		ValidateDeps: config.ValidationDeps{
+			ActionExists: func(string) bool { return true },
+			ScopeExists:  func(string) bool { return true },
+		},
+		Service: svc,
+		Matcher: mat,
+		Toaster: toaster.toast,
 	})
 	if err := cmd.Handler(nil, commands.ExecCtx{}); err != nil {
 		t.Fatalf("Handler: %v", err)
@@ -207,8 +228,11 @@ func TestReloadCommand_BuildPanicRecovered(t *testing.T) {
 		t.Errorf("SwapTrieSet called after Build panic, want not called (old trie must remain)")
 	}
 	msgs := toaster.snapshot()
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "reload failed") || !strings.Contains(msgs[0], "build panic") {
-		t.Errorf("toaster messages = %v, want one 'reload failed: build panic: …' entry", msgs)
+	if len(msgs) != 2 {
+		t.Fatalf("toaster messages = %v, want 2 messages", msgs)
+	}
+	if !strings.Contains(msgs[1], "reload failed") || !strings.Contains(msgs[1], "build panic") {
+		t.Errorf("final message %q, want 'reload failed: build panic: …'", msgs[1])
 	}
 }
 
@@ -224,10 +248,14 @@ func TestReloadCommand_WarningCountInToast(t *testing.T) {
 	toaster := &recordingToaster{}
 
 	cmd := ReloadCommand(ReloadDeps{
-		LoadUserConfig: func() (*config.UserConfig, error) { return &config.UserConfig{}, nil },
-		Service:        svc,
-		Matcher:        mat,
-		Toaster:        toaster.toast,
+		LoadUserConfig: func() (*config.UserConfig, error) { return config.GetDefaultConfig(), nil },
+		ValidateDeps: config.ValidationDeps{
+			ActionExists: func(string) bool { return true },
+			ScopeExists:  func(string) bool { return true },
+		},
+		Service: svc,
+		Matcher: mat,
+		Toaster: toaster.toast,
 	})
 	if err := cmd.Handler(nil, commands.ExecCtx{}); err != nil {
 		t.Fatalf("Handler: %v", err)
@@ -236,8 +264,17 @@ func TestReloadCommand_WarningCountInToast(t *testing.T) {
 		t.Errorf("SwapTrieSet called %d times, want 1", mat.swapCount())
 	}
 	msgs := toaster.snapshot()
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "config reloaded") || !strings.Contains(msgs[0], "1") {
-		t.Errorf("toaster messages = %v, want one 'config reloaded (1 warning(s))' entry", msgs)
+	if len(msgs) != 3 {
+		t.Fatalf("toaster messages = %v, want 3 messages", msgs)
+	}
+	if msgs[0] != "config warning: no binding for help.cheatsheet" {
+		t.Errorf("first message %q, want chessheet warning", msgs[0])
+	}
+	if !strings.Contains(msgs[1], "config warning") || !strings.Contains(msgs[1], "orphan_action") {
+		t.Errorf("second message %q, want build warning", msgs[1])
+	}
+	if !strings.Contains(msgs[2], "config reloaded") || !strings.Contains(msgs[2], "2") {
+		t.Errorf("third message %q, want config reloaded (2 warning(s))", msgs[2])
 	}
 }
 
@@ -246,7 +283,11 @@ func TestReloadCommand_ExtraArgsDropped(t *testing.T) {
 	cmd := ReloadCommand(ReloadDeps{
 		LoadUserConfig: func() (*config.UserConfig, error) {
 			loadCalls++
-			return &config.UserConfig{}, nil
+			return config.GetDefaultConfig(), nil
+		},
+		ValidateDeps: config.ValidationDeps{
+			ActionExists: func(string) bool { return true },
+			ScopeExists:  func(string) bool { return true },
 		},
 		Service: &stubService{trie: NewTrieSet()},
 		Matcher: &recordingMatcher{},
@@ -271,10 +312,14 @@ func TestReloadCommand_ConcurrentSupersede(t *testing.T) {
 	toaster := &recordingToaster{}
 
 	cmd := ReloadCommand(ReloadDeps{
-		LoadUserConfig: func() (*config.UserConfig, error) { return &config.UserConfig{}, nil },
-		Service:        svc,
-		Matcher:        mat,
-		Toaster:        toaster.toast,
+		LoadUserConfig: func() (*config.UserConfig, error) { return config.GetDefaultConfig(), nil },
+		ValidateDeps: config.ValidationDeps{
+			ActionExists: func(string) bool { return true },
+			ScopeExists:  func(string) bool { return true },
+		},
+		Service: svc,
+		Matcher: mat,
+		Toaster: toaster.toast,
 	})
 
 	const N = 3
@@ -342,11 +387,15 @@ func TestReloadCommand_ConcurrentSupersede(t *testing.T) {
 }
 
 func TestReloadCommand_SerialSuccessions(t *testing.T) {
-	// Each serial call should fully run and use the latest cfg.
+	base := config.GetDefaultConfig()
 	cfgs := []*config.UserConfig{
-		{Leader: "a"},
-		{Leader: "b"},
-		{Leader: "c"},
+		base.Clone(),
+		base.Clone(),
+		base.Clone(),
+	}
+	for i, c := range cfgs {
+		r := rune('a' + byte(i))
+		c.Leader = string(r)
 	}
 	var idx atomic.Int32
 	svc := &stubService{trie: NewTrieSet()}
@@ -357,6 +406,10 @@ func TestReloadCommand_SerialSuccessions(t *testing.T) {
 		LoadUserConfig: func() (*config.UserConfig, error) {
 			i := idx.Add(1) - 1
 			return cfgs[i], nil
+		},
+		ValidateDeps: config.ValidationDeps{
+			ActionExists: func(string) bool { return true },
+			ScopeExists:  func(string) bool { return true },
 		},
 		Service: svc,
 		Matcher: mat,
@@ -371,13 +424,14 @@ func TestReloadCommand_SerialSuccessions(t *testing.T) {
 		t.Errorf("SwapTrieSet count = %d, want %d", mat.swapCount(), len(cfgs))
 	}
 	msgs := toaster.snapshot()
+	// 3 reloads * 2 messages each = 6 messages (warning + reloaded per iteration)
+	if len(msgs) != len(cfgs)*2 {
+		t.Errorf("toast count = %d, want %d; messages=%v", len(msgs), len(cfgs)*2, msgs)
+	}
 	for _, m := range msgs {
-		if !strings.Contains(m, "config reloaded") {
+		if !strings.Contains(m, "config warning") && !strings.Contains(m, "config reloaded") {
 			t.Errorf("unexpected toast in serial run: %q", m)
 		}
-	}
-	if len(msgs) != len(cfgs) {
-		t.Errorf("toast count = %d, want %d", len(msgs), len(cfgs))
 	}
 }
 
@@ -386,9 +440,13 @@ func TestReloadCommand_SerialSuccessions(t *testing.T) {
 func TestReloadCommand_RegistersIntoExRegistry(t *testing.T) {
 	r := NewExRegistry()
 	cmd := ReloadCommand(ReloadDeps{
-		LoadUserConfig: func() (*config.UserConfig, error) { return &config.UserConfig{}, nil },
-		Service:        &stubService{trie: NewTrieSet()},
-		Matcher:        &recordingMatcher{},
+		LoadUserConfig: func() (*config.UserConfig, error) { return config.GetDefaultConfig(), nil },
+		ValidateDeps: config.ValidationDeps{
+			ActionExists: func(string) bool { return true },
+			ScopeExists:  func(string) bool { return true },
+		},
+		Service: &stubService{trie: NewTrieSet()},
+		Matcher: &recordingMatcher{},
 	})
 	if err := r.Register(cmd); err != nil {
 		t.Fatalf("Register: %v", err)

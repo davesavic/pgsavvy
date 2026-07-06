@@ -32,13 +32,13 @@ func TestGetDefaultConfigLeaderDefaults(t *testing.T) {
 
 func TestGetDefaultConfigTimeoutDefaults(t *testing.T) {
 	cfg := GetDefaultConfig()
-	if cfg.TimeoutLen != 1*time.Second {
+	if cfg.TimeoutLen == nil || *cfg.TimeoutLen != 1*time.Second {
 		t.Errorf("TimeoutLen = %v, want 1s", cfg.TimeoutLen)
 	}
-	if cfg.TtimeoutLen != 50*time.Millisecond {
+	if cfg.TtimeoutLen == nil || *cfg.TtimeoutLen != 50*time.Millisecond {
 		t.Errorf("TtimeoutLen = %v, want 50ms", cfg.TtimeoutLen)
 	}
-	if cfg.WhichKeyDelay != 300*time.Millisecond {
+	if cfg.WhichKeyDelay == nil || *cfg.WhichKeyDelay != 300*time.Millisecond {
 		t.Errorf("WhichKeyDelay = %v, want 300ms", cfg.WhichKeyDelay)
 	}
 }

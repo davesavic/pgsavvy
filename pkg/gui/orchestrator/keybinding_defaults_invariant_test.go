@@ -198,3 +198,49 @@ func listActionForRail(defaults []*types.ChordBinding, scope types.ContextKey, p
 	}
 	return ""
 }
+
+// TestShippedDefaultScopesAreValidatable guards the settings Keys tab
+// "rebind any action" flow: every scope a shipped default declares MUST be
+// accepted by config.ValidateUserConfig's ScopeExists predicate. When the
+// Keys tab synthesizes a user override for a default row it copies the
+// default's scope verbatim; if the validator rejects that scope the save
+// fails ("unknown scope"). Side-rail contexts (SCHEMAS, TABLES, …) carry
+// inFlatten=false and are invisible to ContextTree.ByKey, so the predicate
+// must also consult types.AllContextKeys — this test fails if that coverage
+// regresses.
+func TestShippedDefaultScopesAreValidatable(t *testing.T) {
+	g, _ := buildTestGui(t)
+	t.Cleanup(func() { _ = g.Close() })
+
+	defaults := controllers.AllDefaultBindings(g.Controllers())
+	if len(defaults) == 0 {
+		t.Fatal("AllDefaultBindings returned no bindings on a wired Gui")
+	}
+
+	valid := func(s string) bool {
+		switch s {
+		case "", "global", "all":
+			return true
+		}
+		key := types.ContextKey(s)
+		for _, k := range types.AllContextKeys() {
+			if k == key {
+				return true
+			}
+		}
+		if reg := g.Registry(); reg != nil {
+			return reg.ByKey(key) != nil
+		}
+		return false
+	}
+	seen := map[types.ContextKey]bool{}
+	for _, b := range defaults {
+		if b == nil || seen[b.Scope] {
+			continue
+		}
+		seen[b.Scope] = true
+		if !valid(string(b.Scope)) {
+			t.Errorf("shipped default scope %q is rejected by config validation; a Keys-tab rebind of any binding in this scope would fail to save", b.Scope)
+		}
+	}
+}

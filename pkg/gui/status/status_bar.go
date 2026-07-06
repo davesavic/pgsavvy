@@ -133,8 +133,8 @@ func BuildStatusLine(modeLabel string, activeConn *models.Connection, options []
 // txIndicator renders the transaction status badge for the status bar.
 // Returns "" when no transaction is active (zero-value TxStatus or
 // committed/rolled-back). Active transactions render [TX] (no savepoints)
-// or [TX:sp1,sp2] (with savepoints) in the theme's WarningFg. Aborted
-// transactions render [TX*] in ErrorFg. Colors are resolved from the active
+// or [TX:sp1,sp2] (with savepoints) in the theme's Warning. Aborted
+// transactions render [TX*] in Error. Colors are resolved from the active
 // theme and suppressed under NO_COLOR (see tintTag).
 func txIndicator(st models.TxStatus, savepoints []string) string {
 	switch st {
@@ -143,9 +143,9 @@ func txIndicator(st models.TxStatus, savepoints []string) string {
 		if len(savepoints) > 0 {
 			tag = fmt.Sprintf("[TX:%s]", strings.Join(savepoints, ","))
 		}
-		return tintTag(tag, theme.Current().WarningFg.Fg)
+		return tintTag(tag, theme.Current().Warning.Fg)
 	case models.TxAbortedInTx:
-		return tintTag("[TX*]", theme.Current().ErrorFg.Fg)
+		return tintTag("[TX*]", theme.Current().Error.Fg)
 	default:
 		return ""
 	}

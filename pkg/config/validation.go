@@ -203,8 +203,8 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 
 	// Query.DefaultStatementTimeout. 0 = off; any positive duration is a
 	// ceiling. A negative value is invalid.
-	if cfg.Query.DefaultStatementTimeout < 0 {
-		errs = append(errs, fmt.Errorf("config: query.default_statement_timeout must be >= 0 (0 = off), got %v", cfg.Query.DefaultStatementTimeout))
+	if cfg.Query.DefaultStatementTimeout != nil && *cfg.Query.DefaultStatementTimeout < 0 {
+		errs = append(errs, fmt.Errorf("config: query.default_statement_timeout must be >= 0 (0 = off), got %v", *cfg.Query.DefaultStatementTimeout))
 	}
 
 	// Export bounds.

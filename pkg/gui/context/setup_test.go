@@ -22,8 +22,9 @@ func TestNewContextTreeReturnsAllContexts(t *testing.T) {
 	// become inFlatten=false container leaves (-3) and the single QUERY_RAIL
 	// container is added (+1), taking it 28→26.
 	// CELL_VIEWER (PERSISTENT_POPUP) takes it 26→27.
-	if len(flat) != 27 {
-		t.Fatalf("Flatten() len = %d, want 27 (QUERY_RAIL flattened; editor/saved/history leaves excluded; CELL_VIEWER added)", len(flat))
+	// SETTINGS (MAIN_CONTEXT) takes it 27→28.
+	if len(flat) != 28 {
+		t.Fatalf("Flatten() len = %d, want 28 (QUERY_RAIL flattened; editor/saved/history leaves excluded; CELL_VIEWER, SETTINGS added)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -84,7 +85,7 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 	tree := NewContextTree(types.ContextTreeDeps{})
 
 	allKeys := []types.ContextKey{
-		// Live (13 — 1 side container + 9 temp popup + 1 global + 3 display + 1
+		// Live (14 — 1 side container + 9 temp popup + 1 global + 3 display + 1
 		// persistent popup; SCHEMAS/TABLES are now named-only leaves and not
 		// retrievable via ByKey, replaced by the SCHEMA_RAIL container).
 		types.SCHEMA_RAIL,
@@ -97,9 +98,10 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 		// retrievable via ByKey (tkt5.2 topology flip).
 		types.QUERY_RAIL, types.CONNECTION_MANAGER, types.TABLE_DATA_EDITOR, types.RESULT_GRID,
 		types.PLAN,
+		types.SETTINGS,
 	}
-	if len(allKeys) != 21 {
-		t.Fatalf("test bug: allKeys len = %d, want 21", len(allKeys))
+	if len(allKeys) != 22 {
+		t.Fatalf("test bug: allKeys len = %d, want 22", len(allKeys))
 	}
 	for _, k := range allKeys {
 		c := tree.ByKey(k)
@@ -144,17 +146,18 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		// PERSISTENT_POPUP kind and is now a QUERY_RAIL leaf (tkt5.2).
 		{types.FIRST_RUN_TIP, types.PERSISTENT_POPUP},
 		{types.CELL_VIEWER, types.PERSISTENT_POPUP},
-		// 2 MAIN_CONTEXT: QUERY_RAIL container (QUERY_EDITOR is now a
-		// non-flattened leaf) + CONNECTION_MANAGER.
+		// 3 MAIN_CONTEXT: QUERY_RAIL container (QUERY_EDITOR is now a
+		// non-flattened leaf) + CONNECTION_MANAGER + SETTINGS.
 		{types.QUERY_RAIL, types.MAIN_CONTEXT},
 		{types.CONNECTION_MANAGER, types.MAIN_CONTEXT},
+		{types.SETTINGS, types.MAIN_CONTEXT},
 		// 3 STUB (TABLE_DATA_EDITOR + RESULT_GRID + PLAN).
 		{types.TABLE_DATA_EDITOR, types.STUB},
 		{types.RESULT_GRID, types.STUB},
 		{types.PLAN, types.STUB},
 	}
-	if len(cases) != 21 {
-		t.Fatalf("test bug: cases len = %d, want 21", len(cases))
+	if len(cases) != 22 {
+		t.Fatalf("test bug: cases len = %d, want 22", len(cases))
 	}
 	for _, c := range cases {
 		got := tree.ByKey(c.key)
@@ -189,8 +192,8 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		// RELATIONSHIP_PANEL takes DISPLAY_CONTEXT 3→4.
 		types.DISPLAY_CONTEXT: 4,
 		// MAIN_CONTEXT: the QUERY_RAIL container (tkt5.2 — QUERY_EDITOR is now
-		// a non-flattened leaf) + CONNECTION_MANAGER = 2.
-		types.MAIN_CONTEXT: 2,
+		// a non-flattened leaf) + CONNECTION_MANAGER + SETTINGS = 3.
+		types.MAIN_CONTEXT: 3,
 		// HISTORY was promoted from STUB to TEMPORARY_POPUP, so
 		// STUB drops 4→3 (HISTORY's later flip to a MAIN_CONTEXT leaf does not
 		// affect STUB).

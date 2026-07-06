@@ -1033,7 +1033,10 @@ func (q *QueryEditorController) defaultStatementTimeout() time.Duration {
 	if cfg == nil {
 		return 0
 	}
-	return cfg.Query.DefaultStatementTimeout
+	if cfg.Query.DefaultStatementTimeout != nil {
+		return *cfg.Query.DefaultStatementTimeout
+	}
+	return 0
 }
 
 func (q *QueryEditorController) handleExplain(ec commands.ExecCtx) error {

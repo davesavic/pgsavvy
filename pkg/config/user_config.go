@@ -8,10 +8,10 @@ type UserConfig struct {
 	Theme         ThemeConfig        `yaml:"theme"`
 	Leader        string             `yaml:"leader"`
 	LocalLeader   string             `yaml:"local_leader"`
-	Timeout       time.Duration      `yaml:"timeout"`
-	TimeoutLen    time.Duration      `yaml:"timeout_len"`
-	TtimeoutLen   time.Duration      `yaml:"ttimeout_len"`
-	WhichKeyDelay time.Duration      `yaml:"whichkey_delay"`
+	Timeout       *time.Duration     `yaml:"timeout,omitempty"`
+	TimeoutLen    *time.Duration     `yaml:"timeout_len,omitempty"`
+	TtimeoutLen   *time.Duration     `yaml:"ttimeout_len,omitempty"`
+	WhichKeyDelay *time.Duration     `yaml:"whichkey_delay,omitempty"`
 	Keybindings   []KeybindingConfig `yaml:"keybindings"`
 	UI            UIConfig           `yaml:"ui"`
 	Editor        EditorConfig       `yaml:"editor"`
@@ -26,7 +26,7 @@ type QueryConfig struct {
 	// 0 (the default) means OFF — no ceiling, the run path passes the
 	// caller's context through unchanged. A non-zero per-query Timeout
 	// always overrides this default. Must be >= 0.
-	DefaultStatementTimeout time.Duration `yaml:"default_statement_timeout"`
+	DefaultStatementTimeout *time.Duration `yaml:"default_statement_timeout,omitempty"`
 }
 
 // EditorConfig groups settings that govern the SQL editor behaviour. The
@@ -165,28 +165,26 @@ type KeybindingConfig struct {
 type ThemeConfig struct {
 	ActiveBorder    string `yaml:"active_border"`
 	InactiveBorder  string `yaml:"inactive_border"`
-	NullValueFg     string `yaml:"null_value_fg"`
-	NumericFg       string `yaml:"numeric_fg"`
-	StringFg        string `yaml:"string_fg"`
-	KeywordFg       string `yaml:"keyword_fg"`
-	CommentFg       string `yaml:"comment_fg"`
-	IdentifierFg    string `yaml:"identifier_fg"`
-	OperatorFg      string `yaml:"operator_fg"`
-	ErrorFg         string `yaml:"error_fg"`
-	WarningFg       string `yaml:"warning_fg"`
-	SuccessFg       string `yaml:"success_fg"`
-	InfoFg          string `yaml:"info_fg"`
+	NullValue       string `yaml:"null_value"`
+	Numeric         string `yaml:"numeric"`
+	String          string `yaml:"string"`
+	Keyword         string `yaml:"keyword"`
+	Comment         string `yaml:"comment"`
+	Identifier      string `yaml:"identifier"`
+	Operator        string `yaml:"operator"`
+	Error           string `yaml:"error"`
+	Warning         string `yaml:"warning"`
+	Success         string `yaml:"success"`
+	Info            string `yaml:"info"`
 	PopupBorder     string `yaml:"popup_border"`
-	TableHeaderFg   string `yaml:"table_header_fg"`
+	TableHeader     string `yaml:"table_header"`
 	SearchHighlight string `yaml:"search_highlight"`
 	// CurSearch is the style for the CURRENT in-grid search match (the cell
 	// the cursor sits on). Stronger than SearchHighlight so the active match
 	// stands out from the others.
 	CurSearch string `yaml:"cur_search"`
-	PromptFg  string `yaml:"prompt_fg"`
-	// DirtyCellBg is the background colour painted on grid cells that have
-	// a staged PendingEdit.
-	DirtyCellBg string `yaml:"dirty_cell_bg"`
+	Prompt    string `yaml:"prompt"`
+	DirtyCell string `yaml:"dirty_cell"`
 	// WarnBorder is the popup border colour used by warning-themed
 	// prompts (e.g. the free-form Expression prompt).
 	WarnBorder string `yaml:"warn_border"`
@@ -196,14 +194,17 @@ type ThemeConfig struct {
 // value is a fresh pointer; callers may mutate it without affecting other
 // callers.
 func GetDefaultConfig() *UserConfig {
+	timeout1s := 1 * time.Second
+	timeout50ms := 50 * time.Millisecond
+	timeout300ms := 300 * time.Millisecond
 	return &UserConfig{
 		ConfigVersion: 1,
 		Leader:        " ",
 		LocalLeader:   ",",
-		Timeout:       1 * time.Second,
-		TimeoutLen:    1 * time.Second,
-		TtimeoutLen:   50 * time.Millisecond,
-		WhichKeyDelay: 300 * time.Millisecond,
+		Timeout:       &timeout1s,
+		TimeoutLen:    &timeout1s,
+		TtimeoutLen:   &timeout50ms,
+		WhichKeyDelay: &timeout300ms,
 		// Theme mirrors builtin.DefaultDark() field-for-field so the shipped
 		// config template (yaml.Marshal of this value) is self-documenting and
 		// LoadUserConfig overlays partial user theme blocks onto a full
@@ -212,23 +213,23 @@ func GetDefaultConfig() *UserConfig {
 		Theme: ThemeConfig{
 			ActiveBorder:    "yellow",
 			InactiveBorder:  "gray",
-			NullValueFg:     "red",
-			NumericFg:       "magenta",
-			StringFg:        "green",
-			KeywordFg:       "blue",
-			CommentFg:       "gray",
-			IdentifierFg:    "white",
-			OperatorFg:      "yellow",
-			ErrorFg:         "red",
-			WarningFg:       "yellow",
-			SuccessFg:       "green",
-			InfoFg:          "cyan",
+			NullValue:       "red",
+			Numeric:         "magenta",
+			String:          "green",
+			Keyword:         "blue",
+			Comment:         "gray",
+			Identifier:      "white",
+			Operator:        "yellow",
+			Error:           "red",
+			Warning:         "yellow",
+			Success:         "green",
+			Info:            "cyan",
 			PopupBorder:     "cyan",
-			TableHeaderFg:   "white",
+			TableHeader:     "white",
 			SearchHighlight: "yellow",
 			CurSearch:       "black on yellow",
-			PromptFg:        "yellow",
-			DirtyCellBg:     "on #5a4410",
+			Prompt:          "yellow",
+			DirtyCell:       "#5a4410",
 			WarnBorder:      "#d97757",
 		},
 		Keybindings: []KeybindingConfig{
@@ -255,6 +256,45 @@ func GetDefaultConfig() *UserConfig {
 			FKForwardLimit:    1000,
 		},
 	}
+}
+
+// Clone returns a deep copy of the receiver. Every mutable field is copied
+// into a fresh allocation so mutations on the clone cannot affect the
+// original (and vice versa).
+//
+// Clone is nil-safe: Clone() on a nil *UserConfig returns nil.
+func (c *UserConfig) Clone() *UserConfig {
+	if c == nil {
+		return nil
+	}
+	dst := *c
+
+	if c.Timeout != nil {
+		v := *c.Timeout
+		dst.Timeout = &v
+	}
+	if c.TimeoutLen != nil {
+		v := *c.TimeoutLen
+		dst.TimeoutLen = &v
+	}
+	if c.TtimeoutLen != nil {
+		v := *c.TtimeoutLen
+		dst.TtimeoutLen = &v
+	}
+	if c.WhichKeyDelay != nil {
+		v := *c.WhichKeyDelay
+		dst.WhichKeyDelay = &v
+	}
+	if c.Query.DefaultStatementTimeout != nil {
+		v := *c.Query.DefaultStatementTimeout
+		dst.Query.DefaultStatementTimeout = &v
+	}
+
+	if c.Keybindings != nil {
+		dst.Keybindings = make([]KeybindingConfig, len(c.Keybindings))
+		copy(dst.Keybindings, c.Keybindings)
+	}
+	return &dst
 }
 
 // Sanitize applies SafeText to user-facing string fields on each

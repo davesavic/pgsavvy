@@ -14,6 +14,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/keys"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // toaster surfaces a transient message via the live toast helper.
@@ -57,11 +58,12 @@ var recognisedSettings = map[string]bool{
 
 // registerReloadEx builds the :reload ex-command and registers it.
 //
-// The :reload LoadUserConfig closure is a minimal-viable stub: it returns
-// the currently-loaded config rather than re-reading from disk. A real
-// on-disk reload requires plumbing the bootstrap path through Deps; that
-// lands in a follow-up. The AC only asks that :reload triggers exactly
-// one matcher.SwapTrieSet — the stub satisfies that contract.
+// LoadUserConfig reads config.yml from disk via config.LoadUserConfig
+// using the UserConfigPath plumbed through Deps. ValidateUserConfig
+// runs against the live command registry and context registry before
+// Build. After a successful Build, StoreConfig atomically swaps the
+// Common.UserConfig pointer and ApplyTheme reconciles the theme
+// colours with theme.ApplyUserConfig.
 //
 // defaults and svc are wireWithDriver locals (built from
 // controllers.AllDefaultBindings + keys.NewKeybindingService) so they are
@@ -70,10 +72,7 @@ var recognisedSettings = map[string]bool{
 func (g *Gui) registerReloadEx(defaults []*types.ChordBinding, svc *keys.KeybindingService) error {
 	reloadDeps := keys.ReloadDeps{
 		LoadUserConfig: func() (*config.UserConfig, error) {
-			if c := g.deps.Common.Cfg(); c != nil {
-				return c, nil
-			}
-			return config.GetDefaultConfig(), nil
+			return config.LoadUserConfig(g.deps.Common.Fs, []string{g.deps.UserConfigPath})
 		},
 		Defaults: defaults,
 		Registry: g.keybindingSystem.cmdRegistry,
@@ -82,6 +81,19 @@ func (g *Gui) registerReloadEx(defaults []*types.ChordBinding, svc *keys.Keybind
 		Matcher:  g.keybindingSystem.matcher,
 		Toaster:  g.toaster,
 		Log:      g.deps.Common.Logger(),
+		ValidateDeps: config.ValidationDeps{
+			ActionExists: func(id string) bool { return g.keybindingSystem.cmdRegistry.Has(id) },
+			ScopeExists:  g.scopeExistsPredicate(),
+		},
+		StoreConfig: func(cfg *config.UserConfig) {
+			g.deps.Common.UserConfig.Store(cfg)
+		},
+		ApplyTheme: func(tc *config.ThemeConfig) {
+			warns := theme.ApplyUserConfig(tc)
+			for _, w := range warns {
+				g.toaster("theme warning: " + w)
+			}
+		},
 	}
 	return g.keybindingSystem.exRegistry.Register(keys.ReloadCommand(reloadDeps))
 }
@@ -263,4 +275,15 @@ func (g *Gui) handleShowTipEx(_ []string, _ commands.ExecCtx) error {
 		return nil
 	}
 	return g.tree.Push(g.registry.FirstRunTip)
+}
+
+// handleSettingsEx is the :settings handler. It pushes the SETTINGS modal
+// onto the focus stack, popping the command line first so dismissing the
+// modal returns to the underlying context. No-op when already on top.
+func (g *Gui) handleSettingsEx(_ []string, _ commands.ExecCtx) error {
+	if g.registry == nil || g.registry.Settings == nil || g.tree == nil {
+		return nil
+	}
+	_ = g.tree.PopIfTop(types.COMMAND_LINE)
+	return g.tree.Push(g.registry.Settings)
 }

@@ -141,6 +141,19 @@ type TranslationSet struct {
 	SeverityWarning       string
 	SeverityInfo          string
 
+	// Settings-modal category tab labels.
+	SettingsGen    string
+	SettingsTheme  string
+	SettingsUI     string
+	SettingsEditor string
+	SettingsQuery  string
+	SettingsKeys   string
+
+	// Settings modal toast messages.
+	SettingsSaved             string
+	SettingsSaveFailed        string
+	SettingsValidationFailed string
+
 	Actions ActionTranslations
 }
 
@@ -354,6 +367,19 @@ type ActionTranslations struct {
 	CellViewerYank         string
 	CellViewerEdit         string
 	CellViewerDismiss      string
+
+	// Settings modal actions.
+	SettingsOpen             string
+	SettingsClose            string
+	SettingsNextTab          string
+	SettingsPrevTab          string
+	SettingsFieldUp          string
+	SettingsFieldDown        string
+	SettingsFieldEdit        string
+	SettingsFieldToggle      string
+	SettingsConfirm          string
+	SettingsKeybindingAdd    string
+	SettingsKeybindingDelete string
 }
 
 // EnglishTranslationSet returns a freshly allocated TranslationSet populated
@@ -447,6 +473,17 @@ func EnglishTranslationSet() *TranslationSet {
 		SeverityNotice:        "NOTICE",
 		SeverityWarning:       "WARNING",
 		SeverityInfo:          "INFO",
+
+		SettingsGen:    "Gen",
+		SettingsTheme:  "Theme",
+		SettingsUI:     "UI",
+		SettingsEditor: "Editor",
+		SettingsQuery:  "Query",
+		SettingsKeys:   "Keys",
+
+		SettingsSaved:             "Settings saved",
+		SettingsSaveFailed:        "Settings save failed",
+		SettingsValidationFailed: "Validation failed",
 
 		Actions: ActionTranslations{
 			EditConnection: "Edit connection",
@@ -608,6 +645,18 @@ func EnglishTranslationSet() *TranslationSet {
 			CellViewerYank:         "Yank cell contents",
 			CellViewerEdit:         "Edit cell",
 			CellViewerDismiss:      "Dismiss viewer",
+
+			SettingsOpen:             "Open settings",
+			SettingsClose:            "Close settings",
+			SettingsNextTab:          "Next tab",
+			SettingsPrevTab:          "Previous tab",
+			SettingsFieldUp:          "Move up",
+			SettingsFieldDown:        "Move down",
+			SettingsFieldEdit:        "Edit field",
+			SettingsFieldToggle:      "Toggle field",
+			SettingsConfirm:          "Save settings",
+			SettingsKeybindingAdd:    "Add keybinding",
+			SettingsKeybindingDelete: "Delete keybinding",
 		},
 	}
 }

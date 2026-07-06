@@ -95,10 +95,10 @@ func writeCategoryScope(b *strings.Builder, heading string, views []ModeView, ke
 		return
 	}
 	th := theme.Current()
-	b.WriteString(styleHeader(heading, th.InfoFg))
+	b.WriteString(styleHeader(heading, th.Info))
 	b.WriteByte('\n')
 	for _, v := range views {
-		b.WriteString(styleHeader(modeLabel(v.Mode), th.KeywordFg))
+		b.WriteString(styleHeader(modeLabel(v.Mode), th.Keyword))
 		b.WriteByte('\n')
 		for _, s := range v.Sections {
 			for _, r := range s.Rows {

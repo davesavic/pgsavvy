@@ -115,7 +115,7 @@ func renderCell(value any, col models.ColumnMeta) (visible, decorated string) {
 
 // renderCellWithDirty wraps renderCell with the dirty-cell decorator.
 // When isDirty is true the decorated string is layered with the
-// DirtyCellBg tint; the visible string is unchanged because the edit is
+// DirtyCell tint; the visible string is unchanged because the edit is
 // signalled by background colour, not a glyph. When isDirty is false the
 // result is identical to renderCell.
 func renderCellWithDirty(value any, col models.ColumnMeta, isDirty bool) (visible, decorated string) {
@@ -123,13 +123,13 @@ func renderCellWithDirty(value any, col models.ColumnMeta, isDirty bool) (visibl
 	if !isDirty {
 		return visible, decorated
 	}
-	dirtyStyle := dereferenceStyle(theme.Current().DirtyCellBg)
+	dirtyStyle := dereferenceStyle(theme.Current().DirtyCell)
 	decorated = DecorateDirtyCell(decorated, true, dirtyStyle)
 	return visible, decorated
 }
 
 // renderCellPadded renders value for col, padded to display width w, with
-// the type-aware cell style. When isDirty is true the DirtyCellBg tint is
+// the type-aware cell style. When isDirty is true the DirtyCell tint is
 // layered over the whole padded cell so a staged (unsaved) edit reads as
 // dirty — the background covers the full column width, including any
 // truncation ellipsis, so no per-cell glyph is needed. Padding the plain
@@ -140,7 +140,7 @@ func renderCellPadded(value any, col models.ColumnMeta, w int, isDirty bool) str
 	padded := padRight(visible, w)
 	styled := wrapWithStyle(padded, styleForCell(value, col))
 	if isDirty {
-		styled = wrapWithStyle(styled, dereferenceStyle(theme.Current().DirtyCellBg))
+		styled = wrapWithStyle(styled, theme.Style{Bg: dereferenceStyle(theme.Current().DirtyCell).Bg})
 	}
 	return styled
 }
@@ -249,17 +249,17 @@ func renderBytesCell(value any) string {
 func styleForCell(value any, col models.ColumnMeta) theme.Style {
 	t := theme.Current()
 	if value == nil {
-		base := dereferenceStyle(t.NullValueFg)
+		base := dereferenceStyle(t.NullValue)
 		base.Italic = true
 		return base
 	}
 	switch classifyColumn(col) {
 	case kindNumeric:
-		return dereferenceStyle(t.NumericFg)
+		return dereferenceStyle(t.Numeric)
 	case kindKeyword:
-		return dereferenceStyle(t.KeywordFg)
+		return dereferenceStyle(t.Keyword)
 	case kindString, kindJSON:
-		return dereferenceStyle(t.StringFg)
+		return dereferenceStyle(t.String)
 	default:
 		return theme.Style{}
 	}

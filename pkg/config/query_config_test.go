@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -12,8 +13,8 @@ import (
 // through unchanged.
 func TestGetDefaultConfigQueryDefaultStatementTimeout(t *testing.T) {
 	cfg := GetDefaultConfig()
-	if cfg.Query.DefaultStatementTimeout != 0 {
-		t.Errorf("Query.DefaultStatementTimeout = %v, want 0 (off by default)", cfg.Query.DefaultStatementTimeout)
+	if cfg.Query.DefaultStatementTimeout != nil && *cfg.Query.DefaultStatementTimeout != 0 {
+		t.Errorf("Query.DefaultStatementTimeout = %v, want nil or 0 (off by default)", cfg.Query.DefaultStatementTimeout)
 	}
 }
 
@@ -26,7 +27,7 @@ func TestParseYAML_QueryDefaultStatementTimeout(t *testing.T) {
 	if err := yaml.Unmarshal(src, &cfg); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if cfg.Query.DefaultStatementTimeout.Seconds() != 2 {
+	if cfg.Query.DefaultStatementTimeout == nil || cfg.Query.DefaultStatementTimeout.Seconds() != 2 {
 		t.Errorf("Query.DefaultStatementTimeout = %v after parsing %q; want 2s",
 			cfg.Query.DefaultStatementTimeout, string(src))
 	}
@@ -37,7 +38,8 @@ func TestParseYAML_QueryDefaultStatementTimeout(t *testing.T) {
 // a negative value is a config error.
 func TestValidateUserConfig_NegativeStatementTimeout(t *testing.T) {
 	cfg := GetDefaultConfig()
-	cfg.Query.DefaultStatementTimeout = -1
+	neg := -1 * time.Nanosecond
+	cfg.Query.DefaultStatementTimeout = &neg
 	_, errs := ValidateUserConfig(cfg, fullDeps())
 	if !containsErrSubstr(errs, "query.default_statement_timeout") {
 		t.Fatalf("expected query.default_statement_timeout error for negative value, got %v", errs)
@@ -48,7 +50,8 @@ func TestValidateUserConfig_NegativeStatementTimeout(t *testing.T) {
 // sentinel (0) passes validation.
 func TestValidateUserConfig_ZeroStatementTimeoutValid(t *testing.T) {
 	cfg := GetDefaultConfig()
-	cfg.Query.DefaultStatementTimeout = 0
+	zero := time.Duration(0)
+	cfg.Query.DefaultStatementTimeout = &zero
 	_, errs := ValidateUserConfig(cfg, fullDeps())
 	if containsErrSubstr(errs, "query.default_statement_timeout") {
 		t.Fatalf("zero statement timeout must be valid (off), got %v", errs)

@@ -145,7 +145,7 @@ When a connection is the active one, the picker shows `●` in place of its icon
 ### Colors
 
 The connection `color` field and every theme color field (`config.yml` under
-`theme:`, e.g. `keyword_fg`, `table_header_fg`) accept the same color token
+`theme:`, e.g. `keyword`, `table_header`) accept the same color token
 vocabulary. One vocabulary resolves everywhere — inline content (grid cells,
 side rails, status bar, connection rows, suggestions, cheatsheet, editor syntax
 highlighting) **and** pane borders — and applies to both foreground and
@@ -154,8 +154,8 @@ background fields:
 | Class | Tokens | Example |
 |-------|--------|---------|
 | Named (16) | `black` `red` `green` `yellow` `blue` `magenta` `cyan` `white` and their bright variants `brightblack` `brightred` `brightgreen` `brightyellow` `brightblue` `brightmagenta` `brightcyan` `brightwhite` | `color: cyan` |
-| Gray alias | `gray` / `grey` → `brightblack` | `comment_fg: gray` |
-| 256-palette | `colorN` where `N` is `0`–`255` | `keyword_fg: color39` |
+| Gray alias | `gray` / `grey` → `brightblack` | `comment: gray` |
+| 256-palette | `colorN` where `N` is `0`–`255` | `keyword: color39` |
 | Hex | `#rgb` or `#rrggbb` (case-insensitive) | `color: "#ff8800"` |
 
 Tokens are case-insensitive. An empty or unrecognized token leaves the element

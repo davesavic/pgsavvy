@@ -736,7 +736,7 @@ func TestRunLayoutCommandLineCaretTracksBufferLength(t *testing.T) {
 
 // TestRunLayoutCommandLinePromptStyled: each Layout
 // pass while COMMAND_LINE is on the focus stack must write a buffer
-// content that opens with the PromptFg ANSI SGR escape, then ':', then
+// content that opens with the Prompt ANSI SGR escape, then ':', then
 // the reset. Without the wrapper, the prompt renders in the terminal's
 // default foreground — too dim against the CommandLine background.
 func TestRunLayoutCommandLinePromptStyled(t *testing.T) {
@@ -755,7 +755,7 @@ func TestRunLayoutCommandLinePromptStyled(t *testing.T) {
 	if body == "" {
 		t.Fatal("COMMAND_LINE view buffer is empty after RunLayout")
 	}
-	// PromptFg default is "yellow" → \x1b[33m. The buffer must start
+	// Prompt default is "yellow" → \x1b[33m. The buffer must start
 	// with an SGR foreground escape immediately followed by ':'.
 	if !strings.HasPrefix(body, "\x1b[") {
 		t.Errorf("COMMAND_LINE buffer does not start with ANSI SGR escape; body=%q", body)

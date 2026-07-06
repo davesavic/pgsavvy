@@ -80,6 +80,11 @@ type Deps struct {
 	// (via config.DeleteQuery) on a dd delete.
 	QueriesPath string
 
+	// UserConfigPath is the absolute path to config.yml. The :reload
+	// ex-command reads it (via config.LoadUserConfig) to reload user
+	// keybindings, delays, and theme on-demand.
+	UserConfigPath string
+
 	// ConnectionsProvider returns the freshly-loaded connection profiles.
 	// Called by the empty-state hook and (in later epics) by the
 	// connection picker's refresh path. Nil collapses to an empty slice.
@@ -1946,14 +1951,14 @@ func resolveKeyDelays(cfg *config.UserConfig, overrides *keyDelayOverrides) (tim
 	ttlen := 50 * time.Millisecond
 	wdelay := 300 * time.Millisecond
 	if cfg != nil {
-		if cfg.TimeoutLen > 0 {
-			tlen = cfg.TimeoutLen
+		if cfg.TimeoutLen != nil && *cfg.TimeoutLen > 0 {
+			tlen = *cfg.TimeoutLen
 		}
-		if cfg.TtimeoutLen > 0 {
-			ttlen = cfg.TtimeoutLen
+		if cfg.TtimeoutLen != nil && *cfg.TtimeoutLen > 0 {
+			ttlen = *cfg.TtimeoutLen
 		}
-		if cfg.WhichKeyDelay > 0 {
-			wdelay = cfg.WhichKeyDelay
+		if cfg.WhichKeyDelay != nil && *cfg.WhichKeyDelay > 0 {
+			wdelay = *cfg.WhichKeyDelay
 		}
 	}
 	if overrides != nil {
@@ -1989,16 +1994,30 @@ func fsFromCommon(c *common.Common) afero.Fs {
 // config.ValidateUserConfig. A scope string is valid if it is one of:
 //   - "" or "global" (collapsed to GLOBAL by KeybindingService),
 //   - "all" (pseudo-scope expanded by KeybindingService.scopesFor),
-//   - any ContextKey registered in g.registry (matched via ByKey).
+//   - any known ContextKey (types.AllContextKeys), OR any ContextKey
+//     currently registered in g.registry.
+//
+// AllContextKeys is consulted in addition to the registry because several
+// real bindable contexts (SCHEMAS, TABLES, COLUMNS, INDEXES, …) carry
+// inFlatten=false and are therefore invisible to ByKey (which iterates
+// Flatten()). Without them, an explicit binding scoped to a side rail —
+// exactly the kind the settings Keys tab lets users rebind — would be
+// rejected on save.
 func (g *Gui) scopeExistsPredicate() func(string) bool {
 	return func(s string) bool {
 		switch s {
 		case "", "global", "all":
 			return true
 		}
+		key := types.ContextKey(s)
+		for _, k := range types.AllContextKeys() {
+			if k == key {
+				return true
+			}
+		}
 		if g.registry == nil {
 			return false
 		}
-		return g.registry.ByKey(types.ContextKey(s)) != nil
+		return g.registry.ByKey(key) != nil
 	}
 }

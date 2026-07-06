@@ -44,6 +44,23 @@ type ReloadDeps struct {
 	// `:reload /etc/passwd` from loading arbitrary files).
 	LoadUserConfig func() (*config.UserConfig, error)
 
+	// ValidateDeps supplies the ActionExists / ScopeExists predicates for
+	// ValidateUserConfig. Bootstrap populates this from the live command
+	// registry and context registry. A zero-value ValidationDeps defaults
+	// to "always returns false" for both predicates, which skips
+	// per-keybinding checks but still runs structural validation.
+	ValidateDeps config.ValidationDeps
+
+	// StoreConfig publishes a reloaded config via Common.UserConfig.Store.
+	// Bootstrap binds this to the atomic.Pointer swap so downstream
+	// Cfg() callers see the fresh config immediately.
+	StoreConfig func(*config.UserConfig)
+
+	// ApplyTheme applies a theme config via theme.ApplyUserConfig and
+	// toasts the token-warning count. Bootstrap binds this to the
+	// production theme.ApplyUserConfig + toast surface.
+	ApplyTheme func(*config.ThemeConfig)
+
 	// Defaults are the controller-published shipped bindings (D8).
 	// Bootstrap populates this from AllDefaultBindings().
 	Defaults []*ChordBinding
@@ -92,10 +109,6 @@ func ReloadCommand(deps ReloadDeps) ExCommand {
 		latestGen atomic.Uint64
 	)
 	handler := func(_ []string, _ commands.ExecCtx) error {
-		// Bump the generation counter then wait for the per-handler
-		// serialisation mutex. If a NEWER :reload has been queued
-		// behind us by the time we acquire runMu, skip our work — the
-		// newer invocation will reload with fresher inputs.
 		myGen := latestGen.Add(1)
 		runMu.Lock()
 		defer runMu.Unlock()
@@ -106,7 +119,6 @@ func ReloadCommand(deps ReloadDeps) ExCommand {
 			return nil
 		}
 
-		// Step 1: load the user config from disk.
 		cfg, err := deps.LoadUserConfig()
 		if err != nil {
 			if deps.Toaster != nil {
@@ -115,8 +127,29 @@ func ReloadCommand(deps ReloadDeps) ExCommand {
 			return nil
 		}
 
-		// Step 2: run Build under a panic guard. A panicking Build
-		// must NOT crash the dispatch goroutine; the old trie stays.
+		warns, errs := config.ValidateUserConfig(cfg, deps.ValidateDeps)
+		if len(errs) > 0 {
+			for _, e := range errs {
+				if deps.Log != nil {
+					deps.Log.Debug(fmt.Sprintf("reload: validation error: %s", e))
+				}
+			}
+			if deps.Toaster != nil {
+				deps.Toaster(fmt.Sprintf("reload failed: %d validation error(s)", len(errs)))
+			}
+			return nil
+		}
+		if deps.Log != nil {
+			for _, w := range warns {
+				deps.Log.Debug(fmt.Sprintf("reload: validation warning: %s", w))
+			}
+		}
+		if deps.Toaster != nil {
+			for _, w := range warns {
+				deps.Toaster("config warning: " + w)
+			}
+		}
+
 		var (
 			newTrie  *TrieSet
 			warnings []Warning
@@ -139,7 +172,13 @@ func ReloadCommand(deps ReloadDeps) ExCommand {
 			return nil
 		}
 
-		// Step 3: log warnings, swap, toast success.
+		if deps.StoreConfig != nil {
+			deps.StoreConfig(cfg)
+		}
+		if deps.ApplyTheme != nil {
+			deps.ApplyTheme(&cfg.Theme)
+		}
+
 		if deps.Log != nil {
 			for _, w := range warnings {
 				deps.Log.Debug(fmt.Sprintf(
@@ -148,10 +187,16 @@ func ReloadCommand(deps ReloadDeps) ExCommand {
 				))
 			}
 		}
+		if deps.Toaster != nil {
+			for _, w := range warnings {
+				deps.Toaster(fmt.Sprintf("config warning: [%s] %s (%s)", w.Code, w.Message, w.Origin))
+			}
+		}
 		deps.Matcher.SwapTrieSet(newTrie)
 		if deps.Toaster != nil {
-			if len(warnings) > 0 {
-				deps.Toaster(fmt.Sprintf("config reloaded (%d warning(s))", len(warnings)))
+			totalWarns := len(warns) + len(warnings)
+			if totalWarns > 0 {
+				deps.Toaster(fmt.Sprintf("config reloaded (%d warning(s))", totalWarns))
 			} else {
 				deps.Toaster("config reloaded")
 			}

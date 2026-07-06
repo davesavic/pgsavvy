@@ -178,6 +178,9 @@ const (
 	// renders a centered bordered box over a blank background, suppressing
 	// both the side rails and the QUERY_EDITOR for the frame.
 	CONNECTION_MANAGER ContextKey = "connection_manager"
+	// SETTINGS is the settings modal (6-tabbed configuration editor).
+	// MAIN_CONTEXT kind.
+	SETTINGS ContextKey = "settings"
 	// RELATIONSHIP_PANEL is the <leader>gr right-docked FK-exploration
 	// sidebar. DISPLAY_CONTEXT kind: it renders a right-anchored overlay
 	// over the result grid (PopupSizeDocked) and live-follows the focused
@@ -237,6 +240,7 @@ func AllContextKeys() []ContextKey {
 		CONFLICT_DIALOG,
 		FK_REVERSE_PICKER,
 		CONNECTION_MANAGER,
+		SETTINGS,
 		RELATIONSHIP_PANEL,
 		FOREIGN_KEYS,
 		CONSTRAINTS,

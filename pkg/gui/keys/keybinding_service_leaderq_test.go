@@ -171,9 +171,9 @@ func TestKeybindingService_LeaderQDispatchesAppQuit(t *testing.T) {
 	leader := []rune(cfg.Leader)[0]
 	matcher, err := NewMatcher(trieSet, MatcherConfig{
 		Leader:        leader,
-		TimeoutLen:    cfg.TimeoutLen,
-		TtimeoutLen:   cfg.TtimeoutLen,
-		WhichKeyDelay: cfg.WhichKeyDelay,
+		TimeoutLen:    durationOrDefault(cfg.TimeoutLen, 1*time.Second),
+		TtimeoutLen:   durationOrDefault(cfg.TtimeoutLen, 50*time.Millisecond),
+		WhichKeyDelay: durationOrDefault(cfg.WhichKeyDelay, 300*time.Millisecond),
 	})
 	if err != nil {
 		t.Fatalf("NewMatcher: %v", err)
@@ -256,4 +256,11 @@ func containsAppQuit(s string) bool {
 		}
 	}
 	return false
+}
+
+func durationOrDefault(d *time.Duration, fallback time.Duration) time.Duration {
+	if d != nil {
+		return *d
+	}
+	return fallback
 }

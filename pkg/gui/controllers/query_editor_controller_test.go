@@ -630,7 +630,8 @@ func TestQueryEditorRunAppliesConfigDefaultTimeout(t *testing.T) {
 	runner := data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
 
 	c := common.NewDummyCommon()
-	c.Cfg().Query.DefaultStatementTimeout = 2 * time.Second
+	t2s := 2 * time.Second
+	c.Cfg().Query.DefaultStatementTimeout = &t2s
 
 	base := newBag()
 	base.HelperBag.QueryRunner = runner

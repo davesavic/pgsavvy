@@ -93,6 +93,12 @@ type Controllers struct {
 	// threading hook). It owns the <leader>gr toggle (RESULT_GRID) and the
 	// <cr>/<esc> panel bindings (RELATIONSHIP_PANEL scope).
 	RelationshipPanel *RelationshipPanelController
+
+	// Settings owns the SETTINGS modal bindings (tab cycle, field
+	// navigation, field edit/toggle, save, close, keybinding add/delete).
+	// Constructed here; the orchestrator wires its SettingsDeps via
+	// SetDeps after construction.
+	Settings *SettingsController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -217,6 +223,8 @@ func AttachControllers(
 	// orchestrator to ResultTabsHelper.ActivePlanContext).
 	plan := NewPlanController(c, helpers.CoreDeps, helpers.ActivePlanContextFn)
 
+	settings := NewSettingsController(c, helpers.CoreDeps, helpers.UIDeps)
+
 	bundle := &Controllers{
 		Schemas:           schemas,
 		Tables:            tables,
@@ -237,6 +245,7 @@ func AttachControllers(
 		ExportMenu:        exportMenu,
 		VimEditor:         vimEditor,
 		Plan:              plan,
+		Settings:          settings,
 	}
 
 	// Single attach pass driven by the per-controller registry. attachTargets
@@ -266,6 +275,7 @@ func AttachControllers(
 		"HideOverlay":       &tree.HideOverlay.BaseContext,
 		"ExportMenu":        &tree.ExportMenu.BaseContext,
 		"Plan":              tree.Plan,
+		"Settings":          &tree.Settings.BaseContext,
 	}
 	for _, e := range bundle.entries() {
 		if !e.attach {
@@ -378,6 +388,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "Cheatsheet", ctrl: b.Cheatsheet, attach: true},
 		{name: "SearchLine", ctrl: b.SearchLine, attach: true},
 		{name: "RelationshipPanel", ctrl: b.RelationshipPanel, attach: true},
+		{name: "Settings", ctrl: b.Settings, attach: true},
 	}
 	out := make([]controllerEntry, 0, len(candidates))
 	for _, e := range candidates {

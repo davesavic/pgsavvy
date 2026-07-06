@@ -33,10 +33,10 @@ func TestDecorateDirtyCell_DirtyZeroStyleUnchanged(t *testing.T) {
 
 // TestDecorateDirtyCell_StyleAppliesAnsiEscape proves a non-zero style
 // produces an ANSI SGR wrapper around the value, with no per-cell glyph.
-// Uses the same recognised colour name path as the cell renderer.
+// DecorateDirtyCell only layers the background tint; foreground is ignored.
 func TestDecorateDirtyCell_StyleAppliesAnsiEscape(t *testing.T) {
-	got := DecorateDirtyCell("v", true, theme.Style{Fg: "red"})
-	want := "\x1b[31mv\x1b[0m"
+	got := DecorateDirtyCell("v", true, theme.Style{Bg: "red"})
+	want := "\x1b[41mv\x1b[0m"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
@@ -98,9 +98,9 @@ func TestDirtyCellRendersBackgroundTint(t *testing.T) {
 	clean := renderCellPadded("hello", col, 10, false)
 	dirty := renderCellPadded("hello", col, 10, true)
 
-	bg := sgrPrefixForStyle(theme.Style{Bg: theme.Current().DirtyCellBg.Bg})
+	bg := sgrPrefixForStyle(theme.Style{Bg: theme.Current().DirtyCell.Bg})
 	if bg == "" {
-		t.Fatalf("default theme DirtyCellBg.Bg=%q produced no SGR — theme misconfigured for 8-colour mode", theme.Current().DirtyCellBg.Bg)
+		t.Fatalf("default theme DirtyCell.Bg=%q produced no SGR — theme misconfigured for 8-colour mode", theme.Current().DirtyCell.Bg)
 	}
 	if !strings.Contains(dirty, bg) {
 		t.Errorf("dirty cell %q missing background tint %q", dirty, bg)
@@ -244,7 +244,7 @@ func TestRenderCellWithDirty_NotDirtyMatchesRenderCell(t *testing.T) {
 
 // TestRenderCellWithDirty_DirtyTintsDecoratedOnly proves the dirty path
 // leaves the visible string unchanged (no glyph) while layering the
-// DirtyCellBg background tint onto the decorated string.
+// DirtyCell background tint onto the decorated string.
 func TestRenderCellWithDirty_DirtyTintsDecoratedOnly(t *testing.T) {
 	col := models.ColumnMeta{Name: "name", TypeName: "text"}
 	visClean, _ := renderCell("hello", col)
@@ -252,7 +252,7 @@ func TestRenderCellWithDirty_DirtyTintsDecoratedOnly(t *testing.T) {
 	if vis != visClean {
 		t.Fatalf("visible %q must match clean %q (no glyph)", vis, visClean)
 	}
-	bg := bgEscape(theme.Current().DirtyCellBg.Bg)
+	bg := bgEscape(theme.Current().DirtyCell.Bg)
 	if bg == "" || !strings.Contains(dec, bg) {
 		t.Fatalf("decorated %q must carry the dirty tint %q", dec, bg)
 	}

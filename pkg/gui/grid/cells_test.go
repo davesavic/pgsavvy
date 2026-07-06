@@ -82,7 +82,7 @@ func TestRenderCell_NullItalic(t *testing.T) {
 }
 
 // TestRenderCell_NumericStyled asserts an int4 cell carries some SGR
-// foreground colour from NumericFg — the decorated output should differ
+// foreground colour from Numeric — the decorated output should differ
 // from the plain text and include an SGR escape introducer.
 func TestRenderCell_NumericStyled(t *testing.T) {
 	resetThemeForTest(t)

@@ -36,7 +36,7 @@ func renderCellPaddedHighlighted(value any, col models.ColumnMeta, w int, isDirt
 	highlighted := applyMatchHighlights(visible, padded, w, spans)
 	styled := wrapWithStyle(highlighted, styleForCell(value, col))
 	if isDirty {
-		styled = wrapWithStyle(styled, dereferenceStyle(theme.Current().DirtyCellBg))
+		styled = wrapWithStyle(styled, theme.Style{Bg: dereferenceStyle(theme.Current().DirtyCell).Bg})
 	}
 	return styled
 }

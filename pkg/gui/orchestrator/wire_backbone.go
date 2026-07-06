@@ -779,6 +779,19 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 		},
 	})
 
+	// <leader>os opens the SETTINGS modal mid-session.
+	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
+		ID:          commands.SettingsOpen,
+		Description: "Open settings",
+		Handler: func(commands.ExecCtx) error {
+			if g.tree == nil || g.registry == nil || g.registry.Settings == nil {
+				return nil
+			}
+			_ = g.tree.PopIfTop(types.COMMAND_LINE)
+			return g.tree.Push(g.registry.Settings)
+		},
+	})
+
 	// TipDismiss handler. Pops the FIRST_RUN_TIP popup
 	// and stamps StartupTipsSeenAt via AppStateStore.StampStartupTips.
 	// The action is wired regardless of whether the tip is currently
@@ -979,6 +992,9 @@ func (g *Gui) wireExCommands(defaults []*types.ChordBinding, svc *keys.Keybindin
 	// :tip — re-show the first-run welcome tip on demand (independent of the
 	// startup seen-stamp / zero-connections gate). Handler in gui_ex_commands.go.
 	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "tip", Description: "Show the first-run welcome tip", Handler: g.handleShowTipEx})
+
+	// :settings — open the settings modal on demand.
+	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "settings", Description: "Open settings", Handler: g.handleSettingsEx})
 }
 
 // wireKeyDispatch installs the master editor / per-key dispatch, wires the mouse,

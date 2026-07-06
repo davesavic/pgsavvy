@@ -513,6 +513,7 @@ func allContextKeyKinds() map[types.ContextKey]types.ContextKind {
 		types.CONFLICT_DIALOG:    types.TEMPORARY_POPUP,
 		types.FK_REVERSE_PICKER:  types.TEMPORARY_POPUP,
 		types.CONNECTION_MANAGER: types.MAIN_CONTEXT,
+		types.SETTINGS:           types.MAIN_CONTEXT,
 		types.RELATIONSHIP_PANEL: types.DISPLAY_CONTEXT,
 		types.CELL_VIEWER:        types.PERSISTENT_POPUP,
 	}
@@ -629,6 +630,7 @@ func TestAllKnownContextsDelta(t *testing.T) {
 	}
 	wantAfter[types.CONNECTION_MANAGER] = struct{}{}
 	wantAfter[types.CHEATSHEET] = struct{}{}
+	wantAfter[types.SETTINGS] = struct{}{}
 	// SCHEMA_RAIL is the consolidated side-rail container shipped by
 	// pgsavvy-i42s.4; it is a new SIDE_CONTEXT member of the scope:all
 	// expansion (the SCHEMAS/TABLES leaves remain in AllContextKeys and the

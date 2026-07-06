@@ -275,15 +275,15 @@ func RenderStatusLine(d StatusRenderDeps) {
 }
 
 // styleToastForLevel wraps msg with the active theme's foreground color for
-// level — ErrorFg for error toasts, SuccessFg otherwise. Color is suppressed
+// level — Error for error toasts, Success otherwise. Color is suppressed
 // under NO_COLOR (theme.IsMonochrome) and for empty/unknown tokens, so the
 // status surface never emits a malformed escape. msg is assumed to already be
 // SafeText-sanitised so it carries no control bytes other than the ones this
 // wrapper adds.
 func styleToastForLevel(msg string, level ui.ToastLevel) string {
-	style := theme.Current().SuccessFg
+	style := theme.Current().Success
 	if level == ui.ToastError {
-		style = theme.Current().ErrorFg
+		style = theme.Current().Error
 	}
 	if theme.IsMonochrome() {
 		return msg

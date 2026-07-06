@@ -157,6 +157,7 @@ func Start(build *BuildInfo, args []string) error {
 		Store:               store,
 		ConnectionsPath:     connectionsPath,
 		QueriesPath:         queriesPath,
+		UserConfigPath:      configPath,
 		ConnectionsProvider: connectionsProvider,
 		DriverNamesFn:       drivers.Names,
 		SetSecretPrompter:   pg.SetSecretPrompter,

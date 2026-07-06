@@ -408,7 +408,7 @@ func hideFooterLine(snap viewSnapshot) string {
 }
 
 // renderHeaderLine assembles the column-name header. Headers use the
-// TableHeaderFg style — wrapped in a single SGR pair around the whole
+// TableHeader style — wrapped in a single SGR pair around the whole
 // line so column separators inherit the style too.
 func renderHeaderLine(snap viewSnapshot, innerW int, moreLeft, moreRight bool) string {
 	var sb strings.Builder
@@ -444,14 +444,14 @@ func renderHeaderLine(snap viewSnapshot, innerW int, moreLeft, moreRight bool) s
 }
 
 // tintHeaderLine wraps the fully-assembled header line in a single
-// TableHeaderFg SGR pair, applied as the OUTERMOST layer. Returns the bare
+// TableHeader SGR pair, applied as the OUTERMOST layer. Returns the bare
 // line under NO_COLOR (theme.IsMonochrome) and for empty/unknown tokens so the
 // grid never emits a malformed escape.
 func tintHeaderLine(line string) string {
 	if theme.IsMonochrome() {
 		return line
 	}
-	sgr := theme.ColorSGR(theme.Current().TableHeaderFg.Fg, theme.Fg)
+	sgr := theme.ColorSGR(theme.Current().TableHeader.Fg, theme.Fg)
 	if sgr == "" {
 		return line
 	}
@@ -541,7 +541,7 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 			value = row.Values[c]
 		}
 		// Dirty-cell substitution: if this (rowPK, column) carries a staged
-		// edit, render the staged NewValue (with the DirtyCellBg tint)
+		// edit, render the staged NewValue (with the DirtyCell tint)
 		// instead of the stale DB value so an unsaved edit is visible.
 		// renderCellPadded pads the plain visible string
 		// before wrapping, so a digit in the SGR prefix can never collide

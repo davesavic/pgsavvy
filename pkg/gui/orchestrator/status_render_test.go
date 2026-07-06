@@ -482,10 +482,10 @@ func TestRenderStatusLine_ActiveLeafSourcesListModeAndOptions(t *testing.T) {
 
 // --- ialt.1: toast styler reads configured theme colors (not hardcoded) ---
 
-func TestStyleToastForLevel_ErrorUsesConfiguredErrorFg(t *testing.T) {
+func TestStyleToastForLevel_ErrorUsesConfiguredError(t *testing.T) {
 	defer theme.SetMonochromeForTest(false)()
 	cfg := builtin.DefaultDark()
-	cfg.ErrorFg = "color202"
+	cfg.Error = "color202"
 	if err := theme.Apply(cfg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -498,10 +498,10 @@ func TestStyleToastForLevel_ErrorUsesConfiguredErrorFg(t *testing.T) {
 	}
 }
 
-func TestStyleToastForLevel_InfoUsesConfiguredSuccessFg(t *testing.T) {
+func TestStyleToastForLevel_InfoUsesConfiguredSuccess(t *testing.T) {
 	defer theme.SetMonochromeForTest(false)()
 	cfg := builtin.DefaultDark()
-	cfg.SuccessFg = "color118"
+	cfg.Success = "color118"
 	if err := theme.Apply(cfg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}

@@ -29,23 +29,23 @@ type Style struct {
 type themeState struct {
 	ActiveBorder    *Style
 	InactiveBorder  *Style
-	NullValueFg     *Style
-	NumericFg       *Style
-	StringFg        *Style
-	KeywordFg       *Style
-	CommentFg       *Style
-	IdentifierFg    *Style
-	OperatorFg      *Style
-	ErrorFg         *Style
-	WarningFg       *Style
-	SuccessFg       *Style
-	InfoFg          *Style
+	NullValue       *Style
+	Numeric         *Style
+	String          *Style
+	Keyword         *Style
+	Comment         *Style
+	Identifier      *Style
+	Operator        *Style
+	Error           *Style
+	Warning         *Style
+	Success         *Style
+	Info            *Style
 	PopupBorder     *Style
-	TableHeaderFg   *Style
+	TableHeader     *Style
 	SearchHighlight *Style
 	CurSearch       *Style // current in-grid search match (stronger than SearchHighlight)
-	PromptFg        *Style
-	DirtyCellBg     *Style // Z1 wires ThemeConfig + builtins
+	Prompt          *Style
+	DirtyCell       *Style
 	WarnBorder      *Style // Z1 Phase A wires ThemeConfig + builtins
 }
 
@@ -80,23 +80,23 @@ func Apply(cfg *config.ThemeConfig) error {
 	next := &themeState{
 		ActiveBorder:    parseStyle(cfg.ActiveBorder),
 		InactiveBorder:  parseStyle(cfg.InactiveBorder),
-		NullValueFg:     parseStyle(cfg.NullValueFg),
-		NumericFg:       parseStyle(cfg.NumericFg),
-		StringFg:        parseStyle(cfg.StringFg),
-		KeywordFg:       parseStyle(cfg.KeywordFg),
-		CommentFg:       parseStyle(cfg.CommentFg),
-		IdentifierFg:    parseStyle(cfg.IdentifierFg),
-		OperatorFg:      parseStyle(cfg.OperatorFg),
-		ErrorFg:         parseStyle(cfg.ErrorFg),
-		WarningFg:       parseStyle(cfg.WarningFg),
-		SuccessFg:       parseStyle(cfg.SuccessFg),
-		InfoFg:          parseStyle(cfg.InfoFg),
+		NullValue:       parseStyle(cfg.NullValue),
+		Numeric:         parseStyle(cfg.Numeric),
+		String:          parseStyle(cfg.String),
+		Keyword:         parseStyle(cfg.Keyword),
+		Comment:         parseStyle(cfg.Comment),
+		Identifier:      parseStyle(cfg.Identifier),
+		Operator:        parseStyle(cfg.Operator),
+		Error:           parseStyle(cfg.Error),
+		Warning:         parseStyle(cfg.Warning),
+		Success:         parseStyle(cfg.Success),
+		Info:            parseStyle(cfg.Info),
 		PopupBorder:     parseStyle(cfg.PopupBorder),
-		TableHeaderFg:   parseStyle(cfg.TableHeaderFg),
+		TableHeader:     parseStyle(cfg.TableHeader),
 		SearchHighlight: parseStyle(cfg.SearchHighlight),
 		CurSearch:       parseStyle(cfg.CurSearch),
-		PromptFg:        parseStyle(cfg.PromptFg),
-		DirtyCellBg:     parseStyle(cfg.DirtyCellBg),
+		Prompt:          parseStyle(cfg.Prompt),
+		DirtyCell:       parseBgStyle(cfg.DirtyCell),
 		WarnBorder:      parseStyle(cfg.WarnBorder),
 	}
 	current.Store(next)
@@ -155,6 +155,60 @@ func parseStyle(s string) *Style {
 		}
 	}
 	return out
+}
+
+// parseBgStyle parses a style string where the colour should be routed to the
+// Bg field (not Fg). If the user has already used the "on" keyword the string is
+// parsed normally; otherwise "on " is prepended so the colour lands in Bg.
+// This allows bg-only fields like DirtyCell to accept a plain colour value
+// (e.g. "#5a4410") without requiring the confusing "on" prefix.
+func parseBgStyle(s string) *Style {
+	if s == "" {
+		return &Style{}
+	}
+	tokens := strings.Fields(s)
+	for _, t := range tokens {
+		if strings.ToLower(t) == "on" {
+			return parseStyle(s)
+		}
+	}
+	return parseStyle("on " + s)
+}
+
+// PreviewSGR returns a combined ANSI SGR escape that renders a style string in
+// its own colours for live-preview displays (e.g. settings theme tab). It
+// handles compound values like "black on yellow", "bold #ff8800", "on yellow",
+// and single-colour tokens. Returns "" for empty, unknown, or monochrome
+// inputs.
+func PreviewSGR(s string) string {
+	if s == "" || IsMonochrome() {
+		return ""
+	}
+	st := parseStyle(s)
+	var params []string
+	if st.Bold {
+		params = append(params, "1")
+	}
+	if st.Underline {
+		params = append(params, "4")
+	}
+	if st.Italic {
+		params = append(params, "3")
+	}
+	if st.Fg != "" {
+		if p := ColorParamSGR(st.Fg, Fg); p != "" {
+			params = append(params, p)
+		}
+	}
+	if st.Bg != "" {
+		if p := ColorParamSGR(st.Bg, Bg); p != "" {
+			params = append(params, p)
+		}
+	}
+	if len(params) == 0 {
+		return ""
+	}
+	return "\x1b[" + strings.Join(params, ";") + "m"
 }
 
 func init() {
