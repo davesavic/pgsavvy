@@ -150,8 +150,8 @@ type TranslationSet struct {
 	SettingsKeys   string
 
 	// Settings modal toast messages.
-	SettingsSaved             string
-	SettingsSaveFailed        string
+	SettingsSaved            string
+	SettingsSaveFailed       string
 	SettingsValidationFailed string
 
 	Actions ActionTranslations
@@ -481,8 +481,8 @@ func EnglishTranslationSet() *TranslationSet {
 		SettingsQuery:  "Query",
 		SettingsKeys:   "Keys",
 
-		SettingsSaved:             "Settings saved",
-		SettingsSaveFailed:        "Settings save failed",
+		SettingsSaved:            "Settings saved",
+		SettingsSaveFailed:       "Settings save failed",
 		SettingsValidationFailed: "Validation failed",
 
 		Actions: ActionTranslations{

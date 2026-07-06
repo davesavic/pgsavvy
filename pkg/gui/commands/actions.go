@@ -645,15 +645,15 @@ const (
 	// the focused text field (PROMPT popup); space toggles the focused
 	// toggle; Enter saves; Esc closes; a/d add/delete keybindings on
 	// the Keys tab.
-	SettingsClose           = "settings.close"
-	SettingsNextTab         = "settings.next_tab"
-	SettingsPrevTab         = "settings.prev_tab"
-	SettingsFieldUp         = "settings.field_up"
-	SettingsFieldDown       = "settings.field_down"
-	SettingsFieldEdit       = "settings.field_edit"
-	SettingsFieldToggle     = "settings.field_toggle"
-	SettingsConfirm         = "settings.confirm"
-	SettingsKeybindingAdd   = "settings.keybinding_add"
+	SettingsClose            = "settings.close"
+	SettingsNextTab          = "settings.next_tab"
+	SettingsPrevTab          = "settings.prev_tab"
+	SettingsFieldUp          = "settings.field_up"
+	SettingsFieldDown        = "settings.field_down"
+	SettingsFieldEdit        = "settings.field_edit"
+	SettingsFieldToggle      = "settings.field_toggle"
+	SettingsConfirm          = "settings.confirm"
+	SettingsKeybindingAdd    = "settings.keybinding_add"
 	SettingsKeybindingDelete = "settings.keybinding_delete"
 
 	// Visual / Selection family — owned by VimEditorController.

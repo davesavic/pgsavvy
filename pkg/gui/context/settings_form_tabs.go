@@ -71,24 +71,31 @@ func buildSettingsFields() [6][]settingsField {
 	return [6][]settingsField{
 		// Tab 0: General
 		{
-		{"leader", "leader", settingsFieldText,
-			func(c *config.UserConfig) string { return c.Leader },
-			func(c *config.UserConfig, v string) error { c.Leader = v; return nil },
-			"prefix for all keybindings", false},
-		{"local_leader", "local_leader", settingsFieldText,
-			func(c *config.UserConfig) string { return c.LocalLeader },
-			func(c *config.UserConfig, v string) error { c.LocalLeader = v; return nil },
-			"prefix for buffer-local keys", false},
-			{"config_version", "config_version", settingsFieldText,
+			{
+				"leader", "leader", settingsFieldText,
+				func(c *config.UserConfig) string { return c.Leader },
+				func(c *config.UserConfig, v string) error { c.Leader = v; return nil },
+				"prefix for all keybindings", false,
+			},
+			{
+				"local_leader", "local_leader", settingsFieldText,
+				func(c *config.UserConfig) string { return c.LocalLeader },
+				func(c *config.UserConfig, v string) error { c.LocalLeader = v; return nil },
+				"prefix for buffer-local keys", false,
+			},
+			{
+				"config_version", "config_version", settingsFieldText,
 				func(c *config.UserConfig) string { return strconv.Itoa(c.ConfigVersion) },
 				nil,
-				"read-only", false},
+				"read-only", false,
+			},
 		},
 		// Tab 1: Theme
 		themeFields,
 		// Tab 2: UI
 		{
-			{"mouse_enabled", "ui.mouse.enabled", settingsFieldToggle,
+			{
+				"mouse_enabled", "ui.mouse.enabled", settingsFieldToggle,
 				func(c *config.UserConfig) string { return boolStr(c.UI.Mouse.Enabled) },
 				func(c *config.UserConfig, v string) error {
 					b, err := parseBool(v)
@@ -98,8 +105,10 @@ func buildSettingsFields() [6][]settingsField {
 					c.UI.Mouse.Enabled = b
 					return nil
 				},
-				"enable mouse support", false},
-			{"double_click_ms", "ui.mouse.double_click_ms", settingsFieldText,
+				"enable mouse support", false,
+			},
+			{
+				"double_click_ms", "ui.mouse.double_click_ms", settingsFieldText,
 				func(c *config.UserConfig) string { return strconv.Itoa(c.UI.Mouse.DoubleClickMs) },
 				func(c *config.UserConfig, v string) error {
 					n, err := strconv.Atoi(v)
@@ -112,16 +121,22 @@ func buildSettingsFields() [6][]settingsField {
 					c.UI.Mouse.DoubleClickMs = n
 					return nil
 				},
-				"100-2000", false},
-			{"result_page_size", "ui.result_page_size", settingsFieldText,
+				"100-2000", false,
+			},
+			{
+				"result_page_size", "ui.result_page_size", settingsFieldText,
 				func(c *config.UserConfig) string { return strconv.Itoa(c.UI.ResultPageSize) },
 				intSetter(func(c *config.UserConfig) *int { return &c.UI.ResultPageSize }),
-				"default 200", false},
-			{"result_prefetch_rows", "ui.result_prefetch_rows", settingsFieldText,
+				"default 200", false,
+			},
+			{
+				"result_prefetch_rows", "ui.result_prefetch_rows", settingsFieldText,
 				func(c *config.UserConfig) string { return strconv.Itoa(c.UI.ResultPrefetchRows) },
-			intSetter(func(c *config.UserConfig) *int { return &c.UI.ResultPrefetchRows }),
-			"default 50", false},
-		{"prefetch_threshold", "ui.prefetch_threshold", settingsFieldText,
+				intSetter(func(c *config.UserConfig) *int { return &c.UI.ResultPrefetchRows }),
+				"default 50", false,
+			},
+			{
+				"prefetch_threshold", "ui.prefetch_threshold", settingsFieldText,
 				func(c *config.UserConfig) string { return strconv.Itoa(c.UI.PrefetchThreshold) },
 				func(c *config.UserConfig, v string) error {
 					n, err := strconv.Atoi(v)
@@ -134,8 +149,10 @@ func buildSettingsFields() [6][]settingsField {
 					c.UI.PrefetchThreshold = n
 					return nil
 				},
-				"default 25", false},
-			{"read_to_end_warn_threshold", "ui.read_to_end_warn_threshold", settingsFieldText,
+				"default 25", false,
+			},
+			{
+				"read_to_end_warn_threshold", "ui.read_to_end_warn_threshold", settingsFieldText,
 				func(c *config.UserConfig) string { return strconv.FormatInt(c.UI.ReadToEndWarnThreshold, 10) },
 				func(c *config.UserConfig, v string) error {
 					n, err := strconv.ParseInt(v, 10, 64)
@@ -148,8 +165,10 @@ func buildSettingsFields() [6][]settingsField {
 					c.UI.ReadToEndWarnThreshold = n
 					return nil
 				},
-				"default 1_000_000", false},
-			{"export_buffered_row_warn", "ui.export.buffered_row_warn_threshold", settingsFieldText,
+				"default 1_000_000", false,
+			},
+			{
+				"export_buffered_row_warn", "ui.export.buffered_row_warn_threshold", settingsFieldText,
 				func(c *config.UserConfig) string { return strconv.FormatInt(c.UI.Export.BufferedRowWarnThreshold, 10) },
 				func(c *config.UserConfig, v string) error {
 					n, err := strconv.ParseInt(v, 10, 64)
@@ -162,8 +181,10 @@ func buildSettingsFields() [6][]settingsField {
 					c.UI.Export.BufferedRowWarnThreshold = n
 					return nil
 				},
-				"warn when exporting > N rows", false},
-			{"export_clipboard_max_bytes", "ui.export.clipboard_max_bytes", settingsFieldText,
+				"warn when exporting > N rows", false,
+			},
+			{
+				"export_clipboard_max_bytes", "ui.export.clipboard_max_bytes", settingsFieldText,
 				func(c *config.UserConfig) string { return strconv.FormatInt(c.UI.Export.ClipboardMaxBytes, 10) },
 				func(c *config.UserConfig, v string) error {
 					n, err := strconv.ParseInt(v, 10, 64)
@@ -176,15 +197,19 @@ func buildSettingsFields() [6][]settingsField {
 					c.UI.Export.ClipboardMaxBytes = n
 					return nil
 				},
-				"max bytes for clipboard export (<=1GiB)", false},
-			{"yank_format", "ui.result_grid.yank_format", settingsFieldText,
+				"max bytes for clipboard export (<=1GiB)", false,
+			},
+			{
+				"yank_format", "ui.result_grid.yank_format", settingsFieldText,
 				func(c *config.UserConfig) string { return c.UI.ResultGrid.YankFormat },
 				func(c *config.UserConfig, v string) error { c.UI.ResultGrid.YankFormat = v; return nil },
-				"copied cell format (csv, tsv, json)", false},
+				"copied cell format (csv, tsv, json)", false,
+			},
 		},
 		// Tab 3: Editor
 		{
-			{"autocomplete", "editor.autocomplete", settingsFieldToggle,
+			{
+				"autocomplete", "editor.autocomplete", settingsFieldToggle,
 				func(c *config.UserConfig) string { return boolStr(c.Editor.Autocomplete) },
 				func(c *config.UserConfig, v string) error {
 					b, err := parseBool(v)
@@ -194,8 +219,10 @@ func buildSettingsFields() [6][]settingsField {
 					c.Editor.Autocomplete = b
 					return nil
 				},
-				"enable SQL autocompletion", false},
-			{"autocomplete_alias", "editor.autocomplete_alias", settingsFieldToggle,
+				"enable SQL autocompletion", false,
+			},
+			{
+				"autocomplete_alias", "editor.autocomplete_alias", settingsFieldToggle,
 				func(c *config.UserConfig) string { return boolStr(c.Editor.AutocompleteAlias) },
 				func(c *config.UserConfig, v string) error {
 					b, err := parseBool(v)
@@ -205,15 +232,19 @@ func buildSettingsFields() [6][]settingsField {
 					c.Editor.AutocompleteAlias = b
 					return nil
 				},
-				"suggest table aliases in completions", false},
-			{"fk_forward_limit", "editor.fk_forward_limit", settingsFieldText,
+				"suggest table aliases in completions", false,
+			},
+			{
+				"fk_forward_limit", "editor.fk_forward_limit", settingsFieldText,
 				func(c *config.UserConfig) string { return strconv.Itoa(c.Editor.FKForwardLimit) },
 				intSetter(func(c *config.UserConfig) *int { return &c.Editor.FKForwardLimit }),
-				"default 1000", false},
+				"default 1000", false,
+			},
 		},
 		// Tab 4: Query
 		{
-			{"default_statement_timeout", "query.default_statement_timeout", settingsFieldText,
+			{
+				"default_statement_timeout", "query.default_statement_timeout", settingsFieldText,
 				func(c *config.UserConfig) string {
 					if c.Query.DefaultStatementTimeout == nil {
 						return ""
@@ -232,7 +263,8 @@ func buildSettingsFields() [6][]settingsField {
 					c.Query.DefaultStatementTimeout = &d
 					return nil
 				},
-				"e.g. 30s, 5m", false},
+				"e.g. 30s, 5m", false,
+			},
 		},
 		// Tab 5: Keys
 		nil,
