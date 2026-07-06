@@ -317,7 +317,7 @@ func TestCloneIsolation_Reflect(t *testing.T) {
 			fieldVal.SetFloat(99.99)
 		case reflect.Bool:
 			fieldVal.SetBool(!fieldVal.Bool())
-		case reflect.Ptr:
+		case reflect.Pointer:
 			if fieldVal.Type() == reflect.TypeOf((*time.Duration)(nil)) && !fieldVal.IsNil() {
 				newVal := 999 * time.Hour
 				fieldVal.Set(reflect.ValueOf(&newVal))
@@ -361,7 +361,7 @@ func mutateStructFields(v reflect.Value) {
 			fv.SetFloat(99.99)
 		case reflect.Bool:
 			fv.SetBool(!fv.Bool())
-		case reflect.Ptr:
+		case reflect.Pointer:
 			if fv.Type() == reflect.TypeOf((*time.Duration)(nil)) && !fv.IsNil() {
 				newVal := 999 * time.Hour
 				fv.Set(reflect.ValueOf(&newVal))
