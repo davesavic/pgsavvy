@@ -88,7 +88,7 @@ func (p cellEditorPicker) CellSnapshot() (any, models.ColumnMeta, []any, bool) {
 	}
 	ri := g.RowIdentity()
 	if len(ri) == 0 {
-		return nil, models.ColumnMeta{}, nil, false
+		return values[col], cols[col], nil, true
 	}
 	pk := make([]any, len(ri))
 	for i, idx := range ri {

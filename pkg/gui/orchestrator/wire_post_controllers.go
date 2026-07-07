@@ -426,6 +426,7 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 				}
 				g.keybindingSystem.matcher.SwapTrieSet(newTrie)
 				g.deps.Common.UserConfig.Store(cfg)
+				g.resultTabsH.SetYankFormat(cfg.UI.ResultGrid.YankFormat)
 				for _, w := range theme.ApplyUserConfig(&cfg.Theme) {
 					g.toaster("theme warning: " + w)
 				}

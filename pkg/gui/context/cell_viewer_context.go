@@ -150,7 +150,7 @@ func (c *CellViewerContext) ByteCount() int   { return c.byteCount }
 func (c *CellViewerContext) LineCount() int   { return c.lineCount }
 
 func (c *CellViewerContext) GetTitle() string {
-	return c.buildTitle(false)
+	return c.buildTitle()
 }
 
 func (c *CellViewerContext) HandleRender() error {
@@ -174,7 +174,7 @@ func (c *CellViewerContext) HandleRender() error {
 		bodyHeight = 1
 	}
 
-	body, parseFailed := grid.FormatViewerBody(c.originalValue, c.column, c.pretty)
+	body, _ := grid.FormatViewerBody(c.originalValue, c.column, c.pretty)
 	sanitized := grid.SanitizeCellEscapes(body)
 
 	var visibleLines []string
@@ -202,16 +202,15 @@ func (c *CellViewerContext) HandleRender() error {
 	}
 
 	visibleBody := strings.Join(highlightedLines, "\n")
-	title := c.buildTitle(parseFailed)
 
 	viewName := c.GetViewName()
 	writeView(c.deps, func() error {
-		return c.deps.GuiDriver.SetContent(viewName, title+"\n"+visibleBody)
+		return c.deps.GuiDriver.SetContent(viewName, visibleBody)
 	})
 	return nil
 }
 
-func (c *CellViewerContext) buildTitle(parseFailed bool) string {
+func (c *CellViewerContext) buildTitle() string {
 	var sb strings.Builder
 	sb.WriteString(c.colname)
 	sb.WriteString(" :: ")
@@ -237,8 +236,6 @@ func (c *CellViewerContext) buildTitle(parseFailed bool) string {
 	case grid.ViewerCellEmpty:
 		sb.WriteString(" [ empty ]")
 	}
-
-	_ = parseFailed
 
 	return sb.String()
 }

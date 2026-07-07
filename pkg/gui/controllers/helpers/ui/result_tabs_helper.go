@@ -3772,6 +3772,21 @@ func (h *ResultTabsHelper) JumpLastOrReadToEnd() {
 	h.ReadToEnd()
 }
 
+// SetYankFormat updates the serialisation format used by the Yank
+// methods on every open result grid. It also stores the format for
+// newly-opened tabs. Wired from the config-save path so in-flight
+// grids pick up format changes without a restart.
+func (h *ResultTabsHelper) SetYankFormat(format string) {
+	h.yankFormat = format
+	for _, t := range h.Tabs() {
+		g := t.Grid()
+		if g == nil {
+			continue
+		}
+		g.SetYankFormat(format)
+	}
+}
+
 // CursorDown / CursorUp / CursorLeft / CursorRight / JumpFirst /
 // HalfPageDown / HalfPageUp / WrappedLineDown / WrappedLineUp /
 // SelectRow / SelectBlock delegate to the active grid. No-op when no

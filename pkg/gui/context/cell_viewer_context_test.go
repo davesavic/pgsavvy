@@ -257,17 +257,19 @@ func TestCellViewer_HandleRenderWithView(t *testing.T) {
 	}
 
 	buf := drv.GetViewBuffer(string(types.CELL_VIEWER))
-	if !strings.Contains(buf, "greeting :: text") {
-		t.Errorf("output missing colname+typename: %q", buf)
-	}
-	if !strings.Contains(buf, "[wrap]") {
-		t.Errorf("output missing [wrap]: %q", buf)
-	}
-	if !strings.Contains(buf, "[pretty]") {
-		t.Errorf("output missing [pretty]: %q", buf)
-	}
 	if !strings.Contains(buf, "hello world") {
 		t.Errorf("output missing body: %q", buf)
+	}
+
+	title := c.GetTitle()
+	if !strings.Contains(title, "greeting :: text") {
+		t.Errorf("title missing colname+typename: %q", title)
+	}
+	if !strings.Contains(title, "[wrap]") {
+		t.Errorf("title missing [wrap]: %q", title)
+	}
+	if !strings.Contains(title, "[pretty]") {
+		t.Errorf("title missing [pretty]: %q", title)
 	}
 }
 
@@ -282,9 +284,9 @@ func TestCellViewer_HandleRenderTitleNoWrap(t *testing.T) {
 		t.Fatalf("HandleRender: %v", err)
 	}
 
-	buf := drv.GetViewBuffer(string(types.CELL_VIEWER))
-	if !strings.Contains(buf, "[nowrap]") {
-		t.Errorf("output missing [nowrap]: %q", buf)
+	title := c.GetTitle()
+	if !strings.Contains(title, "[nowrap]") {
+		t.Errorf("title missing [nowrap]: %q", title)
 	}
 }
 
@@ -299,9 +301,9 @@ func TestCellViewer_HandleRenderTitleNoPretty(t *testing.T) {
 		t.Fatalf("HandleRender: %v", err)
 	}
 
-	buf := drv.GetViewBuffer(string(types.CELL_VIEWER))
-	if !strings.Contains(buf, "[raw]") {
-		t.Errorf("output missing [raw]: %q", buf)
+	title := c.GetTitle()
+	if !strings.Contains(title, "[raw]") {
+		t.Errorf("title missing [raw]: %q", title)
 	}
 }
 
@@ -316,8 +318,8 @@ func TestCellViewer_HandleRenderNullState(t *testing.T) {
 	}
 
 	buf := drv.GetViewBuffer(string(types.CELL_VIEWER))
-	if !strings.Contains(buf, "[ NULL ]") {
-		t.Errorf("output missing [ NULL ]: %q", buf)
+	if !strings.Contains(buf, "(NULL)") {
+		t.Errorf("output missing (NULL): %q", buf)
 	}
 }
 
@@ -332,8 +334,8 @@ func TestCellViewer_HandleRenderEmptyState(t *testing.T) {
 	}
 
 	buf := drv.GetViewBuffer(string(types.CELL_VIEWER))
-	if !strings.Contains(buf, "[ empty ]") {
-		t.Errorf("output missing [ empty ]: %q", buf)
+	if !strings.Contains(buf, "(empty string)") {
+		t.Errorf("output missing (empty string): %q", buf)
 	}
 }
 
@@ -348,8 +350,8 @@ func TestCellViewer_HandleRenderEmptyBytes(t *testing.T) {
 	}
 
 	buf := drv.GetViewBuffer(string(types.CELL_VIEWER))
-	if !strings.Contains(buf, "[ empty ]") {
-		t.Errorf("output missing [ empty ]: %q", buf)
+	if !strings.Contains(buf, "(empty") {
+		t.Errorf("output missing empty marker: %q", buf)
 	}
 }
 
@@ -444,11 +446,7 @@ func TestCellViewer_HandleRenderScroll(t *testing.T) {
 	}
 
 	buf := drv.GetViewBuffer(string(types.CELL_VIEWER))
-	titleAndBody := strings.SplitN(buf, "\n", 2)
-	if len(titleAndBody) < 2 {
-		t.Fatalf("expected title + body, got lines=%d", strings.Count(buf, "\n")+1)
-	}
-	bodyLines := strings.Split(titleAndBody[1], "\n")
+	bodyLines := strings.Split(buf, "\n")
 	if len(bodyLines) > 23 {
 		t.Errorf("body has %d lines, want <= 23 (24 height - 1 title)", len(bodyLines))
 	}
