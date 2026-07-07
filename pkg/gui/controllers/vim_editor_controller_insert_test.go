@@ -634,26 +634,20 @@ func TestCompletionTabAndEnterFallThroughWhenHidden(t *testing.T) {
 // mode (so the user keeps typing); a SECOND <esc> then exits to Normal. This
 // mirrors standard editor completion behaviour and replaces the prior
 // one-press popup-dismiss-and-exit.
-func TestEscDismissesPopupButStaysInsert(t *testing.T) {
+func TestEscDismissesPopupAndExitsInsert(t *testing.T) {
 	ctrl, reg, buf, sugg, modes := newCompletionRig(t, "SELECT * FROM us", 16, []string{"users"})
 	ctrl.RefilterOrTrigger(buf, buf.CursorPos())
 	if !sugg.IsVisible() {
 		t.Fatal("popup not visible before Esc")
 	}
 
-	// First Esc: cancel the popup, stay in Insert.
+	// One Esc should dismiss the popup AND exit to Normal.
 	dispatchAction(t, reg, commands.ModeNormal, commands.ExecCtx{Mode: types.ModeInsert})
 	if sugg.IsVisible() {
-		t.Error("first Esc did not dismiss popup")
+		t.Error("Esc did not dismiss popup")
 	}
-	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeInsert {
-		t.Errorf("first Esc with popup visible left Insert; mode = %v want ModeInsert", got)
-	}
-
-	// Second Esc: now that the popup is gone, exit to Normal.
-	dispatchAction(t, reg, commands.ModeNormal, commands.ExecCtx{Mode: types.ModeInsert})
 	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeNormal {
-		t.Errorf("second Esc did not exit Insert; mode = %v want ModeNormal", got)
+		t.Errorf("Esc with popup visible did not exit Insert; mode = %v want ModeNormal", got)
 	}
 }
 

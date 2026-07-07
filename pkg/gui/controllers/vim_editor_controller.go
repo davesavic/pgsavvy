@@ -2438,13 +2438,8 @@ func (c *VimEditorController) modeNormalHandler() commands.Handler {
 		if c.buffer() == nil {
 			return nil
 		}
-		// Completion-cancel UX: when the popup is open, the exit-insert action
-		// (<esc>, jk, …) cancels the popup ONLY and stays in Insert mode so
-		// the user keeps typing; a SECOND press, with no popup, then exits to
-		// Normal. Mirrors standard editor completion behaviour.
 		if c.suggestions != nil && c.suggestions.IsVisible() {
 			c.suggestions.Hide()
-			return nil
 		}
 		if rep := c.repeat(); rep != nil {
 			rep.PendingOpID = ""
