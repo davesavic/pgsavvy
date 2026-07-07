@@ -1,0 +1,45 @@
+pgsavvy v0.8.0
+
+  Release notes/changelog created to track changes across versions
+
+pgsavvy v0.7.0
+
+  Settings - 6-tabbed modal for theme, keybindings, and UI preferences
+  Yank rows with configurable format (TSV, CSV, JSON, INSERT)
+  Typed connection-name gate prevents accidental queries on wrong DB
+  Commit dialog UI polish with keyboard mnemonics
+  Export UI improvements and JSON value export fix
+  Set PG application_name for easier monitoring
+  Extracted all demo recordings and README GIFs
+
+pgsavvy v0.6.0
+
+  Query editor confirm-run gate with connection name typing
+  Commit dialog: SQL preview toggle, dry-run, progressive-reveal apply
+  Export refactoring: destination menu with path editing
+  Yank rows in multiple output formats
+  Application name set on Postgres connections
+  gofumpt formatting baseline across codebase
+
+pgsavvy v0.5.0
+
+  Cell Viewer popup (<leader>gv) for full cell-contents inspection
+  Syntax-highlighted JSON viewing with chroma lexer
+  Wrap/no-wrap and pretty/raw toggles in viewer
+  Yank cell contents and edit bridge (i → cell editor)
+  Scrollable popup with j/k, half-page, full-page navigation
+
+pgsavvy v0.4.0
+
+  Completion engine: improved schema, function, and snippet ranking
+  Cheatsheet reworked as a tabbed rail component with mode filtering
+  Theme: active table header foreground, status badge colour wiring
+  Theme: trim 25 vestigial config fields, add docs consistency gate
+  Toast colours wired to theme ErrorFg / WarningFg / SuccessFg
+
+pgsavvy v0.3.0
+
+  Go 1.26 and updated dependencies
+  Consolidated tabbed rail for schemas/tables side panel
+  Fix update timeout during self-update check
+  golangci-lint v2 parity and lint baseline

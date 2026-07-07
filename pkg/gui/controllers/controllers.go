@@ -99,6 +99,12 @@ type Controllers struct {
 	// Constructed here; the orchestrator wires its SettingsDeps via
 	// SetDeps after construction.
 	Settings *SettingsController
+
+	// Changelog is constructed by the orchestrator alongside the other
+	// popup controllers (it needs a FocusPopper-capable handle on the
+	// focus-stack). The bundle owns it so AllDefaultBindings includes its
+	// bindings.
+	Changelog *ChangelogController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -276,6 +282,7 @@ func AttachControllers(
 		"ExportMenu":        &tree.ExportMenu.BaseContext,
 		"Plan":              tree.Plan,
 		"Settings":          &tree.Settings.BaseContext,
+		"Changelog":         &tree.Changelog.BaseContext,
 	}
 	for _, e := range bundle.entries() {
 		if !e.attach {
@@ -389,6 +396,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "SearchLine", ctrl: b.SearchLine, attach: true},
 		{name: "RelationshipPanel", ctrl: b.RelationshipPanel, attach: true},
 		{name: "Settings", ctrl: b.Settings, attach: true},
+		{name: "Changelog", ctrl: b.Changelog, attach: true},
 	}
 	out := make([]controllerEntry, 0, len(candidates))
 	for _, e := range candidates {

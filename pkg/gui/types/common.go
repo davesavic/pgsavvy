@@ -81,6 +81,11 @@ type ContextTreeDeps struct {
 	// Nil-safe: FirstRunTipContext.HandleRender is a no-op when nil.
 	FirstRunTipText func() (title, body string)
 
+	// ReleaseNotesContent is the embedded RELEASE_NOTES.txt plain-text
+	// content rendered by ChangelogContext. Empty string means no content
+	// is embedded (dev builds or builds that lack the embed target).
+	ReleaseNotesContent string
+
 	// WhichKey is the live which-key notifier consumed by WhichKeyContext
 	// to fetch visibility + snapshot. Nil at construction time before
 	// the orchestrator wires it. Nil-safe: WhichKeyContext

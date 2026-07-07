@@ -25,11 +25,9 @@ type AppState struct {
 	LastTheme           string            `yaml:"last_theme"`
 	LastResultViewMode  string            `yaml:"last_result_view_mode"`
 	StartupTipsSeenAt   time.Time         `yaml:"startup_tips_seen_at"`
-	// Version is currently inert: it is round-tripped on save but never
-	// compared or migrated (there is no migration mechanism). It matters for
-	// self-update, which lets a user jump N versions in one step — so an older
-	// state.yml must survive a Load→Save through this struct without dropping
-	// recognized fields. See app_state_test.go golden round-trip test.
+	// Version stores the last-seen build version. Compared against
+	// BuildInfo.Version at startup to decide whether to show the
+	// changelog popup. Updated on dismiss.
 	Version                  string                         `yaml:"version"`
 	StatementTimeoutOverride map[string]string              `yaml:"statement_timeout_override"`
 	HiddenSchemas            map[string][]string            `yaml:"hidden_schemas"`

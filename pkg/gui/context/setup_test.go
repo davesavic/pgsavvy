@@ -23,8 +23,9 @@ func TestNewContextTreeReturnsAllContexts(t *testing.T) {
 	// container is added (+1), taking it 28→26.
 	// CELL_VIEWER (PERSISTENT_POPUP) takes it 26→27.
 	// SETTINGS (MAIN_CONTEXT) takes it 27→28.
-	if len(flat) != 28 {
-		t.Fatalf("Flatten() len = %d, want 28 (QUERY_RAIL flattened; editor/saved/history leaves excluded; CELL_VIEWER, SETTINGS added)", len(flat))
+	// CHANGELOG (PERSISTENT_POPUP) takes it 28→29.
+	if len(flat) != 29 {
+		t.Fatalf("Flatten() len = %d, want 29 (QUERY_RAIL flattened; editor/saved/history leaves excluded; CELL_VIEWER, SETTINGS, CHANGELOG added)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -93,6 +94,7 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 		types.GLOBAL, types.LIMIT, types.WHICH_KEY, types.CHEATSHEET,
 		types.FIRST_RUN_TIP,
 		types.CELL_VIEWER,
+		types.CHANGELOG,
 		// Main + stub. QUERY_RAIL is the flattened container; QUERY_EDITOR /
 		// HISTORY / SAVED_QUERY are now inFlatten=false leaves and NOT
 		// retrievable via ByKey (tkt5.2 topology flip).
@@ -100,8 +102,8 @@ func TestNewContextTreeEveryKeyRetrievable(t *testing.T) {
 		types.PLAN,
 		types.SETTINGS,
 	}
-	if len(allKeys) != 22 {
-		t.Fatalf("test bug: allKeys len = %d, want 22", len(allKeys))
+	if len(allKeys) != 23 {
+		t.Fatalf("test bug: allKeys len = %d, want 23", len(allKeys))
 	}
 	for _, k := range allKeys {
 		c := tree.ByKey(k)
@@ -146,6 +148,7 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		// PERSISTENT_POPUP kind and is now a QUERY_RAIL leaf (tkt5.2).
 		{types.FIRST_RUN_TIP, types.PERSISTENT_POPUP},
 		{types.CELL_VIEWER, types.PERSISTENT_POPUP},
+		{types.CHANGELOG, types.PERSISTENT_POPUP},
 		// 3 MAIN_CONTEXT: QUERY_RAIL container (QUERY_EDITOR is now a
 		// non-flattened leaf) + CONNECTION_MANAGER + SETTINGS.
 		{types.QUERY_RAIL, types.MAIN_CONTEXT},
@@ -156,8 +159,8 @@ func TestNewContextTreeKindAssignments(t *testing.T) {
 		{types.RESULT_GRID, types.STUB},
 		{types.PLAN, types.STUB},
 	}
-	if len(cases) != 22 {
-		t.Fatalf("test bug: cases len = %d, want 22", len(cases))
+	if len(cases) != 23 {
+		t.Fatalf("test bug: cases len = %d, want 23", len(cases))
 	}
 	for _, c := range cases {
 		got := tree.ByKey(c.key)
@@ -202,7 +205,8 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		// its PERSISTENT_POPUP kind to become a QUERY_RAIL leaf (tkt5.2), so
 		// PERSISTENT_POPUP drops 2→1.
 		// CELL_VIEWER (PERSISTENT_POPUP) takes it 1→2.
-		types.PERSISTENT_POPUP: 2,
+		// CHANGELOG (PERSISTENT_POPUP) takes it 2→3.
+		types.PERSISTENT_POPUP: 3,
 	}
 	for k, w := range want {
 		if counts[k] != w {

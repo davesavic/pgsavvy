@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"log"
 	"os"
 
@@ -9,6 +10,9 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
 	"github.com/davesavic/pgsavvy/pkg/session"
 )
+
+//go:embed RELEASE_NOTES.txt
+var releaseNotes []byte
 
 var (
 	commit      string
@@ -28,7 +32,7 @@ func main() {
 		Version:     version,
 		BuildSource: buildSource,
 	}
-	if err := app.Start(buildInfo, os.Args[1:]); err != nil {
+	if err := app.Start(buildInfo, string(releaseNotes), os.Args[1:]); err != nil {
 		log.Fatal(err)
 	}
 }

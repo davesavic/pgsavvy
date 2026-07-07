@@ -40,7 +40,7 @@ func TestStart_UpdateRouting_RefusesDevBuildBeforeTUI(t *testing.T) {
 	// touches GitHub and never enters the TUI.
 	build := &BuildInfo{Version: "dev", BuildSource: "task"}
 
-	err := Start(build, []string{"update"})
+	err := Start(build, "", []string{"update"})
 	require.Error(t, err)
 	require.ErrorIs(t, err, update.ErrNonReleaseBuild,
 		"update routing must reach pkg/update.Run and surface its refusal")
@@ -52,7 +52,7 @@ func TestStart_UpdateRouting_EmptyVersionRefuses(t *testing.T) {
 	withTempStateDir(t)
 	build := &BuildInfo{Version: "", BuildSource: "release"}
 
-	err := Start(build, []string{"update"})
+	err := Start(build, "", []string{"update"})
 	require.Error(t, err)
 	require.ErrorIs(t, err, update.ErrNonReleaseBuild)
 }
@@ -66,7 +66,7 @@ func TestStart_UpdateRejectsArguments(t *testing.T) {
 
 	for _, arg := range []string{"--force", "v1.2.3"} {
 		t.Run(arg, func(t *testing.T) {
-			err := Start(build, []string{"update", arg})
+			err := Start(build, "", []string{"update", arg})
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "does not accept arguments",
 				"a stray %q must be rejected with the usage error", arg)
@@ -83,7 +83,7 @@ func TestStart_VersionFlagUnchanged(t *testing.T) {
 	build := &BuildInfo{Version: "v9.9.9", BuildSource: "release"}
 
 	out := withStdoutCaptured(t, func() {
-		require.NoError(t, Start(build, []string{"--version"}))
+		require.NoError(t, Start(build, "", []string{"--version"}))
 	})
 	require.Equal(t, "pgsavvy v9.9.9 (release)", out)
 }

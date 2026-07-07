@@ -104,6 +104,14 @@ type Deps struct {
 	// filepath.Join(env.GetStateDir(), "history.sqlite"). Tests inject a
 	// temp-dir variant so they don't litter the XDG state dir.
 	HistoryProvider func() (*query.History, error)
+
+	// BuildVersion is the version string from the build info (-ldflags),
+	// used by the changelog popup to detect version changes.
+	BuildVersion string
+
+	// ReleaseNotesContent is the embedded RELEASE_NOTES.txt plain-text
+	// content, rendered in the changelog popup on version change.
+	ReleaseNotesContent string
 }
 
 // matcherToastTTL is how long a Matcher-surfaced toast (swallowed

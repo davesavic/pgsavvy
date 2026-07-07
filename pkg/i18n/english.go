@@ -380,6 +380,11 @@ type ActionTranslations struct {
 	SettingsConfirm          string
 	SettingsKeybindingAdd    string
 	SettingsKeybindingDelete string
+
+	// Changelog popup actions.
+	ChangelogScrollDown string
+	ChangelogScrollUp   string
+	ChangelogDismiss    string
 }
 
 // EnglishTranslationSet returns a freshly allocated TranslationSet populated
@@ -657,6 +662,10 @@ func EnglishTranslationSet() *TranslationSet {
 			SettingsConfirm:          "Save settings",
 			SettingsKeybindingAdd:    "Add keybinding",
 			SettingsKeybindingDelete: "Delete keybinding",
+
+			ChangelogScrollDown: "Scroll down",
+			ChangelogScrollUp:   "Scroll up",
+			ChangelogDismiss:    "Dismiss changelog",
 		},
 	}
 }

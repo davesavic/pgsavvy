@@ -259,6 +259,7 @@ func (g *Gui) wireContextRegistry(tr *i18n.TranslationSet, provider func() []mod
 			}
 			return tr.FirstRunTipTitle, tr.FirstRunTipBody
 		},
+		ReleaseNotesContent: g.deps.ReleaseNotesContent,
 	}
 	g.registry = guicontext.NewContextTree(ctxDeps)
 	// Wire the session logger into the QUERY_RAIL container so its
@@ -993,6 +994,9 @@ func (g *Gui) wireExCommands(defaults []*types.ChordBinding, svc *keys.Keybindin
 	// startup seen-stamp / zero-connections gate). Handler in gui_ex_commands.go.
 	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "tip", Description: "Show the first-run welcome tip", Handler: g.handleShowTipEx})
 
+	// :changelog — re-show the release-notes popup on demand. Handler in gui_ex_commands.go.
+	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "changelog", Description: "Show release notes", Handler: g.handleShowChangelogEx})
+
 	// :settings — open the settings modal on demand.
 	_ = g.keybindingSystem.exRegistry.Register(keys.ExCommand{Name: "settings", Description: "Open settings", Handler: g.handleSettingsEx})
 }
@@ -1093,6 +1097,22 @@ func (g *Gui) wireKeyDispatch(trieSet *keys.TrieSet, cfg *config.UserConfig, tab
 			logs.Event(g.deps.Common.Logger(), "gui", "first_run_tip_shown")
 		}
 		if err := g.tree.Push(g.registry.FirstRunTip); err != nil {
+			return err
+		}
+	}
+
+	// push the changelog popup when the persisted version differs from
+	// the current build version AND the build version is not dev/empty.
+	// Pushed under the first-run tip so the tip dismiss reveals it.
+	if g.registry.Changelog != nil && g.deps.Store != nil &&
+		g.deps.Store.IsVersionChanged(g.deps.BuildVersion) {
+		if g.deps.Common != nil {
+			logs.Event(g.deps.Common.Logger(), "gui", "changelog_shown",
+				slog.String("build_version", g.deps.BuildVersion),
+			)
+		}
+		g.registry.Changelog.Open(g.deps.BuildVersion)
+		if err := g.tree.Push(g.registry.Changelog); err != nil {
 			return err
 		}
 	}

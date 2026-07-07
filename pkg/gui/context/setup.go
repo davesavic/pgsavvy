@@ -79,6 +79,9 @@ type ContextTree struct {
 	// CellViewer is the full cell-content viewer popup.
 	// PERSISTENT_POPUP kind.
 	CellViewer *CellViewerContext
+	// Changelog is the post-upgrade release-notes popup.
+	// PERSISTENT_POPUP kind.
+	Changelog *ChangelogContext
 
 	// QueryRail is the MAIN_CONTEXT container that multiplexes the
 	// QueryEditor + SavedQuery + History leaves into the single
@@ -416,6 +419,14 @@ func contextSpecs() []contextSpec {
 			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.7, HeightFrac: 0.7},
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewCellViewerContext(b, d) },
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.CellViewer = c.(*CellViewerContext) },
+		},
+		// Changelog is the post-upgrade release-notes popup. PERSISTENT_POPUP
+		// so it survives subsequent popup pushes.
+		{
+			key: types.CHANGELOG, kind: types.PERSISTENT_POPUP, title: "Changelog", inFlatten: true,
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.7, HeightFrac: 0.8},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewChangelogContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.Changelog = c.(*ChangelogContext) },
 		},
 
 		// QUERY_EDITOR is now a QUERY_RAIL container leaf (tkt5.2 topology

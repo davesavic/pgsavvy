@@ -713,6 +713,13 @@ func (g *Gui) RunLayout(w, h int) error {
 				view.Wrap = true
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
+			// CHANGELOG styling: wrap reflows the release-notes body to the
+			// box width. Paint active border + title when on top.
+			if ctx.GetKey() == types.CHANGELOG && view != nil {
+				view.Title = ctx.GetTitle()
+				view.Wrap = true
+				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+			}
 			_ = ctx.HandleRender()
 			if ctx.GetKey() == types.CHEATSHEET && view != nil {
 				applyCheatsheetScroll(view, ctx)
@@ -720,10 +727,13 @@ func (g *Gui) RunLayout(w, h int) error {
 			if ctx.GetKey() == types.TABLE_INSPECT && view != nil {
 				applyTableInspectScroll(view, ctx)
 			}
-			if ctx.GetKey() == types.CELL_VIEWER && view != nil {
-				applyCellViewerScroll(view, ctx)
-			}
-			if ctx.GetKey() == types.RELATIONSHIP_PANEL && view != nil {
+		if ctx.GetKey() == types.CELL_VIEWER && view != nil {
+			applyCellViewerScroll(view, ctx)
+		}
+		if ctx.GetKey() == types.CHANGELOG && view != nil {
+			applyChangelogScroll(view, ctx)
+		}
+		if ctx.GetKey() == types.RELATIONSHIP_PANEL && view != nil {
 				applyRelationshipPanelScroll(view, g.relationshipPanelFocused())
 			}
 			_, _ = g.driver.SetViewOnTop(name)
@@ -1665,6 +1675,34 @@ type cellViewerScroller interface {
 	ScrollY() int
 	SetScrollY(int)
 	TotalWrappedLines() int
+}
+
+// changelogScroller is the minimal interface ChangelogContext satisfies for
+// the layout to clamp its scroll origin.
+type changelogScroller interface {
+	ScrollY() int
+	SetScrollY(int)
+	TotalWrappedLines() int
+}
+
+// applyChangelogScroll pins the changelog's vertical origin to the context's
+// scroll offset, clamped to the content's last page. Same invariant as
+// applyCellViewerScroll — the clamped value is persisted only when there is
+// real scroll room.
+func applyChangelogScroll(view *gocui.View, ctx types.IBaseContext) {
+	sc, ok := ctx.(changelogScroller)
+	if !ok {
+		return
+	}
+	maxOY := max(sc.TotalWrappedLines()-view.InnerHeight(), 0)
+	oy := sc.ScrollY()
+	if oy > maxOY {
+		oy = maxOY
+		if maxOY > 0 {
+			sc.SetScrollY(oy)
+		}
+	}
+	view.SetOriginY(oy)
 }
 
 // applyCellViewerScroll pins the viewer's vertical origin to the context's

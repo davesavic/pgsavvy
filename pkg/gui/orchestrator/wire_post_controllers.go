@@ -464,6 +464,23 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 			},
 		})
 	}
+
+	// build the ChangelogController and attach it to its context so its
+	// j/k/Enter/Esc/q bindings reach the trie via AllDefaultBindings.
+	// Constructed here — not in AttachControllers — because it needs a
+	// Pop-capable handle on the focus-stack (*gui.ContextTree).
+	if g.registry != nil && g.registry.Changelog != nil && g.tree != nil {
+		changelogCtrl := controllers.NewChangelogController(
+			g.deps.Common, helperBag.CoreDeps, g.registry.Changelog, g.tree,
+		)
+		changelogCtrl.SetOnDismiss(func() {
+			if g.deps.Store != nil {
+				g.deps.Store.StampVersion(g.deps.BuildVersion)
+			}
+		})
+		changelogCtrl.AttachToContext(&g.registry.Changelog.BaseContext)
+		g.controllers.Changelog = changelogCtrl
+	}
 }
 
 // wireEditorCompletion wires the completion engine + the SUGGESTIONS

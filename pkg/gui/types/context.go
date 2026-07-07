@@ -195,6 +195,9 @@ const (
 	// CONSTRAINTS is the constraints leaf of the TABLE_INSPECT tabbed
 	// popup. Renders check/unique/etc. constraint definitions as text.
 	CONSTRAINTS ContextKey = "constraints"
+	// CHANGELOG is the post-upgrade release-note popup shown on first
+	// launch after a version change. PERSISTENT_POPUP kind.
+	CHANGELOG ContextKey = "changelog"
 )
 
 // AllContextKeys returns every ContextKey constant declared above.
@@ -244,6 +247,7 @@ func AllContextKeys() []ContextKey {
 		RELATIONSHIP_PANEL,
 		FOREIGN_KEYS,
 		CONSTRAINTS,
+		CHANGELOG,
 	}
 }
 

@@ -287,3 +287,18 @@ func (g *Gui) handleSettingsEx(_ []string, _ commands.ExecCtx) error {
 	_ = g.tree.PopIfTop(types.COMMAND_LINE)
 	return g.tree.Push(g.registry.Settings)
 }
+
+// handleShowChangelogEx is the :changelog handler. It pushes the changelog
+// popup onto the focus stack, popping the command line first. Opens the
+// context with the current build version. No-op when already on top.
+func (g *Gui) handleShowChangelogEx(_ []string, _ commands.ExecCtx) error {
+	if g.registry == nil || g.registry.Changelog == nil || g.tree == nil {
+		return nil
+	}
+	_ = g.tree.PopIfTop(types.COMMAND_LINE)
+	if top := g.tree.Current(); top != nil && top.GetKey() == types.CHANGELOG {
+		return nil
+	}
+	g.registry.Changelog.Open(g.deps.BuildVersion)
+	return g.tree.Push(g.registry.Changelog)
+}

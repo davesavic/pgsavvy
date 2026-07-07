@@ -254,6 +254,47 @@ func TestIsStartupTipsSeenAndStamp(t *testing.T) {
 	require.False(t, b.StartupTipsSeenAt.IsZero(), "persisted timestamp non-zero")
 }
 
+// TestStoreVersionTracking covers IsVersionChanged and StampVersion:
+// fresh install (empty version) must report changed, dev builds must
+// always report unchanged, stamp must persist and survive a reload.
+func TestStoreVersionTracking(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	clk := newFakeClock()
+	s := NewAppStateStore(fs, "/state.yml", clk)
+	defer func() { _ = s.Close() }()
+
+	// Fresh install: Version is empty, must report changed.
+	require.True(t, s.IsVersionChanged("v1.0.0"), "fresh install must register as version changed")
+
+	// Dev build: must always return false.
+	require.False(t, s.IsVersionChanged("dev"), "dev version must never report changed")
+	require.False(t, s.IsVersionChanged(""), "empty build version must never report changed")
+
+	// Stamp the current version.
+	s.StampVersion("v1.0.0")
+	clk.Advance(DebounceWindow + time.Millisecond)
+	require.NoError(t, s.Flush())
+
+	// After stamp, IsVersionChanged must return false for the same version.
+	require.False(t, s.IsVersionChanged("v1.0.0"), "same version must not report changed after stamp")
+
+	// Different version must report changed.
+	require.True(t, s.IsVersionChanged("v2.0.0"), "different version must report changed")
+
+	// Dev build stamp must be a no-op — version stays v1.0.0.
+	s.StampVersion("dev")
+	clk.Advance(DebounceWindow + time.Millisecond)
+	require.NoError(t, s.Flush())
+	require.False(t, s.IsVersionChanged("v1.0.0"), "dev stamp must not overwrite real version")
+
+	// Reload and verify persistence.
+	s2 := NewAppStateStore(fs, "/state.yml", clk)
+	defer func() { _ = s2.Close() }()
+	require.NoError(t, s2.Load())
+	require.False(t, s2.IsVersionChanged("v1.0.0"), "version must persist across reload")
+	require.True(t, s2.IsVersionChanged("v2.0.0"), "version change must survive reload")
+}
+
 // TestStoreGetOrCreateBufferUUID_PersistsAcrossLoad is the regression test:
 // the editor buffer UUID must round-trip through disk so
 // the same .sql file is reused on the next run. Before the fix the UUID was

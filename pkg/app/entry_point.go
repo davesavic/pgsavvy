@@ -49,7 +49,10 @@ type BuildInfo struct {
 // to quit cleanly, and runs the TUI. The M15c shutdown order
 // (store.Flush → store.Close → driver.Close) is enforced by
 // orchestrator.Gui.Close.
-func Start(build *BuildInfo, args []string) error {
+//
+// releaseNotes is the embedded RELEASE_NOTES.txt content. It is passed
+// through to the orchestrator for the changelog popup on version change.
+func Start(build *BuildInfo, releaseNotes string, args []string) error {
 	// Route the `update` subcommand BEFORE flag parsing and before
 	// orchestrator.NewGui — self-update never runs inside the gocui alt-screen.
 	// args is os.Args[1:], so args[0]=="update" cannot collide with the
@@ -162,6 +165,8 @@ func Start(build *BuildInfo, args []string) error {
 		DriverNamesFn:       drivers.Names,
 		SetSecretPrompter:   pg.SetSecretPrompter,
 		SetPasswordPrompter: pg.SetPasswordPrompter,
+		BuildVersion:        build.Version,
+		ReleaseNotesContent: releaseNotes,
 	})
 
 	// Signal handler asks the MainLoop to quit (M15c: never call Flush

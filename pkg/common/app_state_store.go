@@ -283,6 +283,30 @@ func (s *AppStateStore) StampStartupTips() {
 	})
 }
 
+// IsVersionChanged reports whether persisted AppState.Version differs
+// from the given build version. Returns true when the stored version is
+// empty (first run) so the changelog popup appears on fresh installs.
+func (s *AppStateStore) IsVersionChanged(buildVersion string) bool {
+	if buildVersion == "" || buildVersion == "dev" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.Version != buildVersion
+}
+
+// StampVersion sets AppState.Version to the given build version and
+// triggers a debounced save. Skip stamps when buildVersion is "dev" or
+// empty — there is no durable version to track.
+func (s *AppStateStore) StampVersion(buildVersion string) {
+	if buildVersion == "" || buildVersion == "dev" {
+		return
+	}
+	s.MutateAndSave(func(a *AppState) {
+		a.Version = buildVersion
+	})
+}
+
 // HiddenColumnsSnapshot returns a defensive copy of the persisted hidden-column
 // name list for the given (connID, baseTable) pair. Returns nil when no entry
 // exists. Caller may mutate the returned slice.

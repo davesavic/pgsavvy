@@ -232,6 +232,11 @@ const (
 	// stamps the seen-at timestamp via AppStateStore.StampStartupTips.
 	TipDismiss = "tip.dismiss"
 
+	// ChangelogDismiss — owned by the orchestrator's Changelog wiring.
+	// CHANGELOG-scoped. Pops the changelog popup and
+	// stamps AppState.Version via AppStateStore.StampVersion.
+	ChangelogDismiss = "changelog.dismiss"
+
 	// Query family — owned by QueryEditorController.
 	// Default bindings: <leader>r, <leader>R, <leader>e, <leader>E,
 	// <leader>x, <leader>! respectively.
@@ -895,6 +900,7 @@ func AllActionIDs() []string {
 		ConnectionManagerDelete,
 		ConnectionManagerPasteDSN,
 		TipDismiss,
+		ChangelogDismiss,
 		CellEditEnter,
 		CellEditCommit,
 		CellEditDiscard,
