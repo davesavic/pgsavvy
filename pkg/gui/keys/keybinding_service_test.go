@@ -512,6 +512,7 @@ func allContextKeyKinds() map[types.ContextKey]types.ContextKind {
 		types.COMMIT_DIALOG:      types.TEMPORARY_POPUP,
 		types.CONFLICT_DIALOG:    types.TEMPORARY_POPUP,
 		types.FK_REVERSE_PICKER:  types.TEMPORARY_POPUP,
+		types.CHANGELOG:          types.PERSISTENT_POPUP,
 		types.CONNECTION_MANAGER: types.MAIN_CONTEXT,
 		types.SETTINGS:           types.MAIN_CONTEXT,
 		types.RELATIONSHIP_PANEL: types.DISPLAY_CONTEXT,
