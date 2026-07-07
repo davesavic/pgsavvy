@@ -727,13 +727,13 @@ func (g *Gui) RunLayout(w, h int) error {
 			if ctx.GetKey() == types.TABLE_INSPECT && view != nil {
 				applyTableInspectScroll(view, ctx)
 			}
-		if ctx.GetKey() == types.CELL_VIEWER && view != nil {
-			applyCellViewerScroll(view, ctx)
-		}
-		if ctx.GetKey() == types.CHANGELOG && view != nil {
-			applyChangelogScroll(view, ctx)
-		}
-		if ctx.GetKey() == types.RELATIONSHIP_PANEL && view != nil {
+			if ctx.GetKey() == types.CELL_VIEWER && view != nil {
+				applyCellViewerScroll(view, ctx)
+			}
+			if ctx.GetKey() == types.CHANGELOG && view != nil {
+				applyChangelogScroll(view, ctx)
+			}
+			if ctx.GetKey() == types.RELATIONSHIP_PANEL && view != nil {
 				applyRelationshipPanelScroll(view, g.relationshipPanelFocused())
 			}
 			_, _ = g.driver.SetViewOnTop(name)

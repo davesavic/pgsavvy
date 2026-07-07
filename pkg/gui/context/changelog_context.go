@@ -14,9 +14,9 @@ type ChangelogContext struct {
 
 	active bool
 
-	content            string
-	scroll             [2]int
-	totalWrappedLines  int
+	content           string
+	scroll            [2]int
+	totalWrappedLines int
 }
 
 func NewChangelogContext(base BaseContext, deps Deps) *ChangelogContext {
