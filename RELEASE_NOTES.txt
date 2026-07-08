@@ -1,3 +1,7 @@
+pgsavvy v0.8.1
+
+  Fixed bug when scrolling in cell viewer which caused panic.
+
 pgsavvy v0.8.0
 
   Release notes/changelog created to track changes across versions
