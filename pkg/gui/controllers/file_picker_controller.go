@@ -297,6 +297,14 @@ func (f *FilePickerController) handleConfirm(_ commands.ExecCtx) error {
 		return nil
 	}
 	if fp.InputFocused() {
+		switch {
+		case fp.SearchInputActive():
+			fp.ApplySearch()
+			return fp.HandleRender()
+		case fp.NewDirInputActive():
+			fp.ApplyNewDir()
+			return fp.HandleRender()
+		}
 		fp.Confirm()
 		return nil
 	}
@@ -335,16 +343,8 @@ func (f *FilePickerController) handleSearch(_ commands.ExecCtx) error {
 	if fp == nil {
 		return nil
 	}
-	if f.helpers.Prompt == nil {
-		return nil
-	}
-	return f.helpers.Prompt.Prompt("Search directory:", "", func(value string) error {
-		fp.SetSearch(value)
-		return fp.HandleRender()
-	}, func() error {
-		fp.ClearSearch()
-		return fp.HandleRender()
-	})
+	fp.ActivateSearch()
+	return fp.HandleRender()
 }
 
 func (f *FilePickerController) handleSearchNext(_ commands.ExecCtx) error {
@@ -379,18 +379,8 @@ func (f *FilePickerController) handleNewDir(_ commands.ExecCtx) error {
 	if fp == nil {
 		return nil
 	}
-	if f.helpers.Prompt == nil {
-		return nil
-	}
-	return f.helpers.Prompt.Prompt("New directory name:", "", func(value string) error {
-		if value == "" {
-			return nil
-		}
-		fp.CreateDirectory(value)
-		return fp.HandleRender()
-	}, func() error {
-		return fp.HandleRender()
-	})
+	fp.ActivateNewDir()
+	return fp.HandleRender()
 }
 
 func (f *FilePickerController) handleFocusInput(_ commands.ExecCtx) error {
@@ -398,6 +388,13 @@ func (f *FilePickerController) handleFocusInput(_ commands.ExecCtx) error {
 	if fp == nil {
 		return nil
 	}
-	fp.ToggleInputFocus()
+	switch {
+	case fp.SearchInputActive():
+		fp.CancelSearch()
+	case fp.NewDirInputActive():
+		fp.CancelNewDir()
+	default:
+		fp.ToggleInputFocus()
+	}
 	return fp.HandleRender()
 }

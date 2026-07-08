@@ -51,6 +51,15 @@ type pickerMatch struct {
 	ByteEnd   int
 }
 
+type pickerInputKind int
+
+const (
+	inputKindNone     pickerInputKind = iota
+	inputKindFilename                // editing the save-as filename
+	inputKindSearch                  // typing a search query for the listing
+	inputKindNewDir                  // typing a new directory name
+)
+
 // FilePickerContext renders the filesystem path picker as a centered
 // TEMPORARY_POPUP with three zones: breadcrumb, directory listing, and
 // (in save mode) a filename input footer.
@@ -70,6 +79,7 @@ type FilePickerContext struct {
 	showHidden   bool
 	filename     string
 	inputFocused bool
+	inputKind    pickerInputKind
 	errMsg       string
 
 	listingOffset int
@@ -102,7 +112,8 @@ func (f *FilePickerContext) Push(mode PickerMode, startPath string, onConfirm fu
 	f.search = filePickerSearchState{}
 	f.showHidden = false
 	f.filename = ""
-	f.inputFocused = mode == PickerSave
+	f.inputFocused = false
+	f.inputKind = inputKindNone
 	f.errMsg = ""
 	f.listingOffset = 0
 	if mode == PickerSave && startPath != "" {
@@ -366,6 +377,114 @@ func (f *FilePickerContext) Items() []models.FSEntry { return f.items }
 // InputFocused reports whether the filename input has focus.
 func (f *FilePickerContext) InputFocused() bool { return f.inputFocused }
 
+// InputKind reports what purpose the focused text input serves.
+func (f *FilePickerContext) InputKind() pickerInputKind { return f.inputKind }
+
+// activateInput clears the TextArea, seeds it, focuses, and sets the
+// given kind. Caller must call HandleRender afterwards.
+func (f *FilePickerContext) activateInput(k pickerInputKind) {
+	f.inputKind = k
+	if !f.inputFocused {
+		f.ClearViewBuffer()
+		if f.view != nil && f.view.TextArea != nil {
+			f.view.TextArea.TypeString(f.filename)
+		}
+		if f.deps.GuiDriver != nil {
+			f.deps.GuiDriver.SetCaretEnabled(true)
+		}
+		if f.modes != nil {
+			f.modes.Set(types.FILE_PICKER, types.ModeInsert)
+		}
+		f.inputFocused = true
+	}
+}
+
+// deactivateInput returns focus to the directory listing, saving the
+// current TextArea content into filename.
+func (f *FilePickerContext) deactivateInput() {
+	if f.view != nil && f.view.TextArea != nil {
+		f.filename = f.view.TextArea.GetContent()
+	}
+	if f.deps.GuiDriver != nil {
+		f.deps.GuiDriver.SetCaretEnabled(false)
+	}
+	if f.modes != nil {
+		f.modes.Set(types.FILE_PICKER, types.ModeCommand)
+	}
+	f.inputFocused = false
+	f.inputKind = inputKindNone
+}
+
+// ActivateSearch clears the text area, sets search mode, and focuses
+// the input so the user can type a listing-filter query inline.
+func (f *FilePickerContext) ActivateSearch() {
+	f.activateInput(inputKindSearch)
+}
+
+// ApplySearch reads the input text, calls SetSearch, and returns focus
+// to the directory listing.
+func (f *FilePickerContext) ApplySearch() {
+	if f.inputFocused && f.inputKind == inputKindSearch {
+		query := ""
+		if f.view != nil && f.view.TextArea != nil {
+			query = f.view.TextArea.GetContent()
+		}
+		f.deactivateInput()
+		f.SetSearch(query)
+		return
+	}
+	f.deactivateInput()
+}
+
+// CancelSearch discards the input, clears the active search resetting
+// the listing, and returns focus to the listing.
+func (f *FilePickerContext) CancelSearch() {
+	if f.inputFocused && f.inputKind == inputKindSearch {
+		f.deactivateInput()
+		f.ClearSearch()
+		return
+	}
+	f.deactivateInput()
+}
+
+// ActivateNewDir clears the text area, sets new-dir mode, and focuses
+// the input.
+func (f *FilePickerContext) ActivateNewDir() {
+	f.activateInput(inputKindNewDir)
+}
+
+// ApplyNewDir creates a directory with the typed name and returns focus
+// to the listing.
+func (f *FilePickerContext) ApplyNewDir() {
+	if f.inputFocused && f.inputKind == inputKindNewDir {
+		name := ""
+		if f.view != nil && f.view.TextArea != nil {
+			name = f.view.TextArea.GetContent()
+		}
+		f.deactivateInput()
+		if name != "" {
+			f.CreateDirectory(name)
+		}
+		return
+	}
+	f.deactivateInput()
+}
+
+// CancelNewDir discards the input and returns focus to the listing.
+func (f *FilePickerContext) CancelNewDir() {
+	f.deactivateInput()
+}
+
+// SearchInputActive reports whether the input is in search mode.
+func (f *FilePickerContext) SearchInputActive() bool {
+	return f.inputFocused && f.inputKind == inputKindSearch
+}
+
+// NewDirInputActive reports whether the input is in new-directory mode.
+func (f *FilePickerContext) NewDirInputActive() bool {
+	return f.inputFocused && f.inputKind == inputKindNewDir
+}
+
 // CurrentPath returns the current directory path.
 func (f *FilePickerContext) CurrentPath() string { return f.currentPath }
 
@@ -378,16 +497,9 @@ func (f *FilePickerContext) ToggleInputFocus() {
 		return
 	}
 	if f.inputFocused {
-		if f.view != nil && f.view.TextArea != nil {
-			f.filename = f.view.TextArea.GetContent()
-		}
-		if f.deps.GuiDriver != nil {
-			f.deps.GuiDriver.SetCaretEnabled(false)
-		}
-		if f.modes != nil {
-			f.modes.Set(types.FILE_PICKER, types.ModeCommand)
-		}
+		f.deactivateInput()
 	} else {
+		f.inputKind = inputKindFilename
 		f.ClearViewBuffer()
 		if f.view != nil && f.view.TextArea != nil {
 			f.view.TextArea.TypeString(f.filename)
@@ -398,8 +510,8 @@ func (f *FilePickerContext) ToggleInputFocus() {
 		if f.modes != nil {
 			f.modes.Set(types.FILE_PICKER, types.ModeInsert)
 		}
+		f.inputFocused = true
 	}
-	f.inputFocused = !f.inputFocused
 }
 
 // SetFilename sets the filename input text.
@@ -528,16 +640,12 @@ func (f *FilePickerContext) HandleRender() error {
 	if f.errMsg != "" {
 		headerLines++
 	}
-	footerLines := 0
-	if f.mode == PickerSave {
-		footerLines = 2
-	}
+	footerLines := f.footerLineCount()
 	maxVisible := innerH - headerLines - footerLines
 	if maxVisible < 1 {
 		maxVisible = 1
 	}
 
-	// Adjust the listing offset so the cursor is inside the visible window.
 	if len(f.items) > 0 {
 		if f.cursor < f.listingOffset {
 			f.listingOffset = f.cursor
@@ -568,7 +676,15 @@ func (f *FilePickerContext) HandleRender() error {
 	// (0,0). We correct it here so the caret appears in the footer.
 	if f.inputFocused && f.view != nil && f.view.TextArea != nil && f.deps.GuiDriver != nil {
 		cursorX, _ := f.view.TextArea.GetCursorXY()
-		caretX := 13 + cursorX // len("> File name: ") - 1
+		caretX := cursorX
+		switch f.inputKind {
+		case inputKindSearch:
+			caretX += 10
+		case inputKindNewDir:
+			caretX += 17
+		default:
+			caretX += 13
+		}
 		caretY := headerLines + maxVisible
 		_ = f.deps.GuiDriver.SetViewCursor(viewName, caretX, caretY)
 	}
@@ -601,10 +717,7 @@ func (f *FilePickerContext) RenderBody() string {
 	if f.errMsg != "" {
 		headerLines++
 	}
-	footerLines := 0
-	if f.mode == PickerSave {
-		footerLines = 2
-	}
+	footerLines := f.footerLineCount()
 	maxVisible := innerH - headerLines - footerLines
 	if maxVisible < 1 {
 		maxVisible = 1
@@ -624,9 +737,7 @@ func (f *FilePickerContext) RenderBody() string {
 		b.WriteByte('\n')
 	}
 
-	if f.mode == PickerSave {
-		b.WriteString(f.renderFooter())
-	}
+	b.WriteString(f.renderFooter())
 
 	return b.String()
 }
@@ -753,9 +864,30 @@ func formatSize(bytes int64) string {
 	return fmt.Sprintf("%.1f%s", float64(bytes)/float64(div), units[exp])
 }
 
+func (f *FilePickerContext) footerLineCount() int {
+	if f.inputFocused && (f.inputKind == inputKindSearch || f.inputKind == inputKindNewDir) {
+		return 2
+	}
+	if f.mode == PickerSave {
+		return 2
+	}
+	return 1
+}
+
 func (f *FilePickerContext) renderFooter() string {
 	var b strings.Builder
-	if f.mode == PickerSave {
+	switch {
+	case f.inputFocused && f.inputKind == inputKindSearch:
+		b.WriteString("> Search: ")
+		b.WriteString(f.Buffer())
+		b.WriteByte('\n')
+		b.WriteString("  " + pickerDimSGR + "Enter: search  Esc: cancel" + pickerReset)
+	case f.inputFocused && f.inputKind == inputKindNewDir:
+		b.WriteString("> New directory: ")
+		b.WriteString(f.Buffer())
+		b.WriteByte('\n')
+		b.WriteString("  " + pickerDimSGR + "Enter: create  Esc: cancel" + pickerReset)
+	case f.mode == PickerSave:
 		if f.inputFocused {
 			b.WriteString("> File name: ")
 		} else {
@@ -766,8 +898,10 @@ func (f *FilePickerContext) renderFooter() string {
 		if f.inputFocused {
 			b.WriteString("  " + pickerDimSGR + "Enter: confirm  Esc: browse  Ctrl+h: backspace" + pickerReset)
 		} else {
-			b.WriteString("  " + pickerDimSGR + "j/k: navigate  i: edit name  h: up  q: cancel" + pickerReset)
+			b.WriteString("  " + pickerDimSGR + "j/k: navigate  i: edit name  h/bs: up  q: cancel" + pickerReset)
 		}
+	default:
+		b.WriteString("  " + pickerDimSGR + "j/k: navigate  h/bs: up  Enter: select  q: cancel" + pickerReset)
 	}
 	return b.String()
 }
