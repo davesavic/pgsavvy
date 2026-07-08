@@ -186,10 +186,13 @@ func (c *CellViewerContext) HandleRender() error {
 		lines := strings.Split(sanitized, "\n")
 		c.totalWrappedLines = len(lines)
 		start := c.scroll[1]
-		end := start + bodyHeight
 		if start < 0 {
 			start = 0
 		}
+		if start > len(lines) {
+			start = len(lines)
+		}
+		end := start + bodyHeight
 		if end > len(lines) {
 			end = len(lines)
 		}
