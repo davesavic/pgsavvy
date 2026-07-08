@@ -41,8 +41,9 @@ var categoryByTag = map[string]Category{
 	"Text object":  CategoryEditing,
 	"Edit history": CategoryEditing,
 
-	"Query": CategoryQuery,
-	"Plan":  CategoryQuery,
+	"Query":       CategoryQuery,
+	"Plan":        CategoryQuery,
+	"File Picker": CategoryQuery,
 
 	"Result": CategoryResults,
 	"Row":    CategoryResults,

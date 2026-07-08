@@ -708,6 +708,12 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 		g.registerSavedQueryOpen()
 	}
 
+	// QueryOpenFile — `<leader>of` in the QUERY_EDITOR opens the file picker
+	// to load an SQL file into the editor.
+	if g.registry != nil && g.registry.FilePicker != nil && g.tree != nil {
+		g.registerFilePickerOpen()
+	}
+
 	// rail highlight+jump search (/ n N <esc>) on SCHEMAS
 	// and TABLES. Single action IDs; the handler resolves the focused
 	// rail from ctx.Scope. Needs the registry + SearchLine helper.

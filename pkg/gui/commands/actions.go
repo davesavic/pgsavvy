@@ -405,6 +405,9 @@ const (
 	// overwrite-confirming on a name collision.
 	QuerySave = "query.save"
 
+	// QueryOpenFile opens the file picker to load an SQL file into the editor.
+	QueryOpenFile = "query.open_file"
+
 	// Plan family — owned by PlanController. All PLAN-
 	// scoped; published only when a plan tab is the focused context.
 	//   PlanToggle        - <CR> toggles collapse on the cursor node
@@ -673,6 +676,23 @@ const (
 	VisualEnterBlock = "visual.enter_block"
 	VisualExit       = "visual.exit"
 	SelectionExtend  = "selection.extend"
+
+	// File Picker family — owned by FilePickerController.
+	// Bindings: j/k move cursor, gg/G jump, Enter confirm, h/Backspace ascend,
+	// q/Esc cancel, / search, . toggle hidden, n create directory, Tab focus input.
+	FilePickerUp         = "file_picker.up"
+	FilePickerDown       = "file_picker.down"
+	FilePickerJumpFirst  = "file_picker.jump_first"
+	FilePickerJumpLast   = "file_picker.jump_last"
+	FilePickerConfirm    = "file_picker.confirm"
+	FilePickerAscend     = "file_picker.ascend"
+	FilePickerCancel     = "file_picker.cancel"
+	FilePickerSearch     = "file_picker.search"
+	FilePickerSearchNext = "file_picker.search_next"
+	FilePickerSearchPrev = "file_picker.search_prev"
+	FilePickerHidden     = "file_picker.hidden"
+	FilePickerNewDir     = "file_picker.new_dir"
+	FilePickerFocusInput = "file_picker.focus_input"
 )
 
 // AllActionIDs returns every ID declared in this file in declaration
@@ -806,6 +826,7 @@ func AllActionIDs() []string {
 		QuerySavedOpen,
 		QuerySavedDelete,
 		QuerySave,
+		QueryOpenFile,
 		PlanToggle,
 		PlanExpandAll,
 		PlanCollapseAll,
@@ -952,5 +973,18 @@ func AllActionIDs() []string {
 		SettingsConfirm,
 		SettingsKeybindingAdd,
 		SettingsKeybindingDelete,
+		FilePickerUp,
+		FilePickerDown,
+		FilePickerJumpFirst,
+		FilePickerJumpLast,
+		FilePickerConfirm,
+		FilePickerAscend,
+		FilePickerCancel,
+		FilePickerSearch,
+		FilePickerSearchNext,
+		FilePickerSearchPrev,
+		FilePickerHidden,
+		FilePickerNewDir,
+		FilePickerFocusInput,
 	}
 }

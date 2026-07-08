@@ -289,6 +289,14 @@ type ResultTabsHelperDeps struct {
 	// edit-path path (the 'i' binding becomes a no-op).
 	EditExportPath func(initial string, onSubmit func(string) error, onCancel func() error) error
 
+	// OpenFilePickerForSave opens the FILE_PICKER in save mode starting at
+	// startPath. onConfirm receives the trimmed, validated absolute path;
+	// onCancel is called on Esc/q (or empty-path confirmation). The picker
+	// auto-pops the EXPORT_MENU (both are TEMPORARY_POPUPs); callbacks must
+	// re-push it via PushExportMenu. When non-nil, ExportMenuEditPath
+	// prefers this over EditExportPath. nil falls back to EditExportPath.
+	OpenFilePickerForSave func(startPath string, onConfirm func(string) error, onCancel func() error) error
+
 	// OnWorker dispatches a closure onto a background worker goroutine
 	// (mirrors orchestrator.Gui.OnWorker). The <leader>oe export pipeline
 	// uses this to run exporter.Run off the UI thread. nil disables the
@@ -3383,9 +3391,10 @@ func (h *ResultTabsHelper) ExportMenuCancel() {
 func (h *ResultTabsHelper) ExportMenuEditPath() {
 	h.mu.Lock()
 	m := h.exportMenu
+	openPicker := h.deps.OpenFilePickerForSave
 	edit := h.deps.EditExportPath
 	h.mu.Unlock()
-	if m == nil || m.menu == nil || edit == nil {
+	if m == nil || m.menu == nil {
 		return
 	}
 	if !m.menu.IsPathFieldActive() {
@@ -3399,11 +3408,27 @@ func (h *ResultTabsHelper) ExportMenuEditPath() {
 		}
 		return nil
 	}
+
+	if openPicker != nil {
+		onCancel := func() error { return reopen() }
+		var onConfirm func(string) error
+		onConfirm = func(value string) error {
+			value = strings.TrimSpace(value)
+			if err := validateExportPath(value); err != nil {
+				h.toast(err.Error())
+				return reopen()
+			}
+			menu.SetPath(value)
+			return reopen()
+		}
+		_ = openPicker(menu.Path(), onConfirm, onCancel)
+		return
+	}
+
+	if edit == nil {
+		return
+	}
 	onCancel := func() error { return reopen() }
-	// onSubmit re-opens the PROMPT (seeded with the rejected value) on a
-	// validation failure so the user can fix the typo in place. It returns
-	// nil in that case — returning the bare error gets swallowed by
-	// master_editor.go and drops the user out with no menu and no feedback.
 	var onSubmit func(value string) error
 	onSubmit = func(value string) error {
 		value = strings.TrimSpace(value)

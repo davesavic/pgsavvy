@@ -35,6 +35,7 @@ type AppState struct {
 	LastSessionSettings      map[string]map[string]string   `yaml:"last_session_settings"`
 	LastSchemaName           map[string]string              `yaml:"last_schema_name"`
 	LastTableName            map[string]string              `yaml:"last_table_name"`
+	LastPickerDirectory      string                         `yaml:"last_picker_directory"`
 }
 
 // Save serializes the receiver to YAML and atomically replaces 'path' on POSIX

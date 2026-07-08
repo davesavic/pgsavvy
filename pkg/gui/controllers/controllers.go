@@ -105,6 +105,11 @@ type Controllers struct {
 	// focus-stack). The bundle owns it so AllDefaultBindings includes its
 	// bindings.
 	Changelog *ChangelogController
+
+	// FilePicker is constructed by the orchestrator (it takes deps on
+	// the FilePickerContext which is wired in the ContextTree). The
+	// bundle owns it so AllDefaultBindings includes its bindings.
+	FilePicker *FilePickerController
 }
 
 // AttachControllers builds every controller, attaches it to its target
@@ -283,6 +288,7 @@ func AttachControllers(
 		"Plan":              tree.Plan,
 		"Settings":          &tree.Settings.BaseContext,
 		"Changelog":         &tree.Changelog.BaseContext,
+		"FilePicker":        &tree.FilePicker.BaseContext,
 	}
 	for _, e := range bundle.entries() {
 		if !e.attach {
@@ -397,6 +403,7 @@ func (b *Controllers) entries() []controllerEntry {
 		{name: "RelationshipPanel", ctrl: b.RelationshipPanel, attach: true},
 		{name: "Settings", ctrl: b.Settings, attach: true},
 		{name: "Changelog", ctrl: b.Changelog, attach: true},
+		{name: "FilePicker", ctrl: b.FilePicker, attach: true},
 	}
 	out := make([]controllerEntry, 0, len(candidates))
 	for _, e := range candidates {

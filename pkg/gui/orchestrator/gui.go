@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -875,6 +876,76 @@ func (g *Gui) registerSavedQueryOpen() {
 			return nil
 		},
 	})
+}
+
+// registerFilePickerOpen wires the QueryOpenFile action handler: pushes the
+// file picker in "open" mode to load an SQL file into the query editor.
+func (g *Gui) registerFilePickerOpen() {
+	if g.registry == nil || g.registry.FilePicker == nil || g.tree == nil {
+		return
+	}
+	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
+		ID:          commands.QueryOpenFile,
+		Description: "Open SQL file",
+		Tag:         "Query",
+		Handler: func(_ commands.ExecCtx) error {
+			return g.pushFilePicker(guicontext.PickerOpen, "", func(path string) {
+				if path == "" {
+					return
+				}
+				content, err := afero.ReadFile(g.deps.Common.Fs, path)
+				if err != nil {
+					if g.toastHelp != nil {
+						g.toastHelp.Show("Cannot read file: "+err.Error(), 3*time.Second)
+					}
+					return
+				}
+				adapter := newEditorBufferAdapter(g.registry.QueryEditor)
+				if err := adapter.ReplaceAll(string(content)); err != nil && g.toastHelp != nil {
+					g.toastHelp.Show("Cannot load file: "+err.Error(), 3*time.Second)
+					return
+				}
+				if g.toastHelp != nil {
+					g.toastHelp.Show("Loaded: "+filepath.Base(path), 3*time.Second)
+				}
+			}, nil)
+		},
+	})
+}
+
+// pushFilePicker sets up the FilePickerContext with the given mode and
+// optional startPath, and pushes it onto the focus stack. onConfirm is
+// called with the selected absolute file path on Enter; onCancel is
+// called on Esc/q. Returns tree.Push error.
+func (g *Gui) pushFilePicker(mode guicontext.PickerMode, startPath string, onConfirm func(string), onCancel func()) error {
+	if g.registry == nil || g.registry.FilePicker == nil || g.tree == nil {
+		return nil
+	}
+	fp := g.registry.FilePicker
+	start := startPath
+	if start == "" && g.deps.Common != nil {
+		start = g.deps.Common.AppState.LastPickerDirectory
+	}
+	if start == "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			start = home
+		} else {
+			start = "/"
+		}
+	}
+	if onCancel == nil {
+		onCancel = func() {}
+	}
+	fp.Push(mode, start, onConfirm, onCancel, func() error {
+		if g.deps.Common != nil && g.deps.Store != nil {
+			g.deps.Store.MutateAndSave(func(state *common.AppState) {
+				state.LastPickerDirectory = fp.CurrentPath()
+			})
+		}
+		return g.tree.Pop()
+	})
+	return g.tree.Push(fp)
 }
 
 // railForScope returns the focused side-rail SideListContext for a

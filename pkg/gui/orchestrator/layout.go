@@ -704,16 +704,30 @@ func (g *Gui) RunLayout(w, h int) error {
 				}
 				view.FrameColor = frameAttr(border)
 			}
-			// FIRST_RUN_TIP styling: the welcome tip is the focused modal while
-			// on top, so paint the active border (popups are skipped by the
-			// Tier-1 applyFocusFrameColors pass). Wrap reflows the prose body to
-			// the box width. The frame carries no title — HandleRender renders
-			// the tip's own title as the body's first line.
-			if ctx.GetKey() == types.FIRST_RUN_TIP && view != nil {
-				view.Wrap = true
-				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+		// FIRST_RUN_TIP styling: the welcome tip is the focused modal while
+		// on top, so paint the active border (popups are skipped by the
+		// Tier-1 applyFocusFrameColors pass). Wrap reflows the prose body to
+		// the box width. The frame carries no title — HandleRender renders
+		// the tip's own title as the body's first line.
+		if ctx.GetKey() == types.FIRST_RUN_TIP && view != nil {
+			view.Wrap = true
+			view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+		}
+		// FILE_PICKER styling + view-plumb: the file-system path
+		// picker is the focused modal while on top, so paint the
+		// active-border colour (popups are skipped by the Tier-1
+		// applyFocusFrameColors pass; gocui resets FrameColor on each
+		// SetView, so this runs every frame). Surface the "File picker"
+		// title on the frame chrome. Plumb the live view handle so the
+		// context can read InnerWidth for layout (TextArea + breadcrumb).
+		if ctx.GetKey() == types.FILE_PICKER && view != nil {
+			view.Title = ctx.GetTitle()
+			view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+			if cl, ok := ctx.(interface{ SetView(types.View) }); ok {
+				cl.SetView(view)
 			}
-			// CHANGELOG styling: wrap reflows the release-notes body to the
+		}
+		// CHANGELOG styling: wrap reflows the release-notes body to the
 			// box width. Paint active border + title when on top.
 			if ctx.GetKey() == types.CHANGELOG && view != nil {
 				view.Title = ctx.GetTitle()

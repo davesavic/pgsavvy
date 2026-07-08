@@ -481,6 +481,22 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 		changelogCtrl.AttachToContext(&g.registry.Changelog.BaseContext)
 		g.controllers.Changelog = changelogCtrl
 	}
+
+	// Wire the FilePicker context + controller. The FilePickerContext needs
+	// afero.Fs for directory listing and ModeSetter for editable input.
+	if g.registry != nil && g.registry.FilePicker != nil && g.tree != nil && g.deps.Common != nil {
+		g.registry.FilePicker.SetFs(g.deps.Common.Fs)
+		g.registry.FilePicker.SetModes(g.keybindingSystem.modeStore)
+
+		filePickerCtrl := controllers.NewFilePickerController(
+			g.deps.Common, helperBag.CoreDeps, helperBag.UIDeps,
+			func() *guicontext.FilePickerContext {
+				return g.registry.FilePicker
+			},
+		)
+		filePickerCtrl.AttachToContext(&g.registry.FilePicker.BaseContext)
+		g.controllers.FilePicker = filePickerCtrl
+	}
 }
 
 // wireEditorCompletion wires the completion engine + the SUGGESTIONS
