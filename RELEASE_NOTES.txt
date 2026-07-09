@@ -1,3 +1,10 @@
+pgsavvy v0.9.0
+
+  New file explorer modal for browsing, opening, and saving files.
+  Open .sql files in the query editor with <leader>of.
+  Save results from the export modal by selecting save type "File" and
+  selecting a path (i).
+
 pgsavvy v0.8.1
 
   Fixed bug when scrolling in cell viewer which caused panic.
