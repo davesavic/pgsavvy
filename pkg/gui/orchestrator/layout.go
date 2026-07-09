@@ -713,11 +713,32 @@ func (g *Gui) RunLayout(w, h int) error {
 				view.Wrap = true
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
+			// FILE_PICKER styling + view-plumb: the file-system path
+			// picker is the focused modal while on top, so paint the
+			// active-border colour (popups are skipped by the Tier-1
+			// applyFocusFrameColors pass; gocui resets FrameColor on each
+			// SetView, so this runs every frame). Surface the "File picker"
+			// title on the frame chrome. Plumb the live view handle so the
+			// context can read InnerWidth for layout (TextArea + breadcrumb).
+			if ctx.GetKey() == types.FILE_PICKER && view != nil {
+				view.Title = ctx.GetTitle()
+				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+				if cl, ok := ctx.(interface{ SetView(types.View) }); ok {
+					cl.SetView(view)
+				}
+			}
 			// CHANGELOG styling: wrap reflows the release-notes body to the
 			// box width. Paint active border + title when on top.
 			if ctx.GetKey() == types.CHANGELOG && view != nil {
 				view.Title = ctx.GetTitle()
 				view.Wrap = true
+				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
+			}
+			// EXPORT_MENU styling: paint active border + title matching
+			// other modal windows. Title ("Export result") is carried on
+			// the frame chrome; the body no longer duplicates it.
+			if ctx.GetKey() == types.EXPORT_MENU && view != nil {
+				view.Title = ctx.GetTitle()
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 			}
 			_ = ctx.HandleRender()

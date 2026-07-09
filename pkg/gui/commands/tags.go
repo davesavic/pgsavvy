@@ -30,4 +30,5 @@ var KnownTags = []string{
 	"Motion",
 	"Connection",
 	"Plan",
+	"File Picker",
 }

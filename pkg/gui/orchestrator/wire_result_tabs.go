@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"time"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
@@ -72,6 +74,25 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 					label = tr.Actions.ExportMenuEditPath
 				}
 				return g.promptHelp.Prompt(label, initial, onSubmit, onCancel)
+			}
+		}
+		// 'i' on the Path field opens the FILE_PICKER in save
+		// mode when the file picker is available. Pushing the picker
+		// auto-pops the EXPORT_MENU; the helper's onConfirm/onCancel
+		// re-push it via PushExportMenu so focus returns to the menu.
+		if g.registry.FilePicker != nil {
+			resultTabsDeps.OpenFilePickerForSave = func(startPath string, onConfirm func(string) error, onCancel func() error) error {
+				return g.pushFilePicker(guicontext.PickerSave, startPath, func(path string) {
+					if err := onConfirm(path); err != nil {
+						if g.toastHelp != nil {
+							g.toastHelp.Show(err.Error(), 3*time.Second)
+						}
+					}
+				}, func() {
+					if onCancel != nil {
+						_ = onCancel()
+					}
+				})
 			}
 		}
 	}

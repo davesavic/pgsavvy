@@ -12,12 +12,12 @@ import (
 func newPathMenuOnFile(initial string) *popup.ExportMenu {
 	m := popup.NewExportMenu(
 		[]string{"CSV"},
-		[]string{"File", "Clipboard"},
+		[]string{"Clipboard", "File"},
 		[]string{"Buffered"},
 		-1, false,
 	)
 	m.Prefill(initial)
-	// Format(0) -> Destination(1) -> Path(2).
+	// File is default (idx 1). Format(0) → Destination(1) → Path(2).
 	m.MoveField(+1)
 	m.MoveField(+1)
 	if !m.IsPathFieldActive() {

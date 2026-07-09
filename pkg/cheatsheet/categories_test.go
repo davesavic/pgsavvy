@@ -21,6 +21,7 @@ var expectedCategory = map[string]Category{
 	"Edit history": CategoryEditing,
 	"Query":        CategoryQuery,
 	"Plan":         CategoryQuery,
+	"File Picker":  CategoryQuery,
 	"Result":       CategoryResults,
 	"Row":          CategoryResults,
 	"Cell Edit":    CategoryCells,

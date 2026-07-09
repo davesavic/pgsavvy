@@ -83,6 +83,10 @@ type ContextTree struct {
 	// PERSISTENT_POPUP kind.
 	Changelog *ChangelogContext
 
+	// FilePicker is the filesystem path picker popup.
+	// TEMPORARY_POPUP kind.
+	FilePicker *FilePickerContext
+
 	// QueryRail is the MAIN_CONTEXT container that multiplexes the
 	// QueryEditor + SavedQuery + History leaves into the single
 	// "query_editor" view; it is the only flattened main context for the
@@ -290,7 +294,7 @@ func contextSpecs() []contextSpec {
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.HideOverlay = c.(*HideOverlayContext) },
 		},
 		{
-			key: types.EXPORT_MENU, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			key: types.EXPORT_MENU, kind: types.TEMPORARY_POPUP, inFlatten: true, title: "Export result",
 			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.5, HeightFrac: 0.5},
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewExportMenuContext(b, d) },
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.ExportMenu = c.(*ExportMenuContext) },
@@ -427,6 +431,13 @@ func contextSpecs() []contextSpec {
 			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.7, HeightFrac: 0.8},
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewChangelogContext(b, d) },
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.Changelog = c.(*ChangelogContext) },
+		},
+		// FilePicker is the filesystem path picker (TEMPORARY_POPUP, centered 60%).
+		{
+			key: types.FILE_PICKER, kind: types.TEMPORARY_POPUP, title: "File picker", inFlatten: true,
+			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.6, HeightFrac: 0.6},
+			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewFilePickerContext(b, d) },
+			assign:    func(t *ContextTree, c types.IBaseContext) { t.FilePicker = c.(*FilePickerContext) },
 		},
 
 		// QUERY_EDITOR is now a QUERY_RAIL container leaf (tkt5.2 topology

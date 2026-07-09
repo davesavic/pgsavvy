@@ -83,6 +83,28 @@ binding	scope=export_menu	key=j	mode=normal
 binding	scope=export_menu	key=k	mode=normal
 binding	scope=export_menu	key=l	mode=normal
 binding	scope=export_menu	key=q	mode=normal
+binding	scope=file_picker	key=.	mode=command
+binding	scope=file_picker	key=/	mode=command
+binding	scope=file_picker	key=<bs>	mode=command
+binding	scope=file_picker	key=<cr>	mode=command
+binding	scope=file_picker	key=<cr>	mode=insert
+binding	scope=file_picker	key=<down>	mode=command
+binding	scope=file_picker	key=<esc>	mode=command
+binding	scope=file_picker	key=<esc>	mode=insert
+binding	scope=file_picker	key=<tab>	mode=command
+binding	scope=file_picker	key=<up>	mode=command
+binding	scope=file_picker	key=G	mode=command
+binding	scope=file_picker	key=H	mode=command
+binding	scope=file_picker	key=N	mode=command
+binding	scope=file_picker	key=a	mode=command
+binding	scope=file_picker	key=gg	mode=command
+binding	scope=file_picker	key=h	mode=command
+binding	scope=file_picker	key=i	mode=command
+binding	scope=file_picker	key=j	mode=command
+binding	scope=file_picker	key=k	mode=command
+binding	scope=file_picker	key=n	mode=command
+binding	scope=file_picker	key=q	mode=command
+binding	scope=file_picker	key=s	mode=command
 binding	scope=fk_reverse_picker	key=<cr>	mode=normal
 binding	scope=fk_reverse_picker	key=<esc>	mode=normal
 binding	scope=fk_reverse_picker	key=<tab>	mode=normal
@@ -103,6 +125,7 @@ binding	scope=global	key=<leader>C	mode=normal
 binding	scope=global	key=<leader>R	mode=normal
 binding	scope=global	key=<leader>os	mode=normal
 binding	scope=global	key=<leader>p	mode=normal
+binding	scope=global	key=?	mode=command
 binding	scope=global	key=?	mode=normal
 binding	scope=hide_overlay	key=<c-n>	mode=normal
 binding	scope=hide_overlay	key=<c-p>	mode=normal
@@ -180,6 +203,7 @@ binding	scope=query_editor	key=<leader>f	mode=mode(0x1c)
 binding	scope=query_editor	key=<leader>f	mode=normal
 binding	scope=query_editor	key=<leader>h	mode=normal
 binding	scope=query_editor	key=<leader>o	mode=normal
+binding	scope=query_editor	key=<leader>of	mode=normal
 binding	scope=query_editor	key=<leader>r	mode=mode(0x1c)
 binding	scope=query_editor	key=<leader>r	mode=normal
 binding	scope=query_editor	key=<leader>s	mode=normal
@@ -461,6 +485,7 @@ popuprect	key=conflict_dialog	x0=20	y0=20	x1=80	y1=80
 popuprect	key=connection_manager	none
 popuprect	key=constraints	none
 popuprect	key=export_menu	x0=25	y0=25	x1=75	y1=75
+popuprect	key=file_picker	x0=20	y0=20	x1=80	y1=80
 popuprect	key=first_run_tip	x0=25	y0=30	x1=75	y1=70
 popuprect	key=fk_reverse_picker	x0=20	y0=20	x1=80	y1=80
 popuprect	key=foreign_keys	none

@@ -198,6 +198,9 @@ const (
 	// CHANGELOG is the post-upgrade release-note popup shown on first
 	// launch after a version change. PERSISTENT_POPUP kind.
 	CHANGELOG ContextKey = "changelog"
+	// FILE_PICKER is the centered file-system path picker popup shown
+	// on "Export to file..." or "Open SQL file...". TEMPORARY_POPUP kind.
+	FILE_PICKER ContextKey = "file_picker"
 )
 
 // AllContextKeys returns every ContextKey constant declared above.
@@ -248,6 +251,7 @@ func AllContextKeys() []ContextKey {
 		FOREIGN_KEYS,
 		CONSTRAINTS,
 		CHANGELOG,
+		FILE_PICKER,
 	}
 }
 
@@ -269,7 +273,7 @@ func AllContextKeys() []ContextKey {
 // context, so flipping here has no runtime effect until the real
 // QUERY_EDITOR context lands.
 func (k ContextKey) IsEditable() bool {
-	return k == COMMAND_LINE || k == QUERY_EDITOR || k == PROMPT || k == CELL_EDITOR || k == SEARCH_LINE
+	return k == COMMAND_LINE || k == QUERY_EDITOR || k == PROMPT || k == CELL_EDITOR || k == SEARCH_LINE || k == FILE_PICKER
 }
 
 // Display humanizes the snake_case key into a readable label for popup

@@ -517,6 +517,7 @@ func allContextKeyKinds() map[types.ContextKey]types.ContextKind {
 		types.SETTINGS:           types.MAIN_CONTEXT,
 		types.RELATIONSHIP_PANEL: types.DISPLAY_CONTEXT,
 		types.CELL_VIEWER:        types.PERSISTENT_POPUP,
+		types.FILE_PICKER:        types.TEMPORARY_POPUP,
 	}
 }
 

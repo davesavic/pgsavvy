@@ -24,8 +24,9 @@ func TestNewContextTreeReturnsAllContexts(t *testing.T) {
 	// CELL_VIEWER (PERSISTENT_POPUP) takes it 26→27.
 	// SETTINGS (MAIN_CONTEXT) takes it 27→28.
 	// CHANGELOG (PERSISTENT_POPUP) takes it 28→29.
-	if len(flat) != 29 {
-		t.Fatalf("Flatten() len = %d, want 29 (QUERY_RAIL flattened; editor/saved/history leaves excluded; CELL_VIEWER, SETTINGS, CHANGELOG added)", len(flat))
+	// FILE_PICKER (TEMPORARY_POPUP) takes it 29→30.
+	if len(flat) != 30 {
+		t.Fatalf("Flatten() len = %d, want 30 (FILE_PICKER added)", len(flat))
 	}
 	// Sanity: no nil entries.
 	for i, c := range flat {
@@ -189,7 +190,8 @@ func TestNewContextTreeKindCounts(t *testing.T) {
 		// HISTORY (promoted from STUB) took it 14→15, then tkt5.2 flipped
 		// HISTORY into a QUERY_RAIL leaf (MAIN_CONTEXT, inFlatten=false),
 		// taking it back 15→14.
-		types.TEMPORARY_POPUP: 14,
+		// FILE_PICKER (TEMPORARY_POPUP) takes it 14→15.
+		types.TEMPORARY_POPUP: 15,
 		types.EXTRAS_CONTEXT:  0,
 		types.GLOBAL_CONTEXT:  1,
 		// RELATIONSHIP_PANEL takes DISPLAY_CONTEXT 3→4.

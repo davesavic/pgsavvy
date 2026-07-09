@@ -36,17 +36,17 @@ func syncWorker(rec *orderRecorder) func(func(gocui.Task) error) {
 func newExportMenuOnFile(path string) *popup.ExportMenu {
 	m := popup.NewExportMenu(
 		[]string{"CSV"},
-		[]string{"File", "Clipboard"},
+		[]string{"Clipboard", "File"},
 		[]string{"On screen", "Buffered", "All rows"},
 		-1, false,
 	)
 	m.Prefill(path)
-	// Move the field cursor to Scope (the last navigable field, clamps
-	// there) and bump the value to "Buffered" (index 1).
-	m.MoveField(+1)
-	m.MoveField(+1)
-	m.MoveField(+1)
-	m.MoveValue(+1)
+	// File is default (idx 1). Move field cursor to Scope and bump
+	// value to "Buffered" (idx 1).
+	m.MoveField(+1) // Format → Destination
+	m.MoveField(+1) // Destination → Path
+	m.MoveField(+1) // Path → Scope
+	m.MoveValue(+1) // On screen → Buffered
 	return m
 }
 

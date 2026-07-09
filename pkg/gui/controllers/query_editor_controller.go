@@ -185,6 +185,7 @@ func (q *QueryEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types
 		{"<leader>f", commands.QueryFormat, tr.Actions.QueryFormat, visualRunModes, false},
 		{"<leader>h", commands.HistoryOpen, tr.Actions.HistoryOpen, defaultMode, false},
 		{"<leader>o", commands.QuerySavedOpen, tr.Actions.OpenSavedQueries, defaultMode, false},
+		{"<leader>of", commands.QueryOpenFile, "Open SQL file", defaultMode, false},
 		{"<leader>s", commands.QuerySave, tr.Actions.SaveQuery, defaultMode, false},
 	}
 	out := make([]*types.ChordBinding, 0, len(specs)+8)

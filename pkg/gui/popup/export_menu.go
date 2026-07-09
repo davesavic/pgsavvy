@@ -3,7 +3,23 @@ package popup
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/davesavic/pgsavvy/pkg/theme"
 )
+
+func dimSGR() string {
+	if theme.IsMonochrome() {
+		return ""
+	}
+	return "\x1b[2m"
+}
+
+func popupReset() string {
+	if theme.IsMonochrome() {
+		return ""
+	}
+	return "\x1b[0m"
+}
 
 // ExportMenuField identifies the currently-focused selector row.
 type ExportMenuField int
@@ -78,7 +94,7 @@ func NewExportMenu(formats, destinations, scopes []string, sqlInsertsIdx int, bu
 		destinations:              append([]string(nil), destinations...),
 		scopes:                    append([]string(nil), scopes...),
 		formatIdx:                 0,
-		destIdx:                   0,
+		destIdx:                   1,
 		scopeIdx:                  0,
 		field:                     FieldFormat,
 		sqlInsertsIdx:             sqlInsertsIdx,
@@ -366,9 +382,8 @@ func (m *ExportMenu) isBufferedFormat() bool {
 }
 
 // Body renders the menu as a text body suitable for writing into a
-// gocui view. Layout:
-//
-//	Export result
+// gocui view. The frame chrome carries the title ("Export result").
+// Layout:
 //
 //	> Format:      CSV
 //	  Destination: File
@@ -383,7 +398,6 @@ func (m *ExportMenu) isBufferedFormat() bool {
 // appended when applicable.
 func (m *ExportMenu) Body() string {
 	var b strings.Builder
-	b.WriteString("Export result\n\n")
 
 	b.WriteString(m.rowPrefix(FieldFormat))
 	b.WriteString("Format:      ")
@@ -413,13 +427,13 @@ func (m *ExportMenu) Body() string {
 	b.WriteByte('\n')
 
 	if m.scopeIdx >= 0 && m.scopeIdx < len(m.scopeDescriptions) {
-		b.WriteString(m.rowPrefix(FieldScope))
+		b.WriteString("  ") // fixed indent, never a cursor marker
 		b.WriteString("             ")
 		b.WriteString(m.scopeDescriptions[m.scopeIdx])
 		b.WriteByte('\n')
 	}
 
-	b.WriteString("\n(↑/↓ field, ←/→ value, <CR> export, <esc> cancel)")
+	b.WriteString("\n  " + dimSGR() + "↑/↓: field  ←/→: value  Enter: export  Esc: cancel" + popupReset())
 
 	if m.bufferedThresholdExceeded && m.isBufferedFormat() {
 		b.WriteString("\n\nWARNING: buffered format on ")
