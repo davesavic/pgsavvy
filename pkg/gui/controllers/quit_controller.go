@@ -195,6 +195,15 @@ func (q *QuitController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordB
 			ActionID:    commands.HelpCheatsheet,
 			Description: tr.Actions.ShowMenu,
 		},
+		// '?' in ModeCommand so the cheatsheet fires from contexts that
+		// use a non-Normal mode (e.g. FILE_PICKER).
+		{
+			Sequence:    []types.ChordKey{{Code: '?'}},
+			Mode:        types.ModeCommand,
+			Scope:       types.GLOBAL,
+			ActionID:    commands.HelpCheatsheet,
+			Description: tr.Actions.ShowMenu,
+		},
 		// <leader>C opens the connection manager mid-session.
 		{
 			Sequence:    []types.ChordKey{{Special: types.KeyLeader}, {Code: 'C'}},

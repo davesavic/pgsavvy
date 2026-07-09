@@ -351,6 +351,37 @@ func TestMatcher_ScopeToGlobalFallThroughChord(t *testing.T) {
 	}
 }
 
+func TestMatcher_GlobalBindingReachableFromNonNormalMode(t *testing.T) {
+	// Regression: GLOBAL bindings registered in ModeCommand must be
+	// reachable from contexts that use a non-Normal mode (e.g.
+	// FILE_PICKER in ModeCommand). Dispatch looks up (scope, mode) then
+	// (GLOBAL, mode) — a binding only in (GLOBAL, ModeNormal) is not
+	// found when the current mode is ModeCommand.
+	var fired []string
+	var mu sync.Mutex
+	helpCmd := recordingCmd("help.cheatsheet", &fired, &mu, nil)
+	ts := buildTrieSet(t, []trieEntry{
+		{types.ModeNormal, types.GLOBAL, []Key{keyOf('?')}, helpCmd},
+		{types.ModeCommand, types.GLOBAL, []Key{keyOf('?')}, helpCmd},
+	})
+	// Simulate FILE_PICKER in ModeCommand.
+	m := shortMatcher(t, ts, types.FILE_PICKER, types.ModeCommand)
+
+	res, err := m.Dispatch(types.FILE_PICKER, keyOf('?'))
+	if err != nil {
+		t.Fatalf("Dispatch ? under ModeCommand: %v", err)
+	}
+	if res != Dispatched {
+		t.Fatalf("res = %v, want Dispatched", res)
+	}
+	mu.Lock()
+	got := append([]string(nil), fired...)
+	mu.Unlock()
+	if len(got) != 1 || got[0] != "help.cheatsheet" {
+		t.Errorf("fired = %v, want [help.cheatsheet]", got)
+	}
+}
+
 func TestMatcher_CountCollectedAndPassedToHandler(t *testing.T) {
 	var gotCtx commands.ExecCtx
 	var mu sync.Mutex

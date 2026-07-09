@@ -94,15 +94,17 @@ binding	scope=file_picker	key=<esc>	mode=insert
 binding	scope=file_picker	key=<tab>	mode=command
 binding	scope=file_picker	key=<up>	mode=command
 binding	scope=file_picker	key=G	mode=command
+binding	scope=file_picker	key=H	mode=command
 binding	scope=file_picker	key=N	mode=command
+binding	scope=file_picker	key=a	mode=command
 binding	scope=file_picker	key=gg	mode=command
 binding	scope=file_picker	key=h	mode=command
 binding	scope=file_picker	key=i	mode=command
 binding	scope=file_picker	key=j	mode=command
 binding	scope=file_picker	key=k	mode=command
 binding	scope=file_picker	key=n	mode=command
-binding	scope=file_picker	key=n	mode=command
 binding	scope=file_picker	key=q	mode=command
+binding	scope=file_picker	key=s	mode=command
 binding	scope=fk_reverse_picker	key=<cr>	mode=normal
 binding	scope=fk_reverse_picker	key=<esc>	mode=normal
 binding	scope=fk_reverse_picker	key=<tab>	mode=normal
@@ -123,6 +125,7 @@ binding	scope=global	key=<leader>C	mode=normal
 binding	scope=global	key=<leader>R	mode=normal
 binding	scope=global	key=<leader>os	mode=normal
 binding	scope=global	key=<leader>p	mode=normal
+binding	scope=global	key=?	mode=command
 binding	scope=global	key=?	mode=normal
 binding	scope=hide_overlay	key=<c-n>	mode=normal
 binding	scope=hide_overlay	key=<c-p>	mode=normal

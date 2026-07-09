@@ -692,6 +692,8 @@ const (
 	FilePickerSearchPrev = "file_picker.search_prev"
 	FilePickerHidden     = "file_picker.hidden"
 	FilePickerNewDir     = "file_picker.new_dir"
+	FilePickerSort       = "file_picker.sort"
+	FilePickerHome       = "file_picker.home"
 	FilePickerFocusInput = "file_picker.focus_input"
 )
 
@@ -985,6 +987,8 @@ func AllActionIDs() []string {
 		FilePickerSearchPrev,
 		FilePickerHidden,
 		FilePickerNewDir,
+		FilePickerSort,
+		FilePickerHome,
 		FilePickerFocusInput,
 	}
 }

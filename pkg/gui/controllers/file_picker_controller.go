@@ -22,7 +22,9 @@ type FilePickerContextResolver func() *context.FilePickerContext
 //   - n (search)    next match
 //   - N (search)    prev match
 //   - .             toggle hidden files
-//   - n (save mode) create new directory
+//   - a             create new directory
+//   - s             cycle sort order
+//   - H             navigate to home directory
 //   - Tab           focus filename input (save mode only)
 type FilePickerController struct {
 	baseController
@@ -182,17 +184,26 @@ func (f *FilePickerController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 			ActionID:    commands.FilePickerHidden,
 			Description: "Toggle hidden files",
 		},
-		// Note: 'n' for new directory is NOT a chord here — n is already bound
-		// to search-next. In save mode, creating directories works via the
-		// FilePickerNewDir action, which is invoked through the 'n' key
-		// when search is NOT active. The controller's handleNewDir checks
-		// for active search and delegates accordingly.
 		{
-			Sequence:    []types.ChordKey{{Code: 'n'}},
+			Sequence:    []types.ChordKey{{Code: 'a'}},
 			Mode:        types.ModeCommand,
 			Scope:       types.FILE_PICKER,
 			ActionID:    commands.FilePickerNewDir,
 			Description: "Create new directory",
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 's'}},
+			Mode:        types.ModeCommand,
+			Scope:       types.FILE_PICKER,
+			ActionID:    commands.FilePickerSort,
+			Description: "Cycle sort order",
+		},
+		{
+			Sequence:    []types.ChordKey{{Code: 'H'}},
+			Mode:        types.ModeCommand,
+			Scope:       types.FILE_PICKER,
+			ActionID:    commands.FilePickerHome,
+			Description: "Navigate to home directory",
 		},
 	}
 }
@@ -220,6 +231,8 @@ func (f *FilePickerController) RegisterActions(reg *commands.Registry) {
 		{commands.FilePickerSearchPrev, "Prev search match", f.handleSearchPrev},
 		{commands.FilePickerHidden, "Toggle hidden files", f.handleHidden},
 		{commands.FilePickerNewDir, "Create new directory", f.handleNewDir},
+		{commands.FilePickerSort, "Cycle sort order", f.handleSort},
+		{commands.FilePickerHome, "Navigate to home", f.handleHome},
 		{commands.FilePickerFocusInput, "Focus filename input", f.handleFocusInput},
 	}
 	for _, s := range specs {
@@ -396,5 +409,23 @@ func (f *FilePickerController) handleFocusInput(_ commands.ExecCtx) error {
 	default:
 		fp.ToggleInputFocus()
 	}
+	return fp.HandleRender()
+}
+
+func (f *FilePickerController) handleSort(_ commands.ExecCtx) error {
+	fp := f.active()
+	if fp == nil {
+		return nil
+	}
+	fp.CycleSort()
+	return fp.HandleRender()
+}
+
+func (f *FilePickerController) handleHome(_ commands.ExecCtx) error {
+	fp := f.active()
+	if fp == nil {
+		return nil
+	}
+	fp.NavigateHome()
 	return fp.HandleRender()
 }

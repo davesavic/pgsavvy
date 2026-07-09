@@ -2,12 +2,15 @@ package context
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/afero"
 
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/theme"
@@ -19,11 +22,22 @@ type PickerMode string
 const (
 	PickerOpen PickerMode = "open"
 	PickerSave PickerMode = "save"
-
-	// ANSI SGR codes for picker styling.
-	pickerDimSGR = "\x1b[2m"
-	pickerReset  = "\x1b[0m"
 )
+
+// dimSGR returns the ANSI dim SGR code, or empty string in monochrome mode.
+func dimSGR() string {
+	if theme.IsMonochrome() {
+		return ""
+	}
+	return "\x1b[2m"
+}
+
+func pickerReset() string {
+	if theme.IsMonochrome() {
+		return ""
+	}
+	return "\x1b[0m"
+}
 
 // pickerTint wraps s in the named theme foreground color. Respects NO_COLOR.
 func pickerTint(s, color string) string {
@@ -43,6 +57,7 @@ type filePickerSearchState struct {
 	smartCase bool
 	matches   []pickerMatch
 	current   int
+	truncated bool
 }
 
 type pickerMatch struct {
@@ -55,9 +70,9 @@ type pickerInputKind int
 
 const (
 	inputKindNone     pickerInputKind = iota
-	inputKindFilename                // editing the save-as filename
-	inputKindSearch                  // typing a search query for the listing
-	inputKindNewDir                  // typing a new directory name
+	inputKindFilename                 // editing the save-as filename
+	inputKindSearch                   // typing a search query for the listing
+	inputKindNewDir                   // typing a new directory name
 )
 
 // FilePickerContext renders the filesystem path picker as a centered
@@ -82,6 +97,9 @@ type FilePickerContext struct {
 	inputKind    pickerInputKind
 	errMsg       string
 
+	sortOrder int
+	nowFunc   func() time.Time
+
 	listingOffset int
 
 	onConfirm func(string)
@@ -94,7 +112,7 @@ type FilePickerContext struct {
 
 // NewFilePickerContext builds a FilePickerContext bound to FILE_PICKER.
 func NewFilePickerContext(base BaseContext, deps Deps) *FilePickerContext {
-	return &FilePickerContext{BaseContext: base, deps: deps}
+	return &FilePickerContext{BaseContext: base, deps: deps, nowFunc: time.Now}
 }
 
 // SetFs installs the filesystem abstraction. Must be called before Push.
@@ -116,6 +134,10 @@ func (f *FilePickerContext) Push(mode PickerMode, startPath string, onConfirm fu
 	f.inputKind = inputKindNone
 	f.errMsg = ""
 	f.listingOffset = 0
+	f.sortOrder = 0
+	if f.nowFunc == nil {
+		f.nowFunc = time.Now
+	}
 	if mode == PickerSave && startPath != "" {
 		base := filepath.Base(startPath)
 		if base != "." && base != string(filepath.Separator) && base != "" {
@@ -146,14 +168,24 @@ func (f *FilePickerContext) NavigateTo(path string) {
 		return
 	}
 	f.items = make([]models.FSEntry, 0, len(entries))
+	lst, lstOk := f.fs.(afero.Lstater)
 	for _, e := range entries {
 		if !f.showHidden && strings.HasPrefix(e.Name(), ".") {
 			continue
+		}
+		isSymlink := false
+		if lstOk {
+			entryPath := filepath.Join(resolved, e.Name())
+			info, _, lerr := lst.LstatIfPossible(entryPath)
+			if lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+				isSymlink = true
+			}
 		}
 		f.items = append(f.items, models.FSEntry{
 			Name:      e.Name(),
 			Path:      filepath.Join(resolved, e.Name()),
 			IsDir:     e.IsDir(),
+			IsSymlink: isSymlink,
 			SizeBytes: e.Size(),
 			ModTime:   e.ModTime(),
 		})
@@ -161,6 +193,16 @@ func (f *FilePickerContext) NavigateTo(path string) {
 	sort.Slice(f.items, func(i, j int) bool {
 		if f.items[i].IsDir != f.items[j].IsDir {
 			return f.items[i].IsDir
+		}
+		switch f.sortOrder {
+		case 1: // size descending
+			if f.items[i].SizeBytes != f.items[j].SizeBytes {
+				return f.items[i].SizeBytes > f.items[j].SizeBytes
+			}
+		case 2: // modified descending
+			if !f.items[i].ModTime.Equal(f.items[j].ModTime) {
+				return f.items[i].ModTime.After(f.items[j].ModTime)
+			}
 		}
 		return strings.ToLower(f.items[i].Name) < strings.ToLower(f.items[j].Name)
 	})
@@ -308,8 +350,33 @@ func (f *FilePickerContext) resolveConfirmPath() string {
 
 // ToggleHidden flips the show-hidden flag and refreshes the listing.
 func (f *FilePickerContext) ToggleHidden() {
+	saved := f.Selected().Path
 	f.showHidden = !f.showHidden
 	f.Refresh()
+	if saved != "" {
+		for i, item := range f.items {
+			if item.Path == saved {
+				f.cursor = i
+				return
+			}
+		}
+	}
+}
+
+// CycleSort cycles through sort orders: name → size → modified → name.
+func (f *FilePickerContext) CycleSort() {
+	f.sortOrder = (f.sortOrder + 1) % 3
+	f.ClearSearch()
+	f.Refresh()
+}
+
+// NavigateHome navigates to the current user's home directory.
+func (f *FilePickerContext) NavigateHome() {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = "/"
+	}
+	f.NavigateTo(home)
 }
 
 // SetView records the gocui view the layout pass passes in each frame.
@@ -555,13 +622,21 @@ func (f *FilePickerContext) SetSearch(query string) {
 	}
 	smartCase := railQueryIsCaseSensitive(query)
 	matches := make([]pickerMatch, 0)
+	truncated := false
 	for i, item := range f.items {
 		for _, span := range railSubstringMatches(item.Name, query, smartCase) {
+			if len(matches) >= 200 {
+				truncated = true
+				break
+			}
 			matches = append(matches, pickerMatch{
 				RowIndex:  i,
 				ByteStart: span[0],
 				ByteEnd:   span[1],
 			})
+		}
+		if truncated {
+			break
 		}
 	}
 	current := pickerFirstMatchAtOrAfter(matches, f.cursor)
@@ -570,6 +645,7 @@ func (f *FilePickerContext) SetSearch(query string) {
 		smartCase: smartCase,
 		matches:   matches,
 		current:   current,
+		truncated: truncated,
 	}
 	if len(matches) > 0 && current >= 0 && current < len(matches) {
 		f.SetCursor(matches[current].RowIndex)
@@ -612,31 +688,30 @@ func (f *FilePickerContext) ClearSearch() { f.search = filePickerSearchState{} }
 // SearchActive reports whether a search is active.
 func (f *FilePickerContext) SearchActive() bool { return f.search.query != "" }
 
-// SearchStatus reports the 1-based match index and total count.
-func (f *FilePickerContext) SearchStatus() (cur, total int) {
+// SearchStatus reports the 1-based match index, total count, and whether
+// results were truncated.
+func (f *FilePickerContext) SearchStatus() (cur, total int, truncated bool) {
 	total = len(f.search.matches)
 	if total > 0 && f.search.current >= 0 && f.search.current < total {
 		cur = f.search.current + 1
 	}
+	truncated = f.search.truncated
 	return
 }
 
 // SetViewSize records the viewport dimensions the layout pass computed.
 func (f *FilePickerContext) SetViewSize(w, h int) { f.viewW = w; f.viewH = h }
 
-// HandleRender computes the visible listing window from the view height,
-// adjusts the listing offset to keep the cursor visible, renders the
-// body, and writes it to the view. No gocui scroll needed — the rendering
-// fits exactly into the viewport with the footer pinned to the bottom.
-func (f *FilePickerContext) HandleRender() error {
-	// Calculate available lines for the listing.
+// maxVisibleItems returns the number of listing entries that can fit
+// within the current viewport after reserving space for headers and footer.
+func (f *FilePickerContext) maxVisibleItems() int {
 	innerH := 20
 	if f.view != nil {
 		if h := f.view.InnerHeight(); h > 0 {
 			innerH = h
 		}
 	}
-	headerLines := 1 // breadcrumb
+	headerLines := 1
 	if f.errMsg != "" {
 		headerLines++
 	}
@@ -645,6 +720,19 @@ func (f *FilePickerContext) HandleRender() error {
 	if maxVisible < 1 {
 		maxVisible = 1
 	}
+	return maxVisible
+}
+
+// HandleRender computes the visible listing window from the view height,
+// adjusts the listing offset to keep the cursor visible, renders the
+// body, and writes it to the view. No gocui scroll needed — the rendering
+// fits exactly into the viewport with the footer pinned to the bottom.
+func (f *FilePickerContext) HandleRender() error {
+	headerLines := 1
+	if f.errMsg != "" {
+		headerLines++
+	}
+	maxVisible := f.maxVisibleItems()
 
 	if len(f.items) > 0 {
 		if f.cursor < f.listingOffset {
@@ -670,10 +758,6 @@ func (f *FilePickerContext) HandleRender() error {
 		return f.deps.GuiDriver.SetContent(viewName, body)
 	})
 
-	// Position the hardware caret at the end of the filename in the
-	// footer. gocui's DefaultEditor calls RenderTextArea on every
-	// keystroke, which clears the view and positions the cursor at
-	// (0,0). We correct it here so the caret appears in the footer.
 	if f.inputFocused && f.view != nil && f.view.TextArea != nil && f.deps.GuiDriver != nil {
 		cursorX, _ := f.view.TextArea.GetCursorXY()
 		caretX := cursorX
@@ -707,21 +791,7 @@ func (f *FilePickerContext) RenderBody() string {
 		b.WriteByte('\n')
 	}
 
-	innerH := 20
-	if f.view != nil {
-		if h := f.view.InnerHeight(); h > 0 {
-			innerH = h
-		}
-	}
-	headerLines := 1
-	if f.errMsg != "" {
-		headerLines++
-	}
-	footerLines := f.footerLineCount()
-	maxVisible := innerH - headerLines - footerLines
-	if maxVisible < 1 {
-		maxVisible = 1
-	}
+	maxVisible := f.maxVisibleItems()
 
 	end := f.listingOffset + maxVisible
 	if end > len(f.items) {
@@ -743,14 +813,47 @@ func (f *FilePickerContext) RenderBody() string {
 }
 
 func (f *FilePickerContext) renderBreadcrumb() string {
-	return "  " + pickerDimSGR + f.currentPath + pickerReset
+	modeLabel := "Open"
+	if f.mode == PickerSave {
+		modeLabel = "Save"
+	}
+	path := grid.SanitizeCellEscapes(f.currentPath)
+	suffix := ""
+	if f.showHidden {
+		suffix = " [H]"
+	}
+	full := modeLabel + ":  " + dimSGR() + path + suffix + pickerReset()
+
+	// Left-truncation if total exceeds view width
+	maxW := f.viewW - 2
+	if maxW > 0 && len(full) > maxW {
+		// Preserve at least 3 rightmost components
+		parts := strings.Split(path, string(filepath.Separator))
+		keep := parts
+		if len(parts) > 3 {
+			keep = parts[len(parts)-3:]
+		}
+		truncPath := "..." + strings.Join(keep, string(filepath.Separator))
+		truncFull := modeLabel + ":  " + dimSGR() + truncPath + suffix + pickerReset()
+		// If still too long, show just "..."
+		for len(truncFull) > maxW && len(keep) > 0 {
+			keep = keep[1:]
+			truncPath = "..." + strings.Join(keep, string(filepath.Separator))
+			truncFull = modeLabel + ":  " + dimSGR() + truncPath + suffix + pickerReset()
+		}
+		if len(truncFull) > maxW {
+			truncFull = modeLabel + ":  " + dimSGR() + "..." + suffix + pickerReset()
+		}
+		return truncFull
+	}
+	return full
 }
 
 func (f *FilePickerContext) renderListing(start, end int) string {
 	if len(f.items) == 0 {
 		if f.errMsg == "" {
 			if start == 0 {
-				return "  " + pickerDimSGR + "(empty directory)" + pickerReset
+				return "  " + dimSGR() + "(empty directory)" + pickerReset()
 			}
 		}
 		return ""
@@ -775,6 +878,11 @@ func (f *FilePickerContext) renderListing(start, end int) string {
 	if avail < 20 {
 		avail = 20
 	}
+	nowFunc := f.nowFunc
+	if nowFunc == nil {
+		nowFunc = time.Now
+	}
+	now := nowFunc()
 	t := theme.Current()
 	for i := start; i < end; i++ {
 		if i > start {
@@ -787,27 +895,54 @@ func (f *FilePickerContext) renderListing(start, end int) string {
 		} else {
 			b.WriteString("  ")
 		}
-		name := item.Name
+
+		name := grid.SanitizeCellEscapes(item.Name)
+
 		indicator := ""
+		if item.IsSymlink && item.IsDir {
+			indicator = "@/"
+		} else if item.IsSymlink {
+			indicator = "@"
+		} else if item.IsDir {
+			indicator = "/"
+		}
+
+		isSQL := strings.HasSuffix(strings.ToLower(item.Name), ".sql")
+		dimmed := f.mode == PickerOpen && !item.IsDir && !isSQL
+
 		nameColor := ""
 		if item.IsDir {
-			indicator = "/"
 			nameColor = t.Info.Fg
 		}
+
 		display := truncateDisplay(name, indicator, maxNameW, avail)
 		if isCursor {
 			b.WriteString(pickerTint(display, t.PopupBorder.Fg))
 		} else if item.IsDir {
 			b.WriteString(pickerTint(display, nameColor))
+		} else if dimmed {
+			b.WriteString(dimSGR() + display + pickerReset())
 		} else {
 			b.WriteString(display)
 		}
 
 		if !item.IsDir {
 			sizeStr := formatSize(item.SizeBytes)
-			padding := avail - len(display) - len(sizeStr)
+			modStr := ""
+			if !item.ModTime.IsZero() {
+				if item.ModTime.YearDay() == now.YearDay() && item.ModTime.Year() == now.Year() {
+					modStr = item.ModTime.Format("15:04")
+				} else {
+					modStr = item.ModTime.Format("Jan 02")
+				}
+			}
+			metaWidth := len(sizeStr)
+			if modStr != "" {
+				metaWidth += len(modStr) + 1
+			}
+			padding := avail - len(display) - metaWidth
 			if padding < 0 {
-				target := avail - len(sizeStr)
+				target := avail - metaWidth
 				if target < 3 {
 					target = 3
 				}
@@ -817,7 +952,11 @@ func (f *FilePickerContext) renderListing(start, end int) string {
 			if padding > 0 {
 				b.WriteString(strings.Repeat(" ", padding))
 			}
-			b.WriteString(pickerDimSGR + sizeStr + pickerReset)
+			if modStr != "" {
+				b.WriteString(dimSGR() + sizeStr + " " + modStr + pickerReset())
+			} else {
+				b.WriteString(dimSGR() + sizeStr + pickerReset())
+			}
 		}
 	}
 	return b.String()
@@ -839,13 +978,21 @@ func truncateDisplay(name, indicator string, maxNameW, avail int) string {
 	if len(name)+len(suffix) <= avail {
 		return name + suffix
 	}
-	// If the name fits but the suffix doesn't fully, truncate name to fit both
 	space := avail - len(suffix)
 	if space < 1 {
-		return name[:avail]
+		if avail < 1 {
+			avail = 1
+		}
+		if len(name) > avail {
+			return name[:avail]
+		}
+		return name
 	}
 	if len(name) > space {
-		return name[:space-1] + "~" + suffix
+		if space >= 2 {
+			return name[:space-1] + "~" + suffix
+		}
+		return name[:space] + suffix
 	}
 	return name + suffix
 }
@@ -869,9 +1016,9 @@ func (f *FilePickerContext) footerLineCount() int {
 		return 2
 	}
 	if f.mode == PickerSave {
-		return 2
+		return 3
 	}
-	return 1
+	return 2
 }
 
 func (f *FilePickerContext) renderFooter() string {
@@ -879,29 +1026,82 @@ func (f *FilePickerContext) renderFooter() string {
 	switch {
 	case f.inputFocused && f.inputKind == inputKindSearch:
 		b.WriteString("> Search: ")
-		b.WriteString(f.Buffer())
+		b.WriteString(grid.SanitizeCellEscapes(f.Buffer()))
 		b.WriteByte('\n')
-		b.WriteString("  " + pickerDimSGR + "Enter: search  Esc: cancel" + pickerReset)
+		b.WriteString("  " + dimSGR() + "Enter: search  Esc: cancel" + pickerReset())
 	case f.inputFocused && f.inputKind == inputKindNewDir:
 		b.WriteString("> New directory: ")
-		b.WriteString(f.Buffer())
+		b.WriteString(grid.SanitizeCellEscapes(f.Buffer()))
 		b.WriteByte('\n')
-		b.WriteString("  " + pickerDimSGR + "Enter: create  Esc: cancel" + pickerReset)
+		b.WriteString("  " + dimSGR() + "Enter: create  Esc: cancel" + pickerReset())
 	case f.mode == PickerSave:
+		filename := grid.SanitizeCellEscapes(f.Buffer())
 		if f.inputFocused {
 			b.WriteString("> File name: ")
 		} else {
 			b.WriteString("  File name: ")
 		}
-		b.WriteString(f.Buffer())
+		b.WriteString(filename)
+		b.WriteByte('\n')
+		preview := "  " + dimSGR() + "→ " + f.currentPath
+		if filename != "" {
+			preview += string(filepath.Separator) + filename
+		}
+		preview += pickerReset()
+		// Truncate preview when too long
+		if f.viewW > 0 && len(preview) > f.viewW-2 {
+			trimmed := "  " + dimSGR() + "→ .../"
+			if filename != "" {
+				trimmed += filename
+			}
+			trimmed += pickerReset()
+			preview = trimmed
+		}
+		b.WriteString(preview)
 		b.WriteByte('\n')
 		if f.inputFocused {
-			b.WriteString("  " + pickerDimSGR + "Enter: confirm  Esc: browse  Ctrl+h: backspace" + pickerReset)
+			b.WriteString("  " + dimSGR() + "Enter: confirm  Esc: browse  Ctrl+h: backspace" + pickerReset())
 		} else {
-			b.WriteString("  " + pickerDimSGR + "j/k: navigate  i: edit name  h/bs: up  q: cancel" + pickerReset)
+			b.WriteString("  " + dimSGR() + "j/k: navigate  i: edit name  h/bs: up  q: cancel" + pickerReset())
 		}
 	default:
-		b.WriteString("  " + pickerDimSGR + "j/k: navigate  h/bs: up  Enter: select  q: cancel" + pickerReset)
+		b.WriteString(f.renderFooterHints())
+		b.WriteByte('\n')
+		b.WriteString(f.renderFooterActions())
 	}
 	return b.String()
+}
+
+func (f *FilePickerContext) renderFooterHints() string {
+	hints := "  " + dimSGR() + "j/k: navigate  h/bs: up  Enter: select  q: cancel" + pickerReset()
+	if f.SearchActive() && !f.inputFocused {
+		cur, total, truncated := f.SearchStatus()
+		var counter string
+		if truncated {
+			counter = fmt.Sprintf("%d/200+", cur)
+		} else {
+			counter = fmt.Sprintf("%d/%d", cur, total)
+		}
+		// Right-align counter
+		if f.viewW > 0 {
+			padLen := f.viewW - len(hints) + len(dimSGR()) + len(pickerReset())
+			padLen -= len(counter)
+			if padLen > 1 {
+				hints = "  " + dimSGR() + "j/k: navigate  h/bs: up  Enter: select  q: cancel" +
+					strings.Repeat(" ", padLen) + counter + pickerReset()
+			}
+		}
+	}
+	return hints
+}
+
+func (f *FilePickerContext) renderFooterActions() string {
+	sortLabel := "name"
+	switch f.sortOrder {
+	case 1:
+		sortLabel = "size"
+	case 2:
+		sortLabel = "modified"
+	}
+	return "  " + dimSGR() + "a: new dir  H: home  s: sort  .: hidden  sort: " + sortLabel + pickerReset()
 }

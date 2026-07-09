@@ -3411,8 +3411,7 @@ func (h *ResultTabsHelper) ExportMenuEditPath() {
 
 	if openPicker != nil {
 		onCancel := func() error { return reopen() }
-		var onConfirm func(string) error
-		onConfirm = func(value string) error {
+		onConfirm := func(value string) error {
 			value = strings.TrimSpace(value)
 			if err := validateExportPath(value); err != nil {
 				h.toast(err.Error())

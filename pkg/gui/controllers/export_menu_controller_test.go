@@ -57,19 +57,20 @@ func TestExportMenuController_EditPathDispatches(t *testing.T) {
 // TestExportMenu_IsPathFieldActive verifies the predicate is true only when
 // the Path row is the cursor AND the destination is File.
 func TestExportMenu_IsPathFieldActive(t *testing.T) {
-	m := popup.NewExportMenu([]string{"CSV"}, []string{"File", "Clipboard"}, []string{"Buffered"}, -1, false)
+	m := popup.NewExportMenu([]string{"CSV"}, []string{"Clipboard", "File"}, []string{"Buffered"}, -1, false)
 	if m.IsPathFieldActive() {
 		t.Error("IsPathFieldActive true on FieldFormat")
 	}
-	m.MoveField(+1) // Destination
-	m.MoveField(+1) // Path
+	// File is default (idx 1). Navigate to Path.
+	m.MoveField(+1) // Format → Destination
+	m.MoveField(+1) // Destination → Path
 	if !m.IsPathFieldActive() {
 		t.Error("IsPathFieldActive false on FieldPath/File")
 	}
-	// Switch destination to Clipboard (from the Destination row): Path is
-	// no longer File-only-visible, so the predicate must be false.
+	// Switch destination to Clipboard: Path is no longer visible, so
+	// the predicate must be false.
 	m.MoveField(-1) // back to Destination
-	m.MoveValue(+1) // Clipboard
+	m.MoveValue(-1) // Clipboard (idx 0)
 	m.MoveField(+1) // would-be Path; skips since Path hidden under Clipboard
 	if m.IsPathFieldActive() {
 		t.Error("IsPathFieldActive true after switching to Clipboard")

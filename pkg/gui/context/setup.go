@@ -294,7 +294,7 @@ func contextSpecs() []contextSpec {
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.HideOverlay = c.(*HideOverlayContext) },
 		},
 		{
-			key: types.EXPORT_MENU, kind: types.TEMPORARY_POPUP, inFlatten: true,
+			key: types.EXPORT_MENU, kind: types.TEMPORARY_POPUP, inFlatten: true, title: "Export result",
 			popupRect: types.PopupRectSpec{Kind: types.PopupSizeCentered, WidthFrac: 0.5, HeightFrac: 0.5},
 			build:     func(b BaseContext, d types.ContextTreeDeps) types.IBaseContext { return NewExportMenuContext(b, d) },
 			assign:    func(t *ContextTree, c types.IBaseContext) { t.ExportMenu = c.(*ExportMenuContext) },

@@ -290,6 +290,26 @@ editor.repeat
 editor.paste
 ```
 
+### File picker action IDs
+
+```action-ids
+file_picker.up
+file_picker.down
+file_picker.jump_first
+file_picker.jump_last
+file_picker.confirm
+file_picker.ascend
+file_picker.cancel
+file_picker.search
+file_picker.search_next
+file_picker.search_prev
+file_picker.hidden
+file_picker.new_dir
+file_picker.sort
+file_picker.home
+file_picker.focus_input
+```
+
 ---
 
 ## Recovering from a lockout

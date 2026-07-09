@@ -22,8 +22,8 @@ func TestExportMenu_InitialState(t *testing.T) {
 	if m.Field() != FieldFormat {
 		t.Errorf("default field = %v; want FieldFormat", m.Field())
 	}
-	if m.FormatIdx() != 0 || m.DestinationIdx() != 0 || m.ScopeIdx() != 0 {
-		t.Errorf("default indexes = (%d,%d,%d); want (0,0,0)", m.FormatIdx(), m.DestinationIdx(), m.ScopeIdx())
+	if m.FormatIdx() != 0 || m.DestinationIdx() != 1 || m.ScopeIdx() != 0 {
+		t.Errorf("default indexes = (%d,%d,%d); want (0,1,0)", m.FormatIdx(), m.DestinationIdx(), m.ScopeIdx())
 	}
 }
 
@@ -307,29 +307,29 @@ func TestExportMenu_Path_RenderedOnlyForFileDestination(t *testing.T) {
 	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
 	m.Prefill("/tmp/a.csv")
 
-	// Clipboard is default (idx 0) — Path row is hidden.
+	// File is default (idx 1) — Path row is visible.
 	body := m.Body()
-	if strings.Contains(body, "Path:") {
-		t.Errorf("Clipboard destination body should omit Path row: %q", body)
-	}
-
-	// Switch Destination → File (idx 1).
-	m.MoveField(+1) // → FieldDestination
-	m.MoveValue(+1) // → File
-	if m.DestinationLabel() != "File" {
-		t.Fatalf("setup: DestinationLabel = %q; want File", m.DestinationLabel())
-	}
-	body = m.Body()
 	if !strings.Contains(body, "Path:        /tmp/a.csv") {
 		t.Errorf("File destination body should render Path row: %q", body)
+	}
+
+	// Switch Destination → Clipboard (idx 0).
+	m.MoveField(+1) // → FieldDestination
+	m.MoveValue(-1) // → Clipboard
+	if m.DestinationLabel() != "Clipboard" {
+		t.Fatalf("setup: DestinationLabel = %q; want Clipboard", m.DestinationLabel())
+	}
+	body = m.Body()
+	if strings.Contains(body, "Path:") {
+		t.Errorf("Clipboard destination body should omit Path row: %q", body)
 	}
 }
 
 func TestExportMenu_Path_SkippedInNavForClipboard(t *testing.T) {
 	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
-	// Clipboard is default (idx 0) — Path row is hidden.
-	// Move to Destination (still Clipboard) and then down; Path must be skipped.
+	// File is default (idx 1). Switch to Clipboard so Path is hidden.
 	m.MoveField(+1) // → FieldDestination
+	m.MoveValue(-1) // → Clipboard
 	m.MoveField(+1)
 	if m.Field() != FieldScope {
 		t.Errorf("MoveField(+1) from Destination with Clipboard = %v; want FieldScope (Path skipped)", m.Field())
@@ -371,7 +371,8 @@ func TestExportMenu_SetScopeDescriptions_RendersDescription(t *testing.T) {
 		t.Errorf("body should render scope description: %q", body)
 	}
 
-	// Navigate to Scope field — description prefix should become "> ".
+	// Navigate to Scope field — label prefix should become "> ", but the
+	// description continuation line stays at "  " (no cursor marker).
 	for range 3 {
 		m.MoveField(+1)
 	}
@@ -394,7 +395,8 @@ func TestExportMenu_SetScopeDescriptions_CycleUpdatesDescription(t *testing.T) {
 		"Buffered desc.",
 		"All-rows desc.",
 	})
-	// Navigate to Scope.
+	// Navigate to Scope (with File default, Path is visible: Format→Destination→Path→Scope).
+	m.MoveField(+1)
 	m.MoveField(+1)
 	m.MoveField(+1)
 	if m.Field() != FieldScope {
