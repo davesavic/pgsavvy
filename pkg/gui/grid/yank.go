@@ -297,7 +297,8 @@ func buildTSV(snap viewSnapshot) string {
 }
 
 // buildYankJSON returns a JSON array of objects. Each object maps column
-// names to string cell values (via renderCellPlain).
+// names to cell values: null for SQL NULL, string via renderCellPlain
+// otherwise.
 func buildYankJSON(snap viewSnapshot, r0, c0, r1, c1 int) string {
 	var sb strings.Builder
 	sb.WriteString("[")
@@ -318,7 +319,11 @@ func buildYankJSON(snap viewSnapshot, r0, c0, r1, c1 int) string {
 			if c < len(row.Values) {
 				cellVal = row.Values[c]
 			}
-			sb.WriteString(jsonString(renderCellPlain(cellVal, snap.cols[c])))
+			if cellVal == nil {
+				sb.WriteString("null")
+			} else {
+				sb.WriteString(jsonString(renderCellPlain(cellVal, snap.cols[c])))
+			}
 		}
 		sb.WriteString("\n  }")
 	}
@@ -327,7 +332,8 @@ func buildYankJSON(snap viewSnapshot, r0, c0, r1, c1 int) string {
 }
 
 // buildYankNDJSON returns newline-delimited JSON objects, one per row.
-// Each object maps column names to string cell values.
+// Each object maps column names to cell values: null for SQL NULL,
+// string via renderCellPlain otherwise.
 func buildYankNDJSON(snap viewSnapshot, r0, c0, r1, c1 int) string {
 	var sb strings.Builder
 	for r := r0; r <= r1; r++ {
@@ -346,7 +352,11 @@ func buildYankNDJSON(snap viewSnapshot, r0, c0, r1, c1 int) string {
 			if c < len(row.Values) {
 				cellVal = row.Values[c]
 			}
-			sb.WriteString(jsonString(renderCellPlain(cellVal, snap.cols[c])))
+			if cellVal == nil {
+				sb.WriteString("null")
+			} else {
+				sb.WriteString(jsonString(renderCellPlain(cellVal, snap.cols[c])))
+			}
 		}
 		sb.WriteString("}")
 	}

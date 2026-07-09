@@ -320,3 +320,65 @@ func TestYankRowWithHeaders_TSV(t *testing.T) {
 	require.Equal(t, "c0\tc1\tc2\nd\te\tf", val)
 	require.Equal(t, val, rc.lastWrite())
 }
+
+func TestYankSelection_JSON_NULL_BecomesJSONNull(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{
+		{Name: "c0", TypeName: "text"},
+		{Name: "c1", TypeName: "int4"},
+	})
+	v.AppendRows([]models.Row{
+		{Values: []any{"hello", nil}},
+	})
+	v.SetYankFormat("json")
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.EnterRowMode()
+
+	val, ok, err := v.YankSelection()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "[\n  {\n    \"c0\": \"hello\",\n    \"c1\": null\n  }\n]", val)
+	require.Equal(t, val, rc.lastWrite())
+}
+
+func TestYankSelection_NDJSON_NULL_BecomesJSONNull(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{
+		{Name: "c0", TypeName: "text"},
+		{Name: "c1", TypeName: "int4"},
+	})
+	v.AppendRows([]models.Row{
+		{Values: []any{"hello", nil}},
+	})
+	v.SetYankFormat("ndjson")
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+	v.EnterRowMode()
+
+	val, ok, err := v.YankSelection()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "{\"c0\":\"hello\",\"c1\":null}", val)
+	require.Equal(t, val, rc.lastWrite())
+}
+
+func TestYankRowWithHeaders_JSON_NULL_BecomesJSONNull(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{
+		{Name: "c0", TypeName: "text"},
+		{Name: "c1", TypeName: "int4"},
+	})
+	v.AppendRows([]models.Row{
+		{Values: []any{"hello", nil}},
+	})
+	v.SetYankFormat("json")
+	rc := &recordingClipboard{}
+	v.SetClipboard(rc)
+
+	val, ok, err := v.YankRowWithHeaders()
+	require.True(t, ok)
+	require.NoError(t, err)
+	require.Equal(t, "[\n  {\n    \"c0\": \"hello\",\n    \"c1\": null\n  }\n]", val)
+	require.Equal(t, val, rc.lastWrite())
+}
