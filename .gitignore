@@ -19,6 +19,9 @@ coverage.html
 .idea/
 .vscode/
 
+# Nix
+/result
+
 # OS
 .DS_Store
 *.swp
