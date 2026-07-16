@@ -46,6 +46,27 @@ chmod +x pgsavvy
 mv pgsavvy ~/.local/bin/   # or anywhere on your PATH
 ```
 
+### Nix
+
+```sh
+nix run github:davesavic/pgsavvy -- --version    # try it without installing
+nix profile install github:davesavic/pgsavvy       # install to profile
+```
+
+Or add it to your NixOS / home-manager flake inputs:
+
+```nix
+inputs.pgsavvy.url = "github:davesavic/pgsavvy";
+```
+
+The flake provides a statically-linked binary built with Go 1.26, a `devShell`
+with all dev tools (`nix develop`), and `nix flake check` verifies the build.
+
+> **Note:** Nix-managed installs live under `/nix/store` and are read-only.
+> `pgsavvy update` detects this and correctly refuses, deferring to Nix for
+> upgrades. Run `nix profile upgrade pgsavvy` or `nix flake update` to get
+> the latest version.
+
 ## Updating (`pgsavvy update`)
 
 A release binary can update itself in place:
