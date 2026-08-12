@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -197,6 +198,115 @@ func TestMasterEditor_FlushOnInsertTimeout(t *testing.T) {
 		}
 	case <-time.After(300 * time.Millisecond):
 		t.Fatal("matcher never invoked insert-pending-flush within 300ms")
+	}
+}
+
+// TestMasterEditor_PasteSuppressesCommitChord reproduces pgsavvy-v511:
+// a bracketed paste streams keys into an editable popup while
+// gocui.IsPasting is true. A newline in the pasted text arrives as
+// KeyEnter, which the CELL_EDITOR insert-mode trie binds to
+// cell.edit.commit — firing it mid-paste commits a partial value,
+// pops the popup, and lets the remaining pasted keys dispatch as
+// normal-mode actions. While the paste is in flight the master editor
+// must swallow Enter/Esc instead of dispatching; once the paste ends
+// the same key must dispatch normally.
+func TestMasterEditor_PasteSuppressesCommitChord(t *testing.T) {
+	var fired atomic.Int32
+	cmd := &commands.Command{
+		ID: "cell.edit.commit",
+		Handler: func(_ commands.ExecCtx) error {
+			fired.Add(1)
+			return nil
+		},
+	}
+	ts := buildSingleBindingTrieSet([]keys.Key{{Special: keys.KeyEnter}}, types.ModeInsert, types.CELL_EDITOR, cmd)
+
+	pasting := true
+	store := keys.NewModeStore()
+	store.Set(types.CELL_EDITOR, types.ModeInsert)
+	m, err := keys.NewMatcher(ts, keys.MatcherConfig{
+		Modes:       store,
+		TimeoutLen:  50 * time.Millisecond,
+		TtimeoutLen: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewMatcher: %v", err)
+	}
+	ed := orchestrator.NewMasterEditor(nil, m, types.CELL_EDITOR, orchestrator.WithPasteState(func() bool { return pasting }))
+	disp, ok := ed.(orchestrator.Dispatcher)
+	if !ok {
+		t.Fatalf("master editor does not implement orchestrator.Dispatcher")
+	}
+
+	// Paste in flight: Enter must be swallowed, the commit handler must
+	// NOT fire, and the Matcher must not retain pending state.
+	res, err := disp.Dispatch(nil, gocui.NewKeyName(gocui.KeyEnter))
+	if err != nil {
+		t.Fatalf("Dispatch Enter during paste: %v", err)
+	}
+	if res != keys.Swallowed {
+		t.Fatalf("res during paste = %v, want Swallowed", res)
+	}
+	if got := fired.Load(); got != 0 {
+		t.Fatalf("commit fired %d times during paste, want 0", got)
+	}
+	if m.IsPartial() {
+		t.Fatal("matcher holds pending state after paste-swallowed Enter")
+	}
+
+	// Escape is the other commit chord in the cell editor — also inert
+	// while pasting.
+	res, err = disp.Dispatch(nil, gocui.NewKeyName(gocui.KeyEsc))
+	if err != nil {
+		t.Fatalf("Dispatch Esc during paste: %v", err)
+	}
+	if res != keys.Swallowed {
+		t.Fatalf("res for Esc during paste = %v, want Swallowed", res)
+	}
+
+	// Paste ends: the same Enter now dispatches the commit binding.
+	pasting = false
+	res, err = disp.Dispatch(nil, gocui.NewKeyName(gocui.KeyEnter))
+	if err != nil {
+		t.Fatalf("Dispatch Enter after paste: %v", err)
+	}
+	if res != keys.Dispatched {
+		t.Fatalf("res after paste = %v, want Dispatched", res)
+	}
+	if got := fired.Load(); got != 1 {
+		t.Fatalf("commit fired %d times after paste, want 1", got)
+	}
+}
+
+// TestMasterEditor_PastePrintableRunesStillInsert verifies the paste
+// guard is narrow: while pasting, printable runes must still reach
+// the TextArea via the normal passthrough path.
+func TestMasterEditor_PastePrintableRunesStillInsert(t *testing.T) {
+	store := keys.NewModeStore()
+	store.Set(types.CELL_EDITOR, types.ModeInsert)
+	m, err := keys.NewMatcher(keys.NewTrieSet(), keys.MatcherConfig{
+		Modes:       store,
+		TimeoutLen:  50 * time.Millisecond,
+		TtimeoutLen: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewMatcher: %v", err)
+	}
+	ed := orchestrator.NewMasterEditor(nil, m, types.CELL_EDITOR, orchestrator.WithPasteState(func() bool { return true }))
+	disp, ok := ed.(orchestrator.Dispatcher)
+	if !ok {
+		t.Fatalf("master editor does not implement orchestrator.Dispatcher")
+	}
+	v := gocui.NewView("test", 0, 0, 10, 10, gocui.OutputNormal)
+	res, err := disp.Dispatch(v, gocui.NewKeyRune('x'))
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if res != keys.Passthrough {
+		t.Fatalf("res = %v, want Passthrough", res)
+	}
+	if got := v.TextArea.GetContent(); got != "x" {
+		t.Errorf("TextArea content = %q, want %q", got, "x")
 	}
 }
 

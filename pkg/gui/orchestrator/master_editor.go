@@ -66,6 +66,17 @@ func WithEmergencyQuit(fn func() error) MasterEditorOption {
 	}
 }
 
+// WithPasteState injects the paste-in-flight predicate the editor
+// consults to suppress commit chords (Enter/Esc) during a bracketed
+// paste (pgsavvy-v511). Defaults to reading the live gocui.Gui.IsPasting
+// flag; the option exists so tests can drive the guard without a real
+// *gocui.Gui. nil disables the override (production default).
+func WithPasteState(fn func() bool) MasterEditorOption {
+	return func(e *masterEditor) {
+		e.pasteState = fn
+	}
+}
+
 // Dispatcher is the side-channel a master Editor exposes so test
 // harnesses (testfake.RecorderGuiDriver.FeedChord) can drive a chord
 // sequence through the editor and observe the raw keys.DispatchResult
@@ -125,6 +136,9 @@ type masterEditor struct {
 	// emergencyQuit is the un-rebindable Ctrl-C escape hatch (R5). Invoked
 	// before matcher dispatch when the decoded key is Ctrl-C; nil disables.
 	emergencyQuit func() error
+	// pasteState overrides the paste-in-flight predicate (WithPasteState);
+	// nil falls back to reading the live gocui.Gui.IsPasting flag.
+	pasteState func() bool
 
 	mu           sync.Mutex
 	pendingRunes []rune
@@ -144,6 +158,15 @@ func (e *masterEditor) Edit(v *gocui.View, key gocui.Key) bool {
 		if errors.Is(e.emergencyQuit(), gocui.ErrQuit) && e.gui != nil {
 			e.gui.Update(func(*gocui.Gui) error { return gocui.ErrQuit })
 		}
+		return true
+	}
+	// pgsavvy-v511: while a bracketed paste is streaming keystrokes into
+	// this view, Enter/Esc must NOT dispatch — in the editable scopes they
+	// are commit/submit/accept chords, and firing them mid-paste commits a
+	// partial value, pops the popup, and lets the remaining pasted bytes
+	// dispatch as normal-mode actions. Swallow them; printable runes still
+	// flow through the normal dispatch path below.
+	if e.pasteInFlight() && isPasteInertKey(k) {
 		return true
 	}
 	start := time.Now()
@@ -175,6 +198,11 @@ func (e *masterEditor) Dispatch(v *gocui.View, key gocui.Key) (keys.DispatchResu
 	if isEmergencyQuitKey(k) && e.emergencyQuit != nil {
 		return keys.Dispatched, e.emergencyQuit()
 	}
+	// pgsavvy-v511: same mid-paste commit guard as Edit — Enter/Esc are
+	// swallowed while a paste is in flight (see Edit for the rationale).
+	if e.pasteInFlight() && isPasteInertKey(k) {
+		return keys.Swallowed, nil
+	}
 	start := time.Now()
 	result, err := e.matcher.Dispatch(e.scope, k)
 	e.applyResult(v, key, k, result)
@@ -187,6 +215,27 @@ func (e *masterEditor) Dispatch(v *gocui.View, key gocui.Key) (keys.DispatchResu
 // event decoded by KeyFromGocui into Key{Code:'c', Mod:ModCtrl} (R5).
 func isEmergencyQuitKey(k keys.Key) bool {
 	return k == ctrlCKey
+}
+
+// isPasteInertKey reports whether k must never dispatch while a
+// bracketed paste is streaming (pgsavvy-v511). Enter and Escape are
+// commit/submit/accept chords in the editable scopes (CELL_EDITOR,
+// PROMPT, SEARCH_LINE, COMMAND_LINE); firing them mid-paste commits a
+// partially-pasted value and pops the popup. Modifier-laden variants
+// are kept out so user bindings keep working outside paste.
+func isPasteInertKey(k keys.Key) bool {
+	return k.Mod == 0 && (k.Special == keys.KeyEnter || k.Special == keys.KeyEsc)
+}
+
+// pasteInFlight reports whether a bracketed paste is currently
+// streaming keystrokes into the view. gocui toggles Gui.IsPasting on
+// the EventPaste start/end pair; the injected WithPasteState override
+// wins when present (test path), otherwise the live flag is read.
+func (e *masterEditor) pasteInFlight() bool {
+	if e.pasteState != nil {
+		return e.pasteState()
+	}
+	return e.gui != nil && e.gui.IsPasting
 }
 
 // emitInputEvents emits the cat=input key + dispatch_result pair for a
