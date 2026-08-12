@@ -1441,11 +1441,12 @@ func (c *VimEditorController) applyPending(buf *editor.Buffer, r editor.Range, c
 // operator position for a mutating operator that applied over r (the
 // pre-apply range, already normalised). Single-line char-wise ranges
 // (dw, ciw, gUiw) land on the exact start column of the operated
-// range; linewise operators (> / <) and line-spanning ranges (dip, dG)
-// land on the first non-blank of the range's start line. The start
-// line is clamped to the post-apply buffer, and an all-blank start
-// line collapses to column 0. Yank never calls this — vim leaves the
-// cursor untouched after y.
+// range; linewise operators (> / <), LineWise ranges (dd/yy/cc/>>/<<,
+// V-mode selections) and line-spanning ranges (dip, dG) land on the
+// first non-blank of the range's start line. The start line is clamped
+// to the post-apply buffer, and an all-blank start line collapses to
+// column 0. Yank never calls this — vim leaves the cursor untouched
+// after y.
 func (c *VimEditorController) placeCursorAfterOperator(buf *editor.Buffer, spec operatorSpec, r editor.Range) {
 	line := r.Start.Line
 	if last := buf.LineCount() - 1; line > last {
@@ -1455,7 +1456,7 @@ func (c *VimEditorController) placeCursorAfterOperator(buf *editor.Buffer, spec 
 		return // empty buffer
 	}
 	col := r.Start.Col
-	if spec.linewise || r.Start.Line != r.End.Line {
+	if spec.linewise || r.LineWise || r.Start.Line != r.End.Line {
 		runes := buf.Lines[line].Runes
 		col = 0
 		for col < len(runes) && unicode.IsSpace(runes[col]) {
@@ -1562,6 +1563,13 @@ func (c *VimEditorController) operatorVisualApply(buf *editor.Buffer, spec opera
 		c.setMode(types.ModeNormal)
 		return err
 	}
+	// Vim parity: mutating visual operators land the cursor on the
+	// operated selection (selection start for charwise, first non-blank
+	// for linewise); yank leaves it untouched (see
+	// placeCursorAfterOperator).
+	if !spec.isYank {
+		c.placeCursorAfterOperator(buf, spec, sel)
+	}
 	if capture != "" {
 		c.writeRegister(ec.Register, capture)
 		c.mirrorYankToClipboard(spec.actionID, ec.Register, capture)
@@ -1605,6 +1613,11 @@ func (c *VimEditorController) operatorDoubledApply(buf *editor.Buffer, spec oper
 	if err != nil {
 		c.setMode(types.ModeNormal)
 		return err
+	}
+	// Vim parity: mutating operators land the cursor on the operated
+	// range; yank leaves it untouched (see placeCursorAfterOperator).
+	if !spec.isYank {
+		c.placeCursorAfterOperator(buf, spec, r)
 	}
 	if capture != "" {
 		c.writeRegister(ec.Register, capture)

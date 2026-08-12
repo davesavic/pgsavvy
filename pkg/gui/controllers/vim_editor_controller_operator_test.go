@@ -1376,6 +1376,187 @@ func TestIndentRightInnerWordPositionsCursorAtFirstNonBlank(t *testing.T) {
 	}
 }
 
+// --- cursor placement after doubled (dd/yy/cc/>>/<<) and Visual ops ---
+
+// TestOperatorDoubledDeletePositionsCursorAtFirstNonBlank reproduces the
+// reported bug: dd must land the cursor on the first non-blank of the
+// line that takes the deleted line's slot, not keep the stale column.
+func TestOperatorDoubledDeletePositionsCursorAtFirstNonBlank(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("first")},
+		{Runes: []rune("  second")},
+		{Runes: []rune("    third")},
+	}
+	buf.SetCursor(editor.Position{Line: 1, Col: 3}) // stale column inside "second"
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := string(buf.Lines[1].Runes); got != "    third" {
+		t.Fatalf("Line 1 after dd = %q, want %q", got, "    third")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 1, Col: 4}) {
+		t.Errorf("cursor after dd = %+v, want {1 4} (first non-blank)", got)
+	}
+}
+
+// TestOperatorDoubledDeleteLastLinePositionsCursorAtClampedLine guards the
+// boundary: dd on the last line clamps up to the new last line and lands
+// on its first non-blank (vim parity).
+func TestOperatorDoubledDeleteLastLinePositionsCursorAtClampedLine(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("  first")},
+		{Runes: []rune("  second")},
+	}
+	buf.SetCursor(editor.Position{Line: 1, Col: 1}) // on a leading blank — must snap to first non-blank
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := string(buf.Lines[0].Runes); got != "  first" {
+		t.Fatalf("Line 0 after dd-last = %q, want %q", got, "  first")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 2}) {
+		t.Errorf("cursor after dd-last = %+v, want {0 2} (clamped first non-blank)", got)
+	}
+}
+
+// TestOperatorDoubledChangePositionsCursorAtFirstNonBlank: cc ends in
+// Insert with the cursor on the line occupying the changed line's slot.
+func TestOperatorDoubledChangePositionsCursorAtFirstNonBlank(t *testing.T) {
+	_, reg, qec, _, modes := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("first")},
+		{Runes: []rune("  second")},
+		{Runes: []rune("third")},
+	}
+	buf.SetCursor(editor.Position{Line: 1, Col: 2})
+
+	runHandler(t, reg, commands.OperatorChange, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.OperatorChange, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := string(buf.Lines[1].Runes); got != "third" {
+		t.Fatalf("Line 1 after cc = %q, want %q", got, "third")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 1, Col: 0}) {
+		t.Errorf("cursor after cc = %+v, want {1 0} (first non-blank)", got)
+	}
+	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeInsert {
+		t.Errorf("mode after cc = %v, want ModeInsert", got)
+	}
+}
+
+// TestOperatorDoubledIndentRightPositionsCursorAtFirstNonBlank: >> lands
+// on the first non-blank of the shifted line (matches the >iw path).
+func TestOperatorDoubledIndentRightPositionsCursorAtFirstNonBlank(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("  foo")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 1}) // on the leading blanks
+
+	runHandler(t, reg, commands.OperatorIndentRight, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.OperatorIndentRight, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := string(buf.Lines[0].Runes); got != "    foo" {
+		t.Fatalf("Line 0 after >> = %q, want %q", got, "    foo")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 4}) {
+		t.Errorf("cursor after >> = %+v, want {0 4} (first non-blank)", got)
+	}
+}
+
+// TestOperatorVisualDeletePositionsCursorAtSelectionStart: v...d lands
+// the cursor on the first character of the deleted text (vim parity).
+func TestOperatorVisualDeletePositionsCursorAtSelectionStart(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisual)
+	editor.ExtendSelection(buf, editor.Position{Line: 0, Col: 5})
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeVisual})
+
+	if got := string(buf.Lines[0].Runes); got != " world" {
+		t.Fatalf("after vd = %q, want %q", got, " world")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 0}) {
+		t.Errorf("cursor after vd = %+v, want {0 0} (selection start)", got)
+	}
+}
+
+// TestOperatorVisualChangePositionsCursorAtSelectionStart: v...c lands
+// the cursor on the first character of the changed text, in Insert mode.
+func TestOperatorVisualChangePositionsCursorAtSelectionStart(t *testing.T) {
+	_, reg, qec, _, modes := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("aaa bbb")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisual)
+	editor.ExtendSelection(buf, editor.Position{Line: 0, Col: 3})
+
+	runHandler(t, reg, commands.OperatorChange, commands.ExecCtx{Mode: types.ModeVisual})
+
+	if got := string(buf.Lines[0].Runes); got != " bbb" {
+		t.Fatalf("after vc = %q, want %q", got, " bbb")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 0}) {
+		t.Errorf("cursor after vc = %+v, want {0 0} (selection start)", got)
+	}
+	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeInsert {
+		t.Errorf("mode after vc = %v, want ModeInsert", got)
+	}
+}
+
+// TestOperatorVisualLineDeletePositionsCursorAtFirstNonBlank: V...d lands
+// on the first non-blank of the selection's start line.
+func TestOperatorVisualLineDeletePositionsCursorAtFirstNonBlank(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("aaa")},
+		{Runes: []rune("  bbb")},
+		{Runes: []rune("    ccc")},
+	}
+	buf.SetCursor(editor.Position{Line: 1, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisualLine)
+	editor.ExtendSelection(buf, editor.Position{Line: 1, Col: 0})
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeVisualLine})
+
+	if got := string(buf.Lines[1].Runes); got != "    ccc" {
+		t.Fatalf("Line 1 after Vd = %q, want %q", got, "    ccc")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 1, Col: 4}) {
+		t.Errorf("cursor after Vd = %+v, want {1 4} (first non-blank)", got)
+	}
+}
+
+// TestOperatorVisualYankLeavesCursorUntouched guards the yank exclusion:
+// v...y must NOT reposition the cursor (matches the yiw convention).
+func TestOperatorVisualYankLeavesCursorUntouched(t *testing.T) {
+	_, reg, qec, matcher, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 0})
+	editor.EnterVisual(buf, types.ModeVisual)
+	editor.ExtendSelection(buf, editor.Position{Line: 0, Col: 5})
+
+	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeVisual})
+
+	if got := matcher.Registers().Get('"'); got != "hello" {
+		t.Fatalf("register \" after vy = %q, want %q", got, "hello")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 5}) {
+		t.Errorf("cursor after vy = %+v, want {0 5} (yank must not move)", got)
+	}
+}
+
 // --- post-yank flash fired only on the yank operator ---
 
 // fakeYankFlasher records the (buf, range) of the last Flash call so the
