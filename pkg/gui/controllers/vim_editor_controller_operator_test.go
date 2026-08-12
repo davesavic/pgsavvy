@@ -1205,6 +1205,177 @@ func TestChangeInnerWordSetsRepeatState(t *testing.T) {
 	}
 }
 
+// --- cursor placement after a completed operator (vim parity) ---
+
+// TestChangeInnerWordPositionsCursorAtRangeStart reproduces the reported
+// ciw bug: deleting a long word must land the cursor (in Insert mode) at
+// the start of the operated range, not keep the stale column.
+func TestChangeInnerWordPositionsCursorAtRangeStart(t *testing.T) {
+	_, reg, qec, _, modes := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("supercalifragilistic xyz")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 5})
+
+	runHandler(t, reg, commands.OperatorChange, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.TextObjectInnerWord, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := string(buf.Lines[0].Runes); got != " xyz" {
+		t.Errorf("after ciw = %q, want %q", got, " xyz")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 0}) {
+		t.Errorf("cursor after ciw = %+v, want {0 0}", got)
+	}
+	if got := modes.Get(types.QUERY_EDITOR); got != types.ModeInsert {
+		t.Errorf("mode after ciw = %v, want Insert", got)
+	}
+}
+
+func TestDeleteInnerWordPositionsCursorAtRangeStart(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("foo bar baz")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 5}) // inside "bar"
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.TextObjectInnerWord, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := string(buf.Lines[0].Runes); got != "foo  baz" {
+		t.Errorf("after diw = %q, want %q", got, "foo  baz")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 4}) {
+		t.Errorf("cursor after diw = %+v, want {0 4}", got)
+	}
+}
+
+func TestChangeAroundWordPositionsCursorAtRangeStart(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("foo bar baz")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 5}) // inside "bar"
+
+	runHandler(t, reg, commands.OperatorChange, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.TextObjectAroundWord, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := string(buf.Lines[0].Runes); got != "foo baz" {
+		t.Errorf("after caw = %q, want %q", got, "foo baz")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 4}) {
+		t.Errorf("cursor after caw = %+v, want {0 4}", got)
+	}
+}
+
+func TestDeleteWordMotionPositionsCursorAtRangeStart(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("foo bar baz")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 1}) // mid-"foo"
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.MotionWordNext, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := string(buf.Lines[0].Runes); got != "fbar baz" {
+		t.Errorf("after dw = %q, want %q", got, "fbar baz")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 1}) {
+		t.Errorf("cursor after dw = %+v, want {0 1}", got)
+	}
+}
+
+func TestDeleteToEndOfLinePositionsCursorAtRangeStart(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("hello world")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 6})
+
+	runHandler(t, reg, commands.OperatorDeleteEndOfLine, commands.ExecCtx{Mode: types.ModeNormal})
+
+	if got := string(buf.Lines[0].Runes); got != "hello " {
+		t.Errorf("after D = %q, want %q", got, "hello ")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 6}) {
+		t.Errorf("cursor after D = %+v, want {0 6}", got)
+	}
+}
+
+func TestYankInnerWordLeavesCursorUntouched(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("foo bar baz")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 5})
+
+	runHandler(t, reg, commands.OperatorYank, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.TextObjectInnerWord, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 5}) {
+		t.Errorf("cursor after yiw = %+v, want {0 5} (yank must not move)", got)
+	}
+}
+
+func TestDeleteParagraphPositionsCursorAtFirstNonBlank(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("aaa")},
+		{Runes: []rune("bbb ccc")},
+		{Runes: []rune("ddd")},
+		{Runes: []rune("")},
+	}
+	buf.SetCursor(editor.Position{Line: 1, Col: 3})
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.TextObjectInnerParagraph, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	// Char-wise multi-line delete keeps the start line as an empty
+	// residue (head+tail join) — pre-existing deleteRangeLocked
+	// semantics. The cursor must land on the (now all-blank) start
+	// line at column 0.
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 0}) {
+		t.Errorf("cursor after dip = %+v, want {0 0}", got)
+	}
+}
+
+func TestDeleteToBufferEndPositionsCursorAtFirstNonBlank(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{
+		{Runes: []rune("aaa")},
+		{Runes: []rune("bbb ccc")},
+		{Runes: []rune("ddd")},
+	}
+	buf.SetCursor(editor.Position{Line: 1, Col: 2})
+
+	runHandler(t, reg, commands.OperatorDelete, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.MotionBufferEnd, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	// MotionBufferEnd lands at (last, 0), so dG deletes from the
+	// cursor to the last line's first column, leaving its content.
+	// The cursor snaps to the first non-blank of the range's start
+	// line.
+	if len(buf.Lines) != 2 {
+		t.Fatalf("Lines after dG = %d, want 2", len(buf.Lines))
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 1, Col: 0}) {
+		t.Errorf("cursor after dG = %+v, want {1 0}", got)
+	}
+}
+
+func TestIndentRightInnerWordPositionsCursorAtFirstNonBlank(t *testing.T) {
+	_, reg, qec, _, _ := opCtrl(t)
+	buf := qec.Buffer()
+	buf.Lines = []editor.Line{{Runes: []rune("  foo bar")}}
+	buf.SetCursor(editor.Position{Line: 0, Col: 7}) // inside "bar"
+
+	runHandler(t, reg, commands.OperatorIndentRight, commands.ExecCtx{Mode: types.ModeNormal})
+	runHandler(t, reg, commands.TextObjectInnerWord, commands.ExecCtx{Mode: types.ModeOperatorPending})
+
+	if got := string(buf.Lines[0].Runes); got != "    foo bar" {
+		t.Errorf("after >iw = %q, want %q", got, "    foo bar")
+	}
+	if got := buf.CursorPos(); got != (editor.Position{Line: 0, Col: 4}) {
+		t.Errorf("cursor after >iw = %+v, want {0 4}", got)
+	}
+}
+
 // --- post-yank flash fired only on the yank operator ---
 
 // fakeYankFlasher records the (buf, range) of the last Flash call so the

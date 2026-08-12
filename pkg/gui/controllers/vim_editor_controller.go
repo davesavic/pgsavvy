@@ -472,7 +472,11 @@ const editorRepeatModeMask = types.ModeNormal
 // operatorSpec ties a shorthand to an operator action ID + its apply
 // function. apply receives a Range and returns the captured register
 // text (empty for non-yanking operators like gU/gu/>/<). isChange flips
-// the mode to ModeInsert post-application (the vim `c` family).
+// the mode to ModeInsert post-application (the vim `c` family). isYank
+// marks non-mutating yank, which leaves the cursor untouched (vim
+// parity). linewise marks vim linewise operators (>/<): their cursor
+// lands on the first non-blank of the operated line, not the range
+// start column.
 type operatorSpec struct {
 	shorthand   string
 	chord       []keys.Key // overrides shorthand parsing when non-nil
@@ -480,6 +484,8 @@ type operatorSpec struct {
 	description string
 	apply       func(b *editor.Buffer, r editor.Range) (capture string, err error)
 	isChange    bool
+	isYank      bool
+	linewise    bool
 }
 
 // operatorSpecs returns the operator binding table.
@@ -508,6 +514,7 @@ func (c *VimEditorController) operatorSpecs() []operatorSpec {
 			apply: func(b *editor.Buffer, r editor.Range) (string, error) {
 				return editor.Yank(b, r), nil
 			},
+			isYank: true,
 		},
 		{
 			shorthand:   "c",
@@ -541,6 +548,7 @@ func (c *VimEditorController) operatorSpecs() []operatorSpec {
 			apply: func(b *editor.Buffer, r editor.Range) (string, error) {
 				return "", editor.IndentRight(b, r.Start.Line, r.End.Line)
 			},
+			linewise: true,
 		},
 		{
 			chord:       []keys.Key{{Code: '<'}},
@@ -549,6 +557,7 @@ func (c *VimEditorController) operatorSpecs() []operatorSpec {
 			apply: func(b *editor.Buffer, r editor.Range) (string, error) {
 				return "", editor.IndentLeft(b, r.Start.Line, r.End.Line)
 			},
+			linewise: true,
 		},
 	}
 }
@@ -1401,6 +1410,11 @@ func (c *VimEditorController) applyPending(buf *editor.Buffer, r editor.Range, c
 		c.setMode(types.ModeNormal)
 		return err
 	}
+	// Vim parity: mutating operators land the cursor on the operated
+	// range; yank leaves it untouched (see placeCursorAfterOperator).
+	if !spec.isYank {
+		c.placeCursorAfterOperator(buf, spec, r)
+	}
 	if capture != "" {
 		c.writeRegister(ctx.Register, capture)
 		c.mirrorYankToClipboard(spec.actionID, ctx.Register, capture)
@@ -1421,6 +1435,40 @@ func (c *VimEditorController) applyPending(buf *editor.Buffer, r editor.Range, c
 		c.setMode(types.ModeNormal)
 	}
 	return nil
+}
+
+// placeCursorAfterOperator repositions the cursor to vim's post-
+// operator position for a mutating operator that applied over r (the
+// pre-apply range, already normalised). Single-line char-wise ranges
+// (dw, ciw, gUiw) land on the exact start column of the operated
+// range; linewise operators (> / <) and line-spanning ranges (dip, dG)
+// land on the first non-blank of the range's start line. The start
+// line is clamped to the post-apply buffer, and an all-blank start
+// line collapses to column 0. Yank never calls this — vim leaves the
+// cursor untouched after y.
+func (c *VimEditorController) placeCursorAfterOperator(buf *editor.Buffer, spec operatorSpec, r editor.Range) {
+	line := r.Start.Line
+	if last := buf.LineCount() - 1; line > last {
+		line = last
+	}
+	if line < 0 {
+		return // empty buffer
+	}
+	col := r.Start.Col
+	if spec.linewise || r.Start.Line != r.End.Line {
+		runes := buf.Lines[line].Runes
+		col = 0
+		for col < len(runes) && unicode.IsSpace(runes[col]) {
+			col++
+		}
+		if col == len(runes) {
+			col = 0 // all-blank line
+		}
+	}
+	if max := buf.LineRuneLen(line); col > max {
+		col = max
+	}
+	buf.SetCursor(editor.Position{Line: line, Col: col})
 }
 
 // deleteEndOfLineHandler returns the `D` action handler — vim's single-
