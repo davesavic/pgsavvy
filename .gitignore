@@ -31,3 +31,6 @@ coverage.html
 # Repowise
 .mcp.json
 .repowise/
+
+# OpenCode
+opencode.json
