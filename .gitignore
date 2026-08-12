@@ -27,3 +27,7 @@ coverage.html
 *.swp
 *.swo
 /.demo/
+
+# Repowise
+.mcp.json
+.repowise/
