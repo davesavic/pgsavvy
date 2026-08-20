@@ -141,6 +141,19 @@ type QueryRunner struct {
 	// continuously through the op stream AND the drain.
 	busyRelease atomic.Pointer[func()]
 
+	// queryRunSet, when non-nil, is invoked by NotifyQueryRunStarted to
+	// record that a query run is in flight. Wired once at wire time via
+	// SetQueryRunSignal to the orchestrator's generation-tagged run
+	// slot; nil in unit tests that skip the wiring (Notify* no-ops).
+	// Stored on the runner itself so it survives Bind / Unbind, exactly
+	// like the busy-bridge hooks.
+	queryRunSet atomic.Pointer[func(runID string)]
+
+	// queryRunClear, when non-nil, is invoked by NotifyQueryRunFinished
+	// to clear the in-flight run recorded by queryRunSet (same
+	// generation-tag contract as the slot it clears).
+	queryRunClear atomic.Pointer[func(runID string)]
+
 	// launchMu guards the launch queue and the launcher-liveness flag.
 	launchMu  sync.Mutex
 	launchQ   []*launchRequest
@@ -332,6 +345,59 @@ func (r *QueryRunner) SetBusyHold(acquire func() bool, release func()) {
 		r.busyRelease.Store(&release)
 	} else {
 		r.busyRelease.Store(nil)
+	}
+}
+
+// SetQueryRunSignal installs the query-run start/finish hooks
+// (pgsavvy-vky3.2): NotifyQueryRunStarted invokes set with the new
+// run's runID when a query run begins, and NotifyQueryRunFinished
+// invokes clear with the same runID when it ends. This is the
+// controller-reachable seam for the orchestrator's generation-tagged
+// run state — controllers signal through the runner they already hold
+// (HelperBag.QueryRunner) instead of importing orchestrator. The hooks
+// are stored on the runner itself so they survive Bind / Unbind,
+// exactly like the busy-bridge hooks. Wire-time only. Either fn may be
+// nil to clear its half; a nil hook is never invoked later. Safe to
+// call on a nil receiver and concurrently with a live launcher (read
+// through atomic pointers).
+func (r *QueryRunner) SetQueryRunSignal(set func(runID string), clear func(runID string)) {
+	if r == nil {
+		return
+	}
+	if set != nil {
+		r.queryRunSet.Store(&set)
+	} else {
+		r.queryRunSet.Store(nil)
+	}
+	if clear != nil {
+		r.queryRunClear.Store(&clear)
+	} else {
+		r.queryRunClear.Store(nil)
+	}
+}
+
+// NotifyQueryRunStarted invokes the installed query-run start hook
+// with runID. No-op when the hook was never wired (or was cleared) —
+// unit tests that skip SetQueryRunSignal call this freely. Safe to
+// call on a nil receiver.
+func (r *QueryRunner) NotifyQueryRunStarted(runID string) {
+	if r == nil {
+		return
+	}
+	if fn := r.queryRunSet.Load(); fn != nil {
+		(*fn)(runID)
+	}
+}
+
+// NotifyQueryRunFinished invokes the installed query-run finish hook
+// with runID. No-op when the hook was never wired (or was cleared).
+// Safe to call on a nil receiver.
+func (r *QueryRunner) NotifyQueryRunFinished(runID string) {
+	if r == nil {
+		return
+	}
+	if fn := r.queryRunClear.Load(); fn != nil {
+		(*fn)(runID)
 	}
 }
 

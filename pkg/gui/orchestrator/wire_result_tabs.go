@@ -230,6 +230,15 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 	// then stops. Set on the runner itself so it survives Bind / Unbind.
 	g.queryState.queryRunner.SetBusyHold(g.HoldBusy, g.ReleaseBusy)
 
+	// Generation-tagged query-run state (pgsavvy-vky3.2): bridge the
+	// runner's NotifyQueryRun* seam onto the Gui's run slot so
+	// controllers can signal query-run start/finish through the runner
+	// they already hold (HelperBag.QueryRunner) without importing
+	// orchestrator. Pure state wiring — no repaint coupling (rendering
+	// consumes the slot in a later task). Set on the runner itself so
+	// it survives Bind / Unbind.
+	g.queryState.queryRunner.SetQueryRunSignal(g.SetQueryRunStarted, g.ClearQueryRun)
+
 	// prune jump entries belonging to a closed result
 	// tab so <c-o>/<c-i> never resurface stale references. Wired after
 	// both helpers exist; ResultTabsHelper invokes the callback during
