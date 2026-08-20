@@ -784,6 +784,436 @@ func TestQueryEditorExplainAsyncErrNoSessionSurfacesMarshalled(t *testing.T) {
 	}
 }
 
+// --- pgsavvy-vky3.3: query-run signal set/clear at the controller seam ---
+//
+// These tests wire the runner's SetQueryRunSignal seam (the same one
+// wire_result_tabs.go bridges onto the Gui's run slot) and assert the
+// controller lifecycle contract: NotifyQueryRunStarted at every
+// confirmed launch (adjacent to Notice.OnRunStart, same runID) and
+// NotifyQueryRunFinished exactly once per action at finishRunScope.
+
+// runSignalSlot mirrors the orchestrator's generation-tagged query-run
+// slot semantics (the REAL slot's set-overwrites /
+// clear-only-on-match discipline is proven in
+// orchestrator/query_run_state_test.go — this copy exists only
+// because this package deliberately does not import orchestrator):
+// set overwrites the current runID; clear(runID) empties the slot only
+// on a match, so a stale settle cannot wipe a newer run.
+//
+// It doubles as an ordering witness against fakeNoticeReporter: the
+// launch sites fire NotifyQueryRunStarted immediately after
+// Notice.OnRunStart, and finishRunScope fires NotifyQueryRunFinished
+// immediately before Notice.Finish/OnRunEnd — all on the same
+// goroutine — so the notice snapshot taken inside each hook is a stable
+// bracket witness. Each recorded call carries that evidence as a
+// "@in-start-bracket" / "@before-end-bracket" (or "...@outside-...")
+// suffix.
+type runSignalSlot struct {
+	mu     sync.Mutex
+	calls  []string
+	cur    string
+	notice *fakeNoticeReporter
+}
+
+// lastNoticeIs reports whether the reporter's most recent call is want.
+func lastNoticeIs(n *fakeNoticeReporter, want string) bool {
+	if n == nil {
+		return false
+	}
+	calls := n.snapshot()
+	return len(calls) > 0 && calls[len(calls)-1] == want
+}
+
+// noticeHas reports whether the reporter ever recorded want.
+func noticeHas(n *fakeNoticeReporter, want string) bool {
+	if n == nil {
+		return false
+	}
+	for _, c := range n.snapshot() {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *runSignalSlot) onSet(runID string) {
+	tag := "outside-start-bracket"
+	if lastNoticeIs(s.notice, "start:"+runID) {
+		tag = "in-start-bracket"
+	}
+	s.mu.Lock()
+	s.calls = append(s.calls, "set:"+runID+"@"+tag)
+	s.cur = runID
+	s.mu.Unlock()
+}
+
+func (s *runSignalSlot) onClear(runID string) {
+	tag := "after-end-bracket"
+	if !noticeHas(s.notice, "finish:"+runID) && !noticeHas(s.notice, "end:"+runID) {
+		tag = "before-end-bracket"
+	}
+	s.mu.Lock()
+	s.calls = append(s.calls, "clear:"+runID+"@"+tag)
+	if s.cur == runID {
+		s.cur = ""
+	}
+	s.mu.Unlock()
+}
+
+// current reports the slot's live runID (generation-slot semantics).
+func (s *runSignalSlot) current() (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cur, s.cur != ""
+}
+
+func (s *runSignalSlot) snapshot() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.calls))
+	copy(out, s.calls)
+	return out
+}
+
+// tapQueryRunSignal wires the bag's runner query-run signal onto a
+// fresh generation-slot mirror and returns it for assertions.
+func tapQueryRunSignal(b *asyncBag) *runSignalSlot {
+	s := &runSignalSlot{notice: b.notice}
+	b.runner.SetQueryRunSignal(s.onSet, s.onClear)
+	return s
+}
+
+// queued reports how many closures the pump is holding unrun.
+func (p *uiPump) queued() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.fns)
+}
+
+// drainOne runs exactly ONE queued closure (FIFO), leaving any
+// siblings queued behind it unrun — the observation point for
+// "state persists through intermediate settles".
+func (p *uiPump) drainOne(t *testing.T) {
+	t.Helper()
+	p.mu.Lock()
+	if len(p.fns) == 0 {
+		p.mu.Unlock()
+		t.Fatal("drainOne: pump queue empty")
+	}
+	fn := p.fns[0]
+	p.fns = p.fns[1:]
+	p.mu.Unlock()
+	_ = fn()
+}
+
+// startedRunIDs extracts the runIDs of every "start:" notice call, in
+// launch order.
+func startedRunIDs(calls []string) []string {
+	var ids []string
+	for _, c := range calls {
+		if strings.HasPrefix(c, "start:") {
+			ids = append(ids, strings.TrimPrefix(c, "start:"))
+		}
+	}
+	return ids
+}
+
+// TestQueryRunSignalSingleRunSetClearOnce: a single <leader>r fires the
+// set at launch with the SAME runID as the Notice start bracket, and
+// the clear exactly once at finishRunScope — inside the finish bracket
+// (before Notice.Finish records), with nothing between set and clear
+// but the attach.
+func TestQueryRunSignalSingleRunSetClearOnce(t *testing.T) {
+	sess := &launchInner{}
+	b := newAsyncBag(sess)
+	slot := tapQueryRunSignal(b)
+	ctrl := b.controller(&fakeEditorBuffer{Text: "SELECT 1;", Off: 3})
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+
+	b.pump.pumpUntil(t, 2*time.Second, "run settled", func() bool {
+		return countPrefix(b.notice.snapshot(), "finish:") == 1
+	})
+
+	ids := startedRunIDs(b.notice.snapshot())
+	if len(ids) != 1 {
+		t.Fatalf("started runIDs = %v, want exactly 1", ids)
+	}
+	runID := ids[0]
+	want := []string{
+		"set:" + runID + "@in-start-bracket",
+		"clear:" + runID + "@before-end-bracket",
+	}
+	got := slot.snapshot()
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("signal calls = %v, want %v (set once in the start bracket, clear once before the finish)", got, want)
+	}
+	if cur, ok := slot.current(); ok {
+		t.Fatalf("slot reports %q after settle, want idle", cur)
+	}
+}
+
+// TestQueryRunSignalRunSQLSetsAndClears: the RunSQL path (TABLES <cr>
+// reuse) sets at launch and clears at finishRunScope with the same
+// runID, exactly once each.
+func TestQueryRunSignalRunSQLSetsAndClears(t *testing.T) {
+	sess := &launchInner{}
+	b := newAsyncBag(sess)
+	slot := tapQueryRunSignal(b)
+	ctrl := b.controller(&fakeEditorBuffer{Text: "SELECT 1;"})
+	if !ctrl.RunSQL("SELECT * FROM t") {
+		t.Fatal("RunSQL returned false with an active session, want true")
+	}
+
+	b.pump.pumpUntil(t, 2*time.Second, "run settled", func() bool {
+		return countPrefix(b.notice.snapshot(), "finish:") == 1
+	})
+
+	ids := startedRunIDs(b.notice.snapshot())
+	if len(ids) != 1 {
+		t.Fatalf("started runIDs = %v, want exactly 1", ids)
+	}
+	runID := ids[0]
+	got := slot.snapshot()
+	if len(got) != 2 {
+		t.Fatalf("signal calls = %v, want exactly set+clear for %q", got, runID)
+	}
+	if got[0] != "set:"+runID+"@in-start-bracket" {
+		t.Fatalf("set call = %q, want set of %q inside the start bracket", got[0], runID)
+	}
+	if got[1] != "clear:"+runID+"@before-end-bracket" {
+		t.Fatalf("clear call = %q, want clear of %q before the finish records", got[1], runID)
+	}
+	if cur, ok := slot.current(); ok {
+		t.Fatalf("slot reports %q after settle, want idle", cur)
+	}
+}
+
+// TestQueryRunSignalCancelPathClearsAtFinishScope: <leader>x against a
+// parked launch cancels it; the canceled ack (context.Canceled,
+// nothing attached) still funnels through finishRunScope, so the clear
+// fires with the canceled run's ID before Notice.OnRunEnd records.
+func TestQueryRunSignalCancelPathClearsAtFinishScope(t *testing.T) {
+	sess := &launchInner{}
+	gate := make(chan struct{})
+	sess.stage(gate)
+	b := newAsyncBag(sess)
+	slot := tapQueryRunSignal(b)
+	ctrl := b.controller(&fakeEditorBuffer{Text: "SELECT 1;", Off: 3})
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	runCmd, _ := reg.Get(commands.QueryRun)
+	if err := runCmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+
+	// The launch is parked inside Stream; the start bracket is already
+	// recorded (the proceed closure ran synchronously in the handler).
+	ids := startedRunIDs(b.notice.snapshot())
+	if len(ids) != 1 {
+		t.Fatalf("started runIDs = %v before cancel, want exactly 1", ids)
+	}
+	runID := ids[0]
+
+	cancelCmd, _ := reg.Get(commands.QueryCancel)
+	if err := cancelCmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Cancel handler err = %v", err)
+	}
+	b.pump.pumpUntil(t, 2*time.Second, "canceled run settled", func() bool {
+		return noticeHas(b.notice, "end:"+runID)
+	})
+
+	got := slot.snapshot()
+	if len(got) != 2 {
+		t.Fatalf("signal calls = %v, want exactly set+clear for %q", got, runID)
+	}
+	if got[0] != "set:"+runID+"@in-start-bracket" {
+		t.Fatalf("set call = %q, want set of %q inside the start bracket", got[0], runID)
+	}
+	if got[1] != "clear:"+runID+"@before-end-bracket" {
+		t.Fatalf("clear call = %q, want clear of %q fired at finishRunScope before OnRunEnd", got[1], runID)
+	}
+	if cur, ok := slot.current(); ok {
+		t.Fatalf("slot reports %q after canceled settle, want idle", cur)
+	}
+	// Canceled: nothing attached, no tabs of either kind.
+	if len(b.tabs.resultCalls) != 0 || len(b.tabs.errorCalls) != 0 {
+		t.Fatalf("tabs = %d result / %d error, want 0/0 on a canceled launch", len(b.tabs.resultCalls), len(b.tabs.errorCalls))
+	}
+}
+
+// TestQueryRunSignalLastWinsRetainsNewerRun: launch A (parked), launch
+// B — B's launch preempts A, so A's settle is stale. Pumping BOTH
+// settles, the slot still reports B's runID after A's stale clear, and
+// only clears when B's own finishRunScope fires. Positive assertion on
+// the retained state, not merely "empty at end".
+func TestQueryRunSignalLastWinsRetainsNewerRun(t *testing.T) {
+	sess := &launchInner{}
+	g1, g2 := make(chan struct{}), make(chan struct{})
+	sess.stage(g1)
+	sess.stage(g2)
+	b := newAsyncBag(sess)
+	slot := tapQueryRunSignal(b)
+	ctrl := b.controller(&fakeEditorBuffer{Text: "SELECT 1;", Off: 3})
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	runCmd, _ := reg.Get(commands.QueryRun)
+	if err := runCmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Run handler A err = %v", err)
+	}
+
+	// Wait until A's Stream actually started (it consumed gate 1), so
+	// B's launch deterministically parks on gate 2.
+	deadline := time.Now().Add(2 * time.Second)
+	for countSuffix(sess.snapshot(), ":start") < 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("run A never reached its Stream call")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if err := runCmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Run handler B err = %v", err)
+	}
+	ids := startedRunIDs(b.notice.snapshot())
+	if len(ids) != 2 || ids[0] == ids[1] {
+		t.Fatalf("started runIDs = %v, want two distinct IDs", ids)
+	}
+	runA, runB := ids[0], ids[1]
+
+	// A is preempt-canceled: its sentinel is cancelled by B's enqueue,
+	// but the mid-op session call itself runs to completion (pgx-safe
+	// single-flight), so release A's gate — its abandoned rh is then
+	// closed and the ack surfaces context.Canceled → settle → clear(A).
+	close(g1)
+	b.pump.pumpUntil(t, 2*time.Second, "preempted A settled", func() bool {
+		return noticeHas(b.notice, "end:"+runA)
+	})
+
+	// POSITIVE last-wins: after A's stale clear, the slot still holds B.
+	cur, ok := slot.current()
+	if !ok || cur != runB {
+		t.Fatalf("slot = (%q, %v) after stale clear of A, want (%q, true) — B retained", cur, ok, runB)
+	}
+
+	// Release B: it settles, attaches, and its OWN finishRunScope clears.
+	close(g2)
+	b.pump.pumpUntil(t, 2*time.Second, "run B settled", func() bool {
+		return noticeHas(b.notice, "finish:"+runB)
+	})
+	if cur, ok := slot.current(); ok {
+		t.Fatalf("slot reports %q after B settled, want idle", cur)
+	}
+
+	got := slot.snapshot()
+	if len(got) != 4 {
+		t.Fatalf("signal calls = %v, want set+clear for each of A and B", got)
+	}
+	if got[0] != "set:"+runA+"@in-start-bracket" || got[1] != "set:"+runB+"@in-start-bracket" {
+		t.Fatalf("set calls = %v, want A then B in the start brackets", got[:2])
+	}
+	// A's clear precedes B's in settle order; both fire before their
+	// Notice end brackets. Ordering of clear(A) vs attach(B) is
+	// scheduler-dependent — only bracket + match semantics are pinned.
+	for _, c := range got[2:] {
+		if !strings.HasPrefix(c, "clear:") || !strings.HasSuffix(c, "@before-end-bracket") {
+			t.Fatalf("clear call = %q, want a bracket-preceding clear", c)
+		}
+	}
+}
+
+// TestQueryRunSignalRunAllPersistsUntilBatchEnd: a run-all fan-out sets
+// once at batch launch; the slot STAYS set through the intermediate
+// per-statement settles (asserted after the first statement's settle
+// closure runs while the batch is still in flight) and clears only at
+// the batch-end finishRunScope.
+func TestQueryRunSignalRunAllPersistsUntilBatchEnd(t *testing.T) {
+	sess := &launchInner{}
+	b := newAsyncBag(sess)
+	slot := tapQueryRunSignal(b)
+	ctrl := b.controller(&fakeEditorBuffer{Text: "SELECT 1; SELECT 2; SELECT 3;"})
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, _ := reg.Get(commands.QueryRunAll)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("RunAll handler err = %v", err)
+	}
+
+	// Wait for the first per-statement settle closure to queue, then
+	// run exactly ONE — the batch is provably mid-flight.
+	deadline := time.Now().Add(2 * time.Second)
+	for b.pump.queued() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no settle closure was ever posted for statement 1")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	b.pump.drainOne(t)
+
+	// First statement settled (tab + attach landed); the batch's
+	// finishRunScope has NOT fired — the slot must still hold the run.
+	if len(b.tabs.resultCalls) != 1 {
+		t.Fatalf("result tabs = %d after first settle, want 1", len(b.tabs.resultCalls))
+	}
+	ids := startedRunIDs(b.notice.snapshot())
+	if len(ids) != 1 {
+		t.Fatalf("started runIDs = %v, want the single batch run", ids)
+	}
+	cur, ok := slot.current()
+	if !ok || cur != ids[0] {
+		t.Fatalf("slot = (%q, %v) after first statement settled, want (%q, true) — batch still running", cur, ok, ids[0])
+	}
+
+	// Pump the rest: the batch-end finishRunScope is the ONLY clear.
+	b.pump.pumpUntil(t, 2*time.Second, "batch settled", func() bool {
+		return countPrefix(b.notice.snapshot(), "finish:") == 1
+	})
+	got := slot.snapshot()
+	if len(got) != 2 || got[0] != "set:"+ids[0]+"@in-start-bracket" || got[1] != "clear:"+ids[0]+"@before-end-bracket" {
+		t.Fatalf("signal calls = %v, want one set at launch and one clear at batch end for %q", got, ids[0])
+	}
+	if cur, ok := slot.current(); ok {
+		t.Fatalf("slot reports %q after batch end, want idle", cur)
+	}
+}
+
+// TestQueryRunSignalFastSettleIdlesInOnePumpCycle: an immediately
+// resolving statement needs no gates or ticks — one pump cycle carries
+// the settle, so the clear follows the set promptly and the slot
+// reports idle.
+func TestQueryRunSignalFastSettleIdlesInOnePumpCycle(t *testing.T) {
+	sess := &launchInner{}
+	b := newAsyncBag(sess)
+	slot := tapQueryRunSignal(b)
+	ctrl := b.controller(&fakeEditorBuffer{Text: "SELECT 1;", Off: 3})
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Run handler err = %v", err)
+	}
+
+	b.pump.pumpUntil(t, 2*time.Second, "fast run settled", func() bool {
+		return countPrefix(b.notice.snapshot(), "finish:") == 1
+	})
+
+	got := slot.snapshot()
+	if len(got) != 2 {
+		t.Fatalf("signal calls = %v, want set immediately followed by clear", got)
+	}
+	if !strings.HasPrefix(got[0], "set:") || !strings.HasPrefix(got[1], "clear:") {
+		t.Fatalf("signal calls = %v, want set before clear", got)
+	}
+	if cur, ok := slot.current(); ok {
+		t.Fatalf("slot reports %q after the same-cycle settle, want idle", cur)
+	}
+}
+
 // TestQueryEditorExplainAsyncOpensPlanTabMarshalled proves the happy path
 // continuation (notice toast + plan tab) arrives on the UI thread via the
 // pump, in ack order.

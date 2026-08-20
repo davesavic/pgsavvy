@@ -361,6 +361,7 @@ func (q *QueryEditorController) runOne(ec commands.ExecCtx, newTx bool) error {
 		if q.helpers.Notice != nil {
 			q.helpers.Notice.OnRunStart(runID)
 		}
+		runner.NotifyQueryRunStarted(runID)
 		q.runStatement(stmt, data.RunOptions{NewTx: newTx}, func(attached bool) {
 			q.finishRunScope(runID, attached)
 		})
@@ -373,6 +374,12 @@ func (q *QueryEditorController) runOne(ec commands.ExecCtx, newTx bool) error {
 // drain worker then clears the helper state), OnRunEnd when nothing did
 // (no drain worker will fire it).
 func (q *QueryEditorController) finishRunScope(runID string, anyAttached bool) {
+	// Single clear site for the query-run signal: every settle path
+	// (success, surfaceErr, ctx.Canceled cancel/preempt) funnels through
+	// here, and the runID tag means a stale settle can't clear a newer
+	// run. Must fire even when Notice is unwired — the signal is
+	// independent of the Notice helper.
+	q.helpers.QueryRunner.NotifyQueryRunFinished(runID)
 	if q.helpers.Notice == nil {
 		return
 	}
@@ -519,6 +526,7 @@ func (q *QueryEditorController) RunSQL(stmt string) bool {
 		if q.helpers.Notice != nil {
 			q.helpers.Notice.OnRunStart(runID)
 		}
+		runner.NotifyQueryRunStarted(runID)
 		q.runStatement(stmt, data.RunOptions{}, func(attached bool) {
 			q.finishRunScope(runID, attached)
 		})
@@ -563,6 +571,7 @@ func (q *QueryEditorController) runVisualSelection(newTx bool) error {
 		if q.helpers.Notice != nil {
 			q.helpers.Notice.OnRunStart(runID)
 		}
+		runner.NotifyQueryRunStarted(runID)
 		q.runStatements(cleaned, newTx, func(anyAttached bool) {
 			q.finishRunScope(runID, anyAttached)
 		})
@@ -830,6 +839,7 @@ func (q *QueryEditorController) handleRunAll(_ commands.ExecCtx) error {
 		if q.helpers.Notice != nil {
 			q.helpers.Notice.OnRunStart(runID)
 		}
+		runner.NotifyQueryRunStarted(runID)
 		q.runStatements(cleaned, false, func(anyAttached bool) {
 			q.finishRunScope(runID, anyAttached)
 		})
