@@ -264,10 +264,13 @@ type Gui struct {
 	// Generation-tagged query-run state (pgsavvy-vky3.2). queryRun is
 	// guarded by queryRunMu and holds the (runID, startedAt) slot for
 	// the query run currently in flight; see query_run_state.go for the
-	// Set/Clear/Get API and the generation-tag contract. Pure state —
-	// no repaint coupling (rendering consumes it in a later task).
-	queryRunMu sync.Mutex
-	queryRun   queryRunState
+	// Set/Clear/Get API and the generation-tag contract. The SAME mutex
+	// also guards queryRunSubtitlePainted — the last subtitle string
+	// written to the shared rail view — so the repaint path can skip
+	// unchanged view writes without a second lock.
+	queryRunMu              sync.Mutex
+	queryRun                queryRunState
+	queryRunSubtitlePainted string
 }
 
 // keybindingSystem groups the keybinding-subsystem collaborators built by

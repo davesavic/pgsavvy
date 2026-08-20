@@ -258,6 +258,13 @@ func (g *Gui) armSpinnerLocked() {
 			case <-ch:
 				g.OnUIThreadContentOnly(func() error {
 					g.repaintBusyIndicators()
+					// The running-query subtitle rides the same tick but sits
+					// OUTSIDE repaintBusyIndicators on purpose: that helper's
+					// prompt-on-top and resize gates suppress busy-indicator
+					// surfaces only, while the subtitle must keep animating
+					// (and its own repaint applies the editor-leaf guard
+					// internally).
+					g.repaintQueryRunSubtitle()
 					return nil
 				})
 			}

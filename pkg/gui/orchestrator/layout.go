@@ -111,6 +111,41 @@ func (g *Gui) repaintStatusLine() {
 	RenderStatusLine(g.statusRenderDeps())
 }
 
+// paintQueryEditorLeaf is the Tier-1.4 editor-leaf paint unit for the
+// shared QUERY_RAIL view: frame title, highlight + selection/yank
+// overlays, SetContent from the canonical *editor.Buffer, FocusPoint
+// (pins v.oy so the cursor row stays inside the viewport — normal-mode
+// motions mutate buf.Cursor without ever touching v, so without this
+// per-frame sync the rendered caret stays pinned to its last
+// Insert-mode position), and the horizontal scroll keep-in-view. The
+// running-query subtitle repaint (query_run_state.go) re-runs this
+// between full layouts so the content-only flush repaints the frame the
+// subtitle is drawn on — SetContent preserves the view's origin/cursor,
+// so the re-render is visually a no-op apart from the taint.
+func (g *Gui) paintQueryEditorLeaf(v *gocui.View) {
+	if v == nil || g.registry == nil || g.registry.QueryEditor == nil {
+		return
+	}
+	qec := g.registry.QueryEditor
+	v.Title = qec.GetTitle()
+	if buf := qec.Buffer(); buf != nil {
+		content := highlight.Highlight(buf.String())
+		if sel := buf.SelectionSnapshot(); sel != nil {
+			content = editor.ApplySelectionOverlay(content, *sel)
+		}
+		if flash := buf.YankFlashSnapshot(); flash != nil {
+			content = editor.ApplyYankFlashOverlay(content, *flash)
+		}
+		v.SetContent(content)
+		cur := buf.CursorPos()
+		v.FocusPoint(cur.Col, cur.Line, true)
+		// FocusPoint pins only the vertical origin; without this the
+		// editor never scrolls horizontally, so lines wider than the pane
+		// clip past the right border and the caret vanishes.
+		scrollEditorColumnIntoView(v, cur.Col)
+	}
+}
+
 // RunLayout positions every live Context's view inside a terminal of
 // the supplied dimensions, dispatching per-Kind. Side rails + extras
 // are always tiled. Temporary popups + display contexts are created
@@ -283,35 +318,17 @@ func (g *Gui) RunLayout(w, h int) error {
 				rails[name] = v
 				// Editor tab: paint the buffer from the QUERY_EDITOR leaf and
 				// title it from that leaf. Sync the view from the canonical
-				// *editor.Buffer every frame, not just on fresh creation.
-				// Normal-mode motions (h/j/k/l, w/e/b, gg/G, …) in
-				// VimEditorController mutate buf.Cursor without ever touching v,
-				// so without this the rendered caret stays pinned to its last
-				// Insert-mode position. FocusPoint also pins v.oy so the cursor
-				// row stays inside the viewport — typing or motion past the
-				// view's bottom would otherwise scroll the cursor off screen
-				// with the origin stuck at 0 (mirrors the side-rail
-				// scrollSideRailIntoView fix).
+				// *editor.Buffer every frame, not just on fresh creation
+				// (see paintQueryEditorLeaf). When a list leaf (or an unwired
+				// editor) owns the shared view, the running-query subtitle
+				// must not linger on the border: full-flush context, so a
+				// field-clear here needs no taint and NO editor content may
+				// be written — the list leaf owns the buffer this frame.
 				if activeKey == types.QUERY_EDITOR && g.registry.QueryEditor != nil {
-					qec := g.registry.QueryEditor
-					v.Title = qec.GetTitle()
-					if buf := qec.Buffer(); buf != nil {
-						content := highlight.Highlight(buf.String())
-						if sel := buf.SelectionSnapshot(); sel != nil {
-							content = editor.ApplySelectionOverlay(content, *sel)
-						}
-						if flash := buf.YankFlashSnapshot(); flash != nil {
-							content = editor.ApplyYankFlashOverlay(content, *flash)
-						}
-						v.SetContent(content)
-						cur := buf.CursorPos()
-						v.FocusPoint(cur.Col, cur.Line, true)
-						// FocusPoint pins only the vertical origin; without
-						// this the editor never scrolls horizontally, so
-						// lines wider than the pane clip past the right
-						// border and the caret vanishes.
-						scrollEditorColumnIntoView(v, cur.Col)
-					}
+					g.paintQueryEditorLeaf(v)
+					g.paintQueryRunSubtitleFromState(v)
+				} else {
+					g.applyQueryRunSubtitle(v, "")
 				}
 			}
 			// Scoped master-editor swap: attach masterEditors[activeKey] to the
