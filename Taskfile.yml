@@ -25,6 +25,11 @@ tasks:
     cmds:
       - go test {{.CLI_ARGS | default "./..."}}
 
+  test:race:
+    desc: Run unit tests across all packages with the race detector enabled.
+    cmds:
+      - go test -race ./...
+
   pg:up:
     desc: Bring up the docker/postgres fixture and wait until it reports healthy.
     cmds:
@@ -70,10 +75,35 @@ tasks:
       - env GOFLAGS=-count=1 go test -tags=integration ./...
 
   test:all:
-    desc: Run unit + integration tests.
+    desc: Run unit + race + integration tests.
     cmds:
       - task: test
+      - task: test:race
       - task: test:integration
+
+  e2e:tmux:
+    desc: Verify preconditions and build bin/pgsavvy for the manual tmux E2E protocol (.claude/skills/testing-with-tmux/SKILL.md).
+    deps: [build]
+    preconditions:
+      - sh: '[ -n "$PGSAVVY_TEST_PG" ]'
+        msg: |
+          PGSAVVY_TEST_PG is not set; refusing to run the tmux E2E protocol silently.
+          Bring the fixture up and export the DSN, e.g.:
+            task pg:up
+            export PGSAVVY_TEST_PG=postgres://pgsavvy:pgsavvy@localhost:5432/pgsavvy_test
+            task e2e:tmux
+      - sh: 'go run ./internal/pgprobe "$PGSAVVY_TEST_PG"'
+        msg: |
+          PGSAVVY_TEST_PG is set but the database is unreachable.
+          Start the fixture with `task pg:up`, then retry.
+      - sh: 'command -v tmux >/dev/null 2>&1'
+        msg: 'tmux not found on PATH; install tmux via your package manager.'
+    cmds:
+      - 'echo "e2e:tmux ready: fixture reachable, tmux present, binary built at bin/pgsavvy."'
+      - 'echo "Follow the manual protocol in .claude/skills/testing-with-tmux/SKILL.md, e.g."'
+      - 'echo "  tmux new-session -d -s dbg -x 130 -y 42"'
+      - 'echo "  tmux send-keys -t dbg ./bin/pgsavvy Enter; sleep 3"'
+      - 'echo "cleanup: tmux kill-session -t dbg 2>/dev/null || true"'
 
   lint:
     desc: Run golangci-lint v2 (5 linters; see .golangci.yml).

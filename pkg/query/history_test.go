@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davesavic/pgsavvy/internal/race"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	_ "modernc.org/sqlite"
@@ -339,14 +340,21 @@ func TestHistory_SearchByPrefix_StressLatency(t *testing.T) {
 		t.Fatalf("warm-up failed: %v", err)
 	}
 
+	// Race-detector instrumentation roughly triples measured latency;
+	// scale the budget under -race so the assertion still runs (slower,
+	// but bounded) instead of flaking. Normal runs keep the 50ms gate.
+	budget := 50 * time.Millisecond
+	if race.Enabled {
+		budget *= 4
+	}
 	for _, prefix := range []string{"SEL", "FROM", "tbl_42"} {
 		start := time.Now()
 		got, err := h.SearchByPrefix(context.Background(), prefix, 20)
 		elapsed := time.Since(start)
 		require.NoError(t, err)
 		require.LessOrEqual(t, len(got), 20)
-		require.Less(t, elapsed, 50*time.Millisecond,
-			"SearchByPrefix(%q) over %d rows took %v; want <50ms", prefix, n, elapsed)
+		require.Less(t, elapsed, budget,
+			"SearchByPrefix(%q) over %d rows took %v; want <%v", prefix, n, elapsed, budget)
 	}
 }
 
