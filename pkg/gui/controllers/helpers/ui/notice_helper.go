@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -30,12 +32,14 @@ type noticeToaster interface {
 // NoticeHelperDeps bundles the collaborators required to construct a
 // NoticeHelper. Toaster may be nil (toasting disabled); OnWorker may be
 // nil (callers feed OnNotice directly — test-friendly); Tr is required
-// because the toast format strings live there.
+// because the toast format strings live there; Logger may be nil (the
+// AttachStream early-return warn is skipped).
 type NoticeHelperDeps struct {
 	Toaster  noticeToaster
 	OnWorker func(func(gocui.Task) error)
 	Tr       *i18n.TranslationSet
 	ToastTTL time.Duration
+	Logger   *slog.Logger
 }
 
 // NoticeReporter is the controller-facing surface for routing server
@@ -64,6 +68,7 @@ type NoticeHelper struct {
 	onWorker func(func(gocui.Task) error)
 	tr       *i18n.TranslationSet
 	toastTTL time.Duration
+	log      *slog.Logger
 
 	mu             sync.Mutex
 	currentRun     string
@@ -88,6 +93,7 @@ func NewNoticeHelper(deps NoticeHelperDeps) *NoticeHelper {
 		onWorker: deps.OnWorker,
 		tr:       tr,
 		toastTTL: ttl,
+		log:      deps.Logger,
 	}
 }
 
@@ -156,6 +162,12 @@ func (h *NoticeHelper) OnNotice(n pgconn.Notice) {
 // OnNotice and signals the helper when the stream's notice channel
 // closes. When OnWorker is nil the call records a pending-stream slot
 // but does not spawn a worker — tests drive OnNotice directly.
+//
+// When no run is bound the stream is DROPPED — its NOTICEs would be
+// lost silently (a launch→continuation gap after OnRunEnd, or a stale
+// straggler), so the drop warn-logs. logs.Event hard-codes Debug, so
+// the WARN is emitted directly, mirroring the ResultTabsHelper
+// preempt-stop warn precedent.
 func (h *NoticeHelper) AttachStream(rh *session.RunHandle) {
 	if rh == nil {
 		return
@@ -163,6 +175,12 @@ func (h *NoticeHelper) AttachStream(rh *session.RunHandle) {
 	h.mu.Lock()
 	if h.currentRun == "" {
 		h.mu.Unlock()
+		if h.log != nil {
+			h.log.LogAttrs(context.Background(), slog.LevelWarn, "notice_attach_no_run",
+				slog.String("cat", "notice"),
+				slog.String("evt", "notice_attach_no_run"),
+				slog.Uint64("qid_nonce", rh.QueryID().Nonce))
+		}
 		return
 	}
 	runID := h.currentRun

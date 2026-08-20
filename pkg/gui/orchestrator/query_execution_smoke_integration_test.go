@@ -270,8 +270,13 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		before := helper.Count()
 		runCommand(t, s.g, commands.QueryRun)
 
-		if got := helper.Count(); got != before+1 {
-			t.Fatalf("tab count = %d, want %d after <leader>r", got, before+1)
+		// C2: <leader>r enqueues on the launch queue and returns; the
+		// result tab opens when the launch resolves (continuation
+		// marshalled onto the UI thread).
+		if !eventuallyQE(t, 5*time.Second, func() bool {
+			return helper.Count() == before+1
+		}) {
+			t.Fatalf("tab count = %d, want %d after <leader>r", helper.Count(), before+1)
 		}
 		active := helper.Active()
 		if active == nil {
@@ -352,8 +357,10 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 			runCommand(t, s.g, commands.QueryRunAll)
 		}()
 
-		if got := helper.Count(); got != before+3 {
-			t.Fatalf("tab count = %d, want %d after <leader>R on 3-stmt buffer", got, before+3)
+		if !eventuallyQE(t, 5*time.Second, func() bool {
+			return helper.Count() == before+3
+		}) {
+			t.Fatalf("tab count = %d, want %d after <leader>R on 3-stmt buffer", helper.Count(), before+3)
 		}
 
 		// Every tab streamed exactly one row. RBM workers park on the
@@ -508,15 +515,32 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 	t.Run("step04_rail_switch_cancels_running_stream", func(t *testing.T) {
 		// AC: "Pane switch mid-query issues pg_cancel_backend via
 		// separate connection; tab title gains '(cancelled, N rows)'"
-		stmt := "SELECT pg_sleep(5)"
+		// C2: the launch parks on the runner's launcher goroutine until
+		// the driver Stream resolves, so a bare pg_sleep (whose single
+		// row arrives at CommandComplete) opens its tab already
+		// finished. A >200-row result instead parks the RBM worker
+		// mid-fill — the tab sits in a stable StateRunning (D-13 lazy
+		// pagination) — preserving the AC's mid-stream cancel window
+		// under the async launch. (The mid-QUERY window now lives on
+		// the launcher, sentinel-cancellable — that is the freeze fix
+		// itself.)
+		stmt := "SELECT n FROM generate_series(1, 500) n"
 		seedEditor(t, s.g, stmt)
+		before := helper.Count()
 		runCommand(t, s.g, commands.QueryRun)
+		// C2: the tab opens asynchronously once the launch resolves.
+		if !eventuallyQE(t, 10*time.Second, func() bool {
+			return helper.Count() == before+1 && helper.Active() != nil
+		}) {
+			t.Fatalf("tab count = %d (want %d) after <leader>r on the streaming fill", helper.Count(), before+1)
+		}
 		active := helper.Active()
 		if active == nil {
 			t.Fatal("Active() = nil after <leader>r")
 		}
-		// Wait until the stream is actually running (not queued).
-		if !eventuallyQE(t, 5*time.Second, func() bool {
+		// Wait until the stream is actually running (not queued); the
+		// parked post-initial-fill worker keeps Running stable.
+		if !eventuallyQE(t, 10*time.Second, func() bool {
 			return active.State() == ui.StateRunning
 		}) {
 			t.Fatalf("tab never entered StateRunning; state=%v", active.State())
@@ -743,8 +767,11 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 
 		seedEditor(t, s.g, "SELECT 1")
 		runCommand(t, s.g, commands.QueryRun)
-		if got := helper.Count(); got != 1 {
-			t.Fatalf("after first <leader>r: tab count = %d, want 1", got)
+		// C2: the tab opens when the async launch resolves.
+		if !eventuallyQE(t, 5*time.Second, func() bool {
+			return helper.Count() == 1
+		}) {
+			t.Fatalf("after first <leader>r: tab count = %d, want 1", helper.Count())
 		}
 		firstTab := helper.Active()
 		if firstTab == nil {
@@ -773,8 +800,11 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 			runCommand(t, s.g, commands.QueryRun)
 		}()
 
-		if got := helper.Count(); got != 2 {
-			t.Fatalf("after second <leader>r: tab count = %d, want 2", got)
+		// C2: the second tab opens when the async launch resolves.
+		if !eventuallyQE(t, 5*time.Second, func() bool {
+			return helper.Count() == 2
+		}) {
+			t.Fatalf("after second <leader>r: tab count = %d, want 2", helper.Count())
 		}
 
 		tabs := helper.Tabs()

@@ -232,6 +232,23 @@ func waitRows(t *testing.T, tab *ui.Tab, want int) {
 	}
 }
 
+// waitColumnSorted polls until the tab's rendered column col equals want
+// (and the tab is not errored). The sort re-run is launched through the
+// async launch queue (C2): triggerSort returns after ENQUEUE, so the
+// reattached grid lands a beat later — this wait is the async-tolerant
+// replacement for reading the column immediately after waitRows (the
+// row COUNT alone no longer implies the re-run landed, because the
+// pre-sort grid already holds the same count).
+func waitColumnSorted(t *testing.T, tab *ui.Tab, col int, want []string) {
+	t.Helper()
+	if !eventuallyQE(t, 5*time.Second, func() bool {
+		return tab.Err() == nil && eqStrings(gridColumn(t, tab, col), want)
+	}) {
+		t.Fatalf("col %d display order = %v, want %v (state=%v err=%v)",
+			col, gridColumn(t, tab, col), want, tab.State(), tab.Err())
+	}
+}
+
 // TestResultSortDBSide_AC is the live-PG capstone for the database-side sort
 // flow. Each subtest exercises one PRIORITY scenario.
 func TestResultSortDBSide_AC(t *testing.T) {
@@ -272,7 +289,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 
 		// Sort ASC by the FIRST column (ordinal 1 = a.id).
 		triggerSort(t, s, 0)
-		waitRows(t, tab, 5)
+		waitColumnSorted(t, tab, 0, []string{"5", "10", "20", "30", "40"})
 
 		gotCol0 := gridColumn(t, tab, 0)
 		// Reference: wrap the SAME join in a derived table and ORDER BY ordinal 1
@@ -291,7 +308,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 		// Sort by the THIRD column (ordinal 3 = b.id), proving the ordinal — not
 		// the name "id" — selects the sort key.
 		triggerSort(t, s, 2)
-		waitRows(t, tab, 5)
+		waitColumnSorted(t, tab, 2, []string{"101", "102", "103", "104", "105"})
 		gotCol2 := gridColumn(t, tab, 2)
 		wantCol2 := refColumn(t, conn, 2,
 			"SELECT * FROM ("+join+") _x ORDER BY 3 ASC")
@@ -319,7 +336,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 
 		// asc by col 0 (id).
 		triggerSort(t, s, 0)
-		waitRows(t, tab, 5)
+		waitColumnSorted(t, tab, 0, []string{"5", "10", "20", "30", "40"})
 		asc := gridColumn(t, tab, 0)
 		if want := []string{"5", "10", "20", "30", "40"}; !eqStrings(asc, want) {
 			t.Fatalf("asc = %v, want %v", asc, want)
@@ -327,7 +344,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 
 		// desc — reversed.
 		triggerSort(t, s, 0)
-		waitRows(t, tab, 5)
+		waitColumnSorted(t, tab, 0, []string{"40", "30", "20", "10", "5"})
 		desc := gridColumn(t, tab, 0)
 		if want := []string{"40", "30", "20", "10", "5"}; !eqStrings(desc, want) {
 			t.Fatalf("desc = %v, want %v", desc, want)
@@ -335,7 +352,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 
 		// clear — original order restored (origSQL re-run verbatim).
 		triggerSort(t, s, 0)
-		waitRows(t, tab, 5)
+		waitColumnSorted(t, tab, 0, orig)
 		cleared := gridColumn(t, tab, 0)
 		if !eqStrings(cleared, orig) {
 			t.Fatalf("cleared order = %v, want original %v", cleared, orig)
@@ -362,7 +379,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 		// Sort asc by id. The re-run wraps the $1 query AND must re-bind arg=20;
 		// a lost binding surfaces as "$1 unbound" -> tab error / 0 rows.
 		triggerSort(t, s, 0)
-		waitRows(t, tab, 3)
+		waitColumnSorted(t, tab, 0, []string{"20", "30", "40"})
 		if tab.Err() != nil {
 			t.Fatalf("parameterized sort errored (arg not re-bound?): %v", tab.Err())
 		}
@@ -393,7 +410,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 		waitRows(t, tab, 3)
 
 		triggerSort(t, s, 0)
-		waitRows(t, tab, 3)
+		waitColumnSorted(t, tab, 0, []string{"5", "10", "20"})
 		if tab.Err() != nil {
 			t.Fatalf("inner-limit sort errored: %v", tab.Err())
 		}
@@ -420,7 +437,7 @@ func TestResultSortDBSide_AC(t *testing.T) {
 		waitRows(t, tab, 5)
 
 		triggerSort(t, s, 0)
-		waitRows(t, tab, 5)
+		waitColumnSorted(t, tab, 0, []string{"5", "10", "20", "30", "40"})
 		if tab.Err() != nil {
 			t.Fatalf("trailing-comment sort errored: %v", tab.Err())
 		}

@@ -339,7 +339,9 @@ func (q *QueryEditorController) handleRunInNewTx(ec commands.ExecCtx) error {
 
 // runOne dispatches <leader>r / <leader>!. In Visual mode it fans the
 // selection out through SplitStatements (capped at maxVisualRunBatch);
-// otherwise it falls through to the statement-under-cursor path.
+// otherwise it falls through to the statement-under-cursor path. The
+// Notice run-scope teardown is ack-driven: it fires when the launch (or
+// the whole fan-out) settles, on the UI thread.
 func (q *QueryEditorController) runOne(ec commands.ExecCtx, newTx bool) error {
 	if ec.Mode.Has(types.ModeVisual | types.ModeVisualLine | types.ModeVisualBlock) {
 		return q.runVisualSelection(newTx)
@@ -359,16 +361,26 @@ func (q *QueryEditorController) runOne(ec commands.ExecCtx, newTx bool) error {
 		if q.helpers.Notice != nil {
 			q.helpers.Notice.OnRunStart(runID)
 		}
-		attached := q.runStatement(stmt, data.RunOptions{NewTx: newTx})
-		if q.helpers.Notice != nil {
-			if attached {
-				q.helpers.Notice.Finish(runID)
-			} else {
-				q.helpers.Notice.OnRunEnd(runID)
-			}
-		}
+		q.runStatement(stmt, data.RunOptions{NewTx: newTx}, func(attached bool) {
+			q.finishRunScope(runID, attached)
+		})
 	})
 	return nil
+}
+
+// finishRunScope tears down a Notice run scope after every statement of
+// the run settled: Finish when at least one stream attached (the last
+// drain worker then clears the helper state), OnRunEnd when nothing did
+// (no drain worker will fire it).
+func (q *QueryEditorController) finishRunScope(runID string, anyAttached bool) {
+	if q.helpers.Notice == nil {
+		return
+	}
+	if anyAttached {
+		q.helpers.Notice.Finish(runID)
+	} else {
+		q.helpers.Notice.OnRunEnd(runID)
+	}
 }
 
 // handleSave dispatches <leader>s. It captures the current query text
@@ -507,14 +519,9 @@ func (q *QueryEditorController) RunSQL(stmt string) bool {
 		if q.helpers.Notice != nil {
 			q.helpers.Notice.OnRunStart(runID)
 		}
-		attached := q.runStatement(stmt, data.RunOptions{})
-		if q.helpers.Notice != nil {
-			if attached {
-				q.helpers.Notice.Finish(runID)
-			} else {
-				q.helpers.Notice.OnRunEnd(runID)
-			}
-		}
+		q.runStatement(stmt, data.RunOptions{}, func(attached bool) {
+			q.finishRunScope(runID, attached)
+		})
 	})
 	return true
 }
@@ -556,21 +563,53 @@ func (q *QueryEditorController) runVisualSelection(newTx bool) error {
 		if q.helpers.Notice != nil {
 			q.helpers.Notice.OnRunStart(runID)
 		}
-		attached := 0
-		for _, stmt := range cleaned {
-			if q.runStatement(stmt, data.RunOptions{NewTx: newTx}) {
-				attached++
-			}
-		}
-		if q.helpers.Notice != nil {
-			if attached == 0 {
-				q.helpers.Notice.OnRunEnd(runID)
-			} else {
-				q.helpers.Notice.Finish(runID)
-			}
-		}
+		q.runStatements(cleaned, newTx, func(anyAttached bool) {
+			q.finishRunScope(runID, anyAttached)
+		})
 	})
 	return nil
+}
+
+// runStatements launches stmts as ONE fan-out action: with a UI scheduler
+// wired it enqueues a single batch launch on the runner's launch queue
+// (the batch is atomic with respect to any later action — a rapid Enter
+// cannot interleave between statements), settling each statement's
+// continuation on the UI thread as its ack arrives. onAllSettled fires
+// exactly once after the last statement settled; errors count as
+// settled-but-unattached, mirroring the synchronous tally. It requires a
+// non-empty stmts slice: onAllSettled never fires for an empty batch
+// (callers guard). Without a scheduler (unit tests) the statements run
+// inline, preserving the legacy synchronous contract.
+func (q *QueryEditorController) runStatements(stmts []string, newTx bool, onAllSettled func(anyAttached bool)) {
+	remaining := len(stmts)
+	attached := 0
+	// Acks are serialised on the UI thread (or inline in the sync
+	// fallback), so the plain counters need no lock.
+	onSettled := func(ok bool) {
+		if ok {
+			attached++
+		}
+		remaining--
+		if remaining == 0 {
+			onAllSettled(attached > 0)
+		}
+	}
+	if q.helpers.OnUIThread == nil {
+		for _, stmt := range stmts {
+			rh, err := q.helpers.QueryRunner.Run(context.Background(), stmt, q.applyRunDefaults(data.RunOptions{NewTx: newTx}))
+			onSettled(q.settleStatement(stmt, rh, err))
+		}
+		return
+	}
+	launches := make([]data.StatementLaunch, 0, len(stmts))
+	for _, stmt := range stmts {
+		launches = append(launches, data.StatementLaunch{SQL: stmt, Opts: q.applyRunDefaults(data.RunOptions{NewTx: newTx})})
+	}
+	q.helpers.QueryRunner.RunStatementsAsync(context.Background(), launches, func(i int, rh *session.RunHandle, err error) {
+		q.marshalToUI(func() {
+			onSettled(q.settleStatement(stmts[i], rh, err))
+		})
+	})
 }
 
 // nonEmptyStatements trims each split statement and drops the blanks (a
@@ -791,55 +830,71 @@ func (q *QueryEditorController) handleRunAll(_ commands.ExecCtx) error {
 		if q.helpers.Notice != nil {
 			q.helpers.Notice.OnRunStart(runID)
 		}
-		attached := 0
-		for _, stmt := range cleaned {
-			if q.runStatement(stmt, data.RunOptions{}) {
-				attached++
-			}
-		}
-		if q.helpers.Notice != nil {
-			if attached == 0 {
-				// Nothing attached → no drain worker will fire OnRunEnd.
-				// Tear down the run scope directly to avoid stranding state.
-				q.helpers.Notice.OnRunEnd(runID)
-			} else {
-				q.helpers.Notice.Finish(runID)
-			}
-		}
+		q.runStatements(cleaned, false, func(anyAttached bool) {
+			q.finishRunScope(runID, anyAttached)
+		})
 	})
 	return nil
 }
 
-// runStatement dispatches a single SQL statement through QueryRunner.
-// Returns true when a NoticeReporter stream was attached (i.e. the run
-// is in-flight); false when the runner errored before launch or when
-// no NoticeReporter is wired. Used by runOne / runVisualSelection /
-// handleRunAll to tally the attached count their run-scope teardown
-// depends on. Pre-conditions (no session, no statement) are the
-// caller's responsibility — runStatement assumes runner is non-nil and
-// stmt is non-empty.
-func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) bool {
+// runStatement dispatches a single SQL statement through the QueryRunner
+// launch queue and returns as soon as the launch is ENQUEUED — the
+// blocking preempt and the session op run on the runner's launcher
+// goroutine, never on the UI thread. onSettled (the launch-ack callback)
+// fires exactly once when the launch resolves, on the UI thread, with
+// attached reporting whether a Notice stream was attached (errors and
+// cancellations report false). Pre-conditions (no session, no statement)
+// are the caller's responsibility.
+//
+// With no UI scheduler wired (unit-test path) the synchronous runner.Run
+// runs inline instead, preserving the legacy synchronous contract those
+// tests assert against.
+func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions, onSettled func(attached bool)) {
 	runner := q.helpers.QueryRunner
-	// Resolve unqualified object names against the currently selected schema
-	// (SCHEMAS rail). Empty when no schema is selected, leaving resolution to
-	// the session default.
+	opts = q.applyRunDefaults(opts)
+	settle := func(rh *session.RunHandle, err error) {
+		q.marshalToUI(func() {
+			onSettled(q.settleStatement(stmt, rh, err))
+		})
+	}
+	if q.helpers.OnUIThread == nil {
+		rh, err := runner.Run(context.Background(), stmt, opts)
+		settle(rh, err)
+		return
+	}
+	runner.RunAsync(context.Background(), stmt, opts, settle)
+}
+
+// applyRunDefaults resolves a statement's RunOptions: unqualified object
+// names resolve against the currently selected schema (SCHEMAS rail;
+// empty leaves the session default), and the configurable default
+// statement-timeout ceiling applies unless the caller set a per-run
+// override (0 = off).
+func (q *QueryEditorController) applyRunDefaults(opts data.RunOptions) data.RunOptions {
 	if q.helpers.Schemas != nil {
 		opts.DefaultSchema = q.helpers.Schemas.SelectedSchemaName()
 	}
-	// Apply the configurable default statement-timeout ceiling unless the
-	// caller already set a per-run override. 0 = off (no ceiling). The pg
-	// driver realises a non-zero Timeout as a context.WithTimeout deadline
-	// whose CancelFunc the row stream owns, so a runaway query is bounded
-	// without leaking a timer past the stream.
 	if opts.Timeout == 0 {
 		opts.Timeout = q.defaultStatementTimeout()
 	}
-	// Last-wins preemption of any in-flight stream is centralized in the
-	// QueryRunner chokepoint (QueryRunner.Run preempts before acquiring the
-	// per-session queue lock), covering run / RunQuery / Explain uniformly.
-	rh, err := runner.Run(context.Background(), stmt, opts)
+	return opts
+}
+
+// settleStatement is the post-launch continuation and ALWAYS runs on the
+// UI thread (marshalled from the launcher side; inline on the sync
+// fallback path): it surfaces launch errors, flags the History tab
+// stale, attaches the Notice stream, opens the result tab, and schedules
+// the post-run invalidations. Returns whether a Notice stream was
+// attached.
+func (q *QueryEditorController) settleStatement(stmt string, rh *session.RunHandle, err error) bool {
 	if err != nil {
-		q.surfaceErr(stmt, err)
+		// A cancelled launch (last-wins preempt, or <leader>x against a
+		// still-pending launch) surfaces nothing: the replacing action
+		// owns the screen. Everything else surfaces via surfaceErr —
+		// a preempt fence toasts, a real failure opens the error tab.
+		if !errors.Is(err, context.Canceled) {
+			q.surfaceErr(stmt, err)
+		}
 		return false
 	}
 	// A dispatched run appends a history row, so flag the History tab stale
@@ -858,6 +913,20 @@ func (q *QueryEditorController) runStatement(stmt string, opts data.RunOptions) 
 		q.scheduleDMLCacheEvict(stmt, rh.Done(), rh.Err)
 	}
 	return attached
+}
+
+// marshalToUI runs fn on the UI thread when a scheduler is wired,
+// falling back to a direct call on the caller's goroutine (test path —
+// the toastFromWorker convention).
+func (q *QueryEditorController) marshalToUI(fn func()) {
+	if q.helpers.OnUIThread == nil {
+		fn()
+		return
+	}
+	q.helpers.OnUIThread(func() error {
+		fn()
+		return nil
+	})
 }
 
 // scheduleDDLInvalidation drops the warmed completion metadata for the active
@@ -951,11 +1020,15 @@ func (q *QueryEditorController) scheduleDMLCacheEvict(stmt string, done <-chan s
 // be written back into the tab's origin (else clear would re-run a wrapped
 // statement).
 //
-// RunQuery preempts the prior in-flight stream for the tab (its first action
-// fires the preempt hook -> ResultTabsHelper.PreemptInFlight -> runner.Stop()),
-// so the new "result_tab_<id>" task is NOT deduped by the ResultBufferManager.
-// Returns true when the re-run was launched; false when no runner/session, no
-// reattacher surface, or RunQuery errored.
+// With a UI scheduler wired the re-run goes through the launch queue and
+// returns after enqueue; the ReattachActiveTab continuation (and any
+// error surfacing) arrives on the UI thread. The re-run preempts the
+// prior in-flight stream for the tab (the launcher-side preempt
+// chokepoint -> ResultTabsHelper.PreemptInFlight -> runner.Stop()), so
+// the new "result_tab_<id>" task is NOT deduped by the
+// ResultBufferManager. Returns true when the re-run was launched; false
+// when no runner/session or no reattacher surface. Launch errors surface
+// asynchronously via the marshalled surfaceErr.
 //
 // Contract entry point for the sort-cycle driver; reached via
 // sortActiveResult, which the constructor wires to the sort entry points.
@@ -970,29 +1043,37 @@ func (q *QueryEditorController) reRunActiveTab(runSQL string) bool {
 		return false
 	}
 	origSQL, origArgs, origDefaultSchema := reattacher.ActiveTabOrigin()
-
-	// RunQuery preempts any in-flight stream for the tab before acquiring the
-	// per-session queue lock, so the prior stream is stopped/discarded and the
-	// new task is not deduped.
-	rh, err := runner.RunQuery(context.Background(), models.Query{
+	query := models.Query{
 		SQL:           runSQL,
 		Args:          origArgs,
 		DefaultSchema: origDefaultSchema,
 		Timeout:       q.defaultStatementTimeout(),
-	})
-	if err != nil {
-		// A failed re-run surfaces as a normal query error on the active tab.
-		// surfaceErr -> ShowError -> SetErrorSQL writes the canonical origSQL
-		// field with runSQL, which on a wrapped sort would clobber the
-		// original needed by a later clear. Pass origSQL (not runSQL) so the
-		// tab's write-once origin survives a failed re-run.
-		q.surfaceErr(origSQL, err)
-		return false
 	}
-	if q.helpers.Notice != nil {
-		q.helpers.Notice.AttachStream(rh)
+	// A failed re-run surfaces as a normal query error on the active tab.
+	// surfaceErr -> ShowError -> SetErrorSQL writes the canonical origSQL
+	// field with runSQL, which on a wrapped sort would clobber the
+	// original needed by a later clear. Pass origSQL (not runSQL) so the
+	// tab's write-once origin survives a failed re-run.
+	reattach := func(rh *session.RunHandle, err error) {
+		q.marshalToUI(func() {
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					q.surfaceErr(origSQL, err)
+				}
+				return
+			}
+			if q.helpers.Notice != nil {
+				q.helpers.Notice.AttachStream(rh)
+			}
+			reattacher.ReattachActiveTab(rh, runSQL, origSQL)
+		})
 	}
-	reattacher.ReattachActiveTab(rh, runSQL, origSQL)
+	if q.helpers.OnUIThread == nil {
+		rh, err := runner.RunQuery(context.Background(), query)
+		reattach(rh, err)
+		return err == nil
+	}
+	runner.RunQueryAsync(context.Background(), query, reattach)
 	return true
 }
 

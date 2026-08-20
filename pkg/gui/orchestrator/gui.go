@@ -493,6 +493,7 @@ func (g *Gui) wireWithDriver() error {
 		Toaster:  g.toastHelp,
 		OnWorker: g.OnWorker,
 		Tr:       tr,
+		Logger:   g.deps.Common.Logger(),
 	})
 
 	tablePicker := tablesPickerAdapter{registry: g.registry.Tables}
