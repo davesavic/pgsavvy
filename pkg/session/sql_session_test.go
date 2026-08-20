@@ -263,6 +263,61 @@ func TestSQLSessionCancel_BoundsCancelDialDeadline(t *testing.T) {
 	_ = rh.Rows().Close()
 }
 
+// TestSQLSessionCancelCurrent_DelegatesWhenStreamInFlight proves
+// SQLSession.CancelCurrent reaches the inner cancelCurrenter capability when a
+// Stream is in flight (runActive set) — the path the QueryRunner's last-wins
+// supersession uses to abort a Stream-blocked op — and that the delegated ctx
+// is bounded (cancelDialBound) so a dead/slow host cannot freeze the caller.
+func TestSQLSessionCancelCurrent_DelegatesWhenStreamInFlight(t *testing.T) {
+	s, _, fs := newTestSession(t, nil)
+	release := make(chan struct{})
+	staged := &fakeRowStream{
+		qid:     models.QueryID{SessionID: 42, BackendPID: 7, Nonce: 1},
+		total:   1,
+		blockOn: release,
+	}
+	fs.streams = []func() drivers.RowStream{func() drivers.RowStream { return staged }}
+
+	rh, err := s.Stream(context.Background(), models.Query{SQL: "SELECT pg_sleep(60)"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	if err := s.CancelCurrent(context.Background()); err != nil {
+		t.Fatalf("CancelCurrent: %v", err)
+	}
+	if got := fs.cancelCurrentCalls.Load(); got != 1 {
+		t.Fatalf("inner CancelCurrent called %d times, want 1", got)
+	}
+	if dl := fs.cancelCurrentDeadline.Load(); dl == nil {
+		t.Fatal("inner CancelCurrent received a ctx with NO deadline; want a bounded dial")
+	}
+
+	// Release the stream so finish/Close can complete and goleak passes.
+	close(release)
+	for {
+		_, ok, err := rh.Rows().Next(context.Background())
+		if !ok || err != nil {
+			break
+		}
+	}
+	<-rh.Done()
+	_ = rh.Rows().Close()
+}
+
+// TestSQLSessionCancelCurrent_NoopWhenIdle proves SQLSession.CancelCurrent is
+// a no-op when no Stream is in flight (runActive nil) — it must not reach the
+// inner capability for an idle session.
+func TestSQLSessionCancelCurrent_NoopWhenIdle(t *testing.T) {
+	s, _, fs := newTestSession(t, nil)
+	if err := s.CancelCurrent(context.Background()); err != nil {
+		t.Fatalf("CancelCurrent (idle) err = %v, want nil", err)
+	}
+	if got := fs.cancelCurrentCalls.Load(); got != 0 {
+		t.Fatalf("inner CancelCurrent called %d times on idle session, want 0", got)
+	}
+}
+
 // TestSQLSession_PreemptPendingFencesThenClears is the AD4 guard: a
 // bound-expiry fence (MarkPreemptPending) makes Stream/Execute/Explain/Begin
 // fail fast with ErrPreemptPending instead of blocking on streamMu while the

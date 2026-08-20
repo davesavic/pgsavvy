@@ -211,7 +211,20 @@ func (c *Connection) Cancel(ctx context.Context, qid models.QueryID) error {
 // of which error branch fires.
 func (c *Connection) cancelInner(ctx context.Context, qid models.QueryID) error {
 	secretKey, _ := c.lookupCancelKey(qid.BackendPID)
+	return c.cancelForPID(ctx, qid.BackendPID, secretKey)
+}
 
+// cancelForPID writes a 16-byte CancelRequest for backendPID + secretKey over a
+// FRESH TCP connection (using the pool's pgconn.Config DialFunc / Host / Port)
+// — the original session's pgconn is never touched, so the cancel works while
+// that session is mid-Stream on a long-running query. secretKey authenticates
+// the request; 0 is permitted (Postgres silently ignores a wrong key).
+//
+// ctx bounds the dial AND the close-wait read (mirrored onto the socket
+// deadline) so a dead/slow host cannot block the caller indefinitely. The read
+// result is intentionally discarded — Postgres never sends a reply on the
+// cancel channel; the server simply closes after processing.
+func (c *Connection) cancelForPID(ctx context.Context, backendPID, secretKey uint32) error {
 	// Pool.Config() returns a defensive copy, so reading ConnConfig.Config is
 	// race-free with respect to pool internals.
 	cfg := c.pool.Config()
@@ -237,7 +250,7 @@ func (c *Connection) cancelInner(ctx context.Context, qid models.QueryID) error 
 	buf := make([]byte, 16)
 	binary.BigEndian.PutUint32(buf[0:4], 16)
 	binary.BigEndian.PutUint32(buf[4:8], cancelRequestCode)
-	binary.BigEndian.PutUint32(buf[8:12], qid.BackendPID)
+	binary.BigEndian.PutUint32(buf[8:12], backendPID)
 	binary.BigEndian.PutUint32(buf[12:16], secretKey)
 
 	if _, err := conn.Write(buf); err != nil {

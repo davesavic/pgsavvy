@@ -43,12 +43,38 @@ type gateSess struct {
 	lastTx  *gateTx
 	inTx    bool
 	cancels []models.QueryID
+
+	// cancelCurrentCalls counts CancelCurrent invocations (the wire-cancel
+	// capability probed via sessionCancelCurrenter). cancelCurrentRet is the
+	// error CancelCurrent reports (nil default). CancelCurrent itself only
+	// records — it does NOT release a blocked Stream; tests release the gate
+	// manually, exactly as they would observe the server abort surfacing.
+	cancelCurrentCalls int
+	cancelCurrentRet   error
 }
 
 type gateStagedStream struct {
 	gate chan struct{}
 	err  error
 	rh   *session.RunHandle
+}
+
+func (g *gateSess) cancelCurrentCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.cancelCurrentCalls
+}
+
+// CancelCurrent implements the sessionCancelCurrenter capability the
+// QueryRunner probes to abort a Stream-blocked op at the wire on last-wins
+// supersession. Here it only records the call (and the test drives the gate
+// release); the real pg.Session issues the out-of-band CancelRequest.
+func (g *gateSess) CancelCurrent(context.Context) error {
+	g.mu.Lock()
+	g.cancelCurrentCalls++
+	err := g.cancelCurrentRet
+	g.mu.Unlock()
+	return err
 }
 
 func (g *gateSess) record(ev string) {
@@ -395,6 +421,120 @@ func TestSecondLaunchCancelsInFlightSentinel(t *testing.T) {
 	}
 	if aEnd == -1 || bStart == -1 || aEnd > bStart {
 		t.Fatalf("sequence not single-flight: events = %v", events)
+	}
+}
+
+// waitForCancelCurrent polls until gateSess records >= n CancelCurrent calls
+// (the wire-cancel capability fired) or fails.
+func waitForCancelCurrent(t *testing.T, gs *gateSess, n int, what string) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		if gs.cancelCurrentCount() >= n {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("%s: CancelCurrent called %d times, want >= %d", what, gs.cancelCurrentCount(), n)
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
+}
+
+// TestSecondLaunchWireCancelsBlockedOp pins the REAL last-wins at the wire:
+// a launch B superseding a launch A whose op is still blocked inside Stream
+// (pg_sleep / row-less DML — the case where no RunHandle exists to Cancel)
+// must issue the protocol-safe wire cancel (sessionCancelCurrenter /
+// CancelCurrent) instead of letting A run to completion. Even when A's op
+// terminates with the wire-abort error (57014), its abandoned ack surfaces
+// context.Canceled — never the 57014 — and B runs cleanly right after.
+func TestSecondLaunchWireCancelsBlockedOp(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	gs := &gateSess{}
+	gate := make(chan struct{})
+	// A's op returns the deferred 57014 once released, exactly as pgx
+	// surfaces a server-abort from inside a blocked Stream.
+	gs.stage(gateStagedStream{gate: gate, err: errors.New("57014: canceling statement due to user request")})
+	gs.stage(gateStagedStream{})
+	r := data.NewQueryRunner(gs, drivers.Capabilities{HasLiveCancel: true})
+
+	a := make(chan ackResult, 1)
+	b := make(chan ackResult, 1)
+	r.RunAsync(context.Background(), "SELECT A", data.RunOptions{}, func(rh *session.RunHandle, err error) { a <- ackResult{rh, err} })
+	waitForEvent(t, gs, "stream:SELECT A:start")
+
+	// B's enqueue supersedes A's still-pending launch: the runner must abort
+	// A at the wire (CancelCurrent) AND abandon its sentinel.
+	r.RunAsync(context.Background(), "SELECT B", data.RunOptions{}, func(rh *session.RunHandle, err error) { b <- ackResult{rh, err} })
+	waitForCancelCurrent(t, gs, 1, "supersede of blocked A")
+
+	// Release A's op (as the server does after the cancel request). Its ack
+	// must be suppressed as context.Canceled — the 57014 must NOT surface.
+	close(gate)
+	if got := waitAck(t, a, "A"); got.rh != nil || !errors.Is(got.err, context.Canceled) {
+		t.Fatalf("wire-aborted abandoned A ack = (%v, %v), want (nil, context.Canceled)", got.rh, got.err)
+	}
+	if got := waitAck(t, b, "B"); got.err != nil {
+		t.Fatalf("B ack err = %v, want nil", got.err)
+	}
+}
+
+// TestCancelWireCancelsBlockedOp pins <leader>x against a Stream-blocked op:
+// QueryRunner.Cancel on a still-pending launch must issue the wire cancel
+// (CancelCurrent) so the blocked query is aborted server-side, and the
+// resulting ack is suppressed as context.Canceled.
+func TestCancelWireCancelsBlockedOp(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	gs := &gateSess{}
+	gate := make(chan struct{})
+	gs.stage(gateStagedStream{gate: gate, err: errors.New("57014: canceling statement due to user request")})
+	r := data.NewQueryRunner(gs, drivers.Capabilities{HasLiveCancel: true})
+
+	a := make(chan ackResult, 1)
+	r.RunAsync(context.Background(), "SELECT A", data.RunOptions{}, func(rh *session.RunHandle, err error) { a <- ackResult{rh, err} })
+	waitForEvent(t, gs, "stream:SELECT A:start")
+
+	if err := r.Cancel(); err != nil {
+		t.Fatalf("Cancel err = %v", err)
+	}
+	waitForCancelCurrent(t, gs, 1, "<leader>x on blocked A")
+
+	close(gate)
+	if got := waitAck(t, a, "A"); got.rh != nil || !errors.Is(got.err, context.Canceled) {
+		t.Fatalf("cancelled blocked A ack = (%v, %v), want (nil, context.Canceled)", got.rh, got.err)
+	}
+}
+
+// TestNoWireCancelWithoutLiveCancel proves the wire-cancel is gated on the
+// driver's HasLiveCancel capability: a superseding launch against a runner
+// without it never issues CancelCurrent (it still sentinel-cancels).
+func TestNoWireCancelWithoutLiveCancel(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	gs := &gateSess{}
+	gate := make(chan struct{})
+	gs.stage(gateStagedStream{gate: gate})
+	gs.stage(gateStagedStream{})
+	// Note: Capabilities{} — HasLiveCancel false.
+	r := data.NewQueryRunner(gs, drivers.Capabilities{})
+
+	a := make(chan ackResult, 1)
+	b := make(chan ackResult, 1)
+	r.RunAsync(context.Background(), "SELECT A", data.RunOptions{}, func(rh *session.RunHandle, err error) { a <- ackResult{rh, err} })
+	waitForEvent(t, gs, "stream:SELECT A:start")
+	r.RunAsync(context.Background(), "SELECT B", data.RunOptions{}, func(rh *session.RunHandle, err error) { b <- ackResult{rh, err} })
+
+	close(gate)
+	if got := waitAck(t, a, "A"); !errors.Is(got.err, context.Canceled) {
+		t.Fatalf("abandoned A ack err = %v, want context.Canceled", got.err)
+	}
+	if got := waitAck(t, b, "B"); got.err != nil {
+		t.Fatalf("B ack err = %v, want nil", got.err)
+	}
+	if n := gs.cancelCurrentCount(); n != 0 {
+		t.Fatalf("CancelCurrent called %d times without HasLiveCancel, want 0", n)
 	}
 }
 

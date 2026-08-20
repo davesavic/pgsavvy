@@ -99,6 +99,30 @@ func (s *Session) SecretKey() uint32 { return s.secretKey }
 // matches the BackendPID stamped into every QueryID produced by Stream/Execute.
 func (s *Session) BackendPID() uint32 { return s.backendPID }
 
+// CancelCurrent asks the PostgreSQL server to terminate the query currently
+// executing on this session's connection, identified by the backend PID and
+// secret key captured at session-open. Unlike Connection.Cancel(QueryID) it
+// needs no stamped QueryID, so it can abort a Stream still blocked inside the
+// driver — pg_sleep / row-less DML, where pgx has not yet returned a RowStream
+// — the exact case last-wins supersession must interrupt at the wire.
+//
+// The cancel is out-of-band (a fresh-dial CancelRequest; the busy pgconn is
+// never touched), so it is safe to call while this session's Stream is blocked
+// and does NOT require the inFlight guard. No-op when the session is closed.
+// ctx bounds the dial + close-wait read; callers pass a short deadline (the
+// session layer uses cancelDialBound).
+func (s *Session) CancelCurrent(ctx context.Context) error {
+	if s.closed.Load() {
+		return nil
+	}
+	logs.Event(pkgLogger(), "db", "query_cancel",
+		slog.Uint64("sid", uint64(s.id)),
+		slog.Uint64("backend_pid", uint64(s.backendPID)),
+		slog.String("kind", "cancel_current"),
+	)
+	return s.parent.cancelForPID(ctx, s.backendPID, s.secretKey)
+}
+
 // Conn exposes the underlying pgxpool.Conn to same-package loaders that have
 // ALREADY acquired the inFlight guard via their calling Session method. It is
 // NOT guarded itself — calling it from outside the package is a programmer

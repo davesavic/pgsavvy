@@ -350,9 +350,9 @@ func TestBusyHistoryLeafSubtitleNotClobbered(t *testing.T) {
 }
 
 // TestRapidDoubleRunSubtitlePersists pins the double-run contract: two
-// confirmed <leader>r launches within 100ms (the second last-wins-
-// cancels the first per the single-flight queue; the first still runs
-// to completion server-side on the detached ctx and settles as a
+// confirmed <leader>r launches within 100ms (the second last-wins-cancels
+// the first per the single-flight queue; the first is abandoned + wire-cancelled
+// at the session so the second runs immediately, and settles as a
 // generation-stale no-op clear). From launch until the second run's
 // settle, a tight poll must never observe an empty subtitle while the
 // run state reports in flight, at least two distinct frames must be

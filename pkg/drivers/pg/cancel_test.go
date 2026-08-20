@@ -128,6 +128,67 @@ func TestPgCancelInvalidPIDIgnored(t *testing.T) {
 	}
 }
 
+// TestPgSessionCancelCurrentTerminatesBlockedStream proves
+// Session.CancelCurrent aborts a Stream still blocked INSIDE the driver —
+// pg_sleep / row-less DML, where pgx has not yet returned a RowStream and no
+// QueryID exists to Cancel with. It uses the session's captured backend PID +
+// secret key for the out-of-band CancelRequest; this is the wire mechanism the
+// QueryRunner's last-wins supersession relies on.
+func TestPgSessionCancelCurrentTerminatesBlockedStream(t *testing.T) {
+	_, sess := requirePGConnAndSession(t)
+	pgsess, ok := sess.(*pg.Session)
+	if !ok {
+		t.Fatalf("expected *pg.Session, got %T", sess)
+	}
+
+	type streamResult struct {
+		err error
+		dur time.Duration
+	}
+	done := make(chan streamResult, 1)
+	go func() {
+		start := time.Now()
+		stream, sErr := sess.Stream(context.Background(), models.Query{SQL: "SELECT pg_sleep(60)"})
+		// pgx may surface the deferred 57014 only at Next/Err; drain one row
+		// to coerce it.
+		if sErr == nil && stream != nil {
+			_, _, sErr = stream.Next(context.Background())
+		}
+		if stream != nil {
+			_ = stream.Close()
+		}
+		done <- streamResult{err: sErr, dur: time.Since(start)}
+	}()
+
+	// Brief settle so pg_sleep is registered on the backend before we cancel.
+	time.Sleep(250 * time.Millisecond)
+
+	cancelCtx, cancelCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelCancel()
+	if err := pgsess.CancelCurrent(cancelCtx); err != nil {
+		t.Fatalf("Session.CancelCurrent: %v", err)
+	}
+
+	select {
+	case res := <-done:
+		if res.err == nil {
+			t.Fatalf("Stream returned nil err after CancelCurrent (dur=%v); want 57014", res.dur)
+		}
+		var qe *drivers.QueryError
+		if !errors.As(res.err, &qe) {
+			t.Fatalf("Stream err = %v (%T), want *drivers.QueryError carrying 57014", res.err, res.err)
+		}
+		if qe.Code != "57014" {
+			t.Errorf("QueryError.Code = %q, want 57014 (query_canceled)", qe.Code)
+		}
+		if res.dur > time.Second {
+			t.Errorf("CancelCurrent took %v to surface; want < 1s", res.dur)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("CancelCurrent did not terminate pg_sleep within 3s")
+	}
+}
+
 func TestPgCancelTerminatesLongRunningQuery(t *testing.T) {
 	// Session A runs SELECT pg_sleep(60) on a dedicated goroutine. The query
 	// is single-row so pgx blocks INSIDE Session.Stream (specifically

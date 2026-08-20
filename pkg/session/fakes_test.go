@@ -101,10 +101,29 @@ type fakeSess struct {
 	closeCount atomic.Int32
 
 	noticeCh chan<- pgconn.Notice
+
+	// cancelCurrentCalls counts CancelCurrent invocations (the cancelCurrenter
+	// capability SQLSession probes); cancelCurrentErr is the reported error.
+	// cancelCurrentDeadline captures the ctx deadline SQLSession passes so a
+	// test can assert the bounded-dial discipline.
+	cancelCurrentCalls    atomic.Int32
+	cancelCurrentErr      error
+	cancelCurrentDeadline atomic.Pointer[time.Time]
 }
 
 // AttachNotice satisfies session.noticeAttacher.
 func (s *fakeSess) AttachNotice(ch chan<- pgconn.Notice) { s.noticeCh = ch }
+
+// CancelCurrent satisfies session.cancelCurrenter (the pg.Session capability
+// SQLSession type-asserts for last-wins wire cancellation).
+func (s *fakeSess) CancelCurrent(ctx context.Context) error {
+	s.cancelCurrentCalls.Add(1)
+	if dl, ok := ctx.Deadline(); ok {
+		d := dl
+		s.cancelCurrentDeadline.Store(&d)
+	}
+	return s.cancelCurrentErr
+}
 
 func (s *fakeSess) Close() error                                                 { s.closeCount.Add(1); return nil }
 func (s *fakeSess) ID() models.SessionID                                         { return s.id }

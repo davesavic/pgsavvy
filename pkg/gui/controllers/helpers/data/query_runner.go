@@ -18,6 +18,44 @@ import (
 // wired (typically because the user is not connected yet).
 var ErrNoSession = errors.New("query: no active session")
 
+// wireCancelBound caps the wall-clock cost of the last-wins wire cancel issued
+// from cancelPendingLaunch / Cancel / CancelAndWaitActiveRun. The cancel is an
+// out-of-band fresh-dial CancelRequest; on a dead/slow host the dial (and the
+// close-wait read) could otherwise block the caller for the caller's own
+// deadline. Mirrors session.cancelDialBound, which already bounds the
+// <leader>x Cancel path on the UI thread.
+const wireCancelBound = 3 * time.Second
+
+// sessionCancelCurrenter is the optional capability of the bound session (a
+// real *session.SQLSession) to abort its currently-executing query WITHOUT a
+// stamped QueryID — a launch op still blocked inside Stream (pg_sleep / row-less
+// DML). Probed by type assertion so unit-test fakes that implement RunnerSession
+// without the capability stay green and silent (no wire cancel fires for them).
+type sessionCancelCurrenter interface {
+	CancelCurrent(ctx context.Context) error
+}
+
+// cancelCurrentWire aborts the query currently executing on the bound session's
+// connection via the protocol-safe out-of-band CancelRequest. This is what makes
+// last-wins REAL at the wire: a superseding launch (or <leader>x) interrupts the
+// in-flight query instead of letting it run to completion server-side. No-op
+// when the driver lacks live-cancel, the session lacks the capability (unit-test
+// fakes), or nothing is in flight.
+func (r *QueryRunner) cancelCurrentWire(ctx context.Context) {
+	b := r.load()
+	if b == nil || b.sess == nil {
+		return
+	}
+	if !b.caps.HasLiveCancel {
+		return
+	}
+	cc, ok := b.sess.(sessionCancelCurrenter)
+	if !ok {
+		return
+	}
+	_ = cc.CancelCurrent(ctx)
+}
+
 // RunnerSession is the subset of *session.SQLSession that QueryRunner
 // needs. Defining the dependency as an interface keeps the helper
 // testable without a live driver: tests inject a fake that records
@@ -458,6 +496,16 @@ func (r *QueryRunner) cancelPendingLaunch() {
 		}
 		s.abandoned.Store(true)
 		s.cancel()
+		// Last-wins at the wire: if the superseded launch is the one currently
+		// blocked inside Stream (still pending), abort it server-side so the
+		// queue drains promptly instead of running to completion. Synchronous
+		// and race-free: the CAS above proved this sentinel was still pending,
+		// so the launcher cannot yet have started a successor op for the cancel
+		// to target by mistake. Bounded by wireCancelBound (mirrors the
+		// <leader>x UI-thread precedent).
+		ctx, ctxCancel := context.WithTimeout(context.Background(), wireCancelBound)
+		r.cancelCurrentWire(ctx)
+		ctxCancel()
 		return
 	}
 }
@@ -834,14 +882,15 @@ func (r *QueryRunner) execLaunch(req *launchRequest) {
 		if req.slot.abandoned.Load() {
 			// Last-wins: this launch was preempted. Close the orphaned
 			// stream promptly (releases the session queue lock without a
-			// tab) and surface a cancellation, not a doomed tab.
+			// tab) and surface a cancellation, not a doomed tab — even when
+			// the op terminated with a wire-abort error (57014), which is the
+			// expected consequence of the superseding cancel, never a
+			// user-facing failure.
 			if res.rh != nil {
 				_ = res.rh.Rows().Close()
 				res.rh = nil
 			}
-			if err == nil {
-				err = context.Canceled
-			}
+			err = context.Canceled
 		}
 
 		// Resolve per statement: publish the handle unless a NEWER pending
@@ -1048,7 +1097,11 @@ func (r *QueryRunner) Cancel() error {
 		return b.sess.Cancel(rh.QueryID())
 	}
 	if s.cancel != nil {
-		s.cancel()
+		// A still-pending (tab-less) launch: abandon + cancel its sentinel and
+		// wire-cancel the currently-executing op — which may still be blocked
+		// inside Stream (pg_sleep / row-less DML), where no RunHandle exists to
+		// target yet. cancelPendingLaunch performs all three atomically.
+		r.cancelPendingLaunch()
 	}
 	return nil
 }
@@ -1078,6 +1131,13 @@ func (r *QueryRunner) CancelAndWaitActiveRun() bool {
 		done = rh.Done()
 	} else if s.cancel != nil {
 		s.cancel()
+		// Abort the currently-executing op at the wire too: it may be blocked
+		// inside Stream (pg_sleep / row-less DML), where no RunHandle exists to
+		// Cancel — without this, done would only close after the query ran to
+		// completion (up to the statement timeout), stalling the quit path.
+		ctx, ctxCancel := context.WithTimeout(context.Background(), wireCancelBound)
+		r.cancelCurrentWire(ctx)
+		ctxCancel()
 		done = s.done
 	}
 	if done == nil {

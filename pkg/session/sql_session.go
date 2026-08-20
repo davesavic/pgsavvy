@@ -34,6 +34,17 @@ type noticeAttacher interface {
 	AttachNotice(ch chan<- pgconn.Notice)
 }
 
+// cancelCurrenter is the optional capability of a drivers.Session to abort
+// the query currently executing on its connection WITHOUT a stamped QueryID
+// (a Stream still blocked inside the driver — pg_sleep / row-less DML — where
+// pgx has not yet returned a RowStream). The pg.Session implements it via an
+// out-of-band fresh-dial CancelRequest. Probed by type assertion so SQLSession
+// stays engine-agnostic; a session that lacks the capability reports a no-op
+// (nil) CancelCurrent.
+type cancelCurrenter interface {
+	CancelCurrent(ctx context.Context) error
+}
+
 // sqlSessionNoticeBuffer is the long-lived buffer between the driver's
 // notice router and the SQLSession fan-out goroutine. 128 is comfortably
 // larger than the per-run buffer (64) so a burst can land in this channel
@@ -466,6 +477,31 @@ func (s *SQLSession) Cancel(qid models.QueryID) error {
 		s.logger.LogAttrs(context.Background(), slog.LevelDebug, "query_cancel", attrs...)
 	}
 	return err
+}
+
+// CancelCurrent aborts the query currently executing on this session's
+// connection via the protocol-safe out-of-band CancelRequest. Unlike Cancel it
+// needs no stamped QueryID, so it can interrupt a Stream still blocked inside
+// the driver — pg_sleep / row-less DML — which the QueryRunner's last-wins
+// path relies on to supersede an in-flight query at the wire instead of
+// waiting for it to run to completion.
+//
+// No-op (nil) when the driver lacks the cancelCurrenter capability, or when no
+// Stream is in flight (runActive is nil — the launcher may be waiting on
+// streamMu behind a synchronous op, and aborting that op is not this path's
+// intent). The call is bounded by cancelDialBound so a dead/slow host cannot
+// block its caller indefinitely.
+func (s *SQLSession) CancelCurrent(ctx context.Context) error {
+	if s.runActive.Load() == nil {
+		return nil
+	}
+	cc, ok := s.inner.(cancelCurrenter)
+	if !ok {
+		return nil
+	}
+	bctx, cancel := context.WithTimeout(ctx, cancelDialBound)
+	defer cancel()
+	return cc.CancelCurrent(bctx)
 }
 
 // Close releases the inner session, rolls back any active transaction, and
