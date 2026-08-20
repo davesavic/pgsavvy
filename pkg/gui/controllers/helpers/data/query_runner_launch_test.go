@@ -627,10 +627,20 @@ func (s *recInnerSession) CurrentTransaction() drivers.Transaction {
 	return s.lastTx
 }
 
-type recTx struct{ rolledBack atomic.Bool }
+type recTx struct {
+	committed  atomic.Bool
+	rolledBack atomic.Bool
+}
 
-func (t *recTx) Commit(context.Context) error             { return nil }
-func (t *recTx) Rollback(context.Context) error           { t.rolledBack.Store(true); return nil }
+func (t *recTx) Commit(context.Context) error {
+	t.committed.Store(true)
+	return nil
+}
+
+func (t *recTx) Rollback(context.Context) error {
+	t.rolledBack.Store(true)
+	return nil
+}
 func (t *recTx) Savepoint(context.Context, string) error  { return nil }
 func (t *recTx) Release(context.Context, string) error    { return nil }
 func (t *recTx) RollbackTo(context.Context, string) error { return nil }

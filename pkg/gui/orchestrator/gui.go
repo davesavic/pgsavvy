@@ -239,8 +239,11 @@ type Gui struct {
 	// Query-execution state surfaced by the query runtime.
 	queryState queryState
 
-	// closed is true once Close has run; idempotent guard.
-	closed bool
+	// closed is true once Close has run; idempotent guard. Atomic (AD7)
+	// so a concurrent second Close is a no-op and the OnUIThread /
+	// OnUIThreadContentOnly closed-gate reads it without racing the
+	// Close write.
+	closed atomic.Bool
 
 	// Threading-model + busy-spinner state (DESIGN.md §17, U8). See
 	// threading.go for the OnUIThread / OnUIThreadContentOnly / OnWorker
@@ -337,8 +340,10 @@ type spinnerState struct {
 	busy int64
 
 	// workersWG joins live OnWorker goroutines on shutdown so the
-	// goleak smoke tests have a deterministic quiescence point.
-	workersWG sync.WaitGroup
+	// goleak smoke tests have a deterministic quiescence point. The
+	// workerGroup wrapper (threading.go) adds a bounded WaitTimeout so
+	// Close cannot hang on a never-finishing worker.
+	workersWG *workerGroup
 
 	// onWorkerSampleCounter implements the AD-20 quiescence-preserving
 	// sampling for cat=state worker_start / worker_end emits. Every
@@ -383,7 +388,7 @@ func NewGui(deps Deps, opts ...Option) *Gui {
 	g := &Gui{
 		deps:         deps,
 		tree:         gui.NewContextTree(),
-		spinnerState: spinnerState{clock: realClock{}},
+		spinnerState: spinnerState{clock: realClock{}, workersWG: newWorkerGroup()},
 	}
 	g.connectHelper = data.NewConnectHelper()
 	g.schemasHelper = data.NewSchemasHelper(deps.Common, deps.Store)
@@ -534,6 +539,12 @@ func (g *Gui) wireWithDriver() error {
 	// cycles. connectInvoker.Bind swaps the inner session atomically.
 	if g.queryState.queryRunner == nil {
 		g.queryState.queryRunner = data.NewQueryRunner(nil, drivers.Capabilities{})
+	}
+	// Wire the structured logger so launcher-side diagnostics (e.g. the
+	// failed-rollback warn on an ANALYZE wrap) actually emit at runtime.
+	// Mirrors the ResultTabsHelper/ConnectHelper SetLogger pattern; nil-safe.
+	if g.deps.Common != nil {
+		g.queryState.queryRunner.SetLogger(g.deps.Common.Logger())
 	}
 
 	// Instantiate the inline-edit helpers. Each is built
@@ -1630,21 +1641,47 @@ func logPanicStack(logger *slog.Logger, recovered any) {
 	)
 }
 
+// closeDrainBound bounds the two shutdown drains in Close: the
+// queryRunner launcher-idle wait and the worker-group wait. Matches
+// CancelAndWaitActiveRun's 2s bound; the preempt stop-wait above uses its
+// own (larger) preemptStopBound, and the log closer its own 2s deadline.
+// Idle Close completes in well under this bound (nothing to drain); the
+// bound only bites when a worker/launcher is genuinely wedged, in which
+// case Close fails loud (warn/error-logged) instead of hanging.
+const closeDrainBound = 2 * time.Second
+
 // Close runs the M15c shutdown sequence:
-//  1. workersWG.Wait
-//  2. activeSQLSession.Close
-//  3. queryRunner.Unbind
-//  4. history.Close
-//  5. store.Flush + store.Close
-//  6. driver.Close (gocui TUI driver)
-//  7. LogCloser.Close (2 s deadline; AD-16)
+//  1. Set the atomic closed gate (concurrent Close calls become no-ops;
+//     OnUIThread / OnUIThreadContentOnly stop delivering into the dead UI)
+//  2. Flush the query-editor buffer
+//  3. PreemptInFlight — stop in-flight result-tab streams (solves the
+//     parked-RBM-worker class of hang; see below)
+//  4. stopSpinner — stop the busy-spinner ticker unconditionally so the
+//     ticker drain goroutine can exit (it is registered on workersWG)
+//  5. Cancel pending launch sentinels + wait for the launch queue to go
+//     idle (bounded) — a queued launch can never execute against the
+//     session we are about to close, and no ack can be pending into the
+//     dead UI afterwards
+//  6. Wait for in-flight OnWorker goroutines (bounded — fail loud on
+//     expiry instead of hanging on a leaked worker)
+//  7. activeSQLSession.Close
+//  8. queryRunner.Unbind
+//  9. history.Close
+//  10. store.Flush + store.Close
+//  11. driver.Close (gocui TUI driver)
+//  12. LogCloser.Close (2 s deadline; AD-16)
+//
+// Note: the QueryRunner launch-loop goroutine is NOT tracked on workersWG.
+// If step 5's bounded launcher-idle wait expires, Close proceeds with the
+// launcher still alive and relies on step 7 (activeSQLSession.Close) to
+// kill the wire — the wedged op then surfaces as a goleak failure in the
+// smoke tests (fail-loud by design, never a hang).
 //
 // Idempotent.
 func (g *Gui) Close() error {
-	if g.closed {
+	if !g.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	g.closed = true
 	// Flush the query editor buffer to disk synchronously. The MainLoop
 	// has already exited so HandleFocusLost was never fired — save the
 	// buffer directly rather than dispatching via OnWorker.
@@ -1669,11 +1706,31 @@ func (g *Gui) Close() error {
 	// into a torn-down MainLoop after driver.Close(). stopSpinner is
 	// idempotent (nil ticker → no-op) so the never-armed path is safe.
 	g.stopSpinner()
+	// C6: cancel any PENDING (queued) launch sentinel so a queued launch
+	// can never execute against the session we are about to close, then
+	// wait for the launcher goroutine to go idle (bounded). After this,
+	// no ack can be pending — every in-flight op has resolved (its ack
+	// ran through the now-closed OnUIThread gate or was never scheduled)
+	// and no queued op will start. An in-flight EXPLAIN ANALYZE op has no
+	// RunHandle to interrupt and is non-drainable by design; the bounded
+	// wait covers it, and the session Close below cancels the live wire.
+	if g.queryState.queryRunner != nil {
+		if err := g.queryState.queryRunner.CancelQueuedAndWaitIdle(closeDrainBound); err != nil {
+			if g.deps.Common != nil {
+				g.deps.Common.Logger().Error("gui: launch-queue drain on Close", slog.Any("err", err))
+			}
+		}
+	}
 	// Drain any in-flight OnWorker goroutines before the store/driver
 	// teardown so the goleak smoke tests see a quiescent goroutine pool
 	// (DESIGN.md §17). Safe to call when no workers were ever spawned —
-	// sync.WaitGroup.Wait on a zero counter returns immediately.
-	g.spinnerState.workersWG.Wait()
+	// the zero-count fast path returns immediately. Bounded: a leaked
+	// worker cannot hang Close, only fail loud (logged above).
+	if err := g.spinnerState.workersWG.WaitTimeout(closeDrainBound); err != nil {
+		if g.deps.Common != nil {
+			g.deps.Common.Logger().Error("gui: worker drain on Close", slog.Any("err", err))
+		}
+	}
 	var firstErr error
 	// Close the active SQLSession FIRST so an in-flight Stream gets
 	// cancelled (SQLSession.Close cancels the live RunHandle and waits

@@ -113,6 +113,13 @@ type View struct {
 	// callback once per movement.
 	lastNearTailFireAt int
 
+	// suppressNearTail is set around a content-only re-render of an
+	// in-flight initial-fill chunk so the auto-prefetch callback cannot
+	// queue a ReadRows request before the fill has drained. Checked
+	// before the once-per-growth gate is consumed so the pending
+	// prefetch fires on the first render after the flag clears.
+	suppressNearTail bool
+
 	// onCursorChange is invoked at the end of every cursor-row-mutating
 	// motion (MoveCursorDown/Up, JumpFirst/Last, HalfPageDown/Up,
 	// SetCursor) with the new (row, col). It fires WHILE v.mu is held, so
@@ -593,6 +600,17 @@ func (v *View) SetOnNearTail(fn func(n int)) {
 	v.mu.Unlock()
 }
 
+// SetSuppressNearTail gates the auto-prefetch callback for the duration
+// of a single content-only re-render (the initial-fill chunk paint). Pass
+// true around the Render call; the flag is checked before the once-per-
+// growth gate is consumed, so the prefetch fires on the first render after
+// the flag is cleared. Safe from any goroutine.
+func (v *View) SetSuppressNearTail(suppressed bool) {
+	v.mu.Lock()
+	v.suppressNearTail = suppressed
+	v.mu.Unlock()
+}
+
 // SetOnCursorChange wires the cursor-row-change callback fired at the end
 // of every row-mutating motion. The callback runs WHILE v.mu is held —
 // see the onCursorChange field doc — so it must only capture/schedule.
@@ -944,8 +962,9 @@ func (v *View) maybeFireNearTail() {
 	rowsLen := len(v.rows)
 	cursorRow := v.cursorRow
 	last := v.lastNearTailFireAt
+	suppressed := v.suppressNearTail
 	v.mu.RUnlock()
-	if cb == nil || rowsLen == 0 {
+	if cb == nil || rowsLen == 0 || suppressed {
 		return
 	}
 	if rowsLen-cursorRow > PrefetchThreshold {

@@ -85,6 +85,15 @@ type launchInner struct {
 	events    []string
 	staged    []launchStaged
 	streamErr error
+
+	// explainErr / explainPlan replay for every Explain call — the async
+	// EXPLAIN/ANALYZE controller tests inject an error or a canned plan
+	// through these. explainGate, when non-nil, parks Explain until it is
+	// closed (or the op ctx aborts) so a test can hold the EXPLAIN op
+	// mid-flight on the launcher.
+	explainErr  error
+	explainPlan models.Plan
+	explainGate chan struct{}
 }
 
 type launchStaged struct {
@@ -204,14 +213,31 @@ func (l *launchInner) DescribeFunction(stdcontext.Context, string, string) ([]mo
 	return nil, nil
 }
 
-func (l *launchInner) Explain(stdcontext.Context, models.Query, bool) (models.Plan, error) {
-	return models.Plan{}, nil
+func (l *launchInner) Explain(ctx stdcontext.Context, _ models.Query, _ bool) (models.Plan, error) {
+	if l.explainGate != nil {
+		<-l.explainGate
+	}
+	return l.explainPlan, l.explainErr
 }
 
 func (l *launchInner) Begin(stdcontext.Context, models.TxOptions) (drivers.Transaction, error) {
 	l.record("begin")
-	return nil, nil
+	return launchTx{}, nil
 }
+
+// launchTx is the minimal drivers.Transaction the async analyze-wrap path
+// rolls back after EXPLAIN.
+type launchTx struct{}
+
+func (launchTx) Commit(stdcontext.Context) error                 { return nil }
+func (launchTx) Rollback(stdcontext.Context) error               { return nil }
+func (launchTx) Savepoint(stdcontext.Context, string) error      { return nil }
+func (launchTx) Release(stdcontext.Context, string) error        { return nil }
+func (launchTx) RollbackTo(stdcontext.Context, string) error     { return nil }
+func (launchTx) Savepoints() []string                            { return nil }
+func (launchTx) Status() models.TxStatus                         { return models.TxActive }
+func (launchTx) ObserveError(error)                              {}
+func (launchTx) StatementCount() int                             { return 0 }
 func (l *launchInner) InTransaction() bool                       { return false }
 func (l *launchInner) CurrentTransaction() drivers.Transaction   { return nil }
 func (l *launchInner) LiveTxStatus() (models.TxStatus, []string) { return "", nil }
@@ -685,4 +711,103 @@ func TestNoticeHelperAttachStreamWithoutRunWarns(t *testing.T) {
 
 	// A nil Logger must not panic on the same path.
 	ui.NewNoticeHelper(ui.NoticeHelperDeps{Tr: i18n.EnglishTranslationSet()}).AttachStream(rh)
+}
+
+// TestQueryEditorExplainAnalyzeAsyncReturnsAfterEnqueue is C4 at the
+// controller seam: with a UI scheduler wired, the <leader>eA handler
+// returns after enqueue (under the 50ms budget) while the EXPLAIN ANALYZE
+// op is parked on the launcher — the statement duration (RC3) must not
+// block the UI thread. The plan-tab continuation then arrives on the UI
+// thread once the op resolves.
+func TestQueryEditorExplainAnalyzeAsyncReturnsAfterEnqueue(t *testing.T) {
+	sess := &launchInner{}
+	gate := make(chan struct{})
+	sess.explainGate = gate
+	b := newAsyncBag(sess)
+	ctrl := b.controller(&fakeEditorBuffer{Text: "SELECT pg_sleep(5);", Off: 3})
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, _ := reg.Get(commands.QueryExplainAnalyze)
+
+	start := time.Now()
+	handlerDone := make(chan error, 1)
+	go func() { handlerDone <- cmd.Handler(commands.ExecCtx{}) }()
+	select {
+	case err := <-handlerDone:
+		if err != nil {
+			t.Fatalf("ExplainAnalyze handler err = %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+			t.Fatalf("handler took %vms — want enqueue-only, <50ms (EXPLAIN ANALYZE must not run on the UI thread)", elapsed.Milliseconds())
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("handler still blocked after 100ms while the EXPLAIN ANALYZE op is parked — EXPLAIN runs on the UI thread")
+	}
+	// The plan tab must NOT open until the op resolves on the launcher
+	// (the continuation arrives on the UI thread, which we hold).
+	if len(b.tabs.planCalls) != 0 {
+		t.Fatalf("plan tab opened before the explain op resolved: %#v", b.tabs.planCalls)
+	}
+
+	close(gate)
+	b.pump.pumpUntil(t, 2*time.Second, "one plan tab", func() bool {
+		return len(b.tabs.planCalls) == 1
+	})
+	if b.tabs.planCalls[0].Label != "SELECT pg_sleep(5)" {
+		t.Fatalf("plan tab label = %q, want the statement label", b.tabs.planCalls[0].Label)
+	}
+}
+
+// TestQueryEditorExplainAsyncErrNoSessionSurfacesMarshalled covers the
+// async error path: an ExplainAsync op that loses its session surfaces
+// ErrNoSession via the marshalled surfaceErr (error tab) on the UI
+// thread — never on the launcher goroutine.
+func TestQueryEditorExplainAsyncErrNoSessionSurfacesMarshalled(t *testing.T) {
+	sess := &launchInner{explainErr: data.ErrNoSession}
+	b := newAsyncBag(sess)
+	ctrl := b.controller(&fakeEditorBuffer{Text: "SELECT 1;", Off: 3})
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, _ := reg.Get(commands.QueryExplain)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Explain handler err = %v", err)
+	}
+
+	b.pump.pumpUntil(t, 2*time.Second, "one error tab", func() bool {
+		return len(b.tabs.errorCalls) == 1
+	})
+	if b.tabs.errorCalls[0].Err != data.ErrNoSession {
+		t.Fatalf("error tab err = %v, want ErrNoSession", b.tabs.errorCalls[0].Err)
+	}
+	if len(b.tabs.planCalls) != 0 {
+		t.Fatalf("plan tabs = %d, want 0 on error", len(b.tabs.planCalls))
+	}
+}
+
+// TestQueryEditorExplainAsyncOpensPlanTabMarshalled proves the happy path
+// continuation (notice toast + plan tab) arrives on the UI thread via the
+// pump, in ack order.
+func TestQueryEditorExplainAsyncOpensPlanTabMarshalled(t *testing.T) {
+	sess := &launchInner{explainPlan: models.Plan{RawText: "real plan", Notice: "degraded"}}
+	b := newAsyncBag(sess)
+	ctrl := b.controller(&fakeEditorBuffer{Text: "SELECT 1;", Off: 3})
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, _ := reg.Get(commands.QueryExplain)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("Explain handler err = %v", err)
+	}
+
+	b.pump.pumpUntil(t, 2*time.Second, "one plan tab", func() bool {
+		return len(b.tabs.planCalls) == 1
+	})
+	if got := b.tabs.planCalls[0].Plan.RawText; got != "real plan" {
+		t.Fatalf("plan tab RawText = %q, want real plan", got)
+	}
+	b.pump.pumpUntil(t, 2*time.Second, "notice toast", func() bool {
+		return len(b.toast.msgs) == 1
+	})
+	if got := b.toast.msgs[0].Msg; got != "degraded" {
+		t.Fatalf("notice toast = %q, want degraded", got)
+	}
 }

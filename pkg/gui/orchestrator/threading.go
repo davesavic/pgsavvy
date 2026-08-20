@@ -3,7 +3,9 @@ package orchestrator
 import (
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
@@ -17,6 +19,96 @@ import (
 // worker_end line every Nth OnWorker call in addition to mandatory
 // quiescence-transition emits.
 const onWorkerSampleN = 10
+
+// workerGroup is a sync.WaitGroup with a quiescence channel so shutdown
+// can bound its wait instead of hanging on a never-finishing worker. The
+// done channel closes exactly when the counter returns to zero and a
+// fresh one is armed on the next 0→1 transition, so the primitive stays
+// reusable across bursts (matching sync.WaitGroup's reusable semantics).
+// Counter reads and the channel swap share one mutex; the embedded
+// WaitGroup keeps the blocking Wait contract intact for the test-only
+// quiescence seams.
+type workerGroup struct {
+	mu    sync.Mutex
+	count int
+	wg    sync.WaitGroup
+	done  chan struct{}
+}
+
+func newWorkerGroup() *workerGroup {
+	return &workerGroup{done: make(chan struct{})}
+}
+
+// Add mirrors sync.WaitGroup.Add. A 0→1 transition arms a fresh done
+// channel; the previous epoch's channel (if any) has already closed
+// (count==0 implies the last Done closed it).
+func (g *workerGroup) Add(delta int) {
+	g.mu.Lock()
+	if g.count == 0 && delta > 0 {
+		g.done = make(chan struct{})
+	}
+	g.count += delta
+	g.wg.Add(delta)
+	g.mu.Unlock()
+}
+
+// Done mirrors sync.WaitGroup.Done. The worker that returns the counter
+// to zero closes the current epoch's done channel.
+func (g *workerGroup) Done() {
+	g.mu.Lock()
+	g.count--
+	if g.count == 0 {
+		close(g.done)
+	}
+	g.mu.Unlock()
+	g.wg.Done()
+}
+
+// Go mirrors sync.WaitGroup.Go: it adds one and runs fn on a goroutine
+// that defers Done.
+func (g *workerGroup) Go(fn func()) {
+	g.Add(1)
+	go func() {
+		defer g.Done()
+		fn()
+	}()
+}
+
+// Wait blocks until the counter is zero. The blocking form of the
+// sync.WaitGroup contract, used by the test-only quiescence seams
+// (WaitWorkers / WaitForWorkersForTest).
+func (g *workerGroup) Wait() {
+	g.wg.Wait()
+}
+
+// WaitTimeout blocks until the counter is zero or timeout elapses,
+// whichever comes first. Returns nil on quiescence; on expiry it returns
+// an error naming the still-running count so the caller can fail loud
+// (log the leak) instead of hanging the shutdown path. The wait targets
+// the epoch present at call time — a worker arriving after the call
+// starts belongs to a later epoch and is not waited on (Close never
+// spawns new workers after setting the closed gate, so this is exact for
+// the shutdown path).
+func (g *workerGroup) WaitTimeout(timeout time.Duration) error {
+	g.mu.Lock()
+	done := g.done
+	busy := g.count
+	g.mu.Unlock()
+	if busy == 0 {
+		return nil
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-timer.C:
+		g.mu.Lock()
+		remaining := g.count
+		g.mu.Unlock()
+		return fmt.Errorf("workerGroup: %d worker(s) still running after %v", remaining, timeout)
+	}
+}
 
 // Threading helpers — direct port of lazygit's
 // pkg/gui/gui_common.go OnUIThread / OnUIThreadContentOnly / OnWorker
@@ -313,8 +405,13 @@ func (g *Gui) promptOnTop() bool {
 //
 // Nil-safe: returns immediately if the driver has not been wired yet
 // (NewGui-without-wireWithDriver path used by some unit tests).
+//
+// Closed-gate (AD7): after Close, the MainLoop has exited and gocui's
+// userEvents buffer would never be drained — a late send could block
+// once the buffer fills. The gate makes every post-Close call a no-op so
+// no goroutine can block on a dead UI.
 func (g *Gui) OnUIThread(fn func() error) {
-	if g == nil || g.driver == nil || fn == nil {
+	if g == nil || g.driver == nil || fn == nil || g.closed.Load() {
 		return
 	}
 	g.driver.Update(fn)
@@ -325,9 +422,11 @@ func (g *Gui) OnUIThread(fn func() error) {
 // re-renders view content. Required for high-frequency row-stream
 // updates where a full layout would cause flicker (DESIGN.md §6).
 //
-// Nil-safe in the same way as OnUIThread.
+// Nil-safe in the same way as OnUIThread, and carries the same
+// closed-gate (AD7): after Close no content-only update can be sent into
+// the dead MainLoop.
 func (g *Gui) OnUIThreadContentOnly(fn func() error) {
-	if g == nil || g.driver == nil || fn == nil {
+	if g == nil || g.driver == nil || fn == nil || g.closed.Load() {
 		return
 	}
 	g.driver.UpdateContentOnly(fn)
@@ -356,6 +455,16 @@ func (g *Gui) OnUIThreadContentOnly(fn func() error) {
 // the orchestrator).
 func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 	if fn == nil {
+		return
+	}
+	// Closed-gate (AD7): after Close, spawning a worker would Add(1) to a
+	// group Close is already draining and could re-arm the spinner ticker
+	// whose drain goroutine never sees spinnerStop again — a permanent
+	// goroutine + busy-counter leak. No legitimate producer survives
+	// Close (MainLoop callers are dead and launcher acks route through
+	// the gated OnUIThread), so the gate makes the WaitTimeout
+	// epoch-at-call-time assumption airtight.
+	if g.closed.Load() {
 		return
 	}
 	g.spinnerState.workersWG.Add(1)
@@ -461,6 +570,79 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 	}()
 }
 
+// HoldBusy arms the busy counter WITHOUT spawning a goroutine. It is the
+// launcher-bridge counterpart to OnWorker's ENTRY critical section
+// (pgsavvy-446q): the single-flight launch goroutine in QueryRunner runs
+// streaming session ops directly — not via OnWorker — so nothing would
+// arm the status-line spinner while a slow statement streams (it only
+// arms when the RBM drain task spawns at stream completion). The
+// QueryRunner's SetBusyHold acquires this hold at the top of every
+// launch and pairs it with exactly one ReleaseBusy once the launch fully
+// drains, so the spinner animates the WHOLE query + drain duration.
+//
+// The busyDelta(+1) transition and the arm decision run under ONE
+// spinnerMu hold, mirroring OnWorker's entry section exactly, so a
+// concurrent worker exit can never stop the ticker this arm creates.
+// The AD-20 worker_start emit uses the SAME sampling rule as OnWorker
+// (shared onWorkerSampleCounter: emit on the busy 0->1 transition or
+// every Nth call). No gocui.Task is created and nothing is spawned on a
+// goroutine — the caller is the launcher goroutine already.
+//
+// Returns true when the hold was acquired; the caller MUST then call
+// ReleaseBusy exactly once. Returns false — before touching the counter
+// or the spinner — when the Gui is closed, so the caller skips the
+// paired ReleaseBusy (mirroring OnWorker's closed-gate).
+func (g *Gui) HoldBusy() bool {
+	if g.closed.Load() {
+		return false
+	}
+	g.spinnerState.spinnerMu.Lock()
+	busyAfter := g.busyDelta(+1)
+	busyBefore := busyAfter - 1
+	if busyBefore == 0 {
+		g.armSpinnerLocked()
+	}
+	g.spinnerState.spinnerMu.Unlock()
+
+	sampleTick := g.spinnerState.onWorkerSampleCounter.Add(1)
+	if busyBefore == 0 || sampleTick%onWorkerSampleN == 0 {
+		g.emitWorkerEvent("worker_start",
+			slog.Int64("busy_before", busyBefore),
+			slog.Int64("busy_after", busyAfter),
+		)
+	}
+	return true
+}
+
+// ReleaseBusy decrements the busy counter armed by a successful
+// HoldBusy. It is the launcher-bridge counterpart to OnWorker's EXIT
+// critical section (pgsavvy-446q): the busyDelta(-1) transition and the
+// stop decision run under ONE spinnerMu hold, so a concurrent 0->1 entry
+// can never leave a stopped ticker under a positive busy count. Only the
+// release whose decrement returns the counter to zero stops the spinner.
+// The worker_end emit follows the same quiescence-only rule as OnWorker
+// (emitted only when endBusyAfter == 0, outside the critical section).
+//
+// Callers MUST pair it exactly once with a successful HoldBusy (one
+// that returned true). The QueryRunner fires it only after every
+// RunHandle of the launch has terminated, so busy stays >= 1
+// continuously through the op stream AND the RBM drain.
+func (g *Gui) ReleaseBusy() {
+	g.spinnerState.spinnerMu.Lock()
+	endBusyAfter := g.busyDelta(-1)
+	endBusyBefore := endBusyAfter + 1
+	if endBusyAfter == 0 {
+		g.stopSpinnerLocked()
+	}
+	g.spinnerState.spinnerMu.Unlock()
+	if endBusyAfter == 0 {
+		g.emitWorkerEvent("worker_end",
+			slog.Int64("busy_before", endBusyBefore),
+			slog.Int64("busy_after", endBusyAfter),
+		)
+	}
+}
+
 // emitWorkerEvent funnels every cat=state worker_* emit through a single
 // nil-tolerant helper so the OnWorker hot path stays one-line per
 // call-site.
@@ -473,10 +655,9 @@ func (g *Gui) emitWorkerEvent(evt string, attrs ...slog.Attr) {
 
 // WaitWorkers blocks until every in-flight OnWorker goroutine has
 // returned. Test-only seam (and Close path): goleak-based assertions
-// need a deterministic join point. Returns nil on success; a non-nil
-// error if the wait exceeds the supplied timeout via the embedded
-// channel — kept simple here, callers wrap with their own timeout when
-// needed.
+// need a deterministic join point. Blocks indefinitely — Close uses the
+// bounded WaitTimeout on the same counter instead, so a leaked worker
+// cannot hang shutdown.
 func (g *Gui) WaitWorkers() {
 	g.spinnerState.workersWG.Wait()
 }

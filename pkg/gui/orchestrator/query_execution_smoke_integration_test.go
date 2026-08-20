@@ -32,6 +32,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/spf13/afero"
 	"go.uber.org/goleak"
 
@@ -675,14 +676,19 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		before := helper.Count()
 		runCommand(t, s.g, commands.QueryExplain)
 
-		if got := helper.Count(); got != before+1 {
-			t.Fatalf("tab count = %d, want %d after <leader>e", got, before+1)
+		// C4: EXPLAIN now enqueues on the launch queue and returns; the
+		// plan tab opens when the launch resolves (continuation marshalled
+		// onto the UI thread).
+		if !eventuallyQE(t, 5*time.Second, func() bool {
+			return helper.Count() == before+1
+		}) {
+			t.Fatalf("tab count = %d, want %d after <leader>e", helper.Count(), before+1)
 		}
 		active := helper.Active()
 		if active == nil {
 			t.Fatal("Active() = nil after <leader>e")
 		}
-		// Plan tabs go straight to StatePlan synchronously.
+		// Plan tabs go straight to StatePlan once the launch resolves.
 		if active.State() != ui.StatePlan {
 			t.Fatalf("EXPLAIN tab state = %v, want StatePlan", active.State())
 		}
@@ -703,6 +709,11 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		// step09 stays active here; RunLayout paints the tab body via
 		// ResultTabsHelper.LayoutPaint which now routes through
 		// PlanContext.RenderBody.
+		if !eventuallyQE(t, 5*time.Second, func() bool {
+			return helper.Active() != nil
+		}) {
+			t.Fatal("no active tab after <leader>e resolved")
+		}
 		active := helper.Active()
 		if active == nil {
 			t.Fatal("no active tab to assert against")
@@ -730,6 +741,66 @@ func TestQueryExecutionEpic_AC(t *testing.T) {
 		if !hasGlyph {
 			t.Fatalf("plan tab body missing tree glyphs (▼/▶/─); view=%q buf=%q",
 				viewName, buf)
+		}
+	})
+
+	t.Run("step09c_leader_eA_explain_analyze_off_ui_thread", func(t *testing.T) {
+		// AC (C4): EXPLAIN ANALYZE executes the full statement (RC3), so it
+		// must run OFF the UI thread. The <leader>eA handler must enqueue
+		// and return; keyboard input dispatches while pg_sleep(5) executes
+		// server-side; the plan tab opens asynchronously when the launcher
+		// resolves.
+		// Clean slate: the step09/09b plan tab is still open and the
+		// ANALYZE launch preempts it — count from zero so the +1 assertion
+		// is exact.
+		for helper.Count() > 0 {
+			if err := helper.CloseActive(); err != nil {
+				t.Fatalf("CloseActive (pre <leader>eA): %v", err)
+			}
+		}
+		seedEditor(t, s.g, "SELECT pg_sleep(5)")
+		before := helper.Count()
+
+		start := time.Now()
+		runCommand(t, s.g, commands.QueryExplainAnalyze)
+		if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+			t.Fatalf("<leader>eA handler took %vms — EXPLAIN ANALYZE ran synchronously on the UI thread (must enqueue and return)", elapsed.Milliseconds())
+		}
+
+		// While the ANALYZE is still executing server-side, keyboard input
+		// must still dispatch: feed `:` (opens the command line) and require
+		// it to complete well inside the 5s statement window. Before C4 the
+		// handler blocked the UI thread for the full pg_sleep duration.
+		start = time.Now()
+		if err := s.rec.FeedKey("", gocui.NewKeyRune(':'), types.ModNone); err != nil {
+			t.Fatalf("FeedKey(':') while EXPLAIN ANALYZE in flight: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+			t.Fatalf("FeedKey(':') took %vms — the UI thread was blocked by the in-flight EXPLAIN ANALYZE", elapsed.Milliseconds())
+		}
+
+		// The ANALYZE completes asynchronously: the plan tab opens when the
+		// launch resolves. The pg driver executes the statement TWICE under
+		// ANALYZE (once for the JSON document, once for the text form), so
+		// pg_sleep(5) takes ~10s end to end — 20s is the comfortable bound.
+		if !eventuallyQE(t, 20*time.Second, func() bool {
+			return helper.Count() == before+1
+		}) {
+			t.Fatalf("tab count = %d, want %d after <leader>eA", helper.Count(), before+1)
+		}
+		active := helper.Active()
+		if active == nil {
+			t.Fatal("Active() = nil after <leader>eA")
+		}
+		if active.State() != ui.StatePlan {
+			t.Fatalf("EXPLAIN ANALYZE tab state = %v, want StatePlan", active.State())
+		}
+		if got := active.Plan().RawText; strings.TrimSpace(got) == "" {
+			t.Fatal("EXPLAIN ANALYZE plan RawText is empty; want the analyzed plan")
+		}
+		// Clean slate for downstream steps.
+		if err := helper.CloseActive(); err != nil {
+			t.Fatalf("CloseActive (post <leader>eA): %v", err)
 		}
 	})
 

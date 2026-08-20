@@ -220,6 +220,16 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 	// itself so it survives Bind / Unbind on reconnect.
 	g.queryState.queryRunner.SetPreempter(g.resultTabsH.PreemptInFlight)
 
+	// Launcher busy-bridge (pgsavvy-446q): arm the status-line spinner
+	// for the WHOLE launch duration. The single-flight launcher runs
+	// session ops directly (not via OnWorker), so without this bridge the
+	// busy counter stays 0 while a slow statement streams and the spinner
+	// only appears when the RBM drain task arms at stream completion.
+	// HoldBusy/ReleaseBusy pair per launch; ReleaseBusy fires only after
+	// every RunHandle terminates, so the spinner animates op + drain and
+	// then stops. Set on the runner itself so it survives Bind / Unbind.
+	g.queryState.queryRunner.SetBusyHold(g.HoldBusy, g.ReleaseBusy)
+
 	// prune jump entries belonging to a closed result
 	// tab so <c-o>/<c-i> never resurface stale references. Wired after
 	// both helpers exist; ResultTabsHelper invokes the callback during

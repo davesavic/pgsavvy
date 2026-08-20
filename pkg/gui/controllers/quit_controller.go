@@ -134,6 +134,18 @@ func (q *QuitController) commitAndQuit() error {
 
 	runner.CancelAndWaitActiveRun()
 
+	if runner.WrapTxOpen() {
+		// C4/C6: the 2s drain bound expired inside a runner-owned EXPLAIN
+		// ANALYZE BEGIN..ROLLBACK wrap. CurrentTransaction() here is the
+		// runner's transient wrap tx, NOT the user's — committing it would
+		// commit a wrap that exists only to make ANALYZE non-side-effecting.
+		// The EffectiveAnalyze gate guarantees the wrapped statement is
+		// non-writable (or the connection is read-only), so nothing is lost
+		// by skipping the commit; the session Close rolls the wrap back at
+		// shutdown. Quit proceeds without committing.
+		return gocui.ErrQuit
+	}
+
 	tx := runner.CurrentTransaction()
 	if tx == nil {
 		// Transaction vanished (e.g. connection died) — just quit.

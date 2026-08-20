@@ -2,10 +2,15 @@ package orchestrator_test
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
 	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/session"
 )
@@ -76,5 +81,108 @@ func TestCloseDoesNotDeadlockWithParkedResultTabWorker(t *testing.T) {
 		// Close returned — no deadlock.
 	case <-time.After(5 * time.Second):
 		t.Fatal("Gui.Close() deadlocked: workersWG.Wait() never returned with a parked result-tab worker")
+	}
+}
+
+// TestCloseReturnsWithinBoundWithStuckWorker is the C6 bounded-shutdown
+// contract: an OnWorker goroutine that never returns (the launcher parked
+// inside a Stream call that can never resolve) cannot hang Close. The
+// bounded worker wait fires and Close still returns — fail-loud (logged)
+// — within the test's 5s ceiling.
+func TestCloseReturnsWithinBoundWithStuckWorker(t *testing.T) {
+	g, _ := buildTestGui(t)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	g.OnWorker(func(_ gocui.Task) error {
+		close(started)
+		<-release // never returns until the test releases it
+		return nil
+	})
+	<-started
+
+	done := make(chan error, 1)
+	go func() { done <- g.Close() }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close hung >5s on a stuck worker — the bounded wait did not fire")
+	}
+
+	// Release the worker so it finishes and nothing leaks.
+	close(release)
+	g.WaitWorkers()
+}
+
+// TestOnUIThreadNoOpAfterClose verifies the AD7 closed-gate: after Close,
+// OnUIThread and OnUIThreadContentOnly are strict no-ops — no panic, no
+// block, and crucially no send into the dead UI (gocui's userEvents
+// buffer is never drained post-MainLoop, so a late send could block).
+func TestOnUIThreadNoOpAfterClose(t *testing.T) {
+	g, rec := buildTestGui(t)
+	if err := g.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	preFull := rec.UpdateCalls
+	preContent := rec.ContentOnlyCalls
+
+	// Must not run, must not panic, must not touch the driver.
+	g.OnUIThread(func() error {
+		t.Error("OnUIThread closure ran after Close")
+		return nil
+	})
+	g.OnUIThreadContentOnly(func() error {
+		t.Error("OnUIThreadContentOnly closure ran after Close")
+		return nil
+	})
+
+	if rec.UpdateCalls != preFull {
+		t.Fatalf("OnUIThread after Close reached the driver (%d→%d), want no-op", preFull, rec.UpdateCalls)
+	}
+	if rec.ContentOnlyCalls != preContent {
+		t.Fatalf("OnUIThreadContentOnly after Close reached the driver (%d→%d), want no-op", preContent, rec.ContentOnlyCalls)
+	}
+}
+
+// closeCountingDriver wraps the recorder driver to count Close calls so
+// the double-close test can prove idempotence.
+type closeCountingDriver struct {
+	*testfake.RecorderGuiDriver
+	closeCalls atomic.Int32
+}
+
+func (d *closeCountingDriver) Close() error {
+	d.closeCalls.Add(1)
+	return nil
+}
+
+// TestCloseDoubleIsNoOp verifies the atomic closed-gate: a concurrent
+// second Close is a no-op and the driver is torn down exactly once.
+func TestCloseDoubleIsNoOp(t *testing.T) {
+	drv := &closeCountingDriver{RecorderGuiDriver: testfake.NewRecorderGuiDriver()}
+	g := buildTestGuiWithDriverAndClock(t, drv, newFakeClock())
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	errs := make([]error, 2)
+	for i := range 2 {
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = g.Close()
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("Close[%d] err = %v, want nil", i, err)
+		}
+	}
+	if got := drv.closeCalls.Load(); got != 1 {
+		t.Fatalf("driver Close calls = %d, want 1 (the second Close must be a no-op)", got)
 	}
 }

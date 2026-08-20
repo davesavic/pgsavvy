@@ -11,10 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/tasks"
 )
 
 // fakeRunHandle is a runHandle test double. doneCh is closed by the
@@ -103,6 +106,7 @@ type fakeStreamRunner struct {
 	readRowsCalls  []int
 	readToEndCalls int
 	lastOnDone     func(error)
+	lastAppend     func([]models.Row)
 	estimatedRows  int64
 	setEstCalls    int
 }
@@ -110,7 +114,7 @@ type fakeStreamRunner struct {
 func (f *fakeStreamRunner) NewQueryTask(
 	taskKey string,
 	_ func(ctx context.Context) (drivers.RowStream, error),
-	_ func([]models.Row),
+	appendRows func([]models.Row),
 	initialRows int,
 	onDone func(error),
 ) error {
@@ -120,7 +124,20 @@ func (f *fakeStreamRunner) NewQueryTask(
 	f.lastKey = taskKey
 	f.lastInit = initialRows
 	f.lastOnDone = onDone
+	f.lastAppend = appendRows
 	return nil
+}
+
+// appendRows invokes the appendRows closure captured by the most recent
+// NewQueryTask, modelling one RBM chunk flush landing on the UI thread.
+// No-op when no task has been launched.
+func (f *fakeStreamRunner) appendRows(rows []models.Row) {
+	f.mu.Lock()
+	cb := f.lastAppend
+	f.mu.Unlock()
+	if cb != nil {
+		cb(rows)
+	}
 }
 
 func (f *fakeStreamRunner) Stop() {
@@ -2806,5 +2823,477 @@ func TestLayoutPaintRendersPlanAndErrorTabTitles(t *testing.T) {
 	ev := rec.RealView(errTab.ViewName())
 	if ev == nil || ev.Footer == "" {
 		t.Fatalf("error-tab view/footer empty after LayoutPaint: view=%v", ev)
+	}
+}
+
+// --- C5: progressive chunk-path paint during the initial stream fill ----
+
+// newPaintHelper wires a helper with a recorder driver plus a
+// fakeStreamRunner whose captured appendRows closure tests can drive
+// directly — modelling a single RBM chunk flush landing on the UI thread.
+func newPaintHelper(t *testing.T) (*ResultTabsHelper, *fakeStreamRunner, *testfake.RecorderGuiDriver) {
+	t.Helper()
+	runner := &fakeStreamRunner{}
+	rec := testfake.NewRecorderGuiDriver()
+	h := NewResultTabsHelper(ResultTabsHelperDeps{
+		Toast:         &fakeToaster{},
+		StreamFactory: func() StreamRunner { return runner },
+		Now:           time.Now,
+		Driver:        rec,
+	})
+	return h, runner, rec
+}
+
+// nRows builds n single-column rows whose values are start..start+n-1.
+func nRows(start, n int) []models.Row {
+	out := make([]models.Row, n)
+	for i := range out {
+		out[i] = models.Row{Values: []any{start + i}}
+	}
+	return out
+}
+
+// chunkRows builds chunk index c's 50 rows with globally unique values
+// (c*50 .. c*50+49) so each flush paints a distinct viewport frame.
+func chunkRows(c int) []models.Row {
+	return nRows(c*50, 50)
+}
+
+// paintViewName registers `name` as a real, properly-sized gocui view on
+// the recorder so the chunk-path paint (and LayoutPaint) can render into
+// it and tests can read the buffer back via RealView(name).
+func paintViewName(rec *testfake.RecorderGuiDriver, name string) {
+	rec.EnableRealView(name)
+	rec.SetRealView(name, gocui.NewView(name, 0, 0, 80, 24, gocui.OutputNormal))
+}
+
+// TestChunkPaintRendersRowsBeforeCompletion is the C5 core: a chunk
+// flushed through the appendRows closure must paint the tab's gocui view
+// BEFORE the stream's done path fires. Previously the grid stayed blank
+// until the final LayoutPaint, so a 200-row fill in 50-row chunks over
+// tens of seconds showed nothing.
+func TestChunkPaintRendersRowsBeforeCompletion(t *testing.T) {
+	h, runner, rec := newPaintHelper(t)
+	rh := newFakeRunHandle()
+	rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "id", TypeName: "int8"}}}
+	name := string(types.ResultTabKey(0))
+	paintViewName(rec, name)
+	if err := h.openTab("SELECT", rh); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+
+	// Chunk 1 lands; the tab is still running (no done-path signal).
+	runner.appendRows(chunkRows(0))
+	if tab.Complete() {
+		t.Fatal("tab completed before any done-path signal; progressive paint must be observable mid-stream")
+	}
+	buf := rec.RealView(name).Buffer()
+	if !contains(buf, "id") || !contains(buf, "0") {
+		t.Fatalf("view buffer does not show the first chunk's rows before completion: %q", buf)
+	}
+
+	// Completion must not regress the painted content.
+	runner.fireOnDone()
+	if !tab.Complete() {
+		t.Fatal("tab not complete after fireOnDone")
+	}
+	if buf := rec.RealView(name).Buffer(); !contains(buf, "id") {
+		t.Fatalf("view lost its rows after completion: %q", buf)
+	}
+}
+
+// TestChunkPaintBeforeFirstLayoutIsNoOp verifies the pre-LayoutPaint race:
+// appendRows called when the driver cannot resolve the tab's view (first
+// chunks may arrive before the first LayoutPaint creates it) must be a
+// silent no-op — no panic, no view creation, rows retained for the
+// eventual LayoutPaint.
+func TestChunkPaintBeforeFirstLayoutIsNoOp(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	h := NewResultTabsHelper(ResultTabsHelperDeps{
+		Toast:         &fakeToaster{},
+		StreamFactory: func() StreamRunner { return runner },
+		Now:           time.Now,
+		// Driver intentionally nil at construction so no view is
+		// materialised for the tab.
+	})
+	rh := newFakeRunHandle()
+	rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "id", TypeName: "int8"}}}
+	if err := h.openTab("Q", rh); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+
+	// Wire the driver only now: the view is not registered, so
+	// ViewByName errors — the chunk path must no-op.
+	rec := testfake.NewRecorderGuiDriver()
+	h.deps.Driver = rec
+
+	runner.appendRows(chunkRows(0))
+	if got := tab.Grid().RowCount(); got != 50 {
+		t.Fatalf("grid RowCount after pre-layout chunk = %d, want 50 (rows must be retained)", got)
+	}
+	if len(rec.AllSetViewCalls()) != 0 {
+		t.Fatalf("chunk paint must not create views; got %v", rec.AllSetViewCalls())
+	}
+
+	// The first LayoutPaint renders everything appended so far.
+	name := tab.ViewName()
+	rec.EnableRealView(name)
+	h.LayoutPaint(rec, 0, 0, 80, 24)
+	if buf := rec.RealView(name).Buffer(); !contains(buf, "id") {
+		t.Fatalf("LayoutPaint did not render the retained rows: %q", buf)
+	}
+}
+
+// TestChunkPaintOneFramePerFlush verifies the "at most one grid render per
+// appendRows flush" invariant at the observable level: across a 4-chunk
+// fill, each flush must leave the view showing a coherent frame for its
+// chunk's viewport — a dropped render would leave a stale/blank frame, and
+// a double render would produce no distinct frame per flush.
+func TestChunkPaintOneFramePerFlush(t *testing.T) {
+	h, runner, rec := newPaintHelper(t)
+	rh := newFakeRunHandle()
+	rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "c0", TypeName: "text"}}}
+	name := string(types.ResultTabKey(0))
+	paintViewName(rec, name)
+	if err := h.openTab("Q", rh); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	g := tab.Grid()
+
+	frames := make([]string, 0, 4)
+	for i := 0; i < 4; i++ {
+		runner.appendRows(chunkRows(i))
+		if i < 3 {
+			// Push the cursor to the next chunk boundary so each flush
+			// paints a distinct viewport frame.
+			for range 50 {
+				g.MoveCursorDown()
+			}
+		}
+		frames = append(frames, rec.RealView(name).Buffer())
+	}
+	for i, f := range frames {
+		if f == "" {
+			t.Fatalf("flush %d produced an empty frame (render dropped)", i)
+		}
+		if i > 0 && f == frames[i-1] {
+			t.Fatalf("flush %d produced the same frame as flush %d — a flush must repaint its chunk's viewport exactly once", i, i-1)
+		}
+	}
+	if got := tab.Grid().RowCount(); got != 200 {
+		t.Fatalf("grid RowCount after 4 chunks = %d, want 200", got)
+	}
+}
+
+// TestChunkPaintSuppressesNearTailThenFiresAfter verifies the C5 gate:
+// a chunk-path render with the cursor inside the prefetch window must NOT
+// queue a ReadRows request mid-fill, but the prefetch must NOT be lost —
+// the first render after the fill (e.g. the next LayoutPaint frame) fires
+// it once. The gate is checked before the once-per-growth gate is
+// consumed, so the post-fill prefetch survives.
+func TestChunkPaintSuppressesNearTailThenFiresAfter(t *testing.T) {
+	h, runner, rec := newPaintHelper(t)
+	rh := newFakeRunHandle()
+	rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "c0", TypeName: "text"}}}
+	name := string(types.ResultTabKey(0))
+	paintViewName(rec, name)
+	if err := h.openTab("Q", rh); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+	g := tab.Grid()
+
+	// Chunk 1: 50 rows. Cursor stays at 0 (far from the tail). The chunk
+	// path paints immediately — the mechanism under test must be live.
+	runner.appendRows(chunkRows(0))
+	if buf := rec.RealView(name).Buffer(); !contains(buf, "c0") {
+		t.Fatalf("chunk paint did not render: %q", buf)
+	}
+	// Drive the cursor into the near-tail window (rowsLen-cursor = 2).
+	for range 48 {
+		g.MoveCursorDown()
+	}
+	// Chunk 2 paints with the cursor already inside the prefetch window:
+	// the chunk-path render must NOT queue a prefetch mid-fill.
+	runner.appendRows(nRows(50, 20))
+	if calls := runner.ReadRowsCalls(); len(calls) != 0 {
+		t.Fatalf("prefetch queued mid-fill: %v", calls)
+	}
+	// A render outside the chunk path re-evaluates and fires once — the
+	// gate must not swallow the pending prefetch.
+	g.Render(nil)
+	if calls := runner.ReadRowsCalls(); len(calls) != 1 {
+		t.Fatalf("post-fill prefetch = %v, want exactly 1", calls)
+	}
+}
+
+// TestChunkPaintUpdatesFooterRowCounts verifies the chunk path refreshes
+// view.Footer mid-stream — LayoutPaint does this every frame; the chunk
+// path must too, or the row count in the frame title lags the painted
+// buffer between frames.
+func TestChunkPaintUpdatesFooterRowCounts(t *testing.T) {
+	h, runner, rec := newPaintHelper(t)
+	rh := newFakeRunHandle()
+	rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "id", TypeName: "int8"}}}
+	name := string(types.ResultTabKey(0))
+	paintViewName(rec, name)
+	if err := h.openTab("SELECT", rh); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+
+	runner.appendRows(chunkRows(0))
+	if got := rec.RealView(name).Footer; got != tab.Title() || got != "~50 rows · running" {
+		t.Fatalf("footer after chunk 1 = %q, want %q (%q)", got, "~50 rows · running", tab.Title())
+	}
+	runner.appendRows(chunkRows(1))
+	if got := rec.RealView(name).Footer; got != tab.Title() || got != "~100 rows · running" {
+		t.Fatalf("footer after chunk 2 = %q, want %q (%q)", got, "~100 rows · running", tab.Title())
+	}
+}
+
+// TestZeroRowChunkSkipsPaintAndCompletes verifies a zero-row flush does no
+// paint work at all (the RBM only dispatches non-empty batches, but the
+// guard must hold) and the tab completes normally.
+func TestZeroRowChunkSkipsPaintAndCompletes(t *testing.T) {
+	h, runner, rec := newPaintHelper(t)
+	rh := newFakeRunHandle()
+	rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "id", TypeName: "int8"}}}
+	name := string(types.ResultTabKey(0))
+	paintViewName(rec, name)
+	if err := h.openTab("SELECT", rh); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+
+	runner.appendRows(nil)
+	if buf := rec.RealView(name).Buffer(); buf != "" {
+		t.Fatalf("zero-row flush painted the view: %q", buf)
+	}
+	if got := rec.RealView(name).Footer; got != "" {
+		t.Fatalf("zero-row flush updated the footer: %q", got)
+	}
+	runner.fireOnDone()
+	if !tab.Complete() {
+		t.Fatal("tab not complete after zero-row flush + onDone")
+	}
+}
+
+// TestChunkPaintSkipsInactiveTab verifies a background tab's view is not
+// repainted mid-fill when the user has switched away (overlap/z-order
+// safety), and that switching back + LayoutPaint renders correctly.
+func TestChunkPaintSkipsInactiveTab(t *testing.T) {
+	h, runner, rec := newPaintHelper(t)
+	rh := newFakeRunHandle()
+	rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "id", TypeName: "int8"}}}
+	nameA := string(types.ResultTabKey(0))
+	paintViewName(rec, nameA)
+	if err := h.openTab("SELECT", rh); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tabA := h.Active()
+
+	// Open a plan tab — it becomes active with no stream; tab A keeps
+	// streaming in the background.
+	if err := h.OpenPlanTab("EXPLAIN", models.Plan{RawText: "Seq Scan"}); err != nil {
+		t.Fatalf("OpenPlanTab: %v", err)
+	}
+	if h.Active().id == tabA.id {
+		t.Fatal("plan tab did not become active")
+	}
+
+	// Flush chunks for the background tab A: no paint work.
+	runner.appendRows(chunkRows(0))
+	runner.appendRows(chunkRows(1))
+	if buf := rec.RealView(nameA).Buffer(); buf != "" {
+		t.Fatalf("inactive tab A's view was painted mid-fill: %q", buf)
+	}
+
+	// Switch back to A; a chunk flush while A is ACTIVE paints it
+	// immediately (no LayoutPaint needed).
+	h.Jump(1)
+	if h.Active().id != tabA.id {
+		t.Fatal("Jump(1) did not reactivate tab A")
+	}
+	runner.appendRows(chunkRows(2))
+	if buf := rec.RealView(nameA).Buffer(); !contains(buf, "id") {
+		t.Fatalf("active tab A's chunk flush did not paint the view: %q", buf)
+	}
+}
+
+// blockingRowStream is a deterministic drivers.RowStream yielding `total`
+// single-column rows, blocking inside Next once `idx` reaches blockAt
+// until release (or ctx cancel) — mirroring the session package's
+// fakeRowStream so the chunk-paint path can be observed WHILE the initial
+// fill is still in flight.
+type blockingRowStream struct {
+	cols    []models.ColumnMeta
+	total   int
+	blockAt int
+	release chan struct{}
+	idx     int
+	closed  atomic.Bool
+}
+
+func (s *blockingRowStream) Columns() []models.ColumnMeta { return s.cols }
+func (s *blockingRowStream) QueryID() models.QueryID      { return models.QueryID{} }
+func (s *blockingRowStream) RowsAffected() int64          { return 0 }
+func (s *blockingRowStream) Close() error {
+	s.closed.Store(true)
+	return nil
+}
+
+func (s *blockingRowStream) Next(ctx context.Context) (models.Row, bool, error) {
+	if s.blockAt >= 0 && s.idx == s.blockAt {
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return models.Row{}, false, ctx.Err()
+		}
+	}
+	if s.idx >= s.total {
+		return models.Row{}, false, nil
+	}
+	row := models.Row{Values: []any{s.idx}}
+	s.idx++
+	return row, true, nil
+}
+
+var _ drivers.RowStream = (*blockingRowStream)(nil)
+
+// realRBMHarness wires a real *tasks.ResultBufferManager to a dedicated
+// UI goroutine (FIFO closure execution, mirroring gocui's MainLoop) and a
+// plain worker goroutine, so the helper's chunk-paint path runs through
+// the production dispatch seam: worker drain → OnUIThreadContentOnly →
+// appendRows → view paint, with observable ordering.
+type realRBMHarness struct {
+	mgr       *tasks.ResultBufferManager
+	uiCh      chan func() error
+	uiDone    chan struct{}
+	workersWG sync.WaitGroup
+	rec       *testfake.RecorderGuiDriver
+}
+
+func newRealRBMHarness(rec *testfake.RecorderGuiDriver) *realRBMHarness {
+	h := &realRBMHarness{
+		uiCh:   make(chan func() error, 1024),
+		uiDone: make(chan struct{}),
+		rec:    rec,
+	}
+	go func() {
+		defer close(h.uiDone)
+		for fn := range h.uiCh {
+			_ = fn()
+		}
+	}()
+	h.mgr = tasks.New(
+		func(fn func(gocui.Task) error) {
+			h.workersWG.Add(1)
+			go func() {
+				defer h.workersWG.Done()
+				_ = fn(nil)
+			}()
+		},
+		func(fn func() error) {
+			h.uiCh <- fn
+		},
+	)
+	return h
+}
+
+// runOnUI runs fn on the UI goroutine and blocks until it completes,
+// preserving FIFO order with any in-flight appendRows dispatches.
+func (h *realRBMHarness) runOnUI(fn func() error) {
+	done := make(chan struct{})
+	h.uiCh <- func() error {
+		err := fn()
+		close(done)
+		return err
+	}
+	<-done
+}
+
+func (h *realRBMHarness) buffer(name string) string {
+	var out string
+	h.runOnUI(func() error {
+		out = h.rec.RealView(name).Buffer()
+		return nil
+	})
+	return out
+}
+
+func (h *realRBMHarness) close() {
+	// Stop the manager first: it closes the task's stop channel and waits
+	// for the worker to exit, unblocking any parked Next via ctx cancel.
+	// If no task is running, Stop is a no-op.
+	h.mgr.Stop()
+	close(h.uiCh)
+	<-h.uiDone
+	h.workersWG.Wait()
+}
+
+// TestStreamChunkPaintProgressiveViaRealRBM drives the REAL
+// ResultBufferManager end to end: the worker drains the first 50-row
+// chunk, dispatches it through OnUIThreadContentOnly, and the chunk path
+// paints the view WHILE the fill is still blocked mid-way — before the
+// stream is released and before the done path fires.
+func TestStreamChunkPaintProgressiveViaRealRBM(t *testing.T) {
+	rec := testfake.NewRecorderGuiDriver()
+	harness := newRealRBMHarness(rec)
+	defer harness.close()
+
+	h := NewResultTabsHelper(ResultTabsHelperDeps{
+		Toast: &fakeToaster{},
+		StreamFactory: func() StreamRunner {
+			return harness.mgr
+		},
+		Now:        time.Now,
+		Driver:     rec,
+		OnUIThread: func(fn func() error) { harness.uiCh <- fn },
+	})
+
+	// A 200-row fill never observes EOF within the initial drain (the RBM
+	// parks in the chan loop until an explicit ReadRows), so a 150-row
+	// stream is used: EOF lands inside the third 50-row chunk after the
+	// release, letting the done path fire naturally.
+	stream := &blockingRowStream{
+		cols:    []models.ColumnMeta{{Name: "id", TypeName: "int8"}},
+		total:   150,
+		blockAt: 50,
+		release: make(chan struct{}),
+	}
+	rh := newFakeRunHandle()
+	rh.rows = stream
+	name := string(types.ResultTabKey(0))
+	paintViewName(rec, name)
+	if err := h.openTab("SELECT", rh); err != nil {
+		t.Fatalf("openTab: %v", err)
+	}
+	tab := h.Active()
+
+	// The worker drains the first 50 rows, dispatches them, and then
+	// blocks at row 50 — the fill is incomplete, but the chunk paint must
+	// already be visible.
+	if !waitFor(2*time.Second, func() bool { return harness.buffer(name) != "" }) {
+		t.Fatal("view buffer stayed empty while the initial fill was blocked mid-way")
+	}
+	if tab.Complete() {
+		t.Fatal("tab completed before the stream was released; progressive paint must be observable mid-fill")
+	}
+	if got := tab.RowCount(); got != 50 {
+		t.Fatalf("RowCount while blocked = %d, want 50 (first chunk dispatched before block)", got)
+	}
+
+	// Release the stream: the fill drains to EOF and the tab completes.
+	close(stream.release)
+	if !waitFor(2*time.Second, tab.Complete) {
+		t.Fatal("tab did not reach Complete after the stream was released")
+	}
+	buf := harness.buffer(name)
+	if !contains(buf, "id") || !contains(buf, "0") {
+		t.Fatalf("view buffer lost its rows after completion: %q", buf)
 	}
 }

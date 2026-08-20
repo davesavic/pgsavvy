@@ -8,20 +8,29 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/editor"
 )
 
-// waitForUpdates blocks until the recording driver has captured at least n
+// waitForUpdates blocks until the recording driver has queued at least n
 // Update closures (the AfterFunc-scheduled clears) or the deadline elapses.
-// Keeps the stale-epoch assertion deterministic without asserting wall-clock
-// timing of the flash itself.
+// Polls the queue length under the mutex — NOT the atomic counter — because
+// the counter is incremented before the closure is appended, so observing
+// count==n does not guarantee the closure is runnable yet. Keeps the
+// stale-epoch assertion deterministic without asserting wall-clock timing of
+// the flash itself.
 func waitForUpdates(t *testing.T, d *updateRecordingDriver, n int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if int(d.updates.Load()) >= n {
+		d.mu.Lock()
+		queued := len(d.fns)
+		d.mu.Unlock()
+		if queued >= n {
 			return
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %d Update closures (got %d)", n, d.updates.Load())
+	d.mu.Lock()
+	queued := len(d.fns)
+	d.mu.Unlock()
+	t.Fatalf("timed out waiting for %d queued Update closures (got %d)", n, queued)
 }
 
 // runNextUpdate invokes the single oldest queued closure (FIFO) and removes
@@ -91,10 +100,17 @@ func TestYankFlashHelper_StaleEpochFirstClearNoOps(t *testing.T) {
 	r1 := editor.Range{Start: editor.Position{Line: 0, Col: 0}, End: editor.Position{Line: 0, Col: 3}}
 	r2 := editor.Range{Start: editor.Position{Line: 0, Col: 0}, End: editor.Position{Line: 0, Col: 5}}
 
-	// Tiny ttl so both AfterFuncs queue their clears into the recorder
-	// quickly; the recorder defers execution so order is preserved.
+	// The two TTLs are deliberately far apart: time.AfterFunc fires each
+	// callback in its OWN goroutine, so two timers with the SAME deadline
+	// race to reach the recording driver and the queue order would be
+	// nondeterministic (the stale-first-clear assertion would then be
+	// flaky under -race). With ttl2 >> ttl1 the first timer provably fires
+	// and records its closure long before the second, so the queue order is
+	// fixed: [epoch-1 clear, epoch-2 clear]. The second Flash still applies
+	// synchronously at call time, so the live flash is epoch 2 before any
+	// clear runs.
 	h.Flash(buf, r1, time.Millisecond)
-	h.Flash(buf, r2, time.Millisecond)
+	h.Flash(buf, r2, 250*time.Millisecond)
 	waitForUpdates(t, d, 2)
 
 	// Snapshot before running any clear: the second Flash won (epoch 2),

@@ -1153,15 +1153,35 @@ func (q *QueryEditorController) explain(_ commands.ExecCtx, analyze bool) error 
 	if q.helpers.Schemas != nil {
 		defaultSchema = q.helpers.Schemas.SelectedSchemaName()
 	}
-	plan, err := runner.Explain(context.Background(), stmt, effectiveAnalyze, defaultSchema)
-	if err != nil {
-		q.surfaceErr(stmt, err)
+	// continuation mutates UI state (surfaceErr / toast / openPlanTab) and
+	// MUST run on the UI thread — via marshalToUI in the async ack, or
+	// directly in the synchronous fallback (test path without a scheduler).
+	continuation := func(plan models.Plan, err error) {
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				q.surfaceErr(stmt, err)
+			}
+			return
+		}
+		if plan.Notice != "" {
+			q.toast(plan.Notice)
+		}
+		q.openPlanTab(stmt, plan)
+	}
+	if q.helpers.OnUIThread == nil {
+		plan, err := runner.Explain(context.Background(), stmt, effectiveAnalyze, defaultSchema)
+		continuation(plan, err)
 		return nil
 	}
-	if plan.Notice != "" {
-		q.toast(plan.Notice)
-	}
-	q.openPlanTab(stmt, plan)
+	// C4: EXPLAIN ANALYZE executes the statement (RC3), so it must not run
+	// on the UI thread. Enqueue on the single-flight launch queue — the
+	// launcher preempts any in-flight run before this op — and marshal the
+	// result back onto the UI thread (toastFromWorker convention).
+	runner.ExplainAsync(context.Background(), stmt, effectiveAnalyze, defaultSchema, func(plan models.Plan, err error) {
+		q.marshalToUI(func() {
+			continuation(plan, err)
+		})
+	})
 	return nil
 }
 

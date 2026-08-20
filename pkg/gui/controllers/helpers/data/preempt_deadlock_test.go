@@ -363,6 +363,38 @@ func TestParkedStreamThenExplainAnalyzeDoesNotDeadlock(t *testing.T) {
 	f.cleanup(t)
 }
 
+// TestParkedStreamThenExplainAsyncPreemptsBeforeOp proves the async Explain
+// path keeps the preempt-first ordering: an ExplainAsync enqueued while a
+// stream is parked fires the launcher-side preempt chokepoint before the
+// Explain op locks streamMu. Absent that preempt the op would deadlock on the
+// parked lock (the same freeze the synchronous tests above guard) — the ack
+// must land within the deadline, and the session op must never have run before
+// the preempt fired.
+func TestParkedStreamThenExplainAsyncPreemptsBeforeOp(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	f := newParkedStreamFixture(t)
+	f.startParkedStream(t)
+
+	ack := make(chan error, 1)
+	done := make(chan struct{})
+	f.runner.ExplainAsync(context.Background(), "SELECT 1", false, "", func(_ models.Plan, err error) {
+		ack <- err
+		close(done)
+	})
+
+	select {
+	case <-done:
+		if err := <-ack; err != nil {
+			t.Fatalf("ExplainAsync ack err = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("DEADLOCK: async Explain blocked on the parked-stream streamMu (preempt did not fire on the launcher)")
+	}
+
+	f.cleanup(t)
+}
+
 // TestParkedStreamThenFKForwardDoesNotDeadlock proves the `fk-forward` caller
 // preempts before its session Stream locks streamMu. fk-forward funnels through
 // QueryRunner.RunQuery (the shared chokepoint); we exercise RunQuery directly

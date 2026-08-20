@@ -1925,6 +1925,43 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 			tab.state = StateRunning
 		}
 		tab.mu.Unlock()
+
+		// C5: paint the arriving chunk into the tab's gocui view so wide-
+		// row initial fills appear progressively instead of staying blank
+		// until the final LayoutPaint. One grid render per flush; the
+		// appendRows invocation already runs on the UI thread (the RBM
+		// dispatches it via OnUIThreadContentOnly), so this is a direct
+		// view mutation — no layout pass, no extra OnUIThread hop.
+		//
+		// No-op when: the batch is empty, the driver is unwired, the view
+		// is not yet laid out (first chunks may beat the first
+		// LayoutPaint — the next LayoutPaint renders everything appended
+		// so far), or the tab is not the active one (a background tab's
+		// view must not be repainted — overlap/z-order safety).
+		if len(rows) == 0 || h.deps.Driver == nil {
+			return
+		}
+		if tab.id != h.activeIDSnapshot() {
+			return
+		}
+		view, err := h.deps.Driver.ViewByName(tab.ViewName())
+		if err != nil || view == nil {
+			// View not yet materialised: nothing to paint into; rows are
+			// already buffered.
+			return
+		}
+		// Mirror LayoutPaint's per-frame refresh: the footer carries the
+		// live row count, which changes with every chunk.
+		view.Footer = tab.Title()
+		gridView.SetTitle("")
+		// Gate the auto-prefetch callback for the duration of this render:
+		// the cursor may already sit inside the prefetch window, and the
+		// fill must not queue a ReadRows request mid-drain. The gate is
+		// checked before the once-per-growth gate is consumed, so the
+		// pending prefetch fires on the first render after the fill.
+		gridView.SetSuppressNearTail(true)
+		gridView.Render(view)
+		gridView.SetSuppressNearTail(false)
 	}
 	taskKey := fmt.Sprintf("result_tab_%d", id)
 	onDone := func(err error) {

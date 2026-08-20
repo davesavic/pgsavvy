@@ -3,6 +3,8 @@ package data
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -124,10 +126,37 @@ type QueryRunner struct {
 	// below fails fast with ErrPreemptPending.
 	preemptHook atomic.Pointer[func() bool]
 
+	// busyAcquire, when non-nil, is invoked at the top of every execLaunch
+	// (before the first preempt/op) to arm the UI busy spinner for the
+	// whole launch. Returns true when the hold was acquired; the launcher
+	// then pairs it with exactly one busyRelease once the launch drains.
+	// This is the launcher-bridge for pgsavvy-446q: the launcher runs
+	// session ops directly (not via OnWorker), so without it nothing arms
+	// the spinner while a slow statement streams.
+	busyAcquire atomic.Pointer[func() bool]
+
+	// busyRelease, when non-nil, releases the busy hold acquired by
+	// busyAcquire. Fired only after every statement's RunHandle has
+	// terminated (the RBM drain completed), so busy stays >= 1
+	// continuously through the op stream AND the drain.
+	busyRelease atomic.Pointer[func()]
+
 	// launchMu guards the launch queue and the launcher-liveness flag.
 	launchMu  sync.Mutex
 	launchQ   []*launchRequest
 	launching bool
+
+	// log carries the structured logger for warn-level rollback telemetry.
+	// Set once at wire time via SetLogger; nil-safe — unit tests that skip
+	// SetLogger emit nothing. Must not be read concurrently with a later
+	// SetLogger (same contract as ResultTabsHelper.log).
+	log *slog.Logger
+
+	// wrapTxOpen is true between the Begin and Rollback of a runner-owned
+	// EXPLAIN ANALYZE wrap (sync or async). The quit path reads it to
+	// detect that CurrentTransaction() is the runner's transient wrap tx
+	// (C6): a quit-during-ANALYZE must never Commit it.
+	wrapTxOpen atomic.Bool
 }
 
 // runSlot is one entry of QueryRunner.last. A slot is immutable once
@@ -158,6 +187,12 @@ type runSlot struct {
 	// concurrently with its abandonment may surface a success ack —
 	// harmless, since the successor action's preempt hook stops its tab.
 	abandoned atomic.Bool
+
+	// explain marks an ExplainAsync launch (C6): such an op has no
+	// RunHandle and cannot be interrupted mid-flight, so the quit/close
+	// paths treat it as non-drainable. Set once at enqueue time (before
+	// the slot is published) and never mutated, so the read is race-free.
+	explain bool
 }
 
 // launchRequest is one queued user action: the statements to run (each
@@ -171,12 +206,22 @@ type launchRequest struct {
 	slot         *runSlot
 	preemptFirst bool
 	stmts        []launchStmt
-	ack          func(index int, rh *session.RunHandle, err error)
+	ack          func(index int, res launchResult, err error)
+}
+
+// launchResult is the typed envelope every queued launch op resolves to:
+// a streamed RunHandle (run / re-run / fk-forward) or a parsed Plan
+// (ExplainAsync). Exactly one field is meaningful per op kind; the other
+// stays zero. Public entry points unwrap the envelope inside their ack
+// wrappers, so callers keep their narrow signatures.
+type launchResult struct {
+	rh   *session.RunHandle
+	plan models.Plan
 }
 
 // launchStmt is one statement of a batch launch.
 type launchStmt struct {
-	op func(ctx context.Context) (*session.RunHandle, error)
+	op func(ctx context.Context) (launchResult, error)
 }
 
 // NewQueryRunner builds a QueryRunner bound to sess. caps captures the
@@ -234,10 +279,17 @@ func (r *QueryRunner) Bind(sess *session.SQLSession, caps drivers.Capabilities) 
 // caps. Called by the orchestrator on disconnect / Gui.Close so HasSession
 // flips back to false and the controller short-circuits with the
 // no-connection toast on the next <leader>r.
+//
+// The pending launch sentinel (if any) is cancelled BEFORE the binding is
+// dropped (C6 gap #1): a queued launch must abort via its ctx instead of
+// running to ErrNoSession against the dead binding. Only the PENDING
+// sentinel is touched — a resolved slot's RunHandle owns its own lifecycle
+// and is left undisturbed (its tab Stop path already handles termination).
 func (r *QueryRunner) Unbind() {
 	if r == nil {
 		return
 	}
+	r.cancelPendingLaunch()
 	r.binding.Store(&runnerBinding{})
 	r.last.Store(nil)
 }
@@ -254,6 +306,33 @@ func (r *QueryRunner) SetPreempter(fn func() bool) {
 		return
 	}
 	r.preemptHook.Store(&fn)
+}
+
+// SetBusyHold installs the launcher busy-bridge hooks (pgsavvy-446q):
+// acquire is invoked at the top of execLaunch — before the first
+// preempt/op — and release fires only after every statement's RunHandle
+// has terminated, so the UI busy spinner animates for the whole launch
+// (op stream + RBM drain) and then stops. The hooks are stored on the
+// runner itself so they survive Bind / Unbind, exactly like the
+// preempter. Wire-time only, like SetPreempter. Either fn may be nil to
+// clear its half of the bridge; a nil acquire is never invoked later
+// (execLaunch loads a non-nil pointer before calling). Safe to call on a
+// nil receiver and concurrently with a live launcher (read through
+// atomic pointers).
+func (r *QueryRunner) SetBusyHold(acquire func() bool, release func()) {
+	if r == nil {
+		return
+	}
+	if acquire != nil {
+		r.busyAcquire.Store(&acquire)
+	} else {
+		r.busyAcquire.Store(nil)
+	}
+	if release != nil {
+		r.busyRelease.Store(&release)
+	} else {
+		r.busyRelease.Store(nil)
+	}
 }
 
 // preemptInFlight invokes the preempt chokepoint for the synchronous
@@ -537,9 +616,9 @@ func (r *QueryRunner) RunQueryAsync(ctx context.Context, q models.Query, ack fun
 	if r == nil {
 		return
 	}
-	op := func(lctx context.Context) (*session.RunHandle, error) {
+	op := func(lctx context.Context) (launchResult, error) {
 		if err := lctx.Err(); err != nil {
-			return nil, err
+			return launchResult{}, err
 		}
 		// Detached like RunStatementsAsync's session ctx — see the
 		// comment there for why a sentinel cancel must never ctx-abort
@@ -547,13 +626,14 @@ func (r *QueryRunner) RunQueryAsync(ctx context.Context, q models.Query, ack fun
 		dctx := context.WithoutCancel(lctx)
 		b := r.load()
 		if b == nil || b.sess == nil {
-			return nil, ErrNoSession
+			return launchResult{}, ErrNoSession
 		}
-		return b.sess.Stream(dctx, q)
+		rh, err := b.sess.Stream(dctx, q)
+		return launchResult{rh: rh}, err
 	}
-	r.enqueueLaunch([]launchStmt{{op: op}}, func(_ int, rh *session.RunHandle, err error) {
+	r.enqueueLaunch(false, []launchStmt{{op: op}}, func(_ int, res launchResult, err error) {
 		if ack != nil {
-			ack(rh, err)
+			ack(res.rh, err)
 		}
 	})
 }
@@ -574,11 +654,11 @@ func (r *QueryRunner) RunStatementsAsync(ctx context.Context, stmts []StatementL
 	for _, s := range stmts {
 		stmt := s
 		opts := stmt.Opts
-		ops = append(ops, launchStmt{op: func(lctx context.Context) (*session.RunHandle, error) {
+		ops = append(ops, launchStmt{op: func(lctx context.Context) (launchResult, error) {
 			// Queued-cancel fence: a launch whose sentinel was cancelled
 			// before the launcher reached it never touches the session.
 			if err := lctx.Err(); err != nil {
-				return nil, err
+				return launchResult{}, err
 			}
 			// The session call runs on a ctx DETACHED from the sentinel:
 			// cancelling a pgx query mid-flight destroys the whole
@@ -591,17 +671,22 @@ func (r *QueryRunner) RunStatementsAsync(ctx context.Context, stmts []StatementL
 			dctx := context.WithoutCancel(lctx)
 			b := r.load()
 			if b == nil || b.sess == nil {
-				return nil, ErrNoSession
+				return launchResult{}, ErrNoSession
 			}
 			if opts.NewTx {
 				if _, err := b.sess.Begin(dctx, models.TxOptions{}); err != nil {
-					return nil, err
+					return launchResult{}, err
 				}
 			}
-			return b.sess.Stream(dctx, models.Query{SQL: stmt.SQL, DefaultSchema: opts.DefaultSchema, Timeout: opts.Timeout})
+			rh, err := b.sess.Stream(dctx, models.Query{SQL: stmt.SQL, DefaultSchema: opts.DefaultSchema, Timeout: opts.Timeout})
+			return launchResult{rh: rh}, err
 		}})
 	}
-	r.enqueueLaunch(ops, ack)
+	r.enqueueLaunch(false, ops, func(index int, res launchResult, err error) {
+		if ack != nil {
+			ack(index, res.rh, err)
+		}
+	})
 }
 
 // enqueueLaunch builds the sentinel, performs the synchronous last-wins
@@ -609,10 +694,11 @@ func (r *QueryRunner) RunStatementsAsync(ctx context.Context, stmts []StatementL
 // request's own statements are safe: they queue behind, never beside),
 // publishes THIS launch's slot (so Cancel / CancelAndWaitActiveRun target
 // it from the moment the enqueue returns), and hands the request to the
-// launcher goroutine — starting one lazily if none is live.
-func (r *QueryRunner) enqueueLaunch(stmts []launchStmt, ack func(index int, rh *session.RunHandle, err error)) {
+// launcher goroutine — starting one lazily if none is live. isExplain marks
+// the slot as an ExplainAsync op (no RunHandle, non-drainable; see C6).
+func (r *QueryRunner) enqueueLaunch(isExplain bool, stmts []launchStmt, ack func(index int, res launchResult, err error)) {
 	lctx, cancel := context.WithCancel(context.Background())
-	slot := &runSlot{ctx: lctx, cancel: cancel, done: make(chan struct{})}
+	slot := &runSlot{ctx: lctx, cancel: cancel, done: make(chan struct{}), explain: isExplain}
 
 	// Synchronous (cheap, non-blocking) last-wins: cancel the prior
 	// tab-less launch BEFORE this one is queued, so a rapid second Enter
@@ -654,24 +740,38 @@ func (r *QueryRunner) launchLoop() {
 }
 
 // execLaunch runs one request's statements sequentially on the launcher
-// goroutine: the preempt chokepoint (skipping the request's own
-// sentinel), each session op, per-statement sentinel resolution (Done
-// closes only once every statement's RunHandle terminated), and the ack.
+// goroutine: the busy-hold acquire (if wired), the preempt chokepoint
+// (skipping the request's own sentinel), each session op, per-statement
+// sentinel resolution (Done closes only once every statement's RunHandle
+// terminated), and the ack. The busy hold is released only after every
+// RunHandle terminates, so the UI busy spinner animates for the whole
+// launch — op stream AND RBM drain (pgsavvy-446q).
 func (r *QueryRunner) execLaunch(req *launchRequest) {
+	// Busy-hold bridge (pgsavvy-446q): arm the UI busy counter for the
+	// whole launch BEFORE the first preempt/op. The launcher runs session
+	// ops directly (not via OnWorker), so without this nothing arms the
+	// spinner while a slow statement streams — the busy-arming RBM task
+	// only spawns from the ack at stream completion. The release fires
+	// below, after every RunHandle terminates, so busy stays >= 1
+	// continuously through the op stream AND the RBM drain.
+	acquired := false
+	if acq := r.busyAcquire.Load(); acq != nil {
+		acquired = (*acq)()
+	}
 	var watchers sync.WaitGroup
 	for i, stmt := range req.stmts {
 		if req.preemptFirst {
 			r.preemptBeforeLaunch()
 		}
-		rh, err := stmt.op(req.slot.ctx)
+		res, err := stmt.op(req.slot.ctx)
 
 		if req.slot.abandoned.Load() {
 			// Last-wins: this launch was preempted. Close the orphaned
 			// stream promptly (releases the session queue lock without a
 			// tab) and surface a cancellation, not a doomed tab.
-			if rh != nil {
-				_ = rh.Rows().Close()
-				rh = nil
+			if res.rh != nil {
+				_ = res.rh.Rows().Close()
+				res.rh = nil
 			}
 			if err == nil {
 				err = context.Canceled
@@ -680,20 +780,20 @@ func (r *QueryRunner) execLaunch(req *launchRequest) {
 
 		// Resolve per statement: publish the handle unless a NEWER pending
 		// launch owns last (its enqueue cancelled this slot).
-		r.publishResolved(req.slot, rh)
+		r.publishResolved(req.slot, res.rh)
 
 		// Sentinel Done spans the whole launch: every statement's
 		// RunHandle must terminate before it closes.
-		if rh != nil {
+		if res.rh != nil {
 			watchers.Add(1)
 			go func(rh *session.RunHandle) {
 				<-rh.Done()
 				watchers.Done()
-			}(rh)
+			}(res.rh)
 		}
 
 		if req.ack != nil {
-			req.ack(i, rh, err)
+			req.ack(i, res, err)
 		}
 
 		if ctxErr := req.slot.ctx.Err(); ctxErr != nil {
@@ -702,7 +802,7 @@ func (r *QueryRunner) execLaunch(req *launchRequest) {
 			// then stop — the user replaced this action.
 			if req.ack != nil {
 				for j := i + 1; j < len(req.stmts); j++ {
-					req.ack(j, nil, ctxErr)
+					req.ack(j, launchResult{}, ctxErr)
 				}
 			}
 			break
@@ -710,6 +810,17 @@ func (r *QueryRunner) execLaunch(req *launchRequest) {
 	}
 	go func() {
 		watchers.Wait()
+		// Release the busy hold ONLY now — after every RunHandle has
+		// terminated (the RBM drain completed). This goroutine (not a
+		// defer in execLaunch) is the right site: the release must fire
+		// strictly after the drain, so busy stays >= 1 continuously
+		// through the op stream AND the drain. Paired exactly once with
+		// the acquire at the top of execLaunch.
+		if acquired {
+			if rel := r.busyRelease.Load(); rel != nil {
+				(*rel)()
+			}
+		}
 		close(req.slot.done)
 	}()
 }
@@ -753,13 +864,101 @@ func (r *QueryRunner) Explain(ctx context.Context, sql string, analyze bool, def
 	if err != nil {
 		return models.Plan{}, err
 	}
+	// The wrap tx is runner-owned: mark it so a concurrent quit path can
+	// tell it apart from a user tx and refuse to commit it (C6).
+	r.wrapTxOpen.Store(true)
 	plan, explainErr := b.sess.Explain(ctx, models.Query{SQL: sql, DefaultSchema: defaultSchema}, analyze)
 	// Always ROLLBACK even if Explain errored — the BEGIN would
-	// otherwise leak. The rollback error is swallowed because the
-	// user-visible failure is the Explain error.
-	_ = tx.Rollback(ctx)
+	// otherwise leak. The rollback error must not silently swallow: a
+	// failed ROLLBACK strands the session in an open tx the user did not
+	// ask for, so it is warn-logged (the user-visible failure is still
+	// the Explain error).
+	if err := tx.Rollback(ctx); err != nil {
+		r.warnRollbackFail(ctx, err)
+	}
+	r.wrapTxOpen.Store(false)
 	return plan, explainErr
 }
+
+// ExplainAsync is the UI-thread mirror of Explain for the async launch
+// queue: it enqueues the EXPLAIN/ANALYZE op on the single launcher
+// goroutine and returns immediately; the (plan, error) reply is
+// delivered via ack on the LAUNCHER goroutine. Callers marshal their
+// continuation onto the UI thread from inside ack (toastFromWorker
+// convention) and MUST NOT block the UI thread waiting for it.
+//
+// The op preserves every sync-Explain semantic under queue exclusion:
+// the queued-cancel fence (a cancelled sentinel never touches the
+// session), the InTransaction gate read FRESH inside the op (a tx opened
+// or closed since enqueue is honoured, never a stale UI-thread snapshot),
+// and the BEGIN/ROLLBACK wrap for ANALYZE outside a transaction. The
+// preempt-first ordering comes for free from the queue — the launcher
+// runs preemptBeforeLaunch before this op, exactly as for a Run, so an
+// in-flight result stream is stopped before the EXPLAIN locks the
+// session queue. The session op runs on a ctx DETACHED from the sentinel
+// for the same protocol-safety reason as RunStatementsAsync: a
+// last-wins enqueue must never ctx-abort an in-flight pgx op.
+func (r *QueryRunner) ExplainAsync(ctx context.Context, sql string, analyze bool, defaultSchema string, ack func(plan models.Plan, err error)) {
+	if r == nil {
+		return
+	}
+	op := func(lctx context.Context) (launchResult, error) {
+		if err := lctx.Err(); err != nil {
+			return launchResult{}, err
+		}
+		dctx := context.WithoutCancel(lctx)
+		b := r.load()
+		if b == nil || b.sess == nil {
+			return launchResult{}, ErrNoSession
+		}
+		// Fresh gate read: the launcher's mutual exclusion guarantees this
+		// InTransaction snapshot cannot race a concurrent session op.
+		if !analyze || b.sess.InTransaction() {
+			plan, err := b.sess.Explain(dctx, models.Query{SQL: sql, DefaultSchema: defaultSchema}, analyze)
+			return launchResult{plan: plan}, err
+		}
+		tx, err := b.sess.Begin(dctx, models.TxOptions{})
+		if err != nil {
+			return launchResult{}, err
+		}
+		// The wrap tx is runner-owned: mark it so a concurrent quit path can
+		// tell it apart from a user tx and refuse to commit it (C6).
+		r.wrapTxOpen.Store(true)
+		plan, explainErr := b.sess.Explain(dctx, models.Query{SQL: sql, DefaultSchema: defaultSchema}, analyze)
+		// Always ROLLBACK even if Explain errored — the BEGIN would
+		// otherwise leak. A failed rollback is warn-logged (no silent
+		// swallow); the user-visible failure is still the Explain error.
+		if err := tx.Rollback(dctx); err != nil {
+			r.warnRollbackFail(dctx, err)
+		}
+		r.wrapTxOpen.Store(false)
+		return launchResult{plan: plan}, explainErr
+	}
+	r.enqueueLaunch(true, []launchStmt{{op: op}}, func(_ int, res launchResult, err error) {
+		if ack != nil {
+			ack(res.plan, err)
+		}
+	})
+}
+
+// warnRollbackFail emits the WARN record for a failed EXPLAIN ANALYZE
+// ROLLBACK. logs.Event hard-codes Debug, so the WARN is emitted directly
+// (same precedent as ResultTabsHelper.PreemptInFlight's timeout warn).
+func (r *QueryRunner) warnRollbackFail(ctx context.Context, err error) {
+	if r.log == nil {
+		return
+	}
+	r.log.LogAttrs(ctx, slog.LevelWarn, "explain_rollback_failed",
+		slog.String("cat", "db"),
+		slog.String("evt", "explain_rollback_failed"),
+		slog.Any("err", err))
+}
+
+// SetLogger wires the structured logger consumed by warnRollbackFail.
+// Mirrors ResultTabsHelper.SetLogger; nil-safe — unit tests that skip
+// SetLogger emit nothing. Must not be called concurrently with any op
+// that reads r.log.
+func (r *QueryRunner) SetLogger(l *slog.Logger) { r.log = l }
 
 // Cancel asks the SQLSession to cancel the last launched run: a resolved
 // RunHandle via the driver's live cancel, or a still-pending (tab-less)
@@ -795,10 +994,17 @@ func (r *QueryRunner) Cancel() error {
 // RunHandle terminated — so a quit-during-gap caller cannot proceed to a
 // Commit before the in-flight launch has drained. This mirrors the
 // cancel-then-wait pattern in SQLSession.Close.
-func (r *QueryRunner) CancelAndWaitActiveRun() {
+//
+// Returns true when the bound expired while the active launch was a
+// NON-DRAINABLE in-flight EXPLAIN ANALYZE — an op that has no RunHandle
+// to interrupt and runs detached from its sentinel ctx, so the wait
+// cannot force it to finish. Its runner-owned BEGIN..ROLLBACK wrap tx may
+// still be open; the caller (QuitController.commitAndQuit) must NOT
+// commit CurrentTransaction() in that case (C6). See WrapTxOpen.
+func (r *QueryRunner) CancelAndWaitActiveRun() bool {
 	s := r.last.Load()
 	if s == nil {
-		return
+		return false
 	}
 	var done <-chan struct{}
 	if rh := s.rh; rh != nil {
@@ -809,10 +1015,133 @@ func (r *QueryRunner) CancelAndWaitActiveRun() {
 		done = s.done
 	}
 	if done == nil {
-		return
+		return false
 	}
 	select {
 	case <-done:
+		return false
 	case <-time.After(2 * time.Second):
+	}
+	// The bound expired. If the active slot is STILL a pending launch it
+	// never resolved inside the wait; for an Explain op that means the
+	// wrap is non-drainable and may still be open. A run launch that is
+	// still pending is also non-drainable, but it holds no wrap tx — the
+	// caller's CurrentTransaction() (if any) is the user's own, so only
+	// the Explain case must be reported. Re-read last rather than trusting
+	// the pre-wait snapshot: the op may have resolved in the gap between
+	// the timer firing and this check, in which case the wrap rolled back
+	// and commit is safe.
+	cur := r.last.Load()
+	return cur != nil && cur.cancel != nil && cur.isExplain()
+}
+
+// WrapTxOpen reports whether a runner-owned EXPLAIN ANALYZE wrap
+// transaction is currently open. The quit path checks it after
+// CancelAndWaitActiveRun: when true, CurrentTransaction() is the runner's
+// transient wrap tx (not a user tx) and must not be committed.
+//
+// Residual window (documented, effectively unreachable): the mapping
+// "wrapTxOpen ⟹ CurrentTransaction() is the wrap" relies on queue
+// exclusion for the wrap's Begin→Explain→Rollback. UI-thread SYNC session
+// ops bypass the launch queue (TxController handleBegin → runner.Begin,
+// sync Run/Execute/Explain, cell-apply sess.Execute) and could interleave
+// in the microsecond gaps between the wrap's streamMu acquisitions — a
+// user BEGIN landing there makes CurrentTransaction() a user tx while
+// wrapTxOpen is still true, and commitAndQuit would wrongly skip the
+// commit. Effectively unreachable (requires a precisely-timed user action
+// in a ~µs window) and strictly safer than pre-C6, which could COMMIT the
+// wrap. Future hardening: route sync session ops through the launch queue.
+func (r *QueryRunner) WrapTxOpen() bool {
+	if r == nil {
+		return false
+	}
+	return r.wrapTxOpen.Load()
+}
+
+// isExplain reports whether the slot belongs to an ExplainAsync launch.
+// The flag is set on the slot at enqueue time (enqueueLaunch isExplain
+// param) and never mutated afterwards, so the read is race-free once the
+// slot is published in last.
+func (s *runSlot) isExplain() bool {
+	return s != nil && s.explain
+}
+
+// CancelQueuedAndWaitIdle cancels every PENDING (queued, not-yet-resolved)
+// launch sentinel and blocks until the launcher goroutine is idle (queue
+// drained) or timeout elapses, whichever comes first. Returns nil on
+// success; on expiry it returns an error so the caller (Gui.Close) can
+// fail loud (log) instead of hanging shutdown.
+//
+// The C2 handoff gaps this closes (C6):
+//   - Queued-sentinel cancel: a launch still in the queue is aborted via
+//     its ctx BEFORE the session dies, so it can never execute against a
+//     dead binding (the queued-cancel fence fails it fast with
+//     context.Canceled).
+//   - Launcher-idle drain: waiting for the launcher to go idle guarantees
+//     every in-flight op has resolved — and its ack already ran — before
+//     driver.Close. With the OnUIThread closed-gate in place, no ack can
+//     be pending into the dead UI afterwards.
+//   - C4 op kind: an in-flight EXPLAIN ANALYZE op has no RunHandle and is
+//     non-drainable by design; it is NOT cancelled via rh (there is none)
+//     and the bounded wait covers it. If the op never resolves, the
+//     timeout fires and Close proceeds; the session Close then cancels the
+//     live wire underneath it.
+func (r *QueryRunner) CancelQueuedAndWaitIdle(timeout time.Duration) error {
+	if r == nil {
+		return nil
+	}
+	// Last-wins semantics mean at most one pending sentinel can exist in
+	// last — every older queued launch was cancelled + abandoned at its
+	// successor's enqueue. Cancelling it covers the launch the launcher is
+	// CURRENTLY executing (its op is detached from the sentinel, so this
+	// marks it abandoned for prompt cleanup without aborting the session
+	// call) as well as any slot still sitting in the queue.
+	r.cancelPendingLaunch()
+	// Belt-and-suspenders: sweep the queue for any other still-pending
+	// slots (none should exist; a cancel racing an enqueue's last.Store
+	// could leave one) and cancel them the same way.
+	r.cancelQueuedSentinels()
+	return r.waitLauncherIdle(timeout)
+}
+
+// cancelQueuedSentinels cancels + abandons every pending slot still
+// sitting in the launch queue. The launcher only pops under launchMu, so
+// a slot found here is guaranteed NOT to be executing — it will hit the
+// queued-cancel fence (ctx.Err()) and abort without touching the session.
+func (r *QueryRunner) cancelQueuedSentinels() {
+	r.launchMu.Lock()
+	for _, req := range r.launchQ {
+		if req.slot.cancel != nil {
+			req.slot.abandoned.Store(true)
+			req.slot.cancel()
+		}
+	}
+	r.launchMu.Unlock()
+}
+
+// waitLauncherIdle polls until the launcher goroutine has exited (queue
+// empty, launching==false) or deadline elapses. The launcher only exits
+// when the queue is empty, so launching==false is a precise idle signal —
+// no lost-wakeup race with a concurrent enqueue (both transitions happen
+// under launchMu). Polling is coarse (2ms) and bounded; the shutdown path
+// never needs sub-ms accuracy.
+func (r *QueryRunner) waitLauncherIdle(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		r.launchMu.Lock()
+		idle := !r.launching && len(r.launchQ) == 0
+		r.launchMu.Unlock()
+		if idle {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			r.launchMu.Lock()
+			launching := r.launching
+			queued := len(r.launchQ)
+			r.launchMu.Unlock()
+			return fmt.Errorf("query: launcher not idle after %v (launching=%v, queued=%d)",
+				timeout, launching, queued)
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
