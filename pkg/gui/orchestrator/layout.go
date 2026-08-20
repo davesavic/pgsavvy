@@ -40,6 +40,77 @@ func (g *Gui) Layout(ng *gocui.Gui) error {
 	return g.RunLayout(w, h)
 }
 
+// noteLayoutSize records the terminal geometry this layout pass renders
+// at and flags a change for the spinner-tick repaint path (C3/RC4): the
+// next tick consumes the flag (forceFullLayoutIfResized, threading.go)
+// and forces one full layout pass before content-only ticks resume, so
+// the status rect below is never stale in tick output. The first-ever
+// layout is not a resize (there is no prior geometry to change from).
+func (g *Gui) noteLayoutSize(w, h int) {
+	g.layoutSizeMu.Lock()
+	resized := (g.lastLayoutW != 0 || g.lastLayoutH != 0) &&
+		(g.lastLayoutW != w || g.lastLayoutH != h)
+	g.lastLayoutW, g.lastLayoutH = w, h
+	g.layoutSizeMu.Unlock()
+	if resized {
+		g.resizePendingFullLayout.Store(true)
+	}
+}
+
+// statusRenderDeps assembles the StatusRenderDeps bundle for the
+// AppStatus view. Extracted from the Tier-4a layout pass so the
+// spinner-tick repaint (threading.go repaintBusyIndicators) re-renders
+// the status line through the SAME wiring the full layout pass uses —
+// one source of truth, no drift between the two render paths. Rebuilt
+// per call; every accessor inside reads live state at call time.
+func (g *Gui) statusRenderDeps() StatusRenderDeps {
+	// Resolve the live *models.Connection by joining the activeConnID
+	// state with the Deps.ConnectionsProvider (the same source the
+	// Connections side rail walks). A missing provider or empty ID
+	// collapses to nil — BuildStatusLine renders the no-conn slot.
+	activeConn := func() *models.Connection {
+		if g.connectionState.activeConnID == "" || g.deps.ConnectionsProvider == nil {
+			return nil
+		}
+		for _, c := range g.deps.ConnectionsProvider() {
+			if c.Name == g.connectionState.activeConnID {
+				cp := c
+				return &cp
+			}
+		}
+		return nil
+	}
+	var tr *i18n.TranslationSet
+	if g.deps.Common != nil {
+		tr = g.deps.Common.Tr
+	}
+	return StatusRenderDeps{
+		Driver:          g.driver,
+		Tree:            g.tree,
+		KbRuntime:       g.keybindingSystem.kbRuntime,
+		ActiveConn:      activeConn,
+		Tr:              tr,
+		Toast:           g.toastHelp,
+		BusyCount:       g.BusyCount,
+		SpinnerFrame:    g.SpinnerFrame,
+		TxStatus:        g.txStatusAccessor(),
+		SessionSettings: g.sessionSettingsAccessor(),
+		SearchStatus:    g.searchStatusAccessor(),
+		PendingCount:    g.pendingEditCount,
+	}
+}
+
+// repaintStatusLine re-renders the status bar content into the AppStatus
+// view. Called from the Tier-4a layout pass each full frame AND from the
+// spinner-tick repaint (via OnUIThreadContentOnly) so the busy glyph
+// advances between full layouts (RC4). Rect materialization stays owned
+// by the layout pass (SetView above); this only refreshes content by
+// view name, so a never-laid-out status view (partial test wiring)
+// degrades to a swallowed SetContent error inside RenderStatusLine.
+func (g *Gui) repaintStatusLine() {
+	RenderStatusLine(g.statusRenderDeps())
+}
+
 // RunLayout positions every live Context's view inside a terminal of
 // the supplied dimensions, dispatching per-Kind. Side rails + extras
 // are always tiled. Temporary popups + display contexts are created
@@ -58,6 +129,10 @@ func (g *Gui) RunLayout(w, h int) error {
 	if g.driver == nil {
 		return nil
 	}
+	// Record the geometry this pass renders at; a change flags the
+	// spinner-tick path to force one full layout before its next
+	// content-only repaint (see noteLayoutSize).
+	g.noteLayoutSize(w, h)
 	if w < limitThreshold || h < limitThreshold {
 		return g.renderLimitOverlay(w, h)
 	}
@@ -824,40 +899,10 @@ func (g *Gui) RunLayout(w, h int) error {
 		if view != nil {
 			view.Frame = false
 		}
-		// Resolve the live *models.Connection by joining the activeConnID
-		// state with the Deps.ConnectionsProvider (the same source the
-		// Connections side rail walks). A missing provider or empty ID
-		// collapses to nil — BuildStatusLine renders the no-conn slot.
-		activeConn := func() *models.Connection {
-			if g.connectionState.activeConnID == "" || g.deps.ConnectionsProvider == nil {
-				return nil
-			}
-			for _, c := range g.deps.ConnectionsProvider() {
-				if c.Name == g.connectionState.activeConnID {
-					cp := c
-					return &cp
-				}
-			}
-			return nil
-		}
-		var tr *i18n.TranslationSet
-		if g.deps.Common != nil {
-			tr = g.deps.Common.Tr
-		}
-		RenderStatusLine(StatusRenderDeps{
-			Driver:          g.driver,
-			Tree:            g.tree,
-			KbRuntime:       g.keybindingSystem.kbRuntime,
-			ActiveConn:      activeConn,
-			Tr:              tr,
-			Toast:           g.toastHelp,
-			BusyCount:       g.BusyCount,
-			SpinnerFrame:    g.SpinnerFrame,
-			TxStatus:        g.txStatusAccessor(),
-			SessionSettings: g.sessionSettingsAccessor(),
-			SearchStatus:    g.searchStatusAccessor(),
-			PendingCount:    g.pendingEditCount,
-		})
+		// Content comes from the shared status repaint helper (extracted
+		// from this pass) so the spinner tick paints the SAME line the
+		// full layout pass does — one wiring, no drift between paths.
+		g.repaintStatusLine()
 	}
 
 	// Tier 4: shy overlays driven by notifier visibility (not by stack

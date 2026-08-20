@@ -165,7 +165,7 @@ func (g *Gui) armSpinnerLocked() {
 				return
 			case <-ch:
 				g.OnUIThreadContentOnly(func() error {
-					g.repaintConnectingModal()
+					g.repaintBusyIndicators()
 					return nil
 				})
 			}
@@ -230,6 +230,64 @@ func (g *Gui) repaintConnectingModal() {
 		return
 	}
 	_ = cm.HandleRender()
+}
+
+// repaintBusyIndicators is the spinner-tick repaint body (RC4): while any
+// work is in flight it re-renders every busy-indicator surface the
+// content-only fast path would otherwise leave stale between full layout
+// passes — the status line (spinner glyph advancing, toast multiplex) and
+// the CONNECTION_MANAGER connecting modal (T4). It always runs on the UI
+// thread (scheduled via OnUIThreadContentOnly by the drain goroutine,
+// never on the drain goroutine itself) and never holds spinnerMu, so its
+// focus-tree reads (promptOnTop) respect the C1 non-nesting rule.
+//
+// Ordering:
+//  1. Resize: if the last layout pass observed a terminal-geometry
+//     change, force ONE full layout pass (OnUIThread) and skip the
+//     content-only repaint for this tick, so the status rect (layout.go
+//     Tier 4a) is never stale in tick output.
+//  2. Suppression: while a prompt popup owns the top of the focus stack
+//     the whole tick repaint is suppressed — the generalized form of the
+//     connecting-modal suppression below. Prompts (credential prompt,
+//     confirmers' masked input) are driven by the full-layout pass; a
+//     concurrent content-only repaint of the surfaces beneath them is the
+//     fragile window that can strand the prompt's input/redraw. The busy
+//     indicators resume the next tick after the prompt leaves the top.
+//  3. Repaint: the connecting modal (ModeConnecting only, internally
+//     gated) and then the status line.
+func (g *Gui) repaintBusyIndicators() {
+	if g == nil || g.driver == nil {
+		return
+	}
+	if g.forceFullLayoutIfResized() {
+		return
+	}
+	if g.promptOnTop() {
+		return
+	}
+	g.repaintConnectingModal()
+	g.repaintStatusLine()
+}
+
+// forceFullLayoutIfResized implements the resize half of the tick-repaint
+// contract. RunLayout flags geometry changes via noteLayoutSize
+// (layout.go); the first spinner tick after a change consumes the flag and
+// schedules exactly one full layout pass at the observed size —
+// OnUIThread, so production runs it on the MainLoop with a full flush —
+// and skips its own content-only repaint for that tick. Subsequent ticks
+// resume content-only. Returns true when the flag was consumed (the
+// caller must skip its content-only repaint).
+func (g *Gui) forceFullLayoutIfResized() bool {
+	if !g.resizePendingFullLayout.CompareAndSwap(true, false) {
+		return false
+	}
+	g.layoutSizeMu.Lock()
+	w, h := g.lastLayoutW, g.lastLayoutH
+	g.layoutSizeMu.Unlock()
+	g.OnUIThread(func() error {
+		return g.RunLayout(w, h)
+	})
+	return true
 }
 
 // promptOnTop reports whether the credential prompt popup currently owns the top

@@ -246,6 +246,17 @@ type Gui struct {
 	// threading.go for the OnUIThread / OnUIThreadContentOnly / OnWorker
 	// methods that consume these fields.
 	spinnerState spinnerState
+
+	// RC4 resize observation for the spinner-tick repaint path (C3).
+	// RunLayout records the terminal geometry each pass lays out at
+	// (noteLayoutSize); a CHANGE between passes sets
+	// resizePendingFullLayout, which the next spinner tick consumes
+	// (forceFullLayoutIfResized) to force one full layout pass before
+	// content-only ticks resume — the status rect (layout.go Tier 4a) is
+	// never stale in tick output.
+	layoutSizeMu             sync.Mutex
+	lastLayoutW, lastLayoutH int
+	resizePendingFullLayout  atomic.Bool
 }
 
 // keybindingSystem groups the keybinding-subsystem collaborators built by

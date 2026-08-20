@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/query"
 )
 
@@ -46,4 +47,16 @@ func (g *Gui) StatementTimeoutSetRunnerForTest() func([]string, commands.ExecCtx
 		return nil
 	}
 	return g.controllers.StatementTimeout.SetRunner
+}
+
+// ToastHelpForTest returns the *ui.ToastHelper wireWithDriver installed —
+// the SAME instance RenderStatusLine multiplexes over the status line.
+// Test-only seam (compiled only under `go test`) so external
+// orchestrator_test cases can pin toast TTL semantics under the busy
+// spinner repaint through the real render path.
+func (g *Gui) ToastHelpForTest() *ui.ToastHelper {
+	if g == nil {
+		return nil
+	}
+	return g.toastHelp
 }
