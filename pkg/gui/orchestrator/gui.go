@@ -346,10 +346,13 @@ type spinnerState struct {
 	//   - clock is the injectable wall-clock + ticker-factory seam (see
 	//     clock.go). Defaults to realClock; WithClock overrides for tests.
 	//   - spinnerMu is a DEDICATED mutex guarding arm/stop of the ticker.
-	//     It is NOT the atomic busy counter: armed on the busy 0->1
-	//     transition and stopped on ->0, two concurrent workers could
-	//     otherwise double-arm or lose a stop. spinnerMu makes the
-	//     exactly-one-ticker invariant hold.
+	//     It is NOT the atomic busy counter: the busy TRANSITION
+	//     (busyDelta) and the arm/stop decision run together inside ONE
+	//     spinnerMu critical section on BOTH the entry path (0->1 arms)
+	//     and the exit path (->0 stops), so an exit cannot stop a ticker
+	//     a concurrent entry just rearmed (and vice versa) — spinnerMu
+	//     makes the exactly-one-ticker-while-busy invariant hold. The
+	//     atomic counter itself stays lock-free for BusyCount readers.
 	//   - spinnerTicker is the live Ticker while busy>0 (nil otherwise).
 	//   - spinnerStop signals the per-ticker drain goroutine to exit.
 	//   - spinnerStart is the wall-clock instant the ticker was armed; the

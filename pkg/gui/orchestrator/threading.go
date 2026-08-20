@@ -134,18 +134,19 @@ func (g *Gui) searchStatusAccessor() func() (string, int, int, bool) {
 	}
 }
 
-// armSpinner starts the spinner re-render ticker on the busy 0->1
-// transition. Guarded by the DEDICATED spinnerMu (NOT the atomic busy
-// counter) so two workers racing the 0->1 edge cannot double-arm: the
-// nil check + assignment happen in one critical section. A drain
-// goroutine forwards each tick to OnUIThreadContentOnly until stopSpinner
-// closes spinnerStop.
-func (g *Gui) armSpinner() {
+// armSpinnerLocked starts the spinner re-render ticker on the busy 0->1
+// transition. Caller MUST hold spinnerState.spinnerMu — the arm decision
+// runs inside the SAME critical section as the busyDelta(+1) that detected
+// the transition (OnWorker's entry path), so a worker returning
+// concurrently cannot observe "busy==0" and stop a ticker that this arm is
+// about to (re)create, and vice versa. The nil check + assignment happen
+// in one critical section, so two workers racing the 0->1 edge cannot
+// double-arm. A drain goroutine forwards each tick to
+// OnUIThreadContentOnly until stopSpinner closes spinnerStop.
+func (g *Gui) armSpinnerLocked() {
 	if g.spinnerState.clock == nil {
 		return
 	}
-	g.spinnerState.spinnerMu.Lock()
-	defer g.spinnerState.spinnerMu.Unlock()
 	if g.spinnerState.spinnerTicker != nil {
 		// Already armed (a concurrent worker won the race). Exactly-one
 		// invariant preserved.
@@ -172,14 +173,27 @@ func (g *Gui) armSpinner() {
 	})
 }
 
-// stopSpinner stops the spinner ticker on the busy ->0 transition (and is
-// called unconditionally from Close). Guarded by spinnerMu so a stop
-// cannot be lost against a concurrent arm. Idempotent: a nil ticker means
-// nothing is armed. Stopping the ticker and closing spinnerStop wakes the
-// drain goroutine, which then returns and decrements workersWG.
+// stopSpinner stops the spinner ticker (and is called unconditionally
+// from Close, outside any OnWorker transition). Takes spinnerMu so a stop
+// cannot be lost against a concurrent transition critical section.
+// Idempotent: a nil ticker means nothing is armed. Stopping the ticker and
+// closing spinnerStop wakes the drain goroutine, which then returns and
+// decrements workersWG.
 func (g *Gui) stopSpinner() {
 	g.spinnerState.spinnerMu.Lock()
 	defer g.spinnerState.spinnerMu.Unlock()
+	g.stopSpinnerLocked()
+}
+
+// stopSpinnerLocked is the stop body for callers that already hold
+// spinnerMu — the busy ->0 transition path in OnWorker's exit critical
+// section and stopSpinner itself. Re-checks the armed ticker under the
+// mutex so a stop can never kill a ticker a concurrent re-arm just
+// created: by the time this runs, the same critical section has already
+// observed busy==0, and any later arm strictly happens in a LATER
+// critical section (busy 0->1), which sees spinnerTicker==nil and arms
+// fresh.
+func (g *Gui) stopSpinnerLocked() {
 	if g.spinnerState.spinnerTicker == nil {
 		return
 	}
@@ -286,10 +300,29 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 	if fn == nil {
 		return
 	}
-	busyAfter := g.busyDelta(+1)
-	busyBefore := busyAfter - 1
 	g.spinnerState.workersWG.Add(1)
 	task := gocui.NewFakeTask()
+
+	// ENTRY critical section (rearm-race fix): the busyDelta(+1)
+	// transition and the arm decision run under ONE spinnerMu hold. The
+	// pre-fix code decided busyBefore==0 from the atomic counter and armed
+	// in a separate critical section — a concurrent worker's exit path
+	// could then land stopSpinner BETWEEN the two, killing the ticker this
+	// arm just created while busy>0 (the 0->1->0->1 interleave that left a
+	// live busy counter with a dead ticker). With the decision and the
+	// action sharing the mutex, exit and entry sections are strictly
+	// serialized: whoever runs second sees the other's completed
+	// transition and makes the correct no-op/arm/stop choice.
+	g.spinnerState.spinnerMu.Lock()
+	busyAfter := g.busyDelta(+1)
+	busyBefore := busyAfter - 1
+	if busyBefore == 0 {
+		// U8: arm the spinner re-render ticker on the busy 0->1
+		// transition. No-op if a concurrent worker already armed, so the
+		// exactly-one-ticker invariant holds.
+		g.armSpinnerLocked()
+	}
+	g.spinnerState.spinnerMu.Unlock()
 
 	// AD-20 sampling gate (starts): always emit on the start-of-busy
 	// transition (busy_before == 0); else emit every Nth call so bursts
@@ -306,32 +339,33 @@ func (g *Gui) OnWorker(fn func(gocui.Task) error) {
 		)
 	}
 
-	// U8: arm the spinner re-render ticker on the busy 0->1 transition.
-	// armSpinner is guarded by spinnerMu and is a no-op if a concurrent
-	// worker already armed, so the exactly-one-ticker invariant holds.
-	if busyBefore == 0 {
-		g.armSpinner()
-	}
-
 	go func() {
 		defer g.spinnerState.workersWG.Done()
 		defer func() {
+			// EXIT critical section (rearm-race fix): mirror of the entry
+			// section — the busyDelta(-1) transition and the stop decision
+			// run under ONE spinnerMu hold, so a 0->1 entry landing between
+			// the decrement and the stop can no longer produce a stopped
+			// ticker under a positive busy count. Only the worker whose
+			// decrement returns the counter to zero stops the ticker.
+			g.spinnerState.spinnerMu.Lock()
 			endBusyAfter := g.busyDelta(-1)
 			endBusyBefore := endBusyAfter + 1
+			if endBusyAfter == 0 {
+				g.stopSpinnerLocked()
+			}
+			g.spinnerState.spinnerMu.Unlock()
 			// Quiescence-only emit: only the worker whose decrement
 			// returns the busy counter to zero records the transition.
 			// Non-transition completions are intentionally dropped
 			// (sampling lives on the start side only) to keep the
-			// per-burst line budget at 2 + N/10.
+			// per-burst line budget at 2 + N/10. Emitted OUTSIDE the
+			// critical section — logger I/O never runs under spinnerMu.
 			if endBusyAfter == 0 {
 				g.emitWorkerEvent("worker_end",
 					slog.Int64("busy_before", endBusyBefore),
 					slog.Int64("busy_after", endBusyAfter),
 				)
-				// U8: stop the spinner ticker on the busy ->0 transition.
-				// Guarded by spinnerMu so the stop can't race a concurrent
-				// re-arm into a lost stop.
-				g.stopSpinner()
 			}
 		}()
 		defer func() {
