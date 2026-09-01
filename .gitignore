@@ -34,3 +34,6 @@ coverage.html
 
 # OpenCode
 opencode.json
+
+# Codebase-memory-mcp
+.codebase-memory/
