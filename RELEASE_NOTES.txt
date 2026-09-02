@@ -1,3 +1,7 @@
+pgsavvy v0.10.1
+
+  Hardened connection password command handling and ci/cd pipeline.
+
 pgsavvy v0.10.0
 
   Major UI performance improvements for long running queries where the UI is now separated from the query execution and results rendering. This allows for a more responsive experience when working with large datasets.
