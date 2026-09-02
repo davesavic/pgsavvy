@@ -18,6 +18,12 @@ import (
 // other startup diagnostics.
 var warnWriter io.Writer = os.Stderr
 
+// ErrExecutableCredentialsInsecureMode is returned when a configuration file
+// writable by another local user contains a command that will be executed to
+// resolve a credential. These commands are intentionally shell expressions,
+// so their configuration must be trusted.
+var ErrExecutableCredentialsInsecureMode = errors.New("config: executable credential command in group/world-writable connections file")
+
 // connectionsFile is the on-disk wrapper enforced by D6: connections.yml must
 // be a mapping with a top-level `connections:` key whose value is the profile
 // sequence. The legacy flat-sequence form is rejected at load time.
@@ -43,13 +49,25 @@ const legacyMigrationSnippet = `connections:
 //
 // When the file carries any inline `password:` field and is group/world
 // readable, a single WARN line is written to warnWriter; the load still
-// succeeds.
+// succeeds. A file writable by group or world is rejected when it contains an
+// executable credential command, because another local user could otherwise
+// replace that command before it runs.
 func LoadConnections(fs afero.Fs, path string) ([]models.Connection, error) {
-	data, err := afero.ReadFile(fs, path)
+	file, err := fs.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return []models.Connection{}, nil
 		}
+		return nil, fmt.Errorf("config: read %q: %w", path, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("config: stat %q: %w", path, err)
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
 		return nil, fmt.Errorf("config: read %q: %w", path, err)
 	}
 
@@ -76,6 +94,11 @@ func LoadConnections(fs afero.Fs, path string) ([]models.Connection, error) {
 	if wrapper.Connections == nil {
 		return []models.Connection{}, nil
 	}
+	if hasExecutableCredentialCommand(wrapper.Connections) {
+		if info.Mode().Perm()&0o022 != 0 {
+			return nil, fmt.Errorf("%w: chmod 600 %s", ErrExecutableCredentialsInsecureMode, path)
+		}
+	}
 
 	hasInlinePassword := false
 	for i := range wrapper.Connections {
@@ -85,15 +108,25 @@ func LoadConnections(fs afero.Fs, path string) ([]models.Connection, error) {
 		}
 	}
 	if hasInlinePassword {
-		if info, statErr := fs.Stat(path); statErr == nil {
-			if info.Mode().Perm()&0o077 != 0 {
-				_, _ = fmt.Fprintf(warnWriter,
-					"config: %s contains plaintext password and is group/world readable (mode %04o); chmod 600 %s\n",
-					path, info.Mode().Perm(), path,
-				)
-			}
+		if info.Mode().Perm()&0o077 != 0 {
+			_, _ = fmt.Fprintf(warnWriter,
+				"config: %s contains plaintext password and is group/world readable (mode %04o); chmod 600 %s\n",
+				path, info.Mode().Perm(), path,
+			)
 		}
 	}
 
 	return wrapper.Connections, nil
+}
+
+func hasExecutableCredentialCommand(conns []models.Connection) bool {
+	for _, conn := range conns {
+		if conn.PasswordCommand != "" {
+			return true
+		}
+		if tunnel := conn.SSHTunnel; tunnel != nil && (tunnel.PassphraseCommand != "" || tunnel.SSHPasswordCommand != "") {
+			return true
+		}
+	}
+	return false
 }

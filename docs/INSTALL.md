@@ -133,10 +133,15 @@ Credentials resolve through a waterfall — prefer one of these over a plaintext
 
 | Field | Meaning |
 |-------|---------|
-| `password_command` | Command whose stdout is the password |
+| `password_command` | Shell command whose stdout is the password |
 | `keyring` | Reference into the OS keyring / encrypted file backend |
 | `pgpass` | Path to a `~/.pgpass`-style file |
 | `password` | Plaintext fallback (development only) |
+
+`password_command`, `ssh_password_command`, and `passphrase_command` are
+trusted-local configuration: they are executed by your login user. Keep
+`connections.yml` owned by you and mode `0600`; pgsavvy refuses executable
+credential commands from a group- or world-writable file.
 
 Useful per-profile options include `read_only`, `confirm_writes`,
 `confirm_ddl`, `statement_timeout`, `hidden_schemas`, `role`, and presentation

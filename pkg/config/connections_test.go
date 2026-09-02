@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -298,5 +299,32 @@ func TestLoadConnections_NoWarnWhenNoInlinePassword(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("expected no WARN when no inline password, got: %q", buf.String())
+	}
+}
+
+func TestLoadConnections_RejectsExecutableCredentialCommandFromWritableFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yml")
+	body := "connections:\n  - name: dev\n    driver: postgres\n    dsn: postgres://localhost/dev\n    password_command: printf-secret\n"
+	if err := os.WriteFile(path, []byte(body), 0o622); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadConnections(afero.NewOsFs(), path)
+	if !errors.Is(err, ErrExecutableCredentialsInsecureMode) {
+		t.Fatalf("err = %v, want ErrExecutableCredentialsInsecureMode", err)
+	}
+}
+
+func TestLoadConnections_AllowsExecutableCredentialCommandFromPrivateFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yml")
+	body := "connections:\n  - name: dev\n    driver: postgres\n    dsn: postgres://localhost/dev\n    ssh_tunnel:\n      host: bastion\n      user: ops\n      ssh_password_command: printf-secret\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadConnections(afero.NewOsFs(), path); err != nil {
+		t.Fatalf("LoadConnections() error = %v", err)
 	}
 }

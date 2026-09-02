@@ -1,6 +1,8 @@
 package context
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -128,9 +130,17 @@ func TestForm_OpenEditLazyParsesLegacyDSN(t *testing.T) {
 // the edit form, proving legacy files still load and migrate into discrete rows.
 func TestForm_BackwardCompatDemoFixtureLoads(t *testing.T) {
 	const fixture = "testdata/legacy_connections.yml"
-	conns, err := config.LoadConnections(afero.NewOsFs(), fixture)
+	data, err := os.ReadFile(fixture)
 	if err != nil {
-		t.Fatalf("LoadConnections(%s): %v", fixture, err)
+		t.Fatalf("ReadFile(%s): %v", fixture, err)
+	}
+	path := filepath.Join(t.TempDir(), "connections.yml")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
+	}
+	conns, err := config.LoadConnections(afero.NewOsFs(), path)
+	if err != nil {
+		t.Fatalf("LoadConnections(%s): %v", path, err)
 	}
 	if len(conns) == 0 {
 		t.Fatalf("demo fixture %s has no connections", fixture)
