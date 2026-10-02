@@ -125,16 +125,25 @@ func TestReview_reverse_fk_push_failure(t *testing.T) {
 	if err := g.tree.Push(displaced); err != nil {
 		t.Fatal(err)
 	}
+	swaps := 0
+	g.tree.RegisterSwapHook(func() { swaps++ })
 	if g.wireEditDeps().OpenFKReversePicker(reverseOpenEntries(), nil, 0, 0) {
 		t.Fatal("wired callback reported success despite Push focus error")
 	}
 	if leaf.calls != 1 {
 		t.Fatalf("focus calls=%d; want one failing Push", leaf.calls)
 	}
-	// ContextTree retains its entry on focus failure; the callback must not
-	// change that contract or multiply the entry on subsequent preparation.
+	if g.tree.Current() != picker || len(g.tree.Stack()) != 2 || swaps != 0 {
+		t.Fatalf("failed focus: current=%v depth=%d swaps=%d; want retained picker,2,0", g.tree.Current().GetKey(), len(g.tree.Stack()), swaps)
+	}
+	// Re-preparation succeeds, but duplicate-top Push skips focus and swap
+	// hooks. This checks retention/deduplication, not activation recovery;
+	// Open also replaces the injected failing leaf with fresh display leaves.
 	if !g.wireEditDeps().OpenFKReversePicker(reverseOpenEntries(), nil, 0, 0) || len(g.tree.Stack()) != 2 {
-		t.Fatal("retry must not duplicate the retained picker")
+		t.Fatal("re-preparation must succeed without duplicating the retained picker")
+	}
+	if g.tree.Current() != picker || leaf.calls != 1 || swaps != 0 {
+		t.Fatalf("duplicate top: current=%v old leaf focus calls=%d swaps=%d; want retained picker,1,0", g.tree.Current().GetKey(), leaf.calls, swaps)
 	}
 }
 
