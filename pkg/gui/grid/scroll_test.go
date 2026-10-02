@@ -655,6 +655,44 @@ func TestRender_VerticalScroll_FollowsCursorToTail(t *testing.T) {
 		"cursor row must be on-screen after JumpLast")
 }
 
+func TestReview_expanded_motion(t *testing.T) {
+	v := makeView(makeSingleCol("v", "text"), []models.Row{
+		{Values: []any{"abcdef\nline2\nline3\nline4\nline5"}},
+		{Values: []any{"next"}},
+	})
+	v.SetViewMode(ViewModeExpanded)
+	target := newTallTestView("motion", 4)
+	v.Render(target)
+	v.HorizScrollRight()
+	v.Render(target)
+	require.Contains(t, target.Buffer(), "| bcdef")
+	require.NotContains(t, target.Buffer(), "| abcdef")
+	v.HorizScrollLeft()
+	v.HalfPageDown()
+	v.Render(target)
+	require.Equal(t, 2, v.snapshot().expandedLineOffset, "half of actual four-line viewport")
+	require.Contains(t, target.Buffer(), "| line2")
+	v.HalfPageUp()
+	v.Render(target)
+	require.Equal(t, 0, v.snapshot().expandedLineOffset)
+	for _, move := range []func(){v.MoveCursorDown, v.MoveCursorUp, v.JumpLast, v.JumpFirst, func() { v.SetCursor(1, 0) }} {
+		v.WrappedLineDown()
+		v.HorizScrollRight()
+		move()
+		v.Render(target)
+		require.Zero(t, v.snapshot().expandedLineOffset)
+		require.Zero(t, v.snapshot().colOffset)
+	}
+	v.WrappedLineDown()
+	v.HorizScrollRight()
+	v.SetSearch("line5")
+	v.Render(target)
+	v.SetSearch("next")
+	v.Render(target)
+	require.Zero(t, v.snapshot().expandedLineOffset, "search record changes reset offsets")
+	require.Zero(t, v.snapshot().colOffset)
+}
+
 // --- ialt.2: header reads configured TableHeader ---
 
 func headerSnapForTheme(t *testing.T) (*View, viewSnapshot) {

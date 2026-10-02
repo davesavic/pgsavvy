@@ -43,31 +43,35 @@ func normaliseViewMode(m string) string {
 //	-[ RECORD n+1 of ~total ]--------
 //	...
 //
-// Each record formats only when its index is within
-// [snap.rowOffset-1, snap.rowOffset+innerH+1] — the +/- 1 overscan keeps
-// scrolling smooth without formatting every record on every paint (the
-// AC explicitly forbids "formats every record on Render" for a 1M-row
-// result). Cell values pass through SanitizeCellEscapes so server-side
-// terminal escapes cannot bleed.
+// Only records intersecting the viewport are formatted. Cell values pass
+// through SanitizeCellEscapes so server-side terminal escapes cannot bleed.
 func renderExpanded(snap viewSnapshot, innerW, innerH int) string {
+	return expandedViewport(snap, innerW, innerH).body
+}
+
+type expandedWindow struct {
+	body       string
+	rows       []int
+	lineOffset int
+}
+
+// A record qualifies for visible-scope export when any of its lines,
+// including the separator, intersects this window. Export retains whole rows.
+func expandedViewport(snap viewSnapshot, innerW, innerH int) expandedWindow {
+	window := expandedWindow{}
+	if innerW <= 0 || innerH <= 0 {
+		return window
+	}
 	if len(snap.cols) == 0 {
-		return emptyResultText(snap)
+		window.body = expandedSlice(emptyResultText(snap), 0, innerW)
+		return window
 	}
 	if len(snap.rows) == 0 {
-		// Empty body — just a header banner so the user sees the mode.
-		return expandedSeparator(0, snap.estimatedRows, innerW)
+		window.body = expandedSlice(expandedSeparator(0, snap.estimatedRows, innerW), 0, innerW)
+		return window
 	}
-	if innerW < 4 {
-		innerW = 4
-	}
-	// innerH is reserved for future per-viewport sizing; the current
-	// overscan policy is cursor-relative, so the param is intentionally
-	// unused here.
-	_ = innerH
-	gutter := expandedGutterWidth(snap)
-	valueWidth := max(
-		// "gutter | value"
-		innerW-gutter-3, 4)
+	gutter := min(expandedGutterWidth(snap), max(innerW-4, 0))
+	valueWidth := max(innerW-gutter-3, 1)
 
 	// Determine the active record from the cursor. cursorRow is a raw-
 	// buffer index; the displayed record is its position within the
@@ -79,41 +83,68 @@ func renderExpanded(snap viewSnapshot, innerW, innerH int) string {
 	// (e.g. filtered out), matching the grid-mode clamp.
 	indices := project(snap)
 	if len(indices) == 0 {
-		return expandedSeparator(0, snap.estimatedRows, innerW)
+		window.body = expandedSlice(expandedSeparator(0, snap.estimatedRows, innerW), 0, innerW)
+		return window
 	}
 	cursorIdx := max(projectedPos(indices, snap.cursorRow), 0)
-
-	// Overscan: format from cursor-1 to as many records as fit in the
-	// viewport, plus one record past the bottom edge. We bias around
-	// the cursor rather than the rowOffset because in expanded mode the
-	// "viewport" is one record at a time — extra records are pre-formatted
-	// so j/k feels instantaneous.
-	start := max(cursorIdx-1, 0)
-	end := min(
-		// include one record after cursor
-		cursorIdx+2, len(indices))
-
-	var sb strings.Builder
-	for i := start; i < end; i++ {
-		recordOneBased := i + 1
-		sb.WriteString(expandedSeparator(recordOneBased, expandedTotalEstimate(snap, len(indices)), innerW))
-		sb.WriteByte('\n')
+	visibleCols := expandedColumnOrder(snap)
+	lines := make([]string, 0, innerH)
+	for i := cursorIdx; i < len(indices) && len(lines) < innerH; i++ {
+		record := []string{expandedSeparator(i+1, expandedTotalEstimate(snap, len(indices)), innerW)}
 		row := snap.rows[indices[i]]
-		visibleCols := expandedColumnOrder(snap)
 		for _, c := range visibleCols {
-			label := snap.cols[c].Name
+			label := expandedColumnLabel(snap.cols[c].Name)
 			var value any
 			if c < len(row.Values) {
 				value = row.Values[c]
 			}
-			plain := renderCellPlain(value, snap.cols[c])
-			for _, line := range expandedRecordLines(label, plain, gutter, valueWidth) {
-				sb.WriteString(line)
-				sb.WriteByte('\n')
+			plain := strings.ReplaceAll(renderCellPlain(value, snap.cols[c]), "\t", " ")
+			// Horizontal motion shifts each logical value line, leaving the
+			// column-name gutter fixed. Then wrap the remaining value.
+			logicalLines := strings.Split(plain, "\n")
+			for j, line := range logicalLines {
+				logicalLines[j] = expandedSlice(line, max(snap.colOffset, 0), displayCols(line))
 			}
+			record = append(record, expandedRecordLines(label, strings.Join(logicalLines, "\n"), gutter, valueWidth)...)
 		}
+		start := 0
+		if i == cursorIdx {
+			start = min(max(snap.expandedLineOffset, 0), len(record)-1)
+			window.lineOffset = start
+		}
+		end := min(len(record), start+innerH-len(lines))
+		for _, line := range record[start:end] {
+			lines = append(lines, expandedSlice(line, 0, innerW))
+		}
+		window.rows = append(window.rows, indices[i])
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	window.body = strings.Join(lines, "\n")
+	return window
+}
+
+// expandedSlice clips plain text in terminal cells without splitting UTF-8
+// or emitting half of a wide rune. A left-edge partial rune becomes padding.
+func expandedSlice(s string, start, width int) string {
+	var b strings.Builder
+	pos, used := 0, 0
+	for _, r := range s {
+		w := runewidth.RuneWidth(r)
+		if pos < start {
+			pos += w
+			if pos > start && used < width {
+				b.WriteByte(' ')
+				used++
+			}
+			continue
+		}
+		if used+w > width {
+			break
+		}
+		b.WriteRune(r)
+		used += w
+		pos += w
+	}
+	return b.String()
 }
 
 // expandedGutterWidth computes the gutter width for the snapshot:
@@ -123,7 +154,7 @@ func renderExpanded(snap viewSnapshot, innerW, innerH int) string {
 func expandedGutterWidth(snap viewSnapshot) int {
 	maxLen := 0
 	for _, c := range expandedColumnOrder(snap) {
-		if l := len(snap.cols[c].Name); l > maxLen {
+		if l := len(expandedColumnLabel(snap.cols[c].Name)); l > maxLen {
 			maxLen = l
 		}
 	}
@@ -134,6 +165,12 @@ func expandedGutterWidth(snap viewSnapshot) int {
 		return expandedGutterMax
 	}
 	return maxLen
+}
+
+func expandedColumnLabel(name string) string {
+	name = SanitizeCellEscapes(name)
+	name = strings.ReplaceAll(name, "\n", " ")
+	return strings.ReplaceAll(name, "\t", " ")
 }
 
 // expandedColumnOrder returns the column indices to render in expanded

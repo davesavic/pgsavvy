@@ -195,11 +195,13 @@ type View struct {
 	// reset to 0 when the cursor moves to a new record.
 	expandedLineOffset int
 
-	// viewHeight tracks the data-row capacity of the most recent Render
-	// (innerH - 1 for the header). 0 means "no Render yet"; VisibleRows
-	// falls back to a no-op in that case. Stamped under v.mu.Lock by
-	// clampOffsetsLocked so export-time readers see a consistent value.
-	viewHeight int
+	// viewHeight tracks the last rendered capacity: grid data rows exclude
+	// the header, while expanded mode uses the full inner height. Zero
+	// means no drawable viewport; VisibleRows returns no rows in that case.
+	viewHeight          int
+	viewportHeight      int
+	expandedVisibleRows []int
+	expandedCursorRow   int
 
 	// editable, rowIdentity, disabledReason, identityRef carry the
 	// post-introspection editability state populated by Z1 via
@@ -337,6 +339,11 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 	v.cursorCol = 0
 	v.rowOffset = 0
 	v.colOffset = 0
+	v.expandedLineOffset = 0
+	v.expandedVisibleRows = nil
+	v.expandedCursorRow = 0
+	v.viewHeight = 0
+	v.viewportHeight = 0
 	v.selMode = SelectionNone
 	v.anchorRow = 0
 	v.anchorCol = 0
@@ -548,7 +555,9 @@ func (v *View) AllRows() []models.Row {
 
 // VisibleRows returns a defensive copy of the rows currently inside the
 // rendered viewport — the same window the user sees on screen. The
-// window is [rowOffset, rowOffset+viewHeight), clamped to the buffer.
+// Grid mode uses [rowOffset, rowOffset+viewHeight). Expanded mode returns
+// the complete rows whose record blocks intersected the last rendered window,
+// including separator-only and partially visible records.
 // When no Render has happened yet (viewHeight == 0) or the buffer is
 // empty, an empty slice is returned. Used by the export pipeline's
 // Scope=Visible path.
@@ -557,6 +566,15 @@ func (v *View) VisibleRows() []models.Row {
 	defer v.mu.RUnlock()
 	if len(v.rows) == 0 || v.viewHeight <= 0 {
 		return []models.Row{}
+	}
+	if normaliseViewMode(v.viewMode) == ViewModeExpanded {
+		out := make([]models.Row, 0, len(v.expandedVisibleRows))
+		for _, idx := range v.expandedVisibleRows {
+			if idx < len(v.rows) {
+				out = append(out, v.rows[idx])
+			}
+		}
+		return out
 	}
 	start := min(max(v.rowOffset, 0), len(v.rows))
 	end := min(start+v.viewHeight, len(v.rows))
@@ -626,10 +644,15 @@ func (v *View) SetOnCursorChange(fn func(row, col int)) {
 	v.mu.Unlock()
 }
 
-// fireCursorChangeLocked invokes the cursor-change callback with the
-// current cursor position. Caller MUST hold v.mu (the callback contract
-// requires it not to re-enter grid methods). No-op when unwired.
+// fireCursorChangeLocked resets record-relative scrolling on a row change
+// and invokes the optional cursor-change callback. Caller MUST hold v.mu;
+// the callback must not re-enter grid methods.
 func (v *View) fireCursorChangeLocked() {
+	if normaliseViewMode(v.viewMode) == ViewModeExpanded && v.expandedCursorRow != v.cursorRow {
+		v.expandedLineOffset = 0
+		v.colOffset = 0
+	}
+	v.expandedCursorRow = v.cursorRow
 	if v.onCursorChange != nil {
 		v.onCursorChange(v.cursorRow, v.cursorCol)
 	}
@@ -747,6 +770,9 @@ func (v *View) SetViewMode(m string) {
 	v.mu.Lock()
 	v.viewMode = normaliseViewMode(m)
 	v.expandedLineOffset = 0
+	v.colOffset = 0
+	v.expandedVisibleRows = nil
+	v.expandedCursorRow = v.cursorRow
 	v.mu.Unlock()
 }
 
@@ -848,7 +874,7 @@ func (v *View) Render(target *gocui.View) {
 		target.Clear()
 	}
 
-	if len(snap.cols) == 0 {
+	if len(snap.cols) == 0 && snap.viewMode != ViewModeExpanded {
 		if target != nil {
 			target.WriteString(emptyResultText(snap))
 		}
@@ -861,11 +887,15 @@ func (v *View) Render(target *gocui.View) {
 	innerW, innerH := 80, 24
 	if target != nil {
 		iw, ih := target.InnerSize()
-		if iw > 0 {
-			innerW = iw
-		}
-		if ih > 0 {
-			innerH = ih
+		if snap.viewMode == ViewModeExpanded {
+			innerW, innerH = iw, ih
+		} else {
+			if iw > 0 {
+				innerW = iw
+			}
+			if ih > 0 {
+				innerH = ih
+			}
 		}
 	}
 
@@ -873,12 +903,18 @@ func (v *View) Render(target *gocui.View) {
 	// window. This is a snapshot-local computation; the persisted
 	// offsets are updated under the write lock so the next frame
 	// starts in the right place.
-	snap.rowOffset, snap.colOffset = v.clampOffsetsLocked(snap, innerW, innerH)
-
 	var body string
 	if snap.viewMode == ViewModeExpanded {
-		body = renderExpanded(snap, innerW, innerH)
+		window := expandedViewport(snap, innerW, innerH)
+		body = window.body
+		v.mu.Lock()
+		v.expandedLineOffset = window.lineOffset
+		v.expandedVisibleRows = window.rows
+		v.viewHeight = innerH
+		v.viewportHeight = innerH
+		v.mu.Unlock()
 	} else {
+		snap.rowOffset, snap.colOffset = v.clampOffsetsLocked(snap, innerW, innerH)
 		body = renderBody(snap, innerW, innerH)
 	}
 	if target != nil {
@@ -953,6 +989,7 @@ func (v *View) clampOffsetsLocked(snap viewSnapshot, innerW, innerH int) (rowOff
 	// Record the latest data-row capacity so VisibleRows (export Scope)
 	// can return the on-screen window without re-deriving the layout.
 	v.viewHeight = dataRows
+	v.viewportHeight = innerH
 	v.mu.Unlock()
 	return rowOffset, colOffset
 }

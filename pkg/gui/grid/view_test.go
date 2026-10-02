@@ -201,6 +201,80 @@ func TestVisibleRows_EmptyBeforeRender(t *testing.T) {
 	require.Empty(t, v.VisibleRows(), "VisibleRows before any Render must be empty")
 }
 
+func TestReview_expanded_visible_records(t *testing.T) {
+	cols := []models.ColumnMeta{{Name: "id", TypeName: "int4"}, {Name: "body", TypeName: "text"}}
+	rows := []models.Row{{Values: []any{3, "third"}}, {Values: []any{1, "first\nwrapped"}}, {Values: []any{2, "second"}}}
+	v := makeView(cols, rows)
+	v.SetViewMode(ViewModeExpanded)
+	v.SetHiddenCols(map[int]bool{1: true})
+	v.SetSortIndicator(0, SortAsc) // Ordering is supplied by the database, not the grid.
+	v.SetCursor(1, 0)
+	require.Empty(t, v.VisibleRows(), "no viewport before render")
+	for _, tc := range []struct {
+		height int
+		want   []models.Row
+	}{
+		{1, rows[1:2]}, // Separator-only partial record qualifies.
+		{2, rows[1:2]},
+		{3, rows[1:3]}, // Following separator qualifies, but raw row 0 is offscreen.
+		{4, rows[1:3]},
+	} {
+		t.Run(rowLabel(tc.height), func(t *testing.T) {
+			target := newTallTestView("visible", tc.height)
+			v.Render(target)
+			require.Equal(t, tc.want, v.VisibleRows())
+			require.NotContains(t, target.Buffer(), "third")
+			require.NotContains(t, target.Buffer(), "wrapped", "hidden column changes block height")
+			got := v.VisibleRows()
+			got[0] = models.Row{}
+			require.Equal(t, tc.want, v.VisibleRows(), "returned row slice is defensive")
+		})
+	}
+	v.SetColumns(cols)
+	require.Empty(t, v.VisibleRows(), "replacement invalidates the previous viewport")
+	require.Zero(t, v.snapshot().expandedLineOffset)
+}
+
+func TestReview_expanded_zero_native_viewport(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		width, height int
+	}{
+		{"zero_width", 0, 4},
+		{"zero_height", 40, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := makeView(makeSingleCol("v", "text"), []models.Row{{Values: []any{"visible"}}})
+			v.SetViewMode(ViewModeExpanded)
+			v.Render(newTestView("before"))
+			require.Len(t, v.VisibleRows(), 1)
+			target := gocui.NewView(tc.name, 0, 0, tc.width+1, tc.height+1, gocui.OutputNormal)
+			v.Render(target)
+			require.Empty(t, target.Buffer())
+			require.Empty(t, v.VisibleRows())
+		})
+	}
+}
+
+func TestReview_expanded_empty_native_viewport(t *testing.T) {
+	for _, tc := range []struct {
+		width, height int
+		want          string
+	}{
+		{0, 4, ""}, {40, 0, ""}, {2, 4, "(5"}, {40, 4, "(5 rows affected)"},
+	} {
+		t.Run(rowLabel(tc.width)+rowLabel(tc.height), func(t *testing.T) {
+			v := NewView()
+			v.SetRowsAffected(5)
+			v.SetViewMode(ViewModeExpanded)
+			target := gocui.NewView("empty", 0, 0, tc.width+1, tc.height+1, gocui.OutputNormal)
+			v.Render(target)
+			require.Equal(t, tc.want, strings.TrimRight(target.Buffer(), "\n"))
+			require.Empty(t, v.VisibleRows())
+		})
+	}
+}
+
 // TestEditability_DefaultsAndSetAndReset verifies the SetEditability /
 // Editable / RowIdentity / DisabledReason surface, including the defensive
 // copy behaviour on the RowIdentity getter and the SetColumns reset.

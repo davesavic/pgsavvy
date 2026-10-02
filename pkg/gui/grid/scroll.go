@@ -40,6 +40,9 @@ func (v *View) MoveCursorDown() {
 		return // already on the last projected row
 	}
 	v.expandedLineOffset = 0
+	if normaliseViewMode(v.viewMode) == ViewModeExpanded {
+		v.colOffset = 0
+	}
 	v.fireCursorChangeLocked()
 }
 
@@ -62,6 +65,9 @@ func (v *View) MoveCursorUp() {
 		return // already on the first projected row
 	}
 	v.expandedLineOffset = 0
+	if normaliseViewMode(v.viewMode) == ViewModeExpanded {
+		v.colOffset = 0
+	}
 	v.fireCursorChangeLocked()
 }
 
@@ -122,14 +128,16 @@ func (v *View) MoveCursorRight() {
 // as half of ResultPageSize rows for the no-viewport case). The Render
 // pass clamps scroll afterwards so the cursor stays on screen. In
 // expanded mode this scrolls inside the active record by a half-page
-// of wrapped lines; when the line offset overruns the record's content
-// the cursor advances to the next record.
+// of wrapped lines, clamped on render to the active record's last line.
 func (v *View) HalfPageDown() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if normaliseViewMode(v.viewMode) == ViewModeExpanded {
 		// Step inside the current record by half a viewport's worth.
 		step := expandedHalfPageStep
+		if v.viewportHeight > 0 {
+			step = max(v.viewportHeight/2, 1)
+		}
 		v.expandedLineOffset += step
 		return
 	}
@@ -152,6 +160,9 @@ func (v *View) HalfPageUp() {
 	defer v.mu.Unlock()
 	if normaliseViewMode(v.viewMode) == ViewModeExpanded {
 		step := expandedHalfPageStep
+		if v.viewportHeight > 0 {
+			step = max(v.viewportHeight/2, 1)
+		}
 		v.expandedLineOffset -= step
 		if v.expandedLineOffset < 0 {
 			v.expandedLineOffset = 0
@@ -169,8 +180,8 @@ func (v *View) HalfPageUp() {
 	v.fireCursorChangeLocked()
 }
 
-// expandedHalfPageStep is the half-page distance in wrapped lines used
-// by HalfPageDown / HalfPageUp when the view is in expanded mode.
+// expandedHalfPageStep is the fallback wrapped-line distance before the
+// first rendered viewport supplies its height.
 // Chosen to roughly match a typical 24-line viewport / 2.
 const expandedHalfPageStep = 12
 
@@ -203,8 +214,7 @@ func (v *View) WrappedLineUp() {
 // HorizScrollLeft scrolls the viewport one column-step to the left.
 // In expanded mode this shifts the value-column horizontal offset; in
 // grid mode it walks the cursor left (mirrors MoveCursorLeft). The
-// expanded-mode line offset is reused as a 1-D scroll because expanded
-// view only ever has one logical column of content.
+// expanded-mode colOffset measures terminal cells within the value column.
 func (v *View) HorizScrollLeft() {
 	if v.ViewMode() == ViewModeGrid {
 		v.MoveCursorLeft()
@@ -273,6 +283,9 @@ func (v *View) JumpFirst() {
 		v.cursorRow = 0
 	}
 	v.expandedLineOffset = 0
+	if normaliseViewMode(v.viewMode) == ViewModeExpanded {
+		v.colOffset = 0
+	}
 	v.fireCursorChangeLocked()
 	v.mu.Unlock()
 }
@@ -289,6 +302,9 @@ func (v *View) JumpLast() {
 		v.cursorRow = proj[len(proj)-1]
 	}
 	v.expandedLineOffset = 0
+	if normaliseViewMode(v.viewMode) == ViewModeExpanded {
+		v.colOffset = 0
+	}
 	v.fireCursorChangeLocked()
 	v.mu.Unlock()
 }

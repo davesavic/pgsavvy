@@ -142,9 +142,10 @@ func TestRenderExpanded_Overscan_DoesNotFormatAllRecords(t *testing.T) {
 	}
 	v := makeView(cols, rows)
 	v.SetViewMode(ViewModeExpanded)
-	body := renderExpanded(v.snapshot(), 80, 24)
+	const height = 24
+	body := renderExpanded(v.snapshot(), 80, height)
 	count := strings.Count(body, "[ RECORD ")
-	require.LessOrEqual(t, count, 5,
+	require.LessOrEqual(t, count, (height+1)/2,
 		"renderExpanded must not format all 1000 records on one Render (got %d blocks)", count)
 }
 
@@ -323,4 +324,107 @@ func TestRender_DispatchesOnViewMode(t *testing.T) {
 	v.SetViewMode(ViewModeExpanded)
 	bodyExp := renderExpanded(v.snapshot(), 80, 24)
 	require.Contains(t, bodyExp, "[ RECORD ")
+}
+
+func TestReview_expanded_viewport(t *testing.T) {
+	cols := makeSingleCol("value", "text")
+	rows := []models.Row{
+		{Values: []any{"previous"}},
+		{Values: []any{"first\nsecond\nthird\nfourth"}},
+		{Values: []any{"following"}},
+		{Values: []any{"offscreen"}},
+	}
+	for _, tc := range []struct {
+		name string
+		move func(*View)
+		want string
+	}{
+		{"active_second", func(v *View) {}, "-[ RECORD 2"},
+		{"line_down", func(v *View) { v.WrappedLineDown() }, "value        | first"},
+		{"line_up", func(v *View) { v.WrappedLineDown(); v.WrappedLineDown(); v.WrappedLineUp() }, "value        | first"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := makeView(cols, rows)
+			v.SetViewMode(ViewModeExpanded)
+			v.SetCursor(1, 0)
+			tc.move(v)
+			target := newTallTestView(tc.name, 3)
+			v.Render(target)
+			body := strings.TrimRight(target.Buffer(), "\n")
+			require.True(t, strings.HasPrefix(body, tc.want), "%q", body)
+			require.NotContains(t, body, "previous")
+			require.NotContains(t, body, "following")
+			require.Len(t, strings.Split(body, "\n"), 3)
+			require.Equal(t, rows[1:2], v.VisibleRows())
+		})
+	}
+}
+
+func TestReview_expanded_bounds(t *testing.T) {
+	for _, width := range []int{1, 2, 4, 14, 16, 40} {
+		t.Run(rowLabel(width), func(t *testing.T) {
+			v := makeView(makeSingleCol("long_name", "text"), []models.Row{{Values: []any{"中abc\ndef"}}})
+			v.SetViewMode(ViewModeExpanded)
+			body := renderExpanded(v.snapshot(), width, 2)
+			for _, line := range strings.Split(body, "\n") {
+				require.True(t, utf8.ValidString(line))
+				require.LessOrEqual(t, displayCols(line), width)
+			}
+			require.LessOrEqual(t, len(strings.Split(body, "\n")), 2)
+		})
+	}
+	v := makeView(makeSingleCol("v", "text"), []models.Row{{Values: []any{"last"}}})
+	v.SetViewMode(ViewModeExpanded)
+	for range 100 {
+		v.WrappedLineDown()
+	}
+	target := newTallTestView("clamp", 3)
+	v.Render(target)
+	require.Contains(t, target.Buffer(), "last")
+	require.Equal(t, 1, v.snapshot().expandedLineOffset)
+	require.Empty(t, renderExpanded(v.snapshot(), 0, 0))
+}
+
+type reviewExpandedValue struct{ calls *int }
+
+func (v reviewExpandedValue) String() string { *v.calls++; return "value" }
+
+func TestReview_expanded_does_not_format_offscreen(t *testing.T) {
+	calls := 0
+	rows := make([]models.Row, 1000)
+	for i := range rows {
+		rows[i].Values = []any{reviewExpandedValue{&calls}}
+	}
+	v := makeView(makeSingleCol("v", "text"), rows)
+	v.SetViewMode(ViewModeExpanded)
+	calls = 0
+	_ = renderExpanded(v.snapshot(), 80, 4)
+	require.Equal(t, 2, calls, "only two two-line records fit")
+}
+
+func TestReview_expanded_variable_partial(t *testing.T) {
+	rows := []models.Row{{Values: []any{"one\ntwo\nthree"}}, {Values: []any{"next"}}, {Values: []any{"offscreen"}}}
+	v := makeView(makeSingleCol("v", "text"), rows)
+	v.SetViewMode(ViewModeExpanded)
+	for _, tc := range []struct{ height, count int }{{1, 1}, {4, 1}, {5, 2}, {6, 2}, {7, 3}} {
+		t.Run(rowLabel(tc.height), func(t *testing.T) {
+			target := newTallTestView("partial", tc.height)
+			v.Render(target)
+			require.Equal(t, rows[:tc.count], v.VisibleRows())
+			require.Len(t, strings.Split(strings.TrimRight(target.Buffer(), "\n"), "\n"), tc.height)
+		})
+	}
+}
+
+func TestReview_expanded_single_line_labels(t *testing.T) {
+	for _, label := range []string{"a\nb", "a\tb", "a\x1b]0;title\x07b"} {
+		v := makeView(makeSingleCol(label, "text"), []models.Row{{Values: []any{"val\tue"}}})
+		v.SetViewMode(ViewModeExpanded)
+		body := renderExpanded(v.snapshot(), 80, 2)
+		require.Len(t, strings.Split(body, "\n"), 2, "column labels cannot add physical lines")
+		require.NotContains(t, body, "\t", "tabs cannot escape the display-cell budget")
+		require.NotContains(t, body, "\x1b")
+		require.Equal(t, label, v.Columns()[0].Name, "display normalization must not change identifiers")
+		require.Equal(t, "val\tue", v.AllRows()[0].Values[0], "exports retain original values")
+	}
 }
