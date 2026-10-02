@@ -209,6 +209,10 @@ func (h *CellApplyHelper) Apply(
 			return ApplyResult{}, nil, fmt.Errorf("cell apply: UPDATE %s.%s.%s: %w",
 				schema, table, e.Column, execErr)
 		}
+		if res.RowsAffected > 1 {
+			rollback(ctx, sess)
+			return ApplyResult{}, nil, fmt.Errorf("cell apply: unsafe row identity: UPDATE affected %d rows (expected at most one)", res.RowsAffected)
+		}
 		rowsAffected[i] = int(res.RowsAffected)
 
 		if !dryRun && res.RowsAffected == 0 {
@@ -334,6 +338,10 @@ func (h *CellApplyHelper) Overwrite(
 			rollback(ctx, sess)
 			return ApplyResult{}, fmt.Errorf("cell overwrite: UPDATE %s.%s.%s: %w",
 				schema, table, e.Column, execErr)
+		}
+		if res.RowsAffected > 1 {
+			rollback(ctx, sess)
+			return ApplyResult{}, fmt.Errorf("cell overwrite: unsafe row identity: UPDATE affected %d rows (expected at most one)", res.RowsAffected)
 		}
 		if res.RowsAffected == 0 {
 			rollback(ctx, sess)

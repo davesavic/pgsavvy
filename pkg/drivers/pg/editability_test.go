@@ -18,6 +18,34 @@ func stubIntrospector(rows []relRow, err error) relIntrospector {
 	}
 }
 
+func TestReview_identity_safety(t *testing.T) {
+	if !strings.Contains(strings.ToLower(sqlEditabilityIntrospect), "and i.indpred is null") {
+		t.Error("catalog identity candidates must exclude partial UNIQUE indexes")
+	}
+	for _, tc := range []struct {
+		name   string
+		pk     []int32
+		unique [][]int32
+		want   []int
+	}{
+		{name: "no_global_key"},
+		{name: "full_unique", unique: [][]int32{{1}}, want: []int{0}},
+		{name: "primary_key", pk: []int32{1}, want: []int{0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cols := []models.ColumnMeta{{Name: "id", TableOID: 42, TableAttributeNumber: 1}}
+			row := relRow{OID: 42, RelKind: "r", Schema: "app", Name: "t", PKAttnums: tc.pk, UniqueAttnums: tc.unique}
+			_, id, reason, err := decideEditability(context.Background(), cols, stubIntrospector([]relRow{row}, nil))
+			if err != nil || !reflect.DeepEqual(id, tc.want) {
+				t.Fatalf("identity=%v err=%v, want %v", id, err, tc.want)
+			}
+			if (reason == "") != (tc.want != nil) {
+				t.Fatalf("reason=%q, identity=%v", reason, id)
+			}
+		})
+	}
+}
+
 func TestDecideEditability_AllZeroTableOID_Computed(t *testing.T) {
 	cols := []models.ColumnMeta{
 		{Name: "n", TableOID: 0, TableAttributeNumber: 0},

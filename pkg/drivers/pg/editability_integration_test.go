@@ -9,8 +9,10 @@ package pg_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -70,6 +72,55 @@ func columnsFromSelect(t *testing.T, sess *pg.Session, sql string) []models.Colu
 	}
 	defer func() { _ = stream.Close() }()
 	return stream.Columns()
+}
+
+func TestReview_identity_safety_LiveCatalog(t *testing.T) {
+	for _, key := range []string{"partial", "full_unique", "primary_key", "partial_and_full", "partial_and_pk"} {
+		t.Run(key, func(t *testing.T) {
+			sess := openIntegrationSession(t)
+			ctx := context.Background()
+			schema := fmt.Sprintf("review_identity_%d", time.Now().UnixNano())
+			qualified := pg.QuoteQualified(schema, "t")
+			exec := func(sql string) {
+				t.Helper()
+				if _, err := sess.Execute(ctx, models.Query{SQL: sql}); err != nil {
+					t.Fatalf("fixture SQL: %v", err)
+				}
+			}
+			exec("BEGIN")
+			defer exec("ROLLBACK")
+			exec("CREATE SCHEMA " + pg.QuoteIdent(schema))
+			exec("CREATE TABLE " + qualified + " (id int NOT NULL, name text, active boolean)")
+			if key == "partial" || key == "partial_and_full" || key == "partial_and_pk" {
+				exec("CREATE UNIQUE INDEX partial_id ON " + qualified + " (id) WHERE active")
+			}
+			if key == "full_unique" || key == "partial_and_full" {
+				exec("CREATE UNIQUE INDEX full_id ON " + qualified + " (id)")
+			}
+			if key == "primary_key" || key == "partial_and_pk" {
+				exec("ALTER TABLE " + qualified + " ADD PRIMARY KEY (id)")
+			}
+			exec("INSERT INTO " + qualified + " VALUES (1, 'old', false)")
+			if key == "partial" {
+				exec("INSERT INTO " + qualified + " VALUES (1, 'old', false)")
+			}
+			cols := columnsFromSelect(t, sess, "SELECT id, name, active FROM "+qualified)
+			ref, id, reason, err := pg.EditabilityIntrospect(ctx, sess, cols)
+			if err != nil {
+				t.Fatalf("introspection: %v", err)
+			}
+			if ref != (models.Ref{Schema: schema, Table: "t"}) {
+				t.Fatalf("relation=%+v", ref)
+			}
+			if key == "partial" {
+				if reason != "no row identity" || len(id) != 0 {
+					t.Fatalf("partial UNIQUE authorized identity=%v reason=%q", id, reason)
+				}
+			} else if reason != "" || len(id) != 1 || id[0] != 0 {
+				t.Fatalf("global key disabled: identity=%v reason=%q", id, reason)
+			}
+		})
+	}
 }
 
 func TestEditabilityIntrospect_SingleBaseTable(t *testing.T) {

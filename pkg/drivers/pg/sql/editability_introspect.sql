@@ -42,6 +42,7 @@ SELECT
             FROM pg_index i
             WHERE i.indrelid = c.oid
               AND i.indisunique
+              AND i.indpred IS NULL
               AND NOT i.indisprimary
               AND i.indisvalid
               AND i.indisready

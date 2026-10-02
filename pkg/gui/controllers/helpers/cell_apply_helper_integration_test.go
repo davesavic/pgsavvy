@@ -10,8 +10,10 @@ package helpers_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
@@ -63,6 +65,51 @@ func adminExec(t *testing.T, conn drivers.Connection, sqls ...string) {
 		if _, err := sess.Execute(ctx, models.Query{SQL: s}); err != nil {
 			t.Fatalf("admin exec %q: %v", s, err)
 		}
+	}
+}
+
+func TestReview_identity_safety_LiveRollback(t *testing.T) {
+	for _, mode := range []string{"apply", "overwrite", "dry_run"} {
+		t.Run(mode, func(t *testing.T) {
+			conn := openIntegrationConn(t)
+			schema := fmt.Sprintf("review_mutation_%d", time.Now().UnixNano())
+			qualified := pg.QuoteQualified(schema, "t")
+			adminExec(t, conn, "CREATE SCHEMA "+pg.QuoteIdent(schema))
+			t.Cleanup(func() { adminExec(t, conn, "DROP SCHEMA "+pg.QuoteIdent(schema)+" CASCADE") })
+			adminExec(t, conn,
+				"CREATE TABLE "+qualified+" (id int NOT NULL, name text, active boolean)",
+				"CREATE UNIQUE INDEX partial_id ON "+qualified+" (id) WHERE active",
+				"INSERT INTO "+qualified+" VALUES (2, 'old', false), (1, 'old', false), (1, 'old', false)",
+			)
+			set := &models.PendingEditSet{Table: models.Ref{Schema: schema, Table: "t"}}
+			for _, id := range []int32{2, 1} {
+				mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{id}, Column: "name", OldValue: "old", NewValue: "new", Kind: models.Literal})
+			}
+			helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: conn})
+			var err error
+			if mode == "overwrite" {
+				_, err = helper.Overwrite(context.Background(), set, []string{"id"})
+			} else {
+				_, _, err = helper.Apply(context.Background(), set, []string{"id"}, mode == "dry_run")
+			}
+			if err == nil {
+				t.Error("multi-row mutation was not rejected")
+			}
+			sess, err := conn.AcquireSession(context.Background())
+			if err != nil {
+				t.Fatalf("verify session: %v", err)
+			}
+			defer func() { _ = sess.Close() }()
+			res, err := sess.Execute(context.Background(), models.Query{SQL: "SELECT id, name FROM " + qualified})
+			if err != nil || len(res.Rows) != 3 {
+				t.Fatalf("verify rows=%d err=%v", len(res.Rows), err)
+			}
+			for _, row := range res.Rows {
+				if row.Values[1] != "old" {
+					t.Errorf("batch was not rolled back: id=%v name=%v", row.Values[0], row.Values[1])
+				}
+			}
+		})
 	}
 }
 

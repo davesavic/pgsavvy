@@ -3,6 +3,7 @@ package helpers_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -165,6 +166,77 @@ func newApplySet() *models.PendingEditSet {
 }
 
 // --- Tests ---------------------------------------------------------------
+
+func TestReview_identity_safety(t *testing.T) {
+	for _, mode := range []string{"apply", "overwrite", "dry_run"} {
+		for _, count := range []int64{0, 1, 2} {
+			for _, prior := range []bool{false, true} {
+				name := mode + "/" + fmt.Sprint(count) + "/prior_" + fmt.Sprint(prior)
+				t.Run(name, func(t *testing.T) {
+					set := newApplySet()
+					script := []execResponse{{}}
+					if prior {
+						mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{2}, Column: "name", OldValue: "old", NewValue: "first", Kind: models.Literal})
+						script = append(script, execResponse{RowsAffected: 1})
+					}
+					mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{1}, Column: "name", OldValue: "old", NewValue: "new", Kind: models.Literal})
+					script = append(script, execResponse{RowsAffected: count})
+					if count == 0 && mode == "apply" {
+						script = append(script, execResponse{Rows: [][]any{{"server"}}})
+					}
+					script = append(script, execResponse{}, execResponse{Rows: [][]any{{1, "new"}}, Cols: []string{"id", "name"}})
+					sess := &fakeSession{script: script}
+					helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
+					var res helpers.ApplyResult
+					var conflicts []models.ConflictedEdit
+					var err error
+					if mode == "overwrite" {
+						res, err = helper.Overwrite(context.Background(), set, []string{"id"})
+					} else {
+						res, conflicts, err = helper.Apply(context.Background(), set, []string{"id"}, mode == "dry_run")
+					}
+					wantErr := count > 1 || (count == 0 && mode == "overwrite")
+					if (err != nil) != wantErr {
+						t.Errorf("err=%v, want error=%v", err, wantErr)
+					}
+					wantConflicts := 0
+					if count == 0 && mode == "apply" {
+						wantConflicts = 1
+					}
+					if len(conflicts) != wantConflicts {
+						t.Errorf("conflicts=%v, want %d", conflicts, wantConflicts)
+					}
+					wantCommit := count == 1 && mode != "dry_run"
+					commits, rollbacks := 0, 0
+					for _, call := range sess.calls {
+						switch call.SQL {
+						case "COMMIT":
+							commits++
+						case "ROLLBACK":
+							rollbacks++
+						}
+					}
+					if wantCommit {
+						if commits != 1 || rollbacks != 0 {
+							t.Errorf("commits=%d rollbacks=%d, want 1/0", commits, rollbacks)
+						}
+					} else if commits != 0 || rollbacks != 1 {
+						t.Errorf("commits=%d rollbacks=%d, want 0/1", commits, rollbacks)
+					}
+					if count > 1 && (len(res.RowsAffected) != 0 || len(res.RefetchedRows) != 0) {
+						t.Errorf("unsafe update returned success data: %+v", res)
+					}
+					if mode == "dry_run" && count <= 1 && res.RowsAffected[len(res.RowsAffected)-1] != int(count) {
+						t.Errorf("dry-run counts=%v, want final %d", res.RowsAffected, count)
+					}
+					if !sess.closed {
+						t.Error("dedicated session not closed")
+					}
+				})
+			}
+		}
+	}
+}
 
 func TestApply_EmptySet_NoBegin(t *testing.T) {
 	sess := &fakeSession{}
