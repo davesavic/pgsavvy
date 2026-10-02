@@ -17,6 +17,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query"
 	"github.com/davesavic/pgsavvy/pkg/tasks"
 )
 
@@ -2572,8 +2573,10 @@ func TestEditabilityIntrospectedAtStreamStart(t *testing.T) {
 	factory := func() StreamRunner { return runner }
 	h, _ := newTestHelper(t, factory)
 
-	h.deps.IntrospectEditability = func(_ context.Context, cols []models.ColumnMeta) (bool, []int, string, string) {
-		return true, []int{0}, "", "myschema"
+	h.deps.IntrospectEditability = func([]models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool) {
+		return func(context.Context) (bool, []int, string, models.Ref) {
+			return true, []int{0}, "", models.Ref{Schema: "myschema", Table: "t"}
+		}, func() bool { return true }
 	}
 
 	// The run handle must expose a RowStream with columns: introspection
@@ -2583,6 +2586,7 @@ func TestEditabilityIntrospectedAtStreamStart(t *testing.T) {
 
 	_ = h.openTab("SELECT id FROM t", rh)
 	tab := h.Active()
+	h.AttachActiveTabIdentity("conn", query.DetectFromQuery("SELECT id FROM t"))
 
 	// Editable BEFORE any onDone fires — i.e. while still StateRunning.
 	if tab.State() != StateRunning {
@@ -2605,6 +2609,175 @@ func TestEditabilityIntrospectedAtStreamStart(t *testing.T) {
 	runner.fireOnDone()
 	if !tab.grid.Editable() {
 		t.Fatal("grid not editable after completion")
+	}
+}
+
+func TestReview_target_stale_introspection(t *testing.T) {
+	for _, scenario := range []string{"reattach", "identity", "columnless", "closed", "connection", "owner"} {
+		t.Run(scenario, func(t *testing.T) {
+			h, _ := newTestHelper(t, func() StreamRunner { return &fakeStreamRunner{} })
+			var workers []func(gocui.Task) error
+			var publications []func() error
+			current := true
+			h.deps.OnWorker = func(fn func(gocui.Task) error) { workers = append(workers, fn) }
+			h.deps.OnUIThread = func(fn func() error) { publications = append(publications, fn) }
+			h.deps.IntrospectEditability = func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool) {
+				return func(context.Context) (bool, []int, string, models.Ref) {
+					return true, []int{0}, "", models.Ref{Schema: cols[0].Name, Table: "t.u"}
+				}, func() bool { return current }
+			}
+			_ = h.openTab("old", nil)
+			tab := h.Active()
+			tab.SetIdentity("conn", query.DetectFromQuery("select id from t"))
+			tab.grid.SetColumns([]models.ColumnMeta{{Name: "old"}})
+			h.scheduleEditabilityIntrospect(tab, tab.grid.Columns())
+			if len(workers) != 1 {
+				t.Fatalf("workers = %d, want 1", len(workers))
+			}
+			if err := workers[0](nil); err != nil {
+				t.Fatal(err)
+			}
+			if len(publications) != 1 {
+				t.Fatalf("publications = %d, want 1", len(publications))
+			}
+			switch scenario {
+			case "reattach":
+				rh := newFakeRunHandle()
+				rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "new"}}}
+				h.reattachActiveTab(rh, "select id from t", "select id from t")
+				if len(workers) != 2 {
+					t.Fatalf("workers = %d, want 2", len(workers))
+				}
+				if err := workers[1](nil); err != nil {
+					t.Fatal(err)
+				}
+				if err := publications[1](); err != nil {
+					t.Fatal(err)
+				}
+			case "identity":
+				tab.SetIdentity("conn", query.DetectFromQuery("select id from other"))
+			case "connection":
+				tab.SetIdentity("replacement", query.DetectFromQuery("select id from t"))
+			case "owner":
+				current = false
+			case "columnless":
+				tab.grid.SetEditability(true, []int{0}, "", models.Ref{Schema: "old", Table: "t.u"})
+				tab.grid.SetPendingEdits(&models.PendingEditSet{})
+				h.reattachActiveTab(nil, "select 1", "select 1")
+			case "closed":
+				if err := h.Close(tab); err != nil {
+					t.Fatal(err)
+				}
+				_ = h.openTab("replacement", nil)
+			}
+			if err := publications[0](); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "reattach" {
+				if got := tab.grid.IdentitySchema(); got != "new" {
+					t.Fatalf("stale publication overwrote replacement: %q", got)
+				}
+			} else if tab.grid.Editable() || tab.grid.IdentitySchema() != "" || tab.grid.PendingEdits() != nil {
+				t.Fatal("stale introspection authorized a retired identity or retained old pending ownership")
+			}
+		})
+	}
+}
+
+func TestReview_target_wrapped_rerun(t *testing.T) {
+	h, _ := newTestHelper(t, func() StreamRunner { return &fakeStreamRunner{} })
+	calls := 0
+	h.deps.IntrospectEditability = func([]models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool) {
+		calls++
+		return func(context.Context) (bool, []int, string, models.Ref) {
+			return true, []int{0}, "", models.Ref{Schema: "a.b", Table: "t.u"}
+		}, func() bool { return true }
+	}
+	newHandle := func() *fakeRunHandle {
+		rh := newFakeRunHandle()
+		rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "id"}}}
+		return rh
+	}
+	_ = h.openTab("original", newHandle())
+	h.AttachActiveTabIdentity("conn", query.DetectFromQuery(`select id from "t.u"`))
+	if calls != 1 || !h.Active().grid.Editable() {
+		t.Fatal("first open did not resolve after identity attachment")
+	}
+	h.reattachActiveTab(newHandle(), `select * from (select id from "t.u") q order by 1`, `select id from "t.u"`)
+	if calls != 1 || h.Active().grid.Editable() {
+		t.Fatal("wrapped rerun expanded edit authorization")
+	}
+	h.reattachActiveTab(newHandle(), `select id from "t.u"`, `select id from "t.u"`)
+	if calls != 2 || h.Active().grid.IdentityRef() != (models.Ref{Schema: "a.b", Table: "t.u"}) {
+		t.Fatal("clearing sort did not resolve the original relation")
+	}
+}
+
+func TestReview_target_queued_capture_on_ui(t *testing.T) {
+	for _, retired := range []bool{false, true} {
+		t.Run(fmt.Sprintf("retired_%v", retired), func(t *testing.T) {
+			h, _ := newTestHelper(t, func() StreamRunner { return &fakeStreamRunner{} })
+			publications := make(chan func() error, 3)
+			h.deps.OnUIThread = func(fn func() error) { publications <- fn }
+			h.deps.OnWorker = func(fn func(gocui.Task) error) {
+				if err := fn(nil); err != nil {
+					t.Error(err)
+				}
+			}
+			var captured, inUI atomic.Bool
+			h.deps.IntrospectEditability = func([]models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool) {
+				captured.Store(true)
+				if !inUI.Load() {
+					t.Error("queued factory read UI-owned connection policy off UI")
+				}
+				return func(context.Context) (bool, []int, string, models.Ref) {
+					return true, []int{0}, "", models.Ref{Schema: "a", Table: "t"}
+				}, func() bool { return true }
+			}
+			prior := newFakeRunHandle()
+			_ = h.openTab("prior", prior)
+			rh := newFakeRunHandle()
+			rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "id"}}}
+			_ = h.openTab("queued", rh)
+			tab := h.Active()
+			h.AttachActiveTabIdentity("conn", query.DetectFromQuery("select id from t"))
+			prior.finish()
+			var resume func() error
+			select {
+			case resume = <-publications:
+			case <-time.After(time.Second):
+				t.Fatal("queued resumption did not reach UI scheduler")
+			}
+			if captured.Load() {
+				t.Fatal("factory ran before queued UI resumption")
+			}
+			if retired {
+				if err := h.Close(tab); err != nil {
+					t.Fatal(err)
+				}
+			}
+			inUI.Store(true)
+			if err := resume(); err != nil {
+				t.Fatal(err)
+			}
+			if retired {
+				if captured.Load() {
+					t.Fatal("disposed queued tab captured editability")
+				}
+				return
+			}
+			select {
+			case flip := <-publications:
+				if err := flip(); err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("queued introspection did not publish")
+			}
+			if !captured.Load() || !tab.grid.Editable() {
+				t.Fatal("queued identity did not resolve on UI")
+			}
+		})
 	}
 }
 

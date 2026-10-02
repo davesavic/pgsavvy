@@ -201,17 +201,15 @@ type View struct {
 	// clampOffsetsLocked so export-time readers see a consistent value.
 	viewHeight int
 
-	// editable, rowIdentity, disabledReason, identitySchema carry the
+	// editable, rowIdentity, disabledReason, identityRef carry the
 	// post-introspection editability state populated by Z1 via
 	// SetEditability. SetColumns resets all to zero (a fresh schema attach
-	// invalidates the previous decision). identitySchema is the catalog-
-	// resolved schema (pg_namespace.nspname) used to schema-qualify the
-	// apply-path UPDATE; the SQL-parsed base table loses it for unqualified
-	// SELECTs.
+	// invalidates the previous decision). identityRef retains both catalog
+	// identifiers without interpreting dots embedded in either component.
 	editable       bool
 	rowIdentity    []int
 	disabledReason string
-	identitySchema string
+	identityRef    models.Ref
 
 	// pendingEdits is the per-View staged-edit set. Read by the dirty-cell
 	// renderer (DecorateDirtyCell / GutterMarker) and the status indicator
@@ -362,7 +360,8 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 	v.editable = false
 	v.rowIdentity = nil
 	v.disabledReason = ""
-	v.identitySchema = ""
+	v.identityRef = models.Ref{}
+	v.pendingEdits = nil
 
 	// Seed column widths from headers so an empty result (0 rows) still
 	// renders full-width headings instead of falling back to MinColumnWidth.
@@ -373,9 +372,8 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 // SetEditability installs the post-introspection editability decision.
 // All fields are stored atomically under the write lock so a concurrent
 // reader sees a consistent snapshot. A nil rowIdentity is stored as-is;
-// getters return defensive copies. schema is the catalog-resolved schema
-// of the base relation (empty when unknown).
-func (v *View) SetEditability(editable bool, rowIdentity []int, disabledReason, schema string) {
+// getters return defensive copies. ref is the catalog-resolved relation.
+func (v *View) SetEditability(editable bool, rowIdentity []int, disabledReason string, ref models.Ref) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.editable = editable
@@ -385,7 +383,7 @@ func (v *View) SetEditability(editable bool, rowIdentity []int, disabledReason, 
 		v.rowIdentity = append([]int(nil), rowIdentity...)
 	}
 	v.disabledReason = disabledReason
-	v.identitySchema = schema
+	v.identityRef = ref
 }
 
 // Editable reports whether the current result set is inline-editable.
@@ -415,7 +413,14 @@ func (v *View) RowIdentity() []int {
 func (v *View) IdentitySchema() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	return v.identitySchema
+	return v.identityRef.Schema
+}
+
+// IdentityRef returns the catalog-resolved relation, or zero when unresolved.
+func (v *View) IdentityRef() models.Ref {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.identityRef
 }
 
 // DisabledReason returns the frozen reason string explaining why the

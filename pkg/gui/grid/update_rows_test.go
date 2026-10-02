@@ -109,7 +109,7 @@ func TestUpdateRowsByPK(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			v := NewView()
 			v.SetColumns(tt.gridCols)
-			v.SetEditability(true, tt.rowIdentity, "", "public")
+			v.SetEditability(true, tt.rowIdentity, "", models.Ref{Schema: "public", Table: "t"})
 			v.AppendRows(tt.gridRows)
 
 			got := v.UpdateRowsByPK(tt.refCols, tt.refRows)

@@ -41,8 +41,8 @@ func (g *Gui) wireEditDeps() controllers.EditDeps {
 		// method so the parked-stream preempt is regression-testable
 		// symmetric with the forward adapter.
 		ReverseFKLookup: g.lookupReverseFK,
-		// ActivePendingEditSet resolves the per-(connID, baseTable) set
-		// from the registry using the currently-active tab's identity.
+		// ActivePendingEditSet resolves the connection/catalog-relation set
+		// only after the active grid has a current editability decision.
 		// Returns nil when no tab is active OR the tab has no row
 		// identity (non-table-backed result).
 		ActivePendingEditSet: func() *models.PendingEditSet {
@@ -54,32 +54,15 @@ func (g *Gui) wireEditDeps() controllers.EditDeps {
 				return nil
 			}
 			connID, ri := tab.Identity()
-			if connID == "" || ri.BaseTable == "" || !ri.HasRowIdentity {
+			if connID == "" || !ri.HasRowIdentity {
 				return nil
 			}
-			set := g.pendingEditReg.For(connID, ri.BaseTable)
-			if set != nil {
-				if gv := tab.Grid(); gv != nil {
-					// ri.BaseTable comes from SQL-text parsing, so it carries
-					// no schema for an unqualified `SELECT ... FROM tbl`.
-					// Backfill the catalog-resolved schema editability
-					// introspection stored on the grid, otherwise the
-					// apply-path UPDATE is unqualified and fails to resolve on
-					// a fresh pooled session whose search_path doesn't include
-					// the table's schema.
-					if set.Table.Schema == "" {
-						if sch := gv.IdentitySchema(); sch != "" {
-							set.Table.Schema = sch
-						}
-					}
-					// Point the grid at this exact set so the dirty-cell
-					// renderer shows staged values. The pointer is stable per
-					// (connID, baseTable) and the cell editor stages into the
-					// same instance via this resolver, so a staged edit
-					// reflects on the next render.
-					gv.SetPendingEdits(set)
-				}
+			gv := tab.Grid()
+			if gv == nil || !gv.Editable() {
+				return nil
 			}
+			set := g.pendingEditReg.For(connID, gv.IdentityRef())
+			gv.SetPendingEdits(set)
 			return set
 		},
 		// ActiveConnectionProfile surfaces the live profile captured at

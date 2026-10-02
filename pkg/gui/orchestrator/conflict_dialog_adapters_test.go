@@ -26,7 +26,7 @@ func newConflictHookFixture(t *testing.T, row models.Row, cols ...string) (*ui.R
 		meta[i] = models.ColumnMeta{Name: c}
 	}
 	g.SetColumns(meta)
-	g.SetEditability(true, []int{0}, "", "app")
+	g.SetEditability(true, []int{0}, "", models.Ref{Schema: "app", Table: "t"})
 	g.AppendRows([]models.Row{row})
 	return tabs, &models.PendingEditSet{}
 }

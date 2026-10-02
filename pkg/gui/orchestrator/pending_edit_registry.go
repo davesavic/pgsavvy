@@ -6,8 +6,8 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
-// pendingEditRegistry maps (connID, baseTable) → *models.PendingEditSet.
-// Each distinct (connID, baseTable) gets its own set; repeated lookups
+// pendingEditRegistry maps (connID, catalog relation) → *models.PendingEditSet.
+// Each distinct connection/relation gets its own set; repeated lookups
 // for the same key return the same instance (idempotent For).
 //
 // Replaces the single process-wide PendingEditSet pinned on *Gui:
@@ -21,8 +21,8 @@ type pendingEditRegistry struct {
 }
 
 type pendingEditRegKey struct {
-	connID    string
-	baseTable string
+	connID string
+	ref    models.Ref
 }
 
 func newPendingEditRegistry() *pendingEditRegistry {
@@ -31,40 +31,40 @@ func newPendingEditRegistry() *pendingEditRegistry {
 	}
 }
 
-// For returns the PendingEditSet for (connID, baseTable), creating a
+// For returns the PendingEditSet for (connID, ref), creating a
 // fresh empty set on first lookup. Returns nil when either key
 // component is empty — callers treat nil as "no active editable target"
 // and surface a disabled-reason rather than staging into a sentinel.
-func (r *pendingEditRegistry) For(connID, baseTable string) *models.PendingEditSet {
-	if connID == "" || baseTable == "" {
+func (r *pendingEditRegistry) For(connID string, ref models.Ref) *models.PendingEditSet {
+	if connID == "" || ref.Schema == "" || ref.Table == "" {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	k := pendingEditRegKey{connID: connID, baseTable: baseTable}
+	k := pendingEditRegKey{connID: connID, ref: ref}
 	if s, ok := r.sets[k]; ok {
 		return s
 	}
-	s := &models.PendingEditSet{Table: refFromBaseTable(baseTable)}
+	s := &models.PendingEditSet{Table: ref}
 	r.sets[k] = s
 	return s
 }
 
-// Lookup returns the existing set for (connID, baseTable) without
+// Lookup returns the existing set for (connID, ref) without
 // allocating one. Returns nil when no set has been touched for that
 // key yet. Used by read-only callers (status indicator, dirty-cell
 // render) that should not materialise empty sets just by asking.
-func (r *pendingEditRegistry) Lookup(connID, baseTable string) *models.PendingEditSet {
-	if connID == "" || baseTable == "" {
+func (r *pendingEditRegistry) Lookup(connID string, ref models.Ref) *models.PendingEditSet {
+	if connID == "" || ref.Schema == "" || ref.Table == "" {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.sets[pendingEditRegKey{connID: connID, baseTable: baseTable}]
+	return r.sets[pendingEditRegKey{connID: connID, ref: ref}]
 }
 
 // All returns a snapshot of every materialised PendingEditSet across all
-// (connID, baseTable) keys. Order is unspecified. Drives the cross-table
+// connection/relation keys. Order is unspecified. Drives the cross-table
 // `<leader>cU` discard-all flow; sets never touched (no edit staged) are
 // absent because For only allocates on demand.
 func (r *pendingEditRegistry) All() []*models.PendingEditSet {
@@ -91,16 +91,4 @@ func (g *Gui) pendingEditCount() int {
 		}
 	}
 	return n
-}
-
-// refFromBaseTable parses a "schema.table" identifier into a models.Ref.
-// query.ResultIdentity.BaseTable carries schema-qualified names; a bare
-// identifier (no dot) lands in Table with an empty Schema.
-func refFromBaseTable(s string) models.Ref {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '.' {
-			return models.Ref{Schema: s[:i], Table: s[i+1:]}
-		}
-	}
-	return models.Ref{Table: s}
 }

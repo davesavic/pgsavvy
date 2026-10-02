@@ -319,16 +319,10 @@ type ResultTabsHelperDeps struct {
 	// uses), so production needs no explicit wiring; tests inject a fake.
 	ExportClipboard exporter.ClipboardWriter
 
-	// IntrospectEditability decides whether a completed result is inline-
-	// editable. Wired by the orchestrator to a closure that acquires a
-	// session and runs the driver-specific introspection
-	// (pg.EditabilityIntrospect + pg.ApplyConnectionGate). Returns
-	// (editable, SELECT-order row-identity indexes, disabledReason,
-	// catalog-resolved base-relation schema). The schema is threaded onto
-	// the grid so the apply path can schema-qualify the UPDATE even when the
-	// SELECT was unqualified. nil keeps editability off
-	// (unit-test default).
-	IntrospectEditability func(ctx context.Context, cols []models.ColumnMeta) (bool, []int, string, string)
+	// IntrospectEditability captures connection ownership and policy before
+	// worker dispatch. Returns the bound I/O operation and a publication-time
+	// ownership check. nil keeps editability off.
+	IntrospectEditability func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool)
 
 	// EstimateRows runs a side-effect-free planner EXPLAIN for sql (resolved
 	// against defaultSchema) and returns the top-node estimated row count.
@@ -559,6 +553,7 @@ type Tab struct {
 	// OpenResultTab when both the connection and SQL are in hand).
 	connID         string
 	resultIdentity query.ResultIdentity
+	editabilityGen uint64 // invalidates late introspection on identity/schema replacement
 
 	// sortCol + sortDir are the authoritative per-tab sort state driving the
 	// database-side ORDER-BY re-run. They live on the Tab (not the grid, whose
@@ -762,8 +757,13 @@ func (t *Tab) SetCaveatShown(v bool) {
 // hide-cols overlay falls back to session-only mode in that case.
 func (t *Tab) SetIdentity(connID string, ri query.ResultIdentity) {
 	t.mu.Lock()
+	t.editabilityGen++
 	t.connID = connID
 	t.resultIdentity = ri
+	if t.grid != nil {
+		t.grid.SetEditability(false, nil, "", models.Ref{})
+		t.grid.SetPendingEdits(nil)
+	}
 	t.mu.Unlock()
 }
 
@@ -1864,9 +1864,9 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 	// Fresh schema attach: reset the once-per-tab /regex caveat gate so
 	// a re-run in the same tab re-fires the caveat.
 	tab.caveatShown = false
-	tab.mu.Unlock()
-
+	tab.editabilityGen++
 	gridView := tab.grid
+	tab.mu.Unlock()
 
 	// Install the result-set schema on the grid BEFORE any rows are
 	// appended. RowStream.Columns() is safe to call before the first
@@ -1875,6 +1875,9 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 	// EmptyResultIndicator "(0 rows)" regardless of how many rows the
 	// stream actually produces.
 	var cols []models.ColumnMeta
+	if gridView != nil {
+		gridView.SetColumns(nil)
+	}
 	if gridView != nil && rh != nil {
 		if rs := rh.Rows(); rs != nil {
 			cols = rs.Columns()
@@ -2043,14 +2046,30 @@ func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab, streamErr error) {
 // SetEditability flip back onto the UI thread. No-op when the hook is
 // unwired or the tab has no grid.
 func (h *ResultTabsHelper) scheduleEditabilityIntrospect(tab *Tab, cols []models.ColumnMeta) {
-	if h.deps.IntrospectEditability == nil || tab == nil || tab.grid == nil {
+	if h.deps.IntrospectEditability == nil || tab == nil || len(cols) == 0 {
 		return
 	}
+	tab.mu.Lock()
 	gridView := tab.grid
+	gen := tab.editabilityGen
+	eligible := tab.connID != "" && tab.resultIdentity.HasRowIdentity && !tab.disposed.Load()
+	tab.mu.Unlock()
+	if gridView == nil || !eligible {
+		return
+	}
+	introspect, current := h.deps.IntrospectEditability(append([]models.ColumnMeta(nil), cols...))
+	if introspect == nil || current == nil {
+		return
+	}
 	run := func() {
-		editable, rowID, reason, schema := h.deps.IntrospectEditability(context.Background(), cols)
+		editable, rowID, reason, ref := introspect(context.Background())
 		flip := func() error {
-			gridView.SetEditability(editable, rowID, reason, schema)
+			tab.mu.Lock()
+			defer tab.mu.Unlock()
+			if tab.disposed.Load() || tab.editabilityGen != gen || tab.grid != gridView || !current() {
+				return nil
+			}
+			gridView.SetEditability(editable, rowID, reason, ref)
 			return nil
 		}
 		if h.deps.OnUIThread != nil {
@@ -2098,15 +2117,20 @@ func (h *ResultTabsHelper) queueBehind(tab *Tab, prior *Tab) {
 			// Queued tab was cancelled before its turn arrived; abort.
 			return
 		}
-		// Verify we still want to run: if cancelTab was called between
-		// doneCh firing and our scheduling, bail.
-		tab.mu.Lock()
-		cancelled := tab.cancelled
-		tab.mu.Unlock()
-		if cancelled {
-			return
+		resume := func() error {
+			tab.mu.Lock()
+			cancelled := tab.cancelled || tab.disposed.Load()
+			tab.mu.Unlock()
+			if !cancelled {
+				h.startStreaming(tab)
+			}
+			return nil
 		}
-		h.startStreaming(tab)
+		if h.deps.OnUIThread != nil {
+			h.deps.OnUIThread(resume)
+		} else {
+			_ = resume()
+		}
 	}()
 }
 
@@ -3033,6 +3057,9 @@ func (h *ResultTabsHelper) AttachActiveTabIdentity(connID string, ri query.Resul
 	}
 	t.SetIdentity(connID, ri)
 	h.SeedHiddenColsFromAppState(t)
+	if gv := t.Grid(); gv != nil && t.State() != StateQueued {
+		h.scheduleEditabilityIntrospect(t, gv.Columns())
+	}
 }
 
 // AttachActiveTabErrorSQL records the SQL text behind the currently-active
@@ -3085,12 +3112,12 @@ func (h *ResultTabsHelper) ActiveTabOrigin() (sql string, args []any, defaultSch
 // Flow:
 //  1. Reset tab-level state SetColumns does not cover (rowCount, complete,
 //     err, cancelled) and pre-set StateSorting for the affordance; swap in rh.
-//  2. startStreaming re-installs the schema (which clears the grid's rows,
-//     cursor, offsets, filter, sort, hide-cols, editability) and launches the
-//     new task.
-//  3. Recompute + attach the gating identity from runSQL: a wrapped re-run
+//  2. Recompute + attach the gating identity from runSQL: a wrapped re-run
 //     yields HasRowIdentity=false (read-only); the original SQL yields the
 //     editable identity. This drives the editability-introspection gate.
+//  3. startStreaming re-installs the schema (which clears the grid's rows,
+//     cursor, offsets, filter, sort, hide-cols, editability) and launches the
+//     new task with the replacement identity already installed.
 //  4. Re-seed hide-cols against the ORIGINAL identity (DetectFromQuery(origSQL))
 //     — NOT the gating identity — so a wrapped read-only re-run still restores
 //     the user's hidden columns (decoupled via seedHiddenColsForIdentity).
@@ -3127,17 +3154,13 @@ func (h *ResultTabsHelper) reattachActiveTab(rh runHandle, runSQL, origSQL strin
 	t.rh = rh
 	t.mu.Unlock()
 
-	// startStreaming calls grid.SetColumns (clears rows/cursor/offsets/filter/
-	// sort/hide-cols/editability) and launches the new task under the same
-	// taskKey. It preserves the pre-set StateSorting.
-	h.startStreaming(t)
-
 	// Recompute the GATING identity from the SQL actually run. A wrapped
 	// re-run -> HasRowIdentity=false -> read-only (introspection skipped); the
 	// original SQL -> editable identity restored.
 	connID, _ := t.Identity()
 	gatingRI := query.DetectFromQuery(runSQL)
 	t.SetIdentity(connID, gatingRI)
+	h.startStreaming(t)
 
 	// Re-seed hide-cols against the ORIGINAL identity, decoupled from the
 	// gating identity above. The wrapped identity has no BaseTable, so seeding

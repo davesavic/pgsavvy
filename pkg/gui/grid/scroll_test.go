@@ -537,7 +537,7 @@ func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
 		{Values: []any{2, "carol"}},
 	})
 	// Row identity = column 0 (id); editable result.
-	v.SetEditability(true, []int{0}, "", "public")
+	v.SetEditability(true, []int{0}, "", models.Ref{Schema: "public", Table: "t"})
 
 	set := &models.PendingEditSet{}
 	if err := set.Add(models.PendingEdit{

@@ -214,7 +214,7 @@ func TestEditability_DefaultsAndSetAndReset(t *testing.T) {
 
 	// Install columns then populate editability.
 	v.SetColumns(makeSingleCol("c1", "text"))
-	v.SetEditability(true, []int{0, 2}, "", "myschema")
+	v.SetEditability(true, []int{0, 2}, "", models.Ref{Schema: "myschema", Table: "t"})
 	require.True(t, v.Editable())
 	require.Equal(t, []int{0, 2}, v.RowIdentity())
 	require.Equal(t, "", v.DisabledReason())
@@ -235,10 +235,24 @@ func TestEditability_DefaultsAndSetAndReset(t *testing.T) {
 	require.Equal(t, "", v.IdentitySchema(), "SetColumns must reset IdentitySchema")
 
 	// Disabled-reason path: SetEditability with editable=false + reason.
-	v.SetEditability(false, nil, "no row identity", "")
+	v.SetEditability(false, nil, "no row identity", models.Ref{})
 	require.False(t, v.Editable())
 	require.Nil(t, v.RowIdentity())
 	require.Equal(t, "no row identity", v.DisabledReason())
+}
+
+func TestReview_target_grid_replacement(t *testing.T) {
+	v := NewView()
+	v.SetColumns(makeSingleCol("id", "int8"))
+	ref := models.Ref{Schema: "a.b", Table: "t.u"}
+	v.SetEditability(true, []int{0}, "", ref)
+	require.Equal(t, ref, v.IdentityRef())
+	v.SetPendingEdits(&models.PendingEditSet{Table: models.Ref{Schema: "a.b", Table: "t.u"}})
+	v.SetColumns(nil)
+	require.False(t, v.Editable())
+	require.Empty(t, v.IdentitySchema())
+	require.Equal(t, models.Ref{}, v.IdentityRef())
+	require.Nil(t, v.PendingEdits(), "replacement must detach the prior relation's pending set")
 }
 
 // TestAllRows_ConcurrentSafety runs a producer goroutine appending rows

@@ -97,46 +97,44 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		}
 	}
 	resultTabsDeps.OnWorker = g.OnWorker
-	// production editability introspection. Resolve
-	// the live connection at call time (it is invalidated on Disconnect),
-	// acquire a fresh pooled session, and run the pg introspector. Non-pg
-	// drivers or no connection leave editability off.
-	resultTabsDeps.IntrospectEditability = func(ctx context.Context, cols []models.ColumnMeta) (bool, []int, string, string) {
+	// Capture the connection and UI-owned policy before worker dispatch; OIDs
+	// from the old connection must never be resolved against its replacement.
+	resultTabsDeps.IntrospectEditability = func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool) {
 		if g.connectHelper == nil {
-			return false, nil, "", ""
+			return nil, nil
 		}
 		conn := g.connectHelper.Connection()
 		if conn == nil {
-			return false, nil, "", ""
+			return nil, nil
 		}
-		sess, err := conn.AcquireSession(ctx)
-		if err != nil {
-			return false, nil, "", ""
-		}
-		defer func() { _ = sess.Close() }()
-
-		pgSess, ok := sess.(*pg.Session)
-		if !ok {
-			return false, nil, "", "" // non-pg driver: no introspection yet
-		}
-		baseRelation, rowID, reason, err := pg.EditabilityIntrospect(ctx, pgSess, cols)
-		if err != nil {
-			// reason already carries the canonical "introspection failed: …"
-			// string (editability.go); don't re-prefix it.
-			return false, nil, reason, ""
-		}
-		editable := reason == ""
-
+		gen := g.connectionState.connectGen.Load()
 		readOnly := false
 		if p := g.connectionState.activeConnProfile; p != nil {
 			readOnly = p.ReadOnly
 		}
-		editable, reason = pg.ApplyConnectionGate(editable, reason, readOnly, true /* pg SupportsInlineEdit */)
-		// baseRelation.Schema is the catalog-resolved schema (pg_namespace.
-		// nspname). Thread it out so the apply path can schema-qualify the
-		// UPDATE; the SQL-parsed base table is unqualified for a bare
-		// `SELECT ... FROM tbl`.
-		return editable, rowID, reason, baseRelation.Schema
+		current := func() bool {
+			return !g.closed.Load() && g.connectionState.connectGen.Load() == gen && g.connectHelper.Connection() == conn
+		}
+		return func(ctx context.Context) (bool, []int, string, models.Ref) {
+			if !current() {
+				return false, nil, "", models.Ref{}
+			}
+			sess, err := conn.AcquireSession(ctx)
+			if err != nil {
+				return false, nil, "", models.Ref{}
+			}
+			defer func() { _ = sess.Close() }()
+			pgSess, ok := sess.(*pg.Session)
+			if !ok {
+				return false, nil, "", models.Ref{}
+			}
+			baseRelation, rowID, reason, err := pg.EditabilityIntrospect(ctx, pgSess, cols)
+			if err != nil {
+				return false, nil, reason, models.Ref{}
+			}
+			editable, reason := pg.ApplyConnectionGate(reason == "", reason, readOnly, true)
+			return editable, rowID, reason, baseRelation
+		}, current
 	}
 	// Lazy OID->relname resolution for the hide-cols overlay. Mirrors the
 	// editability closure: resolve the live connection at call time, acquire
