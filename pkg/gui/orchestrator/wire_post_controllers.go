@@ -33,7 +33,10 @@ func (g *Gui) wireEditDeps() controllers.EditDeps {
 			if g.controllers.FKReversePicker == nil {
 				return false
 			}
-			return g.controllers.FKReversePicker.Open(entries, origin, row, col)
+			if !g.controllers.FKReversePicker.Open(entries, origin, row, col) {
+				return false
+			}
+			return g.tree.Push(g.registry.FKReversePicker) == nil
 		},
 		// Reverse-FK resolver — routes each lookup through the active
 		// SQLSession's FKCache so per-Connect rotation is invisible to

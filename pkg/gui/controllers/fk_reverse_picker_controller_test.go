@@ -340,6 +340,27 @@ func TestClose_NilTreeIsNoop(t *testing.T) {
 
 // --- Select ---------------------------------------------------------------
 
+func TestReview_reverse_fk_preparation_only(t *testing.T) {
+	ctx, _ := newReversePickerContext()
+	tree := &fakeReverseTree{}
+	runner := &fakeReverseRunner{}
+	tabs := &fakeReverseTabs{}
+	jumps := &fakeReverseJumps{}
+	c := NewFKReversePickerController(nil, CoreDeps{}, FKReversePickerDeps{
+		Context: ctx, Tree: tree, Runner: runner, Tabs: tabs, Jumps: jumps,
+	})
+	entries := []ReverseEntry{{FK: models.ForeignKey{Table: "orders", Columns: []string{"user_id"}}, PKValues: []any{7}}}
+	if !c.Open(entries, &fakeReverseOrigin{slot: 2, id: 99}, 5, 3) {
+		t.Fatal("preparation rejected valid entries")
+	}
+	if ctx.TabCount() != 1 || len(c.Entries()) != 1 || c.originRow != 5 || c.originCol != 3 {
+		t.Fatal("preparation failed to preserve entries/origin")
+	}
+	if tree.pops != 0 || runner.Captured().SQL != "" || tabs.calls != 0 || len(jumps.pushed) != 0 {
+		t.Fatal("Open must only prepare; no navigation or query side effects")
+	}
+}
+
 func TestSelect_BuildsQuery_PushesJump_OpensTab_PopsPopup(t *testing.T) {
 	ctx, _ := newReversePickerContext()
 	tree := &fakeReverseTree{}
