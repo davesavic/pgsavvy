@@ -33,6 +33,10 @@ func (d *clipboardDest) Open() (io.WriteCloser, string, error) {
 	return &clipboardWriteCloser{dest: d}, "clipboard", nil
 }
 
+func (d *clipboardDest) abort() {
+	d.buf.Reset()
+}
+
 type cappedBuffer struct {
 	bytes.Buffer
 	max int64

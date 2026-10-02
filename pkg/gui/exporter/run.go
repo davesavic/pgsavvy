@@ -28,6 +28,9 @@ type ProgressFn func(rowsWritten int64)
 // Returns the human-readable destination descriptor (filename, "clipboard",
 // "stdout") on success, or an error.
 func Run(ctx context.Context, format Format, dest Destination, src RowSource, progress ProgressFn) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	wc, descriptor, err := dest.Open()
 	if err != nil {
 		return "", err
@@ -36,10 +39,12 @@ func Run(ctx context.Context, format Format, dest Destination, src RowSource, pr
 	success := false
 	defer func() {
 		if !success {
-			// Best-effort cleanup. fileDest knows how to remove .partial; for
-			// others Close is a no-op or has already been called.
+			// Close publishes clipboard buffers, so failure must discard them
+			// instead, including after a failed publication attempt.
 			if fd, ok := dest.(*fileDest); ok {
 				fd.Abort()
+			} else if cd, ok := dest.(*clipboardDest); ok {
+				cd.abort()
 			} else {
 				_ = wc.Close()
 			}
@@ -77,7 +82,13 @@ func Run(ctx context.Context, format Format, dest Destination, src RowSource, pr
 	if err != nil {
 		return "", err
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if err := format.Footer(wc); err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if err := wc.Close(); err != nil {

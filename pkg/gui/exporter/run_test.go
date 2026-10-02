@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -192,5 +193,193 @@ func TestRun_FooterErrorAbortsFile(t *testing.T) {
 	}
 	if _, err := os.Stat(final + ".partial"); !os.IsNotExist(err) {
 		t.Fatalf(".partial exists after footer error: err=%v", err)
+	}
+}
+
+type reviewClipboardWriter struct {
+	last  string
+	calls int
+	err   error
+}
+
+func (c *reviewClipboardWriter) Write(text string) error {
+	c.calls++
+	if c.calls == 1 && c.err != nil {
+		return c.err
+	}
+	c.last = text
+	return nil
+}
+
+type reviewClipboardFormat struct {
+	Format
+	afterHeader, afterRow, afterFooter func() error
+}
+
+func (f reviewClipboardFormat) Header(cols []models.ColumnMeta, w io.Writer) error {
+	if err := f.Format.Header(cols, w); err != nil {
+		return err
+	}
+	if f.afterHeader != nil {
+		return f.afterHeader()
+	}
+	return nil
+}
+
+func (f reviewClipboardFormat) Row(row models.Row, w io.Writer) error {
+	if err := f.Format.Row(row, w); err != nil {
+		return err
+	}
+	if f.afterRow != nil {
+		return f.afterRow()
+	}
+	return nil
+}
+
+func (f reviewClipboardFormat) Footer(w io.Writer) error {
+	if err := f.Format.Footer(w); err != nil {
+		return err
+	}
+	if f.afterFooter != nil {
+		return f.afterFooter()
+	}
+	return nil
+}
+
+type reviewClipboardSource struct {
+	fakeRowSource
+	after func() error
+}
+
+func (s reviewClipboardSource) Iterate(fn func(models.Row) error) error {
+	if err := s.fakeRowSource.Iterate(fn); err != nil {
+		return err
+	}
+	if s.after != nil {
+		return s.after()
+	}
+	return nil
+}
+
+func TestReview_clipboard(t *testing.T) {
+	for _, scenario := range []string{"success", "empty_success", "header", "row", "footer", "source", "cap", "publish", "pre_canceled_empty", "mid_row_cancel", "source_end_cancel", "empty_source_cancel", "footer_cancel", "progress_cancel"} {
+		t.Run(scenario, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			failure := errors.New("synthetic export failure")
+			fail := func() error { return failure }
+			cancelNow := func() error { cancel(); return nil }
+			cb := &reviewClipboardWriter{last: "previous clipboard"}
+			format := reviewClipboardFormat{Format: NewCSV()}
+			src := reviewClipboardSource{fakeRowSource: fakeRowSource{
+				cols: []models.ColumnMeta{{Name: "id"}},
+				rows: []models.Row{{Values: []any{1}}, {Values: []any{2}}},
+			}}
+			capBytes := int64(1024)
+			var progress ProgressFn
+			switch scenario {
+			case "header":
+				format.afterHeader = fail
+			case "row":
+				format.afterRow = fail
+			case "footer":
+				format.afterFooter = fail
+			case "source":
+				src.after = fail
+			case "cap":
+				capBytes = 5 // Header fits; the first CSV row exceeds the cap.
+			case "publish":
+				cb.err = failure
+			case "pre_canceled_empty":
+				src.rows = nil
+				cancel()
+			case "mid_row_cancel":
+				format.afterRow = cancelNow
+			case "source_end_cancel":
+				src.after = cancelNow
+			case "empty_source_cancel":
+				src.rows, src.after = nil, cancelNow
+			case "footer_cancel":
+				format.afterFooter = cancelNow
+			case "progress_cancel":
+				src.rows = src.rows[:1]
+				progress = func(int64) { cancel() }
+			case "empty_success":
+				src.rows = nil
+			}
+			desc, err := Run(ctx, format, NewClipboardDest(cb, capBytes), &src, progress)
+			if scenario == "success" || scenario == "empty_success" {
+				want := "id\r\n1\r\n2\r\n"
+				if scenario == "empty_success" {
+					want = "id\r\n"
+				}
+				if err != nil || desc != "clipboard" || cb.calls != 1 || cb.last != want {
+					t.Fatalf("desc=%q err=%v calls=%d text=%q, want one complete publication", desc, err, cb.calls, cb.last)
+				}
+				return
+			}
+			if err == nil || desc != "" {
+				t.Errorf("desc=%q err=%v, want failed export", desc, err)
+			}
+			if strings.Contains(scenario, "cancel") {
+				if !errors.Is(err, context.Canceled) {
+					t.Errorf("err=%v, want context.Canceled", err)
+				}
+			} else if scenario != "cap" && !errors.Is(err, failure) {
+				t.Errorf("err=%v, want original failure", err)
+			}
+			wantCalls := 0
+			if scenario == "publish" {
+				wantCalls = 1
+			}
+			if cb.calls != wantCalls || cb.last != "previous clipboard" {
+				t.Errorf("calls=%d text=%q, want %d calls and unchanged clipboard", cb.calls, cb.last, wantCalls)
+			}
+		})
+	}
+}
+
+type reviewClipboardDest struct{ io.WriteCloser }
+
+func (d reviewClipboardDest) Open() (io.WriteCloser, string, error) {
+	return d.WriteCloser, "stdout", nil
+}
+
+func TestReview_clipboard_OtherDestinations(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	format := reviewClipboardFormat{Format: NewCSV(), afterFooter: func() error { cancel(); return nil }}
+	src := &fakeRowSource{cols: []models.ColumnMeta{{Name: "id"}}, rows: []models.Row{{Values: []any{1}}}}
+	dir := t.TempDir()
+	final := filepath.Join(dir, "out.csv")
+	if err := os.WriteFile(final, []byte("previous file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if desc, err := Run(ctx, format, NewFileDest(dir, "out.csv"), src, nil); !errors.Is(err, context.Canceled) || desc != "" {
+		t.Errorf("late-canceled file export desc=%q err=%v", desc, err)
+	}
+	contents, err := os.ReadFile(final)
+	if err != nil || string(contents) != "previous file" {
+		t.Errorf("late cancellation replaced original file: %q err=%v", contents, err)
+	}
+	if _, err := os.Stat(final + ".partial"); !os.IsNotExist(err) {
+		t.Errorf("partial file remains: %v", err)
+	}
+	var stdout bytes.Buffer
+	if _, err := Run(context.Background(), footerErrFormat{}, reviewClipboardDest{nopCloser{&stdout}}, src, nil); err == nil {
+		t.Fatal("expected stdout format failure")
+	}
+	if _, err := stdout.WriteString("still open"); err != nil || stdout.String() != "header\nrow\nstill open" {
+		t.Errorf("stdout failure contract changed: %q err=%v", stdout.String(), err)
+	}
+	wc, _, err := NewStdoutDest().Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stdout.Stat(); err != nil {
+		t.Fatalf("stdout closed by destination: %v", err)
 	}
 }
