@@ -92,8 +92,8 @@ type GridStatePicker interface {
 // PendingEditStore is the narrow write surface CellEditorController
 // uses to stage / discard edits. *models.PendingEditSet satisfies this
 // structurally; the interface keeps the controller free of having to
-// know which set is "active" (Z1 resolves the active table's set per
-// dispatch).
+// know which set is "active". Dynamic stores may implement
+// Capture() PendingEditStore to bind the destination at editor entry.
 //
 // A nil store disables commit + discard with no-op semantics so unit
 // tests that skip the wiring still pass.
@@ -136,6 +136,9 @@ type CellEditorController struct {
 	tree   FocusPopper
 	picker GridStatePicker
 	store  PendingEditStore
+
+	editStore     PendingEditStore
+	storeCaptured bool
 }
 
 // NewCellEditorController constructs the controller. All four optional
@@ -169,6 +172,22 @@ func (e *CellEditorController) SetPicker(p GridStatePicker) { e.picker = p }
 // SetStore swaps the PendingEditStore post-construction. Same rationale
 // as SetPicker — the active store is per-table and resolved lazily.
 func (e *CellEditorController) SetStore(s PendingEditStore) { e.store = s }
+
+// Dynamic stores bind once per editor entry, not after a popup or tab change.
+func (e *CellEditorController) captureStore() {
+	e.editStore = e.store
+	if s, ok := e.store.(interface{ Capture() PendingEditStore }); ok {
+		e.editStore = s.Capture()
+	}
+	e.storeCaptured = true
+}
+
+func (e *CellEditorController) pendingStore() PendingEditStore {
+	if e.storeCaptured {
+		return e.editStore
+	}
+	return e.store
+}
 
 // SetTree swaps the FocusPopper post-construction. The orchestrator
 // builds the ContextTree after every controller, so wiring lands here
@@ -206,6 +225,7 @@ func (e *CellEditorController) Enter(_ commands.ExecCtx) error {
 	if !ok {
 		return nil
 	}
+	e.captureStore()
 	// Boolean cells open a true/false/NULL chooser instead of the plain
 	// text buffer.
 	if helpers.CategoryOf(col) == helpers.CategoryBoolean {
@@ -237,14 +257,15 @@ func (e *CellEditorController) openBooleanChooser(col models.ColumnMeta, pk []an
 	if col.Nullable {
 		choices = append(choices, "NULL")
 	}
+	store := e.pendingStore()
 	onSubmit := func(idx int) error {
-		if e.store == nil || len(pk) == 0 {
+		if store == nil || len(pk) == 0 {
 			return nil
 		}
 		// idx maps to BooleanChoice by position (0=true, 1=false,
 		// 2=NULL): the BooleanChoice enum order matches the chooser order.
 		edit := helpers.BuildBooleanEdit(helpers.BooleanChoice(idx), pk, col, old)
-		return e.wrapErr("cell.edit.boolean", e.store.Add(edit))
+		return e.wrapErr("cell.edit.boolean", store.Add(edit))
 	}
 	return e.wrapErr("cell.edit.boolean",
 		e.helpers.Choice.Choose("set boolean value:", choices, onSubmit, func() error { return nil }))
@@ -282,11 +303,12 @@ func (e *CellEditorController) Commit(_ commands.ExecCtx) error {
 		}
 	}
 	typed := e.ctx.ReadAndClearBuffer()
-	if changed && e.store != nil && len(pk) > 0 {
+	store := e.pendingStore()
+	if changed && store != nil && len(pk) > 0 {
 		// OldValue carries the ORIGINAL value (not the seed string)
 		// so the eventual UPDATE WHERE clause uses the typed value
 		// for optimistic concurrency detection.
-		if err := e.store.Add(models.PendingEdit{
+		if err := store.Add(models.PendingEdit{
 			PrimaryKey: pk,
 			Column:     col.Name,
 			ColumnType: col.TypeName,
@@ -325,8 +347,9 @@ func (e *CellEditorController) Discard(_ commands.ExecCtx) error {
 	// nonzero HasEdit count maps cleanly to "this cell was already
 	// dirty when the user opened the editor".
 	dirty := false
-	if e.store != nil && len(pk) > 0 {
-		dirty = e.store.HasEdit(pk, col.Name)
+	store := e.pendingStore()
+	if store != nil && len(pk) > 0 {
+		dirty = store.HasEdit(pk, col.Name)
 	}
 
 	// Reset the buffer so the next `i` on this cell starts fresh.
@@ -337,7 +360,7 @@ func (e *CellEditorController) Discard(_ commands.ExecCtx) error {
 	}
 
 	if dirty {
-		e.store.Remove(pk, col.Name)
+		store.Remove(pk, col.Name)
 		if e.helpers.Toast != nil {
 			e.helpers.Toast.Show(
 				fmt.Sprintf("discarded pending edit on (%v, %s); <leader>cu to retry", pk, col.Name),
@@ -578,7 +601,8 @@ func (e *CellEditorController) SetNull(_ commands.ExecCtx) error {
 	}
 	col := e.ctx.Column()
 	pk := e.ctx.PrimaryKey()
-	if len(pk) == 0 || e.store == nil {
+	store := e.pendingStore()
+	if len(pk) == 0 || store == nil {
 		// No store / no row identity — nothing to record. Still close
 		// the popup so the user isn't trapped.
 		e.ctx.Close()
@@ -592,7 +616,7 @@ func (e *CellEditorController) SetNull(_ commands.ExecCtx) error {
 		_ = e.popFocus()
 		return e.wrapErr("cell.edit.set_null", err)
 	}
-	if err := e.store.Add(edit); err != nil {
+	if err := store.Add(edit); err != nil {
 		e.ctx.Close()
 		_ = e.popFocus()
 		return e.wrapErr("cell.edit.set_null", err)
@@ -626,12 +650,13 @@ func (e *CellEditorController) injectExpression(
 	}
 	col := e.ctx.Column()
 	pk := e.ctx.PrimaryKey()
-	if len(pk) == 0 || e.store == nil {
+	store := e.pendingStore()
+	if len(pk) == 0 || store == nil {
 		e.ctx.Close()
 		return e.popFocus()
 	}
 	edit := builder(pk, col, e.ctx.OriginalValue())
-	if err := e.store.Add(edit); err != nil {
+	if err := store.Add(edit); err != nil {
 		e.ctx.Close()
 		_ = e.popFocus()
 		return e.wrapErr(label, err)
@@ -665,26 +690,34 @@ func (e *CellEditorController) ExprPrompt(_ commands.ExecCtx) error {
 	col := e.ctx.Column()
 	pk := e.ctx.PrimaryKey()
 	old := e.ctx.OriginalValue()
+	draft := e.ctx.Buffer()
+	store := e.pendingStore()
+	resume := func() error {
+		e.ctx.Open(old, col, pk, draft)
+		if e.tree == nil {
+			return nil
+		}
+		return e.wrapErr("cell.edit.expr.resume", e.tree.Push(e.ctx))
+	}
 
 	onSubmit := func(value string) error {
-		if value == "" || e.store == nil || len(pk) == 0 {
+		if value == "" {
+			return resume()
+		}
+		// PromptHelper has already popped PROMPT; CELL_EDITOR was replaced,
+		// not stacked underneath it. Never pop the underlying result context.
+		e.ctx.Close()
+		if store == nil || len(pk) == 0 {
 			return nil
 		}
 		edit := helpers.BuildExprEdit(pk, col, old, value)
-		if err := e.store.Add(edit); err != nil {
+		if err := store.Add(edit); err != nil {
 			return e.wrapErr("cell.edit.expr.prompt", err)
 		}
-		// The cell-editor popup is still on the stack underneath the
-		// prompt (the prompt is pushed on top). Close + pop it now so
-		// the user lands back on the grid after the prompt dismisses.
-		if e.ctx != nil {
-			e.ctx.Close()
-		}
-		return e.popFocus()
+		return nil
 	}
-	onCancel := func() error { return nil }
 	return e.wrapErr("cell.edit.expr.prompt",
-		e.helpers.Prompt.Prompt(helpers.WarnExprPromptLabel, "", onSubmit, onCancel))
+		e.helpers.Prompt.Prompt(helpers.WarnExprPromptLabel, "", onSubmit, resume))
 }
 
 // setNullDisabled returns ("column is NOT NULL", true) when the

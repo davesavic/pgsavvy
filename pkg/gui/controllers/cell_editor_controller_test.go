@@ -6,12 +6,136 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davesavic/pgsavvy/pkg/gui"
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+type exprFocusCaptureStore struct {
+	active *fakeEditStore
+}
+
+func (s *exprFocusCaptureStore) Capture() controllers.PendingEditStore { return s.active }
+func (s *exprFocusCaptureStore) Add(e models.PendingEdit) error        { return s.active.Add(e) }
+func (s *exprFocusCaptureStore) Remove(pk []any, col string)           { s.active.Remove(pk, col) }
+func (s *exprFocusCaptureStore) HasEdit(pk []any, col string) bool     { return s.active.HasEdit(pk, col) }
+
+func TestReview_expr_focus(t *testing.T) {
+	for _, action := range []string{"submit", "cancel_then_commit", "empty_then_expression", "stage_error", "read_only"} {
+		t.Run(action, func(t *testing.T) {
+			tree := gui.NewContextTree()
+			root := guicontext.NewBaseContext(guicontext.BaseContextOpts{Key: types.SCHEMA_RAIL, Kind: types.SIDE_CONTEXT})
+			grid := guicontext.NewBaseContext(guicontext.BaseContextOpts{Key: types.RESULT_GRID, Kind: types.MAIN_CONTEXT})
+			for _, c := range []types.IBaseContext{&root, &grid} {
+				if err := tree.Push(c); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx := newCellEditorTestCtx()
+			promptCtx := guicontext.NewPromptContext(guicontext.NewBaseContext(guicontext.BaseContextOpts{Key: types.PROMPT, Kind: types.TEMPORARY_POPUP}), guicontext.Deps{})
+			prompt := ui.NewPromptHelper(tree, promptCtx)
+			picker := &fakeGridPicker{editable: true, supportsInlineEdit: true, cellOK: true, cell: "original", column: models.ColumnMeta{Name: "value", TypeName: "text"}, pk: []any{int64(7)}}
+			original, other := &fakeEditStore{}, &fakeEditStore{}
+			store := &exprFocusCaptureStore{active: original}
+			controller := controllers.NewCellEditorController(nil, controllers.CoreDeps{}, controllers.UIDeps{Prompt: prompt}, ctx, tree, picker, store)
+			if err := controller.Enter(commands.ExecCtx{}); err != nil {
+				t.Fatal(err)
+			}
+			ctx.SetBuffer("unfinished draft")
+			store.active = other
+			picker.cell, picker.pk, picker.column = "unrelated", []any{int64(9)}, models.ColumnMeta{Name: "other", TypeName: "text"}
+			if action == "read_only" {
+				picker.readOnly = true
+				reg := commands.NewRegistry()
+				controller.RegisterActions(reg)
+				cmd, ok := reg.Get(controllers.CellEditExprPrompt)
+				if !ok {
+					t.Fatal("missing expression action")
+				}
+				if _, disabled := cmd.GetDisabled(commands.ExecCtx{}); !disabled {
+					t.Fatal("read-only expression must be disabled")
+				}
+				return
+			}
+			if err := controller.ExprPrompt(commands.ExecCtx{}); err != nil {
+				t.Fatal(err)
+			}
+			if tree.Current() != promptCtx || len(tree.Stack()) != 3 || tree.Stack()[1] != &grid {
+				t.Fatal("PROMPT must replace CELL_EDITOR above results")
+			}
+			var err error
+			switch action {
+			case "submit":
+				err = prompt.Submit("upper('expr')")
+			case "cancel_then_commit":
+				err = prompt.Cancel()
+			case "empty_then_expression":
+				err = prompt.Submit("")
+			case "stage_error":
+				original.addErr = fmt.Errorf("synthetic staging failure")
+				err = prompt.Submit("upper('expr')")
+			}
+			if action == "stage_error" {
+				if err == nil {
+					t.Fatal("staging error must remain visible")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if action == "cancel_then_commit" || action == "empty_then_expression" {
+				if tree.Current() != ctx || len(tree.Stack()) != 3 || tree.Stack()[1] != &grid || !ctx.Active() {
+					t.Fatal("empty/cancel must restore editor above original results")
+				}
+				if ctx.Buffer() != "unfinished draft" || ctx.Initial() != "unfinished draft" || ctx.OriginalValue() != "original" || ctx.Column().Name != "value" || !reflect.DeepEqual(ctx.PrimaryKey(), []any{int64(7)}) {
+					t.Fatal("continuation lost draft or original cell identity")
+				}
+				if action == "cancel_then_commit" {
+					err = controller.Commit(commands.ExecCtx{})
+				} else {
+					if err = controller.ExprPrompt(commands.ExecCtx{}); err == nil {
+						err = prompt.Submit("upper('expr')")
+					}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tree.Current() != &grid || len(tree.Stack()) != 2 {
+				t.Fatal("expression dismissal removed underlying result context")
+			}
+			if ctx.Active() {
+				t.Fatal("dismissed editor still active")
+			}
+			if len(other.adds) != 0 {
+				t.Fatal("staged into unrelated target")
+			}
+			if action == "stage_error" {
+				if len(original.adds) != 0 {
+					t.Fatal("failed staging added an edit")
+				}
+				return
+			}
+			if len(original.adds) != 1 {
+				t.Fatalf("original target has %d edits; want 1", len(original.adds))
+			}
+			edit := original.adds[0]
+			if edit.Column != "value" || edit.OldValue != "original" || !reflect.DeepEqual(edit.PrimaryKey, []any{int64(7)}) {
+				t.Fatalf("wrong staged identity: %+v", edit)
+			}
+			if action == "cancel_then_commit" {
+				if edit.Kind != models.Literal || edit.NewValue != "unfinished draft" {
+					t.Fatalf("wrong literal: %+v", edit)
+				}
+			} else if edit.Kind != models.Expression || edit.NewExpr != "upper('expr')" {
+				t.Fatalf("wrong expression: %+v", edit)
+			}
+		})
+	}
+}
 
 // fakeGridPicker is a hand-rolled controllers.GridStatePicker fake.
 // Every field is read-only from the controller's perspective; tests

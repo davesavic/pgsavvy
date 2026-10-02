@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/grid"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -166,6 +167,12 @@ func (p cellEditorPicker) activeGrid() interface {
 // dialog uses, so both flows agree on which set is live.
 type cellEditorStore struct {
 	resolve func() *models.PendingEditSet
+}
+
+// Capture retains the editor's destination even if the active tab changes.
+func (s cellEditorStore) Capture() controllers.PendingEditStore {
+	set := s.set()
+	return cellEditorStore{resolve: func() *models.PendingEditSet { return set }}
 }
 
 func (s cellEditorStore) Add(e models.PendingEdit) error {

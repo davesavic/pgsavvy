@@ -1,13 +1,173 @@
 package orchestrator
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/config"
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+	"github.com/spf13/afero"
 )
+
+func TestReview_expr_focus_store(t *testing.T) {
+	original, other := &models.PendingEditSet{}, &models.PendingEditSet{}
+	active := original
+	store := cellEditorStore{resolve: func() *models.PendingEditSet { return active }}
+	captured := store.Capture()
+	active = other
+	edit := models.PendingEdit{PrimaryKey: []any{int64(7)}, Column: "value", NewExpr: "now()", Kind: models.Expression}
+	require.NoError(t, captured.Add(edit))
+	require.True(t, captured.HasEdit(edit.PrimaryKey, edit.Column))
+	require.Equal(t, 1, original.Count())
+	require.Zero(t, other.Count())
+	captured.Remove(edit.PrimaryKey, edit.Column)
+	require.True(t, original.IsEmpty())
+	active = nil
+	unavailable := store.Capture()
+	active = other
+	require.Error(t, unavailable.Add(edit), "missing captured destination must not fall back to a replacement")
+	require.Zero(t, other.Count())
+}
+
+func TestReview_expr_focus_native(t *testing.T) {
+	for _, action := range []string{"submit", "cancel", "empty"} {
+		t.Run(action, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestReview_expr_focus_native_process$", "-test.v")
+			cmd.Env = append(os.Environ(), "PGSAVVY_EXPR_FOCUS_PROBE="+action)
+			out, err := cmd.CombinedOutput()
+			require.NoError(t, err, "native probe: %s", out)
+			t.Log(string(out))
+		})
+	}
+}
+
+func TestReview_expr_focus_native_process(t *testing.T) {
+	action := os.Getenv("PGSAVVY_EXPR_FOCUS_PROBE")
+	if action == "" {
+		return
+	}
+	ng, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: 130, Height: 42})
+	require.NoError(t, err)
+	fs := afero.NewMemMapFs()
+	c := common.NewCommon(slog.New(slog.DiscardHandler), i18n.EnglishTranslationSet(), config.GetDefaultConfig(), &common.AppState{}, fs)
+	g := NewGui(Deps{Common: c, Store: common.NewAppStateStore(fs, "/state.yml", common.DefaultClock()), ConnectionsProvider: func() []models.Connection { return nil }})
+	require.NoError(t, g.UseDriverForTest(newGocuiDriver(ng)))
+	defer func() { require.NoError(t, g.Close()) }()
+	ng.SetManagerFunc(func(*gocui.Gui) error {
+		if err := g.resultTabsH.OpenResultTab("original", nil); err != nil {
+			return err
+		}
+		tab := g.resultTabsH.Active()
+		grid := tab.Grid()
+		grid.SetColumns([]models.ColumnMeta{{Name: "value", TypeName: "text"}})
+		grid.SetEditability(true, []int{0}, "", models.Ref{Schema: "app", Table: "original"})
+		grid.AppendRows([]models.Row{{Values: []any{"original"}}})
+		if err := g.tree.Push(tab.Context()); err != nil {
+			return err
+		}
+		original, other := &models.PendingEditSet{}, &models.PendingEditSet{}
+		active := original
+		controller := g.controllers.CellEditor
+		controller.SetStore(cellEditorStore{resolve: func() *models.PendingEditSet { return active }})
+		if err := controller.Enter(commands.ExecCtx{}); err != nil {
+			return err
+		}
+		if g.tree.Current() != g.registry.CellEditor {
+			return errors.New("Enter did not focus editor")
+		}
+		if err := g.RunLayout(130, 42); err != nil {
+			return err
+		}
+		view, err := ng.View(g.registry.CellEditor.GetViewName())
+		if err != nil {
+			return err
+		}
+		view.TextArea.Clear()
+		for _, r := range "unfinished draft" {
+			view.TextArea.TypeCharacter(string(r))
+		}
+		active = other
+		if err := controller.ExprPrompt(commands.ExecCtx{}); err != nil {
+			return err
+		}
+		if err := g.RunLayout(130, 42); err != nil {
+			return err
+		}
+		promptView, err := ng.View(g.registry.Prompt.GetViewName())
+		if err != nil {
+			return err
+		}
+		if g.tree.Current() != g.registry.Prompt || ng.CurrentView() != promptView || !strings.Contains(promptView.Buffer(), "verbatim") {
+			return fmt.Errorf("wrong warning prompt frame: %q", promptView.Buffer())
+		}
+		switch action {
+		case "submit":
+			err = g.promptHelp.Submit("upper('expr')")
+		case "cancel":
+			err = g.promptHelp.Cancel()
+		case "empty":
+			err = g.promptHelp.Submit("")
+		default:
+			return errors.New("unknown probe action")
+		}
+		if err != nil {
+			return err
+		}
+		if action != "submit" {
+			if err := g.RunLayout(130, 42); err != nil {
+				return err
+			}
+			view, err := ng.View(g.registry.CellEditor.GetViewName())
+			if err != nil {
+				return err
+			}
+			if g.tree.Current() != g.registry.CellEditor || ng.CurrentView() != view || !ng.Cursor || !strings.Contains(view.Buffer(), "unfinished draft") || g.registry.CellEditor.Buffer() != "unfinished draft" {
+				return fmt.Errorf("wrong editor continuation frame: %q caret=%v", view.Buffer(), ng.Cursor)
+			}
+			t.Logf("native %s editor body=%q caret=%v", action, view.Buffer(), ng.Cursor)
+			if err := controller.Commit(commands.ExecCtx{}); err != nil {
+				return err
+			}
+		}
+		if g.tree.Current() != tab.Context() || len(g.tree.Stack()) != 2 {
+			return errors.New("result context lost after prompt")
+		}
+		if err := g.RunLayout(130, 42); err != nil {
+			return err
+		}
+		resultView, err := ng.View(tab.Context().GetViewName())
+		if err != nil {
+			return err
+		}
+		if ng.CurrentView() != resultView || !strings.Contains(resultView.Buffer(), "original") {
+			return fmt.Errorf("wrong result frame: %q", resultView.Buffer())
+		}
+		if original.Count() != 1 || other.Count() != 0 || original.Edits()[0].Column != "value" || original.Edits()[0].OldValue != "original" {
+			return errors.New("native edit routed to wrong target")
+		}
+		t.Logf("native %s result body=%q original_edits=1 unrelated_edits=0", action, resultView.Buffer())
+		return gocui.ErrQuit
+	})
+	if err := ng.MainLoop(); !errors.Is(err, gocui.ErrQuit) {
+		t.Fatal(err)
+	}
+}
 
 // TestFormatForEdit_JSONObject asserts the cell-editor seed for a
 // json/jsonb value pgx decoded into a Go map is JSON text, not Go's
