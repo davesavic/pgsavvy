@@ -20,6 +20,227 @@ func bufFromLines(lines ...string) *Buffer {
 	return b
 }
 
+func TestReview_undo_linewise_round_trip(t *testing.T) {
+	cases := []struct {
+		name       string
+		lines      []string
+		start, end Position
+	}{
+		{"first", []string{"aaa", "bbb"}, Position{0, 0}, Position{0, 0}},
+		{"middle", []string{"aaa", "bbb", "ccc"}, Position{1, 0}, Position{1, 0}},
+		{"last", []string{"aaa", "bbb"}, Position{1, 0}, Position{1, 0}},
+		{"prefix", []string{"aaa", "bbb", "ccc"}, Position{0, 0}, Position{1, 0}},
+		{"suffix", []string{"aaa", "bbb", "ccc"}, Position{1, 0}, Position{2, 0}},
+		{"whole_buffer", []string{"aaa", "bbb"}, Position{0, 0}, Position{1, 0}},
+		{"single_line", []string{"aaa"}, Position{0, 0}, Position{0, 0}},
+		{"single_blank", []string{""}, Position{0, 0}, Position{0, 0}},
+		{"blank_first", []string{"", "bbb"}, Position{0, 0}, Position{0, 0}},
+		{"blank_middle", []string{"aaa", "", "bbb"}, Position{1, 0}, Position{1, 0}},
+		{"trailing_empty", []string{"aaa", ""}, Position{1, 0}, Position{1, 0}},
+		{"whole_blank_buffer", []string{"", "", ""}, Position{0, 0}, Position{2, 0}},
+		{"unicode", []string{"α🙂", "界é", "끝"}, Position{1, 0}, Position{2, 0}},
+		{"nonzero_columns", []string{"aaa", "界🙂", "ccc"}, Position{0, 1}, Position{1, 2}},
+	}
+	for _, tc := range cases {
+		for _, operator := range []bool{false, true} {
+			entry := "Apply"
+			if operator {
+				entry = "Delete"
+			}
+			t.Run(tc.name+"/"+entry, func(t *testing.T) {
+				defer func() {
+					if p := recover(); p != nil {
+						t.Fatalf("linewise replay panicked: %v", p)
+					}
+				}()
+				b := bufFromLines(tc.lines...)
+				original := b.LinesCopy()
+				cursor := Position{tc.end.Line, len([]rune(tc.lines[tc.end.Line]))}
+				b.SetCursor(cursor)
+				r := Range{Start: tc.start, End: tc.end, LineWise: true}
+				deleted := append([]string{}, tc.lines[:tc.start.Line]...)
+				deleted = append(deleted, tc.lines[tc.end.Line+1:]...)
+				if operator {
+					cut, err := Delete(b, r)
+					if err != nil {
+						t.Fatal(err)
+					}
+					wantCut := strings.Join(tc.lines[tc.start.Line:tc.end.Line+1], "\n") + "\n"
+					if cut != wantCut {
+						t.Fatalf("cut = %q, want %q", cut, wantCut)
+					}
+					if len(deleted) == 0 {
+						deleted = []string{""}
+					}
+				} else if err := b.Apply(Edit{Kind: EditKindDelete, Range: r}); err != nil {
+					t.Fatal(err)
+				}
+				wantDeleted := bufFromLines(deleted...).LinesCopy()
+				cursor = reviewUndoClampedCursor(wantDeleted, cursor)
+				reviewUndoAssert(t, b, wantDeleted, cursor)
+				for range 3 {
+					if err := b.Undo(); err != nil {
+						t.Fatal(err)
+					}
+					cursor = reviewUndoClampedCursor(original, cursor)
+					reviewUndoAssert(t, b, original, cursor)
+					if err := b.Redo(); err != nil {
+						t.Fatal(err)
+					}
+					cursor = reviewUndoClampedCursor(wantDeleted, cursor)
+					reviewUndoAssert(t, b, wantDeleted, cursor)
+				}
+				if b.History.NodeCount() != 1 {
+					t.Fatalf("one deletion must remain one history step, got %d", b.History.NodeCount())
+				}
+			})
+		}
+	}
+}
+
+func reviewUndoClampedCursor(lines []Line, cursor Position) Position {
+	if len(lines) == 0 {
+		return Position{}
+	}
+	cursor.Line = min(cursor.Line, len(lines)-1)
+	cursor.Col = min(cursor.Col, len(lines[cursor.Line].Runes))
+	return cursor
+}
+
+func reviewUndoAssert(t *testing.T, b *Buffer, lines []Line, cursor Position) {
+	t.Helper()
+	if got := b.LinesCopy(); !reflect.DeepEqual(got, lines) {
+		t.Fatalf("LinesCopy = %v, want %v", got, lines)
+	}
+	if got := b.CursorPos(); got != cursor {
+		t.Fatalf("cursor = %v, want %v", got, cursor)
+	}
+}
+
+func TestReview_undo_empty_buffer_stays_empty(t *testing.T) {
+	b := &Buffer{}
+	if err := b.Apply(Edit{Kind: EditKindDelete, Range: Range{LineWise: true}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, replay := range []func() error{b.Undo, b.Redo} {
+		if err := replay(); err != nil {
+			t.Fatal(err)
+		}
+		reviewUndoAssert(t, b, nil, Position{})
+	}
+}
+
+func TestReview_undo_delete_on_empty_buffer(t *testing.T) {
+	b := &Buffer{}
+	if _, err := Delete(b, Range{LineWise: true}); err != nil {
+		t.Fatal(err)
+	}
+	reviewUndoAssert(t, b, bufFromLines("").LinesCopy(), Position{})
+	for range 3 {
+		if err := b.Undo(); err != nil {
+			t.Fatal(err)
+		}
+		reviewUndoAssert(t, b, nil, Position{})
+		if err := b.Redo(); err != nil {
+			t.Fatal(err)
+		}
+		reviewUndoAssert(t, b, bufFromLines("").LinesCopy(), Position{})
+	}
+}
+
+func TestReview_undo_insert_after_direct_whole_buffer_delete(t *testing.T) {
+	for _, text := range []string{"x", "x\ny", "x\n", "\n", "界🙂\nα"} {
+		t.Run(text, func(t *testing.T) {
+			b := bufFromLines("aaa", "bbb")
+			original := b.LinesCopy()
+			if err := b.Apply(Edit{Kind: EditKindDelete, Range: Range{Start: Position{}, End: Position{1, 0}, LineWise: true}}); err != nil {
+				t.Fatal(err)
+			}
+			reviewUndoAssert(t, b, nil, Position{})
+			if err := b.Apply(Edit{Kind: EditKindInsert, Text: text}); err != nil {
+				t.Fatal(err)
+			}
+			inserted := bufFromLines(strings.Split(text, "\n")...).LinesCopy()
+			reviewUndoAssert(t, b, inserted, Position{})
+			for range 3 {
+				for _, step := range []struct {
+					replay func() error
+					lines  []Line
+				}{{b.Undo, nil}, {b.Undo, original}, {b.Redo, nil}, {b.Redo, inserted}} {
+					if err := step.replay(); err != nil {
+						t.Fatal(err)
+					}
+					reviewUndoAssert(t, b, step.lines, Position{})
+				}
+			}
+			if b.History.NodeCount() != 2 {
+				t.Fatalf("history nodes = %d, want two independently undoable edits", b.History.NodeCount())
+			}
+		})
+	}
+}
+
+func TestReview_undo_linewise_history_branching(t *testing.T) {
+	b := bufFromLines("aaa", "bbb", "ccc")
+	original := b.LinesCopy()
+	if err := b.Apply(Edit{Kind: EditKindDelete, Range: Range{Start: Position{1, 0}, End: Position{1, 0}, LineWise: true}}); err != nil {
+		t.Fatal(err)
+	}
+	oldBranch := b.History.Current()
+	if err := b.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	reviewUndoAssert(t, b, original, Position{})
+	if _, err := Delete(b, Range{Start: Position{0, 0}, End: Position{2, 0}, LineWise: true}); err != nil {
+		t.Fatal(err)
+	}
+	if siblings := b.History.Siblings(b.History.Current()); len(siblings) != 1 || siblings[0] != oldBranch {
+		t.Fatal("linewise deletion must preserve the previous undo branch")
+	}
+	if err := b.Apply(Edit{Kind: EditKindInsert, Text: "replacement"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	reviewUndoAssert(t, b, bufFromLines("").LinesCopy(), Position{})
+	if err := b.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	reviewUndoAssert(t, b, original, Position{})
+	if err := b.Redo(); err != nil {
+		t.Fatal(err)
+	}
+	reviewUndoAssert(t, b, bufFromLines("").LinesCopy(), Position{})
+	if err := b.Redo(); err != nil {
+		t.Fatal(err)
+	}
+	reviewUndoAssert(t, b, bufFromLines("replacement").LinesCopy(), Position{})
+	if b.History.NodeCount() != 3 {
+		t.Fatalf("history nodes = %d, want three independently undoable edits", b.History.NodeCount())
+	}
+}
+
+func TestReview_undo_linewise_followed_by_character_branch(t *testing.T) {
+	b := bufFromLines("aaa", "bbb", "ccc")
+	original := b.LinesCopy()
+	if err := b.Apply(Edit{Kind: EditKindDelete, Range: Range{Start: Position{1, 0}, End: Position{1, 0}, LineWise: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Upper(b, Range{Start: Position{1, 0}, End: Position{1, 3}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, replay := range []func() error{b.Undo, b.Undo, b.Redo, b.Undo} {
+		if err := replay(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reviewUndoAssert(t, b, original, Position{})
+}
+
 func TestBufferStringEmpty(t *testing.T) {
 	b := &Buffer{}
 	if got := b.String(); got != "" {

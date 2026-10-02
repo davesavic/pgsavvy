@@ -29,6 +29,13 @@ type Edit struct {
 	Range   Range
 	Text    string
 	reverse *Edit
+
+	// History-only row restoration keeps blank rows and append positions
+	// distinct from character insertion without changing public Insert semantics.
+	restoreLinewise bool
+	// Delete's vim-style empty row belongs to the recorded mutation so
+	// Undo removes it and Redo recreates it, unlike a direct Buffer.Apply.
+	keepEmptyLine bool
 }
 
 // Reverse returns the inverse Edit captured by Buffer.Apply. The

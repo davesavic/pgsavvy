@@ -36,20 +36,8 @@ func Delete(b *Buffer, r Range) (string, error) {
 		// content without a trailing newline; add one for the register.
 		cut = cut + "\n"
 	}
-	if err := b.Apply(Edit{Kind: EditKindDelete, Range: r}); err != nil {
+	if err := b.Apply(Edit{Kind: EditKindDelete, Range: r, keepEmptyLine: r.LineWise}); err != nil {
 		return "", err
-	}
-	// LineWise dd on a single-line buffer would empty Lines entirely;
-	// vim leaves an empty line so the buffer always has at least one
-	// addressable row. Mirror that here so motion/textobject handlers
-	// can still call b.SetCursor(Position{0,0}) post-delete.
-	if r.LineWise {
-		b.mu.Lock()
-		if len(b.Lines) == 0 {
-			b.Lines = []Line{{Runes: []rune{}}}
-			b.Cursor = Position{Line: 0, Col: 0}
-		}
-		b.mu.Unlock()
 	}
 	return cut, nil
 }

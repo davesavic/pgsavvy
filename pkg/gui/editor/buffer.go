@@ -514,17 +514,31 @@ func (b *Buffer) buildReverseLocked(e Edit) Edit {
 	switch e.Kind {
 	case EditKindInsert:
 		endPos := advancePos(e.Range.Start, e.Text)
+		if len(b.Lines) == 0 && e.Text != "" {
+			// Every inserted row is new; character deletion would leave a
+			// phantom empty row and break earlier linewise history replay.
+			return Edit{Kind: EditKindDelete, Range: Range{Start: e.Range.Start, End: endPos, LineWise: true}}
+		}
 		return Edit{
 			Kind:  EditKindDelete,
 			Range: Range{Start: e.Range.Start, End: endPos},
 		}
 	case EditKindDelete:
+		if len(b.Lines) == 0 && e.keepEmptyLine {
+			// The operator creates a placeholder even without a row to cut.
+			return Edit{Kind: EditKindDelete, Range: Range{LineWise: true}}
+		}
 		deleted := b.textInRangeLocked(e.Range)
-		return Edit{
+		rev := Edit{
 			Kind:  EditKindInsert,
 			Range: Range{Start: e.Range.Start, End: e.Range.Start},
 			Text:  deleted,
 		}
+		if e.Range.LineWise && len(b.Lines) > 0 {
+			rev.restoreLinewise = true
+			rev.keepEmptyLine = e.keepEmptyLine && e.Range.Start.Line == 0 && e.Range.End.Line == len(b.Lines)-1
+		}
+		return rev
 	case EditKindReplace:
 		replaced := b.textInRangeLocked(e.Range)
 		endPos := advancePos(e.Range.Start, e.Text)
@@ -542,13 +556,36 @@ func (b *Buffer) buildReverseLocked(e Edit) Edit {
 func (b *Buffer) mutateLocked(e Edit) {
 	switch e.Kind {
 	case EditKindInsert:
-		b.insertAtLocked(e.Range.Start, e.Text)
+		if e.restoreLinewise {
+			b.restoreLinesLocked(e)
+		} else {
+			b.insertAtLocked(e.Range.Start, e.Text)
+		}
 	case EditKindDelete:
 		b.deleteRangeLocked(e.Range)
+		if e.keepEmptyLine && len(b.Lines) == 0 {
+			b.Lines = []Line{{Runes: []rune{}}}
+		}
 	case EditKindReplace:
 		b.deleteRangeLocked(e.Range)
 		b.insertAtLocked(e.Range.Start, e.Text)
 	}
+}
+
+// restoreLinesLocked splices whole rows, including at the end of Lines.
+// Captured text is immutable; every replay owns fresh rune slices.
+func (b *Buffer) restoreLinesLocked(e Edit) {
+	if e.keepEmptyLine {
+		b.Lines = nil
+	}
+	chunks := splitTextOnNewline(e.Text)
+	lines := make([]Line, 0, len(b.Lines)+len(chunks))
+	lines = append(lines, b.Lines[:e.Range.Start.Line]...)
+	for _, chunk := range chunks {
+		lines = append(lines, Line{Runes: chunk})
+	}
+	lines = append(lines, b.Lines[e.Range.Start.Line:]...)
+	b.Lines = lines
 }
 
 // insertAtLocked splices text at p. Internal newlines split the
