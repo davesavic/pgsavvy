@@ -7,6 +7,8 @@ package sshtunnel
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"strconv"
@@ -45,6 +47,7 @@ const handshakeTimeout = 30 * time.Second
 // idempotent.
 type Tunnel struct {
 	client    *ssh.Client
+	agent     io.Closer
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -81,7 +84,12 @@ func OpenWithPrompter(promptCtx, dialCtx context.Context, cfg models.SSHTunnelCo
 	}
 	port := session.SSHTunnelPort(&cfg)
 
-	methods, selected, err := authMethods(promptCtx, cfg, prompter)
+	methods, selected, owned, err := authMethods(promptCtx, cfg, prompter)
+	defer func() {
+		if owned != nil {
+			_ = owned.Close()
+		}
+	}()
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +120,9 @@ func OpenWithPrompter(promptCtx, dialCtx context.Context, cfg models.SSHTunnelCo
 	}
 
 	logs.Event(pkgLogger(), logCat, "open_ok", slog.String("addr", addr))
-	return &Tunnel{client: client}, nil
+	tun := &Tunnel{client: client, agent: owned}
+	owned = nil
+	return tun, nil
 }
 
 // dialSSH performs a context-aware SSH dial: the raw TCP connection honors ctx
@@ -162,12 +172,15 @@ func (t *Tunnel) DialContext(ctx context.Context, network, addr string) (net.Con
 	return conn, nil
 }
 
-// Close releases the underlying ssh.Client. Idempotent: repeated calls return
+// Close releases the SSH client and its owned agent socket. Idempotent: repeated calls return
 // the result of the first close and never panic.
 func (t *Tunnel) Close() error {
 	t.closeOnce.Do(func() {
 		logs.Event(pkgLogger(), logCat, "close")
 		t.closeErr = t.client.Close()
+		if t.agent != nil {
+			t.closeErr = errors.Join(t.closeErr, t.agent.Close())
+		}
 	})
 	return t.closeErr
 }

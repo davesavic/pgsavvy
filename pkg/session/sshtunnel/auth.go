@@ -2,6 +2,7 @@ package sshtunnel
 
 import (
 	"context"
+	"io"
 	"net"
 	"os"
 
@@ -19,15 +20,18 @@ import (
 //
 // The returned string slice describes the selected methods (e.g. "agent",
 // "identity") for telemetry; it never contains key material.
-func authMethods(ctx context.Context, cfg models.SSHTunnelConfig, prompter session.SecretPrompter) ([]ssh.AuthMethod, []string, error) {
+// The caller owns the returned closer even when later preparation fails.
+func authMethods(ctx context.Context, cfg models.SSHTunnelConfig, prompter session.SecretPrompter) ([]ssh.AuthMethod, []string, io.Closer, error) {
 	methods := make([]ssh.AuthMethod, 0, 2)
 	selected := make([]string, 0, 2)
+	var owned io.Closer
 
 	if cfg.IdentityFromAgent {
-		m, err := agentAuth()
+		m, conn, err := agentAuth()
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
+		owned = conn
 		methods = append(methods, m)
 		selected = append(selected, "agent")
 	}
@@ -35,7 +39,7 @@ func authMethods(ctx context.Context, cfg models.SSHTunnelConfig, prompter sessi
 	if cfg.IdentityFile != "" {
 		m, err := identityAuth(ctx, cfg, prompter)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, owned, err
 		}
 		methods = append(methods, m)
 		selected = append(selected, "identity")
@@ -44,17 +48,17 @@ func authMethods(ctx context.Context, cfg models.SSHTunnelConfig, prompter sessi
 	if usePasswordAuth(cfg, len(methods), prompter) {
 		m, err := passwordAuth(ctx, cfg, prompter)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, owned, err
 		}
 		methods = append(methods, m)
 		selected = append(selected, "password")
 	}
 
 	if len(methods) == 0 {
-		return nil, nil, dialErr("no auth method configured; set identity_file, identity_from_agent, or ssh_password_command", nil)
+		return nil, nil, owned, dialErr("no auth method configured; set identity_file, identity_from_agent, or ssh_password_command", nil)
 	}
 
-	return methods, selected, nil
+	return methods, selected, owned, nil
 }
 
 // usePasswordAuth reports whether a password ssh.AuthMethod should be added.
@@ -92,17 +96,17 @@ func passwordAuth(ctx context.Context, cfg models.SSHTunnelConfig, prompter sess
 // agentAuth dials SSH_AUTH_SOCK and returns a public-keys-callback auth method
 // backed by the running ssh-agent. A missing/empty SSH_AUTH_SOCK yields a
 // typed DialError naming ssh-agent rather than a nil deref.
-func agentAuth() (ssh.AuthMethod, error) {
+func agentAuth() (ssh.AuthMethod, io.Closer, error) {
 	sock := os.Getenv("SSH_AUTH_SOCK")
 	if sock == "" {
-		return nil, dialErr("ssh-agent requested but SSH_AUTH_SOCK is unset", nil)
+		return nil, nil, dialErr("ssh-agent requested but SSH_AUTH_SOCK is unset", nil)
 	}
 	conn, err := net.Dial("unix", sock)
 	if err != nil {
-		return nil, dialErr("ssh-agent dial failed", err)
+		return nil, nil, dialErr("ssh-agent dial failed", err)
 	}
 	ag := agent.NewClient(conn)
-	return ssh.PublicKeysCallback(ag.Signers), nil
+	return ssh.PublicKeysCallback(ag.Signers), conn, nil
 }
 
 // identityAuth reads and parses the identity file referenced by cfg. Encrypted

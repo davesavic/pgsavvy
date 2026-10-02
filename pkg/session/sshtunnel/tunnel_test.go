@@ -3,19 +3,97 @@ package sshtunnel
 import (
 	"bufio"
 	"context"
+	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+type reviewAgentCloser struct {
+	io.Closer
+	calls atomic.Int32
+	err   error
+}
+
+func (c *reviewAgentCloser) Close() error {
+	c.calls.Add(1)
+	return errors.Join(c.Closer.Close(), c.err)
+}
+
+type reviewAgentSSHConn struct {
+	ssh.Conn
+	calls atomic.Int32
+	err   error
+}
+
+func (c *reviewAgentSSHConn) Close() error {
+	c.calls.Add(1)
+	return errors.Join(c.Conn.Close(), c.err)
+}
+
+func TestReview_agent_close_once(t *testing.T) {
+	for _, failure := range []string{"none", "client", "agent", "both"} {
+		t.Run(failure, func(t *testing.T) {
+			hostKey, _ := genKey(t)
+			key, pem := genKey(t)
+			f := reviewStartAgent(t, pem, false)
+			srv := startServer(t, hostKey, key.PublicKey())
+			cfg := models.SSHTunnelConfig{Host: hostAddr(t, srv.Addr), Port: portAddr(t, srv.Addr), User: "tester", IdentityFromAgent: true, KnownHosts: freshKnownHosts(t)}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			tun, err := Open(ctx, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = tun.Close() })
+			if tun.agent == nil {
+				t.Fatal("successful tunnel did not adopt agent socket")
+			}
+			agentClose := &reviewAgentCloser{Closer: tun.agent}
+			clientClose := &reviewAgentSSHConn{Conn: tun.client.Conn}
+			clientErr, agentErr := errors.New("synthetic client close"), errors.New("synthetic agent close")
+			if failure == "client" || failure == "both" {
+				clientClose.err = clientErr
+			}
+			if failure == "agent" || failure == "both" {
+				agentClose.err = agentErr
+			}
+			tun.agent = agentClose
+			// Keep NewClient's running goroutines on their unmodified client.
+			tun.client = &ssh.Client{Conn: clientClose}
+			var wg sync.WaitGroup
+			errs := make([]error, 16)
+			for i := range errs {
+				wg.Go(func() { errs[i] = tun.Close() })
+			}
+			wg.Wait()
+			for _, err := range errs {
+				if err != errs[0] || errors.Is(err, clientErr) != (clientClose.err != nil) || errors.Is(err, agentErr) != (agentClose.err != nil) {
+					t.Fatal("Close did not preserve combined result across callers")
+				}
+			}
+			if agentClose.calls.Load() != 1 || clientClose.calls.Load() != 1 {
+				t.Fatalf("close count agent=%d client=%d, want one each", agentClose.calls.Load(), clientClose.calls.Load())
+			}
+			reviewWaitAgent(t, f.closed, "counted agent EOF before fixture teardown")
+			if tun.Close() != errs[0] || agentClose.calls.Load() != 1 || clientClose.calls.Load() != 1 {
+				t.Fatal("sequential repeat changed close result or count")
+			}
+		})
+	}
+}
 
 // hostAddr splits "host:port" and returns the host.
 func hostAddr(t *testing.T, addr string) string {
