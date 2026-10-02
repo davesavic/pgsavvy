@@ -14,30 +14,19 @@ import (
 // this file.
 type depsAlias = types.ContextTreeDeps
 
-// writeView runs fn on the driver MainLoop iff deps.GuiDriver is non-nil.
-// All concrete contexts that perform view writes go through this helper
-// so the nil-driver case (unit tests, partial wiring) is a silent no-op
-// rather than a panic.
-//
-// The fn runs asynchronously on the gocui Update queue, which treats any
-// returned error as FATAL and exits MainLoop. A queued view write can race
-// the view's lifecycle: a TEMPORARY_POPUP that is re-pushed after being
-// evicted (popup-replaces-popup) deletes its gocui view, and the layout
-// pass that recreates it may not have run when the queued write drains —
-// so the write targets a view that momentarily does not exist and returns
-// gocui.ErrUnknownView. That is benign (the layout repaints the view next
-// frame), so we swallow it rather than let it kill the app. Any other
-// error still propagates.
+// writeView paints on the caller's UI lane. Worker publications must marshal
+// before rendering; scheduling another paint from Layout creates a feedback
+// loop, and even content-only queue sends can block MainLoop when saturated.
+// A missing view is benign during popup replacement/pre-layout. Other errors
+// retain the existing fatal Update delivery rather than disappearing in
+// callers that discard HandleRender errors. Nil driver remains a no-op.
 func writeView(deps depsAlias, fn func() error) {
 	if deps.GuiDriver == nil {
 		return
 	}
-	deps.GuiDriver.Update(func() error {
-		if err := fn(); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
-			return err
-		}
-		return nil
-	})
+	if err := fn(); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		deps.GuiDriver.Update(func() error { return err })
+	}
 }
 
 // railEmptyPlaceholder returns the contextual dim placeholder for an empty
@@ -73,12 +62,9 @@ func scrollSideRailIntoView(deps depsAlias, viewName string, row int) {
 	if deps.GuiDriver == nil || row < 0 {
 		return
 	}
-	deps.GuiDriver.Update(func() error {
-		v, err := deps.GuiDriver.ViewByName(viewName)
-		if err != nil || v == nil {
-			return nil
-		}
-		v.FocusPoint(0, row, true)
-		return nil
-	})
+	v, err := deps.GuiDriver.ViewByName(viewName)
+	if err != nil || v == nil {
+		return
+	}
+	v.FocusPoint(0, row, true)
 }

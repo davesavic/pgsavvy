@@ -40,6 +40,60 @@ func (d *railTestDriver) SetContent(view, str string) error {
 
 func (d *railTestDriver) ViewByName(string) (types.View, error) { return d.view, nil }
 
+type renderRailDriver struct {
+	railTestDriver
+	full, content int
+	viewErr       error
+}
+
+func (d *renderRailDriver) Update(fn func() error) {
+	d.full++
+	_ = fn()
+}
+
+func (d *renderRailDriver) UpdateContentOnly(fn func() error) {
+	d.content++
+	_ = fn()
+}
+
+func (d *renderRailDriver) ViewByName(string) (types.View, error) {
+	if d.view == nil {
+		return nil, d.viewErr
+	}
+	return d.view, d.viewErr
+}
+
+func TestReview_render_rail_origin(t *testing.T) {
+	v := gocui.NewView("schemas-tables", 0, 0, 20, 10, gocui.OutputNormal)
+	v.SetContent(strings.Repeat("row\n", 40))
+	v.SetOrigin(5, 0)
+	d := &renderRailDriver{railTestDriver: railTestDriver{view: v}}
+	scrollSideRailIntoView(Deps{GuiDriver: d}, "schemas-tables", 29)
+	ox, oy := v.Origin()
+	if ox != 5 || oy == 0 || d.full != 0 || d.content != 0 {
+		t.Fatalf("origin=(%d,%d) full=%d content=%d; want preserved pan, visible cursor, no scheduling", ox, oy, d.full, d.content)
+	}
+	for _, tc := range []struct {
+		name string
+		row  int
+		err  error
+	}{
+		{"negative_row", -1, nil},
+		{"nil_view", 0, nil},
+		{"missing_view", 0, gocui.ErrUnknownView},
+		{"other_view_error", 0, fmt.Errorf("lookup failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &renderRailDriver{viewErr: tc.err}
+			scrollSideRailIntoView(Deps{GuiDriver: d}, "missing", tc.row)
+			if d.full != 0 || d.content != 0 {
+				t.Fatalf("benign origin no-op scheduled full=%d content=%d", d.full, d.content)
+			}
+		})
+	}
+	scrollSideRailIntoView(Deps{}, "missing", 0)
+}
+
 func (d *railTestDriver) SetViewTabs(name string, labels []string, active int) error {
 	d.tabsCalls = append(d.tabsCalls, railTabsCall{name: name, labels: labels, active: active})
 	return nil
@@ -195,12 +249,9 @@ func TestSchemaRail_PerTabOriginDoesNotBleed(t *testing.T) {
 	}
 }
 
-// railDeferredDriver models production GuiDriver timing: Update ENQUEUES the
-// callback (the leaf's SetContent and FocusPoint) to run on a later loop tick
-// instead of inline. railTestDriver runs Update synchronously, which hides the
-// per-frame origin clobber because the leaf's FocusPoint scroll-to-cursor lands
-// before the assertion; deferring it exposes the origin the synchronous restore
-// in HandleRender leaves behind at draw time — exactly as gocui draws.
+// railDeferredDriver defers Update so legacy queued render writes cannot hide
+// origin clobbering behind an inline fake. Current UI-owned rendering writes
+// content and scrolls synchronously without using this queue.
 type railDeferredDriver struct {
 	stubDriver
 	view  *gocui.View
@@ -226,12 +277,9 @@ func (d *railDeferredDriver) drain() {
 }
 
 // TestSchemaRail_ScrollFollowsCursorAcrossFrames is a regression test for the
-// per-frame origin clobber. HandleRender restores the saved per-tab origin
-// SYNCHRONOUSLY, but the leaf's vertical scroll-to-cursor (FocusPoint) runs in
-// the DEFERRED Update queue. Once FocusPoint has scrolled the view to keep the
-// cursor visible, the NEXT frame's restore must not yank oy back to the stale
-// saved origin (only written on a tab switch) — otherwise the list never
-// follows the cursor (the reported bug: rows do not scroll with the cursor).
+// per-frame origin clobber. Once FocusPoint scrolls the cursor into view,
+// the next frame must not restore a stale per-tab origin. Origins are saved
+// and restored on tab switches, not on every render.
 func TestSchemaRail_ScrollFollowsCursorAcrossFrames(t *testing.T) {
 	v := gocui.NewView("schemas-tables", 0, 0, 20, 10, gocui.OutputNormal)
 	drv := &railDeferredDriver{view: v}
@@ -244,7 +292,7 @@ func TestSchemaRail_ScrollFollowsCursorAcrossFrames(t *testing.T) {
 	tree.Schemas.SetItems(rows)
 	tree.Schemas.SetCursor(29) // bottom row, well past the viewport
 
-	// Frame 1: render queues SetContent + FocusPoint; draining scrolls oy down.
+	// Drain any legacy queued writes before observing the completed first frame.
 	if err := tree.SchemaRail.HandleRender(); err != nil {
 		t.Fatalf("HandleRender frame 1: %v", err)
 	}
