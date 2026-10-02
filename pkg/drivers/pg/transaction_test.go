@@ -208,3 +208,36 @@ func TestSessionInTransactionFalseForNewSession(t *testing.T) {
 	require.False(t, s.InTransaction())
 	require.Nil(t, s.CurrentTransaction())
 }
+
+func TestReview_txBeginRejectsExistingOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  byte
+		api  models.TxStatus
+	}{
+		{name: "raw active", raw: 'T'},
+		{name: "raw aborted", raw: 'E'},
+		{name: "API active", api: models.TxActive},
+		{name: "API aborted", api: models.TxAbortedInTx},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStubSession()
+			s.cachedTxStatus.Store(uint32(tc.raw))
+			if tc.api != "" {
+				s.activeTx = newPgTransaction(&fakeTx{}, nil)
+				s.activeTx.status = tc.api
+			} else {
+				require.False(t, s.InTransaction(), "raw status does not confer API ownership")
+				require.Nil(t, s.CurrentTransaction())
+			}
+			before := s.activeTx
+			require.NotPanics(t, func() {
+				tx, err := s.Begin(context.Background(), models.TxOptions{})
+				require.ErrorContains(t, err, "transaction already in progress")
+				require.Nil(t, tx)
+			})
+			require.True(t, before == s.activeTx)
+			require.Equal(t, tc.raw, byte(s.cachedTxStatus.Load()))
+		})
+	}
+}

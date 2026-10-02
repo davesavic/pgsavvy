@@ -88,7 +88,12 @@ func (f *fakeRunnerSession) CurrentTransaction() drivers.Transaction {
 	return f.lastTx
 }
 
-func (f *fakeRunnerSession) LiveTxStatus() (models.TxStatus, []string) { return "", nil }
+func (f *fakeRunnerSession) LiveTxStatus() (models.TxStatus, []string) {
+	if f.inTx {
+		return models.TxActive, nil
+	}
+	return "", nil
+}
 
 func (f *fakeRunnerSession) Cancel(qid models.QueryID) error {
 	f.cancelCalls = append(f.cancelCalls, qid)

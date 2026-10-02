@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"reflect"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/logs"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/session"
+	"github.com/stretchr/testify/require"
 )
 
 // sequencedSession records Begin / Explain / Rollback / preempt events
@@ -24,9 +26,14 @@ type sequencedSession struct {
 	mu  sync.Mutex
 	seq []string
 
-	inTx          bool
-	lastTx        *seqTx
-	txRollbackErr error
+	inTx           bool
+	lastTx         *seqTx
+	txRollbackErr  error
+	liveStatus     models.TxStatus
+	beginErr       error
+	explainHook    func(context.Context) error
+	rollbackCtxErr error
+	rollbackBound  time.Duration
 }
 
 func (s *sequencedSession) add(ev string) {
@@ -51,14 +58,23 @@ func (s *sequencedSession) Stream(context.Context, models.Query) (*session.RunHa
 	return nil, nil
 }
 
-func (s *sequencedSession) Explain(_ context.Context, q models.Query, _ bool) (models.Plan, error) {
+func (s *sequencedSession) Explain(ctx context.Context, q models.Query, _ bool) (models.Plan, error) {
 	s.add("explain:" + q.SQL)
+	if s.explainHook != nil {
+		if err := s.explainHook(ctx); err != nil {
+			return models.Plan{}, err
+		}
+	}
 	return models.Plan{RawText: "fake plan"}, nil
 }
 
 func (s *sequencedSession) Begin(context.Context, models.TxOptions) (drivers.Transaction, error) {
 	s.mu.Lock()
 	s.seq = append(s.seq, "begin")
+	if s.beginErr != nil {
+		s.mu.Unlock()
+		return nil, s.beginErr
+	}
 	s.inTx = true
 	s.lastTx = &seqTx{s: s, rollbackErr: s.txRollbackErr}
 	tx := s.lastTx
@@ -78,7 +94,17 @@ func (s *sequencedSession) CurrentTransaction() drivers.Transaction {
 	return s.lastTx
 }
 
-func (s *sequencedSession) LiveTxStatus() (models.TxStatus, []string) { return "", nil }
+func (s *sequencedSession) LiveTxStatus() (models.TxStatus, []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.liveStatus != "" {
+		return s.liveStatus, nil
+	}
+	if s.inTx {
+		return models.TxActive, nil
+	}
+	return "", nil
+}
 
 func (s *sequencedSession) Cancel(models.QueryID) error { return nil }
 
@@ -105,9 +131,13 @@ func (t *seqTx) Commit(context.Context) error {
 	return nil
 }
 
-func (t *seqTx) Rollback(context.Context) error {
+func (t *seqTx) Rollback(ctx context.Context) error {
 	t.rolledBack.Store(true)
 	t.s.mu.Lock()
+	t.s.rollbackCtxErr = ctx.Err()
+	if deadline, ok := ctx.Deadline(); ok {
+		t.s.rollbackBound = time.Until(deadline)
+	}
 	t.s.seq = append(t.s.seq, "rollback")
 	t.s.inTx = false
 	t.s.lastTx = nil
@@ -354,4 +384,120 @@ func TestExplainAsyncPreemptFiresBeforeOp(t *testing.T) {
 	if got := fs.snapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("sequence = %v, want %v (preempt must precede the session Explain)", got, want)
 	}
+}
+
+func reviewExplain(t *testing.T, r *QueryRunner, ctx context.Context, async bool) (models.Plan, error) {
+	t.Helper()
+	if !async {
+		return r.Explain(ctx, "SELECT 1", true, "")
+	}
+	done := make(chan struct{})
+	var plan models.Plan
+	var err error
+	r.ExplainAsync(ctx, "SELECT 1", true, "", func(p models.Plan, e error) {
+		plan, err = p, e
+		close(done)
+	})
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ExplainAsync did not settle")
+	}
+	return plan, err
+}
+
+func TestReview_txExplainOwnership(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		for _, status := range []models.TxStatus{models.TxActive, models.TxAbortedInTx} {
+			for _, failed := range []bool{false, true} {
+				t.Run(fmt.Sprintf("async=%t/status=%s/error=%t", async, status, failed), func(t *testing.T) {
+					boom := errors.New("explain failed")
+					fs := &sequencedSession{liveStatus: status}
+					if failed {
+						fs.explainHook = func(context.Context) error { return boom }
+					}
+					r := NewQueryRunner(fs, drivers.Capabilities{})
+					_, err := reviewExplain(t, r, context.Background(), async)
+					if failed {
+						require.ErrorIs(t, err, boom)
+					} else {
+						require.NoError(t, err)
+					}
+					require.Equal(t, []string{"explain:SELECT 1"}, fs.snapshot())
+					require.False(t, r.WrapTxOpen())
+					require.Nil(t, fs.CurrentTransaction(), "raw transactions have no API handle")
+					got, _ := fs.LiveTxStatus()
+					require.Equal(t, status, got)
+				})
+			}
+		}
+	}
+}
+
+func TestReview_txExplainCleanupAfterCancellation(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		t.Run(fmt.Sprintf("async=%t", async), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			fs := &sequencedSession{explainHook: func(context.Context) error {
+				cancel()
+				return context.Canceled
+			}}
+			r := NewQueryRunner(fs, drivers.Capabilities{})
+			_, err := reviewExplain(t, r, ctx, async)
+			require.ErrorIs(t, err, context.Canceled)
+			require.Equal(t, []string{"begin", "explain:SELECT 1", "rollback"}, fs.snapshot())
+			require.NoError(t, fs.rollbackCtxErr, "cleanup must not inherit cancellation")
+			require.Positive(t, fs.rollbackBound)
+			require.LessOrEqual(t, fs.rollbackBound, 5*time.Second)
+			require.False(t, r.WrapTxOpen())
+		})
+	}
+}
+
+func TestReview_txExplainBeginFailureDoesNotOwnRollback(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		t.Run(fmt.Sprintf("async=%t", async), func(t *testing.T) {
+			boom := errors.New("begin failed")
+			fs := &sequencedSession{beginErr: boom}
+			r := NewQueryRunner(fs, drivers.Capabilities{})
+			_, err := reviewExplain(t, r, context.Background(), async)
+			require.ErrorIs(t, err, boom)
+			require.Equal(t, []string{"begin"}, fs.snapshot())
+			require.False(t, r.WrapTxOpen())
+		})
+	}
+}
+
+func TestReview_txExplainAsyncReadsStatusAfterPreempt(t *testing.T) {
+	fs := &sequencedSession{}
+	r := NewQueryRunner(fs, drivers.Capabilities{})
+	started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	r.SetPreempter(func() bool {
+		close(started)
+		<-release
+		return false
+	})
+	var err error
+	r.ExplainAsync(context.Background(), "SELECT 1", true, "", func(_ models.Plan, e error) {
+		err = e
+		close(done)
+	})
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("preempt did not start")
+	}
+	fs.mu.Lock()
+	fs.liveStatus = models.TxActive
+	fs.mu.Unlock()
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ExplainAsync did not settle")
+	}
+	require.NoError(t, err)
+	require.Equal(t, []string{"explain:SELECT 1"}, fs.snapshot())
 }

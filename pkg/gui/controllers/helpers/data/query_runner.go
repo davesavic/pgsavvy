@@ -971,7 +971,8 @@ func (r *QueryRunner) Explain(ctx context.Context, sql string, analyze bool, def
 	if b == nil || b.sess == nil {
 		return models.Plan{}, ErrNoSession
 	}
-	if !analyze || b.sess.InTransaction() {
+	status, _ := b.sess.LiveTxStatus()
+	if !analyze || status == models.TxActive || status == models.TxAbortedInTx {
 		return b.sess.Explain(ctx, models.Query{SQL: sql, DefaultSchema: defaultSchema}, analyze)
 	}
 
@@ -988,10 +989,7 @@ func (r *QueryRunner) Explain(ctx context.Context, sql string, analyze bool, def
 	// failed ROLLBACK strands the session in an open tx the user did not
 	// ask for, so it is warn-logged (the user-visible failure is still
 	// the Explain error).
-	if err := tx.Rollback(ctx); err != nil {
-		r.warnRollbackFail(ctx, err)
-	}
-	r.wrapTxOpen.Store(false)
+	r.rollbackExplain(ctx, tx)
 	return plan, explainErr
 }
 
@@ -1004,7 +1002,7 @@ func (r *QueryRunner) Explain(ctx context.Context, sql string, analyze bool, def
 //
 // The op preserves every sync-Explain semantic under queue exclusion:
 // the queued-cancel fence (a cancelled sentinel never touches the
-// session), the InTransaction gate read FRESH inside the op (a tx opened
+// session), the transaction gate read FRESH inside the op (a tx opened
 // or closed since enqueue is honoured, never a stale UI-thread snapshot),
 // and the BEGIN/ROLLBACK wrap for ANALYZE outside a transaction. The
 // preempt-first ordering comes for free from the queue — the launcher
@@ -1027,8 +1025,10 @@ func (r *QueryRunner) ExplainAsync(ctx context.Context, sql string, analyze bool
 			return launchResult{}, ErrNoSession
 		}
 		// Fresh gate read: the launcher's mutual exclusion guarantees this
-		// InTransaction snapshot cannot race a concurrent session op.
-		if !analyze || b.sess.InTransaction() {
+		// transaction snapshot cannot race a concurrent session op. Raw SQL
+		// owns active and aborted transactions even without an API handle.
+		status, _ := b.sess.LiveTxStatus()
+		if !analyze || status == models.TxActive || status == models.TxAbortedInTx {
 			plan, err := b.sess.Explain(dctx, models.Query{SQL: sql, DefaultSchema: defaultSchema}, analyze)
 			return launchResult{plan: plan}, err
 		}
@@ -1043,10 +1043,7 @@ func (r *QueryRunner) ExplainAsync(ctx context.Context, sql string, analyze bool
 		// Always ROLLBACK even if Explain errored — the BEGIN would
 		// otherwise leak. A failed rollback is warn-logged (no silent
 		// swallow); the user-visible failure is still the Explain error.
-		if err := tx.Rollback(dctx); err != nil {
-			r.warnRollbackFail(dctx, err)
-		}
-		r.wrapTxOpen.Store(false)
+		r.rollbackExplain(dctx, tx)
 		return launchResult{plan: plan}, explainErr
 	}
 	r.enqueueLaunch(true, []launchStmt{{op: op}}, func(_ int, res launchResult, err error) {
@@ -1054,6 +1051,16 @@ func (r *QueryRunner) ExplainAsync(ctx context.Context, sql string, analyze bool
 			ack(res.plan, err)
 		}
 	})
+}
+
+func (r *QueryRunner) rollbackExplain(ctx context.Context, tx drivers.Transaction) {
+	// Cancellation of the query must not cancel cleanup of its owned transaction.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := tx.Rollback(cleanupCtx); err != nil {
+		r.warnRollbackFail(cleanupCtx, err)
+	}
+	r.wrapTxOpen.Store(false)
 }
 
 // warnRollbackFail emits the WARN record for a failed EXPLAIN ANALYZE

@@ -802,7 +802,13 @@ func isUnsupportedExplainOption(err error) bool {
 // are mapped to pgx.TxOptions for isolation level, read-only, and deferrable.
 func (s *Session) Begin(ctx context.Context, opts models.TxOptions) (drivers.Transaction, error) {
 	defer s.guard()()
-	if s.InTransaction() {
+	s.sampleTxStatus()
+	defer s.sampleTxStatus()
+	status, _ := s.LiveTxStatus()
+	// Raw COMMIT/ROLLBACK can leave an API handle unsettled. Replacing it
+	// would let that old handle terminate a later transaction on this connection.
+	owned := s.activeTx != nil && (s.activeTx.Status() == models.TxActive || s.activeTx.Status() == models.TxAbortedInTx)
+	if owned || status == models.TxActive || status == models.TxAbortedInTx {
 		return nil, errors.New("session: transaction already in progress")
 	}
 	pgxOpts := pgx.TxOptions{
@@ -863,14 +869,14 @@ func (s *Session) sampleTxStatus() {
 }
 
 // LiveTxStatus reports the session's current transaction status for the status
-// bar [TX] badge. A driver-API transaction (Session.Begin) takes precedence
-// while active; raw-SQL BEGIN/COMMIT/ROLLBACK are detected via the sampled
-// pgconn status byte. It reads only activeTx and the cached atomic — never
-// dereferences pgConn — so it is safe on a stub session. Savepoint names are
-// returned only for a driver-API transaction; raw-SQL transactions report a
-// nil slice (D4).
+// bar [TX] badge. The sampled backend byte is authoritative on live sessions,
+// including when raw SQL aborts or ends a driver-API transaction. API handles
+// supply savepoint metadata, not backend state. Stub sessions without pgConn
+// retain API bookkeeping as their status source. This never reads protocol
+// state while a query is in flight. Raw-SQL transactions have no savepoint
+// metadata (D4).
 func (s *Session) LiveTxStatus() (models.TxStatus, []string) {
-	if s.activeTx != nil {
+	if s.pgConn == nil && s.activeTx != nil {
 		switch s.activeTx.Status() {
 		case models.TxActive:
 			return models.TxActive, s.activeTx.Savepoints()
@@ -878,11 +884,18 @@ func (s *Session) LiveTxStatus() (models.TxStatus, []string) {
 			return models.TxAbortedInTx, s.activeTx.Savepoints()
 		}
 	}
+	var names []string
+	if s.activeTx != nil {
+		switch s.activeTx.Status() {
+		case models.TxActive, models.TxAbortedInTx:
+			names = s.activeTx.Savepoints()
+		}
+	}
 	switch byte(s.cachedTxStatus.Load()) {
 	case 'T':
-		return models.TxActive, nil
+		return models.TxActive, names
 	case 'E':
-		return models.TxAbortedInTx, nil
+		return models.TxAbortedInTx, names
 	}
 	return "", nil
 }

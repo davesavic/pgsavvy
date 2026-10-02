@@ -10,7 +10,10 @@ package pg_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -182,5 +185,95 @@ func TestPgLiveTxStatusRawSQLViaExecute(t *testing.T) {
 	}
 	if status, _ := sess.LiveTxStatus(); status != "" {
 		t.Fatalf("post-COMMIT LiveTxStatus = %q, want \"\"", status)
+	}
+}
+
+func TestReview_txRawBeginRejectsAPIBegin(t *testing.T) {
+	for _, streamed := range []bool{false, true} {
+		for _, aborted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("streamed=%t/aborted=%t", streamed, aborted), func(t *testing.T) {
+				sess := requirePGSession(t)
+				ctx := context.Background()
+				exec := func(sql string) {
+					if streamed {
+						drainStream(t, sess, sql)
+					} else {
+						_, err := sess.Execute(ctx, models.Query{SQL: sql})
+						require.NoError(t, err)
+					}
+				}
+				exec("CREATE TEMP TABLE review_tx (value integer)")
+				exec("BEGIN")
+				exec("INSERT INTO review_tx VALUES (1)")
+				exec("SAVEPOINT user_work")
+				want := models.TxActive
+				if aborted {
+					_, err := sess.Execute(ctx, models.Query{SQL: "SELECT 1/0"})
+					require.Error(t, err)
+					want = models.TxAbortedInTx
+				}
+				require.Nil(t, sess.CurrentTransaction())
+				tx, err := sess.Begin(ctx, models.TxOptions{})
+				require.ErrorContains(t, err, "transaction already in progress")
+				require.Nil(t, tx)
+				status, names := sess.LiveTxStatus()
+				require.Equal(t, want, status)
+				require.Nil(t, names)
+				if aborted {
+					exec("ROLLBACK TO SAVEPOINT user_work")
+				}
+				res, err := sess.Execute(ctx, models.Query{SQL: "SELECT value FROM review_tx"})
+				require.NoError(t, err)
+				require.Len(t, res.Rows, 1, "rejected Begin must preserve pending writes")
+				exec("ROLLBACK")
+				res, err = sess.Execute(ctx, models.Query{SQL: "SELECT value FROM review_tx"})
+				require.NoError(t, err)
+				require.Empty(t, res.Rows)
+			})
+		}
+	}
+}
+
+func TestReview_txAPIStatusTracksBackend(t *testing.T) {
+	sess := requirePGSession(t)
+	ctx := context.Background()
+	tx, err := sess.Begin(ctx, models.TxOptions{})
+	require.NoError(t, err)
+	require.NoError(t, tx.Savepoint(ctx, "user_work"))
+	_, err = sess.Execute(ctx, models.Query{SQL: "SELECT 1/0"})
+	require.Error(t, err)
+	status, names := sess.LiveTxStatus()
+	require.Equal(t, models.TxAbortedInTx, status)
+	require.Equal(t, []string{"user_work"}, names)
+	require.NoError(t, tx.RollbackTo(ctx, "user_work"))
+	_, err = sess.Execute(ctx, models.Query{SQL: "SELECT 1"})
+	require.NoError(t, err)
+	status, _ = sess.LiveTxStatus()
+	require.Equal(t, models.TxActive, status)
+	require.NoError(t, tx.Rollback(ctx))
+	status, _ = sess.LiveTxStatus()
+	require.Empty(t, status)
+}
+
+func TestReview_txRawEndDoesNotReplaceAPIHandle(t *testing.T) {
+	for _, end := range []string{"COMMIT", "ROLLBACK"} {
+		t.Run(end, func(t *testing.T) {
+			sess := requirePGSession(t)
+			ctx := context.Background()
+			owned, err := sess.Begin(ctx, models.TxOptions{})
+			require.NoError(t, err)
+			_, err = sess.Execute(ctx, models.Query{SQL: end})
+			require.NoError(t, err)
+			status, _ := sess.LiveTxStatus()
+			require.Empty(t, status, "raw termination leaves the backend idle")
+			replacement, err := sess.Begin(ctx, models.TxOptions{})
+			require.ErrorContains(t, err, "transaction already in progress")
+			require.Nil(t, replacement)
+			require.Same(t, owned, sess.CurrentTransaction())
+			require.NoError(t, owned.Rollback(ctx))
+			next, err := sess.Begin(ctx, models.TxOptions{})
+			require.NoError(t, err)
+			require.NoError(t, next.Rollback(ctx))
+		})
 	}
 }

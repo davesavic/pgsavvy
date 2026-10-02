@@ -14,11 +14,13 @@ package data_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
@@ -156,3 +158,183 @@ func rowCount(t *testing.T, ctx context.Context, sess *session.SQLSession, tbl s
 }
 
 var _ = drivers.Capabilities{} // keep import for clarity when caps used in adjacent helpers
+
+func reviewLiveExplain(t *testing.T, runner *data.QueryRunner, sql string, async bool) error {
+	t.Helper()
+	if !async {
+		_, err := runner.Explain(context.Background(), sql, true, "")
+		return err
+	}
+	done := make(chan struct{})
+	var err error
+	runner.ExplainAsync(context.Background(), sql, true, "", func(_ models.Plan, e error) {
+		err = e
+		close(done)
+	})
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("ExplainAsync did not settle")
+	}
+	return err
+}
+
+func TestReview_txExplainPreservesUserWrites(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		for _, api := range []bool{false, true} {
+			for _, outcome := range []string{"success", "error", "already aborted"} {
+				for _, commit := range []bool{false, true} {
+					t.Run(fmt.Sprintf("async=%t/api=%t/%s/commit=%t", async, api, outcome, commit), func(t *testing.T) {
+						runner, sess := requirePGRunner(t)
+						ctx := context.Background()
+						mustExec(t, ctx, sess, "CREATE TEMP TABLE review_tx (value integer)")
+						var tx drivers.Transaction
+						if api {
+							var err error
+							tx, err = sess.Begin(ctx, models.TxOptions{})
+							require.NoError(t, err)
+						} else {
+							mustExec(t, ctx, sess, "BEGIN")
+							require.Nil(t, sess.CurrentTransaction())
+						}
+						mustExec(t, ctx, sess, "INSERT INTO review_tx VALUES (1)")
+						if outcome != "success" {
+							mustExec(t, ctx, sess, "SAVEPOINT user_work")
+						}
+						if outcome == "already aborted" {
+							_, err := sess.Execute(ctx, models.Query{SQL: "SELECT 1/0"})
+							require.Error(t, err)
+						}
+						sql := "SELECT * FROM review_tx"
+						if outcome == "error" {
+							sql = "SELECT 1/0"
+						}
+						err := reviewLiveExplain(t, runner, sql, async)
+						status, _ := sess.LiveTxStatus()
+						if outcome == "success" {
+							require.NoError(t, err)
+							require.Equal(t, models.TxActive, status)
+						} else {
+							require.Error(t, err)
+							require.Equal(t, models.TxAbortedInTx, status)
+							mustExec(t, ctx, sess, "ROLLBACK TO SAVEPOINT user_work")
+						}
+						require.False(t, runner.WrapTxOpen())
+						require.Equal(t, 1, rowCount(t, ctx, sess, "review_tx"))
+						if api {
+							require.Same(t, tx, sess.CurrentTransaction())
+							if commit {
+								require.NoError(t, tx.Commit(ctx))
+							} else {
+								require.NoError(t, tx.Rollback(ctx))
+							}
+						} else if commit {
+							mustExec(t, ctx, sess, "COMMIT")
+						} else {
+							mustExec(t, ctx, sess, "ROLLBACK")
+						}
+						want := 0
+						if commit {
+							want = 1
+						}
+						require.Equal(t, want, rowCount(t, ctx, sess, "review_tx"))
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestReview_txExplainServerCancellation(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		for _, userTx := range []bool{false, true} {
+			t.Run(fmt.Sprintf("async=%t/userTx=%t", async, userTx), func(t *testing.T) {
+				runner, sess := requirePGRunner(t)
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				probe, err := pgx.Connect(ctx, os.Getenv(envDSN))
+				require.NoError(t, err)
+				defer func() { _ = probe.Close(context.Background()) }()
+				res, err := sess.Execute(ctx, models.Query{SQL: "SELECT pg_backend_pid()"})
+				require.NoError(t, err)
+				pid := res.Rows[0].Values[0]
+				mustExec(t, ctx, sess, "CREATE TEMP TABLE review_tx (value integer)")
+				if userTx {
+					mustExec(t, ctx, sess, "BEGIN")
+					mustExec(t, ctx, sess, "INSERT INTO review_tx VALUES (1)")
+					mustExec(t, ctx, sess, "SAVEPOINT user_work")
+				}
+				done := make(chan error, 1)
+				if async {
+					runner.ExplainAsync(ctx, "SELECT pg_sleep(30)", true, "", func(_ models.Plan, err error) { done <- err })
+				} else {
+					go func() {
+						_, err := runner.Explain(ctx, "SELECT pg_sleep(30)", true, "")
+						done <- err
+					}()
+				}
+				// Observe the target backend waiting inside pg_sleep before canceling.
+				ticker := time.NewTicker(10 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					var sleeping bool
+					require.NoError(t, probe.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND wait_event='PgSleep')", pid).Scan(&sleeping))
+					if sleeping {
+						break
+					}
+					select {
+					case err := <-done:
+						t.Fatalf("Explain ended before cancellation: %v", err)
+					case <-ctx.Done():
+						t.Fatal("Explain did not reach pg_sleep")
+					case <-ticker.C:
+					}
+				}
+				var canceled bool
+				require.NoError(t, probe.QueryRow(ctx, "SELECT pg_cancel_backend($1)", pid).Scan(&canceled))
+				require.True(t, canceled)
+				select {
+				case err := <-done:
+					require.Error(t, err)
+				case <-ctx.Done():
+					t.Fatal("canceled Explain did not settle")
+				}
+				require.False(t, runner.WrapTxOpen())
+				status, _ := sess.LiveTxStatus()
+				if userTx {
+					require.Equal(t, models.TxAbortedInTx, status)
+					mustExec(t, ctx, sess, "ROLLBACK TO SAVEPOINT user_work")
+					require.Equal(t, 1, rowCount(t, ctx, sess, "review_tx"))
+					mustExec(t, ctx, sess, "COMMIT")
+					require.Equal(t, 1, rowCount(t, ctx, sess, "review_tx"))
+				} else {
+					require.Empty(t, status, "runner-owned transaction must be rolled back")
+				}
+			})
+		}
+	}
+}
+
+func TestReview_txExplainFailsClosedWithUnsettledAPIHandle(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		for _, end := range []string{"COMMIT", "ROLLBACK"} {
+			t.Run(fmt.Sprintf("async=%t/%s", async, end), func(t *testing.T) {
+				runner, sess := requirePGRunner(t)
+				ctx := context.Background()
+				mustExec(t, ctx, sess, "CREATE TEMP TABLE review_tx (value integer)")
+				mustExec(t, ctx, sess, "CREATE FUNCTION pg_temp.review_tx_write() RETURNS integer LANGUAGE sql AS 'INSERT INTO review_tx VALUES (1) RETURNING value'")
+				owned, err := sess.Begin(ctx, models.TxOptions{})
+				require.NoError(t, err)
+				mustExec(t, ctx, sess, end)
+				err = reviewLiveExplain(t, runner, "SELECT pg_temp.review_tx_write()", async)
+				count := rowCount(t, ctx, sess, "review_tx")
+				require.ErrorContains(t, err, "transaction already in progress")
+				require.Zero(t, count, "unsettled handles must not bypass rollback protection")
+				require.Same(t, owned, sess.CurrentTransaction())
+				require.NoError(t, owned.Rollback(ctx))
+				require.NoError(t, reviewLiveExplain(t, runner, "SELECT pg_temp.review_tx_write()", async))
+				require.Zero(t, rowCount(t, ctx, sess, "review_tx"), "settled ownership permits a runner-owned rollback wrap")
+			})
+		}
+	}
+}

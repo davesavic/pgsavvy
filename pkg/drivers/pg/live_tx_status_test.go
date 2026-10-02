@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -113,4 +114,32 @@ func TestOnTerminateClearsActiveTx(t *testing.T) {
 	require.Nil(t, s.activeTx)
 	status, _ = s.LiveTxStatus()
 	require.Equal(t, models.TxStatus(""), status)
+}
+
+func TestReview_txLiveBackendStatusOverridesShadow(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  byte
+		want models.TxStatus
+	}{
+		{name: "active", raw: 'T', want: models.TxActive},
+		{name: "aborted", raw: 'E', want: models.TxAbortedInTx},
+		{name: "idle", raw: 'I'},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStubSession()
+			// LiveTxStatus must read the completed-operation cache, not pgConn.
+			s.pgConn = &pgconn.PgConn{}
+			s.cachedTxStatus.Store(uint32(tc.raw))
+			s.activeTx = newPgTransaction(&fakeTx{}, nil)
+			require.NoError(t, s.activeTx.Savepoint(context.Background(), "sp1"))
+			status, names := s.LiveTxStatus()
+			require.Equal(t, tc.want, status)
+			if tc.want == "" {
+				require.Nil(t, names)
+			} else {
+				require.Equal(t, []string{"sp1"}, names)
+			}
+		})
+	}
 }
