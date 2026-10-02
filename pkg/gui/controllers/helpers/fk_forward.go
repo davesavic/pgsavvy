@@ -296,6 +296,12 @@ func (h *FKForwardHelper) Jump(ctx context.Context, tab CurrentTab, cursorRow, c
 
 	label := buildFKForwardLabel(chosen, args)
 	if err := h.tabs.OpenResultTab(label, rh); err != nil {
+		if rh != nil {
+			// Tab ownership transfers only on success. Cancel alone does not
+			// finish the handle; Close must release the session even if cancel fails.
+			_ = rh.Cancel()
+			_ = rh.Rows().Close()
+		}
 		// ErrTabCapReached: surface the "unpin a tab" guidance via the
 		// toast. Caller still gets the error so disabling-tests pass.
 		if errors.Is(err, ui.ErrTabCapReached) {

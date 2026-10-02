@@ -3,10 +3,12 @@ package helpers_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/davesavic/pgsavvy/pkg/drivers"
 	helpers "github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -129,6 +131,127 @@ func newHelper(t *testing.T, deps helpers.FKForwardDeps) *helpers.FKForwardHelpe
 }
 
 // --- Tests ---------------------------------------------------------------
+
+type reviewFKRows struct {
+	events   *[]string
+	closeErr error
+}
+
+func (r *reviewFKRows) Columns() []models.ColumnMeta { return nil }
+func (r *reviewFKRows) QueryID() models.QueryID      { return models.QueryID{Nonce: 7} }
+func (r *reviewFKRows) RowsAffected() int64          { return 0 }
+func (r *reviewFKRows) Next(context.Context) (models.Row, bool, error) {
+	return models.Row{}, false, nil
+}
+
+func (r *reviewFKRows) Close() error {
+	*r.events = append(*r.events, "close")
+	return r.closeErr
+}
+
+type reviewFKSession struct {
+	*fakeSession
+	rows drivers.RowStream
+}
+
+func (s *reviewFKSession) Stream(context.Context, models.Query) (drivers.RowStream, error) {
+	return s.rows, nil
+}
+
+type reviewFKConn struct {
+	drivers.Connection
+	events    *[]string
+	cancelErr error
+}
+
+func (c *reviewFKConn) Cancel(context.Context, models.QueryID) error {
+	*c.events = append(*c.events, "cancel")
+	return c.cancelErr
+}
+
+func TestReview_fk_stream_disposal(t *testing.T) {
+	cancelErr := errors.New("synthetic cancellation failure")
+	closeErr := errors.New("synthetic row close failure")
+	tabErr := errors.New("synthetic tab rejection")
+	runErr := errors.New("synthetic query failure")
+	for _, tc := range []struct {
+		name                        string
+		tabErr, cancelErr, closeErr error
+		runErr                      error
+	}{
+		{name: "all_pinned", tabErr: ui.ErrTabCapReached},
+		{name: "cancel_failure", tabErr: ui.ErrTabCapReached, cancelErr: cancelErr},
+		{name: "other_rejection", tabErr: tabErr},
+		{name: "close_failure", tabErr: ui.ErrTabCapReached, closeErr: closeErr},
+		{name: "both_cleanup_failures", tabErr: tabErr, cancelErr: cancelErr, closeErr: closeErr},
+		{name: "accepted"},
+		{name: "query_failure", runErr: runErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var events []string
+			rows := &reviewFKRows{events: &events, closeErr: tc.closeErr}
+			conn := &reviewFKConn{events: &events, cancelErr: tc.cancelErr}
+			sqlSess := session.New(conn, &reviewFKSession{fakeSession: &fakeSession{id: 7}, rows: rows}, session.Options{})
+			rh, err := sqlSess.Stream(context.Background(), models.Query{SQL: "SELECT 1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = rh.Rows().Close()
+				_ = sqlSess.Close()
+			})
+			tabs := &fakeTabs{err: tc.tabErr}
+			jumps := &fakeJumpList{}
+			toast := &fakeToast{}
+			h := newHelper(t, helpers.FKForwardDeps{
+				Cache:  &fakeCache{fks: []models.ForeignKey{simpleFK()}},
+				Runner: &fakeRunner{rh: rh, err: tc.runErr}, Tabs: tabs, JumpList: jumps, Toast: toast,
+			})
+			tab := &fakeTab{schema: "app", table: "orders", cols: []string{"user_id"}, rows: map[int][]any{0: {int64(1)}}}
+			err = h.Jump(context.Background(), tab, 0, 0)
+			wantErr := tc.tabErr
+			if tc.runErr != nil {
+				wantErr = tc.runErr
+			}
+			if !errors.Is(err, wantErr) {
+				t.Fatalf("Jump error = %v, want primary error %v", err, wantErr)
+			}
+			rejected := tc.tabErr != nil && tc.runErr == nil
+			var wantEvents []string
+			if rejected {
+				wantEvents = []string{"cancel", "close"}
+			}
+			if !reflect.DeepEqual(events, wantEvents) {
+				t.Errorf("cleanup events = %v, want %v exactly once in order", events, wantEvents)
+			}
+			select {
+			case <-rh.Done():
+				if !rejected {
+					t.Error("unrejected stream was disposed by helper")
+				}
+				if !errors.Is(rh.Err(), tc.closeErr) {
+					t.Errorf("terminal close error = %v, want %v", rh.Err(), tc.closeErr)
+				}
+			default:
+				if rejected {
+					t.Error("rejected stream still owns session lock")
+				}
+			}
+			if tc.runErr == nil && (tabs.openCall != 1 || tabs.gotRH != rh) {
+				t.Error("tab allocation did not receive the original handle once")
+			}
+			if tc.runErr != nil && tabs.openCall != 0 {
+				t.Error("query failure must not attempt tab allocation")
+			}
+			if len(jumps.pushed) != 1 {
+				t.Error("origin jump entry must survive allocation failure")
+			}
+			if errors.Is(tc.tabErr, ui.ErrTabCapReached) && (len(toast.messages) != 1 || !strings.Contains(toast.messages[0], "unpin a tab")) {
+				t.Error("tab-cap guidance was not preserved")
+			}
+		})
+	}
+}
 
 func TestFKForward_SimpleFK_OpensTabWithParameterisedSQL(t *testing.T) {
 	t.Parallel()

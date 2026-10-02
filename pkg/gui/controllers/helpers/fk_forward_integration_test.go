@@ -11,8 +11,11 @@ package helpers_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
@@ -86,6 +89,105 @@ func drainRows(t *testing.T, rh *session.RunHandle) []models.Row {
 type fakeTabsRecording struct {
 	label string
 	rh    *session.RunHandle
+}
+
+type reviewFKPinnedTabs struct {
+	*ui.ResultTabsHelper
+	rh *session.RunHandle
+}
+
+func (r *reviewFKPinnedTabs) OpenResultTab(label string, rh *session.RunHandle) error {
+	r.rh = rh
+	return r.ResultTabsHelper.OpenResultTab(label, rh)
+}
+
+func TestReview_fk_stream_live_all_pinned_releases_session(t *testing.T) {
+	sqlSess := openIntegrationSQLSession(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	seed, err := sqlSess.Stream(ctx, models.Query{SQL: `SELECT user_id, role_id FROM app.user_roles ORDER BY user_id, role_id LIMIT 1`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRows := drainRows(t, seed)
+	if len(seedRows) != 1 {
+		t.Fatal("fixture must contain the seeded FK row")
+	}
+	tabs := &reviewFKPinnedTabs{ResultTabsHelper: ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{MaxTabs: 1})}
+	t.Cleanup(tabs.CloseAll)
+	if err := tabs.ResultTabsHelper.OpenResultTab("pinned", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !tabs.PinActive() {
+		t.Fatal("fixture tab was not pinned")
+	}
+	runner := data.NewQueryRunnerForSession(sqlSess, drivers.Capabilities{})
+	jumps := ui.NewResultJumpList()
+	h := helpers.NewFKForwardHelper(helpers.FKForwardDeps{Cache: sqlSess.FKCache(), Runner: runner, Tabs: tabs, JumpList: jumps, Limit: 10})
+	tab := &fakeTab{
+		slot: 0, id: 100, schema: "app", table: "user_roles", cols: []string{"user_id", "role_id"},
+		rows: map[int][]any{0: seedRows[0].Values},
+	}
+	for range 2 {
+		if err := h.Jump(ctx, tab, 0, 0); !errors.Is(err, ui.ErrTabCapReached) {
+			t.Fatalf("Jump error = %v, want ErrTabCapReached", err)
+		}
+		rejected := tabs.rh
+		if rejected == nil {
+			t.Fatal("real tab manager never received the rejected handle")
+		}
+		t.Cleanup(func() {
+			_ = rejected.Cancel()
+			_ = rejected.Rows().Close()
+		})
+		select {
+		case <-rejected.Done():
+		default:
+			t.Error("rejected handle did not terminate before Jump returned")
+		}
+		if tabs.Count() != 1 {
+			t.Error("all-pinned rejection changed existing tab ownership")
+		}
+
+		// Call SQLSession directly: QueryRunner preemption must not mask a leak.
+		type reply struct {
+			rh  *session.RunHandle
+			err error
+		}
+		started := make(chan struct{})
+		next := make(chan reply, 1)
+		go func() {
+			close(started)
+			rh, err := sqlSess.Stream(ctx, models.Query{SQL: "SELECT 42"})
+			next <- reply{rh, err}
+		}()
+		<-started
+		var result reply
+		select {
+		case result = <-next:
+		case <-time.After(2 * time.Second):
+			// A failing baseline must release the orphan and join its waiter.
+			_ = rejected.Cancel()
+			_ = rejected.Rows().Close()
+			select {
+			case result = <-next:
+			case <-time.After(5 * time.Second):
+				t.Fatal("query waiter did not settle after explicit cleanup")
+			}
+			t.Error("next query blocked on the rejected FK stream")
+		}
+		if result.err != nil {
+			t.Fatalf("next query: %v", result.err)
+		}
+		t.Cleanup(func() { _ = result.rh.Rows().Close() })
+		rows := drainRows(t, result.rh)
+		if len(rows) != 1 || len(rows[0].Values) != 1 || fmt.Sprint(rows[0].Values[0]) != "42" {
+			t.Fatalf("next query rows = %v, want one row containing 42", rows)
+		}
+	}
+	if jumps.Len() != 2 {
+		t.Errorf("jump history length = %d, want two rejected jump origins", jumps.Len())
+	}
 }
 
 func (f *fakeTabsRecording) OpenResultTab(label string, rh *session.RunHandle) error {
