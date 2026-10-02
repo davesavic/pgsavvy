@@ -1,6 +1,8 @@
 package common
 
 import (
+	"bytes"
+	"log/slog"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -374,6 +376,124 @@ func TestLastTableNameSnapshot(t *testing.T) {
 	s.SetLastTableName("conn1", "users")
 	require.Equal(t, "users", s.LastTableNameSnapshot("conn1"))
 	require.Empty(t, s.LastTableNameSnapshot("conn2"), "different connID returns empty")
+}
+
+func TestReview_picker_state(t *testing.T) {
+	for _, mode := range []string{"synchronous", "debounced"} {
+		for _, directory := range []string{"", "/remembered/資料"} {
+			for _, failSave := range []bool{false, true} {
+				name := mode + "/populated"
+				if directory == "" {
+					name = mode + "/empty"
+				}
+				if failSave {
+					name += "/failed_save"
+				} else {
+					name += "/saved"
+				}
+				t.Run(name, func(t *testing.T) {
+					fs := afero.NewMemMapFs()
+					const path = "/state.yml"
+					seed := &AppState{LastPickerDirectory: directory, LastConnectionID: "before"}
+					require.NoError(t, seed.Save(fs, path))
+					require.NoError(t, seed.Load(fs, path))
+					before, err := afero.ReadFile(fs, path)
+					require.NoError(t, err)
+					storeFs := fs
+					if failSave {
+						storeFs = afero.NewReadOnlyFs(fs)
+					}
+					clk := newFakeClock()
+					s := NewAppStateStore(storeFs, path, clk)
+					t.Cleanup(func() { _ = s.Close() })
+					var logOutput bytes.Buffer
+					s.SetLogger(slog.New(slog.NewJSONHandler(&logOutput, &slog.HandlerOptions{Level: slog.LevelDebug})))
+					require.NoError(t, s.Load())
+					s.MutateAndSave(func(a *AppState) {
+						a.LastConnectionID = "after"
+						a.LastResultViewMode = "expanded"
+					})
+					if mode == "synchronous" {
+						err = s.Save()
+						// Synchronous Save returns its error without recording LastSaveErr.
+						require.NoError(t, s.LastSaveErr())
+					} else {
+						clk.Advance(DebounceWindow - time.Millisecond)
+						stillBefore, readErr := afero.ReadFile(fs, path)
+						require.NoError(t, readErr)
+						require.Equal(t, before, stillBefore)
+						clk.Advance(time.Millisecond)
+						err = s.Flush()
+						require.Equal(t, err, s.LastSaveErr())
+					}
+					if failSave {
+						require.Error(t, err)
+						after, readErr := afero.ReadFile(fs, path)
+						require.NoError(t, readErr)
+						require.Equal(t, before, after, "failed save must not replace existing state")
+						if mode == "debounced" {
+							require.Contains(t, logOutput.String(), `"evt":"appstate_save_fire"`)
+							require.NotContains(t, logOutput.String(), `"err":null`)
+						}
+					} else {
+						require.NoError(t, err)
+					}
+					s.mu.Lock()
+					liveDirectory := s.state.LastPickerDirectory
+					s.mu.Unlock()
+					require.Equal(t, directory, liveDirectory, "saving must not mutate the live directory")
+					reloaded := &AppState{}
+					require.NoError(t, reloaded.Load(fs, path))
+					require.Equal(t, directory, reloaded.LastPickerDirectory)
+					if failSave {
+						require.Equal(t, seed, reloaded)
+					} else {
+						require.Equal(t, "after", reloaded.LastConnectionID)
+						require.Equal(t, "expanded", reloaded.LastResultViewMode)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestReview_picker_state_copy(t *testing.T) {
+	orig := &AppState{
+		LastConnectionID:         "connection",
+		RecentConnectionIDs:      []string{"connection"},
+		LastBufferUUIDs:          map[string]string{"connection": "buffer"},
+		LastTheme:                "dark",
+		LastResultViewMode:       "expanded",
+		StartupTipsSeenAt:        time.Unix(1_700_000_000, 0).UTC(),
+		Version:                  "v1.2.3",
+		StatementTimeoutOverride: map[string]string{"connection": "1000"},
+		HiddenSchemas:            map[string][]string{"connection": {"private"}},
+		HiddenColumns:            map[string]map[string][]string{"connection": {"users": {"hidden"}}},
+		LastSessionSettings:      map[string]map[string]string{"connection": {"application_name": "test"}},
+		LastSchemaName:           map[string]string{"connection": "public"},
+		LastTableName:            map[string]string{"connection": "users"},
+		LastPickerDirectory:      "/remembered/資料",
+	}
+	cp := deepCopyAppState(orig)
+	require.Equal(t, orig, cp, "populated snapshots must retain every field")
+	cp.RecentConnectionIDs[0] = "changed"
+	cp.LastBufferUUIDs["connection"] = "changed"
+	cp.StatementTimeoutOverride["connection"] = "changed"
+	cp.HiddenSchemas["connection"][0] = "changed"
+	cp.HiddenColumns["connection"]["users"][0] = "changed"
+	cp.LastSessionSettings["connection"]["application_name"] = "changed"
+	cp.LastSchemaName["connection"] = "changed"
+	cp.LastTableName["connection"] = "changed"
+	require.Equal(t, []string{"connection"}, orig.RecentConnectionIDs)
+	require.Equal(t, "buffer", orig.LastBufferUUIDs["connection"])
+	require.Equal(t, "1000", orig.StatementTimeoutOverride["connection"])
+	require.Equal(t, []string{"private"}, orig.HiddenSchemas["connection"])
+	require.Equal(t, []string{"hidden"}, orig.HiddenColumns["connection"]["users"])
+	require.Equal(t, "test", orig.LastSessionSettings["connection"]["application_name"])
+	require.Equal(t, "public", orig.LastSchemaName["connection"])
+	require.Equal(t, "users", orig.LastTableName["connection"])
+	require.Equal(t, &AppState{}, deepCopyAppState(nil))
+	require.Equal(t, &AppState{}, deepCopyAppState(&AppState{}))
 }
 
 func TestDeepCopyIsolatesNewMapFields(t *testing.T) {

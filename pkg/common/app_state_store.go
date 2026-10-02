@@ -462,11 +462,12 @@ func deepCopyAppState(a *AppState) *AppState {
 		return &AppState{}
 	}
 	cp := &AppState{
-		LastConnectionID:   a.LastConnectionID,
-		LastTheme:          a.LastTheme,
-		LastResultViewMode: a.LastResultViewMode,
-		StartupTipsSeenAt:  a.StartupTipsSeenAt,
-		Version:            a.Version,
+		LastConnectionID:    a.LastConnectionID,
+		LastTheme:           a.LastTheme,
+		LastResultViewMode:  a.LastResultViewMode,
+		StartupTipsSeenAt:   a.StartupTipsSeenAt,
+		Version:             a.Version,
+		LastPickerDirectory: a.LastPickerDirectory,
 	}
 	if a.RecentConnectionIDs != nil {
 		cp.RecentConnectionIDs = make([]string, len(a.RecentConnectionIDs))
