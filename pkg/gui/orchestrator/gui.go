@@ -235,6 +235,7 @@ type Gui struct {
 
 	// Connection-lifecycle state surfaced by the activeConnAdapter.
 	connectionState connectionState
+	connectionLife  connectionLifecycle
 
 	// Query-execution state surfaced by the query runtime.
 	queryState queryState
@@ -1193,14 +1194,21 @@ func (g *Gui) deleteConnectionFromModal(connName string) error {
 			g.resultTabsH.PreemptInFlight()
 		}
 		if g.queryState.activeSQLSession != nil {
-			_ = g.queryState.activeSQLSession.Close()
 			g.queryState.activeSQLSession = nil
 		}
 		if g.queryState.queryRunner != nil {
 			g.queryState.queryRunner.Unbind()
 		}
-		if g.connectHelper != nil {
-			g.connectHelper.Disconnect()
+		g.connectionLife.mu.Lock()
+		owner := g.connectionLife.owner
+		if owner != nil && owner.profile != connName {
+			owner = nil
+		}
+		g.connectionLife.mu.Unlock()
+		if owner != nil {
+			g.OnWorker(func(_ gocui.Task) error {
+				return g.retireConnection(owner)
+			})
 		}
 		// Drop warmed completion metadata for the now-closed
 		// connection so a later Connect to a different profile cannot read a
@@ -1662,8 +1670,8 @@ func logPanicStack(logger *slog.Logger, recovered any) {
 const closeDrainBound = 2 * time.Second
 
 // Close runs the M15c shutdown sequence:
-//  1. Set the atomic closed gate (concurrent Close calls become no-ops;
-//     OnUIThread / OnUIThreadContentOnly stop delivering into the dead UI)
+//  1. Set the atomic closed gate and cancel the connect attempt (concurrent
+//     Close calls become no-ops; UI publication stops delivering into the dead UI)
 //  2. Flush the query-editor buffer
 //  3. PreemptInFlight — stop in-flight result-tab streams (solves the
 //     parked-RBM-worker class of hang; see below)
@@ -1675,7 +1683,7 @@ const closeDrainBound = 2 * time.Second
 //     dead UI afterwards
 //  6. Wait for in-flight OnWorker goroutines (bounded — fail loud on
 //     expiry instead of hanging on a leaked worker)
-//  7. activeSQLSession.Close
+//  7. Close published/pending query sessions, then helper session/pool/tunnel
 //  8. queryRunner.Unbind
 //  9. history.Close
 //  10. store.Flush + store.Close
@@ -1693,6 +1701,12 @@ func (g *Gui) Close() error {
 	if !g.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	g.connectionState.connectGen.Add(1)
+	g.connectionLife.mu.Lock()
+	if g.connectionLife.cancel != nil {
+		g.connectionLife.cancel()
+	}
+	g.connectionLife.mu.Unlock()
 	// Flush the query editor buffer to disk synchronously. The MainLoop
 	// has already exited so HandleFocusLost was never fired — save the
 	// buffer directly rather than dispatching via OnWorker.
@@ -1753,6 +1767,10 @@ func (g *Gui) Close() error {
 			firstErr = err
 		}
 		g.queryState.activeSQLSession = nil
+	}
+	// Pending publications own sessions too; their UI closures may never run.
+	if err := g.retireConnection(nil); err != nil && firstErr == nil {
+		firstErr = err
 	}
 	// Unbind so any controller that still holds the runner sees
 	// HasSession() == false. Also resets the runner's `last` handle so

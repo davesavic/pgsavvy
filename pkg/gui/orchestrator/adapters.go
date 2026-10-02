@@ -140,6 +140,51 @@ type connectInvoker struct {
 	testCancelFn context.CancelFunc
 }
 
+// ioMu serializes helper lifecycle I/O; mu protects publication ownership only.
+// The MainLoop never takes ioMu or waits for resource disposal.
+type connectionLifecycle struct {
+	ioMu   sync.Mutex
+	mu     sync.Mutex
+	owner  *connectionOwner
+	cancel context.CancelFunc
+}
+
+type connectionOwner struct {
+	profile   string
+	sqlSess   *session.SQLSession
+	published bool
+}
+
+func (g *Gui) retireConnection(want *connectionOwner) error {
+	g.connectionLife.ioMu.Lock()
+	defer g.connectionLife.ioMu.Unlock()
+	return g.retireConnectionLocked(want)
+}
+
+// Caller holds ioMu. A delayed retirement can only dispose its captured owner,
+// never the replacement installed by a later connect.
+func (g *Gui) retireConnectionLocked(want *connectionOwner) error {
+	g.connectionLife.mu.Lock()
+	owner := g.connectionLife.owner
+	if want != nil && owner != want {
+		g.connectionLife.mu.Unlock()
+		return nil
+	}
+	g.connectionLife.owner = nil
+	g.connectionLife.mu.Unlock()
+	var err error
+	if owner != nil && owner.sqlSess != nil {
+		err = owner.sqlSess.Close()
+	}
+	if g.queryState.queryRunner != nil {
+		g.queryState.queryRunner.Unbind()
+	}
+	if g.connectHelper != nil {
+		g.connectHelper.Disconnect()
+	}
+	return err
+}
+
 func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection) error {
 	if c == nil || c.helper == nil {
 		return nil
@@ -557,27 +602,45 @@ func (c *connectInvoker) Retry() {
 // differs from the one currently active, so connectWithGen can re-Connect
 // through the shared ConnectHelper (which rejects a second Connect while a
 // Session is open). It is a no-op on a first connect (no active profile) and
-// on a same-profile re-select. Runs on the worker — the same lane, and the
+// on a published same-profile re-select. Pending publication is retired even
+// for the same profile. Runs with lifecycle ioMu held — the same lane and
 // same teardown ordering, as reconnectInvoker.Reconnect.
 func (c *connectInvoker) teardownForSwitch(profile *models.Connection) {
 	if c.g == nil || profile == nil {
 		return
 	}
-	active := c.g.connectionState.activeConnID
-	if active == "" || active == profile.Name {
+	c.g.connectionLife.mu.Lock()
+	owner := c.g.connectionLife.owner
+	keep := owner == nil || (owner.published && owner.profile == profile.Name)
+	c.g.connectionLife.mu.Unlock()
+	if keep {
 		return
 	}
-	// Close the query session FIRST — it releases its pooled conn; closing the
-	// pool (helper.Disconnect) before that deadlocks waiting on the still-held
-	// conn.
-	if c.g.queryState.activeSQLSession != nil {
-		_ = c.g.queryState.activeSQLSession.Close()
-		c.g.queryState.activeSQLSession = nil
-	}
-	c.helper.Disconnect()
+	_ = c.g.retireConnectionLocked(owner)
 }
 
 func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Connection, gen uint64, reporter drivers.ProgressReporter) error {
+	if c.g != nil {
+		c.g.connectionLife.ioMu.Lock()
+		defer c.g.connectionLife.ioMu.Unlock()
+		if c.isStaleConnect(gen) {
+			return nil
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		c.g.connectionLife.mu.Lock()
+		c.g.connectionLife.cancel = cancel
+		if c.g.closed.Load() {
+			cancel()
+		}
+		c.g.connectionLife.mu.Unlock()
+		defer func() {
+			cancel()
+			c.g.connectionLife.mu.Lock()
+			c.g.connectionLife.cancel = nil
+			c.g.connectionLife.mu.Unlock()
+		}()
+	}
 	// --- WORKER PHASE: all blocking I/O runs here (Connect itself runs on
 	// the worker goroutine — connections_controller.go schedules it via
 	// OnWorker). Nothing in this phase writes GUI state the MainLoop reads;
@@ -598,11 +661,17 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		c.routeConnectError(gen, err)
 		return err
 	}
+	owner := &connectionOwner{profile: profile.Name}
+	if c.g != nil {
+		c.g.connectionLife.mu.Lock()
+		c.g.connectionLife.owner = owner
+		c.g.connectionLife.mu.Unlock()
+	}
 	if c.isStaleConnect(gen) {
 		// A newer activation superseded this one mid-dial. Tear down the
 		// freshly-opened schema-rail session so we don't leak it, and drop
 		// the result without touching activeConn / the schemas rail.
-		c.helper.Disconnect()
+		_ = c.g.retireConnectionLocked(owner)
 		return nil
 	}
 	// Open the query session (I/O part of wireQueryRuntime). This acquires
@@ -615,7 +684,11 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		// error verbatim; a follow-up reconnect goes through the same
 		// path cleanly. setActiveConn is marshalled onto the UI thread to
 		// serialise with the MainLoop reads of activeConnID.
-		c.helper.Disconnect()
+		if c.g != nil {
+			_ = c.g.retireConnectionLocked(owner)
+		} else {
+			c.helper.Disconnect()
+		}
 		if !c.isStaleConnect(gen) {
 			c.runOnUIThread(func() error {
 				if c.isStaleConnect(gen) {
@@ -628,6 +701,7 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		}
 		return err
 	}
+	owner.sqlSess = rt.sqlSess
 	// T3 AD3: Objects is activated LATE — here, immediately before the schema
 	// load — NOT on the auth boundary. A wireQueryRuntimeIO/AcquireSession
 	// failure in the gap above would otherwise be mis-rendered as
@@ -696,12 +770,17 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 	// activeSQLSession is never written for a superseded connect and no
 	// session is orphaned (TOCTOU leak fix).
 	c.runOnUIThread(func() error {
-		if c.isStaleConnect(gen) {
-			c.helper.Disconnect()
-			if rt.sqlSess != nil {
-				_ = rt.sqlSess.Close()
+		if c.g != nil {
+			c.g.connectionLife.mu.Lock()
+			if c.isStaleConnect(gen) || c.g.connectionLife.owner != owner {
+				c.g.connectionLife.mu.Unlock()
+				c.g.OnWorker(func(_ gocui.Task) error {
+					return c.g.retireConnection(owner)
+				})
+				return nil
 			}
-			return nil
+			defer c.g.connectionLife.mu.Unlock()
+			owner.published = true
 		}
 		// Clear result tabs from the outgoing connection: they are bound
 		// to the old session and would otherwise display stale results
@@ -800,7 +879,7 @@ func (c *connectInvoker) isStaleConnect(gen uint64) bool {
 	if c == nil || c.g == nil {
 		return false
 	}
-	return c.g.connectionState.connectGen.Load() != gen
+	return c.g.closed.Load() || c.g.connectionState.connectGen.Load() != gen
 }
 
 // routeConnectError marshals the failure onto the UI thread and paints it
@@ -1690,17 +1769,13 @@ func (r *reconnectInvoker) Reconnect(ctx context.Context, profile *models.Connec
 	if r.helper == nil || r.inv == nil {
 		return fmt.Errorf("reconnect: not wired")
 	}
-	// Tear down the query session FIRST. SQLSession.Close releases its
-	// inner pool conn; if we close the pool first (helper.Disconnect) the
-	// pool's Close blocks forever waiting for that outstanding conn to be
-	// released, deadlocking the reconnect.
-	if r.inv.g != nil && r.inv.g.queryState.activeSQLSession != nil {
-		_ = r.inv.g.queryState.activeSQLSession.Close()
-		r.inv.g.queryState.activeSQLSession = nil
+	if r.inv.g != nil {
+		if err := r.inv.g.retireConnection(nil); err != nil {
+			return err
+		}
+	} else {
+		r.helper.Disconnect()
 	}
-	// Tear down the schema-rail session + pool. This also satisfies the
-	// "data: already connected (call Disconnect first)" guard in Connect.
-	r.helper.Disconnect()
 	// Drop ALL warmed completion metadata from the prior
 	// connection AND the warmer's per-key cooldown/in-flight bookkeeping, so no
 	// stale entry survives the reconnect and a table that was in cooldown at

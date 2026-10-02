@@ -46,9 +46,15 @@ type wireFakeSession struct {
 	statsErr       error
 	schemasErr     error
 	schemasBlock   chan struct{}
+	closeHook      func(models.SessionID)
 }
 
-func (s *wireFakeSession) Close() error         { return nil }
+func (s *wireFakeSession) Close() error {
+	if s.closeHook != nil {
+		s.closeHook(s.id)
+	}
+	return nil
+}
 func (s *wireFakeSession) ID() models.SessionID { return s.id }
 func (s *wireFakeSession) ListDatabases(_ context.Context) ([]models.Database, error) {
 	return nil, nil
@@ -184,15 +190,26 @@ type wireFakeConn struct {
 	// schemasBlock, when set, blocks ListSchemas on it until the ctx is
 	// cancelled — used to exercise the Objects schema-load TIMEOUT path so the
 	// row fails into ✗ rather than hanging on "Loading objects…" (T3 AD7).
-	schemasBlock chan struct{}
+	schemasBlock     chan struct{}
+	sessionCloseHook func(models.SessionID)
+	closeHook        func()
+	acquireHook      func(int32)
 }
 
-func (c *wireFakeConn) Close() error                                     { return nil }
+func (c *wireFakeConn) Close() error {
+	if c.closeHook != nil {
+		c.closeHook()
+	}
+	return nil
+}
 func (c *wireFakeConn) Ping(_ context.Context) error                     { return nil }
 func (c *wireFakeConn) ServerVersion() string                            { return "fake-wire-1.0" }
 func (c *wireFakeConn) Cancel(_ context.Context, _ models.QueryID) error { return nil }
 func (c *wireFakeConn) AcquireSession(_ context.Context) (drivers.Session, error) {
 	n := c.acquired.Add(1)
+	if c.acquireHook != nil {
+		c.acquireHook(n)
+	}
 	return &wireFakeSession{
 		id:             models.SessionID(n),
 		schemas:        c.schemas,
@@ -209,6 +226,7 @@ func (c *wireFakeConn) AcquireSession(_ context.Context) (drivers.Session, error
 		statsErr:       c.statsErr,
 		schemasErr:     c.schemasErr,
 		schemasBlock:   c.schemasBlock,
+		closeHook:      c.sessionCloseHook,
 	}, nil
 }
 

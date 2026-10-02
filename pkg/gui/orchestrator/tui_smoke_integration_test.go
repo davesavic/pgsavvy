@@ -83,6 +83,109 @@ func requireSmokePG(t *testing.T) string {
 	return dsn
 }
 
+type cleanupLiveDriver struct {
+	drivers.Driver
+	opened chan *cleanupLiveConn
+}
+
+type cleanupLiveConn struct {
+	drivers.Connection
+	sessions []drivers.Session
+}
+
+func (d *cleanupLiveDriver) Open(ctx context.Context, p drivers.ConnectionProfile, reporter drivers.ProgressReporter) (drivers.Connection, error) {
+	c, err := d.Driver.Open(ctx, p, reporter)
+	if err != nil {
+		return nil, err
+	}
+	conn := &cleanupLiveConn{Connection: c}
+	d.opened <- conn
+	return conn, nil
+}
+
+func (c *cleanupLiveConn) AcquireSession(ctx context.Context) (drivers.Session, error) {
+	s, err := c.Connection.AcquireSession(ctx)
+	if err == nil {
+		c.sessions = append(c.sessions, s)
+	}
+	return s, err
+}
+
+func TestReview_cleanup_live(t *testing.T) {
+	dsn := requireSmokePG(t)
+	for _, scenario := range []string{"published", "queued_shutdown", "stale_publication"} {
+		t.Run(scenario, func(t *testing.T) {
+			g, d := cleanupQueuedGui(t)
+			opened := make(chan *cleanupLiveConn, 1)
+			name := "cleanup-live-" + itoaInt64(uniqueDriverNameCounter.Add(1))
+			drivers.Register(name, func(ctx context.Context) (drivers.Driver, error) {
+				drv, err := pg.New(nil)(ctx)
+				if err != nil {
+					return nil, err
+				}
+				return &cleanupLiveDriver{Driver: drv, opened: opened}, nil
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := g.HelperBagForTest().Connect.Connect(ctx, &models.Connection{Name: name, Driver: name, DSN: dsn}); err != nil {
+				t.Fatal("isolated live connect failed")
+			}
+			conn := <-opened
+			if len(conn.sessions) != 2 {
+				t.Fatalf("acquired %d sessions, want 2", len(conn.sessions))
+			}
+			// Escape hatch for the baseline deadlock; only fixture-owned sessions.
+			defer func() {
+				for _, s := range conn.sessions {
+					_ = s.Close()
+				}
+				_ = conn.Connection.Close()
+			}()
+			if scenario == "published" {
+				d.drainPending()
+			}
+			if scenario == "stale_publication" {
+				g.BumpConnectGenForTest()
+			}
+			done := make(chan error, 1)
+			go func() {
+				if scenario == "stale_publication" {
+					d.drainPending()
+					g.WaitForWorkersForTest()
+					done <- nil
+				} else {
+					done <- g.Close()
+				}
+			}()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(2 * time.Second):
+				_ = conn.sessions[1].Close()
+				select {
+				case <-done:
+				case <-time.After(2 * time.Second):
+					t.Fatal("cleanup remained blocked after fixture session release")
+				}
+				t.Fatal("cleanup deadlocked while second live session was held")
+			}
+			probeCtx, probeCancel := context.WithTimeout(context.Background(), time.Second)
+			defer probeCancel()
+			if err := conn.Ping(probeCtx); err == nil {
+				t.Fatal("owning pool still accepts Ping after retirement")
+			}
+			if scenario != "stale_publication" {
+				d.drainPending()
+				if g.ActiveSQLSessionForTest() != nil {
+					t.Fatal("closed GUI published a live query session")
+				}
+			}
+		})
+	}
+}
+
 // smoke bundles the live components built during setup. Step subtests
 // mutate s.connections as profiles are added so the ConnectionsProvider
 // closure returns the up-to-date slice.
