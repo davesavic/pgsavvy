@@ -2,6 +2,7 @@ package keys
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -69,5 +70,56 @@ func TestMatcher_HandlerErrQuit_Propagates(t *testing.T) {
 	}
 	if msgs := spy.snapshot(); len(msgs) != 0 {
 		t.Errorf("ErrQuit was toasted (%v); quit must not surface a toast", msgs)
+	}
+}
+
+func TestReview_timers_error_boundary(t *testing.T) {
+	for _, kind := range []string{"quit", "ordinary", "disabled", "panic"} {
+		t.Run(kind, func(t *testing.T) {
+			spy := &recordingToastSpy{}
+			calls := 0
+			cmd := &commands.Command{ID: "review." + kind, Handler: func(commands.ExecCtx) error {
+				calls++
+				switch kind {
+				case "quit":
+					return fmt.Errorf("quit: %w", gocui.ErrQuit)
+				case "ordinary":
+					return errors.New("failed\x1b[2J")
+				case "panic":
+					panic("controlled panic")
+				}
+				return nil
+			}}
+			if kind == "disabled" {
+				cmd.DisabledReasonStatic = "disabled"
+			}
+			ts := buildTrieSet(t, []trieEntry{
+				{types.ModeNormal, types.COMMAND_LINE, []Key{keyOf('z')}, cmd},
+				{types.ModeNormal, types.COMMAND_LINE, []Key{keyOf('z'), keyOf('x')}, fixtureCmd("review.long")},
+			})
+			m, queue := reviewTimerMatcher(t, ts, types.ModeNormal, spy.toast)
+			reviewDispatch(t, m, types.COMMAND_LINE, keyOf('z'))
+			fn := reviewQueueExpiry(t, m, queue)
+			if calls != 0 || len(spy.snapshot()) != 0 {
+				t.Fatal("handler boundary ran before UI drain")
+			}
+			err := fn()
+			if kind == "quit" {
+				if !errors.Is(err, gocui.ErrQuit) || len(spy.snapshot()) != 0 {
+					t.Fatalf("quit err=%v toasts=%v", err, spy.snapshot())
+				}
+			} else if err != nil {
+				t.Fatalf("non-quit escaped timed boundary: %v", err)
+			}
+			if kind == "ordinary" || kind == "disabled" {
+				msgs := spy.snapshot()
+				if len(msgs) != 1 || strings.Contains(msgs[0], "\x1b") {
+					t.Fatalf("unsafe/missing boundary toast: %v", msgs)
+				}
+			}
+			if kind == "disabled" && calls != 0 {
+				t.Fatal("disabled timed handler ran")
+			}
+		})
 	}
 }

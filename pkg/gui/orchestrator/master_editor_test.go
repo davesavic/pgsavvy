@@ -1,17 +1,30 @@
 package orchestrator_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
+	"github.com/spf13/afero"
 
+	"github.com/davesavic/pgsavvy/pkg/common"
+	"github.com/davesavic/pgsavvy/pkg/config"
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/keys"
 	"github.com/davesavic/pgsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query"
 )
 
 // editorTestRig bundles the moving parts a master-editor test needs.
@@ -19,6 +32,173 @@ type editorTestRig struct {
 	matcher *keys.Matcher
 	editor  gocui.Editor
 	disp    orchestrator.Dispatcher
+}
+
+func reviewAmbiguousTrie(mode types.Mode, scope types.ContextKey, leaf *commands.Command) *keys.TrieSet {
+	b := keys.NewTrieBuilder()
+	for i, seq := range [][]keys.Key{{{Code: 'z'}}, {{Code: 'z'}, {Code: 'x'}}} {
+		cmd := leaf
+		if i == 1 {
+			cmd = &commands.Command{ID: "review.long", Handler: func(commands.ExecCtx) error { return nil }}
+		}
+		b.InsertDefault(&keys.ChordBinding{Sequence: seq, Mode: mode, Scope: scope, ActionID: cmd.ID, Source: keys.ShippedDefault}, cmd)
+	}
+	trie, _ := b.Build()
+	ts := keys.NewTrieSet()
+	ts.Set(mode, scope, trie)
+	return ts
+}
+
+func TestReview_timers_wired_close(t *testing.T) {
+	for _, closeBeforeDrain := range []bool{false, true} {
+		t.Run(fmt.Sprint(closeBeforeDrain), func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			c := common.NewCommon(slog.New(slog.DiscardHandler), i18n.EnglishTranslationSet(), config.GetDefaultConfig(), &common.AppState{}, fs)
+			g := orchestrator.NewGui(orchestrator.Deps{
+				Common: c, Store: common.NewAppStateStore(fs, "/state.yml", common.DefaultClock()),
+				ConnectionsProvider: func() []models.Connection { return nil },
+				HistoryProvider:     func() (*query.History, error) { return nil, nil },
+			})
+			d := newQueueingDriver()
+			if err := g.UseDriverForTest(d); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = g.Close() })
+			d.drainPending()
+			var calls atomic.Int32
+			g.Matcher().SwapTrieSet(reviewAmbiguousTrie(types.ModeNormal, types.QUERY_EDITOR, &commands.Command{ID: "review.wired", Handler: func(commands.ExecCtx) error { calls.Add(1); return nil }}))
+			if _, err := g.Matcher().Dispatch(types.QUERY_EDITOR, keys.Key{Code: 'z'}); err != nil {
+				t.Fatal(err)
+			}
+			var expiry func() error
+			select {
+			case expiry = <-d.updates:
+			case <-time.After(3 * time.Second):
+				t.Fatalf("production matcher did not enqueue timeout (handler calls=%d)", calls.Load())
+			}
+			if calls.Load() != 0 {
+				t.Fatal("production timeout handler ran before UI drain")
+			}
+			want := int32(1)
+			if closeBeforeDrain {
+				if err := g.Close(); err != nil {
+					t.Fatal(err)
+				}
+				want = 0
+			}
+			if err := expiry(); err != nil || calls.Load() != want {
+				t.Fatalf("timeout delivery err=%v calls=%d, want %d", err, calls.Load(), want)
+			}
+		})
+	}
+}
+
+func TestReview_timers_native(t *testing.T) {
+	for _, mode := range []string{"quit", "tab", "text", "broken"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestReview_timers_native_process$", "-test.v")
+			cmd.Env = append(os.Environ(), "PGSAVVY_TIMER_PROBE="+mode)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("native %s: %v (deadline=%v)\n%s", mode, err, ctx.Err(), out)
+			}
+			t.Logf("%s", out)
+		})
+	}
+}
+
+func TestReview_timers_native_process(t *testing.T) {
+	probe := os.Getenv("PGSAVVY_TIMER_PROBE")
+	if probe == "" {
+		return
+	}
+	g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: 80, Height: 24})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	scope := types.COMMAND_LINE
+	mode := types.ModeCommand
+	store := keys.NewModeStore()
+	store.Set(scope, mode)
+	toasts := 0
+	calls := 0
+	rail := guicontext.NewContextTree(types.ContextTreeDeps{}).SchemaRail
+	ts := buildSingleBindingTrieSet([]keys.Key{{Code: '界'}, {Code: 'x'}}, mode, scope, &commands.Command{ID: "review.text", Handler: func(commands.ExecCtx) error { return nil }})
+	if probe == "quit" || probe == "tab" {
+		ts = reviewAmbiguousTrie(mode, scope, &commands.Command{ID: "review.quit", Handler: func(commands.ExecCtx) error {
+			calls++
+			if probe == "tab" {
+				rail.SetActiveTab(guicontext.SchemaRailTabTables)
+			}
+			return gocui.ErrQuit
+		}})
+	}
+	m, err := keys.NewMatcher(ts, keys.MatcherConfig{
+		Modes: store, TimeoutLen: 10 * time.Millisecond, Toaster: func(string) { toasts++ },
+		OnTimeout: func(fn func() error) {
+			g.Update(func(g *gocui.Gui) error {
+				err := fn()
+				if probe != "quit" && probe != "tab" {
+					v, viewErr := g.View(string(scope))
+					if viewErr != nil {
+						return viewErr
+					}
+					if text := v.TextArea.GetContent(); text != "界" {
+						return fmt.Errorf("timeout text=%q, want 界 in the same UI delivery", text)
+					}
+					return gocui.ErrQuit
+				}
+				return err
+			})
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Cancel()
+	ed := orchestrator.NewMasterEditor(g, m, scope)
+	disp := ed.(orchestrator.Dispatcher)
+	started := false
+	g.SetManagerFunc(func(g *gocui.Gui) error {
+		v, err := g.SetView(string(scope), 0, 0, 60, 10, 0)
+		if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+		if started {
+			return nil
+		}
+		started = true
+		if probe == "quit" || probe == "tab" {
+			_, err := m.Dispatch(scope, keys.Key{Code: 'z'})
+			return err
+		}
+		if _, err := disp.Dispatch(v, gocui.NewKeyRune('界')); err != nil {
+			return err
+		}
+		if probe == "broken" {
+			if _, err := disp.Dispatch(v, gocui.NewKeyRune('o')); err != nil {
+				return err
+			}
+			if text := v.TextArea.GetContent(); text != "界o" {
+				return fmt.Errorf("broken-prefix text=%q, want 界o", text)
+			}
+			return gocui.ErrQuit
+		}
+		return nil
+	})
+	if err := g.MainLoop(); !errors.Is(err, gocui.ErrQuit) {
+		t.Fatalf("MainLoop: %v", err)
+	}
+	if (probe == "quit" || probe == "tab") && (calls != 1 || toasts != 0) {
+		t.Fatalf("timed quit calls=%d toasts=%d", calls, toasts)
+	}
+	if probe == "tab" && rail.ActiveTab() != guicontext.SchemaRailTabTables {
+		t.Fatal("native timed tab switch was not delivered")
+	}
+	t.Logf("native %s: MainLoop exited with ErrQuit; text/error ownership verified", probe)
 }
 
 func buildSingleBindingTrieSet(seq []keys.Key, mode types.Mode, scope types.ContextKey, cmd *commands.Command) *keys.TrieSet {
@@ -159,12 +339,9 @@ func TestMasterEditor_FellThrough(t *testing.T) {
 
 // TestMasterEditor_FlushOnInsertTimeout verifies that an unresolved
 // Insert-mode partial in the master editor causes the Matcher's
-// insert-pending-flush callback to fire. The master editor's own
-// flushRunes performs the actual TextArea write inside gocui.Update on
-// the production path; here we observe the upstream signal (which
-// proves the wiring) using a sync-protected sink. Verifying the
-// TextArea write directly would race against gocui.TextArea's
-// non-concurrency-safe internal state.
+// insert-pending-flush callback to fire. This standalone nil-GUI rig observes
+// the upstream signal using a sync-protected sink. The native timer probes
+// separately verify the actual TextArea write on the scheduled UI lane.
 func TestMasterEditor_FlushOnInsertTimeout(t *testing.T) {
 	cmd := &commands.Command{ID: "noop", Handler: func(commands.ExecCtx) error { return nil }}
 	ts := buildSingleBindingTrieSet([]keys.Key{{Code: 'j'}, {Code: 'k'}}, types.ModeInsert, types.QUERY_EDITOR, cmd)

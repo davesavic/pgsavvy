@@ -84,10 +84,8 @@ func (r DispatchResult) String() string {
 const countMax = 999999
 
 // InsertPendingFlush is the callback shape master Editor
-// registers with the Matcher. The Matcher invokes it from the timer
-// goroutine when a partial sequence in ModeInsert times out without
-// resolving to a leaf, so the buffered runes can be written to the
-// TextArea (per D16).
+// registers with the Matcher. Timeout flushes run on the configured UI
+// scheduler; broken Insert/Command chords flush synchronously in Dispatch.
 type InsertPendingFlush = func(scope types.ContextKey, runes []rune)
 
 // Matcher is the per-process keystroke dispatcher. One Matcher instance
@@ -113,6 +111,7 @@ type Matcher struct {
 	log        DebugLogger
 	sessionLog *slog.Logger
 	toaster    ToastFunc
+	onTimeout  func(func() error)
 
 	mu       sync.Mutex
 	pending  []Key
@@ -122,11 +121,12 @@ type Matcher struct {
 	timer    *time.Timer
 	seq      uint64 // monotonic; stale timer/AfterFunc fires compare against this
 
-	flushMu      sync.RWMutex
-	insertFlush  map[types.ContextKey]InsertPendingFlush
-	timerScope   types.ContextKey
-	timerMode    types.Mode
-	timerPending []Key
+	flushMu         sync.RWMutex
+	insertFlush     map[types.ContextKey]InsertPendingFlush
+	timerScope      types.ContextKey
+	timerInputScope types.ContextKey
+	timerMode       types.Mode
+	timerPending    []Key
 }
 
 // MatcherConfig groups Matcher construction parameters.
@@ -145,6 +145,10 @@ type MatcherConfig struct {
 	// means refusals are silent — handy for unit tests that do not
 	// care about toast emissions.
 	Toaster ToastFunc
+
+	// OnTimeout marshals expiry callbacks to the owning UI lane and delivers
+	// their control errors. Nil runs inline for standalone, non-UI matchers.
+	OnTimeout func(func() error)
 }
 
 // NewMatcher constructs a Matcher with the supplied configuration and
@@ -177,6 +181,7 @@ func NewMatcher(initial *TrieSet, cfg MatcherConfig) (*Matcher, error) {
 		whichkey:    cfg.WhichKey,
 		log:         cfg.Log,
 		toaster:     cfg.Toaster,
+		onTimeout:   cfg.OnTimeout,
 		insertFlush: map[types.ContextKey]InsertPendingFlush{},
 	}
 	m.trieSet.Store(initial)
@@ -242,16 +247,15 @@ func (m *Matcher) OnInsertPendingFlush(scope types.ContextKey, fn InsertPendingF
 
 // flushInsertPending delivers the printable runes buffered in pending
 // to scope's registered flush callback. No-op when pending carries no
-// printable runes or scope has no callback. Called from the timer
-// goroutine (timeout) and synchronously from Dispatch (a pending insert
-// chord broken by the next key).
+// printable runes or scope has no callback. Called on timeout delivery and
+// synchronously from Dispatch when a pending text chord is broken.
 func (m *Matcher) flushInsertPending(scope types.ContextKey, pending []Key) {
 	if len(pending) == 0 {
 		return
 	}
 	runes := make([]rune, 0, len(pending))
 	for _, k := range pending {
-		if k.Special == KeyNone && k.Mod == 0 && k.Code != 0 {
+		if isPrintableRune(k) {
 			runes = append(runes, k.Code)
 		}
 	}
@@ -415,7 +419,7 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 		seq := append(append([]Key(nil), m.pending...), k)
 		res := scopeTrie.Lookup(seq)
 		if res.Found {
-			return m.handleLookup(res, seq, scope, mode)
+			return m.handleLookup(res, seq, scope, mode, scope, nil)
 		}
 		// Not found in scope WITH pending — clear scope pending and try
 		// global with the full sequence, then k FRESH (D10 scope→global
@@ -433,17 +437,30 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 	// misses, fall back to k alone (D10 fresh-key fall-through).
 	globalTrie, _ := ts.Get(mode, types.GLOBAL)
 	if globalTrie != nil {
-		if hadChordPartial {
-			full := append(append([]Key(nil), droppedPending...), k)
+		if hadChordPartial || len(m.pending) > 0 {
+			prefix := droppedPending
+			if !hadChordPartial {
+				prefix = m.pending
+			}
+			full := append(append([]Key(nil), prefix...), k)
 			res := globalTrie.Lookup(full)
 			if res.Found {
-				return m.handleLookup(res, full, types.GLOBAL, mode)
+				return m.handleLookup(res, full, types.GLOBAL, mode, scope, nil)
+			}
+			if !hadChordPartial {
+				droppedPending = append([]Key(nil), m.pending...)
+				m.cancelPendingLocked()
+				hadChordPartial = true
 			}
 		}
 		seq := []Key{k}
 		res := globalTrie.Lookup(seq)
 		if res.Found {
-			return m.handleLookup(res, seq, types.GLOBAL, mode)
+			var abandoned []Key
+			if hadChordPartial && (mode == types.ModeInsert || mode == types.ModeCommand) {
+				abandoned = droppedPending
+			}
+			return m.handleLookup(res, seq, types.GLOBAL, mode, scope, abandoned)
 		}
 	}
 
@@ -492,7 +509,7 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 
 // handleLookup resolves a Lookup that returned Found=true. The caller
 // holds m.mu; this method releases m.mu BEFORE invoking the Handler.
-func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextKey, mode types.Mode) (DispatchResult, error) {
+func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextKey, mode types.Mode, inputScope types.ContextKey, abandoned []Key) (DispatchResult, error) {
 	log := m.sessionLog
 	switch {
 	case res.IsLeaf && !res.HasChildren:
@@ -502,6 +519,7 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		reg := m.register
 		m.cancelLocked()
 		m.mu.Unlock()
+		m.flushInsertPending(inputScope, abandoned)
 		logs.Event(log, "input", "chord_resolved",
 			slog.String("seq", chordSeqLabel(seq)),
 			slog.String("scope", string(scope)),
@@ -518,10 +536,11 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		// Ambiguous: leaf AND prefix. Buffer and schedule timer.
 		m.pending = seq
 		m.lastLeaf = res.Action
-		m.scheduleTimerLocked(scope, mode)
+		m.scheduleTimerLocked(scope, mode, inputScope)
 		m.notifyWhichKeyLocked(scope, seq)
 		cmd := res.Action
 		m.mu.Unlock()
+		m.flushInsertPending(inputScope, abandoned)
 		logs.Event(log, "input", "chord_resolved",
 			slog.String("seq", chordSeqLabel(seq)),
 			slog.String("scope", string(scope)),
@@ -544,12 +563,13 @@ func (m *Matcher) handleLookup(res LookupResult, seq []Key, scope types.ContextK
 		// ambiguous-leaf in this same sequence and bumps seq so an
 		// in-flight fire is ignored.
 		if mode == types.ModeInsert || mode == types.ModeCommand {
-			m.scheduleTimerLocked(scope, mode)
+			m.scheduleTimerLocked(scope, mode, inputScope)
 		} else {
 			m.stopTimerLocked()
 		}
 		m.notifyWhichKeyLocked(scope, seq)
 		m.mu.Unlock()
+		m.flushInsertPending(inputScope, abandoned)
 		logs.Event(log, "input", "chord_resolved",
 			slog.String("seq", chordSeqLabel(seq)),
 			slog.String("scope", string(scope)),
@@ -677,7 +697,7 @@ func (m *Matcher) emitDisabledToast(cmd *commands.Command, reason string) {
 
 // scheduleTimerLocked starts the inactivity / leaf-ambiguity timer.
 // Uses ttlen if pending[0] is <esc>, else tlen. Caller MUST hold m.mu.
-func (m *Matcher) scheduleTimerLocked(scope types.ContextKey, mode types.Mode) {
+func (m *Matcher) scheduleTimerLocked(scope types.ContextKey, mode types.Mode, inputScope types.ContextKey) {
 	if m.timer != nil {
 		m.timer.Stop()
 		m.timer = nil
@@ -692,6 +712,9 @@ func (m *Matcher) scheduleTimerLocked(scope types.ContextKey, mode types.Mode) {
 	m.seq++
 	id := m.seq
 	m.timerScope = scope
+	// Global bindings retain GLOBAL in ExecCtx, but buffered text belongs to
+	// the editable scope that received the key, not the binding's trie.
+	m.timerInputScope = inputScope
 	m.timerMode = mode
 	m.timerPending = append([]Key(nil), m.pending...)
 	m.timer = time.AfterFunc(delay, func() {
@@ -713,9 +736,8 @@ func (m *Matcher) stopTimerLocked() {
 	m.seq++
 }
 
-// onTimerFire runs on its own goroutine (time.AfterFunc). Compares
-// captured id against the current m.seq; ignores stale fires. Releases
-// m.mu before invoking the leaf Handler / insert-pending flush.
+// onTimerFire only publishes expiry. Cancellation is checked again when the
+// owning lane delivers it, not merely when the timer goroutine wakes up.
 func (m *Matcher) onTimerFire(id uint64) {
 	defer func() {
 		// Timer goroutine recover: a panicking handler must not crash
@@ -733,8 +755,34 @@ func (m *Matcher) onTimerFire(id uint64) {
 		m.mu.Unlock()
 		return
 	}
+	m.mu.Unlock()
+	deliver := func() error { return m.deliverTimeout(id) }
+	if m.onTimeout != nil {
+		m.onTimeout(deliver)
+	} else {
+		_ = deliver()
+	}
+}
+
+func (m *Matcher) deliverTimeout(id uint64) (err error) {
+	defer func() {
+		if r := recover(); r != nil && m.log != nil {
+			m.log.Debug("matcher: timer-fire callback panic", "err", r)
+		}
+	}()
+	m.mu.Lock()
+	if id != m.seq {
+		m.mu.Unlock()
+		return nil
+	}
+	if m.modes.Get(m.timerInputScope) != m.timerMode {
+		m.cancelLocked()
+		m.mu.Unlock()
+		return nil
+	}
 	leaf := m.lastLeaf
 	scope := m.timerScope
+	inputScope := m.timerInputScope
 	mode := m.timerMode
 	count := m.count
 	reg := m.register
@@ -748,16 +796,20 @@ func (m *Matcher) onTimerFire(id uint64) {
 
 	if leaf != nil {
 		// Ambiguous-leaf timeout: fire the leaf action.
-		_, _ = m.invokeHandler(leaf, scope, mode, count, reg)
-		return
+		_, err := m.invokeHandler(leaf, scope, mode, count, reg)
+		if errors.Is(err, gocui.ErrQuit) {
+			return err
+		}
+		if err != nil {
+			m.emitHandlerErrorToast(leaf, err)
+		}
+		return nil
 	}
 
-	// No leaf: in ModeInsert, deliver buffered runes to the scope's
-	// editor via its flush callback (per D16). In other modes the
-	// pending is silently dropped.
-	if mode == types.ModeInsert {
-		m.flushInsertPending(scope, pendingCopy)
+	if mode == types.ModeInsert || mode == types.ModeCommand {
+		m.flushInsertPending(inputScope, pendingCopy)
 	}
+	return nil
 }
 
 // cancelPendingLocked drops the pending sequence (and stops the timer)

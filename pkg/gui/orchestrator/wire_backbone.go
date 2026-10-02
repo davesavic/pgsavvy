@@ -57,6 +57,7 @@ func (g *Gui) wireKeybindingSystem(cfg *config.UserConfig) error {
 		Registers:     keys.NewRegisterStore(),
 		WhichKey:      g.keybindingSystem.whichkey,
 		Log:           g.deps.Common.Logger(),
+		OnTimeout:     g.OnUIThread,
 		// Surface swallowed handler errors and disabled-binding reasons
 		// as toasts. Late-bound: g.toastHelp is constructed later in this
 		// method, but by the time any key dispatches it is non-nil

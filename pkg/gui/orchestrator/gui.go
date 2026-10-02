@@ -1286,10 +1286,9 @@ func (g *Gui) restoreConnectionManagerCursor() {
 //   - GLOBAL bindings are also installed with empty viewname so they
 //     fire from any focused view.
 //
-// Note: NewMasterEditor needs the underlying *gocui.Gui to schedule
-// pending-buffer flushes onto the MainLoop. For the recorder-driver
-// path (testfake) we pass nil; the in-flight flush path is only
-// relevant for ModeInsert (out of scope for this epic).
+// NewMasterEditor resolves the live view through *gocui.Gui when flushing
+// buffered Insert/Command text on the matcher's UI lane. The recorder path
+// passes nil and uses the per-call view for synchronous pending flushes.
 func (g *Gui) installKeyDispatch(trieSet *keys.TrieSet) error {
 	var ngocui *gocui.Gui
 	if real, ok := g.driver.(*gocuiDriver); ok {
@@ -1700,6 +1699,9 @@ const closeDrainBound = 2 * time.Second
 func (g *Gui) Close() error {
 	if !g.closed.CompareAndSwap(false, true) {
 		return nil
+	}
+	if g.keybindingSystem.matcher != nil {
+		g.keybindingSystem.matcher.Cancel()
 	}
 	g.connectionState.connectGen.Add(1)
 	g.connectionLife.mu.Lock()

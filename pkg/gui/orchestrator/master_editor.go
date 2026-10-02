@@ -97,7 +97,7 @@ type Dispatcher interface {
 // g may be nil (testfake path) — when nil the timer-driven flush is a
 // no-op (the test path drives flushPendingSync directly with the
 // per-call *gocui.View). Production wiring passes the real *gocui.Gui
-// so flushes are scheduled onto the MainLoop, and the editor's
+// with the Matcher timeout scheduler bound to the MainLoop, and the editor's
 // viewName is used to look up the live view at flush time (no cached
 // pointer; re-pushes create a fresh view and a cached pointer would
 // dangle).
@@ -378,13 +378,10 @@ func (e *masterEditor) flushPendingSync(v *gocui.View) {
 	v.RenderTextArea()
 }
 
-// flushRunes is invoked by the Matcher's timer goroutine when a
-// ModeInsert partial sequence times out. It schedules the write onto
-// the MainLoop via gocui.Update; inside the closure the live view is
-// looked up via gui.View so the write hits the current view-instance
-// (re-pushes DeleteView + recreate, so any cached pointer would
-// dangle). When gui is nil (testfake path) the call is a no-op — the
-// test path drives flushPendingSync directly with the per-call view.
+// flushRunes runs on the same UI lane as Dispatch/timeout delivery. A second
+// queue hop would reorder broken-prefix text and survive timeout cancellation.
+// Resolve the live view because popup re-pushes can replace its instance.
+// Nil gui retains the fake editor's flushPendingSync path.
 func (e *masterEditor) flushRunes(runes []rune) {
 	if len(runes) == 0 {
 		return
@@ -393,16 +390,12 @@ func (e *masterEditor) flushRunes(runes []rune) {
 	if e.gui == nil {
 		return
 	}
-	name := e.viewName
-	e.gui.Update(func(g *gocui.Gui) error {
-		v, err := g.View(name)
-		if err != nil || v == nil || v.TextArea == nil {
-			return nil
-		}
-		for _, r := range runes {
-			v.TextArea.TypeCharacter(string(r))
-		}
-		v.RenderTextArea()
-		return nil
-	})
+	v, err := e.gui.View(e.viewName)
+	if err != nil || v == nil || v.TextArea == nil {
+		return
+	}
+	for _, r := range runes {
+		v.TextArea.TypeCharacter(string(r))
+	}
+	v.RenderTextArea()
 }

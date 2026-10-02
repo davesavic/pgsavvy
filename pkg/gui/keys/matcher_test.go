@@ -2,6 +2,7 @@ package keys
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -78,6 +79,228 @@ func recordingCmdWithCtx(id string, gotCtx *commands.ExecCtx, mu *sync.Mutex) *c
 
 func keyOf(r rune) Key            { return Key{Code: r} }
 func specialKey(s SpecialKey) Key { return Key{Special: s} }
+
+func reviewTimerMatcher(t *testing.T, ts *TrieSet, mode types.Mode, toaster ToastFunc) (*Matcher, chan func() error) {
+	t.Helper()
+	store := NewModeStore()
+	store.Set(types.COMMAND_LINE, mode)
+	queue := make(chan func() error, 8)
+	m, err := NewMatcher(ts, MatcherConfig{
+		Modes: store, TimeoutLen: time.Hour, TtimeoutLen: time.Hour, Toaster: toaster,
+		OnTimeout: func(fn func() error) { queue <- fn },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Cancel)
+	return m, queue
+}
+
+func reviewQueueExpiry(t *testing.T, m *Matcher, queue chan func() error) func() error {
+	t.Helper()
+	m.mu.Lock()
+	id := m.seq
+	m.mu.Unlock()
+	m.onTimerFire(id)
+	select {
+	case fn := <-queue:
+		return fn
+	default:
+		t.Fatal("timer did not marshal expiry through the explicit scheduler")
+		return nil
+	}
+}
+
+func reviewDispatch(t *testing.T, m *Matcher, scope types.ContextKey, k Key) DispatchResult {
+	t.Helper()
+	result, err := m.Dispatch(scope, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestReview_timers_delivery_and_reentrance(t *testing.T) {
+	var m *Matcher
+	calls := 0
+	leaf := &commands.Command{ID: "review.tab", Handler: func(ctx commands.ExecCtx) error {
+		calls++
+		if ctx.Scope != types.COMMAND_LINE || ctx.Mode != types.ModeNormal || ctx.Count != 2 || ctx.Register != 'a' {
+			t.Errorf("timeout lost execution context: %+v", ctx)
+		}
+		m.Cancel()
+		return nil
+	}}
+	ts := buildTrieSet(t, []trieEntry{
+		{types.ModeNormal, types.COMMAND_LINE, []Key{keyOf('z')}, leaf},
+		{types.ModeNormal, types.COMMAND_LINE, []Key{keyOf('z'), keyOf('x')}, fixtureCmd("review.longer")},
+	})
+	var queue chan func() error
+	m, queue = reviewTimerMatcher(t, ts, types.ModeNormal, nil)
+	for _, r := range "\"a2z" {
+		if _, err := m.Dispatch(types.COMMAND_LINE, keyOf(r)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fn := reviewQueueExpiry(t, m, queue)
+	if calls != 0 || !m.IsPartial() {
+		t.Fatal("expiry mutated state or ran handler before UI drain")
+	}
+	if err := fn(); err != nil || calls != 1 || m.IsPartial() {
+		t.Fatalf("delivery error=%v calls=%d partial=%v", err, calls, m.IsPartial())
+	}
+	if err := fn(); err != nil || calls != 1 {
+		t.Fatalf("duplicate delivery executed handler: err=%v calls=%d", err, calls)
+	}
+}
+
+func TestReview_timers_stale_delivery(t *testing.T) {
+	for _, action := range []string{"cancel", "scope", "reload", "longer", "mode"} {
+		t.Run(action, func(t *testing.T) {
+			calls := 0
+			leaf := &commands.Command{ID: "review.short", Handler: func(commands.ExecCtx) error { calls++; return nil }}
+			longCalls := 0
+			longer := &commands.Command{ID: "review.long", Handler: func(commands.ExecCtx) error { longCalls++; return nil }}
+			ts := buildTrieSet(t, []trieEntry{
+				{types.ModeNormal, types.COMMAND_LINE, []Key{keyOf('z')}, leaf},
+				{types.ModeNormal, types.COMMAND_LINE, []Key{keyOf('z'), keyOf('x')}, longer},
+			})
+			m, queue := reviewTimerMatcher(t, ts, types.ModeNormal, nil)
+			reviewDispatch(t, m, types.COMMAND_LINE, keyOf('z'))
+			fn := reviewQueueExpiry(t, m, queue)
+			switch action {
+			case "cancel":
+				m.Cancel()
+			case "scope":
+				m.Cancel() // production focus-change hook
+				reviewDispatch(t, m, types.PROMPT, keyOf('o'))
+			case "reload":
+				m.SwapTrieSet(NewTrieSet())
+			case "longer":
+				reviewDispatch(t, m, types.COMMAND_LINE, keyOf('x'))
+			case "mode":
+				m.modes.Set(types.COMMAND_LINE, types.ModeCommand)
+			}
+			if err := fn(); err != nil || calls != 0 {
+				t.Fatalf("stale expiry escaped: err=%v calls=%d", err, calls)
+			}
+			if action == "longer" && longCalls != 1 {
+				t.Fatalf("longer chord calls=%d, want 1", longCalls)
+			}
+		})
+	}
+}
+
+func TestReview_timers_text_prefix(t *testing.T) {
+	for _, mode := range []types.Mode{types.ModeInsert, types.ModeCommand} {
+		for _, scope := range []types.ContextKey{types.COMMAND_LINE, types.GLOBAL} {
+			t.Run(fmt.Sprintf("%v/%s", mode, scope), func(t *testing.T) {
+				ts := buildTrieSet(t, []trieEntry{{mode, scope, []Key{keyOf('界'), keyOf('😀'), keyOf('x')}, fixtureCmd("review.text")}})
+				m, queue := reviewTimerMatcher(t, ts, mode, nil)
+				text := ""
+				m.OnInsertPendingFlush(types.COMMAND_LINE, func(scope types.ContextKey, r []rune) {
+					if scope != types.COMMAND_LINE {
+						t.Errorf("wrong text scope: %s", scope)
+					}
+					text += string(r)
+					m.Cancel()
+				})
+				reviewDispatch(t, m, types.COMMAND_LINE, keyOf('界'))
+				reviewDispatch(t, m, types.COMMAND_LINE, keyOf('😀'))
+				fn := reviewQueueExpiry(t, m, queue)
+				if text != "" {
+					t.Fatal("text flushed before UI drain")
+				}
+				if err := fn(); err != nil || text != "界😀" {
+					t.Fatalf("flush err=%v text=%q", err, text)
+				}
+				if err := fn(); err != nil {
+					t.Fatal(err)
+				}
+				if text != "界😀" {
+					t.Fatalf("duplicate text delivery: %q", text)
+				}
+			})
+		}
+	}
+}
+
+func TestReview_timers_text_cancel_and_complete(t *testing.T) {
+	for _, bindingScope := range []types.ContextKey{types.COMMAND_LINE, types.GLOBAL} {
+		for _, action := range []string{"cancel", "complete", "broken", "enter"} {
+			t.Run(string(bindingScope)+"/"+action, func(t *testing.T) {
+				m, queue := reviewTimerMatcher(t, buildTrieSet(t, []trieEntry{{types.ModeCommand, bindingScope, []Key{keyOf('j'), keyOf('k')}, fixtureCmd("review.complete")}}), types.ModeCommand, nil)
+				text := ""
+				m.OnInsertPendingFlush(types.COMMAND_LINE, func(_ types.ContextKey, r []rune) { text += string(r) })
+				reviewDispatch(t, m, types.COMMAND_LINE, keyOf('j'))
+				fn := reviewQueueExpiry(t, m, queue)
+				switch action {
+				case "cancel":
+					m.Cancel()
+				case "complete":
+					reviewDispatch(t, m, types.COMMAND_LINE, keyOf('k'))
+				case "broken":
+					if result, err := m.Dispatch(types.COMMAND_LINE, keyOf('o')); result != Passthrough || err != nil || text != "j" {
+						t.Fatalf("broken prefix lost ordering: result=%v err=%v text=%q", result, err, text)
+					}
+					text += "o"
+				case "enter":
+					m.Cancel()
+					m.flushInsertPending(types.COMMAND_LINE, []Key{specialKey(KeyEnter), {Code: '\n'}, keyOf('界')})
+				}
+				if err := fn(); err != nil {
+					t.Fatal(err)
+				}
+				want := map[string]string{"cancel": "", "complete": "", "broken": "jo", "enter": "界"}[action]
+				if text != want {
+					t.Fatalf("text=%q, want %q", text, want)
+				}
+			})
+		}
+	}
+}
+
+func TestReview_timers_broken_prefix_before_global_binding(t *testing.T) {
+	for _, mode := range []types.Mode{types.ModeInsert, types.ModeCommand} {
+		for _, scope := range []types.ContextKey{types.COMMAND_LINE, types.GLOBAL} {
+			for _, fresh := range []string{"leaf", "prefix"} {
+				t.Run(fmt.Sprintf("%v/%s/%s", mode, scope, fresh), func(t *testing.T) {
+					text := ""
+					calls := 0
+					cmd := &commands.Command{ID: "review.fresh", Handler: func(commands.ExecCtx) error {
+						calls++
+						if text != "界" {
+							t.Errorf("fresh binding ran before abandoned text: %q", text)
+						}
+						return nil
+					}}
+					seq := []Key{keyOf('o')}
+					if fresh == "prefix" {
+						seq = append(seq, keyOf('q'))
+					}
+					ts := buildTrieSet(t, []trieEntry{
+						{mode, scope, []Key{keyOf('界'), keyOf('x')}, fixtureCmd("review.abandoned")},
+						{mode, types.GLOBAL, seq, cmd},
+					})
+					m, queue := reviewTimerMatcher(t, ts, mode, nil)
+					m.OnInsertPendingFlush(types.COMMAND_LINE, func(_ types.ContextKey, r []rune) { text += string(r) })
+					reviewDispatch(t, m, types.COMMAND_LINE, keyOf('界'))
+					old := reviewQueueExpiry(t, m, queue)
+					reviewDispatch(t, m, types.COMMAND_LINE, keyOf('o'))
+					if text != "界" {
+						t.Fatalf("abandoned prefix dropped before fresh %s: %q", fresh, text)
+					}
+					if fresh == "prefix" {
+						reviewDispatch(t, m, types.COMMAND_LINE, keyOf('q'))
+					}
+					if err := old(); err != nil || text != "界" || calls != 1 {
+						t.Fatalf("stale delivery duplicated/lost text: err=%v text=%q calls=%d", err, text, calls)
+					}
+				})
+			}
+		}
+	}
+}
 
 // shortMatcher builds a Matcher with short timeouts suitable for tests.
 func shortMatcher(t *testing.T, ts *TrieSet, scope types.ContextKey, mode types.Mode) *Matcher {
