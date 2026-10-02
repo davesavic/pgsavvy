@@ -11,6 +11,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -1217,6 +1218,154 @@ func TestQueryEditorTypedNameGateSkippedForEmptyName(t *testing.T) {
 	}
 	if len(rec.streamCalls) != 1 {
 		t.Fatalf("streamCalls = %d, want 1", len(rec.streamCalls))
+	}
+}
+
+func runReviewClassifyEditor(t *testing.T, sql string, conn *models.Connection) (*recordingRunnerSession, *bag, *ui.ConfirmHelper) {
+	t.Helper()
+	rec := &recordingRunnerSession{}
+	base := newBag()
+	base.HelperBag.QueryRunner = data.NewQueryRunner(rec, drivers.Capabilities{HasLiveCancel: true})
+	base.HelperBag.EditorBuffer = &fakeEditorBuffer{Text: sql, Off: 0}
+	base.HelperBag.ResultTabs = &fakeResultTabs{}
+	base.HelperBag.ConnProfile = func() *models.Connection { return conn }
+	// Use real callback consumption without a native popup or database.
+	confirm := ui.NewConfirmHelper(nil, nil)
+	base.HelperBag.Confirm = confirm
+	base.Prompt = &fakePrompt{}
+	base.HelperBag.Prompt = base.Prompt
+	ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, _ := reg.Get(commands.QueryRun)
+	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	return rec, base, confirm
+}
+
+func TestReview_classify_confirmation(t *testing.T) {
+	for _, sql := range []string{
+		"/* outer /* inner */ tail */ DROP TABLE t",
+		"/* outer /* inner */ DELETE FROM ignored */ DROP TABLE t",
+		"/* a /* b /* c */ b */ a *//* next */ CREATE TABLE t (id int)",
+	} {
+		for _, accept := range []bool{false, true} {
+			name := "cancel/"
+			if accept {
+				name = "accept/"
+			}
+			t.Run(name+sql, func(t *testing.T) {
+				rec, _, confirm := runReviewClassifyEditor(t, sql, &models.Connection{ConfirmDDL: true})
+				if !confirm.Active() || len(rec.streamCalls) != 0 || len(rec.execCalls) != 0 {
+					t.Fatal("DDL must wait for confirmation without dispatch")
+				}
+				want := 0
+				if accept {
+					want = 1
+					if err := confirm.Yes(); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := confirm.No(); err != nil {
+					t.Fatal(err)
+				}
+				// A dismissed confirmation must neither dispatch nor dispatch again.
+				if err := confirm.Yes(); err != nil {
+					t.Fatal(err)
+				}
+				if confirm.Active() || len(rec.streamCalls) != want || len(rec.execCalls) != 0 {
+					t.Fatalf("after dismissal: active=%v stream=%d exec=%d, want stream=%d", confirm.Active(), len(rec.streamCalls), len(rec.execCalls), want)
+				}
+				if want == 1 && rec.streamCalls[0].SQL != sql {
+					t.Fatalf("dispatched SQL = %q, want %q", rec.streamCalls[0].SQL, sql)
+				}
+			})
+		}
+	}
+}
+
+func TestReview_classify_confirmation_boundaries(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		conn models.Connection
+		gate bool
+	}{
+		{"ddl flags disabled", "/* a /* b */ a */ DROP TABLE t", models.Connection{}, false},
+		{"ddl writes only", "/* a /* b */ a */ DROP TABLE t", models.Connection{ConfirmWrites: true}, false},
+		{"select both flags", "/* a /* b */ a */ SELECT comment, drop FROM t", models.Connection{ConfirmWrites: true, ConfirmDDL: true}, false},
+		{"writable cte", "/* a /* b */ a */ WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d", models.Connection{ConfirmWrites: true}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec, _, confirm := runReviewClassifyEditor(t, tc.sql, &tc.conn)
+			if confirm.Active() != tc.gate {
+				t.Fatalf("confirmation active = %v, want %v", confirm.Active(), tc.gate)
+			}
+			if tc.gate {
+				if len(rec.streamCalls) != 0 || len(rec.execCalls) != 0 {
+					t.Fatal("dispatch before approval")
+				}
+				if err := confirm.Yes(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if len(rec.streamCalls) != 1 || len(rec.execCalls) != 0 || rec.streamCalls[0].SQL != tc.sql {
+				t.Fatal("expected exactly one unchanged-SQL stream dispatch")
+			}
+		})
+	}
+}
+
+func TestReview_classify_typed_name(t *testing.T) {
+	const sql = "/* outer /* inner */ tail */ DROP TABLE t"
+	for _, action := range []string{"approve", "wrong name", "prompt cancel", "confirm cancel"} {
+		t.Run(action, func(t *testing.T) {
+			rec, base, confirm := runReviewClassifyEditor(t, sql, &models.Connection{Name: "fixture", ConfirmDDL: true})
+			if base.Prompt.calls != 1 || confirm.Active() || len(rec.streamCalls) != 0 || len(rec.execCalls) != 0 {
+				t.Fatal("DDL must wait for typed name before confirmation or dispatch")
+			}
+			switch action {
+			case "wrong name":
+				if err := base.Prompt.Submit("other"); err != nil {
+					t.Fatal(err)
+				}
+				if len(base.Toast.msgs) != 1 || base.Toast.msgs[0].Msg != "connection name doesn't match" {
+					t.Fatal("missing mismatch visibility")
+				}
+			case "prompt cancel":
+				if err := base.Prompt.Cancel(); err != nil {
+					t.Fatal(err)
+				}
+				if len(base.Toast.msgs) != 1 || base.Toast.msgs[0].Msg != "run cancelled" {
+					t.Fatal("missing cancellation visibility")
+				}
+			default:
+				if err := base.Prompt.Submit("fixture"); err != nil {
+					t.Fatal(err)
+				}
+				if !confirm.Active() || len(rec.streamCalls) != 0 || len(rec.execCalls) != 0 {
+					t.Fatal("name match must still wait for confirmation")
+				}
+				if action == "approve" {
+					if err := confirm.Yes(); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := confirm.No(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := 0
+			if action == "approve" {
+				want = 1
+			}
+			if confirm.Active() || len(rec.streamCalls) != want || len(rec.execCalls) != 0 {
+				t.Fatalf("after %s: active=%v stream=%d exec=%d, want stream=%d", action, confirm.Active(), len(rec.streamCalls), len(rec.execCalls), want)
+			}
+			if want == 1 && rec.streamCalls[0].SQL != sql {
+				t.Fatal("accepted dispatch changed SQL")
+			}
+		})
 	}
 }
 

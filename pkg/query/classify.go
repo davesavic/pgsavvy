@@ -100,11 +100,24 @@ func skipLeading(s string) string {
 			return ""
 		}
 		if strings.HasPrefix(s, "/*") {
-			if i := strings.Index(s[2:], "*/"); i >= 0 {
-				s = s[2+i+2:]
-				continue
+			depth, i := 1, 2
+			for i+1 < len(s) && depth > 0 {
+				switch s[i : i+2] {
+				case "/*":
+					depth++
+					i += 2
+				case "*/":
+					depth--
+					i += 2
+				default:
+					i++
+				}
 			}
-			return ""
+			if depth != 0 {
+				return ""
+			}
+			s = s[i:]
+			continue
 		}
 		return s
 	}

@@ -1,6 +1,52 @@
 package query
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestReview_classify_nested_comments(t *testing.T) {
+	tests := []struct {
+		name      string
+		sql       string
+		classify  StatementKind
+		effective StatementKind
+	}{
+		{"nested drop", "/* outer /* inner */ tail */ DROP TABLE t", KindDDL, KindDDL},
+		{"nested create", "/* outer /* inner */ tail */ CREATE TABLE t (id int)", KindDDL, KindDDL},
+		{"three levels", "/* a /* b /* c */ b */ a */ ALTER TABLE t ADD COLUMN c int", KindDDL, KindDDL},
+		{"comment dml before ddl", "/* a /* b */ DELETE FROM ignored */ DROP TABLE t", KindDDL, KindDDL},
+		{"comment ddl before select", "/* a /* b */ DROP TABLE ignored */ SELECT 1", KindOther, KindOther},
+		{"nested dml", "/* a /* b */ a */ UPDATE t SET a=1", KindDML, KindDML},
+		{"nested select", "/* a /* b */ a */ SELECT 1", KindOther, KindOther},
+		{"nested writable cte", "/* a /* b */ a */ WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d", KindOther, KindDML},
+		{"adjacent comments", "/* a /* b */ a *//* next */DROP TABLE t", KindDDL, KindDDL},
+		{"mixed comments and whitespace", " \t-- first\n/* a /* b */ a */\n-- next\n\t/* last */ drop table t", KindDDL, KindDDL},
+		{"empty nested comment", "/**//*/**/*/DROP TABLE t", KindDDL, KindDDL},
+		{"quoted markers still nest", "/* '/*' nested '*/' */ DROP TABLE t", KindDDL, KindDDL},
+		{"line marker inside block", "/* -- /* inner */ tail */ DROP TABLE t", KindDDL, KindDDL},
+		{"comment only", "/* a /* b */ a */", KindOther, KindOther},
+		{"comment then whitespace", "/* a /* b */ a */ \n\t", KindOther, KindOther},
+		{"comment then final line comment", "/* a /* b */ a */-- end", KindOther, KindOther},
+		{"unterminated outer", "/* a /* b */ DROP TABLE t", KindOther, KindOther},
+		{"unterminated inner", "/* a /* b DROP TABLE t", KindOther, KindOther},
+		{"bare opening marker", "/*", KindOther, KindOther},
+		{"trailing partial delimiter", "/* a /* b */ *", KindOther, KindOther},
+		{"nonoverlapping delimiters", "/*/DROP TABLE t", KindOther, KindOther},
+		{"select ddl named columns", "/* a /* b */ a */ SELECT comment, drop FROM t", KindOther, KindOther},
+		{"deep nesting", strings.Repeat("/*", 256) + "note" + strings.Repeat("*/", 256) + "DROP TABLE t", KindDDL, KindDDL},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Classify(tc.sql); got != tc.classify {
+				t.Errorf("Classify = %v, want %v", got, tc.classify)
+			}
+			if got := EffectiveKind(tc.sql); got != tc.effective {
+				t.Errorf("EffectiveKind = %v, want %v", got, tc.effective)
+			}
+		})
+	}
+}
 
 func TestClassify(t *testing.T) {
 	tests := []struct {
