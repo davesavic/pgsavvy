@@ -593,11 +593,13 @@ func TestPlanContext_Heat_EstimateOnlyUsesSelfCost(t *testing.T) {
 // finding's node for the Enter-jump test.
 func findingPlan() models.Plan {
 	child := &models.PlanNode{
+		HasActuals: true, HasActualRows: true,
 		Op: "Seq Scan flagged", RelationName: "events",
 		Cost: 80, EstRows: 1,
 		ActualTotalTime: 8, ActualRows: 1000, Loops: 1,
 	}
 	root := &models.PlanNode{
+		HasActuals: true, HasActualRows: true,
 		Op: "Result", Cost: 100, EstRows: 100,
 		ActualTotalTime: 10, ActualRows: 100, Loops: 1,
 		Children: []*models.PlanNode{child},

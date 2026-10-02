@@ -71,12 +71,12 @@ func parseSettings(v any) map[string]string {
 
 // nodeHasActuals reports whether n (or any descendant) carries one or more
 // Actual* fields populated by `EXPLAIN ANALYZE`. The walk is depth-first;
-// returns true on the first node with a non-zero actual.
+// returns true on the first node with a parsed numeric actual, including zero.
 func nodeHasActuals(n *models.PlanNode) bool {
 	if n == nil {
 		return false
 	}
-	if n.ActualCost != 0 || n.ActualRows != 0 || n.Loops != 0 || n.ActualTotalTime != 0 {
+	if n.HasActuals {
 		return true
 	}
 	return slices.ContainsFunc(n.Children, nodeHasActuals)
@@ -96,6 +96,12 @@ func buildPlanNode(m map[string]any) *models.PlanNode {
 	n := &models.PlanNode{Detail: map[string]string{}}
 	for k, v := range m {
 		switch k {
+		case "Actual Total Cost", "Actual Rows", "Actual Loops", "Actual Total Time", "Actual Startup Time":
+			if jsonNumberPresent(v) {
+				n.HasActuals = true
+			}
+		}
+		switch k {
 		case "Node Type":
 			if s, ok := v.(string); ok {
 				n.Op = s
@@ -108,6 +114,7 @@ func buildPlanNode(m map[string]any) *models.PlanNode {
 			n.ActualCost = jsonNumberToFloat(v)
 		case "Actual Rows":
 			n.ActualRows = jsonNumberToInt64(v)
+			n.HasActualRows = jsonNumberPresent(v)
 		case "Actual Loops":
 			n.Loops = jsonNumberToInt64(v)
 		case "Actual Total Time":
@@ -193,6 +200,24 @@ func buildPlanNode(m map[string]any) *models.PlanNode {
 		n.Detail = nil
 	}
 	return n
+}
+
+// jsonNumberPresent distinguishes a valid numeric measurement from null or a
+// wrongly typed field before zero-coercion loses that distinction.
+func jsonNumberPresent(v any) bool {
+	switch x := v.(type) {
+	case float64:
+		return !math.IsNaN(x) && !math.IsInf(x, 0)
+	case float32:
+		return !math.IsNaN(float64(x)) && !math.IsInf(float64(x), 0)
+	case int, int64:
+		return true
+	case json.Number:
+		f, err := x.Float64()
+		return err == nil && !math.IsNaN(f) && !math.IsInf(f, 0)
+	default:
+		return false
+	}
 }
 
 // jsonNumberToFloat coerces a json-decoded value into a float64. encoding/json

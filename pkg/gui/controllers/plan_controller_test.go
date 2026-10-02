@@ -40,11 +40,13 @@ func newPlanControllerFixture(_ *testing.T) *planControllerFixture {
 // so insights navigation can be exercised through the controller handlers.
 func newPlanControllerFixtureWithFinding(_ *testing.T) *planControllerFixture {
 	child := &models.PlanNode{
+		HasActuals: true, HasActualRows: true,
 		Op: "Seq Scan flagged", RelationName: "events",
 		Cost: 80, EstRows: 1,
 		ActualTotalTime: 8, ActualRows: 1000, Loops: 1,
 	}
 	root := &models.PlanNode{
+		HasActuals: true, HasActualRows: true,
 		Op: "Result", Cost: 100, EstRows: 100,
 		ActualTotalTime: 10, ActualRows: 100, Loops: 1,
 		Children: []*models.PlanNode{child},

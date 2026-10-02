@@ -175,7 +175,7 @@ const (
 )
 
 func ruleBadRowEstimate(n *models.PlanNode, p *models.Plan) (Finding, bool) {
-	if !material(n, p) {
+	if !p.Analyzed || !n.HasActualRows || n.Loops <= 0 || !material(n, p) {
 		return Finding{}, false
 	}
 	err := n.RowEstimateError
@@ -184,7 +184,7 @@ func ruleBadRowEstimate(n *models.PlanNode, p *models.Plan) (Finding, bool) {
 	}
 
 	expected := n.EstRows
-	actual := actualRows(n)
+	actual := n.ActualRows
 	fix := "the planner's row estimate is far from reality, suggesting stale statistics"
 	if n.RelationName != "" {
 		fix = withRelation(fix+"; run ANALYZE", n.RelationName)
@@ -197,7 +197,7 @@ func ruleBadRowEstimate(n *models.PlanNode, p *models.Plan) (Finding, bool) {
 		Severity: SeverityWarn,
 		Title:    "Bad row estimate",
 		Explanation: fmt.Sprintf(
-			"estimated %d rows but produced %d (off by %.1fx)",
+			"estimated %d rows per loop but produced %d (off by %.1fx)",
 			expected, actual, factor(err),
 		),
 		SuggestedFix: fix,
@@ -219,7 +219,7 @@ func factor(err float64) float64 {
 // --- Rule 2: selective seq scan on a large table ------------------------------
 
 const (
-	// seqScanLargeRows: a Seq Scan producing fewer than this many rows is too
+	// seqScanLargeRows: a Seq Scan processing fewer than this many rows is too
 	// small to be worth an index regardless of selectivity. ~10k rows is a
 	// reasonable floor below which a sequential scan is typically fine.
 	seqScanLargeRows = 10_000
@@ -231,7 +231,7 @@ const (
 )
 
 func ruleSeqScanLarge(n *models.PlanNode, p *models.Plan) (Finding, bool) {
-	if n.Op != "Seq Scan" {
+	if n.Op != "Seq Scan" || !p.Analyzed || !n.HasActualRows || n.Loops <= 0 {
 		return Finding{}, false
 	}
 	if !material(n, p) {
@@ -239,12 +239,9 @@ func ruleSeqScanLarge(n *models.PlanNode, p *models.Plan) (Finding, bool) {
 	}
 
 	kept := actualRows(n)
-	if !p.Analyzed {
-		kept = n.EstRows
-	}
 
 	// "Large" gate: the scan must process a meaningful number of rows.
-	removed := n.RowsRemovedByFilter
+	removed := n.RowsRemovedByFilter * n.Loops
 	scanned := kept + removed
 	if scanned < seqScanLargeRows {
 		return Finding{}, false

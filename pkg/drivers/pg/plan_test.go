@@ -1,10 +1,135 @@
 package pg
 
 import (
+	"context"
+	"fmt"
+	"os"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
+
+	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query/plandoctor"
 )
+
+func TestReview_diagnostics_parser(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields        string
+		analyzed, rowsKnown bool
+		ratio               float64
+		badEstimate         bool
+	}{
+		{"estimate only", ``, false, false, 1, false},
+		{"all zero actuals", `,"Actual Rows":0,"Actual Loops":0,"Actual Total Time":0`, true, true, 1, false},
+		{"measured zero", `,"Actual Rows":0,"Actual Loops":1,"Actual Total Time":1`, true, true, 0.01, true},
+		{"accurate repeated", `,"Actual Rows":100,"Actual Loops":100,"Actual Total Time":1`, true, true, 1, false},
+		{"unknown rows", `,"Actual Loops":1,"Actual Total Time":1`, true, false, 1, false},
+		{"unexecuted", `,"Actual Rows":0,"Actual Loops":0,"Actual Total Time":1`, true, true, 1, false},
+		{"null rows", `,"Actual Rows":null,"Actual Loops":1,"Actual Total Time":1`, true, false, 1, false},
+		{"invalid rows", `,"Actual Rows":"invalid","Actual Loops":1,"Actual Total Time":1`, true, false, 1, false},
+		{"invalid actuals only", `,"Actual Rows":null,"Actual Loops":"invalid","Actual Total Time":false`, false, false, 1, false},
+		{"zero cost present", `,"Actual Total Cost":0`, true, false, 1, false},
+		{"zero startup present", `,"Actual Startup Time":0`, true, false, 1, false},
+		{"zero total time present", `,"Actual Total Time":0`, true, false, 1, false},
+		{"zero loops present", `,"Actual Loops":0`, true, false, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(fmt.Sprintf(`[{"Plan":{"Node Type":"Result","Total Cost":1000,"Plan Rows":100%s}}]`, tc.fields))
+			p, err := parsePlanJSON(raw)
+			require.NoError(t, err)
+			require.Equal(t, tc.analyzed, p.Analyzed)
+			require.Equal(t, tc.analyzed, p.Node.HasActuals)
+			require.Equal(t, tc.rowsKnown, p.Node.HasActualRows)
+			require.InDelta(t, tc.ratio, p.Node.RowEstimateError, 1e-9)
+			badEstimate := false
+			for _, f := range plandoctor.Analyze(&p) {
+				if f.Title == "Bad row estimate" {
+					badEstimate = true
+				}
+			}
+			require.Equal(t, tc.badEstimate, badEstimate)
+		})
+	}
+	t.Run("mixed tree with measured zero descendant", func(t *testing.T) {
+		p, err := parsePlanJSON([]byte(`[{"Plan":{"Node Type":"Result","Total Cost":1000,"Plan Rows":100,"Plans":[{"Node Type":"Result","Total Cost":500,"Plan Rows":100,"Actual Rows":0,"Actual Loops":1,"Actual Total Time":1}]}}]`))
+		require.NoError(t, err)
+		require.True(t, p.Analyzed)
+		require.False(t, p.Node.HasActuals)
+		require.False(t, p.Node.HasActualRows)
+		require.Equal(t, float64(1), p.Node.RowEstimateError)
+		child := p.Node.Children[0]
+		require.True(t, child.HasActualRows)
+		findings := plandoctor.Analyze(&p)
+		require.Len(t, findings, 1)
+		require.Equal(t, "Bad row estimate", findings[0].Title)
+		require.Same(t, child, findings[0].NodeRef)
+	})
+}
+
+func TestReview_diagnostics_live_repeated_scan(t *testing.T) {
+	dsn := os.Getenv("PGSAVVY_TEST_PG")
+	if dsn == "" {
+		t.Skip("requires isolated PGSAVVY_TEST_PG fixture")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		// A parse error can contain the fixture DSN, including credentials.
+		t.Fatal("connection failed: check isolated fixture and PGSAVVY_TEST_PG")
+	}
+	t.Cleanup(func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer closeCancel()
+		require.NoError(t, conn.Close(closeCtx))
+	})
+	_, err = conn.Exec(ctx, `CREATE TEMP TABLE diagnostic_rows AS SELECT i FROM generate_series(1,10000) AS i; ANALYZE diagnostic_rows; SET max_parallel_workers_per_gather=0`)
+	require.NoError(t, err)
+	var raw []byte
+	err = conn.QueryRow(ctx, `EXPLAIN (ANALYZE, FORMAT JSON)
+		SELECT sum(s.i) FROM generate_series(1,100) AS g(i)
+		CROSS JOIN LATERAL (SELECT r.i FROM diagnostic_rows AS r WHERE r.i <= 100 + g.i * 0 OFFSET 0) AS s`).Scan(&raw)
+	require.NoError(t, err)
+	p, err := parsePlanJSON(raw)
+	require.NoError(t, err)
+	var scan *models.PlanNode
+	var visit func(*models.PlanNode)
+	visit = func(n *models.PlanNode) {
+		if n.Op == "Seq Scan" && n.RelationName == "diagnostic_rows" {
+			scan = n
+		}
+		for _, child := range n.Children {
+			visit(child)
+		}
+	}
+	visit(p.Node)
+	require.NotNil(t, scan, "live plan must exercise the repeated sequential scan")
+	require.Equal(t, int64(100), scan.Loops)
+	require.Equal(t, int64(100), scan.ActualRows)
+	require.Equal(t, int64(9900), scan.RowsRemovedByFilter)
+	require.Positive(t, scan.EstRows)
+	// Check all independent defects even if an earlier assertion fails.
+	t.Run("presence", func(t *testing.T) {
+		require.True(t, p.Analyzed)
+		require.True(t, scan.HasActuals)
+		require.True(t, scan.HasActualRows)
+	})
+	t.Run("per loop ratio", func(t *testing.T) {
+		require.InDelta(t, float64(scan.ActualRows)/float64(scan.EstRows), scan.RowEstimateError, 1e-9)
+	})
+	t.Run("scan totals", func(t *testing.T) {
+		var selective *plandoctor.Finding
+		for _, f := range plandoctor.Analyze(&p) {
+			if f.NodeRef == scan && f.Title == "Selective sequential scan" {
+				selective = &f
+			}
+		}
+		require.NotNil(t, selective, "repeated 99%% rejection must be diagnosed")
+		require.Equal(t, "sequential scan read 1000000 rows and discarded 990000 via filter (99% rejected)", selective.Explanation)
+	})
+}
 
 // TestParsePlanJSON_NestedPlans is a golden-fixture test exercising the
 // recursive tree shape for a Hash Join over two Seq Scans. Verifies that

@@ -13,6 +13,10 @@ import (
 // analyzed, and runs ComputeDerived so SelfTime/SelfCost/RowEstimateError match
 // production parsing.
 func analyzedPlan(root *models.PlanNode) *models.Plan {
+	walk(root, func(n *models.PlanNode) {
+		n.HasActuals = true
+		n.HasActualRows = true
+	})
 	p := &models.Plan{Node: root, Analyzed: true}
 	p.ComputeDerived()
 	return p
@@ -56,6 +60,66 @@ func TestNoForbiddenImports(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestReview_diagnostics_rows(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		analyzed, known  bool
+		rows, est, loops int64
+		want             bool
+	}{
+		{"estimate only", false, false, 0, 100, 0, false},
+		{"accurate repeated", true, true, 1, 1, 100, false},
+		{"unknown rows", true, false, 0, 100, 1, false},
+		{"unexecuted", true, true, 0, 100, 0, false},
+		{"measured zero", true, true, 0, 100, 1, true},
+		{"repeated mismatch", true, true, 100, 1, 100, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &models.PlanNode{Op: "Result", Cost: 1000, ActualTotalTime: 1, HasActuals: tc.analyzed, HasActualRows: tc.known, ActualRows: tc.rows, EstRows: tc.est, Loops: tc.loops}
+			p := &models.Plan{Node: n, Analyzed: tc.analyzed}
+			p.ComputeDerived()
+			f, fired := findRule(Analyze(p), "Bad row estimate")
+			if fired != tc.want {
+				t.Fatalf("finding=%v want=%v: %+v", fired, tc.want, f)
+			}
+			if tc.name == "repeated mismatch" && !strings.Contains(f.Explanation, "estimated 1 rows per loop but produced 100") {
+				t.Fatalf("explanation must compare per-loop rows: %s", f.Explanation)
+			}
+		})
+	}
+}
+
+func TestReview_diagnostics_selective_scan(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		kept, removed, loops int64
+		known                bool
+		want                 bool
+	}{
+		{"repeated 99 percent", 100, 9900, 100, true, true},
+		{"exact 90 percent and size", 10, 90, 100, true, true},
+		{"below 90 percent", 11, 89, 100, true, false},
+		{"below size", 10, 90, 99, true, false},
+		{"fully consumed", 10000, 0, 100, true, false},
+		{"measured zero kept", 0, 100, 100, true, true},
+		{"unexecuted", 0, 10000, 0, true, false},
+		{"unknown kept", 0, 10000, 1, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &models.PlanNode{Op: "Seq Scan", RelationName: "fixture", ActualTotalTime: 1, HasActuals: true, HasActualRows: tc.known, ActualRows: tc.kept, EstRows: tc.kept, Loops: tc.loops, RowsRemovedByFilter: tc.removed}
+			p := &models.Plan{Node: n, Analyzed: true}
+			p.ComputeDerived()
+			f, fired := findRule(Analyze(p), "Selective sequential scan")
+			if fired != tc.want {
+				t.Fatalf("finding=%v want=%v: %+v", fired, tc.want, f)
+			}
+			if tc.name == "repeated 99 percent" && f.Explanation != "sequential scan read 1000000 rows and discarded 990000 via filter (99% rejected)" {
+				t.Fatalf("inconsistent scan totals: %s", f.Explanation)
+			}
+		})
 	}
 }
 

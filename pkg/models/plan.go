@@ -7,7 +7,8 @@ package models
 // populated is the expected happy-path.
 //
 // Analyzed is true when the parsed tree carries `EXPLAIN ANALYZE` actuals
-// (Actual Total Cost / Actual Rows / Actual Loops) on at least one node.
+// (numeric actual cost, rows, loops or timing fields) on at least one node,
+// including measurements whose value is zero.
 // Drivers set this flag during parsing; UI rendering branches on it to add
 // actual-cost / actual-rows / loops columns to the tree view.
 // Notice, when non-empty, carries a user-facing degraded-mode message the UI
@@ -37,6 +38,10 @@ type PlanNode struct {
 	ActualCost float64
 	ActualRows int64
 	Loops      int64
+	// HasActuals records a parsed numeric actual field, even when it is zero.
+	HasActuals bool
+	// HasActualRows distinguishes measured zero rows from an absent measurement.
+	HasActualRows bool
 
 	// Timing actuals (ms) from EXPLAIN ANALYZE.
 	ActualTotalTime   float64
@@ -97,8 +102,8 @@ type PlanNode struct {
 	// TotalTime is node.ActualTotalTime * max(Loops,1) — the inclusive wall
 	// time this node accounts for (PG reports actual time as a per-loop avg).
 	TotalTime float64
-	// RowEstimateError = max(ActualRows*max(Loops,1),1) / max(EstRows,1); ~1.0
-	// when estimate ~= actual; finite even when either side is zero.
+	// RowEstimateError compares per-loop actual and estimated rows:
+	// max(ActualRows,1) / max(EstRows,1). Unknown/unexecuted nodes use neutral 1.
 	RowEstimateError float64
 }
 
@@ -128,8 +133,10 @@ func computeNodeDerived(n *PlanNode) {
 	n.SelfCost = n.Cost - childCost
 	n.SelfTime = n.TotalTime - childTime
 
-	actualRows := n.ActualRows * maxInt64(n.Loops, 1)
-	n.RowEstimateError = float64(maxInt64(actualRows, 1)) / float64(maxInt64(n.EstRows, 1))
+	n.RowEstimateError = 1
+	if n.HasActualRows && n.Loops > 0 {
+		n.RowEstimateError = float64(maxInt64(n.ActualRows, 1)) / float64(maxInt64(n.EstRows, 1))
+	}
 }
 
 func maxInt64(a, b int64) int64 {
