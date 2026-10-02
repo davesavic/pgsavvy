@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -166,6 +167,89 @@ func newApplySet() *models.PendingEditSet {
 }
 
 // --- Tests ---------------------------------------------------------------
+
+func TestReview_overwrite_SQL(t *testing.T) {
+	for _, kind := range []string{"literal", "null", "expression"} {
+		for _, mode := range []string{"overwrite", "apply", "dry_run"} {
+			t.Run(kind+"/"+mode, func(t *testing.T) {
+				set := &models.PendingEditSet{Table: models.Ref{Schema: `a"pp`, Table: `u"sers`}}
+				e := models.PendingEdit{PrimaryKey: []any{7, "key'quoted"}, Column: `n"ame`, OldValue: "stale", NewValue: "new", Kind: models.Literal}
+				switch kind {
+				case "null":
+					e.OldValue, e.NewValue = nil, nil
+				case "expression":
+					e.Kind, e.NewExpr = models.Expression, `upper("n""ame")`
+				}
+				mustAdd(t, set, e)
+				sess := &fakeSession{script: []execResponse{{}, {RowsAffected: 1}, {}, {Rows: [][]any{{7, "key'quoted", "new"}}, Cols: []string{"id", "key", `n"ame`}}}}
+				helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
+				var res helpers.ApplyResult
+				var err error
+				if mode == "overwrite" {
+					res, err = helper.Overwrite(context.Background(), set, []string{`i"d`, "key"})
+				} else {
+					var conflicts []models.ConflictedEdit
+					res, conflicts, err = helper.Apply(context.Background(), set, []string{`i"d`, "key"}, mode == "dry_run")
+					if len(conflicts) != 0 {
+						t.Fatalf("unexpected conflicts: %v", conflicts)
+					}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantArgs := []any{}
+				assignment := e.NewExpr
+				if e.Kind == models.Literal {
+					wantArgs = append(wantArgs, e.NewValue)
+					assignment = "$1"
+				}
+				firstPK := len(wantArgs) + 1
+				wantArgs = append(wantArgs, e.PrimaryKey...)
+				wantSQL := fmt.Sprintf(`UPDATE "a""pp"."u""sers" SET "n""ame" = %s WHERE "i""d" = $%d AND "key" = $%d`, assignment, firstPK, firstPK+1)
+				if mode != "overwrite" {
+					wantArgs = append(wantArgs, e.OldValue)
+					wantSQL += fmt.Sprintf(` AND "n""ame" IS NOT DISTINCT FROM $%d`, len(wantArgs))
+				}
+				update := sess.calls[1]
+				if update.SQL != wantSQL || !reflect.DeepEqual(update.Args, wantArgs) {
+					t.Errorf("UPDATE = %q %v, want %q %v", update.SQL, update.Args, wantSQL, wantArgs)
+				}
+				if len(res.SQL) != 1 || res.SQL[0] != wantSQL {
+					t.Errorf("result SQL = %v, want %q", res.SQL, wantSQL)
+				}
+				if !sess.closed {
+					t.Error("dedicated session not closed")
+				}
+				for _, sqlMode := range []helpers.SQLMode{helpers.SQLModeParameterized, helpers.SQLModeLiteral} {
+					preview, _ := helpers.BuildUpdateSQL(set.Table, []string{`i"d`, "key"}, e, sqlMode)
+					if !strings.Contains(preview, ` AND "n""ame" IS NOT DISTINCT FROM `) {
+						t.Errorf("ordinary builder lost optimistic guard: %s", preview)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestReview_overwrite_UpdateError(t *testing.T) {
+	for _, failure := range []error{errors.New("synthetic update failure"), context.Canceled} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			set := newApplySet()
+			for _, id := range []int{1, 2} {
+				mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{id}, Column: "name", OldValue: "old", NewValue: "new"})
+			}
+			sess := &fakeSession{script: []execResponse{{}, {RowsAffected: 1}, {Err: failure}, {}}}
+			helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
+			res, err := helper.Overwrite(context.Background(), set, []string{"id"})
+			if !errors.Is(err, failure) || len(res.RowsAffected) != 0 {
+				t.Fatalf("res=%+v err=%v, want wrapped update failure without success data", res, err)
+			}
+			if len(sess.calls) != 4 || sess.calls[3].SQL != "ROLLBACK" || !sess.closed {
+				t.Errorf("failed batch did not roll back and close: %+v", sess.calls)
+			}
+		})
+	}
+}
 
 func TestReview_identity_safety(t *testing.T) {
 	for _, mode := range []string{"apply", "overwrite", "dry_run"} {

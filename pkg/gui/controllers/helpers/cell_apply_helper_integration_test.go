@@ -113,6 +113,86 @@ func TestReview_identity_safety_LiveRollback(t *testing.T) {
 	}
 }
 
+func TestReview_overwrite_Live(t *testing.T) {
+	for _, scenario := range []string{"literal", "null", "expression", "missing", "multi_row"} {
+		for _, mode := range []string{"overwrite", "apply", "dry_run"} {
+			t.Run(scenario+"/"+mode, func(t *testing.T) {
+				conn := openIntegrationConn(t)
+				schema := fmt.Sprintf("review_overwrite_%d", time.Now().UnixNano())
+				ref := models.Ref{Schema: schema, Table: `t"arget`}
+				qualified := pg.QuoteQualified(ref.Schema, ref.Table)
+				adminExec(t, conn, "CREATE SCHEMA "+pg.QuoteIdent(schema))
+				t.Cleanup(func() { adminExec(t, conn, "DROP SCHEMA "+pg.QuoteIdent(schema)+" CASCADE") })
+				adminExec(t, conn,
+					"CREATE TABLE "+qualified+` (id int NOT NULL, slot text NOT NULL, "v""alue" text)`,
+					"INSERT INTO "+qualified+" VALUES (1, 'x', 'server'), (1, 'y', 'unrelated'), (2, 'x', 'old'), (4, 'x', 'server'), (4, 'x', 'server')",
+				)
+				set := &models.PendingEditSet{Table: ref}
+				e := models.PendingEdit{PrimaryKey: []any{int32(1), "x"}, Column: `v"alue`, OldValue: "stale", NewValue: "new"}
+				wantValue := "server"
+				if scenario == "null" {
+					e.OldValue = nil
+				} else if scenario == "expression" {
+					e.Kind, e.NewExpr = models.Expression, `'new' || "v""alue"`
+				} else if scenario == "missing" || scenario == "multi_row" {
+					mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{int32(2), "x"}, Column: `v"alue`, OldValue: "old", NewValue: "first"})
+					e.PrimaryKey[0] = int32(3)
+					if scenario == "multi_row" {
+						e.PrimaryKey[0], e.OldValue = int32(4), "server"
+					}
+				}
+				mustAdd(t, set, e)
+				helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: conn})
+				var res helpers.ApplyResult
+				var conflicts []models.ConflictedEdit
+				var err error
+				if mode == "overwrite" {
+					res, err = helper.Overwrite(context.Background(), set, []string{"id", "slot"})
+				} else {
+					res, conflicts, err = helper.Apply(context.Background(), set, []string{"id", "slot"}, mode == "dry_run")
+				}
+				wantErr := scenario == "multi_row" || (scenario == "missing" && mode == "overwrite")
+				if (err != nil) != wantErr {
+					t.Fatalf("err=%v, want error=%v", err, wantErr)
+				}
+				if wantErr {
+					if len(res.RowsAffected) != 0 || len(res.RefetchedRows) != 0 {
+						t.Fatalf("failed batch returned success data: %+v", res)
+					}
+				} else if mode == "overwrite" {
+					wantValue = "new"
+					if scenario == "expression" {
+						wantValue = "newserver"
+					}
+					if len(res.RowsAffected) != 1 || res.RowsAffected[0] != 1 || len(res.RefetchedRows) != 1 || res.RefetchedRows[0].Values[2] != wantValue {
+						t.Fatalf("overwrite result=%+v, want exactly one changed/refetched row", res)
+					}
+				} else if mode == "apply" {
+					if len(conflicts) != 1 {
+						t.Fatalf("guarded Apply conflicts=%v, want one", conflicts)
+					}
+				} else if res.RowsAffected[len(res.RowsAffected)-1] != 0 {
+					t.Fatalf("guarded dry-run counts=%v, want final zero", res.RowsAffected)
+				}
+				sess, err := conn.AcquireSession(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = sess.Close() }()
+				rows, err := sess.Execute(context.Background(), models.Query{SQL: `SELECT id, slot, "v""alue" FROM ` + qualified + ` ORDER BY id, slot`})
+				if err != nil || len(rows.Rows) != 5 {
+					t.Fatalf("verify rows=%d err=%v", len(rows.Rows), err)
+				}
+				for i, expected := range []string{wantValue, "unrelated", "old", "server", "server"} {
+					if rows.Rows[i].Values[2] != expected {
+						t.Errorf("row %d value=%v, want %s; wrong target or missing rollback", i, rows.Rows[i].Values[2], expected)
+					}
+				}
+			})
+		}
+	}
+}
+
 // TestCellApply_LiveHappyPath_LiteralEdit exercises the success path on
 // a freshly-created table: BEGIN / UPDATE / COMMIT / refetch. Asserts
 // rowsAffected and that the committed value is observable through a

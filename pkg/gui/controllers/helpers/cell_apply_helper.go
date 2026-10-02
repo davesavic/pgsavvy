@@ -331,7 +331,7 @@ func (h *CellApplyHelper) Overwrite(
 	sqlTexts := make([]string, len(edits))
 	for i := range edits {
 		e := edits[i]
-		stmt, args := BuildUpdateSQL(set.Table, pkCols, e, SQLModeParameterized)
+		stmt, args := buildUpdateSQL(set.Table, pkCols, e, SQLModeParameterized, false)
 		sqlTexts[i] = stmt
 		res, execErr := sess.Execute(ctx, models.Query{SQL: stmt, Args: args})
 		if execErr != nil {

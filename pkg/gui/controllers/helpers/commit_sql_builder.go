@@ -34,6 +34,10 @@ const (
 // Expression edits (Kind==Expression) splice NewExpr verbatim into the
 // SET clause in both modes — no quoting, no parameter binding.
 func BuildUpdateSQL(table models.Ref, pkCols []string, edit models.PendingEdit, mode SQLMode) (string, []any) {
+	return buildUpdateSQL(table, pkCols, edit, mode, true)
+}
+
+func buildUpdateSQL(table models.Ref, pkCols []string, edit models.PendingEdit, mode SQLMode, guardOldValue bool) (string, []any) {
 	var b strings.Builder
 	var args []any
 
@@ -65,6 +69,9 @@ func BuildUpdateSQL(table models.Ref, pkCols []string, edit models.PendingEdit, 
 			args = append(args, edit.PrimaryKey[i])
 			fmt.Fprintf(&b, "$%d", len(args))
 		}
+	}
+	if !guardOldValue {
+		return b.String(), args
 	}
 	b.WriteString(" AND ")
 	b.WriteString(pg.QuoteIdent(edit.Column))
