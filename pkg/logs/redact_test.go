@@ -192,6 +192,40 @@ func TestDefaultRedactor_DSNRegex_KVForm(t *testing.T) {
 	}
 }
 
+func TestReview_redact(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"escaped_quote", `host=h password='head\'REVIEW_SECRET_TAIL' user=u`, `host=h password=*** user=u`},
+		{"escaped_double_quote", `password="head\"REVIEW_SECRET_TAIL" user=u`, `password=*** user=u`},
+		{"double_quote_suffix", `password="head\"inner"REVIEW_SECRET_TAIL user=u`, `password=*** user=u`},
+		{"tls_double_quote_suffix", `sslpassword="head"REVIEW_TLS_TAIL user=u`, `sslpassword=*** user=u`},
+		{"escaped_backslash", `password='head\\' user=u`, `password=*** user=u`},
+		{"escaped_space", `password=head\ REVIEW_SECRET_TAIL user=u`, `password=*** user=u`},
+		{"mixed_keys", `PaSsWoRd='head\'REVIEW_SECRET_TAIL' SSLPASSWORD='head\'REVIEW_TLS_TAIL' user=u`, `PaSsWoRd=*** SSLPASSWORD=*** user=u`},
+		{"unterminated", `password='head REVIEW_SECRET_TAIL`, `password=***`},
+		{"spaced_equal", `password = 'head\'REVIEW_SECRET_TAIL' user=u`, `password = *** user=u`},
+		{"url_control", `error postgres://u:REVIEW_SECRET_TAIL@h/d user=u`, `error postgres://u:***@h/d user=u`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := redactRecord(t, DefaultRedactor(), tc.in, slog.String("dsn", tc.in), slog.Any("nested", map[string]any{"dsn": tc.in}))
+			if rec.Message != tc.want {
+				t.Error("message redaction mismatch; raw values omitted")
+			}
+			a, ok := attrByKey(rec, "dsn")
+			if !ok || a.String() != tc.want {
+				t.Error("attribute redaction mismatch; raw values omitted")
+			}
+			a, ok = attrByKey(rec, "nested")
+			if !ok || a.Any().(map[string]any)["dsn"] != tc.want {
+				t.Error("nested redaction mismatch; raw values omitted")
+			}
+			DefaultRedactor().Redact(&rec)
+			if rec.Message != tc.want {
+				t.Error("message redaction is not idempotent")
+			}
+		})
+	}
+}
+
 func TestDefaultRedactor_EnvAddedAfterStart_StillRedacted(t *testing.T) {
 	r := DefaultRedactor() // constructed before env is set
 	t.Setenv("MY_TEST_PASSWORD", "topsecret_unique_value_xyz")

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
@@ -462,6 +463,58 @@ func TestWarnInsecureSSL_Format(t *testing.T) {
 }
 
 // ---------- DSN redaction ----------------------------------------------------
+
+func TestReview_redact(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"escaped_quote", `host=h password='head\'REVIEW_SECRET_TAIL' user=u`, `host=h password=*** user=u`},
+		{"escaped_double_quote", `password="head\"REVIEW_SECRET_TAIL" user=u`, `password=*** user=u`},
+		{"double_quote_suffix", `password="head\"inner"REVIEW_SECRET_TAIL user=u`, `password=*** user=u`},
+		{"tls_double_quote_suffix", `sslpassword="head"REVIEW_TLS_TAIL user=u`, `sslpassword=*** user=u`},
+		{"escaped_backslash", `password='head\\' user=u`, `password=*** user=u`},
+		{"escaped_space", `password=head\ REVIEW_SECRET_TAIL user=u`, `password=*** user=u`},
+		{"mixed_keys", `PaSsWoRd='head\'REVIEW_SECRET_TAIL' SSLPASSWORD='head\'REVIEW_TLS_TAIL' user=u`, `PaSsWoRd=*** SSLPASSWORD=*** user=u`},
+		{"unterminated", `password='head REVIEW_SECRET_TAIL`, `password=***`},
+		{"spaced_equal", `password = 'head\'REVIEW_SECRET_TAIL' user=u`, `password = *** user=u`},
+		{"url_control", `error postgres://u:REVIEW_SECRET_TAIL@h/d user=u`, `error postgres://u:***@h/d user=u`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RedactConnectionString(tc.in)
+			if got != tc.want {
+				t.Error("redaction mismatch; raw credential-bearing output omitted")
+			}
+			if RedactConnectionString(got) != got {
+				t.Error("redaction is not idempotent")
+			}
+		})
+	}
+}
+
+func TestReview_redact_PgxValidAndParseError(t *testing.T) {
+	for _, tc := range []struct{ name, value, decoded string }{
+		{"quote_and_space", `'head\' REVIEW_SECRET_TAIL'`, "head' REVIEW_SECRET_TAIL"},
+		{"double_quote_suffix", `"head\"inner"REVIEW_SECRET_TAIL`, `"head\"inner"REVIEW_SECRET_TAIL`},
+		{"backslash", `'head\\REVIEW_SECRET_TAIL'`, `head\REVIEW_SECRET_TAIL`},
+		{"bare_escaped_space", `head\ REVIEW_SECRET_TAIL`, `head\ REVIEW_SECRET_TAIL`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dsn := "host=127.0.0.1 user=u password=" + tc.value + " dbname=d sslmode=disable"
+			cfg, err := pgxpool.ParseConfig(dsn)
+			if err != nil || cfg.ConnConfig.Password != tc.decoded {
+				t.Fatal("synthetic fixture is not a pgx-valid password; raw values omitted")
+			}
+			_, err = BuildPgxConfig(context.Background(), models.Connection{DSN: dsn + " port=invalid"}, "")
+			if err == nil {
+				t.Fatal("expected invalid-port error without dialing")
+			}
+			if strings.Contains(err.Error(), "REVIEW_SECRET_TAIL") {
+				t.Error("password suffix leaked through parser error; raw error omitted")
+			}
+			if !strings.Contains(err.Error(), "invalid port") || !strings.Contains(err.Error(), "host=127.0.0.1") {
+				t.Error("nonsecret parser diagnostics lost")
+			}
+		})
+	}
+}
 
 func TestRedactDSN(t *testing.T) {
 	cases := []struct{ in, want string }{

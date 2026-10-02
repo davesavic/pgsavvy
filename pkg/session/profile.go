@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/utils"
 )
 
 // statementTimeoutRe is the permissive grammar for Connection.StatementTimeout.
@@ -94,8 +95,14 @@ func BuildPgxConfig(_ context.Context, profile models.Connection, password strin
 
 	cfg, err := pgxpool.ParseConfig(connString)
 	if err != nil {
-		// pgxpool surfaces the connection string in its error; scrub inline
-		// credentials before returning. See /review-plan-2026-05-17 Sec-7.
+		// pgx's error formatter can remove quote boundaries while retaining
+		// an escaped password suffix. Scrub the original DSN before formatting.
+		var parseErr *pgconn.ParseConfigError
+		if errors.As(err, &parseErr) {
+			safeErr := *parseErr
+			safeErr.ConnString = RedactConnectionString(parseErr.ConnString)
+			err = &safeErr
+		}
 		return nil, fmt.Errorf("session: parse dsn: %s", RedactConnectionString(err.Error()))
 	}
 
@@ -362,19 +369,12 @@ func RedactDSN(s string) string {
 	return dsnInlineCredRe.ReplaceAllString(s, "${1}${2}:***@")
 }
 
-// kvDSNCredRe matches `key=value` form Postgres DSNs and libpq connection
-// strings where the key is password/sslpassword. The value is captured both
-// for quoted (single-quoted, with potential whitespace) and unquoted forms.
-// The `(?i)` makes the key match case-insensitive.
-var kvDSNCredRe = regexp.MustCompile(`(?i)\b(password|sslpassword)=('[^']*'|"[^"]*"|\S+)`)
-
-// RedactConnectionString applies both the URL-form (dsnInlineCredRe) and the
-// kv-form (kvDSNCredRe) scrubs in sequence. Use this in any code path that
+// RedactConnectionString applies URL-form and escape-aware keyword/value
+// scrubs in sequence. Use this in any code path that
 // emits a DSN-shaped string to logs or to a user-visible toast.
 func RedactConnectionString(s string) string {
 	s = dsnInlineCredRe.ReplaceAllString(s, "${1}${2}:***@")
-	s = kvDSNCredRe.ReplaceAllString(s, "$1=***")
-	return s
+	return utils.RedactDSNKeyValues(s)
 }
 
 // isLoopbackHost is true for empty host (Unix socket), "localhost", or any

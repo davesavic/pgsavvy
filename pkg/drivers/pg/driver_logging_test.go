@@ -148,6 +148,41 @@ func TestOpen_KVFormDSN_PasswordRedacted(t *testing.T) {
 	}
 }
 
+func TestReview_redact_DriverErrorEmission(t *testing.T) {
+	for _, tc := range []struct{ name, value string }{
+		{"quote_and_space", `'head\' REVIEW_SECRET_TAIL'`},
+		{"double_quote_suffix", `"head\"inner"REVIEW_SECRET_TAIL`},
+		{"backslash", `'head\\REVIEW_SECRET_TAIL'`},
+		{"bare_escaped_space", `head\ REVIEW_SECRET_TAIL`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := installCaptureLogger(t)
+			d, err := New(stubPrompter{})(context.Background())
+			if err != nil {
+				t.Fatal("driver factory failed")
+			}
+			profile := models.Connection{Name: "review-redact", Driver: "postgres", Password: "synthetic", DSN: "host=127.0.0.1 port=invalid user=u password=" + tc.value + " dbname=d sslmode=disable"}
+			_, err = d.Open(context.Background(), profile, nil)
+			if err == nil {
+				t.Fatal("expected invalid-port error without dialing")
+			}
+			if strings.Contains(err.Error(), "REVIEW_SECRET_TAIL") || strings.Contains(buf.String(), "REVIEW_SECRET_TAIL") {
+				t.Error("password suffix leaked through driver error/log emission; raw output omitted")
+			}
+			for _, event := range []string{"conn_open", "conn_open_done"} {
+				records := findEvents(t, buf, event)
+				if len(records) != 1 {
+					t.Fatalf("event %s count=%d, want one", event, len(records))
+				}
+				dsn, _ := records[0]["redacted_dsn"].(string)
+				if !strings.Contains(dsn, "password=*** dbname=d") {
+					t.Error("redacted DSN marker or nonsecret fields missing")
+				}
+			}
+		})
+	}
+}
+
 // TestEvent_NilLoggerNoOps documents the safety contract: every emit site
 // in the pg driver calls logs.Event with pkgLogger(), which returns nil
 // when SetGlobalLogger has not been called. A nil-logger emit must not

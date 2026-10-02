@@ -8,11 +8,13 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/davesavic/pgsavvy/pkg/utils"
 )
 
 // Redactor scrubs secret material from a slog.Record in-place. The default
 // implementation walks the record's attrs reflectively, redacts fields tagged
-// `log:"redact"`, applies DSN-credential regex scrubs to all string-typed
+// `log:"redact"`, applies DSN-credential scrubs to all string-typed
 // values + the record's message, and replaces values that exactly match any
 // env-var whose name contains PASSWORD/SECRET/TOKEN.
 type Redactor interface {
@@ -31,13 +33,8 @@ const (
 	maxWalkDepth        = 5
 )
 
-// Duplicated from pkg/session/profile.go to avoid an import cycle if/when
-// pkg/session grows to depend on pkg/logs. Keep these in sync with the
-// canonical definitions there.
-var (
-	logsDSNInlineCredRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^:/@?\s]+):[^@/?\s]+@`)
-	logsKVDSNCredRe     = regexp.MustCompile(`(?i)\b(password|sslpassword)=('[^']*'|"[^"]*"|\S+)`)
-)
+// The URL pattern mirrors pkg/session/profile.go without importing session.
+var logsDSNInlineCredRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^:/@?\s]+):[^@/?\s]+@`)
 
 type defaultRedactor struct {
 	depthWarnOnce sync.Once
@@ -228,8 +225,8 @@ func fieldName(sf reflect.StructField) string {
 	return sf.Name
 }
 
-// scrubString applies env-exact-match, URL-form DSN regex, and kv-form DSN
-// regex in that order. Returns s unchanged when no rule matches.
+// scrubString applies env-exact-match, URL-form DSN redaction, and the
+// escape-aware keyword/value scanner. Returns s unchanged when no rule matches.
 func scrubString(s string, env map[string]struct{}) string {
 	if s == "" {
 		return s
@@ -238,6 +235,5 @@ func scrubString(s string, env map[string]struct{}) string {
 		return redactedMarker
 	}
 	s = logsDSNInlineCredRe.ReplaceAllString(s, "${1}${2}:***@")
-	s = logsKVDSNCredRe.ReplaceAllString(s, "$1=***")
-	return s
+	return utils.RedactDSNKeyValues(s)
 }
