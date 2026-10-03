@@ -3,6 +3,9 @@ package keys
 import (
 	"testing"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+	"github.com/stretchr/testify/require"
+
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
@@ -53,18 +56,18 @@ func TestSequenceFromShorthand_CtrlW_V(t *testing.T) {
 
 func TestSequenceFromShorthand_Specials(t *testing.T) {
 	cases := []struct {
-		in      string
-		special SpecialKey
+		in   string
+		want Key
 	}{
-		{"<esc>", KeyEsc},
-		{"<cr>", KeyEnter},
-		{"<tab>", KeyTab},
-		{"<bs>", KeyBs},
-		{"<space>", KeySpace},
-		{"<up>", KeyUp},
-		{"<down>", KeyDown},
-		{"<f1>", KeyF1},
-		{"<f12>", KeyF12},
+		{"<esc>", Key{Special: KeyEsc}},
+		{"<cr>", Key{Special: KeyEnter}},
+		{"<tab>", Key{Special: KeyTab}},
+		{"<bs>", Key{Special: KeyBs}},
+		{"<space>", Key{Code: ' '}},
+		{"<up>", Key{Special: KeyUp}},
+		{"<down>", Key{Special: KeyDown}},
+		{"<f1>", Key{Special: KeyF1}},
+		{"<f12>", Key{Special: KeyF12}},
 	}
 	for _, c := range cases {
 		got, err := SequenceFromShorthand(c.in)
@@ -72,8 +75,8 @@ func TestSequenceFromShorthand_Specials(t *testing.T) {
 			t.Errorf("%s: unexpected error %v", c.in, err)
 			continue
 		}
-		if len(got) != 1 || got[0].Special != c.special {
-			t.Errorf("%s: got %#v, want Special=%v", c.in, got, c.special)
+		if len(got) != 1 || got[0] != c.want {
+			t.Errorf("%s: got %#v, want %+v", c.in, got, c.want)
 		}
 	}
 }
@@ -168,4 +171,56 @@ func TestModeBitsFromTokens_Errors(t *testing.T) {
 	if _, err := modeBitsFromTokens([]string{"bogus"}); err == nil {
 		t.Error("unknown token: expected error")
 	}
+}
+
+func TestReview_space(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		mod   Modifier
+		gmod  gocui.Modifier
+		round Modifier
+	}{
+		{"<space>", 0, 0, 0},
+		{"<c-space>", ModCtrl, gocui.ModCtrl, ModCtrl},
+		{"<a-space>", ModAlt, gocui.ModAlt, ModAlt},
+		{"<s-space>", ModShift, gocui.ModShift, ModShift},
+		{"<m-space>", ModMeta, gocui.ModAlt, ModAlt},
+		{"<c-a-s-space>", ModCtrl | ModAlt | ModShift, gocui.ModCtrl | gocui.ModAlt | gocui.ModShift, ModCtrl | ModAlt | ModShift},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			seq, err := SequenceFromShorthand(tc.input)
+			require.NoError(t, err)
+			require.Equal(t, []Key{{Code: ' ', Mod: tc.mod}}, seq)
+			gk, gmod, err := ChordKeyToGocui(seq[0])
+			require.NoError(t, err)
+			require.Equal(t, gocui.NewKeyRune(' '), gk)
+			require.Equal(t, tc.gmod, gmod)
+			// Construct the runtime key independently, including the existing
+			// Meta-to-Alt mapping, instead of feeding the parser's key back.
+			runtime := gocui.NewKeyStrMod(" ", tc.gmod)
+			require.Equal(t, Key{Code: ' ', Mod: tc.round}, KeyFromGocui(runtime))
+			legacyKey, legacyMod, err := ChordKeyToGocui(Key{Special: KeySpace, Mod: tc.mod})
+			require.NoError(t, err)
+			require.Equal(t, gk, legacyKey)
+			require.Equal(t, gmod, legacyMod)
+		})
+	}
+	for _, input := range []string{"<leader>Q", "<localleader>Q", "<c-leader>Q"} {
+		seq, err := SequenceFromShorthand(input)
+		require.NoError(t, err)
+		before := append([]Key(nil), seq...)
+		expanded := expandLeaderTokens(seq, ' ', ' ')
+		wantMod := Modifier(0)
+		if input == "<c-leader>Q" {
+			wantMod = ModCtrl
+		}
+		require.Equal(t, []Key{{Code: ' ', Mod: wantMod}, {Code: 'Q'}}, expanded)
+		require.Equal(t, before, seq)
+	}
+	for _, special := range []SpecialKey{KeyLeader, KeyLocalLeader, ^SpecialKey(0)} {
+		_, _, err := ChordKeyToGocui(Key{Special: special})
+		require.Error(t, err)
+	}
+	_, err := SpecialKeyToGocui(KeySpace)
+	require.Error(t, err, "Space has no named gocui key; use the full encoder")
 }

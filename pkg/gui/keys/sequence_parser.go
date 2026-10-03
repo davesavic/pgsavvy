@@ -54,6 +54,11 @@ func keyFromLabel(lbl config.KeyLabel) (Key, error) {
 		}
 	}
 
+	// Runtime Space arrives as a rune, including on non-editable views.
+	if lbl.Key == "space" {
+		k.Code = ' '
+		return k, nil
+	}
 	if sp, ok := specialKeyByName[lbl.Key]; ok {
 		k.Special = sp
 		return k, nil
@@ -82,7 +87,6 @@ var specialKeyByName = map[string]SpecialKey{
 	"tab":         KeyTab,
 	"bs":          KeyBs,
 	"backspace":   KeyBs,
-	"space":       KeySpace,
 	"up":          KeyUp,
 	"down":        KeyDown,
 	"left":        KeyLeft,

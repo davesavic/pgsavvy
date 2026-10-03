@@ -1570,7 +1570,8 @@ func (g *Gui) installShimsForScope(trieSet *keys.TrieSet, scope types.ContextKey
 		for _, k := range trie.ReachableKeys() {
 			gk, gmod, err := keys.ChordKeyToGocui(k)
 			if err != nil {
-				continue
+				firstErr = fmt.Errorf("gui: encode keybinding(view=%q, key=%v): %w", view, k, err)
+				return
 			}
 			// R5: RESERVE Ctrl-C. Never install a trie shim for Ctrl-C, even
 			// if a user bound <c-c> to some action in this non-editable

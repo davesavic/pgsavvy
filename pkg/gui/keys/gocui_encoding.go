@@ -29,6 +29,10 @@ func ChordKeyToGocui(k types.ChordKey) (types.Key, types.Modifier, error) {
 
 func chordKeyToGocui(k types.ChordKey) (types.Key, types.Modifier, error) {
 	mod := chordModifierToGocui(k.Mod)
+	// Retain compatibility for callers still constructing the legacy enum.
+	if k.Special == types.KeySpace {
+		return gocui.NewKeyRune(' '), mod, nil
+	}
 	if k.Special == types.KeyNone {
 		if k.Code == 0 {
 			return types.Key{}, 0, errors.New("keys: empty ChordKey (no Code and no Special)")
