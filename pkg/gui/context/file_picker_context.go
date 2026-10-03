@@ -157,6 +157,7 @@ func (f *FilePickerContext) NavigateTo(path string) {
 		f.errMsg = "Cannot access: " + path
 		return
 	}
+	f.ClearSearch()
 	f.currentPath = resolved
 	f.errMsg = ""
 	f.listingOffset = 0

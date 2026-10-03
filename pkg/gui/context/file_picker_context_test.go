@@ -89,6 +89,164 @@ func newTestPickerFs() afero.Fs {
 	return fs
 }
 
+type reviewPickerSearchFs struct {
+	afero.Fs
+	beforeOpen func(string)
+	readError  string
+}
+
+func (fs *reviewPickerSearchFs) Open(path string) (afero.File, error) {
+	if fs.beforeOpen != nil {
+		fs.beforeOpen(path)
+	}
+	if path == fs.readError {
+		return nil, os.ErrPermission
+	}
+	return fs.Fs.Open(path)
+}
+
+func TestReview_picker_search(t *testing.T) {
+	for _, scenario := range []string{"navigate", "descend", "ascend", "hidden_on", "hidden_off", "refresh", "create_directory", "sort_size", "sort_modified", "sort_name", "empty", "read_error", "truncated", "no_matches", "smart_case"} {
+		t.Run(scenario, func(t *testing.T) {
+			fs := &reviewPickerSearchFs{Fs: newTestPickerFs()}
+			for _, dir := range []string{"/other", "/empty"} {
+				require.NoError(t, fs.MkdirAll(dir, 0o755))
+			}
+			for _, name := range []string{"a.txt", "b.txt", "c.txt", "d.txt"} {
+				require.NoError(t, afero.WriteFile(fs, filepath.Join("/other", name), nil, 0o600))
+			}
+			fp := NewFilePickerContext(BaseContext{}, Deps{})
+			fp.SetFs(fs)
+			fp.Push(PickerOpen, "/home/user", nil, nil, nil)
+			fp.SetViewSize(200, 20)
+			fp.nowFunc = func() time.Time { return time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC) }
+			query := "s"
+			switch scenario {
+			case "hidden_off":
+				fp.ToggleHidden()
+			case "sort_modified":
+				fp.CycleSort()
+			case "sort_name":
+				fp.CycleSort()
+				fp.CycleSort()
+			case "truncated":
+				for i := range 205 {
+					require.NoError(t, afero.WriteFile(fs, fmt.Sprintf("/home/user/x_%03d.sql", i), nil, 0o600))
+				}
+				fp.Refresh()
+				query = "x_"
+			case "no_matches":
+				query = "absent"
+			case "smart_case":
+				query = "SQL"
+			}
+			fp.SetSearch(query)
+			require.True(t, fp.SearchActive())
+			if scenario == "truncated" {
+				_, total, truncated := fp.SearchStatus()
+				require.Equal(t, 200, total)
+				require.True(t, truncated)
+			}
+			var opens int
+			fs.beforeOpen = func(string) {
+				opens++
+				if fp.SearchActive() || len(fp.search.matches) != 0 {
+					t.Error("search must clear before reading the replacement listing")
+				}
+			}
+			saved := fp.Selected().Path
+			switch scenario {
+			case "navigate", "truncated", "no_matches", "smart_case":
+				fp.NavigateTo("/other")
+			case "descend":
+				fp.SetCursor(0)
+				fp.Descend()
+				require.Equal(t, "/home/user/projects", fp.CurrentPath())
+			case "ascend":
+				fp.Ascend()
+				require.Equal(t, "/home", fp.CurrentPath())
+			case "hidden_on", "hidden_off":
+				fp.ToggleHidden()
+				require.Equal(t, saved, fp.Selected().Path)
+			case "refresh":
+				fp.Refresh()
+				require.Equal(t, saved, fp.Selected().Path)
+			case "create_directory":
+				fp.CreateDirectory("new_directory")
+				exists, err := afero.DirExists(fs, "/home/user/new_directory")
+				require.NoError(t, err)
+				require.True(t, exists)
+			case "sort_size", "sort_modified", "sort_name":
+				fp.CycleSort()
+			case "empty":
+				fp.NavigateTo("/empty")
+				require.Empty(t, fp.Items())
+				require.Contains(t, fp.RenderBody(), "(empty directory)")
+			case "read_error":
+				fs.readError = "/other"
+				fp.NavigateTo("/other")
+				require.Empty(t, fp.Items())
+				require.Contains(t, fp.RenderBody(), "Read error: permission denied")
+			}
+			require.Positive(t, opens)
+			t.Run("cleared_state", func(t *testing.T) {
+				require.Equal(t, filePickerSearchState{}, fp.search)
+				cur, total, truncated := fp.SearchStatus()
+				require.Zero(t, cur)
+				require.Zero(t, total)
+				require.False(t, truncated)
+			})
+			t.Run("render", func(t *testing.T) {
+				expected := *fp
+				expected.ClearSearch()
+				require.Equal(t, expected.RenderBody(), fp.RenderBody())
+			})
+			for _, step := range []struct {
+				name string
+				fn   func()
+			}{{"next", fp.NextMatch}, {"prev", fp.PrevMatch}} {
+				t.Run(step.name, func(t *testing.T) {
+					fp.SetCursor(0)
+					selected := fp.Selected()
+					step.fn()
+					require.Zero(t, fp.cursor)
+					require.Equal(t, selected, fp.Selected())
+				})
+			}
+		})
+	}
+}
+
+func TestReview_picker_search_unchanged_listing(t *testing.T) {
+	for _, scenario := range []string{"empty_path", "nil_fs", "unresolved_path", "failed_create", "non_directory_descend"} {
+		t.Run(scenario, func(t *testing.T) {
+			fp := NewFilePickerContext(BaseContext{}, Deps{})
+			fp.SetFs(newTestPickerFs())
+			fp.Push(PickerOpen, "/home/user", nil, nil, nil)
+			fp.SetSearch("sql")
+			search, selected, items := fp.search, fp.Selected(), fp.Items()
+			switch scenario {
+			case "empty_path":
+				fp.NavigateTo("")
+			case "nil_fs":
+				fp.SetFs(nil)
+				fp.NavigateTo("/home/user")
+			case "unresolved_path":
+				fp.NavigateTo("/missing/parent/child")
+				require.Contains(t, fp.errMsg, "Cannot access:")
+			case "failed_create":
+				fp.CreateDirectory("projects")
+				require.Contains(t, fp.errMsg, "Cannot create:")
+			case "non_directory_descend":
+				fp.Descend()
+			}
+			require.Equal(t, search, fp.search)
+			require.Equal(t, selected, fp.Selected())
+			require.Equal(t, items, fp.Items())
+		})
+	}
+}
+
 func TestFilePickerContext_PushInitializesState(t *testing.T) {
 	fp := NewFilePickerContext(BaseContext{}, Deps{})
 	fp.SetFs(newTestPickerFs())
