@@ -1,13 +1,90 @@
 package grid
 
 import (
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
+	"math/big"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+type reviewArrayValuer struct {
+	value driver.Value
+	err   error
+}
+
+func (v reviewArrayValuer) Value() (driver.Value, error) { return v.value, v.err }
+
+func TestReview_numeric_array(t *testing.T) {
+	col := models.ColumnMeta{TypeName: "_numeric"}
+	t.Run("actual_codec", func(t *testing.T) {
+		m := pgtype.NewMap()
+		arrayType, ok := m.TypeForOID(pgtype.NumericArrayOID)
+		require.True(t, ok)
+		literal := "{123456789012345678901234567890.12345678901234567890,-0.00000000000000000001,0,NULL,NaN,Infinity,-Infinity}"
+		for _, format := range []int16{pgtype.TextFormatCode, pgtype.BinaryFormatCode} {
+			src := []byte(literal)
+			if format == pgtype.BinaryFormatCode {
+				var values []pgtype.Numeric
+				require.NoError(t, m.Scan(pgtype.NumericArrayOID, pgtype.TextFormatCode, src, &values))
+				var err error
+				src, err = m.Encode(pgtype.NumericArrayOID, format, values, nil)
+				require.NoError(t, err)
+			}
+			decoded, err := arrayType.Codec.DecodeValue(m, pgtype.NumericArrayOID, format, src)
+			require.NoError(t, err)
+			require.IsType(t, pgtype.Numeric{}, decoded.([]any)[0])
+			got, recognized := FormatArrayLiteral(decoded)
+			require.True(t, recognized)
+			require.Equal(t, literal, got)
+			require.Equal(t, literal, renderCellPlain(decoded, col))
+			var reparsed []pgtype.Numeric
+			require.NoError(t, m.Scan(pgtype.NumericArrayOID, pgtype.TextFormatCode, []byte(got), &reparsed))
+			require.Len(t, reparsed, 7)
+			require.False(t, reparsed[3].Valid)
+			for i, value := range decoded.([]any) {
+				if value == nil {
+					continue
+				}
+				want, err := value.(pgtype.Numeric).Value()
+				require.NoError(t, err)
+				actual, err := reparsed[i].Value()
+				require.NoError(t, err)
+				require.Equal(t, want, actual)
+			}
+		}
+	})
+
+	cases := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"positive_exponent", []pgtype.Numeric{{Int: big.NewInt(123), Exp: 8, Valid: true}}, "{12300000000}"},
+		{"negative_exponent", []pgtype.Numeric{{Int: big.NewInt(-123), Exp: -8, Valid: true}}, "{-0.00000123}"},
+		{"typed_null", []pgtype.Numeric{{}}, "{NULL}"},
+		{"nil_numeric_pointer", []*pgtype.Numeric{nil}, "{NULL}"},
+		{"nested_and_escaped", []any{[]any{pgtype.Numeric{Int: big.NewInt(123), Valid: true}, pgtype.Numeric{}}, []any{`quote"\,`, "NULL"}}, `{{123,NULL},{"quote\"\\,","NULL"}}`},
+		{"valuer_nil", []any{reviewArrayValuer{}}, "{NULL}"},
+		{"valuer_escaping", []any{reviewArrayValuer{value: `quote"\,`}}, `{"quote\"\\,"}`},
+		{"conversion_error", []any{1, reviewArrayValuer{value: "123", err: errors.New("synthetic conversion detail")}, 2}, "array value conversion failed"},
+		{"nested_conversion_error", []any{[]any{1}, []any{reviewArrayValuer{err: errors.New("synthetic conversion detail")}}}, "array value conversion failed"},
+		{"invalid_driver_value", []any{reviewArrayValuer{value: struct{}{}}}, "array value conversion failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := FormatArrayLiteral(tc.value)
+			require.True(t, ok)
+			require.Equal(t, tc.want, got)
+			require.Equal(t, tc.want, renderCellPlain(tc.value, col))
+		})
+	}
+}
 
 func TestReview_json_scalar_display(t *testing.T) {
 	col := models.ColumnMeta{TypeName: "jsonb"}

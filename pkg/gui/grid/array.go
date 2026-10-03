@@ -1,6 +1,7 @@
 package grid
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -51,13 +52,24 @@ func FormatJSONValue(v any) string {
 // Elements needing it are double-quoted with embedded " and \ escaped;
 // a nil element renders as the unquoted NULL keyword. Nested slices
 // recurse so multi-dimensional arrays round-trip.
+// Valuers supply canonical scalar text. Conversion failure returns the fixed
+// non-array message "array value conversion failed" with recognition true,
+// preventing callers from falling back to struct dumps or seeding partial data.
 func FormatArrayLiteral(v any) (string, bool) {
+	s, ok, err := formatArrayLiteral(v)
+	if err != nil {
+		return "array value conversion failed", true
+	}
+	return s, ok
+}
+
+func formatArrayLiteral(v any) (string, bool, error) {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() || rv.Kind() != reflect.Slice {
-		return "", false
+		return "", false, nil
 	}
 	if rv.Type().Elem().Kind() == reflect.Uint8 {
-		return "", false // []byte: bytea / raw json, not an array
+		return "", false, nil // []byte: bytea / raw json, not an array
 	}
 	var b strings.Builder
 	b.WriteByte('{')
@@ -65,28 +77,51 @@ func FormatArrayLiteral(v any) (string, bool) {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		b.WriteString(formatArrayElem(rv.Index(i).Interface()))
+		elem, err := formatArrayElem(rv.Index(i).Interface())
+		if err != nil {
+			return "", true, err
+		}
+		b.WriteString(elem)
 	}
 	b.WriteByte('}')
-	return b.String(), true
+	return b.String(), true, nil
 }
 
 // formatArrayElem renders one array element. nil → the bare NULL
-// keyword; a nested slice recurses; everything else is stringified via
-// %v and quoted when it would otherwise break array parsing.
-func formatArrayElem(e any) string {
+// keyword; a nested slice recurses; a Valuer supplies the scalar value.
+// Scalars are quoted when they would otherwise break array parsing.
+func formatArrayElem(e any) (string, error) {
 	if e == nil {
-		return "NULL"
+		return "NULL", nil
 	}
-	if nested, ok := FormatArrayLiteral(e); ok {
-		return nested
+	if rv := reflect.ValueOf(e); rv.Kind() == reflect.Pointer && rv.IsNil() {
+		return "NULL", nil
+	}
+	if nested, ok, err := formatArrayLiteral(e); ok {
+		return nested, err
+	}
+	if v, ok := e.(driver.Valuer); ok {
+		value, err := v.Value()
+		if err != nil {
+			return "", err
+		}
+		if value == nil {
+			return "NULL", nil
+		}
+		if !driver.IsValue(value) {
+			return "", fmt.Errorf("invalid array driver value: %T", value)
+		}
+		e = value
+		if bytes, ok := value.([]byte); ok {
+			e = string(bytes)
+		}
 	}
 	s := fmt.Sprintf("%v", e)
 	if arrayElemNeedsQuote(s) {
 		r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
-		return `"` + r.Replace(s) + `"`
+		return `"` + r.Replace(s) + `"`, nil
 	}
-	return s
+	return s, nil
 }
 
 // arrayElemNeedsQuote reports whether an element's string form must be
