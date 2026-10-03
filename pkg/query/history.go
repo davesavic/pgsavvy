@@ -351,10 +351,10 @@ LIMIT ?`
 // FTS5 token stream contains a token starting with prefix, ordered by most
 // recent first. limit <= 0 or an empty/blank prefix returns an empty slice.
 //
-// The query uses FTS5 prefix syntax (`MATCH 'sanitized*'`); the prefix is
-// sanitized to a single contiguous run of alphanumerics + underscore so
-// arbitrary user input cannot inject FTS5 operators (NEAR, OR, ", etc.). If
-// sanitization yields the empty string, the call returns ([]string{}, nil).
+// The query uses quoted FTS5 prefix syntax (`MATCH '"sanitized"*'`); the prefix
+// is sanitized to a single contiguous run of alphanumerics + underscore.
+// Quoting makes operator words such as AND literal; the star stays outside
+// the quotes to match longer tokens. Empty sanitization returns ([]string{}, nil).
 //
 // De-duplication is performed in Go after streaming rows newest-first; the
 // query itself avoids GROUP BY so the FTS5 + index path can short-circuit
@@ -387,7 +387,7 @@ WHERE id IN (
 )
 ORDER BY id DESC`
 
-	rows, err := h.db.QueryContext(ctx, q, clean+"*", scanCap)
+	rows, err := h.db.QueryContext(ctx, q, `"`+clean+`"*`, scanCap)
 	if err != nil {
 		return nil, fmt.Errorf("query: history search: %w", err)
 	}
@@ -416,7 +416,7 @@ ORDER BY id DESC`
 }
 
 // sanitizeFTSPrefix reduces prefix to a leading run of [A-Za-z0-9_] runes so
-// the value can be safely interpolated as `value*` in an FTS5 MATCH clause.
+// the value can be safely encoded as `"value"*` in an FTS5 MATCH clause.
 // Anything else (whitespace, quotes, operators) ends the prefix.
 func sanitizeFTSPrefix(prefix string) string {
 	var b strings.Builder

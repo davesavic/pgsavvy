@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -312,6 +313,69 @@ func TestHistory_SearchByPrefix_RejectsFTSOperators(t *testing.T) {
 		got, err := h.SearchByPrefix(context.Background(), malicious, 10)
 		require.NoErrorf(t, err, "input %q crashed FTS5 parser", malicious)
 		require.Emptyf(t, got, "input %q leaked through sanitization", malicious)
+	}
+}
+
+func TestReview_history_literal_prefix(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	h, err := New(filepath.Join(t.TempDir(), "history.sqlite"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, h.Close()) }()
+
+	// The production insert trigger indexes these rows; insertion order fixes recency.
+	for _, statement := range []string{
+		"SELECT candy, sword, knot, floor, cannot FROM unrelated",
+		"SELECT AND FROM old_and", "SELECT android FROM fixture", "SELECT AND FROM old_and",
+		"SELECT OR FROM old_or", "SELECT orbit FROM fixture", "SELECT OR FROM old_or",
+		"SELECT NOT FROM old_not", "SELECT nothing FROM fixture", "SELECT NOT FROM old_not",
+	} {
+		_, err := h.db.Exec(`INSERT INTO history(executed_at, sql, duration_ms, rows_affected, succeeded, connection_id) VALUES (?,?,?,?,?,?)`,
+			1, statement, 1, 1, 1, "synthetic")
+		require.NoError(t, err)
+	}
+
+	for _, keyword := range []struct {
+		word, mixed, longer string
+	}{
+		{"AND", "aNd", "android"},
+		{"OR", "oR", "orbit"},
+		{"NOT", "nOt", "nothing"},
+	} {
+		t.Run(keyword.word, func(t *testing.T) {
+			old := "SELECT " + keyword.word + " FROM old_" + strings.ToLower(keyword.word)
+			newer := "SELECT " + keyword.longer + " FROM fixture"
+			for _, prefix := range []string{
+				keyword.word, strings.ToLower(keyword.word), keyword.mixed,
+				keyword.word + `" OR unrelated`, keyword.word + "*", keyword.word + " NEAR(unrelated)",
+				keyword.word + ";DROP TABLE history", keyword.word + "-unrelated",
+			} {
+				t.Run(prefix, func(t *testing.T) {
+					got, err := h.SearchByPrefix(context.Background(), prefix, 10)
+					require.NoError(t, err)
+					require.Equal(t, []string{old, newer}, got)
+				})
+			}
+			for _, limit := range []int{0, -1, 1} {
+				t.Run(fmt.Sprintf("limit_%d", limit), func(t *testing.T) {
+					got, err := h.SearchByPrefix(context.Background(), keyword.word, limit)
+					require.NoError(t, err)
+					if limit <= 0 {
+						require.Equal(t, []string{}, got)
+					} else {
+						require.Equal(t, []string{old}, got)
+					}
+				})
+			}
+		})
+	}
+
+	for _, prefix := range []string{"", " ", `"AND"`, "* OR *", ";DROP", "不存在", "unmatched"} {
+		t.Run("empty_"+prefix, func(t *testing.T) {
+			got, err := h.SearchByPrefix(context.Background(), prefix, 10)
+			require.NoError(t, err)
+			require.Equal(t, []string{}, got)
+		})
 	}
 }
 
