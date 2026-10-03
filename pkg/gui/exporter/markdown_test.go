@@ -15,6 +15,28 @@ func markdownCols() []models.ColumnMeta {
 	}
 }
 
+func TestReview_serialize_markdown(t *testing.T) {
+	for _, tc := range reviewSerializeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			f := NewMarkdown()
+			var buf bytes.Buffer
+			if err := f.Header([]models.ColumnMeta{tc.col}, &buf); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.Row(models.Row{Values: []any{tc.value}}, &buf); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.Footer(&buf); err != nil {
+				t.Fatal(err)
+			}
+			want := "||\n|---|\n|" + strings.NewReplacer("\n", " ", "|", `\|`).Replace(tc.want) + "|\n"
+			if got := buf.String(); got != want {
+				t.Fatalf("retained Markdown differs: got %d bytes, want %d bytes", len(got), len(want))
+			}
+		})
+	}
+}
+
 func TestMarkdown_TableShape(t *testing.T) {
 	f := NewMarkdown()
 	var buf bytes.Buffer

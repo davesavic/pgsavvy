@@ -55,7 +55,7 @@ func stringifyAndSanitize(v any, col models.ColumnMeta) string {
 	if v == nil {
 		return ""
 	}
-	return grid.RenderCellText(v, col)
+	return grid.RenderRetainedCellText(v, col)
 }
 
 // writeDelimitedRow writes a single delimited row terminated by CRLF.

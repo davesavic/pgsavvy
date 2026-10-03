@@ -22,6 +22,35 @@ func resetThemeForTest(t *testing.T) {
 	require.NoError(t, theme.Apply(builtin.DefaultDark()))
 }
 
+func TestReview_serialize_display_boundaries(t *testing.T) {
+	for _, kind := range []string{"text", "jsonb"} {
+		t.Run(kind, func(t *testing.T) {
+			value := strings.Repeat("雪", 4000)
+			col := models.ColumnMeta{TypeName: kind}
+			want := value
+			if kind == "jsonb" {
+				encoded, err := json.Marshal(value)
+				require.NoError(t, err)
+				want = string(encoded)
+			}
+			require.Equal(t, want, RenderRetainedCellText(value, col))
+			preview := RenderCellText(value, col)
+			require.LessOrEqual(t, len(preview), MaxCellRenderBytes)
+			require.True(t, utf8.ValidString(preview))
+			require.True(t, strings.HasSuffix(preview, "…"))
+		})
+	}
+	value := []byte("123456789")
+	col := models.ColumnMeta{TypeName: "bytea"}
+	require.Equal(t, `\x3132333435363738… (9B)`, RenderCellText(value, col))
+	require.Equal(t, `\x313233343536373839`, RenderRetainedCellText(value, col))
+	require.Equal(t, []byte("123456789"), value)
+	fallback := "a\rb\x1b[31mEND\x1b[0m"
+	require.Equal(t, fallback, RenderCellText(fallback, col))
+	require.Equal(t, "abEND", RenderRetainedCellText(fallback, col))
+	require.Equal(t, "NULL", RenderRetainedCellText(nil, models.ColumnMeta{}))
+}
+
 // TestRenderCellPlain_ArrayLiteral asserts a Postgres array column value
 // (decoded by pgx into a Go slice) renders as Postgres array syntax
 // {a,b,c} rather than Go's "[a b c]" slice formatting. The grid display

@@ -8,6 +8,8 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
+func TestReview_serialize_tsv(t *testing.T) { reviewSerializeDelimited(t, NewTSV, '\t') }
+
 func TestTSV_HeaderAndRows_NoQuotingNeeded(t *testing.T) {
 	f := NewTSV()
 	var buf bytes.Buffer

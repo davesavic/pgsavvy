@@ -56,10 +56,15 @@ func IsJSONColumn(col models.ColumnMeta) bool {
 
 // RenderCellText returns the unstyled, type-aware text representation of a
 // cell value. Unlike fmt.Sprint, this uses column metadata to format jsonb,
-// bytea, timestamps, arrays, etc. in a human-readable form. Exporters use
-// this so exported output matches what the user sees in the grid.
+// bytea, timestamps, arrays, etc. in a human-readable, bounded preview.
 func RenderCellText(value any, col models.ColumnMeta) string {
 	return renderCellPlain(value, col)
+}
+
+// RenderRetainedCellText formats complete buffered values without display caps
+// or bytea preview annotations. It cannot recover driver-truncated data.
+func RenderRetainedCellText(value any, col models.ColumnMeta) string {
+	return formatCellText(value, col, false)
 }
 
 // classifyColumn maps a ColumnMeta to its display kind. Lowercased
@@ -152,6 +157,10 @@ func renderCellPadded(value any, col models.ColumnMeta, w int, isDirty bool) str
 // so untrusted server output cannot bleed terminal escapes into the
 // grid or exports.
 func renderCellPlain(value any, col models.ColumnMeta) string {
+	return formatCellText(value, col, true)
+}
+
+func formatCellText(value any, col models.ColumnMeta, preview bool) string {
 	if value == nil {
 		return "NULL"
 	}
@@ -160,17 +169,27 @@ func renderCellPlain(value any, col models.ColumnMeta) string {
 	}
 	switch classifyColumn(col) {
 	case kindBytes:
-		return renderBytesCell(value)
+		if preview {
+			return renderBytesCell(value)
+		}
+		if b, ok := value.([]byte); ok {
+			return `\x` + hex.EncodeToString(b)
+		}
+		return SanitizeCellEscapes(fmt.Sprintf("%v", value))
 	case kindJSON:
 		s := FormatJSONValue(value)
-		s = capCellBytes(s)
+		if preview {
+			s = capCellBytes(s)
+		}
 		return SanitizeCellEscapes(s)
 	default:
 		s, ok := FormatArrayLiteral(value)
 		if !ok {
 			s = formatScalar(value)
 		}
-		s = capCellBytes(s)
+		if preview {
+			s = capCellBytes(s)
+		}
 		return SanitizeCellEscapes(s)
 	}
 }
