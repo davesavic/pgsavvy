@@ -9,7 +9,57 @@ import (
 
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
 )
+
+func TestReview_picker_links(t *testing.T) {
+	root := t.TempDir()
+	listing := filepath.Join(root, "listing")
+	dir := filepath.Join(root, "target-dir")
+	file := filepath.Join(root, "target.sql")
+	require.NoError(t, os.Mkdir(listing, 0o700))
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	require.NoError(t, os.WriteFile(file, []byte("select 1;"), 0o600))
+	cases := []struct {
+		name, target string
+		isDir        bool
+	}{
+		{"z-dir-link", dir, true},
+		{"relative-dir", "../target-dir", true},
+		{"a-file-link.sql", file, false},
+		{"relative-file.sql", "../target.sql", false},
+		{"dangling", "../absent", false},
+	}
+	for _, tc := range cases {
+		require.NoError(t, os.Symlink(tc.target, filepath.Join(listing, tc.name)))
+	}
+	fp := NewFilePickerContext(BaseContext{}, Deps{})
+	fp.SetFs(afero.NewOsFs())
+	fp.Push(PickerOpen, listing, nil, nil, nil)
+	fp.SetViewSize(100, 20)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var found bool
+			for _, item := range fp.Items() {
+				if item.Name == tc.name {
+					found = true
+					require.True(t, item.IsSymlink)
+					require.Equal(t, tc.isDir, item.IsDir)
+					require.Equal(t, filepath.Join(listing, tc.name), item.Path)
+				}
+			}
+			require.True(t, found)
+		})
+	}
+	for range 3 {
+		for i := 1; i < len(fp.Items()); i++ {
+			require.False(t, !fp.Items()[i-1].IsDir && fp.Items()[i].IsDir, "directories precede files")
+		}
+		fp.CycleSort()
+	}
+	require.Contains(t, fp.RenderBody(), "z-dir-link@/")
+	require.Contains(t, fp.RenderBody(), "a-file-link.sql@")
+}
 
 func newTestPickerFs() afero.Fs {
 	fs := afero.NewMemMapFs()

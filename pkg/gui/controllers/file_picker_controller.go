@@ -318,16 +318,14 @@ func (f *FilePickerController) handleConfirm(_ commands.ExecCtx) error {
 			fp.ApplyNewDir()
 			return fp.HandleRender()
 		}
-		fp.Confirm()
-		return nil
+		return fp.Confirm()
 	}
 	sel := fp.Selected()
 	if sel.IsDir {
 		fp.Descend()
 		return fp.HandleRender()
 	}
-	fp.Confirm()
-	return nil
+	return fp.Confirm()
 }
 
 func (f *FilePickerController) handleAscend(_ commands.ExecCtx) error {

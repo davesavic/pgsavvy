@@ -173,18 +173,22 @@ func (f *FilePickerContext) NavigateTo(path string) {
 		if !f.showHidden && strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
+		entryPath := filepath.Join(resolved, e.Name())
 		isSymlink := false
+		isDir := e.IsDir()
 		if lstOk {
-			entryPath := filepath.Join(resolved, e.Name())
 			info, _, lerr := lst.LstatIfPossible(entryPath)
 			if lerr == nil && info.Mode()&os.ModeSymlink != 0 {
 				isSymlink = true
+				if target, err := f.fs.Stat(entryPath); err == nil {
+					isDir = target.IsDir()
+				}
 			}
 		}
 		f.items = append(f.items, models.FSEntry{
 			Name:      e.Name(),
-			Path:      filepath.Join(resolved, e.Name()),
-			IsDir:     e.IsDir(),
+			Path:      entryPath,
+			IsDir:     isDir,
 			IsSymlink: isSymlink,
 			SizeBytes: e.Size(),
 			ModTime:   e.ModTime(),
@@ -281,6 +285,17 @@ func (f *FilePickerContext) SetCursor(i int) {
 func (f *FilePickerContext) Descend() {
 	sel := f.Selected()
 	if sel.IsDir {
+		if sel.IsSymlink {
+			target, err := f.fs.Stat(sel.Path)
+			if err != nil {
+				f.errMsg = pickerLinkError(err)
+				return
+			}
+			if !target.IsDir() {
+				f.errMsg = "Link error: target is no longer a directory"
+				return
+			}
+		}
 		f.NavigateTo(sel.Path)
 	}
 }
@@ -295,8 +310,36 @@ func (f *FilePickerContext) Ascend() {
 
 // Confirm invokes the stored onConfirm callback (if any) with the selected
 // file path (or typed filename in save mode), then pops the picker.
-func (f *FilePickerContext) Confirm() {
+// An unresolved link instead reports an inline error and retains callbacks.
+func (f *FilePickerContext) Confirm() error {
 	path := f.resolveConfirmPath()
+	if path != "" && f.fs != nil {
+		isSymlink := !f.inputFocused && f.Selected().IsSymlink
+		if f.inputFocused {
+			// A listed link that vanished is not a newly requested save file.
+			for _, item := range f.items {
+				if item.Path == path && item.IsSymlink {
+					isSymlink = true
+					break
+				}
+			}
+			if lst, ok := f.fs.(afero.Lstater); ok {
+				info, _, err := lst.LstatIfPossible(path)
+				isSymlink = isSymlink || (err == nil && info.Mode()&os.ModeSymlink != 0)
+			}
+		}
+		if isSymlink {
+			target, err := f.fs.Stat(path)
+			if err != nil {
+				f.errMsg = pickerLinkError(err)
+				return f.HandleRender()
+			}
+			if target.IsDir() {
+				f.NavigateTo(path)
+				return f.HandleRender()
+			}
+		}
+	}
 	cb := f.onConfirm
 	cancel := f.onCancel
 	pop := f.popFn
@@ -313,6 +356,11 @@ func (f *FilePickerContext) Confirm() {
 	} else if cancel != nil {
 		cancel()
 	}
+	return nil
+}
+
+func pickerLinkError(err error) string {
+	return "Link error: " + strings.Join(strings.Fields(grid.SanitizeCellEscapes(err.Error())), " ")
 }
 
 // Cancel invokes the onCancel callback (if any) and pops the picker.
