@@ -1,6 +1,7 @@
 package context
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/i18n"
@@ -106,5 +107,175 @@ func TestForm_SSHOffSavesNilTunnel(t *testing.T) {
 	}
 	if conn.SSHTunnel != nil {
 		t.Errorf("SSHTunnel persisted after disabling: %+v", conn.SSHTunnel)
+	}
+}
+
+func TestReview_form_copy(t *testing.T) {
+	profile := func() models.Connection {
+		return models.Connection{
+			Name: "original", Driver: "postgres", Host: "db", User: "db-user",
+			ReadOnly: true, ConfirmWrites: true, ConfirmDDL: true,
+			SSHTunnel: &models.SSHTunnelConfig{
+				Host: "bastion", User: "ssh-user", Port: 22,
+				IdentityFile: "/original-key", KnownHosts: "/original-hosts",
+				PassphraseCommand: "original-passphrase-helper", SSHPasswordCommand: "original-password-helper",
+			},
+		}
+	}
+	tr := i18n.EnglishTranslationSet()
+
+	for _, tc := range []struct {
+		name string
+		edit func(*connForm)
+		want func(*models.SSHTunnelConfig)
+	}{
+		{"host", func(f *connForm) { f.setTextValue(fieldSSHHost, "edited-host") }, func(s *models.SSHTunnelConfig) { s.Host = "edited-host" }},
+		{"user", func(f *connForm) { f.setTextValue(fieldSSHUser, "edited-user") }, func(s *models.SSHTunnelConfig) { s.User = "edited-user" }},
+		{"port", func(f *connForm) { f.setTextValue(fieldSSHPort, "2222") }, func(s *models.SSHTunnelConfig) { s.Port = 2222 }},
+		{"identity file", func(f *connForm) { f.setTextValue(fieldSSHIdentityFile, "/edited-key") }, func(s *models.SSHTunnelConfig) { s.IdentityFile = "/edited-key" }},
+		{"known hosts", func(f *connForm) { f.setTextValue(fieldSSHKnownHosts, "/edited-hosts") }, func(s *models.SSHTunnelConfig) { s.KnownHosts = "/edited-hosts" }},
+		{"agent normalization", func(f *connForm) { f.sshAuth = sshAuthAgent }, func(s *models.SSHTunnelConfig) { s.IdentityFromAgent = true; s.IdentityFile = "" }},
+		{"password normalization", func(f *connForm) { f.sshAuth = sshAuthPassword }, func(s *models.SSHTunnelConfig) { s.IdentityFromAgent = false; s.IdentityFile = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := profile()
+			want := profile()
+			c := newTestConnectionManager(&captureDriver{}, nil, nil)
+			c.OpenEditForm(original, nil, testDrivers)
+			if c.form.conn.SSHTunnel == original.SSHTunnel {
+				t.Error("edit draft aliases stored tunnel")
+			}
+			if !reflect.DeepEqual(c.form.conn, want) {
+				t.Fatal("opening edit changed untouched fields")
+			}
+			tc.edit(&c.form)
+			conn, isEdit, name, ok := c.FormValidateAll(tr)
+			if !ok || !isEdit || name != original.Name {
+				t.Fatal("edited form did not validate with original metadata")
+			}
+			if !reflect.DeepEqual(original, want) {
+				t.Error("editing or validation mutated stored profile")
+			}
+			expected := profile()
+			tc.want(expected.SSHTunnel)
+			if !reflect.DeepEqual(conn, expected) {
+				t.Error("validated output lost edited or untouched fields")
+			}
+			if conn.SSHTunnel.PassphraseCommand != want.SSHTunnel.PassphraseCommand ||
+				conn.SSHTunnel.SSHPasswordCommand != want.SSHTunnel.SSHPasswordCommand ||
+				!conn.ReadOnly || !conn.ConfirmWrites || !conn.ConfirmDDL {
+				t.Error("edited output lost credential helpers or safety flags")
+			}
+			if conn.SSHTunnel == c.form.conn.SSHTunnel || conn.SSHTunnel == original.SSHTunnel {
+				t.Error("validated output aliases form or stored tunnel")
+			}
+			c.SetMode(ModeList)
+			c.OpenEditForm(original, nil, testDrivers)
+			if !reflect.DeepEqual(c.FormConnection(), want) {
+				t.Error("reopening cancelled draft did not restore original values")
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		edit func(*models.SSHTunnelConfig)
+	}{
+		{"host", func(s *models.SSHTunnelConfig) { s.Host = "snapshot-host" }},
+		{"user", func(s *models.SSHTunnelConfig) { s.User = "snapshot-user" }},
+		{"port", func(s *models.SSHTunnelConfig) { s.Port = 2222 }},
+		{"identity file", func(s *models.SSHTunnelConfig) { s.IdentityFile = "/snapshot-key" }},
+		{"agent", func(s *models.SSHTunnelConfig) { s.IdentityFromAgent = true }},
+		{"known hosts", func(s *models.SSHTunnelConfig) { s.KnownHosts = "/snapshot-hosts" }},
+		{"passphrase command", func(s *models.SSHTunnelConfig) { s.PassphraseCommand = "snapshot-passphrase-helper" }},
+		{"password command", func(s *models.SSHTunnelConfig) { s.SSHPasswordCommand = "snapshot-password-helper" }},
+	} {
+		t.Run("snapshot/"+tc.name, func(t *testing.T) {
+			original := profile()
+			c := newTestConnectionManager(&captureDriver{}, nil, nil)
+			c.OpenEditForm(original, nil, testDrivers)
+			snapshot := c.FormConnection()
+			tc.edit(snapshot.SSHTunnel)
+			if !reflect.DeepEqual(c.FormConnection(), profile()) || !reflect.DeepEqual(original, profile()) {
+				t.Error("snapshot mutation leaked into draft or stored profile")
+			}
+		})
+	}
+
+	t.Run("snapshot survives later edits and normalization", func(t *testing.T) {
+		c := newTestConnectionManager(&captureDriver{}, nil, nil)
+		c.OpenEditForm(profile(), nil, testDrivers)
+		snapshot := c.FormConnection()
+		c.form.setTextValue(fieldSSHHost, "later-host")
+		c.form.sshAuth = sshAuthAgent
+		conn, _, _, ok := c.FormValidateAll(tr)
+		if !ok || !conn.SSHTunnel.IdentityFromAgent || conn.SSHTunnel.IdentityFile != "" {
+			t.Fatal("agent normalization not reflected in saved output")
+		}
+		if !reflect.DeepEqual(snapshot, profile()) {
+			t.Error("later form edits mutated earlier snapshot")
+		}
+		conn.SSHTunnel.Host = "save-consumer-host"
+		if c.FormConnection().SSHTunnel.Host != "later-host" {
+			t.Error("save consumer mutated form draft")
+		}
+	})
+
+	t.Run("failed validation normalizes only draft", func(t *testing.T) {
+		original := profile()
+		c := newTestConnectionManager(&captureDriver{}, nil, nil)
+		c.OpenEditForm(original, nil, testDrivers)
+		c.form.setTextValue(fieldSSHHost, "")
+		c.form.sshAuth = sshAuthAgent
+		if _, _, _, ok := c.FormValidateAll(tr); ok || c.form.err == "" {
+			t.Fatal("incomplete SSH draft did not retain visible validation failure")
+		}
+		if !reflect.DeepEqual(original, profile()) {
+			t.Error("failed validation mutated original profile")
+		}
+	})
+
+	t.Run("nil and disabled tunnels", func(t *testing.T) {
+		original := models.Connection{Name: "no-ssh", Driver: "postgres"}
+		c := newTestConnectionManager(&captureDriver{}, nil, nil)
+		c.OpenEditForm(original, nil, testDrivers)
+		if c.FormConnection().SSHTunnel != nil || c.form.sshEnabled || c.form.sshAuth != sshAuthAgent {
+			t.Fatal("nil tunnel was not preserved with default derived auth")
+		}
+		conn, _, _, ok := c.FormValidateAll(tr)
+		if !ok || conn.SSHTunnel != nil {
+			t.Fatal("nil tunnel changed on validation")
+		}
+		c.form.toggle(fieldUseSSHTunnel)
+		c.form.setTextValue(fieldSSHHost, "new-host")
+		c.form.setTextValue(fieldSSHUser, "new-user")
+		if original.SSHTunnel != nil {
+			t.Error("enabling draft tunnel modified original nil tunnel")
+		}
+		c.OpenEditForm(profile(), nil, testDrivers)
+		c.form.toggle(fieldUseSSHTunnel)
+		conn, _, _, ok = c.FormValidateAll(tr)
+		if !ok || conn.SSHTunnel != nil {
+			t.Error("disabled tunnel not dropped from saved output")
+		}
+	})
+
+	for _, auth := range []string{sshAuthAgent, sshAuthKeyFile, sshAuthPassword} {
+		t.Run("derived auth/"+auth, func(t *testing.T) {
+			original := profile()
+			original.SSHTunnel.IdentityFromAgent = auth == sshAuthAgent
+			if auth == sshAuthPassword {
+				original.SSHTunnel.IdentityFile = ""
+			}
+			want := *original.SSHTunnel
+			c := newTestConnectionManager(&captureDriver{}, nil, nil)
+			c.OpenEditForm(original, nil, testDrivers)
+			if !c.form.sshEnabled || c.form.sshAuth != auth || !reflect.DeepEqual(*c.form.conn.SSHTunnel, want) {
+				t.Fatal("opening draft lost derived auth or untouched SSH fields")
+			}
+			if _, _, _, ok := c.FormValidateAll(tr); !ok || !reflect.DeepEqual(*original.SSHTunnel, want) {
+				t.Error("derived auth validation changed stored tunnel")
+			}
+		})
 	}
 }

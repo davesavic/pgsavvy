@@ -1,6 +1,8 @@
 package controllers_test
 
 import (
+	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
@@ -306,5 +308,108 @@ func TestController_EscCancelsFormBackToList(t *testing.T) {
 	}
 	if saves != 0 {
 		t.Errorf("save invoked on cancel")
+	}
+}
+
+func TestReview_form_copy_controller(t *testing.T) {
+	for _, outcome := range []string{"cancel", "save", "save failure"} {
+		t.Run(outcome, func(t *testing.T) {
+			original := models.Connection{
+				Name: "beta", Driver: "postgres", ReadOnly: true, ConfirmWrites: true, ConfirmDDL: true,
+				SSHTunnel: &models.SSHTunnelConfig{Host: "bastion", User: "ssh-user", IdentityFromAgent: true},
+			}
+			untouched := models.Connection{Name: "other", Driver: "postgres", SSHTunnel: &models.SSHTunnelConfig{Host: "other-host"}}
+			wantTunnel := *original.SSHTunnel
+			wantOther := *untouched.SSHTunnel
+			ctx := newFormCtx()
+			prompt := &capturePrompt{}
+			saves := 0
+			var saved models.Connection
+			saveErr := errors.New("save failed")
+			ctrl := newFormController(ctx, prompt, func(conn models.Connection, isEdit bool, name string) error {
+				saves++
+				if !isEdit || name != original.Name || !reflect.DeepEqual(*original.SSHTunnel, wantTunnel) {
+					t.Error("save metadata changed or original mutated before save callback")
+				}
+				saved = conn
+				if outcome == "save failure" {
+					conn.SSHTunnel.User = "save-consumer-user"
+					return saveErr
+				}
+				return nil
+			})
+			ctx.SetItems([]any{&original, &untouched})
+			dispatchCM(t, ctrl, commands.ConnectionManagerEdit)
+			for range 40 {
+				if ctx.FormFocusedLabel() == "ssh_host" {
+					break
+				}
+				dispatchCM(t, ctrl, commands.ConnectionManagerFieldNext)
+			}
+			if ctx.FormFocusedLabel() != "ssh_host" {
+				t.Fatal("SSH host field not reachable")
+			}
+			dispatchCM(t, ctrl, commands.ConnectionManagerEdit)
+			if !prompt.active || prompt.initial != "bastion" {
+				t.Fatal("field prompt did not receive original SSH host")
+			}
+			if err := prompt.Cancel(); err != nil || ctx.FormConnection().SSHTunnel.Host != "bastion" {
+				t.Fatal("field-prompt cancellation changed draft")
+			}
+			dispatchCM(t, ctrl, commands.ConnectionManagerEdit)
+			if err := prompt.Submit("edited-host"); err != nil {
+				t.Fatal("valid host edit failed")
+			}
+			if !reflect.DeepEqual(*original.SSHTunnel, wantTunnel) {
+				t.Error("field-prompt submission mutated stored profile")
+			}
+			switch outcome {
+			case "cancel":
+				dispatchCM(t, ctrl, commands.ConnectionManagerClose)
+				if saves != 0 || ctx.Mode() != guicontext.ModeList {
+					t.Fatal("cancel saved or failed to return to list")
+				}
+				dispatchCM(t, ctrl, commands.ConnectionManagerEdit)
+				if !reflect.DeepEqual(*ctx.FormConnection().SSHTunnel, wantTunnel) {
+					t.Error("reopened draft retained cancelled edits")
+				}
+			case "save":
+				dispatchCM(t, ctrl, commands.ConnectionManagerConfirm)
+				if saves != 1 || ctx.Mode() != guicontext.ModeList || saved.SSHTunnel.Host != "edited-host" ||
+					!saved.ReadOnly || !saved.ConfirmWrites || !saved.ConfirmDDL {
+					t.Error("save lost edited SSH values or safety flags")
+				}
+				original = saved
+				dispatchCM(t, ctrl, commands.ConnectionManagerEdit)
+				for range 40 {
+					if ctx.FormFocusedLabel() == "ssh_host" {
+						break
+					}
+					dispatchCM(t, ctrl, commands.ConnectionManagerFieldNext)
+				}
+				if ctx.FormFocusedLabel() != "ssh_host" || ctx.FormConnection().SSHTunnel.Host != "edited-host" {
+					t.Fatal("reopening saved output lost SSH values")
+				}
+				ctx.FormSetFocusedValue("second-edit")
+				if original.SSHTunnel.Host != "edited-host" || ctx.FormConnection().SSHTunnel.Host != "second-edit" {
+					t.Error("reopening saved output lost values or mutated stored profile")
+				}
+			case "save failure":
+				if err := ctrl.Confirm(commands.ExecCtx{}); !errors.Is(err, saveErr) {
+					t.Error("save failure not propagated")
+				}
+				if saves != 1 || ctx.Mode() != guicontext.ModeForm || ctx.FormConnection().SSHTunnel.User != "ssh-user" {
+					t.Error("failed save exited form or consumer mutation leaked into draft")
+				}
+				dispatchCM(t, ctrl, commands.ConnectionManagerClose)
+				dispatchCM(t, ctrl, commands.ConnectionManagerEdit)
+				if !reflect.DeepEqual(*ctx.FormConnection().SSHTunnel, wantTunnel) {
+					t.Error("failed save changed stored profile")
+				}
+			}
+			if !reflect.DeepEqual(*untouched.SSHTunnel, wantOther) {
+				t.Error("unrelated profile changed")
+			}
+		})
 	}
 }

@@ -214,7 +214,9 @@ func (c *ConnectionManagerContext) FormSetStatus(msg string) {
 // FormConnection returns a COPY of the form's in-progress (unsaved) connection,
 // reflecting every field edited so far. Used by the test-connection action to
 // dial the connection being edited without saving it.
-func (c *ConnectionManagerContext) FormConnection() models.Connection { return c.form.conn }
+func (c *ConnectionManagerContext) FormConnection() models.Connection {
+	return copyFormConnection(c.form.conn)
+}
 
 // SetLabelWrapWidth records the modal's inner column count so the form clips
 // its inline err/status line to a single physical row. The layout pass
@@ -245,7 +247,7 @@ func (c *ConnectionManagerContext) FormValidateAll(tr *i18n.TranslationSet) (con
 		return models.Connection{}, false, "", false
 	}
 	c.form.err = ""
-	return c.form.conn, c.form.isEdit, c.form.originalName, true
+	return copyFormConnection(c.form.conn), c.form.isEdit, c.form.originalName, true
 }
 
 // OpenAddForm seeds a blank add form and switches to ModeForm. existingNames
@@ -276,7 +278,7 @@ func (c *ConnectionManagerContext) OpenAddForm(existingNames []string, driversFn
 // originalName is excluded from the uniqueness check) and switches to
 // ModeForm.
 func (c *ConnectionManagerContext) OpenEditForm(conn models.Connection, existingNames []string, driversFn func() []string) {
-	conn = migrateLegacyDSN(conn)
+	conn = migrateLegacyDSN(copyFormConnection(conn))
 	sshEnabled, sshAuth := deriveSSHAuth(conn)
 	c.form = connForm{
 		conn:          conn,

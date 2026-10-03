@@ -329,6 +329,15 @@ func deriveSSHAuth(c models.Connection) (enabled bool, auth string) {
 	return true, sshAuthPassword
 }
 
+// copyFormConnection isolates the mutable SSH config at form ownership boundaries.
+func copyFormConnection(conn models.Connection) models.Connection {
+	if conn.SSHTunnel != nil {
+		tunnel := *conn.SSHTunnel
+		conn.SSHTunnel = &tunnel
+	}
+	return conn
+}
+
 // toggleFocused flips the focused toggle, or cycles the driver when the
 // driver row is focused. No-op on text rows.
 func (f *connForm) toggleFocused() { f.toggle(f.focusedSpec().id) }
