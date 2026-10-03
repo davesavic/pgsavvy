@@ -248,10 +248,21 @@ func (w *SchemaWarmer) SetOnWarmError(fn func(schema, table string, err error)) 
 // wrappers already serialize onto the worker queue, and connect/schema-select
 // callers invoke it off the UI thread.
 func (w *SchemaWarmer) LoadEager(schema string) {
-	ctx := context.Background()
+	w.LoadEagerContext(context.Background(), schema)
+}
+
+// LoadEagerContext preserves a caller's cancellation and bound metadata session.
+// Canceled results must not repopulate completion metadata.
+func (w *SchemaWarmer) LoadEagerContext(ctx context.Context, schema string) {
+	if ctx.Err() != nil {
+		return
+	}
 
 	// Tables FIRST (Finding O).
 	tables, err := w.deps.LoadTables(ctx, schema)
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		logs.Event(w.log, "completion", "eager_tables_err",
 			slog.String("schema", schema), slog.String("err", err.Error()))
@@ -264,6 +275,9 @@ func (w *SchemaWarmer) LoadEager(schema string) {
 
 	// Function names SECOND (per-connection, not per-schema).
 	fns, err := w.deps.LoadFunctions(ctx)
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		logs.Event(w.log, "completion", "eager_functions_err",
 			slog.String("schema", schema), slog.String("err", err.Error()))

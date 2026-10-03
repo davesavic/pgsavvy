@@ -234,10 +234,13 @@ type Gui struct {
 	keybindingSystem keybindingSystem
 
 	// Connection-lifecycle state surfaced by the activeConnAdapter.
-	connectionState connectionState
-	connectionLife  connectionLifecycle
-	inspectMu       sync.Mutex
-	inspectRequest  *tableInspectRequest
+	connectionState         connectionState
+	connectionLife          connectionLifecycle
+	inspectMu               sync.Mutex
+	inspectRequest          *tableInspectRequest
+	schemaActivationMu      sync.Mutex
+	schemaActivationRequest *schemaActivationRequest
+	schemaActivationRunMu   sync.Mutex
 
 	// Query-execution state surfaced by the query runtime.
 	queryState queryState
@@ -1784,6 +1787,7 @@ func (g *Gui) Close() error {
 		return nil
 	}
 	g.cancelTableInspect()
+	g.cancelSchemaActivation()
 	if g.resultTabsH != nil {
 		g.resultTabsH.CancelExport()
 	}

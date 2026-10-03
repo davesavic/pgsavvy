@@ -181,6 +181,7 @@ func (g *Gui) retireConnectionLocked(want *connectionOwner) error {
 	g.connectionLife.owner = nil
 	g.connectionLife.mu.Unlock()
 	g.cancelTableInspect()
+	g.cancelSchemaActivation()
 	var err error
 	if owner != nil && owner.sqlSess != nil {
 		err = owner.sqlSess.Close()
@@ -207,6 +208,7 @@ func (c *connectInvoker) Connect(ctx context.Context, profile *models.Connection
 	var gen uint64
 	if c.g != nil {
 		gen = c.g.connectionState.connectGen.Add(1)
+		c.g.cancelSchemaActivation()
 	}
 	// T3 AD8: the direct / reconnect path passes a NIL reporter — no modal is
 	// open to render a staged checklist, so no stage writes happen here.
@@ -223,6 +225,7 @@ func (c *connectInvoker) startAttempt(profile *models.Connection) {
 		return
 	}
 	gen := c.g.connectionState.connectGen.Add(1)
+	c.g.cancelSchemaActivation()
 	// Cancel-only, no deadline: the network connect budget lives in the pg
 	// driver (connectTimeout), applied AFTER interactive credential prompts so
 	// a human typing a passphrase is not charged against the dial budget.

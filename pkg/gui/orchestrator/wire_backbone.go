@@ -441,44 +441,7 @@ func (g *Gui) wireNavDeps(connectInv *connectInvoker, tablePicker tablesPickerAd
 			}
 			return
 		}
-		if g.deps.Store != nil && g.connectionState.activeConnID != "" {
-			g.deps.Store.SetLastSchemaName(g.connectionState.activeConnID, schema)
-		}
-		g.OnWorker(func(_ gocui.Task) error {
-			// make the selected schema the live search_path so
-			// unqualified queries resolve against it and the status bar
-			// reflects the active schema. On failure (e.g. schema dropped
-			// out from under us) keep loading its tables regardless.
-			if sess := g.queryState.activeSQLSession; sess != nil {
-				sql, value := schemaSearchPathSQL(schema)
-				if _, err := sess.Execute(context.Background(), models.Query{SQL: sql}); err != nil {
-					logs.Event(g.deps.Common.Logger(), "gui", "schema_search_path_failed",
-						slog.String("schema", schema),
-						slog.String("err", err.Error()))
-				} else {
-					g.persistTrackedSetting(context.Background(), "search_path", value)
-				}
-			}
-
-			connectInv.populateTablesRail(context.Background(), schema)
-
-			// re-warm the completion metadata snapshot for the
-			// newly selected schema (table+view + function names) so FROM /
-			// function completion in the new schema serves from the store.
-			// Already on a worker; LoadEager is synchronous + idempotent.
-			if g.schemaWarmer != nil {
-				g.schemaWarmer.LoadEager(schema)
-			}
-
-			// Switch the consolidated rail to the Tables tab and push the
-			// SCHEMA_RAIL container (NOT the leaf) so the user lands on the
-			// refreshed tables after picking a schema.
-			if g.registry.SchemaRail == nil {
-				return nil
-			}
-			g.registry.SchemaRail.SetActiveTab(guicontext.SchemaRailTabTables)
-			return connectInv.g.tree.Push(g.registry.SchemaRail)
-		})
+		g.activateSchema(connectInv, schema)
 	}
 	// <CR> on a table row loads the COLUMNS and INDEXES rails for
 	// the selected table on a single worker (one composite enqueue

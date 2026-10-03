@@ -88,6 +88,61 @@ func sampleTables() []*models.Table {
 	}
 }
 
+func TestReview_schema_ui_eager_context(t *testing.T) {
+	for _, stage := range []string{"before", "tables", "functions", "success", "table_error"} {
+		t.Run(stage, func(t *testing.T) {
+			type marker struct{}
+			ctx, cancel := context.WithCancel(context.WithValue(context.Background(), marker{}, "bound"))
+			defer cancel()
+			var tableCalls, functionCalls int
+			deps := warmDeps{
+				LoadTables: func(got context.Context, schema string) ([]*models.Table, error) {
+					require.Equal(t, "bound", got.Value(marker{}))
+					require.Equal(t, "public", schema)
+					tableCalls++
+					if stage == "tables" {
+						cancel()
+					}
+					if stage == "table_error" {
+						return nil, errors.New("synthetic failure")
+					}
+					return sampleTables(), nil
+				},
+				LoadFunctions: func(got context.Context) ([]string, error) {
+					require.Equal(t, "bound", got.Value(marker{}))
+					functionCalls++
+					if stage == "functions" {
+						cancel()
+					}
+					return []string{"latest_function"}, nil
+				},
+			}
+			w := NewSchemaWarmer(NewSchemaMetadataStore(), deps, nil)
+			w.Store().SetFunctionNames([]string{"original_function"})
+			if stage == "before" {
+				cancel()
+			}
+			w.LoadEagerContext(ctx, "public")
+			switch stage {
+			case "before":
+				require.Zero(t, tableCalls)
+				require.Zero(t, functionCalls)
+			case "tables":
+				require.Nil(t, w.Store().TableNames("public"))
+				require.Zero(t, functionCalls)
+			case "functions":
+				require.Equal(t, []string{"original_function"}, w.Store().FunctionNames())
+			case "success":
+				require.Equal(t, []string{"orders", "users"}, w.Store().TableNames("public"))
+				require.Equal(t, []string{"latest_function"}, w.Store().FunctionNames())
+			case "table_error":
+				require.Nil(t, w.Store().TableNames("public"))
+				require.Equal(t, []string{"latest_function"}, w.Store().FunctionNames())
+			}
+		})
+	}
+}
+
 func TestSchemaWarmEagerLoadsTablesThenFunctions(t *testing.T) {
 	f := &fakeQuerier{tables: sampleTables(), functions: []string{"now", "lower"}}
 	w := NewSchemaWarmer(NewSchemaMetadataStore(), syncDeps(f), nil)
