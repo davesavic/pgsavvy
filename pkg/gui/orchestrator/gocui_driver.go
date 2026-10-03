@@ -1,6 +1,10 @@
 package orchestrator
 
 import (
+	"context"
+	"errors"
+	"sync"
+
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
@@ -20,12 +24,157 @@ func (d *gocuiDriver) LiveViewCount() int {
 // runtime through the GuiDriver interface.
 type gocuiDriver struct {
 	g *gocui.Gui
+
+	publicationMu sync.Mutex
+	publications  []*uiPublication
+	accepted      map[*uiPublication]struct{}
+	wake          chan struct{}
+	publisherDone chan struct{}
+	started       bool
+	retiring      bool
+	terminalErr   error
+	onRetire      func()
+}
+
+type uiPublication struct {
+	ctx         context.Context
+	cancel      context.CancelFunc
+	fn          func() error
+	contentOnly bool
+	settled     func(error)
+	stopCancel  func() bool
+	once        sync.Once
 }
 
 // newGocuiDriver wraps an already-constructed *gocui.Gui. The caller
 // owns the Gui's lifecycle; the driver simply adapts the surface.
 func newGocuiDriver(g *gocui.Gui) *gocuiDriver {
-	return &gocuiDriver{g: g}
+	return &gocuiDriver{
+		g: g, accepted: make(map[*uiPublication]struct{}),
+		wake: make(chan struct{}, 1), publisherDone: make(chan struct{}),
+	}
+}
+
+func (d *gocuiDriver) settle(p *uiPublication, err error) {
+	p.once.Do(func() {
+		d.publicationMu.Lock()
+		delete(d.accepted, p)
+		stop := p.stopCancel
+		d.publicationMu.Unlock()
+		if stop != nil {
+			stop()
+		}
+		p.cancel()
+		if p.settled != nil {
+			p.settled(err)
+		}
+	})
+}
+
+// Admission never sends into native userEvents: that send can block while a
+// MainLoop callback is stopping a stream. One ordered publisher owns all sends.
+func (d *gocuiDriver) publish(ctx context.Context, fn func() error, contentOnly bool, settled func(error)) {
+	ctx, cancel := context.WithCancel(ctx)
+	p := &uiPublication{ctx: ctx, cancel: cancel, fn: fn, contentOnly: contentOnly, settled: settled}
+	d.publicationMu.Lock()
+	if d.retiring {
+		d.publicationMu.Unlock()
+		d.settle(p, context.Canceled)
+		return
+	}
+	d.accepted[p] = struct{}{}
+	p.stopCancel = context.AfterFunc(ctx, func() { d.settle(p, ctx.Err()) })
+	d.publications = append(d.publications, p)
+	d.publicationMu.Unlock()
+	d.wakePublisher()
+}
+
+func (d *gocuiDriver) wakePublisher() {
+	select {
+	case d.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (d *gocuiDriver) retire(err error) {
+	d.publicationMu.Lock()
+	if d.retiring {
+		d.publicationMu.Unlock()
+		return
+	}
+	d.retiring = true
+	d.terminalErr = err
+	pending := make([]*uiPublication, 0, len(d.accepted))
+	for p := range d.accepted {
+		pending = append(pending, p)
+	}
+	onRetire := d.onRetire
+	d.publicationMu.Unlock()
+	for _, p := range pending {
+		d.settle(p, context.Canceled)
+	}
+	if onRetire != nil {
+		onRetire()
+	}
+	d.wakePublisher()
+}
+
+func (d *gocuiDriver) callbackResult(err error) error {
+	if err != nil {
+		d.retire(err)
+	}
+	// A terminal callback is appended only after the publisher's last send.
+	// Until then native MainLoop must keep draining, not wait for that sender.
+	return nil
+}
+
+func (d *gocuiDriver) publishLoop() {
+	defer close(d.publisherDone)
+	for {
+		d.publicationMu.Lock()
+		if d.retiring {
+			d.publications = nil
+			err := d.terminalErr
+			d.publicationMu.Unlock()
+			d.g.UpdateContentOnly(func(*gocui.Gui) error {
+				// Dequeueing this final event releases the last native send;
+				// the publisher has no subsequent UI-dependent work.
+				<-d.publisherDone
+				return err
+			})
+			return
+		}
+		if len(d.publications) == 0 {
+			d.publicationMu.Unlock()
+			<-d.wake
+			continue
+		}
+		p := d.publications[0]
+		d.publications[0] = nil
+		d.publications = d.publications[1:]
+		d.publicationMu.Unlock()
+		fn := func(*gocui.Gui) error {
+			d.publicationMu.Lock()
+			retiring := d.retiring
+			d.publicationMu.Unlock()
+			if retiring || p.ctx.Err() != nil {
+				d.settle(p, context.Canceled)
+				return nil
+			}
+			err := p.fn()
+			callerCanceled := errors.Is(err, context.Canceled) && p.ctx.Err() != nil
+			d.settle(p, err)
+			if callerCanceled {
+				return nil
+			}
+			return d.callbackResult(err)
+		}
+		if p.contentOnly {
+			d.g.UpdateContentOnly(fn)
+		} else {
+			d.g.UpdateAsync(fn)
+		}
+	}
 }
 
 func (d *gocuiDriver) Write(viewName string, b []byte) (int, error) {
@@ -62,7 +211,7 @@ func (d *gocuiDriver) SetKeybinding(viewName string, key types.Key, mod types.Mo
 	// gocui's SetKeybinding handler takes (*Gui, *View). Wrap the
 	// handler closure so callers can pass a parameterless func() error.
 	wrapped := func(_ *gocui.Gui, _ *gocui.View) error {
-		return handler()
+		return d.callbackResult(handler())
 	}
 	// gocui.Key is a {keyName, str, mod} composite — Equals checks all
 	// three fields against the runtime-decoded event Key. Callers pass
@@ -91,20 +240,27 @@ func (d *gocuiDriver) SetMasterEditor(view string, ed gocui.Editor) error {
 		return err
 	}
 	v.Editable = true
+	if e, ok := ed.(*masterEditor); ok {
+		e.requestQuit = func() { d.retire(gocui.ErrQuit) }
+	}
 	v.Editor = ed
 	return nil
 }
 
 func (d *gocuiDriver) SetViewClickBinding(b *types.ViewMouseBinding) error {
-	return d.g.SetViewClickBinding(b)
+	copyBinding := *b
+	copyBinding.Handler = func(opts types.ViewMouseBindingOpts) error {
+		return d.callbackResult(b.Handler(opts))
+	}
+	return d.g.SetViewClickBinding(&copyBinding)
 }
 
 func (d *gocuiDriver) Update(fn func() error) {
-	d.g.Update(func(*gocui.Gui) error { return fn() })
+	d.publish(context.Background(), fn, false, nil)
 }
 
 func (d *gocuiDriver) UpdateContentOnly(fn func() error) {
-	d.g.UpdateContentOnly(func(*gocui.Gui) error { return fn() })
+	d.publish(context.Background(), fn, true, nil)
 }
 
 func (d *gocuiDriver) SetCurrentView(viewName string) (types.View, error) {
@@ -124,7 +280,20 @@ func (d *gocuiDriver) DeleteView(name string) error {
 }
 
 func (d *gocuiDriver) SetManager(managers ...types.Manager) {
-	d.g.SetManager(managers...)
+	d.g.SetManager(gocui.ManagerFunc(func(g *gocui.Gui) error {
+		d.publicationMu.Lock()
+		retiring := d.retiring
+		d.publicationMu.Unlock()
+		if retiring {
+			return nil
+		}
+		for _, manager := range managers {
+			if err := manager.Layout(g); err != nil {
+				return d.callbackResult(err)
+			}
+		}
+		return nil
+	}))
 }
 
 func (d *gocuiDriver) SetCaretEnabled(enabled bool) {
@@ -172,7 +341,7 @@ func clampTabIndex(idx, n int) int {
 // SetTabClickBinding registers a handler invoked with the clicked tab
 // index when the user clicks a native in-border tab on the named view.
 func (d *gocuiDriver) SetTabClickBinding(name string, handler func(idx int) error) error {
-	return d.g.SetTabClickBinding(name, handler)
+	return d.g.SetTabClickBinding(name, func(idx int) error { return d.callbackResult(handler(idx)) })
 }
 
 // SetViewTabColors sets the active (SelFgColor) and inactive (FgColor)
@@ -189,10 +358,43 @@ func (d *gocuiDriver) SetViewTabColors(name string, activeFg, inactiveFg gocui.A
 }
 
 func (d *gocuiDriver) MainLoop() error {
+	d.publicationMu.Lock()
+	d.started = true
+	d.publicationMu.Unlock()
+	go d.publishLoop()
+	priorErrorHandler := d.g.ErrorHandler
+	d.g.ErrorHandler = func(err error) error {
+		d.publicationMu.Lock()
+		retiring := d.retiring
+		d.publicationMu.Unlock()
+		if retiring {
+			select {
+			case <-d.publisherDone:
+				return err
+			default:
+			}
+		}
+		if priorErrorHandler != nil {
+			err = priorErrorHandler(err)
+		}
+		return d.callbackResult(err)
+	}
+	defer d.retire(gocui.ErrQuit)
 	return d.g.MainLoop()
 }
 
 func (d *gocuiDriver) Close() error {
+	d.retire(gocui.ErrQuit)
 	d.g.Close()
+	d.publicationMu.Lock()
+	started := d.started
+	d.publicationMu.Unlock()
+	if started {
+		select {
+		case <-d.publisherDone:
+		default:
+			return errors.New("native UI publisher has not retired")
+		}
+	}
 	return nil
 }

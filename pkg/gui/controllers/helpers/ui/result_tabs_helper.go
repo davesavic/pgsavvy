@@ -127,6 +127,7 @@ type StreamRunner interface {
 	// invoking then exactly once on completion. When idle, then fires
 	// synchronously so callers can rely on the callback in either case.
 	ReadToEnd(then func())
+	ReadToEndWithCompletion(ctx context.Context, completed func(error))
 
 	// EstimatedRows returns the optimiser's row-count estimate for the
 	// active stream, or 0 when unknown.
@@ -482,10 +483,16 @@ func NewResultTabsHelper(deps ResultTabsHelperDeps) *ResultTabsHelper {
 // can read state for rendering; mutators (Pin, Close, etc.) are owned
 // by the helper.
 type Tab struct {
-	id        int64
-	slot      int
-	label     string
-	createdAt time.Time
+	// streamMu fences replacement against export column/row snapshots. Never
+	// hold tab.mu across AppendRows: its cursor callback can reenter the tab.
+	streamMu     sync.RWMutex
+	streamGen    uint64
+	streamCtx    context.Context
+	streamCancel context.CancelFunc
+	id           int64
+	slot         int
+	label        string
+	createdAt    time.Time
 
 	// mu protects state, pinned, rowCount, cancelled. Held briefly in
 	// mutators; helpers.mu must NOT be held when waiting on this mu to
@@ -1851,6 +1858,10 @@ func (h *ResultTabsHelper) priorRunningTab(excludeID int64) *Tab {
 // deps.OnUIThread so the rendering thread is the one that observes the
 // state transition).
 func (h *ResultTabsHelper) startStreaming(tab *Tab) {
+	tab.streamMu.Lock()
+	tab.invalidateStreamLocked()
+	tab.streamCtx, tab.streamCancel = context.WithCancel(context.Background())
+	generation := tab.streamGen
 	tab.mu.Lock()
 	// A re-run pre-sets StateSorting so the "sorting…"
 	// affordance shows until the first re-streamed row; preserve it here
@@ -1889,10 +1900,11 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 			// so inline edits work on buffered rows while a no-LIMIT query
 			// is still streaming. Re-runs call startStreaming
 			// again, so this re-introspects on each fresh schema attach.
-			if len(cols) > 0 {
-				h.scheduleEditabilityIntrospect(tab, cols)
-			}
 		}
+	}
+	tab.streamMu.Unlock()
+	if len(cols) > 0 {
+		h.scheduleEditabilityIntrospect(tab, cols)
 	}
 
 	if rh == nil || runner == nil {
@@ -1919,6 +1931,11 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		return rh.Rows(), nil
 	}
 	appendRows := func(rows []models.Row) {
+		tab.streamMu.RLock()
+		defer tab.streamMu.RUnlock()
+		if tab.streamGen != generation || tab.disposed.Load() {
+			return
+		}
 		gridView.AppendRows(rows)
 		tab.mu.Lock()
 		tab.rowCount += int64(len(rows))
@@ -1978,7 +1995,7 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 		// Editability is introspected at stream start (above), not here:
 		// it is column-driven and the columns are known before the first
 		// row, so Editable() flips true during StateRunning.
-		h.markCompleteOnUI(tab, err)
+		h.markCompleteOnUI(tab, err, generation)
 	}
 	_ = runner.NewQueryTask(taskKey, streamFn, appendRows, resultTabInitialRows, onDone)
 }
@@ -1992,8 +2009,19 @@ func (h *ResultTabsHelper) startStreaming(tab *Tab) {
 // non-nil error the tab finalises to StateErrored with the error stored
 // for the title/error panel, and a toast surfaces the failure — the
 // already-delivered rows are preserved.
-func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab, streamErr error) {
+func (h *ResultTabsHelper) markCompleteOnUI(tab *Tab, streamErr error, generations ...uint64) {
+	tab.streamMu.RLock()
+	generation := tab.streamGen
+	tab.streamMu.RUnlock()
+	if len(generations) != 0 {
+		generation = generations[0]
+	}
 	flip := func() error {
+		tab.streamMu.RLock()
+		defer tab.streamMu.RUnlock()
+		if tab.streamGen != generation || tab.disposed.Load() {
+			return nil
+		}
 		tab.mu.Lock()
 		// StateSorting is treated like StateRunning here: a re-run that
 		// completes before any row arrives (zero-row result) must still
@@ -2570,7 +2598,10 @@ func (t *Tab) PlanContext() *guicontext.PlanContext {
 // runner. Safe to call multiple times.
 func (t *Tab) dispose() {
 	t.disposeOnce.Do(func() {
+		t.streamMu.Lock()
 		t.disposed.Store(true)
+		t.invalidateStreamLocked()
+		t.streamMu.Unlock()
 		t.mu.Lock()
 		state := t.state
 		rh := t.rh
@@ -2610,6 +2641,13 @@ func (t *Tab) dispose() {
 		t.mu.Unlock()
 		close(t.doneCh)
 	})
+}
+
+func (t *Tab) invalidateStreamLocked() {
+	if t.streamCancel != nil {
+		t.streamCancel()
+	}
+	t.streamGen++
 }
 
 // --- in-grid search surface -------------------------------
@@ -3145,6 +3183,8 @@ func (h *ResultTabsHelper) reattachActiveTab(rh runHandle, runSQL, origSQL strin
 	// Reset the TAB-level fields startStreaming/SetColumns do not touch and
 	// pre-arm the "sorting…" affordance, then swap in the new RunHandle. All
 	// under tab.mu; released before startStreaming.
+	t.streamMu.Lock()
+	t.invalidateStreamLocked()
 	t.mu.Lock()
 	t.rowCount = 0
 	t.complete = false
@@ -3153,6 +3193,7 @@ func (h *ResultTabsHelper) reattachActiveTab(rh runHandle, runSQL, origSQL strin
 	t.state = StateSorting
 	t.rh = rh
 	t.mu.Unlock()
+	t.streamMu.Unlock()
 
 	// Recompute the GATING identity from the SQL actually run. A wrapped
 	// re-run -> HasRowIdentity=false -> read-only (introspection skipped); the
@@ -3367,8 +3408,12 @@ func (h *ResultTabsHelper) PromptExport() {
 	m.Prefill(defaultPath)
 
 	h.mu.Lock()
+	prior := h.exportMenu
 	h.exportMenu = &activeExportMenu{tab: t, menu: m}
 	h.mu.Unlock()
+	if prior != nil && prior.cancel != nil {
+		prior.cancel()
+	}
 
 	if h.deps.PushExportMenu != nil {
 		_ = h.deps.PushExportMenu()
@@ -3430,15 +3475,20 @@ func (h *ResultTabsHelper) ExportMenuMoveValue(d int) {
 // ExportMenuCancel pops the menu. If an export is in flight, also
 // cancels it.
 func (h *ResultTabsHelper) ExportMenuCancel() {
+	h.CancelExport()
+	if popFn := h.deps.PopExportMenu; popFn != nil {
+		_ = popFn()
+	}
+}
+
+// CancelExport retires the operation without changing the UI focus stack.
+func (h *ResultTabsHelper) CancelExport() {
 	h.mu.Lock()
 	m := h.exportMenu
 	h.exportMenu = nil
 	h.mu.Unlock()
 	if m != nil && m.cancel != nil {
 		m.cancel()
-	}
-	if popFn := h.deps.PopExportMenu; popFn != nil {
-		_ = popFn()
 	}
 }
 
@@ -3532,6 +3582,7 @@ func (h *ResultTabsHelper) ExportMenuConfirm() {
 	// CONFIRMATION (a TEMPORARY_POPUP) over the EXPORT_MENU auto-pops the
 	// menu, after which h.exportMenu.menu may be nil.
 	tab := m.tab
+	source := captureExportSource(tab)
 	formatLabel := m.menu.FormatLabel()
 	destLabel := m.menu.DestinationLabel()
 	scopeIdx := m.menu.ScopeIdx()
@@ -3573,7 +3624,7 @@ func (h *ResultTabsHelper) ExportMenuConfirm() {
 	}
 
 	dispatch := func() {
-		h.dispatchExport(tab, format, dest, scopeIdx, resolvedPath)
+		h.dispatchExport(source, format, dest, scopeIdx, resolvedPath)
 	}
 
 	// Overwrite guard: when the File destination already exists, confirm on
@@ -3628,19 +3679,37 @@ func (h *ResultTabsHelper) fileExists(destLabel, resolvedPath string) bool {
 // dispatchExport stashes the cancel handle and runs the export on a worker
 // goroutine, surfacing the outcome via a toast. The completion toast carries
 // resolvedPath as the final written path.
-func (h *ResultTabsHelper) dispatchExport(tab *Tab, format exporter.Format, dest exporter.Destination, scopeIdx int, resolvedPath string) {
+func (h *ResultTabsHelper) dispatchExport(source exportSource, format exporter.Format, dest exporter.Destination, scopeIdx int, resolvedPath string) {
 	ctx, cancel := context.WithCancel(context.Background())
+	var stopGeneration func() bool
+	if source.ctx != nil {
+		stopGeneration = context.AfterFunc(source.ctx, cancel)
+	}
 	h.mu.Lock()
 	// Keep cancel reachable so ExportMenuCancel-on-shutdown still aborts
 	// the in-flight export. menu is nil since the UI is closed.
-	h.exportMenu = &activeExportMenu{tab: tab, menu: nil, cancel: cancel}
+	prior := h.exportMenu
+	active := &activeExportMenu{tab: source.tab, menu: nil, cancel: cancel}
+	h.exportMenu = active
 	h.mu.Unlock()
+	if prior != nil && prior.cancel != nil {
+		prior.cancel()
+	}
 
 	h.deps.OnWorker(func(_ gocui.Task) error {
-		src := h.buildRowSource(tab, scopeIdx)
-		descriptor, err := exporter.Run(ctx, format, dest, src, h.progressFn())
+		defer cancel()
+		if stopGeneration != nil {
+			defer stopGeneration()
+		}
+		src, err := h.buildRowSource(ctx, source, scopeIdx)
+		var descriptor string
+		if err == nil {
+			descriptor, err = exporter.Run(ctx, format, dest, src, h.progressFn())
+		}
 		h.mu.Lock()
-		h.exportMenu = nil
+		if h.exportMenu == active {
+			h.exportMenu = nil
+		}
 		h.mu.Unlock()
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -3754,28 +3823,64 @@ func extFor(formatLabel string) string {
 // snapshots grid.VisibleRows; Loaded snapshots grid.AllRows; Full
 // triggers ReadToEnd and blocks the worker goroutine until it
 // completes, then snapshots grid.AllRows.
-func (h *ResultTabsHelper) buildRowSource(t *Tab, scopeIdx int) exporter.RowSource {
-	g := t.Grid()
+type exportSource struct {
+	tab        *Tab
+	grid       *grid.View
+	runner     StreamRunner
+	generation uint64
+	ctx        context.Context
+}
+
+func captureExportSource(t *Tab) exportSource {
+	t.streamMu.RLock()
+	defer t.streamMu.RUnlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return exportSource{tab: t, grid: t.grid, runner: t.runner, generation: t.streamGen, ctx: t.streamCtx}
+}
+
+func (h *ResultTabsHelper) buildRowSource(ctx context.Context, source exportSource, scopeIdx int) (exporter.RowSource, error) {
+	t, g := source.tab, source.grid
 	if g == nil {
-		return &staticRowSource{}
+		return &staticRowSource{}, nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if source.ctx != nil {
+		stop := context.AfterFunc(source.ctx, cancel)
+		defer stop()
+	}
+	if scopeIdx == exportScopeFull && source.runner != nil {
+		done := make(chan error, 1)
+		t.streamMu.RLock()
+		if t.streamGen != source.generation || t.disposed.Load() {
+			t.streamMu.RUnlock()
+			return nil, context.Canceled
+		}
+		source.runner.ReadToEndWithCompletion(ctx, func(err error) { done <- err })
+		t.streamMu.RUnlock()
+		select {
+		case err := <-done:
+			if err != nil {
+				return nil, err
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	t.streamMu.RLock()
+	defer t.streamMu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if t.streamGen != source.generation || t.disposed.Load() || (source.ctx != nil && source.ctx.Err() != nil) {
+		return nil, context.Canceled
 	}
 	cols := g.Columns()
-	switch scopeIdx {
-	case exportScopeVisible:
-		return &staticRowSource{cols: cols, rows: g.VisibleRows()}
-	case exportScopeLoaded:
-		return &staticRowSource{cols: cols, rows: g.AllRows()}
-	case exportScopeFull:
-		done := make(chan struct{})
-		if r := t.Runner(); r != nil {
-			r.ReadToEnd(func() { close(done) })
-		} else {
-			close(done)
-		}
-		<-done
-		return &staticRowSource{cols: cols, rows: g.AllRows()}
+	if scopeIdx == exportScopeVisible {
+		return &staticRowSource{cols: cols, rows: g.VisibleRows()}, nil
 	}
-	return &staticRowSource{cols: cols}
+	return &staticRowSource{cols: cols, rows: g.AllRows()}, nil
 }
 
 // staticRowSource is a snapshot-backed RowSource for the export

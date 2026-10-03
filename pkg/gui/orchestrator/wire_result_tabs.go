@@ -30,7 +30,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		Choice:     g.choiceHelp,
 		OnUIThread: g.OnUIThread,
 		StreamFactory: func() ui.StreamRunner {
-			rbm := tasks.New(g.OnWorker, g.OnUIThreadContentOnly)
+			rbm := tasks.New(g.OnWorker, g.OnUIThreadContentOnly, tasks.WithUIDispatch(g.PublishUIContent))
 			if g.deps.Common != nil {
 				rbm.SetLogger(g.deps.Common.Logger())
 			}

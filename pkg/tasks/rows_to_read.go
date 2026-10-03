@@ -26,8 +26,8 @@ type RowsToRead struct {
 	// fully chan-driven initial fill without re-shaping the request.
 	InitialRefreshAfter int
 
-	// Then is an optional callback invoked after this batch's last
-	// row has been delivered to the UI thread. Used by ReadToEnd to
-	// notify the caller that a full drain has completed.
+	// Then is the legacy success-only pull callback. Error-bearing full-drain
+	// completion is tracked independently by ReadToEndWithCompletion, so queued
+	// or abandoned requests do not depend on the worker invoking this callback.
 	Then func()
 }

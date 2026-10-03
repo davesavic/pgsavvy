@@ -162,6 +162,10 @@ func (f *fakeStreamRunner) ReadToEnd(then func()) {
 	}
 }
 
+func (f *fakeStreamRunner) ReadToEndWithCompletion(ctx context.Context, completed func(error)) {
+	f.ReadToEnd(func() { completed(ctx.Err()) })
+}
+
 func (f *fakeStreamRunner) EstimatedRows() int64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -63,6 +63,10 @@ func (c *capturingStreamRunner) ReadToEnd(fn func()) {
 		fn()
 	}
 }
+
+func (c *capturingStreamRunner) ReadToEndWithCompletion(ctx context.Context, completed func(error)) {
+	completed(ctx.Err())
+}
 func (c *capturingStreamRunner) EstimatedRows() int64   { return 0 }
 func (c *capturingStreamRunner) SetEstimatedRows(int64) {}
 

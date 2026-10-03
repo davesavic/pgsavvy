@@ -136,6 +136,7 @@ type masterEditor struct {
 	// emergencyQuit is the un-rebindable Ctrl-C escape hatch (R5). Invoked
 	// before matcher dispatch when the decoded key is Ctrl-C; nil disables.
 	emergencyQuit func() error
+	requestQuit   func()
 	// pasteState overrides the paste-in-flight predicate (WithPasteState);
 	// nil falls back to reading the live gocui.Gui.IsPasting flag.
 	pasteState func() bool
@@ -155,8 +156,8 @@ func (e *masterEditor) Edit(v *gocui.View, key gocui.Key) bool {
 	// R5: un-rebindable emergency Ctrl-C exit. Intercept before matcher
 	// dispatch so editable views always quit on Ctrl-C regardless of config.
 	if isEmergencyQuitKey(k) && e.emergencyQuit != nil {
-		if errors.Is(e.emergencyQuit(), gocui.ErrQuit) && e.gui != nil {
-			e.gui.Update(func(*gocui.Gui) error { return gocui.ErrQuit })
+		if errors.Is(e.emergencyQuit(), gocui.ErrQuit) {
+			e.quit()
 		}
 		return true
 	}
@@ -175,12 +176,20 @@ func (e *masterEditor) Edit(v *gocui.View, key gocui.Key) bool {
 	// returning gocui.ErrQuit (e.g. the :q ex-command) would otherwise
 	// be silently dropped. Re-schedule the quit on the MainLoop via
 	// Gui.Update so the gocui run loop unwinds.
-	if errors.Is(err, gocui.ErrQuit) && e.gui != nil {
-		e.gui.Update(func(*gocui.Gui) error { return gocui.ErrQuit })
+	if errors.Is(err, gocui.ErrQuit) {
+		e.quit()
 	}
 	out := e.applyResult(v, key, k, result)
 	e.emitInputEvents(k, result, time.Since(start))
 	return out
+}
+
+func (e *masterEditor) quit() {
+	if e.requestQuit != nil {
+		e.requestQuit()
+	} else if e.gui != nil {
+		e.gui.Update(func(*gocui.Gui) error { return gocui.ErrQuit })
+	}
 }
 
 // Dispatch satisfies Dispatcher; the testfake recorder uses it to drive

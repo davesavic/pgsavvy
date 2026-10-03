@@ -31,6 +31,7 @@ type stubRowStream struct {
 	// fire while the worker is parked inside Next).
 	blockAt int
 	release chan struct{}
+	entered chan struct{}
 }
 
 func newStubRowStream(total int) *stubRowStream {
@@ -41,6 +42,9 @@ func (s *stubRowStream) Columns() []models.ColumnMeta { return nil }
 
 func (s *stubRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 	if s.blockAt >= 0 && s.idx == s.blockAt {
+		if s.entered != nil {
+			close(s.entered)
+		}
 		// Park here until released or ctx cancelled — lets a test
 		// observe the "worker is currently inside the driver"
 		// state when triggering preemption.
@@ -70,6 +74,205 @@ func (s *stubRowStream) QueryID() models.QueryID { return models.QueryID{} }
 func (s *stubRowStream) RowsAffected() int64     { return 0 }
 
 var _ drivers.RowStream = (*stubRowStream)(nil)
+
+type completionErrorStream struct {
+	*stubRowStream
+	closeErr error
+}
+
+func (s *completionErrorStream) Close() error {
+	_ = s.stubRowStream.Close()
+	return s.closeErr
+}
+
+func TestReview_full_export_completion(t *testing.T) {
+	for _, mode := range []string{"eof", "next_error", "close_error", "open_error", "stop", "cancel", "replaced", "initial_eof", "saturated_requests", "rejected_ui"} {
+		t.Run(mode, func(t *testing.T) {
+			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+			gate := make(chan struct{})
+			workerDone := make(chan struct{})
+			var workers sync.WaitGroup
+			var launches atomic.Int32
+			ui := make(chan func(), 16)
+			var appended atomic.Int32
+			mgr := tasks.New(func(fn func(gocui.Task) error) {
+				first := launches.Add(1) == 1
+				workers.Go(func() {
+					_ = fn(nil)
+					if first {
+						close(workerDone)
+					}
+				})
+			}, nil, tasks.WithUIDispatch(func(_ context.Context, fn func() error, settled func(error)) {
+				ui <- func() {
+					if mode == "rejected_ui" {
+						settled(context.Canceled)
+					} else {
+						settled(fn())
+					}
+				}
+			}))
+			stream := &completionErrorStream{stubRowStream: newStubRowStream(3)}
+			if mode == "next_error" {
+				stream.errAt = 1
+			}
+			if mode == "close_error" {
+				stream.closeErr = errors.New("synthetic close error")
+			}
+			initial := 0
+			if mode == "initial_eof" || mode == "saturated_requests" {
+				initial = 4
+			}
+			if err := mgr.NewQueryTask("one", func(context.Context) (drivers.RowStream, error) {
+				<-gate
+				if mode == "open_error" {
+					return nil, errors.New("synthetic open error")
+				}
+				return stream, nil
+			}, func(rows []models.Row) { appended.Add(int32(len(rows))) }, initial, nil); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if mode == "saturated_requests" {
+				for range 1024 {
+					mgr.ReadRows(1)
+				}
+			}
+			results := make(chan error, 8)
+			var callbacks atomic.Int32
+			var legacy atomic.Int32
+			mgr.ReadToEnd(func() { legacy.Add(1) })
+			completed := func(err error) { callbacks.Add(1); results <- err }
+			mgr.ReadToEndWithCompletion(ctx, completed)
+			mgr.ReadToEndWithCompletion(ctx, completed)
+			close(gate)
+			select {
+			case <-workerDone:
+			case <-time.After(time.Second):
+				t.Fatal("worker waited for UI delivery")
+			}
+			mgr.ReadToEndWithCompletion(ctx, completed) // late, before held final append
+			mgr.ReadToEnd(func() { legacy.Add(1) })
+			if mode == "eof" || mode == "initial_eof" || mode == "saturated_requests" || mode == "rejected_ui" || mode == "cancel" || mode == "stop" || mode == "replaced" {
+				select {
+				case err := <-results:
+					t.Fatalf("completed before final UI delivery: %v", err)
+				default:
+				}
+			}
+			if mode == "cancel" {
+				cancel()
+			}
+			if mode == "stop" {
+				mgr.Stop()
+			}
+			if mode == "replaced" {
+				if err := mgr.NewQueryTask("two", func(context.Context) (drivers.RowStream, error) {
+					return newStubRowStream(1), nil
+				}, func([]models.Row) {}, 2, nil); err != nil {
+					t.Fatal(err)
+				}
+				workers.Wait()
+			}
+			for len(ui) > 0 {
+				(<-ui)()
+			}
+			for range 3 {
+				select {
+				case err := <-results:
+					wantError := mode != "eof" && mode != "initial_eof" && mode != "saturated_requests"
+					if (err != nil) != wantError {
+						t.Fatalf("mode=%s completion=%v", mode, err)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("abandoned/late waiter did not settle")
+				}
+			}
+			if callbacks.Load() != 3 {
+				t.Fatalf("callbacks=%d; want exactly 3", callbacks.Load())
+			}
+			wantLegacy := int32(0)
+			if mode == "eof" || mode == "initial_eof" || mode == "saturated_requests" || mode == "cancel" {
+				wantLegacy = 2
+			}
+			if legacy.Load() != wantLegacy {
+				t.Fatalf("legacy success callbacks=%d; want %d", legacy.Load(), wantLegacy)
+			}
+			if (mode == "eof" || mode == "initial_eof" || mode == "saturated_requests") && appended.Load() != 3 {
+				t.Fatalf("appended=%d; want final 3 rows", appended.Load())
+			}
+			mgr.Stop()
+			workers.Wait()
+		})
+	}
+	t.Run("no_stream", func(t *testing.T) {
+		mgr := tasks.New(nil, nil)
+		mgr.ReadToEndWithCompletion(context.Background(), func(err error) {
+			if !errors.Is(err, tasks.ErrNoStream) {
+				t.Fatalf("completion=%v", err)
+			}
+		})
+	})
+}
+
+func TestReview_full_export_live_waiter_cancel(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	workerDone := make(chan struct{})
+	opened := make(chan struct{})
+	release := make(chan struct{})
+	stream := newStubRowStream(3)
+	stream.blockAt, stream.release = 0, release
+	stream.entered = make(chan struct{})
+	mgr := tasks.New(func(fn func(gocui.Task) error) {
+		go func() { defer close(workerDone); _ = fn(nil) }()
+	}, func(fn func() error) { _ = fn() })
+	defer mgr.Stop()
+	if err := mgr.NewQueryTask("live", func(context.Context) (drivers.RowStream, error) {
+		close(opened)
+		return stream, nil
+	}, func([]models.Row) {}, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	<-opened
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	mgr.ReadToEndWithCompletion(ctx, func(err error) { result <- err })
+	select {
+	case <-stream.entered:
+	case <-time.After(time.Second):
+		t.Fatal("query did not enter controlled blocked Next")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("completion=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("live waiter cancellation failed to settle")
+	}
+	select {
+	case <-workerDone:
+		t.Fatal("canceling export retired the query worker")
+	default:
+	}
+	if stream.closeCount.Load() != 0 {
+		t.Fatal("export cancellation closed the query stream")
+	}
+	continued := make(chan error, 1)
+	mgr.ReadToEndWithCompletion(context.Background(), func(err error) { continued <- err })
+	close(release)
+	select {
+	case err := <-continued:
+		if err != nil {
+			t.Fatalf("independent query completion=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("query failed to continue after export cancellation")
+	}
+	<-workerDone
+}
 
 // testHarness wires a ResultBufferManager to in-process stubs for
 // onWorker and onUIThread. onWorker spawns a real goroutine tracked

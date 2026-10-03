@@ -1638,6 +1638,14 @@ func (g *Gui) RunAndHandleError() (err error) {
 			panic(r)
 		}
 	}()
+	if d, ok := g.driver.(*gocuiDriver); ok {
+		d.onRetire = func() {
+			if g.resultTabsH != nil {
+				g.resultTabsH.CancelExport()
+			}
+			g.stopSpinner()
+		}
+	}
 	err = g.driver.MainLoop()
 	if err == nil || err == gocui.ErrQuit {
 		return nil
@@ -1699,6 +1707,9 @@ const closeDrainBound = 2 * time.Second
 func (g *Gui) Close() error {
 	if !g.closed.CompareAndSwap(false, true) {
 		return nil
+	}
+	if g.resultTabsH != nil {
+		g.resultTabsH.CancelExport()
 	}
 	if g.keybindingSystem.matcher != nil {
 		g.keybindingSystem.matcher.Cancel()

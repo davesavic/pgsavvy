@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -437,6 +438,27 @@ func (g *Gui) OnUIThreadContentOnly(fn func() error) {
 		return
 	}
 	g.driver.UpdateContentOnly(fn)
+}
+
+// PublishUIContent acknowledges delivery or rejection, not merely queue admission.
+func (g *Gui) PublishUIContent(ctx context.Context, fn func() error, settled func(error)) {
+	if g == nil || g.driver == nil || fn == nil || g.closed.Load() {
+		settled(context.Canceled)
+		return
+	}
+	if d, ok := g.driver.(*gocuiDriver); ok {
+		d.publish(ctx, fn, true, settled)
+		return
+	}
+	g.driver.UpdateContentOnly(func() error {
+		if err := ctx.Err(); err != nil {
+			settled(err)
+			return nil
+		}
+		err := fn()
+		settled(err)
+		return err
+	})
 }
 
 // OnWorker spawns a goroutine that invokes fn with a gocui.Task. The

@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -52,6 +53,7 @@ type ResultBufferManager struct {
 	// the driver enqueues onto userEvents and returns immediately).
 	// All appendRows invocations go through this seam.
 	onUIThread func(func() error)
+	uiDispatch func(context.Context, func() error, func(error))
 
 	// mu protects taskKey, stopCurrentTask, rowsToRead. Held briefly
 	// during NewQueryTask hand-off and during Stop. The worker
@@ -76,6 +78,7 @@ type ResultBufferManager struct {
 	// preempted task cannot leak into the new task. Nil when no
 	// task is running.
 	rowsToRead chan RowsToRead
+	completion *streamCompletion
 
 	// estimatedRows is the optimiser's row-count estimate for the
 	// in-flight query. Populated at stream open by callers that have
@@ -95,6 +98,126 @@ type ResultBufferManager struct {
 	log *slog.Logger
 }
 
+var ErrNoStream = errors.New("no result stream")
+
+// WithUIDispatch adds an error-bearing delivery acknowledgment seam.
+func WithUIDispatch(dispatch func(context.Context, func() error, func(error))) func(*ResultBufferManager) {
+	return func(m *ResultBufferManager) { m.uiDispatch = dispatch }
+}
+
+type completionWaiter struct {
+	mu       sync.Mutex
+	done     bool
+	stop     func() bool
+	callback func(error)
+}
+
+func (w *completionWaiter) finish(err error) {
+	w.mu.Lock()
+	if w.done {
+		w.mu.Unlock()
+		return
+	}
+	w.done = true
+	stop := w.stop
+	w.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+	w.callback(err)
+}
+
+type streamCompletion struct {
+	mu             sync.Mutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	terminal       bool
+	terminalDone   chan struct{}
+	drainRequested chan struct{}
+	err            error
+	deliveryErr    error
+	pending        int
+	waiters        map[*completionWaiter]struct{}
+}
+
+func newStreamCompletion() *streamCompletion {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &streamCompletion{ctx: ctx, cancel: cancel, terminalDone: make(chan struct{}), drainRequested: make(chan struct{}, 1), waiters: make(map[*completionWaiter]struct{})}
+}
+
+func (c *streamCompletion) settleReady() {
+	c.mu.Lock()
+	err := c.err
+	if err == nil {
+		err = c.deliveryErr
+	}
+	if !c.terminal || (err == nil && c.pending != 0) {
+		c.mu.Unlock()
+		return
+	}
+	waiters := c.waiters
+	c.waiters = make(map[*completionWaiter]struct{})
+	c.mu.Unlock()
+	for w := range waiters {
+		w.finish(err)
+	}
+}
+
+func (c *streamCompletion) finish(err error) {
+	c.mu.Lock()
+	if !c.terminal {
+		close(c.terminalDone)
+		c.terminal = true
+		c.err = err
+	}
+	c.mu.Unlock()
+	c.settleReady()
+}
+
+func (c *streamCompletion) retire() {
+	c.mu.Lock()
+	// A fully delivered clean result remains exportable after an idle Stop.
+	if !c.terminal || c.pending != 0 {
+		if !c.terminal {
+			close(c.terminalDone)
+		}
+		c.terminal = true
+		c.err = context.Canceled
+	}
+	c.mu.Unlock()
+	c.cancel()
+	c.settleReady()
+}
+
+func (c *streamCompletion) addWaiter(ctx context.Context, callback func(error)) bool {
+	w := &completionWaiter{callback: func(err error) {
+		if err == nil {
+			err = ctx.Err()
+		}
+		callback(err)
+	}}
+	c.mu.Lock()
+	c.waiters[w] = struct{}{}
+	terminal := c.terminal
+	c.mu.Unlock()
+	stop := context.AfterFunc(ctx, func() {
+		c.mu.Lock()
+		delete(c.waiters, w)
+		c.mu.Unlock()
+		w.finish(ctx.Err())
+	})
+	w.mu.Lock()
+	if w.done {
+		w.mu.Unlock()
+		stop()
+	} else {
+		w.stop = stop
+		w.mu.Unlock()
+	}
+	c.settleReady()
+	return !terminal
+}
+
 // SetLogger wires the per-session structured logger consumed by the
 // cat=state instrumentation (rbm_task_launch /
 // rbm_task_cleanup / rbm_estimated_rows). Safe to call post-construction
@@ -112,11 +235,16 @@ func (m *ResultBufferManager) SetLogger(l *slog.Logger) { m.log = l }
 func New(
 	onWorker func(func(gocui.Task) error),
 	onUIThread func(func() error),
+	options ...func(*ResultBufferManager),
 ) *ResultBufferManager {
-	return &ResultBufferManager{
+	m := &ResultBufferManager{
 		onWorker:   onWorker,
 		onUIThread: onUIThread,
 	}
+	for _, option := range options {
+		option(m)
+	}
+	return m
 }
 
 // TaskKey returns the key of the currently running task, or "" when
@@ -153,6 +281,7 @@ func (m *ResultBufferManager) SetEstimatedRows(n int64) {
 func (m *ResultBufferManager) ReadRows(n int) {
 	m.mu.Lock()
 	ch := m.rowsToRead
+	c := m.completion
 	m.mu.Unlock()
 	if ch == nil {
 		return
@@ -161,24 +290,58 @@ func (m *ResultBufferManager) ReadRows(n int) {
 	// never blocks; if a misbehaving caller fires thousands of
 	// requests faster than the worker drains, the send blocks and
 	// applies natural back-pressure rather than dropping requests.
-	ch <- RowsToRead{Total: n, InitialRefreshAfter: -1}
+	select {
+	case ch <- RowsToRead{Total: n, InitialRefreshAfter: -1}:
+	case <-c.terminalDone:
+	}
 }
 
 // ReadToEnd requests the worker drain the rest of the RowStream and
 // then invoke `then` (if non-nil) exactly once. When the manager is
-// idle, `then` is invoked synchronously so callers can rely on it
-// firing in both cases.
+// idle after a clean, delivered EOF (or before any task), `then` fires
+// synchronously. Failed or retired streams never report success through Then.
 func (m *ResultBufferManager) ReadToEnd(then func()) {
 	m.mu.Lock()
-	ch := m.rowsToRead
+	c := m.completion
 	m.mu.Unlock()
-	if ch == nil {
+	if c == nil {
 		if then != nil {
 			then()
 		}
 		return
 	}
-	ch <- RowsToRead{Total: -1, InitialRefreshAfter: -1, Then: then}
+	m.ReadToEndWithCompletion(context.Background(), func(err error) {
+		if err == nil && then != nil {
+			then()
+		}
+	})
+}
+
+// ReadToEndWithCompletion settles once, including abandoned and late requests.
+// Success means clean EOF/Close and acknowledgment of every queued row append.
+// Canceling ctx only retires this waiter, not the query.
+func (m *ResultBufferManager) ReadToEndWithCompletion(ctx context.Context, completed func(error)) {
+	if completed == nil {
+		return
+	}
+	if err := ctx.Err(); err != nil {
+		completed(err)
+		return
+	}
+	m.mu.Lock()
+	c := m.completion
+	m.mu.Unlock()
+	if c == nil {
+		completed(ErrNoStream)
+		return
+	}
+	if !c.addWaiter(ctx, completed) {
+		return
+	}
+	select {
+	case c.drainRequested <- struct{}{}:
+	default:
+	}
 }
 
 // Stop preempts the currently running task. Closes the RowStream,
@@ -188,7 +351,11 @@ func (m *ResultBufferManager) ReadToEnd(then func()) {
 func (m *ResultBufferManager) Stop() {
 	m.mu.Lock()
 	stop := m.stopCurrentTask
+	c := m.completion
 	m.mu.Unlock()
+	if c != nil {
+		c.retire()
+	}
 	if stop == nil {
 		return
 	}
@@ -238,7 +405,11 @@ func (m *ResultBufferManager) NewQueryTask(
 	}
 
 	priorStop := m.stopCurrentTask
+	priorCompletion := m.completion
 	m.mu.Unlock()
+	if priorCompletion != nil {
+		priorCompletion.retire()
+	}
 
 	// Capture preempted_prior BEFORE running priorStop (AC: the field
 	// must reflect "there was a prior task" at the time NewQueryTask
@@ -265,10 +436,12 @@ func (m *ResultBufferManager) NewQueryTask(
 	rowsToRead := make(chan RowsToRead, 1024)
 	stopCh := make(chan struct{})
 	doneCh := make(chan struct{})
+	completion := newStreamCompletion()
 
 	var stopOnce sync.Once
 	stopFn := func() {
 		stopOnce.Do(func() {
+			completion.retire()
 			close(stopCh)
 		})
 		// Block until the worker has finished cleanup. Safe to
@@ -282,6 +455,7 @@ func (m *ResultBufferManager) NewQueryTask(
 	m.taskKey = taskKey
 	m.stopCurrentTask = stopFn
 	m.rowsToRead = rowsToRead
+	m.completion = completion
 	m.mu.Unlock()
 
 	// Capture so the worker's clearState closure runs against the
@@ -303,6 +477,7 @@ func (m *ResultBufferManager) NewQueryTask(
 			doneCh,
 			myRowsToRead,
 			myStopFn,
+			completion,
 		)
 		return nil
 	})
@@ -328,6 +503,7 @@ func (m *ResultBufferManager) runTask(
 	doneCh chan struct{},
 	myRowsToRead chan RowsToRead,
 	myStopFn func(),
+	completion *streamCompletion,
 ) {
 	var (
 		stream drivers.RowStream
@@ -350,6 +526,10 @@ func (m *ResultBufferManager) runTask(
 	// stream if it was ever opened, and fires onDone. close(doneCh)
 	// unblocks any in-flight Stop callers waiting on stopFn.
 	cleanup := func() {
+		if stream != nil {
+			taskErr = errors.Join(taskErr, stream.Close())
+		}
+		completion.finish(taskErr)
 		m.mu.Lock()
 		// Only clear if we are still the active task. A preempt
 		// from NewQueryTask has already replaced these fields.
@@ -361,9 +541,6 @@ func (m *ResultBufferManager) runTask(
 		}
 		m.mu.Unlock()
 
-		if stream != nil {
-			_ = stream.Close()
-		}
 		fireOnDone()
 		close(doneCh)
 		_ = myStopFn // keep referenced; prevents Go vet noise about unused capture
@@ -388,6 +565,7 @@ func (m *ResultBufferManager) runTask(
 
 	s, err := streamFn(ctx)
 	if err != nil {
+		taskErr = err
 		// streamFn failure: onDone fires (via cleanup), no rows
 		// delivered, manager returns to idle.
 		return
@@ -429,7 +607,7 @@ func (m *ResultBufferManager) runTask(
 			want := min(remaining, initialFillChunkRows)
 			batch, eof, err := m.drainRows(ctx, stream, want, stopCh)
 			if len(batch) > 0 {
-				m.dispatchRows(batch, appendRows)
+				m.dispatchRows(batch, appendRows, completion)
 			}
 			if err != nil {
 				// Mid-stream failure during the initial fill: retain the
@@ -458,36 +636,40 @@ func (m *ResultBufferManager) runTask(
 
 	// --- Chan-driven pull loop ---
 	for {
+		var req RowsToRead
 		select {
 		case <-stopCh:
 			return
-		case req, ok := <-rowsToRead:
+		case <-completion.drainRequested:
+			req = RowsToRead{Total: -1, InitialRefreshAfter: -1}
+		case next, ok := <-rowsToRead:
 			if !ok {
 				// chan closed: only happens if someone external
 				// closed it (we never do). Treat as stop.
 				return
 			}
-			eof, err := m.servicePullRequest(ctx, stream, req, appendRows, stopCh)
-			if err != nil {
-				// Mid-stream failure while servicing a pull request:
-				// record it and exit BEFORE firing req.Then(). The clean-
-				// completion callback (e.g. fireReadToEnd → markCompleteOnUI
-				// with nil error) would otherwise set StateComplete first,
-				// causing the deferred onDone(err) → markCompleteOnUI(tab,
-				// err) to be skipped by its StateRunning/StateSorting guard.
-				// Exiting here routes the error solely through onDone(err) →
-				// StateErrored.
-				taskErr = err
-				return
-			}
-			if req.Then != nil {
-				req.Then()
-			}
-			if eof {
-				// Stream exhausted by a clean EOF: exit so the
-				// deferred cleanup fires onDone → StateComplete (Gap 1).
-				return
-			}
+			req = next
+		}
+		eof, err := m.servicePullRequest(ctx, stream, req, appendRows, stopCh, completion)
+		if err != nil {
+			// Mid-stream failure while servicing a pull request:
+			// record it and exit BEFORE firing req.Then(). The clean-
+			// completion callback (e.g. fireReadToEnd → markCompleteOnUI
+			// with nil error) would otherwise set StateComplete first,
+			// causing the deferred onDone(err) → markCompleteOnUI(tab,
+			// err) to be skipped by its StateRunning/StateSorting guard.
+			// Exiting here routes the error solely through onDone(err) →
+			// StateErrored.
+			taskErr = err
+			return
+		}
+		if req.Then != nil && ctx.Err() == nil && completion.ctx.Err() == nil {
+			req.Then()
+		}
+		if eof {
+			// Stream exhausted by a clean EOF: exit so the
+			// deferred cleanup fires onDone → StateComplete (Gap 1).
+			return
 		}
 	}
 }
@@ -541,10 +723,11 @@ func (m *ResultBufferManager) servicePullRequest(
 	req RowsToRead,
 	appendRows func([]models.Row),
 	stopCh <-chan struct{},
+	completion *streamCompletion,
 ) (bool, error) {
 	batch, eof, err := m.drainRows(ctx, stream, req.Total, stopCh)
 	if len(batch) > 0 {
-		m.dispatchRows(batch, appendRows)
+		m.dispatchRows(batch, appendRows, completion)
 	}
 	return eof, err
 }
@@ -554,12 +737,41 @@ func (m *ResultBufferManager) servicePullRequest(
 // makes the "appendRows is always on the UI thread" invariant
 // trivially auditable. When onUIThread is nil (defensive — should
 // never happen in production) the batch is dropped.
-func (m *ResultBufferManager) dispatchRows(batch []models.Row, appendRows func([]models.Row)) {
-	if m.onUIThread == nil || appendRows == nil {
+func (m *ResultBufferManager) dispatchRows(batch []models.Row, appendRows func([]models.Row), completion *streamCompletion) {
+	if appendRows == nil {
 		return
 	}
-	m.onUIThread(func() error {
+	completion.mu.Lock()
+	completion.pending++
+	completion.mu.Unlock()
+	var once sync.Once
+	settled := func(err error) {
+		once.Do(func() {
+			completion.mu.Lock()
+			completion.pending--
+			if err != nil && completion.deliveryErr == nil {
+				completion.deliveryErr = err
+			}
+			completion.mu.Unlock()
+			completion.settleReady()
+		})
+	}
+	appendFn := func() error {
+		if err := completion.ctx.Err(); err != nil {
+			return err
+		}
 		appendRows(batch)
 		return nil
-	})
+	}
+	if m.uiDispatch != nil {
+		m.uiDispatch(completion.ctx, appendFn, settled)
+	} else if m.onUIThread != nil {
+		m.onUIThread(func() error {
+			err := appendFn()
+			settled(err)
+			return nil
+		})
+	} else {
+		settled(context.Canceled)
+	}
 }
