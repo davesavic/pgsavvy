@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -228,7 +229,14 @@ func formatNew(e models.PendingEdit) string {
 	if e.Kind == models.Expression {
 		return e.NewExpr + " (SQL expression)"
 	}
-	return truncateValue(formatEditValue(e.NewValue, e.ColumnType))
+	value := e.NewValue
+	if grid.IsJSONColumn(models.ColumnMeta{TypeName: e.ColumnType}) {
+		if source, ok := value.(string); ok {
+			// Staged JSON strings are validated document source, not decoded scalars.
+			value = json.RawMessage(source)
+		}
+	}
+	return truncateValue(formatEditValue(value, e.ColumnType))
 }
 
 // truncateValue caps a rendered cell value at commitDialogValueWidth.
@@ -280,12 +288,24 @@ func scrubEditPassword(e *models.PendingEdit, pw string) {
 	if pw == "" {
 		return
 	}
-	if s, ok := e.NewValue.(string); ok {
-		e.NewValue = strings.ReplaceAll(s, pw, "***")
+	scrub := func(value any) any {
+		switch source := value.(type) {
+		case string:
+			return strings.ReplaceAll(source, pw, "***")
+		case json.RawMessage:
+			// Decode string scalars so JSON escaping cannot hide the password.
+			var scalar *string
+			if err := json.Unmarshal(source, &scalar); err == nil && scalar != nil {
+				encoded, _ := json.Marshal(strings.ReplaceAll(*scalar, pw, "***"))
+				return json.RawMessage(encoded)
+			}
+			return json.RawMessage(strings.ReplaceAll(string(source), pw, "***"))
+		default:
+			return value
+		}
 	}
-	if s, ok := e.OldValue.(string); ok {
-		e.OldValue = strings.ReplaceAll(s, pw, "***")
-	}
+	e.NewValue = scrub(e.NewValue)
+	e.OldValue = scrub(e.OldValue)
 }
 
 // pkColumnPlaceholder returns per-PK-column identifier names for use by

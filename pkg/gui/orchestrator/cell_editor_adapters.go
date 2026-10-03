@@ -105,20 +105,14 @@ func (p cellEditorPicker) FormatForEdit(v any, col models.ColumnMeta) string {
 	if v == nil {
 		return ""
 	}
+	if grid.IsJSONColumn(col) {
+		return grid.FormatJSONValue(v)
+	}
 	if s, ok := v.(string); ok {
 		return s
 	}
 	if t, ok := v.(time.Time); ok {
 		return t.Format("2006-01-02 15:04:05.999999-07:00")
-	}
-	// json/jsonb cells seed with JSON text — the same string the grid
-	// shows — rather than Go's default form. pgx decodes them into a Go
-	// map (objects/arrays), a []byte, or a string depending on shape;
-	// classify by column type so every form routes through
-	// FormatJSONValue rather than guessing from the Go value, which
-	// misses raw []byte json and prints "[123 34 ...]".
-	if grid.IsJSONColumn(col) {
-		return grid.FormatJSONValue(v)
 	}
 	// Fallback for cells with no column meta classification: a Go map is
 	// always JSON-shaped.

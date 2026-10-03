@@ -1,8 +1,10 @@
 package grid
 
 import (
+	"encoding/json"
 	"strings"
 
+	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
@@ -566,6 +568,11 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 		if pk := rowPKValues(row, snap.rowIdentity); pk != nil {
 			if e, ok := cellPendingEdit(snap.pendingEdits, pk, snap.cols[c].Name); ok {
 				value = e.NewValue
+				if e.Kind == models.Literal && IsJSONColumn(snap.cols[c]) {
+					if source, ok := value.(string); ok {
+						value = json.RawMessage(source)
+					}
+				}
 				isDirty = true
 			}
 		}

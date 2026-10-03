@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -194,6 +195,23 @@ func TestFormatForEdit_JSONBytes(t *testing.T) {
 		models.ColumnMeta{TypeName: "json"},
 	)
 	require.Equal(t, `{"a":1}`, got)
+}
+
+func TestReview_json_scalar_edit_seed(t *testing.T) {
+	picker := cellEditorPicker{}
+	for _, typ := range []string{"json", "jsonb"} {
+		col := models.ColumnMeta{TypeName: typ}
+		for _, s := range []string{"", "null", "true", "hello", `{"a":1}`, `[1]`, "quote\"\\\n界"} {
+			want, err := json.Marshal(s)
+			require.NoError(t, err)
+			require.Equal(t, string(want), picker.FormatForEdit(s, col))
+			require.Equal(t, string(want), picker.FormatForEdit(json.RawMessage(want), col))
+		}
+		require.Equal(t, `{"a":1}`, picker.FormatForEdit(json.RawMessage(`{"a":1}`), col))
+		require.Equal(t, `[1]`, picker.FormatForEdit([]byte(`[1]`), col))
+		require.Equal(t, "", picker.FormatForEdit(nil, col))
+	}
+	require.Equal(t, "hello", picker.FormatForEdit("hello", models.ColumnMeta{TypeName: "text"}))
 }
 
 // TestStreamBlocksEdit pins the edit-gate state policy: inline edits are

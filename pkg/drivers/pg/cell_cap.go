@@ -53,6 +53,19 @@ func capCellValue(v any, isJSON bool) any {
 	if v == nil {
 		return nil
 	}
+	if isJSON {
+		switch v.(type) {
+		case []byte, json.RawMessage:
+		default:
+			// pgx string scalars are decoded values, not raw JSON source.
+			// Encode once before capping, then retain explicit provenance.
+			b, err := json.Marshal(v)
+			if err != nil {
+				return v
+			}
+			v = json.RawMessage(b)
+		}
+	}
 	switch t := v.(type) {
 	case string:
 		if len(t) <= MaxStoredCellBytes {
@@ -72,21 +85,7 @@ func capCellValue(v any, isJSON bool) any {
 		}
 		return json.RawMessage(truncateUTF8(string(t), MaxStoredCellBytes) + cellTruncationMarker)
 	default:
-		if !isJSON {
-			return v
-		}
-		// jsonb object/array/scalar decoded into a Go map/slice/number.
-		// Normalise to canonical JSON text once here so the renderer no
-		// longer marshals the structured value on every frame, and clip
-		// it when oversized.
-		b, err := json.Marshal(v)
-		if err != nil {
-			return v
-		}
-		if len(b) > MaxStoredCellBytes {
-			return json.RawMessage(truncateUTF8(string(b), MaxStoredCellBytes) + cellTruncationMarker)
-		}
-		return json.RawMessage(b)
+		return v
 	}
 }
 

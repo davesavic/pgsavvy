@@ -576,6 +576,30 @@ func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
 	}
 }
 
+func TestReview_json_scalar_dirty_raw_input(t *testing.T) {
+	for _, raw := range []string{`{"a":2}`, `[1]`, `"true"`, `true`, `null`} {
+		t.Run(raw, func(t *testing.T) {
+			v := NewView()
+			v.SetColumns([]models.ColumnMeta{{Name: "id", TypeName: "int4"}, {Name: "payload", TypeName: "jsonb"}})
+			v.AppendRows([]models.Row{{Values: []any{1, "true"}}, {Values: []any{2, "true"}}})
+			v.SetEditability(true, []int{0}, "", models.Ref{Schema: "public", Table: "t"})
+			set := &models.PendingEditSet{}
+			require.NoError(t, set.Add(models.PendingEdit{PrimaryKey: []any{1}, Column: "payload", ColumnType: "jsonb", OldValue: "true", NewValue: raw, Kind: models.Literal}))
+			v.SetPendingEdits(set)
+			snap := v.snapshot()
+			snap.widths[1] = 30
+			line := stripANSI(renderDataLine(snap, 0, 80))
+			require.Contains(t, line, raw)
+			require.NotContains(t, line, `\"`)
+			if raw == `true` || raw == `null` {
+				require.NotContains(t, line, `"`+raw+`"`)
+			}
+			require.Contains(t, stripANSI(renderDataLine(snap, 1, 80)), `"true"`)
+			require.Equal(t, raw, set.Edits()[0].NewValue)
+		})
+	}
+}
+
 // projectedView builds a single text-column view with the given label
 // values in raw (insertion) order. Used by the projected-cursor navigation
 // regression tests, which drive a non-contiguous projection via an active

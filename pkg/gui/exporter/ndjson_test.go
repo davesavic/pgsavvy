@@ -3,10 +3,12 @@ package exporter
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/stretchr/testify/require"
 )
 
 func ndjsonCols() []models.ColumnMeta {
@@ -141,4 +143,31 @@ func TestNDJSON_JSONBColumn_EmbedsAsJSON(t *testing.T) {
 	if !strings.Contains(out, `"data":{"plan":"pro"}`) {
 		t.Fatalf("expected embedded JSON object, got %q", out)
 	}
+}
+
+func TestReview_json_scalar_export(t *testing.T) {
+	col := models.ColumnMeta{Name: "value", TypeName: "jsonb"}
+	for _, v := range []any{"", "null", "true", "hello", `{"a":1}`, `[1]`, json.RawMessage(`{"a":1}`), []byte(`[1]`), nil} {
+		t.Run(fmt.Sprintf("%T/%v", v, v), func(t *testing.T) {
+			f := NewNDJSON()
+			var buf bytes.Buffer
+			require.NoError(t, f.Header([]models.ColumnMeta{col}, &buf))
+			require.NoError(t, f.Row(models.Row{Values: []any{v}}, &buf))
+			require.NoError(t, f.Footer(&buf))
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+			want := v
+			switch raw := v.(type) {
+			case json.RawMessage:
+				require.NoError(t, json.Unmarshal(raw, &want))
+			case []byte:
+				require.NoError(t, json.Unmarshal(raw, &want))
+			}
+			require.Equal(t, want, got["value"])
+		})
+	}
+	f := NewNDJSON()
+	var buf bytes.Buffer
+	require.NoError(t, f.Header([]models.ColumnMeta{col}, &buf))
+	require.Error(t, f.Row(models.Row{Values: []any{json.RawMessage("broken")}}, &buf))
 }

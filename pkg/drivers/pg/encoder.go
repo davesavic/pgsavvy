@@ -2,6 +2,7 @@ package pg
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -43,6 +44,9 @@ func (encoder) EncodeLiteral(val any, typeOID uint32) string {
 	// produced the value is responsible for not lying about non-nil-ness).
 	if val == nil {
 		return "NULL"
+	}
+	if source, ok := val.(json.RawMessage); ok {
+		val = string(source)
 	}
 
 	// jsonb/json: only triggered by an explicit OID. Without it we cannot

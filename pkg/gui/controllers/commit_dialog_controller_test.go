@@ -1,6 +1,7 @@
 package controllers_test
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -571,6 +572,25 @@ func TestDefaultCommitDialogRender_JSONOldValue(t *testing.T) {
 	}
 }
 
+func TestReview_json_scalar_commit_raw_input(t *testing.T) {
+	for _, raw := range []string{`{"a":2}`, `[1]`, `"true"`, `true`, `null`} {
+		t.Run(raw, func(t *testing.T) {
+			set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "events"}}
+			if err := set.Add(models.PendingEdit{PrimaryKey: []any{7}, Column: "payload", ColumnType: "jsonb", OldValue: "true", NewValue: raw, Kind: models.Literal}); err != nil {
+				t.Fatal(err)
+			}
+			body := controllers.DefaultCommitDialogRender(guicontext.CommitDialogView{Set: set, Conn: &models.Connection{Name: "dev"}})
+			want := `payload: "true" → ` + raw
+			if !strings.Contains(body, want) {
+				t.Fatalf("missing decoded-old/raw-new diff %q in %q", want, body)
+			}
+			if set.Edits()[0].NewValue != raw {
+				t.Fatal("render changed SQL-input payload")
+			}
+		})
+	}
+}
+
 // AC: Expression edits render with `(SQL expression)` suffix.
 func TestDefaultCommitDialogRender_ExpressionSuffix(t *testing.T) {
 	set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "users"}}
@@ -678,6 +698,60 @@ func TestDefaultCommitDialogRender_SqlPreviewScrubsPassword(t *testing.T) {
 	}
 	if !strings.Contains(body, "***") {
 		t.Errorf("password scrubbing marker not found:\n%s", body)
+	}
+}
+
+func TestReview_json_scalar_preview_password(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	for _, tc := range []struct{ name, password string }{
+		{"plain", "review_pw"},
+		{"escaped", "review_'\"\\\n<&>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, err := json.Marshal("prefix-" + tc.password + "-suffix")
+			if err != nil {
+				t.Fatal("fixture JSON encoding failed")
+			}
+			set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "events"}}
+			if err := set.Add(models.PendingEdit{PrimaryKey: []any{7}, Column: "payload", ColumnType: "jsonb", OldValue: json.RawMessage(source), NewValue: `"replacement"`, Kind: models.Literal}); err != nil {
+				t.Fatal("fixture staging failed")
+			}
+			body := controllers.DefaultCommitDialogRender(guicontext.CommitDialogView{Set: set, Conn: &models.Connection{Name: "dev", Password: tc.password}, Mode: guicontext.CommitDialogSqlPreview})
+			if strings.Contains(body, "review_") {
+				t.Fatal("retained JSON password leaked in SQL preview")
+			}
+			if !strings.Contains(body, `IS NOT DISTINCT FROM E'"prefix-***-suffix"'`) {
+				t.Fatal("retained JSON password redaction marker missing")
+			}
+			if string(set.Edits()[0].OldValue.(json.RawMessage)) != string(source) || set.Edits()[0].NewValue != `"replacement"` {
+				t.Fatal("preview modified the stored edit")
+			}
+		})
+	}
+}
+
+func TestReview_json_scalar_preview_raw_document(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	for _, tc := range []struct{ name, source, want string }{
+		{"object", `{"value":"review_pw"}`, `{"value":"***"}`},
+		{"array", `["review_pw"]`, `["***"]`},
+		{"null", `null`, `null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			set := &models.PendingEditSet{Table: models.Ref{Schema: "public", Table: "events"}}
+			if err := set.Add(models.PendingEdit{PrimaryKey: []any{7}, Column: "payload", ColumnType: "jsonb", OldValue: json.RawMessage(tc.source), NewValue: json.RawMessage(tc.source), Kind: models.Literal}); err != nil {
+				t.Fatal("fixture staging failed")
+			}
+			body := controllers.DefaultCommitDialogRender(guicontext.CommitDialogView{Set: set, Conn: &models.Connection{Name: "dev", Password: "review_pw"}, Mode: guicontext.CommitDialogSqlPreview})
+			if strings.Contains(body, "review_") || !strings.Contains(body, "IS NOT DISTINCT FROM E'"+tc.want+"'") {
+				t.Fatal("raw document SQL-preview redaction/provenance failed")
+			}
+			for _, value := range []any{set.Edits()[0].OldValue, set.Edits()[0].NewValue} {
+				if string(value.(json.RawMessage)) != tc.source {
+					t.Fatal("preview modified stored raw document")
+				}
+			}
+		})
 	}
 }
 

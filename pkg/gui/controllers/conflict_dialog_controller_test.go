@@ -450,6 +450,25 @@ func TestDefaultConflictDialogRender_JSONValues(t *testing.T) {
 	}
 }
 
+func TestReview_json_scalar_conflict_raw_input(t *testing.T) {
+	for _, raw := range []string{`{"a":2}`, `[1]`, `"true"`, `true`, `null`} {
+		t.Run(raw, func(t *testing.T) {
+			view := guicontext.ConflictDialogView{Conflicts: []models.ConflictedEdit{{
+				Edit: models.PendingEdit{PrimaryKey: []any{7}, Column: "payload", ColumnType: "jsonb", NewValue: raw, Kind: models.Literal}, ServerValue: "true",
+			}}, Conn: &models.Connection{Name: "dev"}}
+			body := controllers.DefaultConflictDialogRender(view)
+			for _, want := range []string{"your edit:  " + raw + "\n", "server now: \"true\"\n"} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("missing %q in %q", want, body)
+				}
+			}
+			if view.Conflicts[0].Edit.NewValue != raw {
+				t.Fatal("render changed SQL-input payload")
+			}
+		})
+	}
+}
+
 // AC: When ServerValue == staged NewValue, the row renders
 // "already applied by another session".
 func TestDefaultConflictDialogRender_AlreadyAppliedAnnotation(t *testing.T) {

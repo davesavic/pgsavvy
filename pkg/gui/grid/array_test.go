@@ -1,10 +1,32 @@
 package grid
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+func TestReview_json_scalar_display(t *testing.T) {
+	col := models.ColumnMeta{TypeName: "jsonb"}
+	for _, s := range []string{"", "null", "true", "hello", `{"a":1}`, `[1]`, "quote\"\\\n界"} {
+		t.Run(s, func(t *testing.T) {
+			want, err := json.Marshal(s)
+			require.NoError(t, err)
+			require.Equal(t, string(want), FormatJSONValue(s))
+			require.Equal(t, string(want), renderCellPlain(s, col))
+		})
+	}
+	for _, raw := range []string{`{"a":1}`, `[1,true,null]`, `"true"`, `null`, `true`} {
+		require.Equal(t, raw, FormatJSONValue(json.RawMessage(raw)))
+		require.Equal(t, raw, FormatJSONValue([]byte(raw)))
+	}
+	require.Equal(t, "", FormatJSONValue(nil))
+	require.Equal(t, "NULL", renderCellPlain(nil, col))
+	require.Equal(t, "hello", renderCellPlain("hello", models.ColumnMeta{TypeName: "text"}))
+}
 
 // TestFormatArrayLiteral_SimpleStrings is the regression test:
 // pgx decodes a text[] column into a Go slice; rendering it with fmt's

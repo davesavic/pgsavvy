@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -347,6 +348,12 @@ func formatConflictYourEdit(e models.PendingEdit) string {
 	if e.Kind == models.Expression {
 		expr, _ := payload.(string)
 		return highlight.Highlight(expr)
+	}
+	if grid.IsJSONColumn(models.ColumnMeta{TypeName: e.ColumnType}) {
+		if source, ok := payload.(string); ok {
+			// Only the staged side carries document source; server strings are decoded.
+			payload = json.RawMessage(source)
+		}
 	}
 	return formatConflictValue(payload, e.ColumnType)
 }

@@ -1,6 +1,7 @@
 package grid
 
 import (
+	"encoding/json"
 	"math/big"
 	"strings"
 	"testing"
@@ -59,14 +60,13 @@ func TestRenderCellPlain_JSONObject(t *testing.T) {
 }
 
 // TestRenderCellPlain_JSONPassthrough asserts JSON values that arrive
-// already as text ([]byte or string) are passed through unchanged rather
-// than re-marshaled — json.Marshal of a []byte would base64-encode it and
-// of a string would add quotes.
+// explicitly as raw source ([]byte or json.RawMessage) pass through
+// unchanged rather than being base64-encoded or quoted again.
 func TestRenderCellPlain_JSONPassthrough(t *testing.T) {
 	resetThemeForTest(t)
 	col := models.ColumnMeta{Name: "data", TypeName: "jsonb"}
 	require.Equal(t, `{"a":1}`, renderCellPlain([]byte(`{"a":1}`), col))
-	require.Equal(t, `{"a":1}`, renderCellPlain(`{"a":1}`, col))
+	require.Equal(t, `{"a":1}`, renderCellPlain(json.RawMessage(`{"a":1}`), col))
 }
 
 // TestRenderCell_NullItalic asserts NULL cells emit the italic SGR and

@@ -2,9 +2,15 @@ package pg
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/stretchr/testify/require"
+
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
@@ -94,15 +100,77 @@ func TestCapCellValue_LargeJSONMapNormalisedAndTruncated(t *testing.T) {
 }
 
 func TestCapCellValue_JSONStringNotDoubleEncoded(t *testing.T) {
-	// pgx may return a json column value already as a string; it must hit
-	// the string branch (cheap len cap), not be re-quoted as JSON.
-	got := capCellValue(`{"k":"v"}`, true)
-	s, ok := got.(string)
+	// Explicit raw source must not acquire another layer of JSON quoting.
+	got := capCellValue(json.RawMessage(`{"k":"v"}`), true)
+	s, ok := got.(json.RawMessage)
 	if !ok {
-		t.Fatalf("got %T, want string", got)
+		t.Fatalf("got %T, want json.RawMessage", got)
 	}
-	if s != `{"k":"v"}` {
+	if string(s) != `{"k":"v"}` {
 		t.Fatalf("got %q, want unchanged", s)
+	}
+}
+
+func TestReview_json_scalar_codec_retention(t *testing.T) {
+	m := pgtype.NewMap()
+	for _, oid := range []uint32{pgtype.JSONOID, pgtype.JSONBOID} {
+		typ, ok := m.TypeForOID(oid)
+		require.True(t, ok)
+		for _, format := range []int16{pgtype.TextFormatCode, pgtype.BinaryFormatCode} {
+			for _, source := range []string{`""`, `"null"`, `"true"`, `"hello"`, `"{\"a\":1}"`, `"[1]"`, `{"a":1}`, `[1,true,null]`, `true`, `null`} {
+				t.Run(fmt.Sprintf("%s/%d/%s", typ.Name, format, source), func(t *testing.T) {
+					wire := []byte(source)
+					if oid == pgtype.JSONBOID && format == pgtype.BinaryFormatCode {
+						wire = append([]byte{1}, wire...)
+					}
+					decoded, err := typ.Codec.DecodeValue(m, oid, format, wire)
+					require.NoError(t, err)
+					col := models.ColumnMeta{TypeName: typ.Name, TypeOID: oid}
+					vals := []any{decoded}
+					capRowValues(vals, []models.ColumnMeta{col})
+					if source == "null" {
+						require.Nil(t, vals[0]) // Existing pgx nil/SQL NULL contract.
+						return
+					}
+					raw, ok := vals[0].(json.RawMessage)
+					require.True(t, ok, "retained JSON must carry explicit provenance")
+					var got any
+					require.NoError(t, json.Unmarshal(raw, &got))
+					require.Equal(t, decoded, got)
+					require.Equal(t, string(raw), grid.FormatJSONValue(vals[0]))
+					for _, pretty := range []bool{false, true} {
+						body := grid.FormatViewerBodyPlain(vals[0], col, pretty)
+						require.NoError(t, json.Unmarshal([]byte(body), &got))
+						require.Equal(t, decoded, got)
+					}
+					require.Equal(t, vals[0], capCellValue(vals[0], true))
+				})
+			}
+		}
+	}
+}
+
+func TestReview_json_scalar_cap_boundary(t *testing.T) {
+	for _, n := range []int{MaxStoredCellBytes - 3, MaxStoredCellBytes - 2, MaxStoredCellBytes - 1} {
+		s := strings.Repeat("x", n)
+		want, err := json.Marshal(s)
+		require.NoError(t, err)
+		got, ok := capCellValue(s, true).(json.RawMessage)
+		require.True(t, ok)
+		if len(want) <= MaxStoredCellBytes {
+			require.Equal(t, want, []byte(got))
+		} else {
+			require.Equal(t, string(want[:MaxStoredCellBytes])+cellTruncationMarker, string(got))
+		}
+	}
+	for _, s := range []string{strings.Repeat("界", MaxStoredCellBytes), strings.Repeat("\n", MaxStoredCellBytes)} {
+		got, ok := capCellValue(s, true).(json.RawMessage)
+		require.True(t, ok)
+		require.LessOrEqual(t, len(got), MaxStoredCellBytes+len(cellTruncationMarker))
+		require.True(t, utf8.Valid(got))
+		require.True(t, strings.HasSuffix(string(got), cellTruncationMarker))
+		_, failed := grid.FormatViewerBody(got, models.ColumnMeta{TypeName: "jsonb"}, true)
+		require.True(t, failed, "clipped source must retain visible parse failure")
 	}
 }
 

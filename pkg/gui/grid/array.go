@@ -8,12 +8,10 @@ import (
 )
 
 // FormatJSONValue renders a json/jsonb cell value as JSON text. pgx
-// decodes a json/jsonb column into a Go map/slice for objects/arrays, or
-// leaves it as []byte/string when it arrives as raw text. The structured
-// forms are marshaled back to JSON; byte/string forms pass through
-// unchanged so we don't double-encode (json.Marshal of a []byte yields
-// base64, of a string adds a layer of quotes). On a marshal error the Go
-// default %v form is returned so a cell still shows something.
+// decodes objects/arrays into Go maps/slices and string scalars into Go
+// strings. Decoded values are marshaled; explicitly raw []byte and
+// json.RawMessage sources pass through without another encoding. On a marshal
+// error the Go default %v form is returned so a cell still shows something.
 //
 // Like FormatArrayLiteral, this is the single source of truth for JSON
 // cell formatting, shared by the grid renderer and the cell editor's
@@ -22,8 +20,6 @@ func FormatJSONValue(v any) string {
 	switch t := v.(type) {
 	case nil:
 		return ""
-	case string:
-		return t
 	case []byte:
 		return string(t)
 	case json.RawMessage:

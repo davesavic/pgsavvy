@@ -1,6 +1,7 @@
 package pg
 
 import (
+	"encoding/json"
 	"math"
 	"strconv"
 	"strings"
@@ -9,6 +10,22 @@ import (
 
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 )
+
+func TestReview_json_scalar_literal_raw_source(t *testing.T) {
+	enc := encoder{}
+	for _, source := range []string{`"hello"`, `"true"`, `{"a":1}`, `[1]`, `"O'Brien\\path"`} {
+		for _, oid := range []uint32{0, jsonOID, jsonbOID} {
+			want := enc.EncodeLiteral(source, oid)
+			if got := enc.EncodeLiteral(json.RawMessage(source), oid); got != want {
+				t.Errorf("raw document at OID %d: got %q, want %q", oid, got, want)
+			}
+		}
+	}
+	retained := capCellValue("hello", true)
+	if got := enc.EncodeLiteral(retained, jsonbOID); got != `E'"hello"'::jsonb` {
+		t.Fatalf("retained scalar SQL literal: %q", got)
+	}
+}
 
 // maliciousStringer's String() returns text that would close a naive string
 // literal and append additional statements. The encoder MUST neutralize it

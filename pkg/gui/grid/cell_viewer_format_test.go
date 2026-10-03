@@ -2,6 +2,7 @@ package grid
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -49,13 +50,13 @@ func TestFormatViewerBody_JSONPrettyPrints(t *testing.T) {
 
 func TestFormatViewerBody_JSONPassthroughPrettyPrints(t *testing.T) {
 	col := models.ColumnMeta{Name: "data", TypeName: "jsonb"}
-	body := FormatViewerBodyPlain(`{"a":1}`, col, true)
+	body := FormatViewerBodyPlain(json.RawMessage(`{"a":1}`), col, true)
 	require.Contains(t, body, `"a": 1`)
 }
 
 func TestFormatViewerBody_JSONParseFailed(t *testing.T) {
 	col := models.ColumnMeta{Name: "data", TypeName: "jsonb"}
-	body := FormatViewerBodyPlain("not json at all", col, true)
+	body := FormatViewerBodyPlain(json.RawMessage("not json at all"), col, true)
 	require.Contains(t, body, "not json at all")
 	require.Contains(t, body, "(parse failed)")
 }
@@ -64,6 +65,30 @@ func TestFormatViewerBody_ArrayNewlineJoined(t *testing.T) {
 	col := models.ColumnMeta{Name: "tags", TypeName: "_text"}
 	body := FormatViewerBodyPlain([]any{"admin", "founder", "editor"}, col, false)
 	require.Equal(t, "admin\nfounder\neditor", body)
+}
+
+func TestReview_json_scalar_viewer(t *testing.T) {
+	col := models.ColumnMeta{TypeName: "jsonb"}
+	for _, s := range []string{"", "null", "true", "hello", `{"a":1}`, `[1]`, "quote\"\\\n界"} {
+		for _, pretty := range []bool{false, true} {
+			want, err := json.Marshal(s)
+			require.NoError(t, err)
+			body, failed := formatViewerBodyRaw(s, col, pretty)
+			require.False(t, failed)
+			require.Equal(t, string(want), body)
+		}
+	}
+	for _, raw := range []json.RawMessage{json.RawMessage(`{"a":1}`), json.RawMessage(`[1,true,null]`)} {
+		body, failed := formatViewerBodyRaw(raw, col, true)
+		require.False(t, failed)
+		var want, got any
+		require.NoError(t, json.Unmarshal(raw, &want))
+		require.NoError(t, json.Unmarshal([]byte(body), &got))
+		require.Equal(t, want, got)
+	}
+	body, failed := formatViewerBodyRaw(json.RawMessage(`broken`), col, true)
+	require.True(t, failed)
+	require.Contains(t, body, "(parse failed)")
 }
 
 func TestFormatViewerBody_EmptyArrayReturnsSentinel(t *testing.T) {
