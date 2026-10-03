@@ -8,6 +8,7 @@ import (
 	"fmt"
 	iofs "io/fs"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/afero"
@@ -15,9 +16,8 @@ import (
 )
 
 // AppState is NOT safe for concurrent mutation. Callers MUST serialize writes
-// externally for v1 (per-process single-writer invariant). Save takes a
-// defensive snapshot but cannot protect against a mutator racing with the
-// marshal — see Save's godoc for the contract.
+// externally (per-process single-writer invariant). Save's defensive copy
+// cannot protect against a mutator racing with the copy itself.
 type AppState struct {
 	LastConnectionID    string            `yaml:"last_connection_id"`
 	RecentConnectionIDs []string          `yaml:"recent_connection_ids"`
@@ -36,6 +36,82 @@ type AppState struct {
 	LastSchemaName           map[string]string              `yaml:"last_schema_name"`
 	LastTableName            map[string]string              `yaml:"last_table_name"`
 	LastPickerDirectory      string                         `yaml:"last_picker_directory"`
+	CanonicalSessionSettings *CanonicalSessionSettingsState `yaml:"canonical_session_settings,omitempty"`
+}
+
+// CanonicalSessionSetting stores decoded data, never SQL tokens. Scalars have
+// one value (including an empty string); search_path has individual identifiers.
+type CanonicalSessionSetting struct {
+	Values     []string `yaml:"values"`
+	Provenance string   `yaml:"provenance"`
+}
+
+// CanonicalSessionSettingsState has a schema version independent of the build
+// version. Absence leaves legacy SQL-token settings untouched. Downgrades must
+// retain a new-format backup and use isolated old-binary XDG state: legacy
+// load/save against shared state loses this envelope and is unsupported.
+type CanonicalSessionSettingsState struct {
+	Version     int                                           `yaml:"version"`
+	Connections map[string]map[string]CanonicalSessionSetting `yaml:"connections"`
+}
+
+var (
+	ErrUnsupportedSessionSettingsVersion = errors.New("unsupported session settings version")
+	ErrInvalidCanonicalSessionSetting    = errors.New("invalid canonical session setting")
+)
+
+func validateCanonicalSetting(key string, value CanonicalSessionSetting) error {
+	if key == "" || strings.ToLower(key) != key {
+		return ErrInvalidCanonicalSessionSetting
+	}
+	for i, c := range key {
+		if c >= 'a' && c <= 'z' || c == '_' || i > 0 && (c >= '0' && c <= '9' || c == '.') {
+			continue
+		}
+		return ErrInvalidCanonicalSessionSetting
+	}
+	if value.Provenance != "decoded" || len(value.Values) == 0 || key != "search_path" && len(value.Values) != 1 {
+		return ErrInvalidCanonicalSessionSetting
+	}
+	return nil
+}
+
+func (a *AppState) validateSessionSettings() error {
+	if a.CanonicalSessionSettings == nil {
+		return nil
+	}
+	if a.CanonicalSessionSettings.Version != 1 {
+		return fmt.Errorf("%w: %d", ErrUnsupportedSessionSettingsVersion, a.CanonicalSessionSettings.Version)
+	}
+	for connID, settings := range a.CanonicalSessionSettings.Connections {
+		if connID == "" {
+			return ErrInvalidCanonicalSessionSetting
+		}
+		for key, value := range settings {
+			if err := validateCanonicalSetting(key, value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (a *AppState) deleteLegacySessionSetting(connID, key string) {
+	delete(a.LastSessionSettings[connID], key)
+	if key == "statement_timeout" {
+		delete(a.StatementTimeoutOverride, connID)
+	}
+}
+
+func (a *AppState) removeCanonicalLegacySettings() {
+	if a.CanonicalSessionSettings == nil {
+		return
+	}
+	for connID, settings := range a.CanonicalSessionSettings.Connections {
+		for key := range settings {
+			a.deleteLegacySessionSetting(connID, key)
+		}
+	}
 }
 
 // Save serializes the receiver to YAML and atomically replaces 'path' on POSIX
@@ -45,7 +121,13 @@ type AppState struct {
 // map writes will panic. Callers must hold an external lock or pass a
 // defensive copy.
 func (a *AppState) Save(fs afero.Fs, path string) error {
-	data, err := yaml.Marshal(a)
+	if err := a.validateSessionSettings(); err != nil {
+		return err
+	}
+	// Do not let a legacy binary replay stale values for normalized settings.
+	snapshot := deepCopyAppState(a)
+	snapshot.removeCanonicalLegacySettings()
+	data, err := yaml.Marshal(snapshot)
 	if err != nil {
 		return err
 	}
@@ -64,7 +146,7 @@ func (a *AppState) Save(fs afero.Fs, path string) error {
 }
 
 // Load reads the YAML file at 'path' into the receiver. A missing file is
-// treated as a first-run condition: the receiver is left at zero value and
+// treated as a first-run condition: the receiver is left unchanged and
 // nil is returned. Any other read error, or an unmarshal error on a present
 // file, is returned to the caller.
 func (a *AppState) Load(fs afero.Fs, path string) error {
@@ -75,7 +157,29 @@ func (a *AppState) Load(fs afero.Fs, path string) error {
 		}
 		return err
 	}
-	return yaml.Unmarshal(data, a)
+	// Future payloads may not decode into today's types. Read their version
+	// first so unsupported formats are reported independently of payload shape.
+	var header struct {
+		CanonicalSessionSettings *struct {
+			Version int `yaml:"version"`
+		} `yaml:"canonical_session_settings"`
+	}
+	if err := yaml.Unmarshal(data, &header); err != nil {
+		return err
+	}
+	if header.CanonicalSessionSettings != nil && header.CanonicalSessionSettings.Version != 1 {
+		return fmt.Errorf("%w: %d", ErrUnsupportedSessionSettingsVersion, header.CanonicalSessionSettings.Version)
+	}
+	var loaded AppState
+	if err := yaml.Unmarshal(data, &loaded); err != nil {
+		return err
+	}
+	if err := loaded.validateSessionSettings(); err != nil {
+		return err
+	}
+	loaded.removeCanonicalLegacySettings()
+	*a = loaded
+	return nil
 }
 
 // recentConnectionsCap is the maximum number of entries retained in

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -93,6 +94,9 @@ type AppStateStore struct {
 
 	// lastSaveErr records the most recent debounced-save error. Read under mu.
 	lastSaveErr error
+	// A failed load must not be followed by overwriting that file with
+	// the previous (or zero) state. Cleared only by a successful Load.
+	settingsLoadErr error
 
 	// log is the optional structured logger used to emit
 	// cat=state events (appstate_mutate_scheduled / appstate_save_fire /
@@ -132,14 +136,26 @@ func NewAppStateStore(fs afero.Fs, path string, clock Clock) *AppStateStore {
 // via LastSaveErr). It does NOT panic — per AC fix in the epic post-review
 // resolutions.
 func (s *AppStateStore) MutateAndSave(fn func(*AppState)) {
-	if s.closed.Load() {
-		s.mu.Lock()
-		s.lastSaveErr = errStoreClosed
+	s.mu.Lock()
+	if err := s.mutationErrLocked(); err != nil {
+		s.lastSaveErr = err
 		s.mu.Unlock()
 		return
 	}
-	s.mu.Lock()
 	fn(s.state)
+	hadPending := s.scheduleSaveLocked()
+	s.mu.Unlock()
+	logs.Event(s.log, "state", "appstate_mutate_scheduled", slog.Bool("has_pending", hadPending))
+}
+
+func (s *AppStateStore) mutationErrLocked() error {
+	if s.closed.Load() {
+		return errStoreClosed
+	}
+	return s.settingsLoadErr
+}
+
+func (s *AppStateStore) scheduleSaveLocked() bool {
 	// Mark pending and (re)arm the debounce timer.
 	hadPending := s.pending
 	s.pending = true
@@ -147,8 +163,7 @@ func (s *AppStateStore) MutateAndSave(fn func(*AppState)) {
 		s.timer.Stop()
 	}
 	s.timer = s.clock.AfterFunc(DebounceWindow, s.debouncedFire)
-	s.mu.Unlock()
-	logs.Event(s.log, "state", "appstate_mutate_scheduled", slog.Bool("has_pending", hadPending))
+	return hadPending
 }
 
 // debouncedFire is invoked by the Clock after the debounce window elapses. It
@@ -178,6 +193,11 @@ func (s *AppStateStore) debouncedFire() {
 // what eliminates the yaml.Marshal vs concurrent map-write panic (Adv-A / M06b).
 func (s *AppStateStore) saveSnapshot() error {
 	s.mu.Lock()
+	if s.settingsLoadErr != nil {
+		err := s.settingsLoadErr
+		s.mu.Unlock()
+		return err
+	}
 	snap := deepCopyAppState(s.state)
 	fs := s.fs
 	path := s.path
@@ -199,7 +219,19 @@ func (s *AppStateStore) Save() error {
 func (s *AppStateStore) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.state.Load(s.fs, s.path)
+	err := s.state.Load(s.fs, s.path)
+	if err != nil {
+		if s.settingsLoadErr == nil {
+			s.settingsLoadErr = err
+		}
+		s.lastSaveErr = s.settingsLoadErr
+	} else {
+		if s.settingsLoadErr != nil {
+			s.lastSaveErr = nil
+		}
+		s.settingsLoadErr = nil
+	}
+	return err
 }
 
 // Flush blocks until any pending debounced Save has completed. Safe to call
@@ -364,6 +396,104 @@ func (s *AppStateStore) LastSessionSettingsSnapshot(connID string) map[string]st
 	return out
 }
 
+// CanonicalSessionSettingsSnapshot returns decoded values with no shared maps
+// or slices. Replay eligibility and SQL encoding belong to the consumer.
+func (s *AppStateStore) CanonicalSessionSettingsSnapshot(connID string) (map[string]CanonicalSessionSetting, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.settingsLoadErr != nil {
+		return nil, s.settingsLoadErr
+	}
+	if err := s.state.validateSessionSettings(); err != nil {
+		return nil, err
+	}
+	if s.state.CanonicalSessionSettings == nil {
+		return nil, nil
+	}
+	return copyCanonicalSettings(s.state.CanonicalSessionSettings.Connections[connID]), nil
+}
+
+// SetCanonicalSessionSetting copies decoded input and schedules persistence.
+// Success means accepted, not durable: use Save or Flush to observe I/O errors.
+// A matching legacy value is removed rather than dual-written as SQL tokens.
+func (s *AppStateStore) SetCanonicalSessionSetting(connID, key string, value CanonicalSessionSetting) error {
+	s.mu.Lock()
+	if err := s.mutationErrLocked(); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	if connID == "" {
+		s.mu.Unlock()
+		return ErrInvalidCanonicalSessionSetting
+	}
+	if err := validateCanonicalSetting(key, value); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	if err := s.state.validateSessionSettings(); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	if s.state.CanonicalSessionSettings == nil {
+		s.state.CanonicalSessionSettings = &CanonicalSessionSettingsState{Version: 1}
+	}
+	canonical := s.state.CanonicalSessionSettings
+	if canonical.Connections == nil {
+		canonical.Connections = make(map[string]map[string]CanonicalSessionSetting)
+	}
+	if canonical.Connections[connID] == nil {
+		canonical.Connections[connID] = make(map[string]CanonicalSessionSetting)
+	}
+	value.Values = slices.Clone(value.Values)
+	canonical.Connections[connID][key] = value
+	s.state.deleteLegacySessionSetting(connID, key)
+	hadPending := s.scheduleSaveLocked()
+	s.mu.Unlock()
+	logs.Event(s.log, "state", "appstate_mutate_scheduled", slog.Bool("has_pending", hadPending))
+	return nil
+}
+
+// DeleteSessionSetting resets both canonical and legacy representations.
+func (s *AppStateStore) DeleteSessionSetting(connID, key string) error {
+	s.mu.Lock()
+	if err := s.mutationErrLocked(); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	if connID == "" {
+		s.mu.Unlock()
+		return ErrInvalidCanonicalSessionSetting
+	}
+	if err := validateCanonicalSetting(key, CanonicalSessionSetting{Values: []string{""}, Provenance: "decoded"}); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	if err := s.state.validateSessionSettings(); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	if s.state.CanonicalSessionSettings != nil {
+		delete(s.state.CanonicalSessionSettings.Connections[connID], key)
+	}
+	s.state.deleteLegacySessionSetting(connID, key)
+	hadPending := s.scheduleSaveLocked()
+	s.mu.Unlock()
+	logs.Event(s.log, "state", "appstate_mutate_scheduled", slog.Bool("has_pending", hadPending))
+	return nil
+}
+
+func copyCanonicalSettings(src map[string]CanonicalSessionSetting) map[string]CanonicalSessionSetting {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]CanonicalSessionSetting, len(src))
+	for key, value := range src {
+		value.Values = slices.Clone(value.Values)
+		dst[key] = value
+	}
+	return dst
+}
+
 // StatementTimeoutOverrideValue returns the persisted statement_timeout
 // override for the given connection ID, or "" when none is stored.
 func (s *AppStateStore) StatementTimeoutOverrideValue(connID string) string {
@@ -454,9 +584,7 @@ func (s *AppStateStore) HiddenSchemasSnapshot(connectionID string) []string {
 
 // deepCopyAppState produces a defensive copy of a so that yaml.Marshal can
 // iterate its maps without racing concurrent mutators on the original. All
-// six map fields plus the slice field are copied; scalar fields are copied by
-// assignment. Cost is ~6 small-map walks per Save which is well within the
-// debounce budget.
+// mutable maps and slices are copied; scalar fields are copied by assignment.
 func deepCopyAppState(a *AppState) *AppState {
 	if a == nil {
 		return &AppState{}
@@ -508,6 +636,16 @@ func deepCopyAppState(a *AppState) *AppState {
 			maps.Copy(cpInner, inner)
 			cp.LastSessionSettings[k] = cpInner
 		}
+	}
+	if a.CanonicalSessionSettings != nil {
+		canonical := *a.CanonicalSessionSettings
+		if canonical.Connections != nil {
+			canonical.Connections = make(map[string]map[string]CanonicalSessionSetting, len(a.CanonicalSessionSettings.Connections))
+			for connID, settings := range a.CanonicalSessionSettings.Connections {
+				canonical.Connections[connID] = copyCanonicalSettings(settings)
+			}
+		}
+		cp.CanonicalSessionSettings = &canonical
 	}
 	if a.LastSchemaName != nil {
 		cp.LastSchemaName = make(map[string]string, len(a.LastSchemaName))

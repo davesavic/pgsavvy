@@ -2,6 +2,7 @@ package common
 
 import (
 	"bytes"
+	"errors"
 	"log/slog"
 	"runtime"
 	"sync"
@@ -181,6 +182,10 @@ func TestSaveSnapshotIsolation(t *testing.T) {
 					a.HiddenSchemas = map[string][]string{}
 				}
 				a.HiddenSchemas["k"] = []string{"v" + intToStr(idx)}
+				if a.CanonicalSessionSettings == nil {
+					a.CanonicalSessionSettings = &CanonicalSessionSettingsState{Version: 1, Connections: map[string]map[string]CanonicalSessionSetting{"k": {}}}
+				}
+				a.CanonicalSessionSettings.Connections["k"]["application_name"] = CanonicalSessionSetting{Values: []string{"v" + intToStr(idx)}, Provenance: "decoded"}
 			})
 		}
 	}()
@@ -473,6 +478,7 @@ func TestReview_picker_state_copy(t *testing.T) {
 		LastSchemaName:           map[string]string{"connection": "public"},
 		LastTableName:            map[string]string{"connection": "users"},
 		LastPickerDirectory:      "/remembered/資料",
+		CanonicalSessionSettings: &CanonicalSessionSettingsState{Version: 1, Connections: map[string]map[string]CanonicalSessionSetting{"connection": {"search_path": {Values: []string{"schema,comma", "public"}, Provenance: "decoded"}}}},
 	}
 	cp := deepCopyAppState(orig)
 	require.Equal(t, orig, cp, "populated snapshots must retain every field")
@@ -484,6 +490,10 @@ func TestReview_picker_state_copy(t *testing.T) {
 	cp.LastSessionSettings["connection"]["application_name"] = "changed"
 	cp.LastSchemaName["connection"] = "changed"
 	cp.LastTableName["connection"] = "changed"
+	cp.CanonicalSessionSettings.Version = 99
+	cp.CanonicalSessionSettings.Connections["connection"]["search_path"].Values[0] = "changed"
+	cp.CanonicalSessionSettings.Connections["connection"]["timezone"] = CanonicalSessionSetting{Values: []string{"changed"}, Provenance: "decoded"}
+	cp.CanonicalSessionSettings.Connections["other"] = map[string]CanonicalSessionSetting{}
 	require.Equal(t, []string{"connection"}, orig.RecentConnectionIDs)
 	require.Equal(t, "buffer", orig.LastBufferUUIDs["connection"])
 	require.Equal(t, "1000", orig.StatementTimeoutOverride["connection"])
@@ -492,6 +502,8 @@ func TestReview_picker_state_copy(t *testing.T) {
 	require.Equal(t, "test", orig.LastSessionSettings["connection"]["application_name"])
 	require.Equal(t, "public", orig.LastSchemaName["connection"])
 	require.Equal(t, "users", orig.LastTableName["connection"])
+	require.Equal(t, 1, orig.CanonicalSessionSettings.Version)
+	require.Equal(t, map[string]map[string]CanonicalSessionSetting{"connection": {"search_path": {Values: []string{"schema,comma", "public"}, Provenance: "decoded"}}}, orig.CanonicalSessionSettings.Connections)
 	require.Equal(t, &AppState{}, deepCopyAppState(nil))
 	require.Equal(t, &AppState{}, deepCopyAppState(&AppState{}))
 }
@@ -541,6 +553,204 @@ func TestMutateAfterCloseReturnsErr(t *testing.T) {
 	s.MutateAndSave(func(a *AppState) { a.LastConnectionID = "x" })
 	require.ErrorIs(t, s.LastSaveErr(), errStoreClosed)
 	require.ErrorIs(t, ErrStoreClosed(), errStoreClosed)
+}
+
+func TestReview_settings_storage_store(t *testing.T) {
+	for _, mode := range []string{"synchronous", "debounced"} {
+		t.Run(mode, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			clk := newFakeClock()
+			s := NewAppStateStore(fs, "/state.yml", clk)
+			t.Cleanup(func() { _ = s.Close() })
+			missing, err := s.CanonicalSessionSettingsSnapshot("conn")
+			require.NoError(t, err)
+			require.Nil(t, missing)
+			s.MutateAndSave(func(a *AppState) {
+				a.LastSessionSettings = map[string]map[string]string{"conn": {"application_name": "stale", "statement_timeout": "100", "work_mem": "4MB"}, "other": {"application_name": "other"}}
+				a.StatementTimeoutOverride = map[string]string{"conn": "200", "other": "300"}
+			})
+			value := CanonicalSessionSetting{Values: []string{"O'Reilly 資料"}, Provenance: "decoded"}
+			require.NoError(t, s.SetCanonicalSessionSetting("conn", "application_name", value))
+			value.Values[0] = "caller-mutation"
+			require.NoError(t, s.SetCanonicalSessionSetting("conn", "search_path", CanonicalSessionSetting{Values: []string{"schema,comma", `schema"quoted`, "public"}, Provenance: "decoded"}))
+			require.NoError(t, s.SetCanonicalSessionSetting("conn", "statement_timeout", CanonicalSessionSetting{Values: []string{"500"}, Provenance: "decoded"}))
+			snapshot, err := s.CanonicalSessionSettingsSnapshot("conn")
+			require.NoError(t, err)
+			require.Equal(t, []string{"O'Reilly 資料"}, snapshot["application_name"].Values)
+			snapshot["application_name"].Values[0] = "snapshot-mutation"
+			snapshot["timezone"] = CanonicalSessionSetting{Values: []string{"UTC"}, Provenance: "decoded"}
+			delete(snapshot, "search_path")
+			fresh, err := s.CanonicalSessionSettingsSnapshot("conn")
+			require.NoError(t, err)
+			require.Equal(t, []string{"O'Reilly 資料"}, fresh["application_name"].Values)
+			require.NotContains(t, fresh, "timezone")
+			require.Equal(t, []string{"schema,comma", `schema"quoted`, "public"}, fresh["search_path"].Values)
+			require.Equal(t, map[string]string{"work_mem": "4MB"}, s.LastSessionSettingsSnapshot("conn"))
+			require.Empty(t, s.StatementTimeoutOverrideValue("conn"))
+			require.Equal(t, "300", s.StatementTimeoutOverrideValue("other"))
+			if mode == "synchronous" {
+				require.NoError(t, s.Save())
+			} else {
+				clk.Advance(DebounceWindow)
+				require.NoError(t, s.Flush())
+			}
+			reloaded := NewAppStateStore(fs, "/state.yml", newFakeClock())
+			t.Cleanup(func() { _ = reloaded.Close() })
+			require.NoError(t, reloaded.Load())
+			got, err := reloaded.CanonicalSessionSettingsSnapshot("conn")
+			require.NoError(t, err)
+			require.Equal(t, fresh, got)
+			missing, err = reloaded.CanonicalSessionSettingsSnapshot("other")
+			require.NoError(t, err)
+			require.Nil(t, missing)
+			require.NoError(t, reloaded.DeleteSessionSetting("conn", "statement_timeout"))
+			require.NoError(t, reloaded.DeleteSessionSetting("conn", "work_mem"))
+			require.NoError(t, reloaded.DeleteSessionSetting("other", "statement_timeout"))
+			require.NoError(t, reloaded.Save())
+			var disk AppState
+			require.NoError(t, disk.Load(fs, "/state.yml"))
+			require.NotContains(t, disk.CanonicalSessionSettings.Connections["conn"], "statement_timeout")
+			require.Empty(t, disk.LastSessionSettings["conn"])
+			require.Empty(t, disk.StatementTimeoutOverride)
+			require.Equal(t, map[string]string{"application_name": "other"}, disk.LastSessionSettings["other"])
+		})
+	}
+}
+
+func TestReview_settings_storage_rejected_writes(t *testing.T) {
+	for _, tc := range []struct {
+		name, connID, key string
+		value             CanonicalSessionSetting
+	}{
+		{"empty_connection", "", "timezone", CanonicalSessionSetting{Values: []string{"UTC"}, Provenance: "decoded"}},
+		{"empty_key", "conn", "", CanonicalSessionSetting{Values: []string{"UTC"}, Provenance: "decoded"}},
+		{"noncanonical_key", "conn", "TimeZone", CanonicalSessionSetting{Values: []string{"UTC"}, Provenance: "decoded"}},
+		{"sql_key", "conn", "timezone;RESET ALL", CanonicalSessionSetting{Values: []string{"UTC"}, Provenance: "decoded"}},
+		{"raw_provenance", "conn", "timezone", CanonicalSessionSetting{Values: []string{"'UTC'"}, Provenance: "sql"}},
+		{"missing_value", "conn", "timezone", CanonicalSessionSetting{Provenance: "decoded"}},
+		{"multiple_scalar_values", "conn", "timezone", CanonicalSessionSetting{Values: []string{"UTC", "GMT"}, Provenance: "decoded"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := newFakeClock()
+			s := NewAppStateStore(afero.NewMemMapFs(), "/state.yml", clk)
+			t.Cleanup(func() { _ = s.Close() })
+			require.ErrorIs(t, s.SetCanonicalSessionSetting(tc.connID, tc.key, tc.value), ErrInvalidCanonicalSessionSetting)
+			require.Equal(t, &AppState{}, s.state)
+			require.Empty(t, clk.timers)
+			require.False(t, s.pending)
+		})
+	}
+	s := NewAppStateStore(afero.NewMemMapFs(), "/state.yml", newFakeClock())
+	require.NoError(t, s.SetCanonicalSessionSetting("conn", "application_name", CanonicalSessionSetting{Values: []string{""}, Provenance: "decoded"}))
+	require.NoError(t, s.Close())
+	require.ErrorIs(t, s.SetCanonicalSessionSetting("conn", "timezone", CanonicalSessionSetting{Values: []string{"UTC"}, Provenance: "decoded"}), ErrStoreClosed())
+	require.ErrorIs(t, s.DeleteSessionSetting("conn", "application_name"), ErrStoreClosed())
+}
+
+func TestReview_settings_storage_load_write_barrier(t *testing.T) {
+	for _, data := range []string{
+		"canonical_session_settings:\n  version: 99\n",
+		"canonical_session_settings:\n  version: 99\n  connections: incompatible-future-shape\n",
+		"canonical_session_settings:\n  version: 1\n  connections: incompatible-shape\n",
+		"broken: [",
+		"canonical_session_settings:\n  version: 1\n  connections:\n    conn:\n      timezone:\n        values: []\n        provenance: decoded\n",
+	} {
+		t.Run(data, func(t *testing.T) {
+			fs := &recordingFs{Fs: afero.NewMemMapFs()}
+			require.NoError(t, afero.WriteFile(fs, "/state.yml", []byte(data), 0o600))
+			clk := newFakeClock()
+			s := NewAppStateStore(fs, "/state.yml", clk)
+			t.Cleanup(func() { _ = s.Close() })
+			loadErr := s.Load()
+			require.Error(t, loadErr)
+			if bytes.Contains([]byte(data), []byte("version: 99")) {
+				require.True(t, errors.Is(loadErr, ErrUnsupportedSessionSettingsVersion), "check version before decoding an incompatible future payload")
+			}
+			require.ErrorIs(t, s.Save(), loadErr)
+			require.ErrorIs(t, s.SetCanonicalSessionSetting("conn", "timezone", CanonicalSessionSetting{Values: []string{"UTC"}, Provenance: "decoded"}), loadErr)
+			require.ErrorIs(t, s.DeleteSessionSetting("conn", "timezone"), loadErr)
+			_, err := s.CanonicalSessionSettingsSnapshot("conn")
+			require.ErrorIs(t, err, loadErr)
+			called := false
+			s.MutateAndSave(func(a *AppState) { called = true })
+			require.False(t, called)
+			require.Empty(t, clk.timers)
+			require.ErrorIs(t, s.Flush(), loadErr)
+			require.ErrorIs(t, s.LastSaveErr(), loadErr)
+			require.Equal(t, int32(0), fs.renames.Load())
+			still, err := afero.ReadFile(fs, "/state.yml")
+			require.NoError(t, err)
+			require.Equal(t, data, string(still))
+			// An unrelated failing Load cannot clear the barrier.
+			require.NoError(t, afero.WriteFile(fs, "/state.yml", []byte("broken: ["), 0o600))
+			require.Error(t, s.Load())
+			require.ErrorIs(t, s.Save(), loadErr)
+			require.NoError(t, afero.WriteFile(fs, "/state.yml", []byte("last_connection_id: recovered\n"), 0o600))
+			require.NoError(t, s.Load())
+			require.NoError(t, s.LastSaveErr())
+			require.NoError(t, s.SetCanonicalSessionSetting("conn", "timezone", CanonicalSessionSetting{Values: []string{"UTC"}, Provenance: "decoded"}))
+			clk.Advance(DebounceWindow)
+			require.NoError(t, s.Flush())
+			require.Equal(t, "recovered", s.LastConnectionIDSnapshot())
+		})
+	}
+}
+
+func TestReview_settings_storage_save_failure_visibility(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	seed := AppState{LastConnectionID: "before"}
+	require.NoError(t, seed.Save(fs, "/state.yml"))
+	before, err := afero.ReadFile(fs, "/state.yml")
+	require.NoError(t, err)
+	clk := newFakeClock()
+	s := NewAppStateStore(afero.NewReadOnlyFs(fs), "/state.yml", clk)
+	t.Cleanup(func() { _ = s.Close() })
+	var output bytes.Buffer
+	s.SetLogger(slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	require.NoError(t, s.Load())
+	const sensitiveValue = "synthetic-secret-setting-value"
+	require.NoError(t, s.SetCanonicalSessionSetting("conn", "application_name", CanonicalSessionSetting{Values: []string{sensitiveValue}, Provenance: "decoded"}))
+	require.Error(t, s.Save())
+	require.NoError(t, s.LastSaveErr(), "synchronous error contract unchanged")
+	clk.Advance(DebounceWindow)
+	require.Error(t, s.Flush())
+	require.Error(t, s.LastSaveErr())
+	require.Contains(t, output.String(), `"evt":"appstate_save_fire"`)
+	require.NotContains(t, output.String(), `"err":null`)
+	require.NotContains(t, output.String(), sensitiveValue)
+	after, err := afero.ReadFile(fs, "/state.yml")
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}
+
+type stateReadFailureFs struct{ afero.Fs }
+
+func (f *stateReadFailureFs) Open(string) (afero.File, error) {
+	return nil, errors.New("synthetic state read failure")
+}
+
+func TestReview_settings_storage_read_failure_barrier(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	const path = "/state.yml"
+	before := []byte("last_connection_id: preserved\n")
+	require.NoError(t, afero.WriteFile(fs, path, before, 0o600))
+	clk := newFakeClock()
+	s := NewAppStateStore(&stateReadFailureFs{Fs: fs}, path, clk)
+	t.Cleanup(func() { _ = s.Close() })
+	loadErr := s.Load()
+	require.ErrorContains(t, loadErr, "synthetic state read failure")
+	require.ErrorIs(t, s.Save(), loadErr)
+	s.MutateAndSave(func(a *AppState) { t.Fatal("blocked mutation executed") })
+	require.Empty(t, clk.timers)
+	after, err := afero.ReadFile(fs, path)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	s.mu.Lock()
+	s.fs = fs
+	s.mu.Unlock()
+	require.NoError(t, s.Load())
+	require.Equal(t, "preserved", s.LastConnectionIDSnapshot())
+	require.NoError(t, s.Save())
 }
 
 // --- helpers ----------------------------------------------------------------

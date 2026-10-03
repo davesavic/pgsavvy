@@ -3,12 +3,14 @@ package common
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 var uuidV4Pat = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
@@ -292,4 +294,208 @@ func TestPushRecentConnectionID_OrderingAfterRepeatedPushes(t *testing.T) {
 	recent = PushRecentConnectionID(recent, "c")
 	recent = PushRecentConnectionID(recent, "a") // re-add bumps a to front
 	require.Equal(t, []string{"a", "c", "b"}, recent)
+}
+
+const canonicalSettingsYAML = `canonical_session_settings:
+  version: 1
+  connections:
+    conn:
+      application_name:
+        values: ["O'Reilly 資料"]
+        provenance: decoded
+      search_path:
+        values: ['schema,with,commas', 'schema"quoted', public]
+        provenance: decoded
+      timezone:
+        values: [""]
+        provenance: decoded
+`
+
+func TestReview_settings_storage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data string
+	}{
+		{"legacy", goldenOldStateYAML},
+		{"canonical", canonicalSettingsYAML},
+		{"mixed", canonicalSettingsYAML + "last_session_settings:\n  other:\n    timezone: UTC\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			require.NoError(t, afero.WriteFile(fs, "/input.yml", []byte(tc.data), 0o600))
+			var state AppState
+			require.NoError(t, state.Load(fs, "/input.yml"))
+			require.NoError(t, state.Save(fs, "/output.yml"))
+			data, err := afero.ReadFile(fs, "/output.yml")
+			require.NoError(t, err)
+			var before, after map[string]any
+			require.NoError(t, yaml.Unmarshal([]byte(tc.data), &before))
+			require.NoError(t, yaml.Unmarshal(data, &after))
+			for key, value := range before {
+				require.Equal(t, value, after[key], "persisted field %s", key)
+			}
+			var reloaded AppState
+			require.NoError(t, reloaded.Load(fs, "/output.yml"))
+			// Existing YAML tags encode nil maps/slices as empty collections.
+			// Compare the complete persisted representation, not nil vs empty.
+			expectedYAML, err := yaml.Marshal(state)
+			require.NoError(t, err)
+			actualYAML, err := yaml.Marshal(reloaded)
+			require.NoError(t, err)
+			require.Equal(t, expectedYAML, actualYAML)
+		})
+	}
+	t.Run("unknown_version_preserves_receiver_and_file", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		data := []byte("last_connection_id: changed\ncanonical_session_settings:\n  version: 99\n")
+		require.NoError(t, afero.WriteFile(fs, "/state.yml", data, 0o600))
+		state := AppState{LastConnectionID: "before"}
+		require.ErrorIs(t, state.Load(fs, "/state.yml"), ErrUnsupportedSessionSettingsVersion)
+		require.Equal(t, AppState{LastConnectionID: "before"}, state)
+		after, err := afero.ReadFile(fs, "/state.yml")
+		require.NoError(t, err)
+		require.Equal(t, data, after)
+	})
+}
+
+func TestReview_settings_storage_validation(t *testing.T) {
+	for _, version := range []int{0, -1, 2, 99} {
+		t.Run("version_"+intToStr(version), func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			before := []byte("last_connection_id: before\n")
+			require.NoError(t, afero.WriteFile(fs, "/state.yml", before, 0o600))
+			state := AppState{CanonicalSessionSettings: &CanonicalSessionSettingsState{Version: version}}
+			require.ErrorIs(t, state.Save(fs, "/state.yml"), ErrUnsupportedSessionSettingsVersion)
+			after, err := afero.ReadFile(fs, "/state.yml")
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			exists, err := afero.Exists(fs, "/state.yml.tmp")
+			require.NoError(t, err)
+			require.False(t, exists)
+		})
+	}
+	for _, tc := range []struct {
+		name, data string
+	}{
+		{"missing_version", "canonical_session_settings: {}\n"},
+		{"bad_provenance", "canonical_session_settings:\n  version: 1\n  connections:\n    conn:\n      timezone:\n        values: [UTC]\n        provenance: sql\n"},
+		{"empty_values", "canonical_session_settings:\n  version: 1\n  connections:\n    conn:\n      timezone:\n        values: []\n        provenance: decoded\n"},
+		{"partial_yaml", "last_connection_id: changed\nrecent_connection_ids: [\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			require.NoError(t, afero.WriteFile(fs, "/state.yml", []byte(tc.data), 0o600))
+			state := AppState{LastConnectionID: "before"}
+			require.Error(t, state.Load(fs, "/state.yml"))
+			require.Equal(t, AppState{LastConnectionID: "before"}, state)
+		})
+	}
+}
+
+func TestReview_settings_storage_conflicting_legacy(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	var state AppState
+	require.NoError(t, afero.WriteFile(fs, "/state.yml", []byte(canonicalSettingsYAML), 0o600))
+	require.NoError(t, state.Load(fs, "/state.yml"))
+	state.CanonicalSessionSettings.Connections["conn"]["statement_timeout"] = CanonicalSessionSetting{Values: []string{"500"}, Provenance: "decoded"}
+	state.LastSessionSettings = map[string]map[string]string{"conn": {"application_name": "stale", "statement_timeout": "100", "work_mem": "4MB"}, "other": {"application_name": "other"}}
+	state.StatementTimeoutOverride = map[string]string{"conn": "200", "other": "300"}
+	require.NoError(t, state.Save(fs, "/state.yml"))
+	// Save does not mutate its receiver while filtering the persisted snapshot.
+	require.Equal(t, "stale", state.LastSessionSettings["conn"]["application_name"])
+	var reloaded AppState
+	require.NoError(t, reloaded.Load(fs, "/state.yml"))
+	require.Equal(t, map[string]string{"work_mem": "4MB"}, reloaded.LastSessionSettings["conn"])
+	require.Equal(t, map[string]string{"application_name": "other"}, reloaded.LastSessionSettings["other"])
+	require.Equal(t, map[string]string{"other": "300"}, reloaded.StatementTimeoutOverride)
+	require.Equal(t, state.CanonicalSessionSettings, reloaded.CanonicalSessionSettings)
+
+	// Mixed input with contradictions is normalized on Load as well as Save.
+	raw, err := yaml.Marshal(state)
+	require.NoError(t, err)
+	require.NoError(t, afero.WriteFile(fs, "/mixed.yml", raw, 0o600))
+	var mixed AppState
+	require.NoError(t, mixed.Load(fs, "/mixed.yml"))
+	require.Equal(t, reloaded, mixed)
+}
+
+// Frozen pre-change codec: do not embed AppState, which would accidentally give
+// the simulated legacy writer knowledge of future fields.
+type legacySettingsState struct {
+	LastConnectionID         string                         `yaml:"last_connection_id"`
+	RecentConnectionIDs      []string                       `yaml:"recent_connection_ids"`
+	LastBufferUUIDs          map[string]string              `yaml:"last_buffer_uuids"`
+	LastTheme                string                         `yaml:"last_theme"`
+	LastResultViewMode       string                         `yaml:"last_result_view_mode"`
+	StartupTipsSeenAt        time.Time                      `yaml:"startup_tips_seen_at"`
+	Version                  string                         `yaml:"version"`
+	StatementTimeoutOverride map[string]string              `yaml:"statement_timeout_override"`
+	HiddenSchemas            map[string][]string            `yaml:"hidden_schemas"`
+	HiddenColumns            map[string]map[string][]string `yaml:"hidden_columns"`
+	LastSessionSettings      map[string]map[string]string   `yaml:"last_session_settings"`
+	LastSchemaName           map[string]string              `yaml:"last_schema_name"`
+	LastTableName            map[string]string              `yaml:"last_table_name"`
+	LastPickerDirectory      string                         `yaml:"last_picker_directory"`
+}
+
+func TestReview_settings_storage_downgrade(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	const currentRoot = "/current-xdg"
+	const oldRoot = "/isolated-old-xdg"
+	currentPath := filepath.Join(currentRoot, "config", "pgsavvy", "state.yml")
+	oldPath := filepath.Join(oldRoot, "config", "pgsavvy", "state.yml")
+	for _, root := range []string{currentRoot, oldRoot} {
+		for _, dir := range []string{"config/pgsavvy", "data", "cache"} {
+			require.NoError(t, fs.MkdirAll(filepath.Join(root, dir), 0o700))
+		}
+	}
+	var state AppState
+	require.NoError(t, yaml.Unmarshal([]byte(canonicalSettingsYAML), &state))
+	state.LastTheme = "before"
+	state.LastSessionSettings = map[string]map[string]string{"other": {"timezone": "UTC"}}
+	require.NoError(t, state.Save(fs, currentPath))
+	backup, err := afero.ReadFile(fs, currentPath)
+	require.NoError(t, err)
+	backupPath := currentPath + ".new-format-backup"
+	require.NoError(t, afero.WriteFile(fs, backupPath, backup, 0o600))
+	legacyRewrite := func(path string) {
+		t.Helper()
+		data, readErr := afero.ReadFile(fs, path)
+		require.NoError(t, readErr)
+		var legacy legacySettingsState
+		require.NoError(t, yaml.Unmarshal(data, &legacy))
+		legacy.LastTheme = "legacy-unrelated-mutation"
+		data, marshalErr := yaml.Marshal(legacy)
+		require.NoError(t, marshalErr)
+		require.NoError(t, afero.WriteFile(fs, path, data, 0o600))
+	}
+	// Unsupported shared-state downgrade destroys the unknown envelope even
+	// when the legacy binary changes only an unrelated field.
+	legacyRewrite(currentPath)
+	var lost AppState
+	require.NoError(t, lost.Load(fs, currentPath))
+	require.Nil(t, lost.CanonicalSessionSettings)
+	require.Equal(t, state.LastSessionSettings, lost.LastSessionSettings)
+	retained, err := afero.ReadFile(fs, backupPath)
+	require.NoError(t, err)
+	require.Equal(t, backup, retained)
+	require.NoError(t, afero.WriteFile(fs, currentPath, retained, 0o600))
+	var recovered AppState
+	require.NoError(t, recovered.Load(fs, currentPath))
+	recoveredYAML, err := yaml.Marshal(recovered)
+	require.NoError(t, err)
+	require.Equal(t, backup, recoveredYAML)
+
+	// Supported downgrade uses a distinct state root. Its mutations leave both
+	// the current-format original and retained backup byte-for-byte intact.
+	require.NoError(t, afero.WriteFile(fs, oldPath, []byte(goldenOldStateYAML), 0o600))
+	legacyRewrite(oldPath)
+	for _, path := range []string{currentPath, backupPath} {
+		data, readErr := afero.ReadFile(fs, path)
+		require.NoError(t, readErr)
+		require.Equal(t, backup, data)
+	}
+	var restored AppState
+	require.NoError(t, restored.Load(fs, currentPath))
+	require.Equal(t, state.CanonicalSessionSettings, restored.CanonicalSessionSettings)
 }
