@@ -372,11 +372,15 @@ func (cm *ConnectionManagerController) FieldEdit(_ commands.ExecCtx) error {
 		return nil
 	}
 	ctx := cm.deps.Ctx
+	revision := ctx.FormRevision()
 	label := ctx.FormFocusedLabel()
 	initial := ctx.FormFocusedValue()
 	validate := ctx.FormFocusedValidator(cm.tr())
 	return cm.deps.Prompt.Prompt(label, initial,
 		func(value string) error {
+			if !ctx.FormMatches(revision) || ctx.FormFocusedLabel() != label {
+				return nil
+			}
 			// The PROMPT popup pops on submit before this runs, so a
 			// validation failure renders inline in the form (the user
 			// re-opens the field to retry) rather than re-prompting.

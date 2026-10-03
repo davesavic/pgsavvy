@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -134,10 +135,17 @@ type connectInvoker struct {
 	// attempt; the worker's late inline publish is dropped when its captured
 	// gen no longer matches (mirrors isStaleConnect, but on its own counter).
 	testGen atomic.Uint64
-	// testCancelFn aborts the in-flight test dial's ctx. Set when a test
-	// attempt starts, cleared+called when a newer test supersedes it. Guarded
-	// by mu (the same lock that guards cancelFn/current).
-	testCancelFn context.CancelFunc
+	// testAttempt owns only the form probe, never the active connection.
+	// Guarded by mu; completion clears it only when ownership still matches.
+	testAttempt *connectionTestAttempt
+}
+
+type connectionTestAttempt struct {
+	gen      uint64
+	form     *guicontext.ConnectionManagerContext
+	revision uint64
+	cancel   context.CancelFunc
+	settled  atomic.Bool
 }
 
 // ioMu serializes helper lifecycle I/O; mu protects publication ownership only.
@@ -415,7 +423,7 @@ func (c *connectInvoker) startModalAttempt(profile *models.Connection) {
 // Connection). It does NOT pop the modal and is fully independent of save.
 //
 // Threading + supersession mirror startAttempt but on a DEDICATED test
-// generation (c.testGen) + cancel (c.testCancelFn) so a real connect and a
+// generation (c.testGen) + cancel ownership so a real connect and a
 // test never cancel each other. MUST be invoked on the MainLoop: the testGen
 // bump runs there so a later test attempt's bump is strictly higher and the
 // in-flight worker is reliably superseded. The blocking dial runs on the
@@ -425,6 +433,13 @@ func (c *connectInvoker) testConnection(profile *models.Connection) {
 	if c == nil || c.g == nil || profile == nil {
 		return
 	}
+	cm := c.g.registry.ConnectionManager
+	if cm == nil || cm.Mode() != guicontext.ModeForm || c.g.closed.Load() {
+		return
+	}
+	cm.SetOnFormProbeInvalidated(c.cancelTestConnection)
+	c.cancelTestConnection()
+	cm.FormSetStatus("")
 	logger := c.g.deps.Common.Logger()
 	logs.Event(logger, "db", "conn_test",
 		slog.String("phase", "attempt"),
@@ -436,19 +451,41 @@ func (c *connectInvoker) testConnection(profile *models.Connection) {
 	// network phase; cancel drives supersession. Supersede any prior in-flight
 	// test so two `t` presses don't race two dials onto the same form.
 	ctx, cancel := context.WithCancel(context.Background())
+	attempt := &connectionTestAttempt{gen: gen, form: cm, revision: cm.FormRevision(), cancel: cancel}
 	c.mu.Lock()
-	if c.testCancelFn != nil {
-		c.testCancelFn()
-	}
-	c.testCancelFn = cancel
+	c.testAttempt = attempt
 	c.mu.Unlock()
 
 	c.g.OnWorker(func(_ gocui.Task) error {
-		defer cancel()
+		defer c.finishTestAttempt(attempt)
 		err := dialProbe(ctx, profile)
-		c.publishTestResult(gen, profile, err)
-		return err
+		c.publishTestResult(attempt, profile, err)
+		if err != nil && !testProbeCancelled(err) {
+			return fmt.Errorf("%s", session.RedactConnectionString(err.Error()))
+		}
+		return nil
 	})
+}
+
+func (c *connectInvoker) cancelTestConnection() {
+	c.mu.Lock()
+	c.testGen.Add(1)
+	attempt := c.testAttempt
+	c.testAttempt = nil
+	c.mu.Unlock()
+	if attempt != nil {
+		attempt.settled.Store(true)
+		attempt.cancel()
+	}
+}
+
+func (c *connectInvoker) finishTestAttempt(attempt *connectionTestAttempt) {
+	attempt.cancel()
+	c.mu.Lock()
+	if c.testAttempt == attempt {
+		c.testAttempt = nil
+	}
+	c.mu.Unlock()
 }
 
 // dialProbe performs the decoupled reachability+auth dial for the test action:
@@ -480,9 +517,15 @@ func dialProbe(ctx context.Context, profile *models.Connection) error {
 // staleness check (mirrors connectInvoker.isStaleConnect on the dedicated test
 // counter). A superseded test (the form closed, switched mode, or a newer test
 // started) publishes NOTHING. The outcome is logged with the DSN redacted.
-func (c *connectInvoker) publishTestResult(gen uint64, profile *models.Connection, dialErr error) {
+func (c *connectInvoker) publishTestResult(attempt *connectionTestAttempt, profile *models.Connection, dialErr error) {
 	logger := c.g.deps.Common.Logger()
-	if dialErr != nil {
+	cancelled := testProbeCancelled(dialErr)
+	if cancelled {
+		logs.Event(logger, "db", "conn_test",
+			slog.String("phase", "cancelled"),
+			slog.String("redacted_dsn", session.RedactConnectionString(profile.DSN)),
+		)
+	} else if dialErr != nil {
 		logs.Event(logger, "db", "conn_test",
 			slog.String("phase", "outcome"),
 			slog.Bool("ok", false),
@@ -498,11 +541,14 @@ func (c *connectInvoker) publishTestResult(gen uint64, profile *models.Connectio
 	}
 
 	c.runOnUIThread(func() error {
-		if c.testStale(gen) {
+		if c.testStale(attempt.gen) {
 			return nil
 		}
 		cm := c.g.registry.ConnectionManager
-		if cm == nil || cm.Mode() != guicontext.ModeForm {
+		if cm != attempt.form || !cm.FormMatches(attempt.revision) || !attempt.settled.CompareAndSwap(false, true) {
+			return nil
+		}
+		if cancelled {
 			return nil
 		}
 		if dialErr != nil {
@@ -514,6 +560,10 @@ func (c *connectInvoker) publishTestResult(gen uint64, profile *models.Connectio
 	})
 }
 
+func testProbeCancelled(err error) bool {
+	return errors.Is(err, context.Canceled) || session.IsSecretPromptCancelled(err)
+}
+
 // testStale reports whether a test-connection that captured gen has been
 // superseded by a newer test attempt. Always false when g is nil (test wiring
 // without a Gui), matching isStaleConnect.
@@ -521,7 +571,7 @@ func (c *connectInvoker) testStale(gen uint64) bool {
 	if c == nil || c.g == nil {
 		return false
 	}
-	return c.testGen.Load() != gen
+	return c.g.closed.Load() || c.testGen.Load() != gen
 }
 
 // testFailMessage builds the user-facing inline failure line for a failed test

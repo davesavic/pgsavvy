@@ -50,9 +50,11 @@ const (
 type ConnectionManagerContext struct {
 	SideListContext
 
-	mode       ConnectionManagerMode
-	connecting ConnectingState
-	form       connForm
+	mode                   ConnectionManagerMode
+	connecting             ConnectingState
+	form                   connForm
+	formRevision           uint64
+	onFormProbeInvalidated func()
 
 	// onShow populates the row slice + restores the last-used cursor when the
 	// modal gains focus. The orchestrator owns the connection
@@ -100,7 +102,34 @@ func (c *ConnectionManagerContext) Mode() ConnectionManagerMode { return c.mode 
 
 // SetMode switches the render mode. Plain setter — serialised onto the UI
 // thread by the caller.
-func (c *ConnectionManagerContext) SetMode(m ConnectionManagerMode) { c.mode = m }
+func (c *ConnectionManagerContext) SetMode(m ConnectionManagerMode) {
+	if c.mode == ModeForm && m != ModeForm {
+		c.InvalidateFormProbe()
+	}
+	c.mode = m
+}
+
+// FormRevision identifies the current form instance and its edited revision.
+func (c *ConnectionManagerContext) FormRevision() uint64 { return c.formRevision }
+
+// FormMatches is checked on the UI lane, including inside delayed publications.
+func (c *ConnectionManagerContext) FormMatches(revision uint64) bool {
+	return c.mode == ModeForm && c.formRevision == revision
+}
+
+// SetOnFormProbeInvalidated installs a nonblocking probe-cancellation callback.
+func (c *ConnectionManagerContext) SetOnFormProbeInvalidated(fn func()) {
+	c.onFormProbeInvalidated = fn
+}
+
+// InvalidateFormProbe retires probe ownership without leaving the form.
+func (c *ConnectionManagerContext) InvalidateFormProbe() {
+	c.formRevision++
+	c.form.status = ""
+	if c.onFormProbeInvalidated != nil {
+		c.onFormProbeInvalidated()
+	}
+}
 
 // ConnectingState returns the shared connecting/error sink the in-modal
 // connect lifecycle writes (connectInvoker drives SetConnecting / SetError on
@@ -191,6 +220,7 @@ func (c *ConnectionManagerContext) FormFocusedValidator(tr *i18n.TranslationSet)
 // FormSetFocusedValue stores a (pre-validated) value into the focused text
 // field and clears any inline error.
 func (c *ConnectionManagerContext) FormSetFocusedValue(v string) {
+	c.InvalidateFormProbe()
 	c.form.setTextValue(c.form.focusedSpec().id, v)
 	c.form.err = ""
 	c.form.status = ""
@@ -226,20 +256,31 @@ func (c *ConnectionManagerContext) SetLabelWrapWidth(w int) { c.form.msgWidth = 
 
 // FormToggleFocused flips the focused toggle or cycles the driver selector
 // (space / i on a non-text field).
-func (c *ConnectionManagerContext) FormToggleFocused() { c.form.toggleFocused() }
+func (c *ConnectionManagerContext) FormToggleFocused() {
+	if c.form.focusedSpec().kind == fieldText {
+		return
+	}
+	c.InvalidateFormProbe()
+	c.form.toggleFocused()
+}
 
 // FormApplyDSN populates the form's discrete fields from a pasted DSN. Returns
 // (hadInlinePassword, ok): ok=false (with an inline error already stamped) when
 // the DSN is unparseable, leaving the fields untouched. A dropped inline
 // password is reported via hadInlinePassword so the controller can warn.
 func (c *ConnectionManagerContext) FormApplyDSN(dsn string) (hadPassword, ok bool) {
-	return c.form.applyPastedDSN(dsn)
+	hadPassword, ok = c.form.applyPastedDSN(dsn)
+	if ok {
+		c.InvalidateFormProbe()
+	}
+	return hadPassword, ok
 }
 
 // FormValidateAll runs save-time validation. On failure it stamps the inline
 // error and moves focus onto the offending field, returning false. On success
 // it returns the edited connection plus the add/edit metadata.
 func (c *ConnectionManagerContext) FormValidateAll(tr *i18n.TranslationSet) (conn models.Connection, isEdit bool, originalName string, ok bool) {
+	c.InvalidateFormProbe()
 	msg, idx, valid := c.form.validateAll(tr)
 	if !valid {
 		c.form.err = msg
@@ -255,6 +296,7 @@ func (c *ConnectionManagerContext) FormValidateAll(tr *i18n.TranslationSet) (con
 // driver selector list (nil → drivers.Names). The driver defaults to the
 // first registered name so the selector starts on a valid value.
 func (c *ConnectionManagerContext) OpenAddForm(existingNames []string, driversFn func() []string) {
+	c.InvalidateFormProbe()
 	f := connForm{
 		isEdit:        false,
 		existingNames: existingNames,
@@ -278,6 +320,7 @@ func (c *ConnectionManagerContext) OpenAddForm(existingNames []string, driversFn
 // originalName is excluded from the uniqueness check) and switches to
 // ModeForm.
 func (c *ConnectionManagerContext) OpenEditForm(conn models.Connection, existingNames []string, driversFn func() []string) {
+	c.InvalidateFormProbe()
 	conn = migrateLegacyDSN(copyFormConnection(conn))
 	sshEnabled, sshAuth := deriveSSHAuth(conn)
 	c.form = connForm{

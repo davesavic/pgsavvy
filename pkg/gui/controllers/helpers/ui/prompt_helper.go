@@ -21,13 +21,14 @@ type PromptHelper struct {
 	tree   *gui.ContextTree
 	prompt *guicontext.PromptContext
 
-	mu       sync.Mutex
-	label    string
-	initial  string
-	onSubmit func(value string) error
-	onCancel func() error
-	active   bool
-	onReset  func(initial string)
+	mu         sync.Mutex
+	label      string
+	initial    string
+	onSubmit   func(value string) error
+	onCancel   func() error
+	active     bool
+	generation uint64
+	onReset    func(initial string)
 	// caretToggler flips the global gocui caret on Prompt and off on
 	// Submit / Cancel. Without this the layout pass's SetViewCursor sets
 	// the caret position but gocui's flush() skips Screen.ShowCursor
@@ -52,6 +53,7 @@ func (h *PromptHelper) Prompt(label, initial string, onSubmit func(value string)
 	h.onSubmit = onSubmit
 	h.onCancel = onCancel
 	h.active = true
+	h.generation++
 	reset := h.onReset
 	caret := h.caretToggler
 	h.mu.Unlock()
@@ -127,7 +129,27 @@ func (h *PromptHelper) Submit(value string) error {
 
 // Cancel invokes onCancel, pops the popup, and clears state. Esc path.
 func (h *PromptHelper) Cancel() error {
+	return h.cancel(nil)
+}
+
+// Generation identifies the popup opened by the most recent Prompt call.
+func (h *PromptHelper) Generation() uint64 {
 	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.generation
+}
+
+// CancelGeneration dismisses only the owning popup. Called on the UI lane.
+func (h *PromptHelper) CancelGeneration(generation uint64) error {
+	return h.cancel(&generation)
+}
+
+func (h *PromptHelper) cancel(generation *uint64) error {
+	h.mu.Lock()
+	if generation != nil && (!h.active || h.generation != *generation) {
+		h.mu.Unlock()
+		return nil
+	}
 	cb := h.onCancel
 	caret := h.caretToggler
 	h.active = false

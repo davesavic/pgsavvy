@@ -28,11 +28,14 @@ type promptStub struct {
 	masked      []bool
 	active      bool
 	cancelCalls int
+	generation  uint64
 }
 
 func (s *promptStub) Prompt(label, _ string, onSubmit func(string) error, onCancel func() error) error {
 	s.mu.Lock()
 	s.label = label
+	s.generation++
+	s.active = true
 	s.onSubmit = onSubmit
 	s.onCancel = onCancel
 	s.mu.Unlock()
@@ -78,6 +81,22 @@ func (s *promptStub) Active() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.active
+}
+
+func (s *promptStub) Generation() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.generation
+}
+
+func (s *promptStub) CancelGeneration(generation uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active && s.generation == generation {
+		s.cancelCalls++
+		s.active = false
+	}
+	return nil
 }
 
 func (s *promptStub) Cancel() error {
@@ -533,5 +552,117 @@ func TestSecretPromptHelper_Overlapping_ReturnsBusy(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("call #1 did not return after submit")
+	}
+}
+
+type formProbeMask struct{ masked bool }
+
+func (m *formProbeMask) SetMasked(on bool) { m.masked = on }
+
+func TestReview_form_probe_secret_popup(t *testing.T) {
+	for _, scenario := range []string{"cancel before opening", "replacement popup", "new secret popup", "submitted before cleanup", "submitted without replacement", "cancelled without replacement"} {
+		t.Run(scenario, func(t *testing.T) {
+			queue := make(chan func() error, 8)
+			next := func() func() error {
+				select {
+				case fn := <-queue:
+					return fn
+				case <-time.After(2 * time.Second):
+					t.Fatal("UI operation not queued")
+					return nil
+				}
+			}
+			wait := func(done <-chan error) error {
+				select {
+				case err := <-done:
+					return err
+				case <-time.After(2 * time.Second):
+					t.Fatal("credential prompt did not settle")
+					return nil
+				}
+			}
+			prompt := NewPromptHelper(nil, nil)
+			mask := &formProbeMask{}
+			h := NewSecretPromptHelper(prompt, mask, func(fn func() error) { queue <- fn })
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { _, err := h.PromptSecret(ctx, "origin SSH credential"); done <- err }()
+			opening := next()
+			if scenario != "cancel before opening" {
+				if err := opening(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cancel()
+			if err := wait(done); !session.IsSecretPromptCancelled(err) {
+				t.Fatal("context cancellation did not settle credential prompt")
+			}
+			cleanup := next()
+			if scenario == "cancel before opening" {
+				if err := opening(); err != nil {
+					t.Fatal(err)
+				}
+				if prompt.Active() || mask.masked {
+					t.Error("cancelled queued opening resurrected a masked prompt")
+				}
+				if err := cleanup(); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if scenario == "submitted without replacement" || scenario == "cancelled without replacement" {
+				var err error
+				if scenario == "submitted without replacement" {
+					err = prompt.Submit("")
+				} else {
+					err = prompt.Cancel()
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := cleanup(); err != nil {
+					t.Fatal(err)
+				}
+				if prompt.Active() || mask.masked {
+					t.Error("settled inactive popup retained secret masking")
+				}
+				return
+			}
+			if scenario == "submitted before cleanup" {
+				if err := prompt.Submit(""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var nextDone chan error
+			if scenario == "new secret popup" {
+				nextDone = make(chan error, 1)
+				nextCtx, nextCancel := context.WithCancel(context.Background())
+				defer nextCancel()
+				go func() { _, err := h.PromptSecret(nextCtx, "replacement SSH credential"); nextDone <- err }()
+				if err := next()(); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := prompt.Prompt("replacement SSH credential", "", nil, nil); err != nil {
+					t.Fatal(err)
+				}
+				mask.SetMasked(true)
+			}
+			if err := cleanup(); err != nil {
+				t.Fatal(err)
+			}
+			if !prompt.Active() || prompt.Label() != "replacement SSH credential" || !mask.masked {
+				t.Error("old context cleanup dismissed or unmasked replacement popup")
+			}
+			if nextDone != nil {
+				if err := prompt.Submit(""); err != nil {
+					t.Fatal(err)
+				}
+				if err := wait(nextDone); err != nil {
+					t.Fatal("replacement credential prompt failed")
+				}
+			}
+		})
 	}
 }

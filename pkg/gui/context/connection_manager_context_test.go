@@ -7,6 +7,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	"github.com/davesavic/pgsavvy/pkg/gui/status"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
@@ -356,6 +357,44 @@ func TestConnectionManagerContext_HandleFocusPreservesFormMode(t *testing.T) {
 	}
 	if shown != 0 {
 		t.Errorf("onShow fired %d times, want 0 (form mode should skip refresh)", shown)
+	}
+}
+
+func TestReview_form_probe_revision(t *testing.T) {
+	c := newTestConnectionManager(&captureDriver{}, nil, nil)
+	c.OpenAddForm(nil, testDrivers)
+	revision := c.FormRevision()
+	invalidated := 0
+	c.SetOnFormProbeInvalidated(func() { invalidated++ })
+	c.FormMoveFocus(1)
+	if err := c.HandleFocus(types.OnFocusOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.FormConnection()
+	if _, ok := c.FormApplyDSN("not a DSN"); ok {
+		t.Fatal("invalid DSN accepted")
+	}
+	if !c.FormMatches(revision) || invalidated != 0 {
+		t.Fatal("navigation, snapshot or invalid input invalidated probe")
+	}
+	for _, change := range []func(){
+		func() { c.OpenAddForm(nil, testDrivers) },
+		func() { c.OpenEditForm(models.Connection{Name: "edited", Driver: "postgres"}, nil, testDrivers) },
+		func() { c.FormSetFocusedValue("changed") },
+		func() { c.FormMoveFocus(7); c.FormToggleFocused() },
+		func() { _, _ = c.FormApplyDSN("postgres://u@h/db") },
+		func() { _, _, _, _ = c.FormValidateAll(i18n.EnglishTranslationSet()) },
+		func() { c.SetMode(ModeList) },
+	} {
+		before := c.FormRevision()
+		c.FormSetStatus("old probe status")
+		change()
+		if c.FormRevision() <= before || c.FormMatches(before) || c.form.status != "" {
+			t.Error("form mutation retained old probe identity/status")
+		}
+	}
+	if invalidated != 7 {
+		t.Errorf("invalidation count = %d, want 7", invalidated)
 	}
 }
 

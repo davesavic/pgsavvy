@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"github.com/davesavic/pgsavvy/pkg/session"
 )
@@ -16,6 +17,8 @@ type secretPromptOpener interface {
 	Prompt(label, initial string, onSubmit func(value string) error, onCancel func() error) error
 	Cancel() error
 	Active() bool
+	Generation() uint64
+	CancelGeneration(uint64) error
 }
 
 // secretMasker toggles masked (secret) rendering on the PROMPT popup so the
@@ -77,6 +80,7 @@ func (h *SecretPromptHelper) logEvent(msg string, attrs ...slog.Attr) {
 type secretResult struct {
 	value     string
 	cancelled bool
+	err       error
 }
 
 // PromptSecret schedules a masked prompt and blocks until the user submits or
@@ -98,46 +102,71 @@ func (h *SecretPromptHelper) PromptSecret(ctx context.Context, hint string) (str
 	}()
 
 	resCh := make(chan secretResult, 1)
+	var settled sync.Once
+	var generation atomic.Uint64
+	finish := func(result secretResult, before func()) {
+		settled.Do(func() {
+			if before != nil {
+				before()
+			}
+			resCh <- result
+		})
+	}
+	clearMask := func() {
+		if own := generation.Load(); own == 0 || h.open.Generation() == own {
+			h.masker.SetMasked(false)
+		}
+	}
 
 	h.schedule(func() error {
+		if err := ctx.Err(); err != nil {
+			finish(secretResult{err: session.NewSecretPromptCancelled(err)}, nil)
+			return nil
+		}
 		h.masker.SetMasked(true)
-		return h.open.Prompt(hint, "",
+		err := h.open.Prompt(hint, "",
 			func(value string) error {
-				h.masker.SetMasked(false)
-				// Lifecycle event only — the secret VALUE is never logged,
-				// only its length, so it cannot leak into the log sink.
-				h.logEvent("secret_prompt.submit", slog.Int("len", len(value)))
-				resCh <- secretResult{value: value}
+				finish(secretResult{value: value}, func() {
+					clearMask()
+					// Lifecycle metadata only; never log the secret value.
+					h.logEvent("secret_prompt.submit", slog.Int("len", len(value)))
+				})
 				return nil
 			},
 			func() error {
-				h.masker.SetMasked(false)
-				resCh <- secretResult{cancelled: true}
+				finish(secretResult{cancelled: true}, clearMask)
 				return nil
 			},
 		)
+		generation.Store(h.open.Generation())
+		if err != nil {
+			finish(secretResult{err: err}, clearMask)
+		}
+		return err
 	})
 
+	var r secretResult
 	select {
 	case <-ctx.Done():
-		// Clear the mask AND dismiss the popup if it is still active, so a
-		// timed-out / cancelled connect leaves no orphaned masked prompt on
-		// screen. The Active() guard MUST run on the UI lane (the same
-		// goroutine that mutates popup state): a ctx-cancel racing a
-		// successful Submit could otherwise pop a sibling popup. Mirrors
-		// chainedPrompterAdapter's ctx watcher (prompt_chain_adapter.go).
+		finish(secretResult{err: session.NewSecretPromptCancelled(ctx.Err())}, nil)
+		// Both checks run on the UI lane; delayed cleanup must not unmask or
+		// dismiss a replacement popup, even after this worker has returned.
 		h.schedule(func() error {
-			h.masker.SetMasked(false)
-			if !h.open.Active() {
+			own := generation.Load()
+			if own == 0 || h.open.Generation() != own {
 				return nil
 			}
-			return h.open.Cancel()
+			h.masker.SetMasked(false)
+			return h.open.CancelGeneration(own)
 		})
-		return "", session.NewSecretPromptCancelled(ctx.Err())
-	case r := <-resCh:
-		if r.cancelled {
-			return "", session.NewSecretPromptCancelled(nil)
-		}
-		return r.value, nil
+		r = <-resCh
+	case r = <-resCh:
 	}
+	if r.err != nil {
+		return "", r.err
+	}
+	if r.cancelled {
+		return "", session.NewSecretPromptCancelled(nil)
+	}
+	return r.value, nil
 }

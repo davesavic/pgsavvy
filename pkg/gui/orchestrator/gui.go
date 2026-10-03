@@ -1703,6 +1703,9 @@ func (g *Gui) Close() error {
 	if g.keybindingSystem.matcher != nil {
 		g.keybindingSystem.matcher.Cancel()
 	}
+	if g.registry != nil && g.registry.ConnectionManager != nil {
+		g.registry.ConnectionManager.InvalidateFormProbe()
+	}
 	g.connectionState.connectGen.Add(1)
 	g.connectionLife.mu.Lock()
 	if g.connectionLife.cancel != nil {

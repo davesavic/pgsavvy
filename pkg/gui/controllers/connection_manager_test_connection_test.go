@@ -113,3 +113,60 @@ func TestController_TestConnection_BoundToT(t *testing.T) {
 		t.Fatal("`t` binding missing from CONNECTION_MANAGER scope")
 	}
 }
+
+func TestReview_form_probe_stale_field_prompt(t *testing.T) {
+	for _, value := range []string{"edited-origin", ""} {
+		t.Run("submit/"+value, func(t *testing.T) {
+			ctx := newFormCtx()
+			prompt := &capturePrompt{}
+			ctrl := newFormController(ctx, prompt, nil)
+			ctx.OpenEditForm(models.Connection{Name: "origin", Driver: "postgres"}, nil, driverNames)
+			dispatchCM(t, ctrl, commands.ConnectionManagerFieldEdit)
+			ctx.SetMode(guicontext.ModeList)
+			ctx.OpenEditForm(models.Connection{Name: "replacement", Driver: "postgres"}, nil, driverNames)
+			if err := prompt.Submit(value); err != nil {
+				t.Fatal("prompt completion failed")
+			}
+			if ctx.FormConnection().Name != "replacement" {
+				t.Error("old field submit modified replacement form")
+			}
+		})
+	}
+}
+
+func TestReview_form_probe_save_and_prompt_controls(t *testing.T) {
+	ctx := newFormCtx()
+	prompt := &capturePrompt{}
+	invalidated := 0
+	saves := 0
+	ctrl := newFormController(ctx, prompt, func(models.Connection, bool, string) error {
+		saves++
+		if invalidated != 1 {
+			t.Error("save callback ran before probe invalidation")
+		}
+		return nil
+	})
+	ctx.OpenEditForm(models.Connection{Name: "origin", Driver: "postgres"}, nil, driverNames)
+	ctx.SetOnFormProbeInvalidated(func() { invalidated++ })
+	dispatchCM(t, ctrl, commands.ConnectionManagerFieldEdit)
+	if err := prompt.Cancel(); err != nil {
+		t.Fatal(err)
+	}
+	dispatchCM(t, ctrl, commands.ConnectionManagerFieldEdit)
+	if err := prompt.Submit(""); err != nil {
+		t.Fatal(err)
+	}
+	if invalidated != 0 || ctx.FormConnection().Name != "origin" {
+		t.Error("invalid input or prompt cancellation invalidated/changed form")
+	}
+	dispatchCM(t, ctrl, commands.ConnectionManagerConfirm)
+	if saves != 1 || invalidated != 2 || ctx.Mode() != guicontext.ModeList {
+		t.Error("save initiation and form exit did not retire probe")
+	}
+	ctx.OpenAddForm(nil, driverNames)
+	invalidated = 0
+	dispatchCM(t, ctrl, commands.ConnectionManagerConfirm)
+	if saves != 1 || invalidated != 1 || ctx.Mode() != guicontext.ModeForm {
+		t.Error("invalid save did not cancel probe while preserving form")
+	}
+}
