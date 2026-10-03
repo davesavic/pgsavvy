@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,79 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+var reviewInspectorBindingID atomic.Uint64
+
+func TestReview_inspector_session_binding(t *testing.T) {
+	h := NewConnectHelper()
+	t.Cleanup(h.Disconnect)
+	connect := func(rows int64) *fakeSession {
+		s := &fakeSession{statsRows: rows}
+		name := fmt.Sprintf("review-inspector-binding-%d", reviewInspectorBindingID.Add(1))
+		registerFake(t, name, &fakeDriver{conn: &fakeConnection{sess: s}})
+		if _, _, err := h.Connect(context.Background(), &models.Connection{Driver: name}, nil); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	missing, missingCurrent := h.BindSessionContext(context.Background())
+	connect(111)
+	if missingCurrent() {
+		t.Error("disconnected binding adopted the new connection")
+	}
+	if _, _, err := h.LoadTableStats(missing, "public", "t"); !errors.Is(err, ErrSessionReplaced) {
+		t.Errorf("disconnected binding load: %v", err)
+	}
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bound, current := h.BindSessionContext(parent)
+	if !current() {
+		t.Fatal("fresh binding not current")
+	}
+	if rows, _, err := h.LoadTableStats(bound, "public", "t"); err != nil || rows != 111 {
+		t.Fatalf("captured session stats = %d, %v", rows, err)
+	}
+	h.Disconnect()
+	b := connect(222)
+	if current() {
+		t.Error("old binding current after replacement")
+	}
+	if _, err := h.requireSession(bound); !errors.Is(err, ErrSessionReplaced) {
+		t.Errorf("queued closure resolved replacement session: %v", err)
+	}
+	for name, load := range map[string]func(context.Context) error{
+		"columns":     func(ctx context.Context) error { _, err := h.LoadColumns(ctx, "public", "t"); return err },
+		"indexes":     func(ctx context.Context) error { _, err := h.LoadIndexes(ctx, "public", "t"); return err },
+		"outbound":    func(ctx context.Context) error { _, err := h.LoadForeignKeys(ctx, "public", "t"); return err },
+		"inbound":     func(ctx context.Context) error { _, err := h.LoadInboundForeignKeys(ctx, "public", "t"); return err },
+		"constraints": func(ctx context.Context) error { _, err := h.LoadConstraints(ctx, "public", "t"); return err },
+		"stats":       func(ctx context.Context) error { _, _, err := h.LoadTableStats(ctx, "public", "t"); return err },
+		"tables":      func(ctx context.Context) error { _, err := h.LoadTables(ctx, "public"); return err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := load(bound); !errors.Is(err, ErrSessionReplaced) {
+				t.Fatalf("old binding called replacement session: %v", err)
+			}
+		})
+	}
+	if b.tablesCalls.Load() != 0 {
+		t.Fatal("replacement session received stale work")
+	}
+	if rows, _, err := h.LoadTableStats(context.Background(), "public", "t"); err != nil || rows != 222 {
+		t.Fatalf("unbound replacement stats = %d, %v", rows, err)
+	}
+	other := NewConnectHelper()
+	if _, _, err := other.LoadTableStats(bound, "public", "t"); !errors.Is(err, ErrSessionReplaced) {
+		t.Fatalf("binding accepted by another helper: %v", err)
+	}
+	cancel()
+	if !errors.Is(bound.Err(), context.Canceled) {
+		t.Fatal("binding lost parent cancellation")
+	}
+	if _, _, err := h.LoadTableStats(bound, "public", "t"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled binding load: %v", err)
+	}
+}
 
 // --- fakes ----------------------------------------------------------------
 

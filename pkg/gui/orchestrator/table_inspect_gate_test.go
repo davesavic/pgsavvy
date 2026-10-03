@@ -1,10 +1,15 @@
 package orchestrator_test
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // TestTableInspectGate_DecrementsToZeroAndRevealsOnce models the ack-gate
@@ -68,5 +73,71 @@ func TestTableInspectOpen_ClearsLoadingWhenAWorkerErrors(t *testing.T) {
 
 	if g.Registry().TableInspect.IsLoading() {
 		t.Fatal("TableInspect.IsLoading() = true after a worker errored; gate must still clear Loading")
+	}
+}
+
+func TestReview_inspector_current_failure_settles(t *testing.T) {
+	for _, err := range []error{errors.New("synthetic metadata failure"), context.Canceled} {
+		t.Run(err.Error(), func(t *testing.T) {
+			g, d, _ := reviewInspectorGui(t, err, nil)
+			reviewInspectorSelect(g, &models.Table{Schema: "public", Name: "a"})
+			fireTableInspectOpen(t, g)
+			g.WaitForWorkersForTest()
+			var reveals int
+			for _, fn := range reviewInspectorCallbacks(d) {
+				loading := g.Registry().TableInspect.IsLoading()
+				reviewInspectorRun(t, []func() error{fn})
+				if loading && !g.Registry().TableInspect.IsLoading() {
+					reveals++
+				}
+			}
+			if reveals != 1 || g.Registry().TableInspect.IsLoading() {
+				t.Fatalf("failed opening reveal transitions = %d, loading = %t", reveals, g.Registry().TableInspect.IsLoading())
+			}
+			if !strings.Contains(g.Registry().ForeignKeys.BodyText(), "could not load outbound foreign keys") || !strings.Contains(g.Registry().ForeignKeys.BodyText(), "could not load inbound foreign keys") || !strings.Contains(g.Registry().Constraints.BodyText(), "could not load constraints") {
+				t.Fatal("current opening lost failure visibility")
+			}
+		})
+	}
+}
+
+func TestReview_inspector_dismissal_cancels_workers(t *testing.T) {
+	for _, shutdown := range []bool{false, true} {
+		name := "pop"
+		if shutdown {
+			name = "shutdown"
+		}
+		t.Run(name, func(t *testing.T) {
+			g, d, sess := reviewInspectorGui(t, nil, nil)
+			sess.stage.Store(1)
+			tbl := &models.Table{Schema: "public", Name: "b"}
+			reviewInspectorSelect(g, tbl)
+			fireTableInspectOpen(t, g)
+			select {
+			case <-sess.entered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("load never entered")
+			}
+			finished := make(chan struct{})
+			if shutdown {
+				go func() { _ = g.Close(); close(finished) }()
+			} else {
+				if err := g.ContextTree().Pop(); err != nil {
+					t.Fatal(err)
+				}
+				go func() { g.WaitForWorkersForTest(); close(finished) }()
+			}
+			select {
+			case <-finished:
+			case <-time.After(2 * time.Second):
+				close(sess.release)
+				<-finished
+				t.Fatal("dismissed opening workers did not settle on cancellation")
+			}
+			d.drainPending()
+			if len(g.Registry().Columns.Items()) != 0 || tbl.EstimatedRows.Load() != 0 {
+				t.Fatal("dismissed opening published data")
+			}
+		})
 	}
 }

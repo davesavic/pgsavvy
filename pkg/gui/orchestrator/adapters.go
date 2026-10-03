@@ -180,6 +180,7 @@ func (g *Gui) retireConnectionLocked(want *connectionOwner) error {
 	}
 	g.connectionLife.owner = nil
 	g.connectionLife.mu.Unlock()
+	g.cancelTableInspect()
 	var err error
 	if owner != nil && owner.sqlSess != nil {
 		err = owner.sqlSess.Close()
@@ -1241,6 +1242,10 @@ func (c *connectInvoker) populateTablesRail(ctx context.Context, schema string) 
 // onto the UI thread via runOnUIThread to serialise with render-frame reads,
 // mirroring the load-on-worker / publish-on-UI-thread split.
 func (c *connectInvoker) populateColumnsRail(ctx context.Context, schema, table string) {
+	c.populateColumnsRailWithPublisher(ctx, schema, table, c.runOnUIThread)
+}
+
+func (c *connectInvoker) populateColumnsRailWithPublisher(ctx context.Context, schema, table string, publish func(func() error)) {
 	if c == nil || c.g == nil || c.helper == nil {
 		return
 	}
@@ -1260,7 +1265,7 @@ func (c *connectInvoker) populateColumnsRail(ctx context.Context, schema, table 
 		items[i] = cols[i]
 	}
 	columnsCtx := c.g.registry.Columns
-	c.runOnUIThread(func() error {
+	publish(func() error {
 		columnsCtx.SetItems(items)
 		return nil
 	})
@@ -1281,6 +1286,10 @@ func (c *connectInvoker) populateColumnsRail(ctx context.Context, schema, table 
 // onto the UI thread via runOnUIThread to serialise with render-frame reads,
 // mirroring the load-on-worker / publish-on-UI-thread split.
 func (c *connectInvoker) populateIndexesRail(ctx context.Context, schema, table string) {
+	c.populateIndexesRailWithPublisher(ctx, schema, table, c.runOnUIThread)
+}
+
+func (c *connectInvoker) populateIndexesRailWithPublisher(ctx context.Context, schema, table string, publish func(func() error)) {
 	if c == nil || c.g == nil || c.helper == nil {
 		return
 	}
@@ -1300,7 +1309,7 @@ func (c *connectInvoker) populateIndexesRail(ctx context.Context, schema, table 
 		items[i] = idxs[i]
 	}
 	indexesCtx := c.g.registry.Indexes
-	c.runOnUIThread(func() error {
+	publish(func() error {
 		indexesCtx.SetItems(items)
 		return nil
 	})
@@ -1324,6 +1333,10 @@ func (c *connectInvoker) populateIndexesRail(ctx context.Context, schema, table 
 // the FOREIGN_KEYS/CONSTRAINTS tree fields are wired later; the caller owns
 // resolving the context.
 func (c *connectInvoker) populateForeignKeysRail(ctx context.Context, fkCtx *guicontext.ForeignKeysContext, schema, table string) {
+	c.populateForeignKeysRailWithPublisher(ctx, fkCtx, schema, table, c.runOnUIThread)
+}
+
+func (c *connectInvoker) populateForeignKeysRailWithPublisher(ctx context.Context, fkCtx *guicontext.ForeignKeysContext, schema, table string, publish func(func() error)) {
 	if c == nil || c.g == nil || c.helper == nil || fkCtx == nil {
 		return
 	}
@@ -1356,7 +1369,7 @@ func (c *connectInvoker) populateForeignKeysRail(ctx context.Context, fkCtx *gui
 		)
 	}
 
-	c.runOnUIThread(func() error {
+	publish(func() error {
 		fkCtx.SetForeignKeys(outbound, inbound)
 		fkCtx.SetError("outbound", outboundErr)
 		fkCtx.SetError("inbound", inboundErr)
@@ -1377,6 +1390,10 @@ func (c *connectInvoker) populateForeignKeysRail(ctx context.Context, fkCtx *gui
 // The context is passed in (rather than reached via the registry) because
 // the CONSTRAINTS tree field is wired later; the caller owns resolving it.
 func (c *connectInvoker) populateConstraintsRail(ctx context.Context, conCtx *guicontext.ConstraintsContext, schema, table string) {
+	c.populateConstraintsRailWithPublisher(ctx, conCtx, schema, table, c.runOnUIThread)
+}
+
+func (c *connectInvoker) populateConstraintsRailWithPublisher(ctx context.Context, conCtx *guicontext.ConstraintsContext, schema, table string, publish func(func() error)) {
 	if c == nil || c.g == nil || c.helper == nil || conCtx == nil {
 		return
 	}
@@ -1392,7 +1409,7 @@ func (c *connectInvoker) populateConstraintsRail(ctx context.Context, conCtx *gu
 			slog.String("table", table),
 			slog.String("err", err.Error()),
 		)
-		c.runOnUIThread(func() error {
+		publish(func() error {
 			conCtx.SetConstraints(nil)
 			conCtx.SetError(true)
 			return nil
@@ -1406,7 +1423,7 @@ func (c *connectInvoker) populateConstraintsRail(ctx context.Context, conCtx *gu
 			items = append(items, all[i])
 		}
 	}
-	c.runOnUIThread(func() error {
+	publish(func() error {
 		conCtx.SetConstraints(items)
 		conCtx.SetError(false)
 		return nil

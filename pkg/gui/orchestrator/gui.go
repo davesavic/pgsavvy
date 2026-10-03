@@ -236,6 +236,8 @@ type Gui struct {
 	// Connection-lifecycle state surfaced by the activeConnAdapter.
 	connectionState connectionState
 	connectionLife  connectionLifecycle
+	inspectMu       sync.Mutex
+	inspectRequest  *tableInspectRequest
 
 	// Query-execution state surfaced by the query runtime.
 	queryState queryState
@@ -700,8 +702,38 @@ func (g *Gui) persistTrackedSetting(ctx context.Context, settingKey, settingValu
 	}
 }
 
+// A fresh pointer identifies each opening, even a reopen of the same table.
+type tableInspectRequest struct {
+	cancel  context.CancelFunc
+	settled atomic.Bool
+}
+
+func (r *tableInspectRequest) settle() {
+	if r.settled.CompareAndSwap(false, true) {
+		r.cancel()
+	}
+}
+
+func (g *Gui) cancelTableInspect() {
+	g.inspectMu.Lock()
+	r := g.inspectRequest
+	g.inspectRequest = nil
+	g.inspectMu.Unlock()
+	if r != nil {
+		r.settle()
+	}
+}
+
 func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 	inspectCtx := g.registry.TableInspect
+	g.tree.RegisterSwapHook(func() {
+		for _, c := range g.tree.Stack() {
+			if c == inspectCtx {
+				return
+			}
+		}
+		g.cancelTableInspect()
+	})
 
 	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
 		ID:          commands.TableInspectOpen,
@@ -715,7 +747,11 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 			if !ok || tbl == nil {
 				return nil
 			}
+			if g.closed.Load() {
+				return nil
+			}
 			sch, tname := tbl.Schema, tbl.Name
+			g.cancelTableInspect()
 
 			// Re-open semantics (AD-24): if popup already on top, re-target.
 			// SetTarget resets per-tab scroll; SetActiveTab(0) returns to the
@@ -753,6 +789,40 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 			g.registry.Constraints.SetError(false)
 
 			inspectCtx.SetLoading(true)
+			ctx, cancel := context.WithCancel(context.Background())
+			ctx, sessionCurrent := connectInv.helper.BindSessionContext(ctx)
+			connGen := g.connectionState.connectGen.Load()
+			request := &tableInspectRequest{cancel: cancel}
+			g.inspectMu.Lock()
+			g.inspectRequest = request
+			g.inspectMu.Unlock()
+			// This predicate runs only inside MainLoop publication callbacks.
+			current := func() bool {
+				g.inspectMu.Lock()
+				owned := g.inspectRequest == request
+				g.inspectMu.Unlock()
+				if !owned || g.closed.Load() || ctx.Err() != nil || g.connectionState.connectGen.Load() != connGen || !sessionCurrent() {
+					return false
+				}
+				gotSchema, gotTable := inspectCtx.Target()
+				if gotSchema != sch || gotTable != tname {
+					return false
+				}
+				for _, c := range g.tree.Stack() {
+					if c == inspectCtx {
+						return true
+					}
+				}
+				return false
+			}
+			publish := func(fn func() error) {
+				g.OnUIThread(func() error {
+					if current() {
+						return fn()
+					}
+					return nil
+				})
+			}
 			var ack atomic.Int32
 			ack.Store(5)
 			// FIFO invariant: correctness relies on each populate enqueuing its
@@ -767,35 +837,37 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 			// ordering.
 			done := func() {
 				if ack.Add(-1) == 0 {
-					g.OnUIThreadContentOnly(func() error {
-						inspectCtx.SetLoading(false)
+					g.PublishUIContent(ctx, func() error {
+						if current() {
+							inspectCtx.SetLoading(false)
+						}
 						return nil
-					})
+					}, func(error) { request.settle() })
 				}
 			}
 			g.OnWorker(func(_ gocui.Task) error {
 				defer done()
-				connectInv.populateColumnsRail(context.Background(), sch, tname)
+				connectInv.populateColumnsRailWithPublisher(ctx, sch, tname, publish)
 				return nil
 			})
 			g.OnWorker(func(_ gocui.Task) error {
 				defer done()
-				connectInv.populateIndexesRail(context.Background(), sch, tname)
+				connectInv.populateIndexesRailWithPublisher(ctx, sch, tname, publish)
 				return nil
 			})
 			g.OnWorker(func(_ gocui.Task) error {
 				defer done()
-				connectInv.populateForeignKeysRail(context.Background(), g.registry.ForeignKeys, sch, tname)
+				connectInv.populateForeignKeysRailWithPublisher(ctx, g.registry.ForeignKeys, sch, tname, publish)
 				return nil
 			})
 			g.OnWorker(func(_ gocui.Task) error {
 				defer done()
-				connectInv.populateConstraintsRail(context.Background(), g.registry.Constraints, sch, tname)
+				connectInv.populateConstraintsRailWithPublisher(ctx, g.registry.Constraints, sch, tname, publish)
 				return nil
 			})
 			g.OnWorker(func(_ gocui.Task) error {
 				defer done()
-				rows, bytes, err := connectInv.helper.LoadTableStats(context.Background(), sch, tname)
+				rows, bytes, err := connectInv.helper.LoadTableStats(ctx, sch, tname)
 				if err != nil {
 					logs.Event(g.deps.Common.Logger(), "db", "load_table_stats",
 						slog.String("schema", sch),
@@ -804,6 +876,9 @@ func (g *Gui) registerTableInspectOpen(connectInv *connectInvoker) {
 					return nil
 				}
 				g.OnUIThreadContentOnly(func() error {
+					if !current() {
+						return nil
+					}
 					tbl.EstimatedRows.Store(rows)
 					tbl.SizeBytes.Store(bytes)
 					return nil
@@ -1708,6 +1783,7 @@ func (g *Gui) Close() error {
 	if !g.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	g.cancelTableInspect()
 	if g.resultTabsH != nil {
 		g.resultTabsH.CancelExport()
 	}

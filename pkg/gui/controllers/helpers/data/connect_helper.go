@@ -107,6 +107,32 @@ type workItem struct {
 	done chan error
 }
 
+type sessionBindingKey struct{}
+
+type sessionBinding struct {
+	helper *ConnectHelper
+	state  *helperState
+}
+
+// BindSessionContext pins Load* calls to the current metadata session, including
+// calls not submitted until after reconnect. The predicate is safe on any lane;
+// it reports ownership, not cancellation. A disconnected binding never adopts
+// a future session. The returned context preserves the parent's cancellation.
+func (h *ConnectHelper) BindSessionContext(ctx context.Context) (context.Context, func() bool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	h.stateMu.RLock()
+	st := h.state
+	h.stateMu.RUnlock()
+	binding := &sessionBinding{helper: h, state: st}
+	return context.WithValue(ctx, sessionBindingKey{}, binding), func() bool {
+		h.stateMu.RLock()
+		defer h.stateMu.RUnlock()
+		return st != nil && h.state == st
+	}
+}
+
 // NewConnectHelper returns a fresh helper. Construction does not touch
 // drivers.Get and is safe to perform during gui wiring before any driver is
 // known.
@@ -233,7 +259,7 @@ func (h *ConnectHelper) Session() drivers.Session {
 func (h *ConnectHelper) LoadSchemas(ctx context.Context, db string) ([]models.Schema, error) {
 	var out []models.Schema
 	err := h.submit(ctx, func(ctx context.Context) error {
-		sess, err := h.requireSession()
+		sess, err := h.requireSession(ctx)
 		if err != nil {
 			return err
 		}
@@ -256,7 +282,7 @@ func (h *ConnectHelper) LoadSchemas(ctx context.Context, db string) ([]models.Sc
 func (h *ConnectHelper) LoadTables(ctx context.Context, schema string) ([]*models.Table, error) {
 	var out []*models.Table
 	err := h.submit(ctx, func(ctx context.Context) error {
-		sess, err := h.requireSession()
+		sess, err := h.requireSession(ctx)
 		if err != nil {
 			return err
 		}
@@ -277,7 +303,7 @@ func (h *ConnectHelper) LoadTables(ctx context.Context, schema string) ([]*model
 func (h *ConnectHelper) LoadColumns(ctx context.Context, schema, table string) ([]models.Column, error) {
 	var out []models.Column
 	err := h.submit(ctx, func(ctx context.Context) error {
-		sess, err := h.requireSession()
+		sess, err := h.requireSession(ctx)
 		if err != nil {
 			return err
 		}
@@ -298,7 +324,7 @@ func (h *ConnectHelper) LoadColumns(ctx context.Context, schema, table string) (
 func (h *ConnectHelper) LoadIndexes(ctx context.Context, schema, table string) ([]models.Index, error) {
 	var out []models.Index
 	err := h.submit(ctx, func(ctx context.Context) error {
-		sess, err := h.requireSession()
+		sess, err := h.requireSession(ctx)
 		if err != nil {
 			return err
 		}
@@ -319,7 +345,7 @@ func (h *ConnectHelper) LoadIndexes(ctx context.Context, schema, table string) (
 func (h *ConnectHelper) LoadForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
 	var out []models.ForeignKey
 	err := h.submit(ctx, func(ctx context.Context) error {
-		sess, err := h.requireSession()
+		sess, err := h.requireSession(ctx)
 		if err != nil {
 			return err
 		}
@@ -340,7 +366,7 @@ func (h *ConnectHelper) LoadForeignKeys(ctx context.Context, schema, table strin
 func (h *ConnectHelper) LoadInboundForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
 	var out []models.ForeignKey
 	err := h.submit(ctx, func(ctx context.Context) error {
-		sess, err := h.requireSession()
+		sess, err := h.requireSession(ctx)
 		if err != nil {
 			return err
 		}
@@ -361,7 +387,7 @@ func (h *ConnectHelper) LoadInboundForeignKeys(ctx context.Context, schema, tabl
 func (h *ConnectHelper) LoadConstraints(ctx context.Context, schema, table string) ([]models.Constraint, error) {
 	var out []models.Constraint
 	err := h.submit(ctx, func(ctx context.Context) error {
-		sess, err := h.requireSession()
+		sess, err := h.requireSession(ctx)
 		if err != nil {
 			return err
 		}
@@ -382,7 +408,7 @@ func (h *ConnectHelper) LoadConstraints(ctx context.Context, schema, table strin
 func (h *ConnectHelper) LoadTableStats(ctx context.Context, schema, table string) (int64, int64, error) {
 	var rows, sizeBytes int64
 	err := h.submit(ctx, func(ctx context.Context) error {
-		sess, err := h.requireSession()
+		sess, err := h.requireSession(ctx)
 		if err != nil {
 			return err
 		}
@@ -407,7 +433,7 @@ func (h *ConnectHelper) LoadTableStats(ctx context.Context, schema, table string
 func (h *ConnectHelper) LoadFunctions(ctx context.Context) ([]string, error) {
 	var out []string
 	err := h.submit(ctx, func(ctx context.Context) error {
-		sess, err := h.requireSession()
+		sess, err := h.requireSession(ctx)
 		if err != nil {
 			return err
 		}
@@ -434,7 +460,7 @@ func (h *ConnectHelper) LoadFunctions(ctx context.Context) ([]string, error) {
 func (h *ConnectHelper) LoadFunctionDetail(ctx context.Context, schema, name string) ([]models.FunctionDetail, error) {
 	var out []models.FunctionDetail
 	err := h.submit(ctx, func(ctx context.Context) error {
-		sess, err := h.requireSession()
+		sess, err := h.requireSession(ctx)
 		if err != nil {
 			return err
 		}
@@ -586,9 +612,15 @@ func funcDetailKey(schema, name string) string {
 // the old state's queue close before reaching here, so requireSession in the
 // closure path always sees a live Session of the SAME state that owned the
 // closure.
-func (h *ConnectHelper) requireSession() (drivers.Session, error) {
+func (h *ConnectHelper) requireSession(ctx context.Context) (drivers.Session, error) {
 	h.stateMu.RLock()
 	defer h.stateMu.RUnlock()
+	if binding, ok := ctx.Value(sessionBindingKey{}).(*sessionBinding); ok {
+		if binding.helper != h || binding.state == nil || h.state != binding.state {
+			return nil, ErrSessionReplaced
+		}
+		return binding.state.session, nil
+	}
 	if h.state == nil {
 		return nil, errNotConnected
 	}
@@ -615,6 +647,13 @@ func (h *ConnectHelper) submit(ctx context.Context, run func(context.Context) er
 
 	h.stateMu.RLock()
 	st := h.state
+	if binding, ok := ctx.Value(sessionBindingKey{}).(*sessionBinding); ok {
+		if binding.helper != h || binding.state == nil || st != binding.state {
+			h.stateMu.RUnlock()
+			return ErrSessionReplaced
+		}
+		st = binding.state
+	}
 	h.stateMu.RUnlock()
 	if st == nil {
 		return errNotConnected
