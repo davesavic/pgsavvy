@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeRowSource struct {
@@ -381,5 +383,141 @@ func TestReview_clipboard_OtherDestinations(t *testing.T) {
 	}
 	if _, err := os.Stdout.Stat(); err != nil {
 		t.Fatalf("stdout closed by destination: %v", err)
+	}
+}
+
+type reviewJSONNamesDest struct{ opens int }
+
+func (d *reviewJSONNamesDest) Open() (io.WriteCloser, string, error) {
+	d.opens++
+	return nil, "", errors.New("unexpected destination Open")
+}
+
+type reviewJSONNamesSource struct {
+	fakeRowSource
+	iterations int
+}
+
+func (s *reviewJSONNamesSource) Iterate(fn func(models.Row) error) error {
+	s.iterations++
+	return s.fakeRowSource.Iterate(fn)
+}
+
+func TestReview_json_names_Rejection(t *testing.T) {
+	for _, newFormat := range []func() Format{NewNDJSON, NewJSONArray} {
+		for i, cols := range reviewJSONDuplicateCols() {
+			for _, shape := range []string{"distinct", "missing_later", "empty_result"} {
+				for _, target := range []string{"open_probe", "clipboard", "file", "save_as", "existing_partial"} {
+					t.Run(fmt.Sprintf("%s/%d/%s/%s", newFormat().Name(), i, shape, target), func(t *testing.T) {
+						values := make([]any, len(cols))
+						for j := range values {
+							values[j] = j + 1
+						}
+						if shape == "missing_later" {
+							values = values[:1]
+						}
+						src := &reviewJSONNamesSource{fakeRowSource: fakeRowSource{
+							cols: cols, rows: []models.Row{{Values: values}},
+						}}
+						if shape == "empty_result" {
+							src.rows = nil
+						}
+						probe := &reviewJSONNamesDest{}
+						cb := &reviewClipboardWriter{last: "previous clipboard"}
+						dir := t.TempDir()
+						final := filepath.Join(dir, "out.json")
+						require.NoError(t, os.WriteFile(final, []byte("previous file"), 0o600))
+						var dest Destination = probe
+						switch target {
+						case "clipboard":
+							dest = NewClipboardDest(cb, 1024)
+						case "file", "existing_partial":
+							dest = NewFileDest(dir, "out.json")
+						case "save_as":
+							dest = NewFileDestPath(final)
+						}
+						if target == "existing_partial" {
+							require.NoError(t, os.WriteFile(final+".partial", []byte("unrelated partial"), 0o600))
+						}
+						progress := 0
+						desc, err := Run(context.Background(), newFormat(), dest, src, func(int64) { progress++ })
+						require.ErrorContains(t, err, "duplicate")
+						require.ErrorContains(t, err, "alias")
+						require.Empty(t, desc)
+						require.Zero(t, probe.opens)
+						require.Zero(t, src.iterations)
+						require.Zero(t, progress)
+						require.Zero(t, cb.calls)
+						require.Equal(t, "previous clipboard", cb.last)
+						if cd, ok := dest.(*clipboardDest); ok {
+							require.Nil(t, cd.buf, "clipboard destination was opened")
+						}
+						if fd, ok := dest.(*fileDest); ok {
+							require.Nil(t, fd.file, "file destination was opened")
+						}
+						content, readErr := os.ReadFile(final)
+						require.NoError(t, readErr)
+						require.Equal(t, "previous file", string(content))
+						content, readErr = os.ReadFile(final + ".partial")
+						if target == "existing_partial" {
+							require.NoError(t, readErr)
+							require.Equal(t, "unrelated partial", string(content))
+						} else {
+							require.True(t, os.IsNotExist(readErr), "partial exists: %v", readErr)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestReview_json_names_Controls(t *testing.T) {
+	for _, newFormat := range []func() Format{NewNDJSON, NewJSONArray} {
+		for _, tc := range []struct {
+			name string
+			cols []models.ColumnMeta
+			rows []models.Row
+			want string
+		}{
+			{"unique", []models.ColumnMeta{{Name: "x"}, {Name: "y"}}, []models.Row{{Values: []any{1, 2}}}, "{\"x\":1,\"y\":2}"},
+			{"single_empty_name", []models.ColumnMeta{{Name: ""}, {Name: "x"}}, []models.Row{{Values: []any{1, 2}}}, "{\"\":1,\"x\":2}"},
+			{"case_sensitive", []models.ColumnMeta{{Name: "X"}, {Name: "x"}}, []models.Row{{Values: []any{1, 2}}}, "{\"X\":1,\"x\":2}"},
+			{"missing_value", []models.ColumnMeta{{Name: "x"}, {Name: "y"}}, []models.Row{{Values: []any{1}}}, "{\"x\":1,\"y\":null}"},
+			{"zero_columns", nil, []models.Row{{}}, "{}"},
+			{"empty_result", []models.ColumnMeta{{Name: "x"}}, nil, ""},
+		} {
+			t.Run(newFormat().Name()+"/"+tc.name, func(t *testing.T) {
+				f := newFormat()
+				want := tc.want + "\n"
+				if !f.IsStreaming() {
+					want = "[" + tc.want + "]\n"
+				} else if tc.want == "" {
+					want = ""
+				}
+				cb := &reviewClipboardWriter{last: "previous clipboard"}
+				src := &fakeRowSource{cols: tc.cols, rows: tc.rows}
+				desc, err := Run(context.Background(), f, NewClipboardDest(cb, 1024), src, nil)
+				require.NoError(t, err)
+				require.Equal(t, "clipboard", desc)
+				require.Equal(t, 1, cb.calls)
+				require.Equal(t, want, cb.last)
+			})
+		}
+	}
+	for _, tc := range []struct {
+		newFormat func() Format
+		want      string
+	}{
+		{NewCSV, "x,x\r\n1,2\r\n"},
+		{NewTSV, "x\tx\r\n1\t2\r\n"},
+	} {
+		t.Run(tc.newFormat().Name(), func(t *testing.T) {
+			cb := &reviewClipboardWriter{}
+			src := &fakeRowSource{cols: []models.ColumnMeta{{Name: "x"}, {Name: "x"}}, rows: []models.Row{{Values: []any{1, 2}}}}
+			_, err := Run(context.Background(), tc.newFormat(), NewClipboardDest(cb, 1024), src, nil)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, cb.last)
+		})
 	}
 }

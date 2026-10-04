@@ -28,7 +28,14 @@ func (j *jsonArrayFormat) Name() string      { return "JSON Array" }
 func (j *jsonArrayFormat) Ext() string       { return "json" }
 func (j *jsonArrayFormat) IsStreaming() bool { return false }
 
+func (j *jsonArrayFormat) validateColumns(cols []models.ColumnMeta) error {
+	return validateJSONColumns(cols)
+}
+
 func (j *jsonArrayFormat) Header(cols []models.ColumnMeta, _ io.Writer) error {
+	if err := j.validateColumns(cols); err != nil {
+		return err
+	}
 	j.cols = cols
 	j.rows = j.rows[:0]
 	return nil

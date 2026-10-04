@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -10,8 +11,8 @@ import (
 // ndjsonFormat implements Format for newline-delimited JSON output.
 //
 // Streaming: each call to Row emits one JSON object followed by a newline
-// (json.Encoder.Encode appends '\n' itself). Header is a no-op aside from
-// capturing column names; Footer is a no-op.
+// (json.Encoder.Encode appends '\n' itself). Header validates and captures
+// column names; Footer is a no-op.
 //
 // Escaping note: we intentionally rely on encoding/json's built-in escaping
 // for control characters and invalid UTF-8 (json.Marshal replaces invalid
@@ -31,7 +32,25 @@ func (n *ndjsonFormat) Name() string      { return "NDJSON" }
 func (n *ndjsonFormat) Ext() string       { return "ndjson" }
 func (n *ndjsonFormat) IsStreaming() bool { return true }
 
+func (n *ndjsonFormat) validateColumns(cols []models.ColumnMeta) error {
+	return validateJSONColumns(cols)
+}
+
+func validateJSONColumns(cols []models.ColumnMeta) error {
+	seen := make(map[string]int, len(cols))
+	for i, col := range cols {
+		if first, exists := seen[col.Name]; exists {
+			return fmt.Errorf("exporter: duplicate JSON column names at columns %d and %d; use distinct SQL aliases", first+1, i+1)
+		}
+		seen[col.Name] = i
+	}
+	return nil
+}
+
 func (n *ndjsonFormat) Header(cols []models.ColumnMeta, _ io.Writer) error {
+	if err := n.validateColumns(cols); err != nil {
+		return err
+	}
 	n.cols = cols
 	return nil
 }

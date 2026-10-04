@@ -171,3 +171,29 @@ func TestReview_json_scalar_export(t *testing.T) {
 	require.NoError(t, f.Header([]models.ColumnMeta{col}, &buf))
 	require.Error(t, f.Row(models.Row{Values: []any{json.RawMessage("broken")}}, &buf))
 }
+
+func reviewJSONDuplicateCols() [][]models.ColumnMeta {
+	return [][]models.ColumnMeta{
+		{{Name: "x"}, {Name: "x"}},
+		{{Name: ""}, {Name: ""}},
+		{{Name: "x"}, {Name: "y"}, {Name: "x"}},
+		{{Name: "界"}, {Name: "界"}},
+	}
+}
+
+func reviewJSONNamesHeader(t *testing.T, newFormat func() Format) {
+	t.Helper()
+	for i, cols := range reviewJSONDuplicateCols() {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			var buf bytes.Buffer
+			err := newFormat().Header(cols, &buf)
+			require.ErrorContains(t, err, "duplicate")
+			require.ErrorContains(t, err, "alias")
+			require.Zero(t, buf.Len())
+		})
+	}
+}
+
+func TestReview_json_names_NDJSONHeader(t *testing.T) {
+	reviewJSONNamesHeader(t, NewNDJSON)
+}

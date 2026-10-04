@@ -31,6 +31,18 @@ func Run(ctx context.Context, format Format, dest Destination, src RowSource, pr
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	cols := src.Cols()
+	// Object formats must reject lossy metadata before destination side effects.
+	if validator, ok := format.(interface {
+		validateColumns([]models.ColumnMeta) error
+	}); ok {
+		if err := validator.validateColumns(cols); err != nil {
+			return "", err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	wc, descriptor, err := dest.Open()
 	if err != nil {
 		return "", err
@@ -51,7 +63,6 @@ func Run(ctx context.Context, format Format, dest Destination, src RowSource, pr
 		}
 	}()
 
-	cols := src.Cols()
 	if err := format.Header(cols, wc); err != nil {
 		return "", err
 	}

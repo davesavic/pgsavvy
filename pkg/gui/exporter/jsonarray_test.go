@@ -162,3 +162,7 @@ func TestJSONArray_NonJSONBByteaColumn_NotTouched(t *testing.T) {
 		t.Fatal("non-jsonb []byte should still be string (base64) encoded by json.Marshal")
 	}
 }
+
+func TestReview_json_names_JSONArrayHeader(t *testing.T) {
+	reviewJSONNamesHeader(t, NewJSONArray)
+}
