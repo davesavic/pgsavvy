@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/minio/selfupdate"
 	"github.com/spf13/afero"
@@ -185,24 +187,92 @@ func managedInstallReason(invoked, resolved string) string {
 	return ""
 }
 
-// acquireUpdateLock takes an exclusive, advisory lock under stateDir by creating
-// updateLockName with O_CREATE|O_EXCL. A second concurrent `pgsavvy update`
-// fails the exclusive create and is told an update is in progress. The returned
-// release func removes the lockfile; it is safe to call on every exit path.
+const updateLockMarker = "pgsavvy-update-lock-v1\n"
+
+// The stable marker excludes older O_EXCL updaters even while idle. Ownership
+// belongs to the open descriptor, so termination releases it without unlinking
+// an inode that another updater could still hold.
 func acquireUpdateLock(stateDir string) (func(), error) {
+	return acquireUpdateLockWithHook(stateDir, nil)
+}
+
+func acquireUpdateLockWithHook(stateDir string, checkpoint func(string)) (func(), error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("update: ensure state dir: %w", err)
 	}
 	lockPath := filepath.Join(stateDir, updateLockName)
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		if os.IsExist(err) {
-			return nil, fmt.Errorf("update in progress (lock held at %q)", lockPath)
+	for {
+		f, err := openUpdateLockFile(lockPath)
+		if errors.Is(err, os.ErrNotExist) {
+			f, err = publishUpdateLock(lockPath, checkpoint)
+			if errors.Is(err, os.ErrExist) {
+				continue // A legacy or new contender published first; inspect its inode.
+			}
+		} else if err == nil {
+			err = lockUpdateFile(f)
 		}
-		return nil, fmt.Errorf("update: acquire lock: %w", err)
+		if err != nil {
+			if f != nil {
+				_ = f.Close()
+			}
+			return nil, fmt.Errorf("update: acquire lock: %w", err)
+		}
+		marker := make([]byte, len(updateLockMarker)+1)
+		n, readErr := f.ReadAt(marker, 0)
+		if readErr != nil && readErr != io.EOF {
+			_ = f.Close()
+			return nil, fmt.Errorf("update: read lock marker: %w", readErr)
+		}
+		if string(marker[:n]) != updateLockMarker {
+			_ = f.Close()
+			return nil, fmt.Errorf("update: legacy or unrecognized lock at %q; verify no updater is running before manually removing this marker; never remove a new-format lock", lockPath)
+		}
+		var once sync.Once
+		return func() { once.Do(func() { _ = f.Close() }) }, nil
 	}
-	_ = f.Close()
-	return func() { _ = os.Remove(lockPath) }, nil
+}
+
+func publishUpdateLock(lockPath string, checkpoint func(string)) (*os.File, error) {
+	tmp, err := os.CreateTemp(filepath.Dir(lockPath), ".update-lock-*")
+	if err != nil {
+		return nil, fmt.Errorf("create private lock marker: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	defer func() { _ = tmp.Close() }()
+	if checkpoint != nil {
+		checkpoint("temp_created")
+	}
+	if _, err = tmp.WriteString(updateLockMarker); err != nil {
+		return nil, fmt.Errorf("write lock marker: %w", err)
+	}
+	if checkpoint != nil {
+		checkpoint("marker_written")
+	}
+	if err = tmp.Sync(); err != nil {
+		return nil, fmt.Errorf("sync lock marker: %w", err)
+	}
+	if err = tmp.Close(); err != nil {
+		return nil, fmt.Errorf("close lock marker: %w", err)
+	}
+	f, err := openUpdateLockFile(tmp.Name())
+	if err != nil {
+		return nil, err
+	}
+	if err = lockUpdateFile(f); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	// Lock before publishing so no contender can own the new stable inode
+	// between publication and this process acquiring ownership. Link never
+	// overwrites an existing marker; unsupported filesystems fail closed.
+	if err = os.Link(tmp.Name(), lockPath); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("publish initialized lock without overwrite: %w", err)
+	}
+	if checkpoint != nil {
+		checkpoint("published")
+	}
+	return f, nil
 }
 
 // openUpdateLog opens a dedicated update log under stateDir using the shared

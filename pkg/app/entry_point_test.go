@@ -104,6 +104,70 @@ func TestRunUpdate_ConcurrentLockRefuses(t *testing.T) {
 	require.Contains(t, err.Error(), "update in progress")
 }
 
+func TestReview_update_lock_release_preserves_marker(t *testing.T) {
+	stateDir := t.TempDir()
+	path := filepath.Join(stateDir, updateLockName)
+	release, err := acquireUpdateLock(stateDir)
+	require.NoError(t, err)
+	before, err := os.Stat(path)
+	require.NoError(t, err)
+	release()
+	after, err := os.Stat(path)
+	require.NoError(t, err, "release must retain the stable inode for older O_EXCL binaries")
+	require.True(t, os.SameFile(before, after))
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "pgsavvy-update-lock-v1\n", string(content))
+	release, err = acquireUpdateLock(stateDir)
+	require.NoError(t, err)
+	release()
+	legacy, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if legacy != nil {
+		_ = legacy.Close()
+	}
+	require.True(t, os.IsExist(err), "older updaters must remain excluded after ordinary release")
+}
+
+func TestReview_update_lock_unknown_marker(t *testing.T) {
+	for _, marker := range []string{"", "1234\n", "pgsavvy-update-lock-v1", "pgsavvy-update-lock-v2\n"} {
+		t.Run(marker, func(t *testing.T) {
+			stateDir := t.TempDir()
+			path := filepath.Join(stateDir, updateLockName)
+			require.NoError(t, os.WriteFile(path, []byte(marker), 0o600))
+			before, err := os.Stat(path)
+			require.NoError(t, err)
+			release, err := acquireUpdateLock(stateDir)
+			if release != nil {
+				release()
+			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "legacy or unrecognized")
+			require.Contains(t, err.Error(), "no updater is running")
+			after, statErr := os.Stat(path)
+			require.NoError(t, statErr)
+			require.True(t, os.SameFile(before, after))
+			content, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			require.Equal(t, marker, string(content))
+		})
+	}
+}
+
+func TestReview_update_lock_before_download(t *testing.T) {
+	withTempStateDir(t)
+	stateDir := filepath.Join(os.Getenv("XDG_STATE_HOME"), "pgsavvy")
+	release, err := acquireUpdateLock(stateDir)
+	require.NoError(t, err)
+	defer release()
+	build := &BuildInfo{Version: "dev", BuildSource: "task"}
+	err = Start(build, "", []string{"update"})
+	require.ErrorContains(t, err, "update in progress")
+	require.NotErrorIs(t, err, update.ErrNonReleaseBuild)
+	release()
+	err = Start(build, "", []string{"update"})
+	require.ErrorIs(t, err, update.ErrNonReleaseBuild, "released ownership must reach the pre-network provenance check")
+}
+
 // TestManagedInstallReason covers the managed/symlink refusal predicate.
 func TestManagedInstallReason(t *testing.T) {
 	const refusal = "managed or read-only install — update via your package manager"
