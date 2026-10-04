@@ -47,8 +47,16 @@ func installResultTabsSwapHook(tree *gui.ContextTree, helper *ui.ResultTabsHelpe
 	var prev types.ContextKey
 	tree.RegisterSwapHook(func() {
 		var current types.ContextKey
-		if c := tree.Current(); c != nil {
+		// Popups borrow focus without leaving their underlying pane. Track
+		// that pane so departure still cancels even while an overlay is open.
+		stack := tree.Stack()
+		for i := len(stack) - 1; i >= 0; i-- {
+			c := stack[i]
+			if c.GetKind() == types.TEMPORARY_POPUP || c.GetKind() == types.PERSISTENT_POPUP {
+				continue
+			}
 			current = c.GetKey()
+			break
 		}
 		was := prev
 		prev = current

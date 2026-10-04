@@ -188,6 +188,50 @@ func TestSwapHookLeavingFromResultTabCancels(t *testing.T) {
 	}
 }
 
+func TestSwapHookExportOverlaysPreserveStream(t *testing.T) {
+	for _, root := range []types.ContextKey{types.RESULT_GRID, types.QUERY_RAIL} {
+		t.Run(string(root), func(t *testing.T) {
+			h, tab := makeRunningTab(t)
+			tree := seedTree(t, root)
+			installResultTabsSwapHook(tree, h)
+			pushKey(t, tree, root)
+			for _, overlay := range []struct {
+				key  types.ContextKey
+				kind types.ContextKind
+			}{
+				{types.EXPORT_MENU, types.TEMPORARY_POPUP},
+				{types.FILE_PICKER, types.TEMPORARY_POPUP},
+				{types.CELL_VIEWER, types.PERSISTENT_POPUP},
+				{types.PROMPT, types.TEMPORARY_POPUP},
+			} {
+				if err := tree.Push(newSwapHookContext(overlay.key, overlay.kind)); err != nil {
+					t.Fatal(err)
+				}
+				if tab.State() != ui.StateRunning {
+					t.Fatalf("Push(%s) cancelled stream: %v", overlay.key, tab.State())
+				}
+			}
+			for len(tree.Stack()) > 1 {
+				if err := tree.Pop(); err != nil {
+					t.Fatal(err)
+				}
+				if tab.State() != ui.StateRunning {
+					t.Fatalf("overlay Pop cancelled stream: %v", tab.State())
+				}
+			}
+			if err := tree.Push(newSwapHookContext(types.EXPORT_MENU, types.TEMPORARY_POPUP)); err != nil {
+				t.Fatal(err)
+			}
+			if err := tree.Push(newSwapHookContext(types.SCHEMAS, types.SIDE_CONTEXT)); err != nil {
+				t.Fatal(err)
+			}
+			if tab.State() != ui.StateCancelled {
+				t.Fatalf("rail departure from overlay did not cancel: %v", tab.State())
+			}
+		})
+	}
+}
+
 func TestSwapHookEnteringFromOutsideNoCancel(t *testing.T) {
 	h, tab := makeRunningTab(t)
 	tree := seedTree(t, types.SCHEMAS)
