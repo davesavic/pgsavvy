@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 	iofs "io/fs"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/davesavic/pgsavvy/pkg/utils"
 	"github.com/spf13/afero"
 	"gopkg.in/yaml.v3"
 )
@@ -115,8 +115,8 @@ func (a *AppState) removeCanonicalLegacySettings() {
 }
 
 // Save serializes the receiver to YAML and atomically replaces 'path' on POSIX
-// file systems. The temp file is written at mode 0600. On Rename failure the
-// temp file is removed best-effort. CONCURRENT WRITES TO THE RECEIVER DURING
+// file systems. Its exclusive same-directory temp file is written at mode
+// 0600 and removed best-effort on failure. CONCURRENT WRITES TO THE RECEIVER DURING
 // SAVE ARE NOT SAFE — yaml.Marshal iterates AppState's map fields; concurrent
 // map writes will panic. Callers must hold an external lock or pass a
 // defensive copy.
@@ -127,22 +127,7 @@ func (a *AppState) Save(fs afero.Fs, path string) error {
 	// Do not let a legacy binary replay stale values for normalized settings.
 	snapshot := deepCopyAppState(a)
 	snapshot.removeCanonicalLegacySettings()
-	data, err := yaml.Marshal(snapshot)
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := fs.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	if err := afero.WriteFile(fs, tmp, data, 0o600); err != nil {
-		return err
-	}
-	if renameErr := fs.Rename(tmp, path); renameErr != nil {
-		_ = fs.Remove(tmp)
-		return fmt.Errorf("rename %s → %s: %w (tmp removed best-effort)", tmp, path, renameErr)
-	}
-	return nil
+	return utils.AtomicWriteYAML(fs, path, snapshot, 0o600)
 }
 
 // Load reads the YAML file at 'path' into the receiver. A missing file is

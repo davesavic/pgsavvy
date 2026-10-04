@@ -1,10 +1,17 @@
 package common
 
 import (
+	"bufio"
+	"bytes"
+	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -253,6 +260,209 @@ func TestAppState_Save_ReadOnlyFs_ReturnsError(t *testing.T) {
 	require.True(t, os.IsNotExist(statErr))
 	_, statErr = base.Stat("/state.yml.tmp")
 	require.True(t, os.IsNotExist(statErr))
+}
+
+var errReviewState = errors.New("synthetic state I/O failure")
+
+type reviewStateFS struct {
+	afero.Fs
+	fail         string
+	closed       bool
+	beforeRename func(string)
+}
+
+type reviewStateFile struct {
+	afero.File
+	owner *reviewStateFS
+}
+
+func (f *reviewStateFS) OpenFile(path string, flags int, mode os.FileMode) (afero.File, error) {
+	file, err := f.Fs.OpenFile(path, flags, mode)
+	if err != nil {
+		return nil, err
+	}
+	return &reviewStateFile{File: file, owner: f}, nil
+}
+
+func (f *reviewStateFile) Write(p []byte) (int, error) {
+	if f.owner.fail == "write" {
+		n, _ := f.File.Write(p[:len(p)/2])
+		return n, errReviewState
+	}
+	return f.File.Write(p)
+}
+
+func (f *reviewStateFile) Close() error {
+	f.owner.closed = true
+	err := f.File.Close()
+	if f.owner.fail == "close" {
+		return errReviewState
+	}
+	return err
+}
+
+func (f *reviewStateFS) Rename(oldname, newname string) error {
+	if !f.closed {
+		return errors.New("rename before close")
+	}
+	if f.beforeRename != nil {
+		f.beforeRename(oldname)
+	}
+	if f.fail == "rename" {
+		return errReviewState
+	}
+	return f.Fs.Rename(oldname, newname)
+}
+
+func reviewStateFixture(t *testing.T, native bool) (afero.Fs, string) {
+	t.Helper()
+	if !native {
+		return afero.NewMemMapFs(), "/state/state.yml"
+	}
+	return afero.NewOsFs(), filepath.Join(t.TempDir(), "state.yml")
+}
+
+func TestReview_yaml_state(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		name := "MemMapFs"
+		if native {
+			name = "OsFs"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Run("overlap", func(t *testing.T) {
+				base, path := reviewStateFixture(t, native)
+				arrived := []chan string{make(chan string, 1), make(chan string, 1)}
+				release := []chan struct{}{make(chan struct{}), make(chan struct{})}
+				results := []chan error{make(chan error, 1), make(chan error, 1)}
+				done := []chan struct{}{make(chan struct{}), make(chan struct{})}
+				states := []*AppState{{LastConnectionID: "first", LastTheme: strings.Repeat("a", 4096)}, {LastConnectionID: "second", LastTheme: strings.Repeat("b", 8192)}}
+				for i := range states {
+					fs := &reviewStateFS{Fs: base, beforeRename: func(tmp string) { arrived[i] <- tmp; <-release[i] }}
+					go func() { defer close(done[i]); results[i] <- states[i].Save(fs, path) }()
+					defer func() {
+						select {
+						case <-release[i]:
+						default:
+							close(release[i])
+						}
+						<-done[i]
+					}()
+				}
+				temps := make([]string, 2)
+				for i := range states {
+					select {
+					case temps[i] = <-arrived[i]:
+					case <-time.After(5 * time.Second):
+						t.Fatal("state writer did not reach rename barrier")
+					}
+				}
+				for i := range states {
+					close(release[i])
+					require.NoError(t, <-results[i])
+					data, err := afero.ReadFile(base, path)
+					require.NoError(t, err)
+					want, err := yaml.Marshal(states[i])
+					require.NoError(t, err)
+					require.Equal(t, want, data)
+					info, err := base.Stat(path)
+					require.NoError(t, err)
+					require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+				}
+				require.NotEqual(t, temps[0], temps[1])
+				entries, err := afero.ReadDir(base, filepath.Dir(path))
+				require.NoError(t, err)
+				require.Len(t, entries, 1)
+			})
+			for _, phase := range []string{"write", "close", "rename"} {
+				t.Run(phase, func(t *testing.T) {
+					base, path := reviewStateFixture(t, native)
+					require.NoError(t, base.MkdirAll(filepath.Dir(path), 0o700))
+					prior := []byte("last_connection_id: prior\n")
+					require.NoError(t, afero.WriteFile(base, path, prior, 0o600))
+					fs := &reviewStateFS{Fs: base, fail: phase}
+					require.ErrorIs(t, (&AppState{LastConnectionID: "failed"}).Save(fs, path), errReviewState)
+					require.True(t, fs.closed)
+					data, err := afero.ReadFile(base, path)
+					require.NoError(t, err)
+					require.Equal(t, prior, data)
+					entries, err := afero.ReadDir(base, filepath.Dir(path))
+					require.NoError(t, err)
+					require.Len(t, entries, 1, "no failed temp files retained")
+				})
+			}
+		})
+	}
+}
+
+func TestReview_yaml_process_helper(t *testing.T) {
+	path := os.Getenv("PGSAVVY_YAML_TEST_PATH")
+	if path == "" {
+		return
+	}
+	fs := &reviewStateFS{Fs: afero.NewOsFs(), beforeRename: func(tmp string) {
+		_, err := fmt.Fprintln(os.Stdout, tmp)
+		require.NoError(t, err)
+		_, err = bufio.NewReader(os.Stdin).ReadString('\n')
+		require.NoError(t, err)
+	}}
+	state := &AppState{LastConnectionID: os.Getenv("PGSAVVY_YAML_TEST_WRITER"), LastTheme: strings.Repeat(os.Getenv("PGSAVVY_YAML_TEST_WRITER"), 4096)}
+	require.NoError(t, state.Save(fs, path))
+}
+
+func TestReview_yaml_processes(t *testing.T) {
+	base, path := reviewStateFixture(t, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmds := make([]*exec.Cmd, 2)
+	inputs := make([]io.WriteCloser, 2)
+	outputs := make([]*bufio.Reader, 2)
+	stderr := make([]bytes.Buffer, 2)
+	waited := make([]bool, 2)
+	for i, writer := range []string{"first", "second"} {
+		cmds[i] = exec.CommandContext(ctx, os.Args[0], "-test.run=^TestReview_yaml_process_helper$")
+		cmds[i].Env = append(os.Environ(), "PGSAVVY_YAML_TEST_PATH="+path, "PGSAVVY_YAML_TEST_WRITER="+writer)
+		cmds[i].Stderr = &stderr[i]
+		var err error
+		inputs[i], err = cmds[i].StdinPipe()
+		require.NoError(t, err)
+		stdout, err := cmds[i].StdoutPipe()
+		require.NoError(t, err)
+		outputs[i] = bufio.NewReader(stdout)
+		require.NoError(t, cmds[i].Start())
+		defer func() {
+			if !waited[i] {
+				_ = inputs[i].Close()
+				cancel()
+				_ = cmds[i].Wait()
+			}
+		}()
+	}
+	temps := make([]string, 2)
+	for i := range cmds {
+		line, err := outputs[i].ReadString('\n')
+		require.NoError(t, err, "child must reach rename barrier")
+		temps[i] = strings.TrimSpace(line)
+		require.Equal(t, filepath.Dir(path), filepath.Dir(temps[i]))
+	}
+	for i, writer := range []string{"first", "second"} {
+		_, err := io.WriteString(inputs[i], "publish\n")
+		require.NoError(t, err)
+		require.NoError(t, inputs[i].Close())
+		// Drain output before Wait; StdoutPipe is closed by Wait.
+		_, err = io.Copy(io.Discard, outputs[i])
+		require.NoError(t, err)
+		err = cmds[i].Wait()
+		waited[i] = true
+		require.NoError(t, err, "child failed: %s", stderr[i].String())
+		var got AppState
+		require.NoError(t, got.Load(base, path))
+		require.Equal(t, writer, got.LastConnectionID)
+		require.Equal(t, strings.Repeat(writer, 4096), got.LastTheme)
+	}
+	require.NotEqual(t, temps[0], temps[1])
+	entries, err := afero.ReadDir(base, filepath.Dir(path))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
 }
 
 // PushRecentConnectionID prepends, dedupes, and caps the
