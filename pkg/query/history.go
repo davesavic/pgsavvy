@@ -39,6 +39,8 @@ type History struct {
 
 	pausedMu sync.Mutex
 	paused   bool
+	pauseCh  chan struct{}
+	pauseAck chan struct{}
 	resumeCh chan struct{}
 }
 
@@ -76,10 +78,11 @@ func New(path string) (*History, error) {
 	}
 
 	h := &History{
-		db:   db,
-		ch:   make(chan historyEntry, historyChanCap),
-		stop: make(chan struct{}),
-		done: make(chan struct{}),
+		db:      db,
+		ch:      make(chan historyEntry, historyChanCap),
+		stop:    make(chan struct{}),
+		done:    make(chan struct{}),
+		pauseCh: make(chan struct{}),
 	}
 
 	go h.writer()
@@ -168,17 +171,26 @@ func (h *History) writer() {
 	}
 
 	for {
-		if h.isPaused() {
+		h.pausedMu.Lock()
+		paused, pauseCh, resumeCh := h.paused, h.pauseCh, h.resumeCh
+		if paused && h.pauseAck != nil {
+			close(h.pauseAck)
+			h.pauseAck = nil
+		}
+		h.pausedMu.Unlock()
+		if paused {
 			select {
 			case <-h.stop:
 				h.drainAndFlush(&batch, flush)
 				return
-			case <-h.waitResume():
+			case <-resumeCh:
 			}
 			continue
 		}
 
 		select {
+		case <-pauseCh:
+			continue
 		case <-h.stop:
 			h.drainAndFlush(&batch, flush)
 			return
@@ -243,25 +255,25 @@ func (h *History) isPaused() bool {
 	return h.paused
 }
 
-func (h *History) waitResume() <-chan struct{} {
-	h.pausedMu.Lock()
-	defer h.pausedMu.Unlock()
-	if !h.paused {
-		ch := make(chan struct{})
-		close(ch)
-		return ch
-	}
-	return h.resumeCh
-}
-
 func (h *History) pauseWriter() {
 	h.pausedMu.Lock()
-	defer h.pausedMu.Unlock()
-	if h.paused {
+	if !h.paused {
+		h.paused = true
+		h.resumeCh = make(chan struct{})
+		h.pauseAck = make(chan struct{})
+		close(h.pauseCh)
+	}
+	ack := h.pauseAck
+	h.pausedMu.Unlock()
+	if ack == nil {
 		return
 	}
-	h.paused = true
-	h.resumeCh = make(chan struct{})
+	// Wake an idle select and wait until the writer has finished any
+	// in-flight receive/flush and reached its parked state.
+	select {
+	case <-ack:
+	case <-h.done:
+	}
 }
 
 func (h *History) resumeWriter() {
@@ -273,16 +285,11 @@ func (h *History) resumeWriter() {
 	h.paused = false
 	close(h.resumeCh)
 	h.resumeCh = nil
+	h.pauseCh = make(chan struct{})
 }
 
 func (h *History) resumeForTests() {
-	h.pausedMu.Lock()
-	defer h.pausedMu.Unlock()
-	if h.paused {
-		h.paused = false
-		close(h.resumeCh)
-		h.resumeCh = nil
-	}
+	h.resumeWriter()
 }
 
 // AsSessionRecorder returns an adapter that satisfies session.HistoryRecorder

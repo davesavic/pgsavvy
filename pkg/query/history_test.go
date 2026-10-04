@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -111,6 +112,54 @@ func TestHistory_DropOldestOnOverflow(t *testing.T) {
 	require.LessOrEqual(t, stored+int(dropped), n)
 	require.LessOrEqual(t, stored, historyChanCap)
 	require.Greater(t, stored, 0)
+}
+
+func TestHistory_PauseWaitsForWriter(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	h, err := New(filepath.Join(t.TempDir(), "history.sqlite"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, h.Close()) }()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, err := h.db.Conn(ctx)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	for range historyBatchSize {
+		h.Record("SELECT before_pause", 1, 1, true, "before")
+	}
+	for len(h.ch) != 0 {
+		require.NoError(t, ctx.Err(), "writer did not consume its first batch")
+		runtime.Gosched()
+	}
+	// Holding the only DB connection prevents the writer from finishing
+	// its batch. A pause request must not claim that it is already parked.
+	paused := make(chan struct{})
+	go func() {
+		h.pauseWriter()
+		close(paused)
+	}()
+	for !h.isPaused() {
+		require.NoError(t, ctx.Err(), "pause was not requested")
+		runtime.Gosched()
+	}
+	select {
+	case <-paused:
+		t.Error("pause returned while writer was still blocked in flush")
+	case <-time.After(50 * time.Millisecond):
+	}
+	require.NoError(t, conn.Close())
+	select {
+	case <-paused:
+	case <-ctx.Done():
+		t.Fatal("writer did not acknowledge pause after flush completed")
+	}
+	for range 200 {
+		h.Record("SELECT after_pause", 1, 1, true, "after")
+	}
+	require.Len(t, h.ch, historyChanCap)
+	require.EqualValues(t, 200-historyChanCap, h.Dropped())
+	h.resumeWriter()
+	require.NoError(t, h.Close())
 }
 
 func TestHistory_CloseIdempotent(t *testing.T) {
