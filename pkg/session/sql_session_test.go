@@ -1,17 +1,82 @@
 package session_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/goleak"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/session"
 )
+
+type initializingNoticeWriter struct {
+	syncBuf
+	logged chan struct{}
+}
+
+func (w *initializingNoticeWriter) Write(p []byte) (int, error) {
+	n, err := w.syncBuf.Write(p)
+	if bytes.Contains(p, []byte(`"evt":"notice"`)) {
+		w.logged <- struct{}{}
+	}
+	return n, err
+}
+
+func TestSQLSessionStream_NoticeHookBeforePublication(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	const password = "initialization-secret"
+	w := &initializingNoticeWriter{logged: make(chan struct{}, 2)}
+	fs := &fakeSess{id: 42}
+	s := session.New(&fakeConn{}, fs, session.Options{
+		Logger:             slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		ConnectionPassword: password,
+	})
+	defer func() { _ = s.Close() }()
+	loggedDuringInit := false
+	fs.streams = []func() drivers.RowStream{func() drivers.RowStream {
+		fs.noticeCh <- pgconn.Notice{Severity: "NOTICE", Code: "00000", Message: "during initialization " + password}
+		select {
+		case <-w.logged:
+			loggedDuringInit = true
+		case <-time.After(2 * time.Second):
+		}
+		return &fakeRowStream{qid: models.QueryID{SessionID: 42, Nonce: 1}}
+	}}
+	rh, err := s.Stream(context.Background(), models.Query{SQL: "SELECT 1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rh.Rows().Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !loggedDuringInit {
+		t.Error("notice hook did not log while driver Stream was initializing")
+	}
+	notices := 0
+	for n := range rh.Notices() {
+		notices++
+		if n.Message != "during initialization "+password {
+			t.Errorf("routed notice changed: %q", n.Message)
+		}
+	}
+	if notices != 1 || rh.DroppedNotices() != 0 {
+		t.Errorf("notices=%d dropped=%d, want 1 and 0", notices, rh.DroppedNotices())
+	}
+	if got := findEvents(t, &w.syncBuf, "notice"); len(got) != 1 {
+		t.Errorf("notice log count=%d, want 1", len(got))
+	}
+	if strings.Contains(w.String(), password) {
+		t.Error("notice logging exposed connection password")
+	}
+}
 
 // newTestSession constructs a SQLSession over fakeConn + fakeSess wired
 // with the supplied HistoryRecorder.

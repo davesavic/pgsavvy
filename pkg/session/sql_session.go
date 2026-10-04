@@ -351,6 +351,17 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 	start := time.Now()
 
 	rh := protoRunHandle(q.SQL)
+	// The fan-out can route notices as soon as runActive is published,
+	// including while the driver's Stream call is still initializing.
+	rh.noticeHook = func(n pgconn.Notice) {
+		logger.LogAttrs(context.Background(), slog.LevelDebug, "notice",
+			slog.String("evt", "notice"),
+			slog.Uint64("sid", uint64(sid)),
+			slog.String("severity", n.Severity),
+			slog.String("code", n.Code),
+			slog.String("message_preview", noticePreview(n.Message, connPwd)),
+		)
+	}
 	s.runActive.Store(rh)
 
 	rs, err := s.inner.Stream(ctx, q)
@@ -376,16 +387,6 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 
 	rh.queryID = rs.QueryID()
 	rh.rows = &wrappedRowStream{inner: rs, owner: rh}
-
-	rh.noticeHook = func(n pgconn.Notice) {
-		logger.LogAttrs(context.Background(), slog.LevelDebug, "notice",
-			slog.String("evt", "notice"),
-			slog.Uint64("sid", uint64(sid)),
-			slog.String("severity", n.Severity),
-			slog.String("code", n.Code),
-			slog.String("message_preview", noticePreview(n.Message, connPwd)),
-		)
-	}
 
 	rh.cancelFn = func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), cancelDialBound)
