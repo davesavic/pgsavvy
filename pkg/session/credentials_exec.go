@@ -48,7 +48,7 @@ func execPasswordCommand(ctx context.Context, cmd string) (string, error) {
 	c.Stdout = &stdout
 	c.Stderr = &stderr
 
-	runErr := c.Run()
+	runErr := runPasswordCommand(ctx, c)
 	if runErr != nil {
 		stderrBytes := stderr.Bytes()
 		if len(stderrBytes) > maxStderrBytes {

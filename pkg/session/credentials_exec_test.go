@@ -4,12 +4,48 @@ package session
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+func TestReview_password_contracts(t *testing.T) {
+	for _, tt := range []struct {
+		name, command, want string
+	}{
+		{"spaces_and_crlf", "printf '  synthetic password  \\r\\n\\r\\n'", "  synthetic password  "},
+		{"success_discards_stderr", "printf result; printf 'synthetic stderr' >&2", "result"},
+		{"empty_success", "true", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := execPasswordCommand(context.Background(), tt.command)
+			if err != nil || got != tt.want {
+				t.Fatal("normal password-helper output contract changed")
+			}
+		})
+	}
+	t.Run("capped_exit_stderr", func(t *testing.T) {
+		_, err := execPasswordCommand(context.Background(), "i=0; while [ $i -lt 5000 ]; do printf x >&2; i=$((i+1)); done; exit 7")
+		if err == nil || !strings.Contains(err.Error(), "exit code 7") {
+			t.Fatal("exit-code contract changed")
+		}
+		_, stderr, ok := strings.Cut(err.Error(), "stderr=")
+		if !ok || strings.Count(stderr, "x") != maxStderrBytes {
+			t.Fatal("exit-code or capped stderr contract changed")
+		}
+	})
+	t.Run("precanceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := execPasswordCommand(ctx, "printf should-not-run")
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal("pre-canceled helper lost cancellation classification")
+		}
+	})
+}
 
 func TestExecPasswordCommand_TrimsTrailingNewlines(t *testing.T) {
 	got, err := execPasswordCommand(context.Background(), "printf 'pw\\n\\n'")
