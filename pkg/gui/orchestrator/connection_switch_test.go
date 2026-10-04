@@ -1,12 +1,16 @@
 package orchestrator_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/stretchr/testify/require"
 )
 
 // TestConnectionManagerModalSwitchConnection reproduces the bug: while
@@ -61,5 +65,58 @@ func TestConnectionManagerModalSwitchConnection(t *testing.T) {
 	// The modal must be popped on a successful switch, not left showing an error.
 	if top := tree.Current(); top != nil && top.GetKey() == types.CONNECTION_MANAGER {
 		t.Fatalf("modal still top after switch; want it popped")
+	}
+}
+
+func TestReview_schema_reset_ProfileCompletion(t *testing.T) {
+	g, _ := buildTestGuiWithHistory(t)
+	nameA, connA := registerWireFake(t, drivers.Capabilities{})
+	nameB, connB := registerWireFake(t, drivers.Capabilities{})
+	for _, tc := range []struct {
+		conn        *wireFakeConn
+		typ, target string
+	}{
+		{connA, "integer", "accounts_a"},
+		{connB, "text", "accounts_b"},
+	} {
+		tc.conn.schemas = []models.Schema{{Name: "public"}}
+		tc.conn.columns = []models.Column{{Name: "id", DataType: tc.typ}}
+		tc.conn.outboundFKs = []models.ForeignKey{{Schema: "public", Table: "users", Columns: []string{"id"}, RefSchema: "public", RefTable: tc.target, RefColumns: []string{"id"}}}
+	}
+	profiles := []any{&models.Connection{Name: "a", Driver: nameA}, &models.Connection{Name: "b", Driver: nameB}}
+	modal := g.Registry().ConnectionManager
+	engine := g.Controllers().VimEditor.CompletionEngineForTest()
+	sql := "SELECT public.users."
+	buf := &editor.Buffer{Lines: []editor.Line{{Runes: []rune(sql)}}}
+	pos := editor.Position{Col: len([]rune(sql))}
+	for _, step := range []struct {
+		idx         int
+		typ, target string
+	}{
+		{0, "integer", "accounts_a"},
+		{0, "integer", "accounts_a"},
+		{1, "text", "accounts_b"},
+		{0, "integer", "accounts_a"},
+	} {
+		// Each step selects from the list, rather than retrying a prior error.
+		modal.SetMode(guicontext.ModeList)
+		require.NoError(t, g.ContextTree().Push(modal))
+		modal.SetItems(profiles)
+		modal.SetCursor(step.idx)
+		require.NoError(t, g.Controllers().ConnectionManager.Confirm(commands.ExecCtx{}))
+		g.WaitForWorkersForTest()
+		require.Equal(t, profiles[step.idx].(*models.Connection).Name, g.ActiveConnIDForTest())
+		engine.Trigger(context.Background(), buf, pos)
+		g.WaitForWorkersForTest()
+		suggestions := engine.Trigger(context.Background(), buf, pos)
+		found := false
+		for _, suggestion := range suggestions {
+			if suggestion.Text == "id" && suggestion.Source == editor.SchemaSourceName {
+				found = true
+				require.Equal(t, step.typ, suggestion.Detail)
+				require.Equal(t, "public."+step.target+".id", suggestion.FKRef)
+			}
+		}
+		require.True(t, found, "same-named table must expose current database metadata")
 	}
 }

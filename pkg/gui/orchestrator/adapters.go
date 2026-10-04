@@ -671,6 +671,9 @@ func (c *connectInvoker) teardownForSwitch(profile *models.Connection) {
 		return
 	}
 	_ = c.g.retireConnectionLocked(owner)
+	if c.g.schemaWarmer != nil {
+		c.g.schemaWarmer.Reset()
+	}
 }
 
 func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Connection, gen uint64, reporter drivers.ProgressReporter) error {
@@ -1177,7 +1180,7 @@ func (c *connectInvoker) publishSchemaItems(items []any, ok bool) {
 // running it here off the UI thread keeps connect snappy. No-op when the warmer
 // is unwired or no schema is selected.
 func (c *connectInvoker) warmEagerSchema() {
-	if c == nil || c.g == nil || c.g.schemaWarmer == nil {
+	if c == nil || c.g == nil || c.helper == nil || c.g.schemaWarmer == nil {
 		return
 	}
 	schema := schemasPickerAdapter{registry: c.g.registry.Schemas}.SelectedSchemaName()
@@ -1185,8 +1188,11 @@ func (c *connectInvoker) warmEagerSchema() {
 		return
 	}
 	warmer := c.g.schemaWarmer
+	ctx, sessionCurrent := c.helper.BindSessionContext(context.Background())
 	c.g.OnWorker(func(_ gocui.Task) error {
-		warmer.LoadEager(schema)
+		if sessionCurrent() {
+			warmer.LoadEagerContext(ctx, schema)
+		}
 		return nil
 	})
 }

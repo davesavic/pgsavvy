@@ -94,6 +94,7 @@ type SchemaWarmer struct {
 
 	mu    sync.Mutex
 	state map[string]*warmKeyState
+	epoch uint64 // Reset fences eager work across connection lifetimes.
 
 	// callbacks are read under mu so SetOnWarmed/SetOnWarmError race-cleanly
 	// with in-flight warms.
@@ -160,8 +161,9 @@ func (w *SchemaWarmer) Store() *SchemaMetadataStore { return w.store }
 // fresh struct, not the one they captured) rather than letting them repopulate a
 // stale entry. The next claim proceeds against the fresh map.
 func (w *SchemaWarmer) Reset() {
-	w.store.Reset()
 	w.mu.Lock()
+	w.store.Reset()
+	w.epoch++
 	w.state = make(map[string]*warmKeyState)
 	w.mu.Unlock()
 }
@@ -257,10 +259,15 @@ func (w *SchemaWarmer) LoadEagerContext(ctx context.Context, schema string) {
 	if ctx.Err() != nil {
 		return
 	}
+	w.mu.Lock()
+	epoch := w.epoch
+	w.mu.Unlock()
 
 	// Tables FIRST (Finding O).
 	tables, err := w.deps.LoadTables(ctx, schema)
-	if ctx.Err() != nil {
+	w.mu.Lock()
+	if ctx.Err() != nil || w.epoch != epoch {
+		w.mu.Unlock()
 		return
 	}
 	if err != nil {
@@ -272,10 +279,13 @@ func (w *SchemaWarmer) LoadEagerContext(ctx context.Context, schema string) {
 		logs.Event(w.log, "completion", "eager_tables",
 			slog.String("schema", schema), slog.Int("count", len(entries)))
 	}
+	w.mu.Unlock()
 
 	// Function names SECOND (per-connection, not per-schema).
 	fns, err := w.deps.LoadFunctions(ctx)
-	if ctx.Err() != nil {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if ctx.Err() != nil || w.epoch != epoch {
 		return
 	}
 	if err != nil {
@@ -415,7 +425,15 @@ func (w *SchemaWarmer) failWarm(schema, table string, st *warmKeyState, gen uint
 	}
 
 	w.deps.OnUIThreadContentOnly(func() error {
-		w.snapshotOnWarmError()(schema, table, err)
+		w.mu.Lock()
+		live := w.state[tableKey(schema, table)]
+		if live != st || live.gen != gen {
+			w.mu.Unlock()
+			return nil
+		}
+		callback := w.onWarmError
+		w.mu.Unlock()
+		callback(schema, table, err)
 		return nil
 	})
 }
@@ -465,12 +483,6 @@ func (w *SchemaWarmer) snapshotOnWarmed() func(string, string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.onWarmed
-}
-
-func (w *SchemaWarmer) snapshotOnWarmError() func(string, string, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.onWarmError
 }
 
 // tableEntries projects the eager value list from the loaded *models.Table

@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -86,6 +87,128 @@ func sampleTables() []*models.Table {
 		{Name: "orders", Schema: "public", Kind: "table"},
 		{Name: "users", Schema: "public", Kind: "view"},
 	}
+}
+
+func TestReview_schema_reset_LateLazy(t *testing.T) {
+	for _, stage := range []string{"success_queued", "error_queued", "error_pending", "cooldown"} {
+		t.Run(stage, func(t *testing.T) {
+			f := &fakeQuerier{columns: []models.Column{{Name: "id", DataType: "integer"}}, fks: []models.ForeignKey{{Name: "a_fk", Columns: []string{"id"}, RefColumns: []string{"id"}}}}
+			deps := syncDeps(f)
+			var workers []func(gocui.Task) error
+			var ui []func() error
+			deps.OnWorker = func(fn func(gocui.Task) error) { workers = append(workers, fn) }
+			deps.OnUIThreadContentOnly = func(fn func() error) { ui = append(ui, fn) }
+			w := NewSchemaWarmer(NewSchemaMetadataStore(), deps, nil)
+			warmed, failed := 0, 0
+			w.SetOnWarmed(func(string, string) { warmed++ })
+			w.SetOnWarmError(func(string, string, error) { failed++ })
+			if stage != "success_queued" {
+				f.colsErr = errors.New("synthetic outgoing metadata failure")
+			}
+			w.WarmTable("public", "users")
+			if stage != "error_pending" {
+				require.NoError(t, workers[0](gocui.NewFakeTask()))
+			}
+			if stage == "cooldown" {
+				require.Len(t, ui, 1)
+				require.NoError(t, ui[0]())
+				require.Equal(t, 1, failed)
+				ui = nil
+			}
+			w.Reset()
+			f.mu.Lock()
+			f.columns = []models.Column{{Name: "id", DataType: "text"}}
+			f.fks = []models.ForeignKey{{Name: "b_fk", Columns: []string{"id"}, RefColumns: []string{"id"}}}
+			f.colsErr = nil
+			f.mu.Unlock()
+			w.WarmTable("public", "users")
+			require.Len(t, workers, 2, "old in-flight/cooldown must not suppress incoming load")
+			require.NoError(t, workers[1](gocui.NewFakeTask()))
+			require.NoError(t, ui[len(ui)-1]())
+			if stage == "error_pending" {
+				f.mu.Lock()
+				f.colsErr = errors.New("synthetic late outgoing failure")
+				f.mu.Unlock()
+				require.NoError(t, workers[0](gocui.NewFakeTask()))
+			} else if stage != "cooldown" {
+				require.NoError(t, ui[0]())
+			}
+			cols, loaded := w.Store().Columns("public", "users")
+			require.True(t, loaded)
+			require.Equal(t, []models.Column{{Name: "id", DataType: "text"}}, cols)
+			fks, loaded := w.Store().ForeignKeys("public", "users")
+			require.True(t, loaded)
+			require.Equal(t, []models.ForeignKey{{Name: "b_fk", Columns: []string{"id"}, RefColumns: []string{"id"}}}, fks)
+			require.Equal(t, 1, warmed)
+			wantErrors := 0
+			if stage == "cooldown" {
+				wantErrors = 1
+			}
+			require.Equal(t, wantErrors, failed)
+		})
+	}
+}
+
+func TestReview_schema_reset_Eager(t *testing.T) {
+	for _, stage := range []string{"tables", "functions"} {
+		t.Run(stage, func(t *testing.T) {
+			var w *SchemaWarmer
+			switched := false
+			deps := warmDeps{}
+			switchNow := func() {
+				switched = true
+				w.Reset()
+				w.LoadEager("public")
+			}
+			deps.LoadTables = func(context.Context, string) ([]*models.Table, error) {
+				if switched {
+					return []*models.Table{{Name: "users", Kind: "view"}}, nil
+				}
+				if stage == "tables" {
+					switchNow()
+				}
+				return []*models.Table{{Name: "users", Kind: "table"}}, nil
+			}
+			deps.LoadFunctions = func(context.Context) ([]string, error) {
+				if switched {
+					return []string{"b_fn"}, nil
+				}
+				switchNow()
+				return []string{"a_fn"}, nil
+			}
+			w = NewSchemaWarmer(NewSchemaMetadataStore(), deps, nil)
+			w.LoadEager("public")
+			require.Equal(t, "view", w.Store().TableKind("public", "users"))
+			require.Equal(t, []string{"b_fn"}, w.Store().FunctionNames())
+		})
+	}
+}
+
+func TestReview_schema_reset_AtomicLockOrder(t *testing.T) {
+	store := NewSchemaMetadataStore()
+	w := NewSchemaWarmer(store, warmDeps{}, nil)
+	store.mu.Lock()
+	done := make(chan struct{})
+	go func() { w.Reset(); close(done) }()
+	// Holding the store lock makes Reset wait at the nested lock. It must
+	// already own the publication mutex, not clear the store before taking it.
+	deadline := time.Now().Add(3 * time.Second)
+	locked := false
+	for time.Now().Before(deadline) {
+		if !w.mu.TryLock() {
+			locked = true
+			break
+		}
+		w.mu.Unlock()
+		runtime.Gosched()
+	}
+	store.mu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Reset did not settle")
+	}
+	require.True(t, locked, "Reset must lock publication before clearing its store")
 }
 
 func TestReview_schema_ui_eager_context(t *testing.T) {
