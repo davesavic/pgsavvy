@@ -8,7 +8,6 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/pgsavvy/pkg/common"
 	"github.com/davesavic/pgsavvy/pkg/config"
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	"github.com/davesavic/pgsavvy/pkg/gui/keys"
@@ -157,42 +156,55 @@ func (g *Gui) handleSetEx(args []string, _ commands.ExecCtx) error {
 	// already split on whitespace so we rejoin.
 	fullSQL := "SET " + strings.Join(args, " ")
 
-	// Determine the canonical setting key and the value portion.
+	// The SQL tokens are not decoded data; use SHOW after a successful SET.
 	settingKey := strings.ToLower(args[0])
-	var settingValue string
 
 	// Handle "SET TIME ZONE ..." — two-word setting name.
 	if settingKey == "time" && len(args) >= 2 && strings.EqualFold(args[1], "zone") {
 		settingKey = "timezone"
-		// Value is everything after "TIME ZONE" (skip the TO/= if present).
-		valStart := 2
-		if len(args) > 3 && (strings.EqualFold(args[2], "to") || args[2] == "=") {
-			valStart = 3
-		}
-		if valStart < len(args) {
-			settingValue = strings.Join(args[valStart:], " ")
-		}
-	} else if len(args) >= 2 {
-		// Normal form: SET <key> TO <value> or SET <key> = <value>.
-		valStart := 1
-		if len(args) > 2 && (strings.EqualFold(args[1], "to") || args[1] == "=") {
-			valStart = 2
-		}
-		settingValue = strings.Join(args[valStart:], " ")
 	}
 
 	isRecognised := recognisedSettings[settingKey]
+	connID, gen := g.connectionState.activeConnID, g.connectionState.connectGen.Load()
+	ctx, current := g.connectHelper.BindSessionContext(context.Background())
+	inv := &connectInvoker{g: g, helper: g.connectHelper}
 
 	// AD-7: execute on worker, never block UI thread.
 	g.OnWorker(func(_ gocui.Task) error {
-		_, err := sess.Execute(context.Background(), models.Query{SQL: fullSQL})
+		g.settingsRunMu.Lock()
+		defer g.settingsRunMu.Unlock()
+		if !current() {
+			return nil
+		}
+		_, err := sess.Execute(ctx, models.Query{SQL: fullSQL})
 		if err != nil {
 			g.toaster(fmt.Sprintf("SET failed: %s", err))
 			return nil
 		}
 
 		if isRecognised {
-			g.persistTrackedSetting(context.Background(), settingKey, settingValue)
+			value, readErr := readTrackedSetting(ctx, sess, settingKey)
+			if !current() {
+				return nil
+			}
+			if readErr != nil {
+				sess.SettingsSnapshot().Delete(settingKey)
+				if connID != "" && g.deps.Store != nil {
+					if deleteErr := g.deps.Store.DeleteSessionSetting(connID, settingKey); deleteErr != nil {
+						g.toaster("SET applied, not persisted; could not clear previous saved value")
+						return nil
+					}
+				}
+				g.toaster("SET applied, not persisted: setting readback failed")
+				return nil
+			}
+			if err := g.persistTrackedSetting(sess, connID, settingKey, value); err != nil {
+				g.toaster("SET applied, not persisted: state rejected the setting")
+				return nil
+			}
+			if settingKey == "search_path" {
+				g.refreshTrackedSchemas(ctx, inv, sess, connID, gen, current)
+			}
 		}
 
 		g.toaster(fmt.Sprintf("OK: %s", fullSQL))
@@ -216,9 +228,17 @@ func (g *Gui) handleResetEx(args []string, _ commands.ExecCtx) error {
 
 	fullSQL := "RESET " + strings.Join(args, " ")
 	settingKey := strings.ToLower(args[0])
+	connID, gen := g.connectionState.activeConnID, g.connectionState.connectGen.Load()
+	ctx, current := g.connectHelper.BindSessionContext(context.Background())
+	inv := &connectInvoker{g: g, helper: g.connectHelper}
 
 	g.OnWorker(func(_ gocui.Task) error {
-		_, err := sess.Execute(context.Background(), models.Query{SQL: fullSQL})
+		g.settingsRunMu.Lock()
+		defer g.settingsRunMu.Unlock()
+		if !current() {
+			return nil
+		}
+		_, err := sess.Execute(ctx, models.Query{SQL: fullSQL})
 		if err != nil {
 			g.toaster(fmt.Sprintf("RESET failed: %s", err))
 			return nil
@@ -226,25 +246,18 @@ func (g *Gui) handleResetEx(args []string, _ commands.ExecCtx) error {
 
 		// Delete the key from the snapshot so it reverts to the
 		// server default.
-		if recognisedSettings[settingKey] {
+		if recognisedSettings[settingKey] && current() {
 			sess.SettingsSnapshot().Delete(settingKey)
 
-			connID := g.connectionState.activeConnID
 			if connID != "" && g.deps.Store != nil {
-				g.deps.Store.MutateAndSave(func(a *common.AppState) {
-					if a.LastSessionSettings == nil {
-						return
-					}
-					inner := a.LastSessionSettings[connID]
-					if inner == nil {
-						return
-					}
-					delete(inner, settingKey)
-				})
+				if err := g.deps.Store.DeleteSessionSetting(connID, settingKey); err != nil {
+					g.toaster("RESET applied, not persisted: previous saved value could not be cleared")
+					return nil
+				}
 			}
 
-			if (settingKey == "role" || settingKey == "search_path") && g.refreshHelper != nil {
-				_ = g.refreshHelper.RefreshSchemas(context.Background())
+			if settingKey == "role" || settingKey == "search_path" {
+				g.refreshTrackedSchemas(ctx, inv, sess, connID, gen, current)
 			}
 		}
 

@@ -241,6 +241,7 @@ type Gui struct {
 	schemaActivationMu      sync.Mutex
 	schemaActivationRequest *schemaActivationRequest
 	schemaActivationRunMu   sync.Mutex
+	settingsRunMu           sync.Mutex
 
 	// Query-execution state surfaced by the query runtime.
 	queryState queryState
@@ -681,28 +682,33 @@ func schemaSearchPathSQL(schema string) (sql, displayValue string) {
 
 // persistTrackedSetting records a successfully-applied session setting in the
 // snapshot and AppState so it survives reconnects and shows in the status bar,
-// and refreshes the schema rail when search_path changed. Must be called on a
-// worker goroutine. Shared by the :set handler and schema-rail selection.
-func (g *Gui) persistTrackedSetting(ctx context.Context, settingKey, settingValue string) {
-	if g.queryState.activeSQLSession != nil {
-		g.queryState.activeSQLSession.SettingsSnapshot().Set(settingKey, settingValue)
+// using the captured session/connection, never a worker-time live-state read.
+func (g *Gui) persistTrackedSetting(sess *session.SQLSession, connID, settingKey string, value common.CanonicalSessionSetting) error {
+	_, display, err := encodeSetting(settingKey, value)
+	if err != nil {
+		return err
 	}
+	sess.SettingsSnapshot().Set(settingKey, display)
+	if connID != "" && g.deps.Store != nil {
+		return g.deps.Store.SetCanonicalSessionSetting(connID, settingKey, value)
+	}
+	return nil
+}
 
-	if connID := g.connectionState.activeConnID; connID != "" && g.deps.Store != nil {
-		g.deps.Store.MutateAndSave(func(a *common.AppState) {
-			if a.LastSessionSettings == nil {
-				a.LastSessionSettings = make(map[string]map[string]string)
-			}
-			if a.LastSessionSettings[connID] == nil {
-				a.LastSessionSettings[connID] = make(map[string]string)
-			}
-			a.LastSessionSettings[connID][settingKey] = settingValue
-		})
+func (g *Gui) refreshTrackedSchemas(ctx context.Context, inv *connectInvoker, sess *session.SQLSession, connID string, gen uint64, current func() bool) {
+	if !current() {
+		return
 	}
-
-	if settingKey == "search_path" && g.refreshHelper != nil {
-		_ = g.refreshHelper.RefreshSchemas(ctx)
+	if cache := sess.FKCache(); cache != nil {
+		cache.InvalidateAll()
 	}
+	items, ok := inv.loadSchemaItems(ctx)
+	g.OnUIThread(func() error {
+		if current() && g.connectionState.connectGen.Load() == gen && g.queryState.activeSQLSession == sess && g.connectionState.activeConnID == connID {
+			inv.publishSchemaItems(items, ok)
+		}
+		return nil
+	})
 }
 
 // A fresh pointer identifies each opening, even a reopen of the same table.

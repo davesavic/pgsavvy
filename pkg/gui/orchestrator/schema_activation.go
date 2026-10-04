@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/davesavic/pgsavvy/pkg/common"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/logs"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -63,25 +62,33 @@ func (g *Gui) activateSchema(inv *connectInvoker, schema string) {
 		var setErr, schemaErr, tableErr error
 		var schemaItems, tableItems []any
 		if sess != nil {
-			sql, value := schemaSearchPathSQL(schema)
-			_, setErr = sess.Execute(ctx, models.Query{SQL: sql})
-			if !current() {
+			owned := func() bool {
+				g.settingsRunMu.Lock()
+				defer g.settingsRunMu.Unlock()
+				if !current() {
+					return false
+				}
+				sql, _ := schemaSearchPathSQL(schema)
+				_, setErr = sess.Execute(ctx, models.Query{SQL: sql})
+				if !current() {
+					return false
+				}
+				if setErr == nil {
+					names := []string{schema}
+					if schema != "public" {
+						names = append(names, "public")
+					}
+					if err := g.persistTrackedSetting(sess, connID, "search_path", decodedSetting(names...)); err != nil {
+						g.toaster("schema search_path applied, not persisted: state rejected the setting")
+					}
+				}
+				return true
+			}()
+			if !owned {
 				cancel()
 				return nil
 			}
 			if setErr == nil {
-				sess.SettingsSnapshot().Set("search_path", value)
-				if g.deps.Store != nil && connID != "" {
-					g.deps.Store.MutateAndSave(func(a *common.AppState) {
-						if a.LastSessionSettings == nil {
-							a.LastSessionSettings = make(map[string]map[string]string)
-						}
-						if a.LastSessionSettings[connID] == nil {
-							a.LastSessionSettings[connID] = make(map[string]string)
-						}
-						a.LastSessionSettings[connID]["search_path"] = value
-					})
-				}
 				if cache := sess.FKCache(); cache != nil {
 					cache.InvalidateAll()
 				}

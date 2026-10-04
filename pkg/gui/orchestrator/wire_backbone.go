@@ -9,7 +9,6 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/pgsavvy/pkg/cheatsheet"
-	"github.com/davesavic/pgsavvy/pkg/common"
 	"github.com/davesavic/pgsavvy/pkg/config"
 	"github.com/davesavic/pgsavvy/pkg/gui"
 	"github.com/davesavic/pgsavvy/pkg/gui/clipboard"
@@ -924,29 +923,14 @@ func (g *Gui) wireExCommands(defaults []*types.ChordBinding, svc *keys.Keybindin
 		g.controllers.SearchPath.SetRunner = g.handleSetEx
 	}
 
-	// wire the statement timeout prompt to the SET handler + AppState.
+	// SET's captured worker owns persistence after successful readback. The
+	// prompt callback runs before that worker settles and must not write state.
 	if g.controllers != nil && g.controllers.StatementTimeout != nil {
 		g.controllers.StatementTimeout.SetRunner = g.handleSetEx
 		g.controllers.StatementTimeout.ActiveConnID = func() string {
 			return g.connectionState.activeConnID
 		}
-		g.controllers.StatementTimeout.PersistTimeout = func(connID, timeout string) {
-			if g.deps.Store == nil {
-				return
-			}
-			g.deps.Store.MutateAndSave(func(a *common.AppState) {
-				if timeout == "" {
-					if a.StatementTimeoutOverride != nil {
-						delete(a.StatementTimeoutOverride, connID)
-					}
-					return
-				}
-				if a.StatementTimeoutOverride == nil {
-					a.StatementTimeoutOverride = make(map[string]string)
-				}
-				a.StatementTimeoutOverride[connID] = timeout
-			})
-		}
+		g.controllers.StatementTimeout.PersistTimeout = nil
 	}
 
 	// :reset — execute RESET on the live SQL session. Handler in

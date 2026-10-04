@@ -1,6 +1,12 @@
 package orchestrator
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/stretchr/testify/require"
+)
 
 func TestSchemaSearchPathSQL(t *testing.T) {
 	tests := []struct {
@@ -39,4 +45,44 @@ func TestSchemaSearchPathSQL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReview_settings_schemaActivation(t *testing.T) {
+	for _, schema := range []string{"public", "a,b", `say"hi`} {
+		t.Run(schema, func(t *testing.T) {
+			fake := &reviewSettingsSession{}
+			name := reviewSettingsRegister(t, func(context.Context) (drivers.Driver, error) {
+				return &reviewSettingsDriver{conn: &reviewSettingsConn{sess: fake}}, nil
+			})
+			g, store, _, _ := reviewSettingsGui(t, name, "")
+			g.activateSchema(&connectInvoker{g: g, helper: g.connectHelper}, schema)
+			g.spinnerState.workersWG.Wait()
+			saved, err := store.CanonicalSessionSettingsSnapshot("conn")
+			require.NoError(t, err)
+			names := []string{schema}
+			if schema != "public" {
+				names = append(names, "public")
+			}
+			require.Equal(t, decodedSetting(names...), saved["search_path"])
+			require.Empty(t, store.LastSessionSettingsSnapshot("conn"))
+			want, _ := schemaSearchPathSQL(schema)
+			require.Equal(t, []string{want}, fake.queries)
+		})
+	}
+}
+
+func TestReview_settings_schemaPanicReleasesWriter(t *testing.T) {
+	fake := &reviewSettingsSession{panicSet: true}
+	name := reviewSettingsRegister(t, func(context.Context) (drivers.Driver, error) {
+		return &reviewSettingsDriver{conn: &reviewSettingsConn{sess: fake}}, nil
+	})
+	g, _, _, _ := reviewSettingsGui(t, name, "")
+	g.activateSchema(&connectInvoker{g: g, helper: g.connectHelper}, "public")
+	g.spinnerState.workersWG.Wait()
+	require.Equal(t, []string{`SET search_path TO "public"`}, fake.queries)
+	locked := g.settingsRunMu.TryLock()
+	if locked {
+		g.settingsRunMu.Unlock()
+	}
+	require.True(t, locked, "recovered worker panic must not strand other tracked writers")
 }

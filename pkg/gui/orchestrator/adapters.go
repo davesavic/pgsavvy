@@ -1563,15 +1563,21 @@ func (c *connectInvoker) restoreSessionSettings(ctx context.Context, sess *sessi
 	}
 	store := c.g.deps.Store
 
-	saved := store.LastSessionSettingsSnapshot(connID)
-	if saved == nil {
-		saved = make(map[string]string)
+	canonical, err := store.CanonicalSessionSettingsSnapshot(connID)
+	if err != nil {
+		c.g.deps.Common.Logger().Warn("gui: restore canonical settings failed", "connection_id", connID, "err", err)
+		return ""
+	}
+	legacy := store.LastSessionSettingsSnapshot(connID)
+	if legacy == nil {
+		legacy = make(map[string]string)
 	}
 	if to := store.StatementTimeoutOverrideValue(connID); to != "" {
-		saved["statement_timeout"] = to
+		legacy["statement_timeout"] = to
 	}
+	saved := decodeLegacySettings(legacy, canonical, c.g.deps.Common.Logger(), connID)
 
-	return replaySessionSettings(ctx, saved, func(ctx context.Context, sql string) error {
+	return replayCanonicalSessionSettings(ctx, saved, func(ctx context.Context, sql string) error {
 		// Restoration SETs are internal bootstrap, not user queries — keep
 		// them out of query history. A SET the user types themselves still
 		// records normally (this only suppresses the replay path).
@@ -1601,6 +1607,37 @@ func replaySessionSettings(
 	log *slog.Logger,
 	connID string,
 ) string {
+	return replayCanonicalSessionSettings(ctx, decodeLegacySettings(saved, nil, log, connID), exec, snap, log, connID)
+}
+
+func decodeLegacySettings(legacy map[string]string, canonical map[string]common.CanonicalSessionSetting, log *slog.Logger, connID string) map[string]common.CanonicalSessionSetting {
+	saved := make(map[string]common.CanonicalSessionSetting)
+	for key, value := range canonical {
+		saved[key] = value
+	}
+	for key, value := range legacy {
+		if _, exists := saved[key]; exists || !gucAllowlist[key] || value == "" {
+			continue
+		}
+		decoded, err := decodeLegacySetting(key, value)
+		if err != nil {
+			log.Warn("gui: restore legacy setting skipped", "connection_id", connID, "key", key, "err", err)
+			continue
+		}
+		log.Warn("gui: restore legacy setting: provenance unavailable; re-save to remove possible historical loss", "connection_id", connID, "key", key)
+		saved[key] = decoded
+	}
+	return saved
+}
+
+func replayCanonicalSessionSettings(
+	ctx context.Context,
+	saved map[string]common.CanonicalSessionSetting,
+	exec func(context.Context, string) error,
+	snap *session.SettingsSnapshot,
+	log *slog.Logger,
+	connID string,
+) string {
 	var keys []string
 	for k := range saved {
 		if gucAllowlist[k] {
@@ -1614,41 +1651,14 @@ func replaySessionSettings(
 
 	var restored []string
 	for _, key := range keys {
-		val := saved[key]
-		if val == "" {
+		sql, val, err := encodeSetting(key, saved[key])
+		if err != nil {
+			log.Warn("gui: restore setting: invalid decoded value", "connection_id", connID, "key", key)
 			continue
 		}
 
-		var sql string
-		switch key {
-		case "search_path":
-			parts := strings.Split(val, ",")
-			var quoted []string
-			for _, s := range parts {
-				s = strings.TrimSpace(s)
-				s = strings.Trim(s, `"`)
-				if s == "" {
-					continue
-				}
-				quoted = append(quoted, `"`+strings.ReplaceAll(s, `"`, `""`)+`"`)
-			}
-			if len(quoted) == 0 {
-				continue
-			}
-			sql = "SET search_path TO " + strings.Join(quoted, ", ")
-		case "statement_timeout":
-			canon, err := session.CanonicalizeStatementTimeout(val)
-			if err != nil {
-				log.Warn("gui: restore setting: bad statement_timeout", "connection_id", connID, "val", val, "err", err)
-				continue
-			}
-			sql = "SET statement_timeout = '" + canon + "'"
-		default:
-			sql = "SET " + key + " TO '" + strings.ReplaceAll(val, "'", "''") + "'"
-		}
-
 		if err := exec(ctx, sql); err != nil {
-			log.Warn("gui: restore setting failed", "connection_id", connID, "key", key, "sql", sql, "err", err)
+			log.Warn("gui: restore setting failed", "connection_id", connID, "key", key)
 			continue
 		}
 		snap.Set(key, val)
