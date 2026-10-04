@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/clipperhouse/uax29/v2/graphemes"
+
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/theme"
 )
@@ -455,7 +457,7 @@ func renderHeaderLine(snap viewSnapshot, innerW int, moreLeft, moreRight bool) s
 	}
 	// Overlay the ‹ / › scroll arrows on the header's edge cells so the
 	// user can see columns continue past the viewport. The overlay runs on
-	// the still-plain line (rune-index replacement is only safe without ANSI
+	// the still-plain line (cell-coordinate replacement is only safe without ANSI
 	// bytes present), THEN tintHeaderLine wraps the result so the SGR pair is
 	// the outermost layer and the overlay can never corrupt the escape.
 	return tintHeaderLine(overlayColumnArrows(line, moreLeft, moreRight))
@@ -479,26 +481,50 @@ func tintHeaderLine(line string) string {
 // overlayColumnArrows draws the ◄ / ► horizontal-scroll arrows one cell in
 // from each edge of a plain (un-styled) line, leaving the edge-most cell as
 // padding so the arrow doesn't sit flush against the view border. ◄ / ► are
-// single-cell glyphs (unlike ◀ / ▶, which some terminals widen), so the
-// rune overlay keeps the column grid aligned. Safe only for the header line,
+// normally single-cell glyphs. Wide ambiguous-glyph locales use ASCII arrows
+// so the cell overlay keeps the column grid aligned. Safe only for the header line,
 // which carries no ANSI styling. pgsavvy column-scroll indicator.
 func overlayColumnArrows(line string, left, right bool) string {
 	if !left && !right {
 		return line
 	}
-	r := []rune(line)
-	if len(r) < 2 {
+	width := displayWidth(line)
+	if width < 2 {
 		return line
 	}
-	if left {
-		r[0] = ' '
-		r[1] = '◄'
+	leftArrow, rightArrow := '◄', '►'
+	if displayWidth(string(leftArrow)) != 1 {
+		leftArrow = '<'
 	}
-	if right {
-		r[len(r)-1] = ' '
-		r[len(r)-2] = '►'
+	if displayWidth(string(rightArrow)) != 1 {
+		rightArrow = '>'
 	}
-	return string(r)
+	var out strings.Builder
+	pos := 0
+	clusters := graphemes.FromString(line)
+	for clusters.Next() {
+		cluster := clusters.Value()
+		w := displayWidth(cluster)
+		if (left && pos < 2) || (right && pos+w > width-2) {
+			// Replace the entire intersected grapheme, not half a wide glyph.
+			for x := pos; x < pos+w; x++ {
+				switch {
+				case right && x == width-2:
+					out.WriteRune(rightArrow)
+				case right && x == width-1:
+					out.WriteByte(' ')
+				case left && x == 1:
+					out.WriteRune(leftArrow)
+				default:
+					out.WriteByte(' ')
+				}
+			}
+		} else {
+			out.WriteString(cluster)
+		}
+		pos += w
+	}
+	return out.String()
 }
 
 // columnScrollHints reports whether non-hidden columns exist beyond the

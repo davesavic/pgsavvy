@@ -26,7 +26,7 @@ type highlightSpan struct {
 // zero surviving highlight renders byte-identically to the clean path. The
 // match highlight is injected on the PADDED visible string by translating
 // each span's byte offsets to rune positions, mapping those through
-// padRight's rune-count truncation, and wrapping the surviving rune range
+// padRight's cell-width truncation, and wrapping the surviving rune range
 // with the Search / CurSearch SGR. When a span is clipped by truncation or
 // any offset is out of range the WHOLE rendered cell is highlighted instead
 // (whole-cell fallback) so we never slice out of range or mid-rune.
@@ -60,14 +60,8 @@ func applyMatchHighlights(visible, padded string, w int, spans []highlightSpan) 
 		return wholeCellFallback(padded, spans)
 	}
 
-	// padRight keeps the first (w-1) runes + "…" when displayWidth(visible) > w.
-	// Determine how many of visible's runes survive into padded.
-	visibleRunes := utf8.RuneCountInString(visible)
-	survivingRunes := visibleRunes
-	truncated := visibleRunes > w
-	if truncated {
-		survivingRunes = w - 1 // the rest is replaced by the single "…" rune
-	}
+	prefix, _ := cellText(visible, w)
+	survivingRunes := utf8.RuneCountInString(prefix)
 
 	// If any span reaches into the truncated/ellipsis region, fall back to
 	// highlighting the whole rendered cell — we cannot represent a clipped

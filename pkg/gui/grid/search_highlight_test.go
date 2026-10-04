@@ -235,3 +235,34 @@ func TestNextMatch_ScrollsOffscreenCellIntoView(t *testing.T) {
 	require.Contains(t, body, curSearchSGR+"needle"+ansiReset,
 		"matched off-screen cell must be scrolled into view and highlighted")
 }
+
+func TestReview_width_highlight_clipping(t *testing.T) {
+	for _, tc := range []struct {
+		name, value, match string
+		width              int
+		fallback           bool
+	}{
+		{"CJK dropped match", "中文界", "文", 4, true},
+		{"CJK retained match", "中文界", "中", 4, false},
+		{"combining fits", "e\u0301xx", "x", 3, false},
+		{"combining retained", "e\u0301xyz", "e\u0301", 2, false},
+		{"combining dropped", "e\u0301xyz", "x", 2, true},
+		{"joined emoji retained", "👩‍💻abc", "👩‍💻", 3, false},
+		{"joined emoji dropped", "👩‍💻abc", "a", 3, true},
+		{"ASCII one retained", "abc", "a", 1, false},
+		{"ASCII one dropped", "abc", "b", 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			start := strings.Index(tc.value, tc.match)
+			span := []highlightSpan{{byteStart: start, byteEnd: start + len(tc.match)}}
+			padded := padRight(tc.value, tc.width)
+			got := applyMatchHighlights(tc.value, padded, tc.width, span)
+			require.Equal(t, padded, stripANSI(got))
+			if tc.fallback {
+				require.Equal(t, wholeCellFallback(padded, span), got)
+			} else {
+				require.Contains(t, got, searchSGR+tc.match+ansiReset)
+			}
+		})
+	}
+}

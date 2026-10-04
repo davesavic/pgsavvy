@@ -2,7 +2,6 @@ package grid
 
 import (
 	"strings"
-	"unicode/utf8"
 
 	"github.com/mattn/go-runewidth"
 )
@@ -61,13 +60,9 @@ func (v *View) autoSizeFromSampleLocked() {
 	}
 }
 
-// displayWidth returns the rune count of s. For ASCII this is len(s);
-// for unicode it counts code points (not grapheme clusters — combining
-// marks count separately, which over-estimates by a small fraction in
-// rare cases). Sufficient for column-width sizing where a one-cell
-// over-allocation is harmless.
+// displayWidth budgets terminal cells, including wide and combining characters.
 func displayWidth(s string) int {
-	return utf8.RuneCountInString(s)
+	return displayCols(s)
 }
 
 // displayCols returns the terminal display width of s in columns,
@@ -79,7 +74,7 @@ func displayCols(s string) int {
 }
 
 // truncateToWidth returns s clamped to at most maxCols display columns,
-// cutting on a rune boundary and appending the ellipsis "…" (1 column)
+// cutting on a grapheme boundary and appending a fitting overflow marker
 // when content was dropped. The result is always valid UTF-8 — runes
 // are never sliced mid-byte — and its display width never exceeds
 // maxCols. maxCols ≤ 0 yields "". When s already fits it is returned
@@ -89,51 +84,44 @@ func truncateToWidth(s string, maxCols int) string {
 	if maxCols <= 0 {
 		return ""
 	}
-	if runewidth.StringWidth(s) <= maxCols {
-		return s
-	}
-	// Reserve one column for the ellipsis. With only one column to give
-	// we still must emit the ellipsis so overflow is visible.
-	budget := maxCols - 1
-	var b strings.Builder
-	used := 0
-	for _, r := range s {
-		w := runewidth.RuneWidth(r)
-		if used+w > budget {
-			break
-		}
-		b.WriteRune(r)
-		used += w
-	}
-	return b.String() + "…"
+	return runewidth.Truncate(s, maxCols, overflowMarker(maxCols))
 }
 
-// padRight returns s padded with spaces to width w. If s is wider than
-// w, it is truncated and a trailing ellipsis "…" is added in place of
-// the last visible cell — matching the spec ("`…` truncation on
-// overflow"). If w ≤ 1, returns s truncated to w runes verbatim.
-func padRight(s string, w int) string {
-	dw := displayWidth(s)
-	if dw == w {
-		return s
+func overflowMarker(w int) string {
+	if displayWidth("…") <= w {
+		return "…"
 	}
-	if dw < w {
-		// Fast-path ASCII; for unicode just append spaces (each ASCII
-		// space is one rune == one cell).
-		pad := make([]byte, w-dw)
-		for i := range pad {
-			pad[i] = ' '
+	return "."
+}
+
+// cellText separates retained source from the overflow marker so search
+// highlights cannot accidentally target an ellipsis or padding.
+func cellText(s string, w int) (prefix, tail string) {
+	if w <= 0 {
+		return "", ""
+	}
+	if displayWidth(s) <= w {
+		return s, ""
+	}
+	if w == 1 {
+		prefix = runewidth.Truncate(s, w, "")
+		if displayWidth(prefix) == 1 {
+			return prefix, ""
 		}
-		return s + string(pad)
+		return "", overflowMarker(w)
 	}
-	// Truncate with ellipsis. Walk runes so we don't slice mid-rune.
-	if w < 1 {
+	tail = overflowMarker(w)
+	return runewidth.Truncate(s, w-displayWidth(tail), ""), tail
+}
+
+// padRight fills exactly w terminal cells without splitting a grapheme.
+// Width one retains a fitting first character for ASCII compatibility;
+// an unfittable wide character uses a fitting overflow marker instead.
+func padRight(s string, w int) string {
+	if w <= 0 {
 		return ""
 	}
-	runes := []rune(s)
-	if w == 1 {
-		return string(runes[0])
-	}
-	// Keep the first (w-1) runes then append "…".
-	return string(runes[:w-1]) + "…"
+	prefix, tail := cellText(s, w)
+	text := prefix + tail
+	return text + strings.Repeat(" ", w-displayWidth(text))
 }

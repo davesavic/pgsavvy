@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/mattn/go-runewidth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -78,12 +79,109 @@ func TestPadRight_UnicodeWidthBoundary(t *testing.T) {
 	require.Equal(t, 6, utf8.RuneCountInString(input))
 
 	out := padRight(input, 4)
-	require.Equal(t, 4, utf8.RuneCountInString(out),
-		"unicode truncation must yield exactly w runes")
+	require.Equal(t, 4, runewidth.StringWidth(out),
+		"unicode truncation must yield exactly w terminal cells")
 	require.True(t, utf8.ValidString(out),
 		"truncated unicode output must be valid UTF-8 (no mid-rune slice)")
-	require.True(t, strings.HasSuffix(out, "…"),
+	require.True(t, strings.HasSuffix(strings.TrimRight(out, " "), "…"),
 		"unicode truncation must end with the ellipsis rune")
+}
+
+func TestReview_width_measure_and_pad(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+		width, cells      int
+	}{
+		{"ASCII", "abc", "abc  ", 5, 3},
+		{"ASCII overflow", "abcdef", "abc…", 4, 6},
+		{"ASCII width one", "abc", "a", 1, 3},
+		{"CJK", "中文", "中文  ", 6, 4},
+		{"CJK overflow", "中文测试", "中… ", 4, 8},
+		{"CJK width one", "中", "…", 1, 2},
+		{"combining", "e\u0301e\u0301", "e\u0301e\u0301  ", 4, 2},
+		{"combining overflow", "e\u0301xyz", "e\u0301…", 2, 4},
+		{"emoji", "🚀", "🚀 ", 3, 2},
+		{"emoji width one", "🚀", "…", 1, 2},
+		{"joined emoji", "👩‍💻abc", "👩‍💻…", 3, 5},
+		{"modified emoji", "👍🏽abc", "👍🏽…", 3, 5},
+		{"zero budget", "中", "", 0, 2},
+		{"negative budget", "中", "", -1, 2},
+		{"empty", "", "   ", 3, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.cells, displayWidth(tc.input))
+			got := padRight(tc.input, tc.width)
+			require.Equal(t, tc.want, got)
+			require.True(t, utf8.ValidString(got))
+			require.Equal(t, max(tc.width, 0), runewidth.StringWidth(got))
+		})
+	}
+}
+
+func TestReview_width_autosize(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{
+		{Name: "中文测试标题列", TypeName: "text"},
+		{Name: "combining", TypeName: "text"},
+		{Name: "emoji", TypeName: "text"},
+	})
+	require.Equal(t, 14, v.snapshot().widths[0], "empty results size headers in cells")
+	v.AppendRows([]models.Row{{Values: []any{
+		"中文测试标题列值", strings.Repeat("e\u0301", 12), strings.Repeat("🚀", 7),
+	}}})
+	require.Equal(t, []int{16, 12, 14}, v.snapshot().widths)
+}
+
+func TestReview_width_truncate_clusters(t *testing.T) {
+	for _, input := range []string{"中文测试", "e\u0301xyz", "👩‍💻abc", "👍🏽abc"} {
+		for w := 0; w <= 8; w++ {
+			got := truncateToWidth(input, w)
+			require.True(t, utf8.ValidString(got))
+			require.LessOrEqual(t, runewidth.StringWidth(got), w)
+		}
+	}
+	require.Equal(t, "👩‍💻…", truncateToWidth("👩‍💻abc", 3))
+	require.Equal(t, "e\u0301…", truncateToWidth("e\u0301xyz", 2))
+}
+
+func TestReview_width_eastasian_markers(t *testing.T) {
+	previous := runewidth.DefaultCondition
+	runewidth.DefaultCondition = &runewidth.Condition{EastAsianWidth: true, StrictEmojiNeutral: true}
+	t.Cleanup(func() { runewidth.DefaultCondition = previous })
+	require.Equal(t, 2, displayWidth("…"), "exercise the wide-marker branch")
+	for _, input := range []string{"abcdefgh", "中文测试", "e\u0301xyz", "👩‍💻abc", "👍🏽abc"} {
+		for w := 0; w <= 8; w++ {
+			var padded, truncated string
+			require.NotPanics(t, func() {
+				padded = padRight(input, w)
+				truncated = truncateToWidth(input, w)
+			})
+			require.True(t, utf8.ValidString(padded))
+			require.True(t, utf8.ValidString(truncated))
+			require.Equal(t, w, displayWidth(padded))
+			require.LessOrEqual(t, displayWidth(truncated), w)
+		}
+	}
+	require.Equal(t, ".", padRight("中", 1))
+	require.Equal(t, "a", padRight("abc", 1))
+	require.Equal(t, "ab…", padRight("abcdefgh", 4))
+	leftArrow, rightArrow := "◄", "►"
+	if displayWidth(leftArrow) != 1 {
+		leftArrow = "<"
+	}
+	if displayWidth(rightArrow) != 1 {
+		rightArrow = ">"
+	}
+	for _, line := range []string{"abcdef", "中文测试", "👩‍💻abc"} {
+		out := overlayColumnArrows(line, true, true)
+		require.Equal(t, displayWidth(line), displayWidth(out))
+		require.True(t, strings.HasPrefix(out, " "+leftArrow))
+		require.True(t, strings.HasSuffix(out, rightArrow+" "))
+	}
+	value := "中文界"
+	padded := padRight(value, 4)
+	span := []highlightSpan{{byteStart: 3, byteEnd: 6}}
+	require.Equal(t, wholeCellFallback(padded, span), applyMatchHighlights(value, padded, 4, span))
 }
 
 // TestSetColumns_SeedsWidthsFromHeaders verifies that SetColumns sizes

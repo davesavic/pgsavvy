@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
+	"github.com/mattn/go-runewidth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -781,4 +782,72 @@ func TestRenderHeaderLine_PlainUnderNoColor(t *testing.T) {
 	out := renderHeaderLine(snap, 80, false, false)
 
 	require.NotContains(t, out, "\x1b", "no escape under NO_COLOR; got %q", out)
+}
+
+func TestReview_width_header_arrows(t *testing.T) {
+	for _, input := range []string{"中文测试", "e\u0301abcdef", "👩‍💻abcdef", "abcdef🚀", "中文", "abc", "ab", "a", ""} {
+		for _, arrows := range [][2]bool{{true, false}, {false, true}, {true, true}, {false, false}} {
+			out := overlayColumnArrows(input, arrows[0], arrows[1])
+			width := runewidth.StringWidth(input)
+			require.Equal(t, width, runewidth.StringWidth(out), "%q -> %q", input, out)
+			if width < 2 {
+				require.Equal(t, input, out)
+				continue
+			}
+			if arrows[1] {
+				pos := strings.Index(out, "►")
+				require.NotEqual(t, -1, pos)
+				require.Equal(t, width-2, runewidth.StringWidth(out[:pos]))
+				require.True(t, strings.HasSuffix(out, " "))
+			}
+			if arrows[0] && (!arrows[1] || width >= 4) {
+				require.True(t, strings.HasPrefix(out, " ◄"), "%q", out)
+			}
+		}
+	}
+	require.Equal(t, " ◄cd► ", overlayColumnArrows("abcdef", true, true))
+}
+
+func TestReview_width_header_body_hit_coordinates(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{textCol("中文列"), textCol("e\u0301列"), textCol("🚀列")})
+	v.AppendRows([]models.Row{{Values: []any{"中文测试", "e\u0301e\u0301", "🚀🚀"}}})
+	v.widths = []int{8, 6, 6}
+	const width = 26
+	snap := v.snapshot()
+	header := stripANSI(renderHeaderLine(snap, width, false, false))
+	body := stripANSI(renderDataLine(snap, 0, width))
+	require.Equal(t, width, runewidth.StringWidth(header))
+	seps := []int{}
+	for i, r := range header {
+		if r == '│' {
+			seps = append(seps, runewidth.StringWidth(header[:i]))
+		}
+	}
+	require.Equal(t, []int{9, 18}, seps, "%q", header)
+	// Body columns are separated by spaces, not the header's vertical bars.
+	for _, tc := range []struct {
+		value string
+		x     int
+	}{{"中文测试", 0}, {"e\u0301e\u0301", 11}, {"🚀🚀", 20}} {
+		pos := strings.Index(body, tc.value)
+		require.NotEqual(t, -1, pos)
+		require.Equal(t, tc.x, runewidth.StringWidth(body[:pos]), "%q", body)
+	}
+	for x := 0; x < width; x++ {
+		want := -1
+		switch {
+		case x < 8:
+			want = 0
+		case x >= 11 && x < 17:
+			want = 1
+		case x >= 20:
+			want = 2
+		}
+		require.Equal(t, want, v.headerColumnAt(x), "cell %d", x)
+	}
+	for _, arrows := range [][2]bool{{true, false}, {false, true}, {true, true}} {
+		line := stripANSI(renderHeaderLine(snap, width, arrows[0], arrows[1]))
+		require.Equal(t, width, runewidth.StringWidth(line))
+	}
 }
