@@ -10,6 +10,119 @@ import (
 	"time"
 )
 
+func TestReview_async_commit_model(t *testing.T) {
+	for _, outcome := range []string{"committed", "cancelled", "unknown"} {
+		t.Run(outcome, func(t *testing.T) {
+			s := &PendingEditSet{Table: Ref{Schema: "a", Table: "items"}}
+			e := PendingEdit{PrimaryKey: []any{1}, Column: "n", Kind: Expression, NewExpr: "n + 1"}
+			if err := s.Add(e); err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := s.BeginCommit(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !s.CommitInFlight() {
+				t.Fatal("operation not marked busy")
+			}
+			if _, err := s.BeginCommit(nil); !errors.Is(err, ErrCommitInFlight) {
+				t.Fatalf("duplicate submission: %v", err)
+			}
+			otherColumn := e
+			otherColumn.Column = "other"
+			if err := s.Add(otherColumn); !errors.Is(err, ErrCommitInFlight) {
+				t.Fatalf("same-row restaging: %v", err)
+			}
+			unrelated := e
+			unrelated.PrimaryKey = []any{2}
+			if err := s.Add(unrelated); err != nil {
+				t.Fatal(err)
+			}
+			s.Remove(e.PrimaryKey, e.Column)
+			if err := s.Add(e); !errors.Is(err, ErrCommitInFlight) {
+				t.Fatalf("discard bypassed busy guard: %v", err)
+			}
+			s.SettleCommit(snapshot, outcome == "committed", outcome == "unknown", [][]any{{1}}, [][]any{{11}})
+			if s.CommitInFlight() {
+				t.Fatal("settlement left busy guard")
+			}
+			if outcome == "unknown" {
+				if !s.CommitOutcomeUnknown() {
+					t.Fatal("unknown receipt lost after discard")
+				}
+				if err := s.Add(e); !errors.Is(err, ErrCommitOutcomeUnknown) {
+					t.Fatalf("unknown row retry: %v", err)
+				}
+				if _, err := s.BeginCommit(nil); !errors.Is(err, ErrCommitOutcomeUnknown) {
+					t.Fatalf("unknown operation retry: %v", err)
+				}
+				if err := s.ReconcileCommitOutcome(false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := s.Add(e); err != nil {
+				t.Fatal(err)
+			}
+			// A duplicate old receipt must not settle a newer operation.
+			next, err := s.BeginCommit(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.SettleCommit(snapshot, true, false, [][]any{{1}}, [][]any{{11}})
+			if !s.CommitInFlight() || s.Count() != 2 {
+				t.Fatal("old receipt settled new intent")
+			}
+			s.SettleCommit(next, true, false, [][]any{{1}, {2}}, [][]any{{11}, {2}})
+			if !s.IsEmpty() {
+				t.Fatal("matching committed versions remain replayable")
+			}
+		})
+	}
+}
+
+func TestReview_async_commit_snapshot(t *testing.T) {
+	s := &PendingEditSet{Table: Ref{Schema: "a", Table: "items"}}
+	value := map[string]any{"items": []any{[]byte{3}}}
+	if err := s.Add(PendingEdit{PrimaryKey: []any{[]byte{1}}, Column: "payload", NewValue: value}); err != nil {
+		t.Fatal(err)
+	}
+	selected := s.Edits()
+	snapshot, err := s.BeginCommit(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected[0].NewValue.(map[string]any)["items"].([]any)[0].([]byte)[0] = 9
+	copy := snapshot.Edits()
+	if copy[0].NewValue.(map[string]any)["items"].([]any)[0].([]byte)[0] != 3 {
+		t.Fatal("snapshot aliases selection")
+	}
+	copy[0].PrimaryKey[0].([]byte)[0] = 8
+	if snapshot.Edits()[0].PrimaryKey[0].([]byte)[0] != 1 {
+		t.Fatal("snapshot aliases reader")
+	}
+	s.Clear()
+	if err := s.Add(PendingEdit{PrimaryKey: []any{[]byte{1}}, Column: "other"}); !errors.Is(err, ErrCommitInFlight) {
+		t.Fatalf("Clear bypassed guard: %v", err)
+	}
+	if err := s.ReconcileCommitOutcome(false); !errors.Is(err, ErrCommitInFlight) {
+		t.Fatalf("reconcile during operation: %v", err)
+	}
+	s.SettleCommit(snapshot, true, false, [][]any{{[]byte{1}}}, [][]any{{[]byte{1}}})
+	if err := s.Add(PendingEdit{PrimaryKey: []any{[]byte{1}}, Column: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BeginCommit(selected); !errors.Is(err, ErrCommitSnapshotStale) {
+		t.Fatalf("stale selection: %v", err)
+	}
+	var other PendingEditSet
+	if err := other.Add(PendingEdit{PrimaryKey: []any{[]byte{1}}, Column: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BeginCommit(other.Edits()); !errors.Is(err, ErrCommitSnapshotStale) {
+		t.Fatalf("foreign selection: %v", err)
+	}
+}
+
 func TestReview_row_outcome_snapshot_ownership(t *testing.T) {
 	var s PendingEditSet
 	key := []any{[]byte{1}}

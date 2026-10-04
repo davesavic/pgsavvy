@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"strconv"
 	"sync/atomic"
 
@@ -41,6 +42,13 @@ type CommitDialogDryRunHook interface {
 	DryRun(set *models.PendingEditSet, conn *models.Connection) ([]guicontext.DryRunStmtResult, error)
 }
 
+// CommitDialogAsyncHook captures on MainLoop and completes on MainLoop. Returned
+// cancellation requests never imply that already committed writes were undone.
+type CommitDialogAsyncHook interface {
+	StartApply(set *models.PendingEditSet, conn *models.Connection, done func(error) error) (func(), error)
+	StartDryRun(set *models.PendingEditSet, conn *models.Connection, done func([]guicontext.DryRunStmtResult, error) error) (func(), error)
+}
+
 // CommitDialogShowSqlHook is invoked each time the body flips into
 // SqlPreview mode. Hook owners (typically the session logger) emit a
 // one-shot audit line so the rendered SQL is captured per ADR-28.
@@ -74,12 +82,16 @@ type CommitDialogCancelHook interface {
 type CommitDialogController struct {
 	baseController
 
-	ctx       *guicontext.CommitDialogContext
-	tree      FocusPopper
-	applyHook CommitDialogApplyHook
-	dryRunFn  CommitDialogDryRunHook
-	showSqlFn CommitDialogShowSqlHook
-	cancelFn  CommitDialogCancelHook
+	ctx           *guicontext.CommitDialogContext
+	tree          FocusPopper
+	applyHook     CommitDialogApplyHook
+	dryRunFn      CommitDialogDryRunHook
+	showSqlFn     CommitDialogShowSqlHook
+	cancelFn      CommitDialogCancelHook
+	asyncHook     CommitDialogAsyncHook
+	asyncCancel   func()
+	asyncRequest  uint64
+	asyncInFlight bool
 
 	// dryRunInFlight is a re-entry guard for [d]. Set to 1 during
 	// dry-run execution; concurrent [d] presses see it and show a toast
@@ -133,6 +145,75 @@ func (e *CommitDialogController) SetShowSqlHook(h CommitDialogShowSqlHook) { e.s
 // SetCancelHook wires the OnCancel collaborator. Nil-safe.
 func (e *CommitDialogController) SetCancelHook(h CommitDialogCancelHook) { e.cancelFn = h }
 
+func (e *CommitDialogController) SetAsyncHook(h CommitDialogAsyncHook) { e.asyncHook = h }
+
+func (e *CommitDialogController) cancelAsync() {
+	e.asyncRequest++
+	if e.asyncCancel != nil {
+		e.asyncCancel()
+	}
+	e.asyncCancel = nil
+	e.asyncInFlight = false
+}
+
+func (e *CommitDialogController) startAsync(dryRun bool) error {
+	if e.asyncInFlight {
+		e.toastOpen("commit operation already in progress")
+		return nil
+	}
+	set, conn := e.ctx.Set(), e.ctx.Connection()
+	e.asyncRequest++
+	request := e.asyncRequest
+	e.asyncInFlight = true
+	current := func() bool {
+		return e.asyncRequest == request && e.ctx.Active() && e.ctx.Set() == set && e.ctx.Connection() == conn
+	}
+	var cancel func()
+	var err error
+	if dryRun {
+		e.ctx.SetMode(guicontext.CommitDialogDryRunResult)
+		e.ctx.SetDryRunResult(nil)
+		_ = e.ctx.HandleRender()
+		cancel, err = e.asyncHook.StartDryRun(set, conn, func(report []guicontext.DryRunStmtResult, runErr error) error {
+			if !current() {
+				return context.Canceled
+			}
+			e.asyncInFlight = false
+			e.asyncCancel = nil
+			if runErr != nil {
+				report = []guicontext.DryRunStmtResult{{Err: runErr}}
+			}
+			e.ctx.SetDryRunResult(report)
+			_ = e.ctx.HandleRender()
+			return e.wrapErr("commit.dialog.dryrun", runErr)
+		})
+	} else {
+		cancel, err = e.asyncHook.StartApply(set, conn, func(runErr error) error {
+			if !current() {
+				return context.Canceled
+			}
+			e.asyncInFlight = false
+			e.asyncCancel = nil
+			if runErr != nil {
+				return e.wrapErr("commit.dialog.apply", runErr)
+			}
+			e.ctx.Close()
+			if tree, ok := e.tree.(interface{ Current() types.IBaseContext }); ok && tree.Current() != e.ctx {
+				return context.Canceled
+			}
+			return e.popFocus()
+		})
+	}
+	if err != nil {
+		e.asyncInFlight = false
+		return e.wrapErr("commit.dialog.dispatch", err)
+	}
+	if e.asyncInFlight {
+		e.asyncCancel = cancel
+	}
+	return nil
+}
+
 // Apply is the `[a]` handler. Consults ctx.ApplyEnabled(); on a
 // passed gate it invokes the OnApply hook and pops the dialog. On a
 // failed gate it no-ops — the registered command's GetDisabled
@@ -143,6 +224,9 @@ func (e *CommitDialogController) Apply(_ commands.ExecCtx) error {
 	}
 	if !e.ctx.ApplyEnabled() {
 		return nil
+	}
+	if e.asyncHook != nil {
+		return e.startAsync(false)
 	}
 	if e.applyHook == nil {
 		// No hook wired yet (A5 hasn't landed). Treat as no-op rather
@@ -174,6 +258,9 @@ func (e *CommitDialogController) DryRun(_ commands.ExecCtx) error {
 	}
 	if !e.ctx.ApplyEnabled() {
 		return nil
+	}
+	if e.asyncHook != nil {
+		return e.startAsync(true)
 	}
 	if e.dryRunInFlight.Swap(true) {
 		e.toastOpen("dry-run already in progress")
@@ -241,6 +328,9 @@ func (e *CommitDialogController) ShowSql(_ commands.ExecCtx) error {
 // popup-replaces-popup). The context snapshot stays Active() the whole
 // time; both callbacks re-push it so the dialog returns to focus.
 func (e *CommitDialogController) TypeName(_ commands.ExecCtx) error {
+	if e.asyncInFlight {
+		return nil
+	}
 	if e.ctx == nil || !e.ctx.Active() || e.helpers.Prompt == nil {
 		return nil
 	}
@@ -285,6 +375,7 @@ func (e *CommitDialogController) Cancel(_ commands.ExecCtx) error {
 	if e.cancelFn != nil {
 		e.cancelFn.OnCancel()
 	}
+	e.cancelAsync()
 	e.ctx.Close()
 	return e.popFocus()
 }
@@ -312,6 +403,10 @@ func (e *CommitDialogController) Open(_ commands.ExecCtx) error {
 		e.toastOpen("commit dialog: no pending edits")
 		return nil
 	}
+	if set.CommitInFlight() {
+		e.toastOpen("commit operation already in progress")
+		return nil
+	}
 	if e.helpers.ActiveConnectionProfile == nil {
 		e.toastOpen("commit dialog: connection profile not wired")
 		return nil
@@ -325,6 +420,7 @@ func (e *CommitDialogController) Open(_ commands.ExecCtx) error {
 		e.toastOpen("commit dialog: focus tree not wired")
 		return nil
 	}
+	e.cancelAsync()
 	e.ctx.Open(set, conn)
 	return e.wrapErr("commit.dialog.open", e.tree.Push(e.ctx))
 }
@@ -362,6 +458,12 @@ func (e *CommitDialogController) applyDisabled() (string, bool) {
 	set := e.ctx.Set()
 	if set == nil || set.IsEmpty() {
 		return "no staged edits", true
+	}
+	if e.asyncInFlight || set.CommitInFlight() {
+		return "commit operation already in progress", true
+	}
+	if set.CommitOutcomeUnknown() {
+		return "COMMIT outcome unknown; reconcile server state before retrying", true
 	}
 	if conn.ReadOnly {
 		return "read-only connection", true

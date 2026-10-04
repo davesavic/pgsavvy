@@ -15,7 +15,6 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
-	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/keys"
@@ -551,14 +550,12 @@ func (g *Gui) wireInlineEditControllers(helperBag controllers.HelperBag) {
 			cellCtrl.SetStore(cellEditorStore{resolve: helperBag.ActivePendingEditSet})
 			g.controllers.CellEditor = cellCtrl
 		}
-		// a single CellApplyHelper
-		// instance is shared by the commit-dialog apply/dry-run hooks and
-		// the conflict-dialog overwrite hook. The helper is stateless
-		// beyond its acquirer; both dialogs route through the same
-		// connHelperAcquirer so per-call session resolution stays unified.
-		cellApply := helpers.NewCellApplyHelper(helpers.CellApplyDeps{
-			Acquirer: connHelperAcquirer{h: g.connectHelper},
-		})
+		cdDeps := commitDialogDeps{
+			tabs: g.resultTabsH, conflictCtx: g.registry.ConflictDialog,
+			tree: g.tree, toast: g.toastHelp, logger: g.deps.Common.Logger(),
+			onUI: g.OnUIThread, evictCounts: g.evictRelationshipCounts,
+		}
+		commitHooks := asyncCommitHooks{g: g, deps: cdDeps, activeSet: helperBag.ActivePendingEditSet}
 		if commitCtx := g.registry.CommitDialog; commitCtx != nil {
 			commitCtrl := controllers.NewCommitDialogController(
 				g.deps.Common, helperBag.CoreDeps, helperBag.UIDeps, helperBag.EditDeps, commitCtx, g.tree,
@@ -566,22 +563,7 @@ func (g *Gui) wireInlineEditControllers(helperBag controllers.HelperBag) {
 			commitCtrl.AttachToContext(&commitCtx.BaseContext)
 			g.controllers.CommitDialog = commitCtrl
 
-			// wire the apply / dry-run /
-			// show-sql hooks. CellApplyHelper acquires its own session
-			// per call via connHelperAcquirer so it does not entangle
-			// with the user's main SQLSession transactions.
-			cdDeps := commitDialogDeps{
-				apply:       cellApply,
-				tabs:        g.resultTabsH,
-				conflictCtx: g.registry.ConflictDialog,
-				tree:        g.tree,
-				toast:       g.toastHelp,
-				logger:      g.deps.Common.Logger(),
-				onUI:        g.OnUIThread,
-				evictCounts: g.evictRelationshipCounts,
-			}
-			commitCtrl.SetApplyHook(commitApplyHook{deps: cdDeps})
-			commitCtrl.SetDryRunHook(commitDryRunHook{deps: cdDeps})
+			commitCtrl.SetAsyncHook(commitHooks)
 			commitCtrl.SetShowSqlHook(commitShowSqlHook{logger: cdDeps.logger})
 		}
 		if conflictCtx := g.registry.ConflictDialog; conflictCtx != nil {
@@ -595,14 +577,13 @@ func (g *Gui) wireInlineEditControllers(helperBag controllers.HelperBag) {
 			// Cancel is intentionally unwired — the controller's default
 			// pop already covers the no-mutation Esc path.
 			cfDeps := conflictDialogDeps{
-				apply:         cellApply,
 				tabs:          g.resultTabsH,
 				toast:         g.toastHelp,
 				activeSetFunc: helperBag.ActivePendingEditSet,
 				evictCounts:   g.evictRelationshipCounts,
 			}
 			conflictCtrl.SetRefreshHook(conflictRefreshHook{deps: cfDeps})
-			conflictCtrl.SetOverwriteHook(conflictOverwriteHook{deps: cfDeps})
+			conflictCtrl.SetOverwriteHook(commitHooks)
 		}
 		if pickerCtx := g.registry.FKReversePicker; pickerCtx != nil {
 			pickerCtrl := controllers.NewFKReversePickerController(

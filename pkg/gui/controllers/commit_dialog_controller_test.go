@@ -1,6 +1,7 @@
 package controllers_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -57,6 +58,157 @@ func (f *fakeShowSqlHook) OnShowSQL(_ *models.PendingEditSet, _ *models.Connecti
 type fakeCancelHook struct{ calls int }
 
 func (f *fakeCancelHook) OnCancel() { f.calls++ }
+
+type asyncCommitHook struct {
+	apply   func(error) error
+	dry     func([]guicontext.DryRunStmtResult, error) error
+	starts  int
+	cancels int
+	err     error
+}
+
+func (h *asyncCommitHook) StartApply(_ *models.PendingEditSet, _ *models.Connection, done func(error) error) (func(), error) {
+	h.starts++
+	h.apply = done
+	return func() { h.cancels++ }, h.err
+}
+
+func (h *asyncCommitHook) StartDryRun(_ *models.PendingEditSet, _ *models.Connection, done func([]guicontext.DryRunStmtResult, error) error) (func(), error) {
+	h.starts++
+	h.dry = done
+	return func() { h.cancels++ }, h.err
+}
+
+func TestReview_async_commit_controller(t *testing.T) {
+	for _, dry := range []bool{false, true} {
+		name := "apply"
+		if dry {
+			name = "dry_run"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := newCommitDialogTestCtx()
+			set := stagedSet("app", "items", 1)
+			conn := &models.Connection{Name: "A"}
+			ctx.Open(set, conn)
+			ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
+			h := &asyncCommitHook{}
+			ctrl.SetAsyncHook(h)
+			run := ctrl.Apply
+			if dry {
+				run = ctrl.DryRun
+			}
+			if err := run(commands.ExecCtx{}); err != nil {
+				t.Fatal(err)
+			}
+			if !ctx.Active() || h.starts != 1 {
+				t.Fatal("dispatch waited for completion or closed dialog early")
+			}
+			if err := ctrl.Apply(commands.ExecCtx{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := ctrl.DryRun(commands.ExecCtx{}); err != nil {
+				t.Fatal(err)
+			}
+			if h.starts != 1 {
+				t.Fatal("cross-mode double submission")
+			}
+			failure := errors.New("synthetic failure")
+			if dry {
+				if err := h.dry(nil, failure); err == nil {
+					t.Fatal("dry-run failure hidden")
+				}
+				if len(ctx.DryRunResult()) != 1 || ctx.DryRunResult()[0].Err == nil {
+					t.Fatal("dry-run failure not rendered")
+				}
+			} else if err := h.apply(failure); err == nil {
+				t.Fatal("apply failure hidden")
+			}
+			if !ctx.Active() {
+				t.Fatal("failed operation closed dialog")
+			}
+			if err := run(commands.ExecCtx{}); err != nil {
+				t.Fatal(err)
+			}
+			if h.starts != 2 {
+				t.Fatal("settled failure blocked retry")
+			}
+			if dry {
+				if err := h.dry([]guicontext.DryRunStmtResult{{SQL: "UPDATE", RowsAffected: 1}}, nil); err != nil {
+					t.Fatal(err)
+				}
+				if !ctx.Active() || len(ctx.DryRunResult()) != 1 || ctx.DryRunResult()[0].RowsAffected != 1 {
+					t.Fatal("dry-run completion not delivered")
+				}
+			} else {
+				if err := h.apply(nil); err != nil {
+					t.Fatal(err)
+				}
+				if ctx.Active() {
+					t.Fatal("successful apply did not close dialog")
+				}
+			}
+		})
+	}
+}
+
+func TestReview_async_commit_controller_cancel_and_gates(t *testing.T) {
+	ctx := newCommitDialogTestCtx()
+	set := stagedSet("app", "items", 1)
+	conn := &models.Connection{Name: "A", ReadOnly: true}
+	ctx.Open(set, conn)
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &fakeFocusTree{})
+	h := &asyncCommitHook{}
+	ctrl.SetAsyncHook(h)
+	for _, run := range []func(commands.ExecCtx) error{ctrl.Apply, ctrl.DryRun} {
+		if err := run(commands.ExecCtx{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if h.starts != 0 {
+		t.Fatal("read-only gate bypassed")
+	}
+	conn.ReadOnly = false
+	conn.ConfirmWrites = true
+	if err := ctrl.Apply(commands.ExecCtx{}); err != nil {
+		t.Fatal(err)
+	}
+	if h.starts != 0 {
+		t.Fatal("typed-name gate bypassed")
+	}
+	ctx.SetTypedName("A")
+	if err := ctrl.Apply(commands.ExecCtx{}); err != nil {
+		t.Fatal(err)
+	}
+	old := h.apply
+	if err := ctrl.Cancel(commands.ExecCtx{}); err != nil {
+		t.Fatal(err)
+	}
+	if h.cancels != 1 || ctx.Active() {
+		t.Fatal("cancel did not dismiss and request cancellation")
+	}
+	ctx.Open(set, conn)
+	if err := old(nil); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if !ctx.Active() {
+		t.Fatal("stale callback closed reopened dialog")
+	}
+	ctx.SetTypedName("A")
+	h.err = errors.New("synthetic admission failure")
+	if err := ctrl.Apply(commands.ExecCtx{}); err == nil {
+		t.Fatal("admission failure hidden")
+	}
+	h.err = nil
+	if err := ctrl.Apply(commands.ExecCtx{}); err != nil {
+		t.Fatal(err)
+	}
+	if h.starts != 3 {
+		t.Fatal("admission error left controller busy")
+	}
+	if err := ctrl.Cancel(commands.ExecCtx{}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // stagedSet returns a PendingEditSet pre-loaded with n one-column-per-
 // row Literal edits on (schema, table). Defensive copy from the

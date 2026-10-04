@@ -782,6 +782,13 @@ func (t *Tab) Identity() (string, query.ResultIdentity) {
 	return t.connID, t.resultIdentity
 }
 
+// EditabilityGeneration invalidates publication after same-tab query replacement.
+func (t *Tab) EditabilityGeneration() uint64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.editabilityGen
+}
+
 // SetErrorSQL records the SQL text behind this tab's terminal error so
 // the error-panel renderer can draw the QueryError position caret under
 // the offending token. Empty SQL is valid — the caret is simply omitted.

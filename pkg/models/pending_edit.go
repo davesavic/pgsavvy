@@ -30,6 +30,10 @@ var ErrCommitOutcomeUnknown = errors.New("pending edit: COMMIT outcome unknown; 
 
 var ErrCommitIdentityUnresolved = errors.New("pending edit: resulting COMMIT identities missing or ambiguous; reconciliation remains blocked")
 
+var ErrCommitInFlight = errors.New("pending edit: commit operation in progress; wait for settlement")
+
+var ErrCommitSnapshotStale = errors.New("pending edit: selected commit snapshot is stale; reopen the dialog")
+
 // PendingEdit captures one staged column-level mutation on a single row.
 // PrimaryKey identifies the row; Column the field. Kind selects whether
 // NewValue or NewExpr is the source of the new content.
@@ -92,6 +96,69 @@ type PendingEditSet struct {
 	unknown            []PendingEdit
 	unknownOriginalPKs [][]any
 	unknownResultPKs   [][]any
+	commitAttempt      *PendingEditSet
+	commitEdits        []PendingEdit
+}
+
+// BeginCommit atomically captures owned versions and reserves their rows until
+// settlement. A nil selection means all edits; overwrite supplies its selection.
+func (s *PendingEditSet) BeginCommit(selected []PendingEdit) (*PendingEditSet, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.commitAttempt != nil {
+		return nil, ErrCommitInFlight
+	}
+	if len(s.unknown) != 0 {
+		return nil, ErrCommitOutcomeUnknown
+	}
+	if selected == nil {
+		selected = s.edits
+	}
+	if len(selected) == 0 {
+		return nil, ErrCommitSnapshotStale
+	}
+	snapshot := &PendingEditSet{Table: s.Table}
+	for _, attempt := range selected {
+		found := false
+		for _, current := range s.edits {
+			if attempt.owner == s && attempt.revision != 0 && attempt.revision == current.revision {
+				snapshot.edits = append(snapshot.edits, clonePendingEdit(current))
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, ErrCommitSnapshotStale
+		}
+	}
+	s.commitAttempt = snapshot
+	s.commitEdits = snapshot.Edits()
+	return snapshot, nil
+}
+
+func (s *PendingEditSet) CommitInFlight() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.commitAttempt != nil
+}
+
+// SettleCommit is mandatory even when the originating view is gone. Receipt
+// identity makes duplicate/stale delivery harmless; discard never releases rows.
+func (s *PendingEditSet) SettleCommit(snapshot *PendingEditSet, committed, unknown bool, originalPKs, resultPKs [][]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if snapshot == nil || s.commitAttempt != snapshot {
+		return
+	}
+	if committed {
+		s.retireCommitted(s.commitEdits, originalPKs, resultPKs)
+	} else if unknown {
+		s.unknown = append(s.unknown, s.commitEdits...)
+		s.unknownOriginalPKs = clonePendingValue(reflect.ValueOf(originalPKs)).Interface().([][]any)
+		s.unknownResultPKs = clonePendingValue(reflect.ValueOf(resultPKs)).Interface().([][]any)
+	}
+	s.commitAttempt = nil
+	s.commitEdits = nil
 }
 
 // Add stages an edit. If an edit already exists for the same PrimaryKey
@@ -104,6 +171,11 @@ func (s *PendingEditSet) Add(e PendingEdit) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, attempt := range s.commitEdits {
+		if pkEqual(attempt.PrimaryKey, e.PrimaryKey) {
+			return ErrCommitInFlight
+		}
+	}
 	for _, attempt := range s.unknown {
 		if pkEqual(attempt.PrimaryKey, e.PrimaryKey) {
 			return ErrCommitOutcomeUnknown
@@ -273,6 +345,9 @@ func (s *PendingEditSet) CommitOutcomeUnknown() bool {
 func (s *PendingEditSet) ReconcileCommitOutcome(committed bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.commitAttempt != nil {
+		return ErrCommitInFlight
+	}
 	if committed {
 		if !validCommitIdentities(s.unknown, s.unknownOriginalPKs, s.unknownResultPKs) {
 			return ErrCommitIdentityUnresolved

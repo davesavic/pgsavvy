@@ -6,32 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/gui"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
-	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/logs"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
-
-// connHelperAcquirer satisfies helpers.SessionAcquirer by re-resolving
-// the live drivers.Connection from ConnectHelper at each call. The
-// indirection matters because Connection is invalidated on Disconnect,
-// so capturing a snapshot at wiring time would dangle.
-type connHelperAcquirer struct{ h *data.ConnectHelper }
-
-func (a connHelperAcquirer) AcquireSession(ctx context.Context) (drivers.Session, error) {
-	if a.h == nil {
-		return nil, errors.New("commit dialog: connect helper not wired")
-	}
-	conn := a.h.Connection()
-	if conn == nil {
-		return nil, errors.New("commit dialog: no active connection")
-	}
-	return conn.AcquireSession(ctx)
-}
 
 // commitDialogDeps bundles every collaborator the apply / dry-run /
 // show-sql hooks need.
@@ -143,33 +124,6 @@ func refreshGridRows(tabs *ui.ResultTabsHelper, cols []models.ColumnMeta, rows [
 		return
 	}
 	g.UpdateRowsByPK(cols, rows)
-}
-
-// commitDryRunHook implements controllers.CommitDialogDryRunHook.
-type commitDryRunHook struct{ deps commitDialogDeps }
-
-func (h commitDryRunHook) DryRun(set *models.PendingEditSet, _ *models.Connection) ([]guicontext.DryRunStmtResult, error) {
-	pkCols, err := pkColsFromActiveTab(h.deps.tabs)
-	if err != nil {
-		return nil, err
-	}
-	res, _, err := h.deps.apply.Apply(context.Background(), set, pkCols, true)
-	if err != nil {
-		return []guicontext.DryRunStmtResult{{Err: err}}, err
-	}
-	batch, buildErr := helpers.BuildUpdateBatch(set.Table, pkCols, res.Edits, helpers.SQLModeLiteral, true)
-	if buildErr != nil {
-		return nil, buildErr
-	}
-	out := make([]guicontext.DryRunStmtResult, 0, len(batch))
-	for _, stmt := range batch {
-		n := res.RowsAffected[stmt.EditIndexes[0]]
-		out = append(out, guicontext.DryRunStmtResult{
-			SQL:          stmt.SQL,
-			RowsAffected: int64(n),
-		})
-	}
-	return out, nil
 }
 
 // commitShowSqlHook implements controllers.CommitDialogShowSqlHook.

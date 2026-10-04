@@ -16,6 +16,7 @@ import (
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/orchestrator"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query"
 )
 
 // A supersession bump mid-dial causes the worker to
@@ -129,6 +130,106 @@ func cleanupQueuedGui(t *testing.T) (*orchestrator.Gui, *queueingDriver) {
 	}
 	d.drainPending()
 	return g, d
+}
+
+func TestReview_async_commit_shutdown_wiring(t *testing.T) {
+	g, d := cleanupQueuedGui(t)
+	name, conn := registerWireFake(t, drivers.Capabilities{})
+	acquiring, release := make(chan struct{}), make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	queryClosed, poolClosed := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	var order []int
+	conn.acquireHook = func(n int32) {
+		if n == 3 {
+			close(acquiring)
+			<-release
+		}
+	}
+	conn.sessionCloseHook = func(id models.SessionID) {
+		mu.Lock()
+		order = append(order, int(id))
+		mu.Unlock()
+		if id == 2 {
+			close(queryClosed)
+		}
+	}
+	conn.closeHook = func() { mu.Lock(); order = append(order, 0); mu.Unlock(); close(poolClosed) }
+	bag := g.HelperBagForTest()
+	if err := bag.Connect.Connect(context.Background(), &models.Connection{Name: "async-close", Driver: name}); err != nil {
+		t.Fatal(err)
+	}
+	d.drainPending()
+	tabs := g.ResultTabsHelper()
+	if err := tabs.OpenResultTab("commit", nil); err != nil {
+		t.Fatal(err)
+	}
+	tabs.Active().SetIdentity("async-close", query.ResultIdentity{HasRowIdentity: true})
+	grid := tabs.Active().Grid()
+	grid.SetColumns([]models.ColumnMeta{{Name: "id"}, {Name: "data"}})
+	grid.SetEditability(true, []int{0}, "", models.Ref{Schema: "app", Table: "items"})
+	grid.AppendRows([]models.Row{{Values: []any{int64(1), "old"}}})
+	cell := g.Registry().CellEditor
+	cell.Open("old", models.ColumnMeta{Name: "data", TypeName: "text"}, []any{int64(1)}, "new")
+	if err := g.Controllers().CellEditor.Commit(commands.ExecCtx{}); err != nil {
+		t.Fatal(err)
+	}
+	ctrl := g.Controllers().CommitDialog
+	if err := ctrl.Open(commands.ExecCtx{}); err != nil {
+		t.Fatal(err)
+	}
+	set := g.Registry().CommitDialog.Set()
+	if set == nil {
+		t.Fatal("production pending registry did not resolve")
+	}
+	if err := ctrl.Apply(commands.ExecCtx{}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-acquiring:
+	case <-time.After(3 * time.Second):
+		t.Fatal("production async dispatch did not reach acquisition")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- g.Close() }()
+	select {
+	case <-queryClosed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown did not start disposal")
+	}
+	select {
+	case <-poolClosed:
+		t.Fatal("pool closed with owned commit still acquiring")
+	case <-time.After(30 * time.Millisecond):
+	}
+	if !set.CommitInFlight() {
+		t.Fatal("shutdown released operation before settlement")
+	}
+	close(release)
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown failed to join commit operation")
+	}
+	d.drainPending()
+	mu.Lock()
+	got := append([]int(nil), order...)
+	mu.Unlock()
+	if !reflect.DeepEqual(got, []int{2, 3, 1, 0}) {
+		t.Fatalf("disposal order %v; want query, commit, metadata, pool", got)
+	}
+	if set.CommitInFlight() || set.IsEmpty() {
+		t.Fatal("failed cancelled commit did not preserve pending edits")
+	}
 }
 
 func TestReview_cleanup(t *testing.T) {

@@ -1725,6 +1725,7 @@ func (g *Gui) RunAndHandleError() (err error) {
 	}()
 	if d, ok := g.driver.(*gocuiDriver); ok {
 		d.onRetire = func() {
+			g.cancelCommitOperations()
 			if g.resultTabsH != nil {
 				g.resultTabsH.CancelExport()
 			}
@@ -1793,6 +1794,7 @@ func (g *Gui) Close() error {
 	if !g.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	g.cancelCommitOperations()
 	g.cancelTableInspect()
 	g.cancelSchemaActivation()
 	if g.resultTabsH != nil {

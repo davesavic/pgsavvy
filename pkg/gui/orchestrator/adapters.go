@@ -158,9 +158,11 @@ type connectionLifecycle struct {
 }
 
 type connectionOwner struct {
-	profile   string
-	sqlSess   *session.SQLSession
-	published bool
+	profile    string
+	sqlSess    *session.SQLSession
+	published  bool
+	connection drivers.Connection
+	commits    commitOperationOwner
 }
 
 func (g *Gui) retireConnection(want *connectionOwner) error {
@@ -180,6 +182,9 @@ func (g *Gui) retireConnectionLocked(want *connectionOwner) error {
 	}
 	g.connectionLife.owner = nil
 	g.connectionLife.mu.Unlock()
+	if owner != nil {
+		owner.commits.retire()
+	}
 	g.cancelTableInspect()
 	g.cancelSchemaActivation()
 	var err error
@@ -718,7 +723,7 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		c.routeConnectError(gen, err)
 		return err
 	}
-	owner := &connectionOwner{profile: profile.Name}
+	owner := &connectionOwner{profile: profile.Name, connection: conn}
 	if c.g != nil {
 		c.g.connectionLife.mu.Lock()
 		c.g.connectionLife.owner = owner
