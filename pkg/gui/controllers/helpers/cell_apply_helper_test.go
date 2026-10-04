@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -162,6 +163,160 @@ func mustAdd(t *testing.T, set *models.PendingEditSet, e models.PendingEdit) {
 	}
 }
 
+func TestReview_row_outcome_grouped_identity(t *testing.T) {
+	for _, mode := range []string{"apply", "overwrite", "dry_run"} {
+		t.Run(mode, func(t *testing.T) {
+			set := newApplySet()
+			mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{int64(1)}, Column: "id", OldValue: int64(1), NewExpr: "id + 10", Kind: models.Expression})
+			mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{int64(1)}, Column: "name", OldValue: "old", NewValue: "new"})
+			sess := &fakeSession{script: []execResponse{{}, {RowsAffected: 1, Rows: [][]any{{int64(111)}}, Cols: []string{"id"}}, {}, {Rows: [][]any{{int64(111), "new"}}, Cols: []string{"id", "name"}}}}
+			helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
+			var err error
+			if mode == "overwrite" {
+				_, err = helper.Overwrite(context.Background(), set, []string{"id"})
+			} else {
+				var conflicts []models.ConflictedEdit
+				_, conflicts, err = helper.Apply(context.Background(), set, []string{"id"}, mode == "dry_run")
+				if len(conflicts) != 0 {
+					t.Fatalf("unexpected conflicts: %d", len(conflicts))
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			updates := 0
+			for _, call := range sess.calls {
+				if strings.HasPrefix(call.SQL, "UPDATE ") {
+					updates++
+					if !strings.Contains(call.SQL, `"id" = id + 10, "name" = $1`) || !strings.Contains(call.SQL, `RETURNING "id"`) {
+						t.Fatalf("not one returning row mutation: %s", call.SQL)
+					}
+				}
+			}
+			if updates != 1 {
+				t.Fatalf("updates=%d, want one atomic row mutation", updates)
+			}
+			if mode != "dry_run" {
+				last := sess.calls[len(sess.calls)-1]
+				if !reflect.DeepEqual(last.Args, []any{int64(111)}) {
+					t.Fatalf("refetch used %v, want server-returned key 111", last.Args)
+				}
+			}
+		})
+	}
+}
+
+func TestReview_row_outcome_commit_boundary(t *testing.T) {
+	for _, overwrite := range []bool{false, true} {
+		for _, phase := range []string{"refresh", "commit"} {
+			name := phase + "/apply"
+			if overwrite {
+				name = phase + "/overwrite"
+			}
+			t.Run(name, func(t *testing.T) {
+				set := newApplySet()
+				mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{int64(1)}, Column: "n", Kind: models.Expression, NewExpr: "n + 1"})
+				failure := errors.New("synthetic I/O failure")
+				script := []execResponse{{}, {RowsAffected: 1, Rows: [][]any{{int64(1)}}}, {}, {}}
+				if phase == "commit" {
+					script[2].Err = failure
+				} else {
+					script[3].Err = failure
+				}
+				sess := &fakeSession{script: script}
+				h := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
+				var result helpers.ApplyResult
+				var err error
+				if overwrite {
+					result, err = h.Overwrite(context.Background(), set, []string{"id"})
+				} else {
+					result, _, err = h.Apply(context.Background(), set, []string{"id"}, false)
+				}
+				if !errors.Is(err, failure) || result.Committed != (phase == "refresh") || result.CommitUnknown != (phase == "commit") || len(result.Edits) != 1 || !sess.closed {
+					t.Fatalf("wrong boundary receipt: committed=%v unknown=%v edits=%d err=%v", result.Committed, result.CommitUnknown, len(result.Edits), err)
+				}
+				if phase == "commit" {
+					if !errors.Is(err, helpers.ErrCommitUnknown) || !set.CommitOutcomeUnknown() {
+						t.Fatal("COMMIT error assumed rollback")
+					}
+					calls := len(sess.calls)
+					for _, mode := range []string{"apply", "overwrite", "dry_run"} {
+						if mode == "overwrite" {
+							_, err = h.Overwrite(context.Background(), set, []string{"id"})
+						} else {
+							_, _, err = h.Apply(context.Background(), set, []string{"id"}, mode == "dry_run")
+						}
+						if !errors.Is(err, models.ErrCommitOutcomeUnknown) || len(sess.calls) != calls {
+							t.Fatalf("%s replayed uncertain write", mode)
+						}
+					}
+					set.Clear()
+					_, _, err = h.Apply(context.Background(), set, []string{"id"}, false)
+					if !errors.Is(err, models.ErrCommitOutcomeUnknown) || len(sess.calls) != calls {
+						t.Fatal("Clear allowed uncertain replay")
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestReview_row_outcome_missing_returning(t *testing.T) {
+	for _, returned := range [][][]any{nil, {{}}, {{1, 2}}, {{1}, {2}}} {
+		t.Run(fmt.Sprint(returned), func(t *testing.T) {
+			set := newApplySet()
+			mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{1}, Column: "n", NewValue: 2})
+			sess := &fakeSession{script: []execResponse{{}, {RowsAffected: 1, Rows: returned}, {}}}
+			h := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
+			res, _, err := h.Apply(context.Background(), set, []string{"id"}, false)
+			if err == nil || res.Committed || sess.calls[len(sess.calls)-1].SQL != "ROLLBACK" {
+				t.Fatal("malformed identity committed")
+			}
+		})
+	}
+}
+
+func TestReview_row_outcome_refetch_order(t *testing.T) {
+	set := newApplySet()
+	for _, key := range []int{1, 2} {
+		mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{key}, Column: "id", OldValue: key, NewValue: key + 10})
+	}
+	sess := &fakeSession{script: []execResponse{{}, {RowsAffected: 1, Rows: [][]any{{11}}}, {RowsAffected: 1, Rows: [][]any{{12}}}, {}, {Cols: []string{"id", "n"}, Rows: [][]any{{12, "second"}, {11, "first"}}}}}
+	h := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
+	res, _, err := h.Apply(context.Background(), set, []string{"id"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(res.RefetchedOriginalPKs, [][]any{{1}, {2}}) || res.RefetchedRows[0].Values[1] != "first" || res.RefetchedRows[1].Values[1] != "second" {
+		t.Fatal("SELECT order corrupted original-row mapping")
+	}
+}
+
+func TestReview_row_outcome_structured_keys(t *testing.T) {
+	edits := []models.PendingEdit{{PrimaryKey: []any{[]string{"a b"}}, Column: "n", NewValue: 1}, {PrimaryKey: []any{[]string{"a", "b"}}, Column: "m", NewValue: 2}}
+	batch, err := helpers.BuildUpdateBatch(models.Ref{Schema: "app", Table: "items"}, []string{"key"}, edits, helpers.SQLModeParameterized, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 2 || !reflect.DeepEqual(batch[0].OriginalPK, edits[0].PrimaryKey) || !reflect.DeepEqual(batch[1].OriginalPK, edits[1].PrimaryKey) {
+		t.Fatal("formatted array identity conflated separate rows")
+	}
+}
+
+func TestReview_row_outcome_NaN_identity(t *testing.T) {
+	set := newApplySet()
+	key := math.NaN()
+	for _, col := range []string{"n", "m"} {
+		mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{key}, Column: col, OldValue: 1, NewValue: 2})
+	}
+	sess := &fakeSession{script: []execResponse{{}, {RowsAffected: 1, Rows: [][]any{{key}}}, {}, {Cols: []string{"id", "n", "m"}, Rows: [][]any{{key, 2, 2}}}}}
+	h := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
+	res, conflicts, err := h.Apply(context.Background(), set, []string{"id"}, false)
+	if err != nil || len(conflicts) != 0 || len(res.SQL) != 1 || len(res.RefetchedRows) != 1 {
+		t.Fatal("NaN identity did not group/refetch one committed row")
+	}
+}
+
 func newApplySet() *models.PendingEditSet {
 	return &models.PendingEditSet{Table: models.Ref{Schema: "app", Table: "users"}}
 }
@@ -181,7 +336,7 @@ func TestReview_overwrite_SQL(t *testing.T) {
 					e.Kind, e.NewExpr = models.Expression, `upper("n""ame")`
 				}
 				mustAdd(t, set, e)
-				sess := &fakeSession{script: []execResponse{{}, {RowsAffected: 1}, {}, {Rows: [][]any{{7, "key'quoted", "new"}}, Cols: []string{"id", "key", `n"ame`}}}}
+				sess := &fakeSession{script: []execResponse{{}, {RowsAffected: 1, Rows: [][]any{{7, "key'quoted"}}}, {}, {Rows: [][]any{{7, "key'quoted", "new"}}, Cols: []string{`i"d`, "key", `n"ame`}}}}
 				helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
 				var res helpers.ApplyResult
 				var err error
@@ -210,6 +365,7 @@ func TestReview_overwrite_SQL(t *testing.T) {
 					wantArgs = append(wantArgs, e.OldValue)
 					wantSQL += fmt.Sprintf(` AND "n""ame" IS NOT DISTINCT FROM $%d`, len(wantArgs))
 				}
+				wantSQL += ` RETURNING "i""d", "key"`
 				update := sess.calls[1]
 				if update.SQL != wantSQL || !reflect.DeepEqual(update.Args, wantArgs) {
 					t.Errorf("UPDATE = %q %v, want %q %v", update.SQL, update.Args, wantSQL, wantArgs)
@@ -238,7 +394,7 @@ func TestReview_overwrite_UpdateError(t *testing.T) {
 			for _, id := range []int{1, 2} {
 				mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{id}, Column: "name", OldValue: "old", NewValue: "new"})
 			}
-			sess := &fakeSession{script: []execResponse{{}, {RowsAffected: 1}, {Err: failure}, {}}}
+			sess := &fakeSession{script: []execResponse{{}, {RowsAffected: 1, Rows: [][]any{{1}}}, {Err: failure}, {}}}
 			helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
 			res, err := helper.Overwrite(context.Background(), set, []string{"id"})
 			if !errors.Is(err, failure) || len(res.RowsAffected) != 0 {
@@ -261,14 +417,22 @@ func TestReview_identity_safety(t *testing.T) {
 					script := []execResponse{{}}
 					if prior {
 						mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{2}, Column: "name", OldValue: "old", NewValue: "first", Kind: models.Literal})
-						script = append(script, execResponse{RowsAffected: 1})
+						script = append(script, execResponse{RowsAffected: 1, Rows: [][]any{{2}}})
 					}
 					mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{1}, Column: "name", OldValue: "old", NewValue: "new", Kind: models.Literal})
-					script = append(script, execResponse{RowsAffected: count})
+					response := execResponse{RowsAffected: count}
+					if count == 1 {
+						response.Rows = [][]any{{1}}
+					}
+					script = append(script, response)
 					if count == 0 && mode == "apply" {
 						script = append(script, execResponse{Rows: [][]any{{"server"}}})
 					}
-					script = append(script, execResponse{}, execResponse{Rows: [][]any{{1, "new"}}, Cols: []string{"id", "name"}})
+					refRows := [][]any{{1, "new"}}
+					if prior {
+						refRows = append(refRows, []any{2, "first"})
+					}
+					script = append(script, execResponse{}, execResponse{Rows: refRows, Cols: []string{"id", "name"}})
 					sess := &fakeSession{script: script}
 					helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
 					var res helpers.ApplyResult
@@ -407,11 +571,10 @@ func TestApply_DedicatedSession_AcquireFailure(t *testing.T) {
 func TestApply_HappyPath_LiteralAndExpression(t *testing.T) {
 	sess := &fakeSession{
 		script: []execResponse{
-			{},                // 0: BEGIN
-			{RowsAffected: 1}, // 1: UPDATE name
-			{RowsAffected: 1}, // 2: UPDATE flags (expression)
-			{},                // 3: COMMIT
-			{Cols: []string{"id", "name"}, Rows: [][]any{{int64(1), "bob"}}}, // 4: SELECT refetch
+			{}, // 0: BEGIN
+			{RowsAffected: 1, Rows: [][]any{{int64(1)}}}, // 1: grouped UPDATE
+			{}, // 2: COMMIT
+			{Cols: []string{"id", "name"}, Rows: [][]any{{int64(1), "bob"}}}, // 3: SELECT refetch
 		},
 	}
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
@@ -436,44 +599,33 @@ func TestApply_HappyPath_LiteralAndExpression(t *testing.T) {
 	if got, want := res.RowsAffected, []int{1, 1}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("rowsAffected = %v, want %v", got, want)
 	}
-	if len(sess.calls) != 5 {
-		t.Fatalf("len(calls) = %d, want 5 (BEGIN, 2 UPDATEs, COMMIT, refetch); calls=%v", len(sess.calls), sess.calls)
+	if len(sess.calls) != 4 {
+		t.Fatalf("len(calls) = %d, want 4 (BEGIN, grouped UPDATE, COMMIT, refetch); calls=%v", len(sess.calls), sess.calls)
 	}
 
 	// BEGIN at index 0.
 	if sess.calls[0].SQL != "BEGIN" {
 		t.Fatalf("calls[0].SQL = %q, want BEGIN", sess.calls[0].SQL)
 	}
-	// First UPDATE: literal edit; identifier quoted via QuoteIdent;
-	// arguments are [NewValue, pk, OldValue].
+	// Both assignments use one original-row predicate; expressions stay inline.
 	got := sess.calls[1]
-	wantSQL := `UPDATE "app"."users" SET "name" = $1 WHERE "id" = $2 AND "name" IS NOT DISTINCT FROM $3`
+	wantSQL := `UPDATE "app"."users" SET "name" = $1, "flags" = flags | 1 WHERE "id" = $2 AND "name" IS NOT DISTINCT FROM $3 AND "flags" IS NOT DISTINCT FROM $4 RETURNING "id"`
 	if got.SQL != wantSQL {
 		t.Fatalf("UPDATE name SQL =\n  %q\nwant\n  %q", got.SQL, wantSQL)
 	}
-	if len(got.Args) != 3 || got.Args[0] != "bob" || got.Args[1] != int64(1) || got.Args[2] != "alice" {
-		t.Fatalf("UPDATE name args = %v, want [\"bob\", 1, \"alice\"]", got.Args)
-	}
-	// Second UPDATE: expression — NewExpr inlined verbatim, NOT
-	// parameterized. Args carry only [pk, OldValue].
-	got = sess.calls[2]
-	wantSQL = `UPDATE "app"."users" SET "flags" = flags | 1 WHERE "id" = $1 AND "flags" IS NOT DISTINCT FROM $2`
-	if got.SQL != wantSQL {
-		t.Fatalf("UPDATE flags SQL =\n  %q\nwant\n  %q", got.SQL, wantSQL)
-	}
-	if len(got.Args) != 2 || got.Args[0] != int64(1) || got.Args[1] != int64(0) {
-		t.Fatalf("UPDATE flags args = %v, want [1, 0]", got.Args)
+	if len(got.Args) != 4 || got.Args[0] != "bob" || got.Args[1] != int64(1) || got.Args[2] != "alice" || got.Args[3] != int64(0) {
+		t.Fatalf("UPDATE args = %v, want [\"bob\", 1, \"alice\", 0]", got.Args)
 	}
 	// COMMIT.
-	if sess.calls[3].SQL != "COMMIT" {
-		t.Fatalf("calls[3].SQL = %q, want COMMIT", sess.calls[3].SQL)
+	if sess.calls[2].SQL != "COMMIT" {
+		t.Fatalf("calls[2].SQL = %q, want COMMIT", sess.calls[2].SQL)
 	}
 	// Refetch by PK.
-	if !strings.Contains(sess.calls[4].SQL, "SELECT * FROM ") || !strings.Contains(sess.calls[4].SQL, `"id" IN ($1)`) {
-		t.Fatalf("refetch SQL = %q, want SELECT * FROM with parameterized IN-list", sess.calls[4].SQL)
+	if !strings.Contains(sess.calls[3].SQL, "SELECT * FROM ") || !strings.Contains(sess.calls[3].SQL, `"id" IN ($1)`) {
+		t.Fatalf("refetch SQL = %q, want SELECT * FROM with parameterized IN-list", sess.calls[3].SQL)
 	}
-	if len(sess.calls[4].Args) != 1 || sess.calls[4].Args[0] != int64(1) {
-		t.Fatalf("refetch args = %v, want [1]", sess.calls[4].Args)
+	if len(sess.calls[3].Args) != 1 || sess.calls[3].Args[0] != int64(1) {
+		t.Fatalf("refetch args = %v, want [1]", sess.calls[3].Args)
 	}
 	if len(res.RefetchedRows) != 1 {
 		t.Fatalf("refetchedRows = %d, want 1", len(res.RefetchedRows))
@@ -562,9 +714,9 @@ func TestApply_ServerError_RollsBack(t *testing.T) {
 func TestApply_DryRun_AlwaysRollsBack(t *testing.T) {
 	sess := &fakeSession{
 		script: []execResponse{
-			{},                // 0: BEGIN
-			{RowsAffected: 1}, // 1: UPDATE
-			{},                // 2: ROLLBACK
+			{}, // 0: BEGIN
+			{RowsAffected: 1, Rows: [][]any{{int64(1)}}}, // 1: UPDATE RETURNING id
+			{}, // 2: ROLLBACK
 		},
 	}
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
@@ -635,9 +787,9 @@ func TestApply_DryRun_SkipsConflictCollection(t *testing.T) {
 func TestApply_CompositePK_WhereAndRefetchUseAllColumns(t *testing.T) {
 	sess := &fakeSession{
 		script: []execResponse{
-			{},                // 0: BEGIN
-			{RowsAffected: 1}, // 1: UPDATE
-			{},                // 2: COMMIT
+			{}, // 0: BEGIN
+			{RowsAffected: 1, Rows: [][]any{{int64(1), "x"}}}, // 1: UPDATE RETURNING a,b
+			{}, // 2: COMMIT
 			{Cols: []string{"a", "b", "v"}, Rows: [][]any{{int64(1), "x", "new"}}}, // 3: refetch
 		},
 	}
@@ -659,7 +811,7 @@ func TestApply_CompositePK_WhereAndRefetchUseAllColumns(t *testing.T) {
 
 	// UPDATE WHERE clause includes BOTH PK columns and the
 	// IS-NOT-DISTINCT-FROM guard.
-	wantSQL := `UPDATE "app"."t" SET "v" = $1 WHERE "a" = $2 AND "b" = $3 AND "v" IS NOT DISTINCT FROM $4`
+	wantSQL := `UPDATE "app"."t" SET "v" = $1 WHERE "a" = $2 AND "b" = $3 AND "v" IS NOT DISTINCT FROM $4 RETURNING "a", "b"`
 	if sess.calls[1].SQL != wantSQL {
 		t.Fatalf("composite UPDATE SQL =\n  %q\nwant\n  %q", sess.calls[1].SQL, wantSQL)
 	}
@@ -677,14 +829,13 @@ func TestApply_CompositePK_WhereAndRefetchUseAllColumns(t *testing.T) {
 	}
 }
 
-func TestApply_SamePKMultipleColumns_TwoUpdatesOneCommit(t *testing.T) {
+func TestApply_SamePKMultipleColumns_OneUpdateOneCommit(t *testing.T) {
 	sess := &fakeSession{
 		script: []execResponse{
-			{},                // 0: BEGIN
-			{RowsAffected: 1}, // 1: UPDATE col1
-			{RowsAffected: 1}, // 2: UPDATE col2
-			{},                // 3: COMMIT
-			{Cols: []string{"id"}, Rows: [][]any{{int64(7)}}}, // 4: refetch — single distinct PK
+			{}, // 0: BEGIN
+			{RowsAffected: 1, Rows: [][]any{{int64(7)}}}, // 1: UPDATE col1,col2
+			{}, // 2: COMMIT
+			{Cols: []string{"id"}, Rows: [][]any{{int64(7)}}}, // 3: refetch — single distinct PK
 		},
 	}
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
@@ -704,17 +855,20 @@ func TestApply_SamePKMultipleColumns_TwoUpdatesOneCommit(t *testing.T) {
 	if conflicts != nil {
 		t.Fatalf("conflicts = %v", conflicts)
 	}
-	if len(sess.calls) != 5 {
-		t.Fatalf("len(calls) = %d, want 5 (BEGIN, 2 UPDATE, COMMIT, refetch)", len(sess.calls))
+	if len(sess.calls) != 4 {
+		t.Fatalf("len(calls) = %d, want 4 (BEGIN, grouped UPDATE, COMMIT, refetch)", len(sess.calls))
+	}
+	if !strings.Contains(sess.calls[1].SQL, `"name" = $1, "email" = $2`) || !strings.Contains(sess.calls[1].SQL, `"name" IS NOT DISTINCT FROM $4 AND "email" IS NOT DISTINCT FROM $5`) {
+		t.Fatalf("group lost an assignment or guard: %s", sess.calls[1].SQL)
 	}
 	// Refetch must collapse to a SINGLE PK in the IN-list — both edits
 	// touch row id=7.
-	refetchSQL := sess.calls[4].SQL
+	refetchSQL := sess.calls[3].SQL
 	if !strings.Contains(refetchSQL, `"id" IN ($1)`) {
 		t.Fatalf("refetch SQL = %q, want single-arg IN-list", refetchSQL)
 	}
-	if len(sess.calls[4].Args) != 1 {
-		t.Fatalf("refetch args = %v, want single PK", sess.calls[4].Args)
+	if len(sess.calls[3].Args) != 1 {
+		t.Fatalf("refetch args = %v, want single PK", sess.calls[3].Args)
 	}
 }
 
@@ -725,9 +879,9 @@ func TestApply_PKEdit_WhereUsesOldValue(t *testing.T) {
 	// also references OldValue.
 	sess := &fakeSession{
 		script: []execResponse{
-			{},                // BEGIN
-			{RowsAffected: 1}, // UPDATE
-			{},                // COMMIT
+			{}, // BEGIN
+			{RowsAffected: 1, Rows: [][]any{{int64(99)}}}, // UPDATE RETURNING changed id
+			{}, // COMMIT
 			{Cols: []string{"id"}, Rows: [][]any{{int64(99)}}}, // refetch
 		},
 	}
@@ -770,10 +924,10 @@ func TestApply_IdentifiersQuotedViaQuoteIdent(t *testing.T) {
 	// identifier reaches the server (ADR-21).
 	sess := &fakeSession{
 		script: []execResponse{
-			{},                // BEGIN
-			{RowsAffected: 1}, // UPDATE
-			{},                // COMMIT
-			{Cols: []string{"user"}, Rows: [][]any{{int64(1)}}}, // refetch
+			{}, // BEGIN
+			{RowsAffected: 1, Rows: [][]any{{int64(1)}}}, // UPDATE RETURNING User
+			{}, // COMMIT
+			{Cols: []string{"User"}, Rows: [][]any{{int64(1)}}}, // refetch
 		},
 	}
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})

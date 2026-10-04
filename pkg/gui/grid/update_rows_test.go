@@ -1,10 +1,45 @@
 package grid
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+func TestReview_row_outcome_grid_original_identity(t *testing.T) {
+	v := NewView()
+	v.SetColumns([]models.ColumnMeta{{Name: "tenant"}, {Name: "id"}, {Name: "payload"}})
+	v.SetEditability(true, []int{0, 1}, "", models.Ref{Schema: "app", Table: "items"})
+	v.AppendRows([]models.Row{{Values: []any{1, 2, "old"}}, {Values: []any{1, 3, "unrelated"}}})
+	loaded := v.AllRows()
+	cols := []models.ColumnMeta{{Name: "payload"}, {Name: "id"}, {Name: "tenant"}}
+	rows := []models.Row{{Values: []any{"new", 112, 1}}}
+	if n := v.UpdateRowsByPK(cols, rows); n != 0 {
+		t.Fatalf("legacy matcher unexpectedly matched changed key: %d", n)
+	}
+	if !reflect.DeepEqual(v.AllRows(), loaded) {
+		t.Fatal("unrelated identity changed")
+	}
+	if n := v.UpdateRowsFromOriginalPK(cols, rows, [][]any{{1, 2}}); n != 1 {
+		t.Fatalf("original-key update count=%d", n)
+	}
+	if !reflect.DeepEqual(v.AllRows(), []models.Row{{Values: []any{1, 112, "new"}}, {Values: []any{1, 3, "unrelated"}}}) {
+		t.Fatalf("wrong original-row mapping: %+v", v.AllRows())
+	}
+	if loaded[0].Values[1] != 2 {
+		t.Fatal("publication mutated prior snapshot")
+	}
+	current := v.AllRows()
+	for _, keys := range [][][]any{nil, {{1}}, {{1, 2}, {1, 3}}} {
+		if v.UpdateRowsFromOriginalPK(cols, rows, keys) != 0 {
+			t.Fatal("malformed original identity accepted")
+		}
+	}
+	if !reflect.DeepEqual(current, v.AllRows()) {
+		t.Fatal("malformed receipt changed grid")
+	}
+}
 
 func TestUpdateRowsByPK(t *testing.T) {
 	cols := func(names ...string) []models.ColumnMeta {

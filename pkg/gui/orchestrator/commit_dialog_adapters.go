@@ -64,7 +64,7 @@ func (h commitApplyHook) Apply(set *models.PendingEditSet, conn *models.Connecti
 		return err
 	}
 	res, conflicts, err := h.deps.apply.Apply(context.Background(), set, pkCols, false)
-	if err != nil {
+	if err != nil && !res.Committed {
 		return err
 	}
 	if len(conflicts) > 0 {
@@ -81,8 +81,8 @@ func (h commitApplyHook) Apply(set *models.PendingEditSet, conn *models.Connecti
 		h.deps.onUI(func() error { return tree.Push(conflictCtx) })
 		return nil
 	}
-	rows := len(res.RowsAffected)
-	set.Clear()
+	rows := len(res.ResultPKs)
+	set.RetireCommitted(res.Edits, res.OriginalPKs, res.ResultPKs)
 	// A committed UPDATE on this table can change which child rows reference a
 	// given parent key, so the relationship panel's cached inbound counts keyed
 	// by this (child) table are now stale. Evict per-table so the next focus
@@ -94,11 +94,35 @@ func (h commitApplyHook) Apply(set *models.PendingEditSet, conn *models.Connecti
 	// Write the post-commit server values back into the grid so the
 	// applied cells render fresh data instead of the original load
 	// snapshot.
-	refreshGridRows(h.deps.tabs, res.RefetchedColumns, res.RefetchedRows)
+	refreshCommittedGrid(h.deps.tabs, res)
+	if err != nil {
+		showCommitRefreshWarning(h.deps.toast, h.deps.logger)
+		return nil
+	}
 	if h.deps.toast != nil {
 		h.deps.toast.Show(fmt.Sprintf("%d row(s) committed", rows), 0)
 	}
 	return nil
+}
+
+func showCommitRefreshWarning(toast *ui.ToastHelper, logger *slog.Logger) {
+	if toast != nil {
+		toast.Show("Writes committed, but display refresh failed. Reload the result; do not reapply committed edits.", 0)
+	}
+	if logger != nil {
+		logs.Event(logger, "warn", "commit_refresh_failed", slog.Bool("committed", true))
+	}
+}
+
+func refreshCommittedGrid(tabs *ui.ResultTabsHelper, res helpers.ApplyResult) {
+	if tabs == nil {
+		return
+	}
+	tab := tabs.Active()
+	if tab == nil || tab.Grid() == nil {
+		return
+	}
+	tab.Grid().UpdateRowsFromOriginalPK(res.RefetchedColumns, res.RefetchedRows, res.RefetchedOriginalPKs)
 }
 
 // refreshGridRows writes refetched server rows back into the active
@@ -133,16 +157,15 @@ func (h commitDryRunHook) DryRun(set *models.PendingEditSet, _ *models.Connectio
 	if err != nil {
 		return []guicontext.DryRunStmtResult{{Err: err}}, err
 	}
-	edits := set.Edits()
-	out := make([]guicontext.DryRunStmtResult, 0, len(res.RowsAffected))
-	for i, n := range res.RowsAffected {
-		sql := ""
-		if i < len(edits) {
-			stmt, _ := helpers.BuildUpdateSQL(set.Table, pkCols, edits[i], helpers.SQLModeLiteral)
-			sql = stmt
-		}
+	batch, buildErr := helpers.BuildUpdateBatch(set.Table, pkCols, res.Edits, helpers.SQLModeLiteral, true)
+	if buildErr != nil {
+		return nil, buildErr
+	}
+	out := make([]guicontext.DryRunStmtResult, 0, len(batch))
+	for _, stmt := range batch {
+		n := res.RowsAffected[stmt.EditIndexes[0]]
 		out = append(out, guicontext.DryRunStmtResult{
-			SQL:          sql,
+			SQL:          stmt.SQL,
 			RowsAffected: int64(n),
 		})
 	}
@@ -260,6 +283,9 @@ func (h conflictOverwriteHook) Overwrite(conflicts []models.ConflictedEdit, _ *m
 	if set == nil {
 		return errors.New("conflict dialog: no active pending edit set")
 	}
+	if set.CommitOutcomeUnknown() {
+		return models.ErrCommitOutcomeUnknown
+	}
 	pkCols, err := pkColsFromActiveTab(h.deps.tabs)
 	if err != nil {
 		return err
@@ -270,19 +296,22 @@ func (h conflictOverwriteHook) Overwrite(conflicts []models.ConflictedEdit, _ *m
 	// of what the user has chosen to force through, and the user will
 	// re-run :w for the remaining non-conflicting edits.
 	owSet := &models.PendingEditSet{Table: set.Table}
+	attempt := make([]models.PendingEdit, 0, len(conflicts))
 	for _, c := range conflicts {
+		attempt = append(attempt, c.Edit)
 		if addErr := owSet.Add(c.Edit); addErr != nil {
 			return fmt.Errorf("conflict dialog: stage overwrite edit: %w", addErr)
 		}
 	}
 	res, applyErr := h.deps.apply.Overwrite(context.Background(), owSet, pkCols)
-	if applyErr != nil {
+	if res.CommitUnknown {
+		set.MarkCommitUnknown(attempt, res.OriginalPKs, res.ResultPKs)
+	}
+	if applyErr != nil && !res.Committed {
 		return applyErr
 	}
 	// Drop the overwritten edits from the live staged set.
-	for _, c := range conflicts {
-		set.Remove(c.Edit.PrimaryKey, c.Edit.Column)
-	}
+	set.RetireCommitted(attempt, res.OriginalPKs, res.ResultPKs)
 	// Evict the panel's cached inbound counts for the overwritten table — the
 	// committed overwrite may change child references. Same per-table eviction
 	// as the apply path.
@@ -291,10 +320,14 @@ func (h conflictOverwriteHook) Overwrite(conflicts []models.ConflictedEdit, _ *m
 	}
 	// Write the post-overwrite server rows back into the grid — same
 	// refetch contract as the apply path.
-	refreshGridRows(h.deps.tabs, res.RefetchedColumns, res.RefetchedRows)
+	refreshCommittedGrid(h.deps.tabs, res)
+	if applyErr != nil {
+		showCommitRefreshWarning(h.deps.toast, nil)
+		return nil
+	}
 	if h.deps.toast != nil {
 		h.deps.toast.Show(
-			fmt.Sprintf("%d row(s) overwritten", len(res.RowsAffected)),
+			fmt.Sprintf("%d row(s) overwritten", len(res.ResultPKs)),
 			0,
 		)
 	}

@@ -32,7 +32,7 @@ type SessionAcquirer interface {
 
 // CellApplyHelper drives the "apply pending edits" flow: acquire a
 // dedicated session, wrap a BEGIN, issue one parameterized UPDATE per
-// column edit with an IS NOT DISTINCT FROM old-value predicate to detect
+// original row with IS NOT DISTINCT FROM old-value predicates to detect
 // concurrent overwrites, collect conflicts (RowsAffected==0), and on
 // success re-fetch the touched rows by PK so the caller can refresh the
 // grid.
@@ -91,6 +91,7 @@ var (
 	// ErrPKLengthMismatch is returned when a PendingEdit's PrimaryKey
 	// slice does not match the supplied pkCols length.
 	ErrPKLengthMismatch = errors.New("cell apply: pk value count does not match pk column count")
+	ErrCommitUnknown    = models.ErrCommitOutcomeUnknown
 )
 
 // ApplyResult captures the outcome of a successful (or dry-run) Apply.
@@ -100,13 +101,18 @@ var (
 // distinct-PK list (Apply collapses by PK). RefetchedColumns names the
 // projection used for the refetch SELECT. Empty in dry-run mode.
 type ApplyResult struct {
-	RowsAffected     []int
-	RefetchedRows    []models.Row
-	RefetchedColumns []models.ColumnMeta
-	// SQL carries the per-statement UPDATE text produced by the unified
-	// builder. One entry per edit; populated before execution so it is
-	// available even on error. Empty (nil) when the unified builder has
-	// not been wired (backward compat).
+	// Committed distinguishes a durable write from a later display-refresh error.
+	Committed     bool
+	CommitUnknown bool
+	Edits         []models.PendingEdit
+	OriginalPKs   [][]any
+	ResultPKs     [][]any
+	// RefetchedOriginalPKs is aligned with RefetchedRows, independent of SELECT order.
+	RefetchedOriginalPKs [][]any
+	RowsAffected         []int
+	RefetchedRows        []models.Row
+	RefetchedColumns     []models.ColumnMeta
+	// SQL contains one statement per original row, in first-seen order.
 	SQL []string
 }
 
@@ -133,16 +139,22 @@ type ApplyResult struct {
 //     PK — no string-formatted PK values.
 //   - Bounded context: when ctx has no Deadline, h.timeout (or
 //     DefaultCellApplyTimeout) is applied.
-//
-//nolint:gocyclo // a single linear pipeline; further splitting would obscure the BEGIN/Commit/Rollback flow
 func (h *CellApplyHelper) Apply(
 	ctx context.Context,
 	set *models.PendingEditSet,
 	pkCols []string,
 	dryRun bool,
 ) (ApplyResult, []models.ConflictedEdit, error) {
+	return h.apply(ctx, set, pkCols, dryRun, false)
+}
+
+//nolint:gocyclo // linear transaction pipeline with explicit outcome boundaries
+func (h *CellApplyHelper) apply(ctx context.Context, set *models.PendingEditSet, pkCols []string, dryRun, overwrite bool) (ApplyResult, []models.ConflictedEdit, error) {
 	if h == nil || h.acquirer == nil {
 		return ApplyResult{}, nil, ErrNoAcquirer
+	}
+	if set != nil && set.CommitOutcomeUnknown() {
+		return ApplyResult{}, nil, models.ErrCommitOutcomeUnknown
 	}
 	if set == nil || set.IsEmpty() {
 		return ApplyResult{}, nil, nil
@@ -152,15 +164,9 @@ func (h *CellApplyHelper) Apply(
 	}
 
 	edits := set.Edits()
-
-	// Validate every edit's PK width before we touch the pool — a
-	// mismatch is a programmer error, not something to swallow inside a
-	// half-issued transaction.
-	for i := range edits {
-		if len(edits[i].PrimaryKey) != len(pkCols) {
-			return ApplyResult{}, nil, fmt.Errorf("%w: edit[%d] has %d pk values, expected %d",
-				ErrPKLengthMismatch, i, len(edits[i].PrimaryKey), len(pkCols))
-		}
+	batch, batchErr := BuildUpdateBatch(set.Table, pkCols, edits, SQLModeParameterized, !overwrite)
+	if batchErr != nil {
+		return ApplyResult{}, nil, batchErr
 	}
 
 	// Bounded context. Only wrap when caller did not set a deadline so
@@ -197,40 +203,58 @@ func (h *CellApplyHelper) Apply(
 
 	rowsAffected := make([]int, len(edits))
 	conflicts := make([]models.ConflictedEdit, 0)
-	sqlTexts := make([]string, len(edits))
-
-	for i := range edits {
-		e := edits[i]
-		stmt, args := BuildUpdateSQL(set.Table, pkCols, e, SQLModeParameterized)
-		sqlTexts[i] = stmt
-		res, execErr := sess.Execute(ctx, models.Query{SQL: stmt, Args: args})
+	sqlTexts := make([]string, len(batch))
+	out := ApplyResult{Edits: edits, RowsAffected: rowsAffected, SQL: sqlTexts}
+	for bi, stmt := range batch {
+		e := edits[stmt.EditIndexes[0]]
+		sqlTexts[bi] = stmt.SQL
+		res, execErr := sess.Execute(ctx, models.Query{SQL: stmt.SQL, Args: stmt.Args})
 		if execErr != nil {
 			rollback(ctx, sess)
 			return ApplyResult{}, nil, fmt.Errorf("cell apply: UPDATE %s.%s.%s: %w",
 				schema, table, e.Column, execErr)
 		}
-		if res.RowsAffected > 1 {
+		if res.RowsAffected > 1 || res.RowsAffected < 0 {
 			rollback(ctx, sess)
 			return ApplyResult{}, nil, fmt.Errorf("cell apply: unsafe row identity: UPDATE affected %d rows (expected at most one)", res.RowsAffected)
 		}
-		rowsAffected[i] = int(res.RowsAffected)
+		for _, i := range stmt.EditIndexes {
+			rowsAffected[i] = int(res.RowsAffected)
+		}
+		if int64(len(res.Rows)) != res.RowsAffected {
+			rollback(ctx, sess)
+			return ApplyResult{}, nil, errors.New("cell apply: UPDATE returned inconsistent row identities")
+		}
+		if res.RowsAffected == 1 {
+			if len(res.Rows) != 1 || res.Rows[0] == nil || len(res.Rows[0].Values) != len(pkCols) {
+				rollback(ctx, sess)
+				return ApplyResult{}, nil, errors.New("cell apply: UPDATE did not return one complete row identity")
+			}
+			out.OriginalPKs = append(out.OriginalPKs, append([]any(nil), stmt.OriginalPK...))
+			out.ResultPKs = append(out.ResultPKs, append([]any(nil), res.Rows[0].Values...))
+		}
+		if overwrite && res.RowsAffected == 0 {
+			rollback(ctx, sess)
+			return ApplyResult{}, nil, fmt.Errorf("cell overwrite: row not found for %s (deleted by another session?)", e.Column)
+		}
 
 		if !dryRun && res.RowsAffected == 0 {
-			// Conflict. Refetch the server's current value for this
-			// (pk, column) and stash the ConflictedEdit. We still
-			// continue the loop so the caller sees every stale edit
-			// in the batch — useful for the conflict-dialog UX.
-			srvVal, srvErr := fetchServerValue(ctx, sess, qualified, pkCols, e)
-			if srvErr != nil {
-				rollback(ctx, sess)
-				return ApplyResult{}, nil, fmt.Errorf("cell apply: refetch server value for %s: %w",
-					e.Column, srvErr)
+			// A failed row guard leaves all its assignments unapplied. Show
+			// every affected column, including guards that individually matched.
+			for _, i := range stmt.EditIndexes {
+				e = edits[i]
+				srvVal, srvErr := fetchServerValue(ctx, sess, qualified, pkCols, e)
+				if srvErr != nil {
+					rollback(ctx, sess)
+					return ApplyResult{}, nil, fmt.Errorf("cell apply: refetch server value for %s: %w",
+						e.Column, srvErr)
+				}
+				conflicts = append(conflicts, models.ConflictedEdit{
+					Edit:        e,
+					ServerValue: srvVal,
+					LoadedAt:    time.Now(),
+				})
 			}
-			conflicts = append(conflicts, models.ConflictedEdit{
-				Edit:        e,
-				ServerValue: srvVal,
-				LoadedAt:    time.Now(),
-			})
 		}
 	}
 
@@ -241,31 +265,67 @@ func (h *CellApplyHelper) Apply(
 
 	if dryRun {
 		rollback(ctx, sess)
-		return ApplyResult{RowsAffected: rowsAffected, SQL: sqlTexts}, nil, nil
+		return out, nil, nil
 	}
 
 	if _, err := sess.Execute(ctx, models.Query{SQL: "COMMIT"}); err != nil {
-		// COMMIT failure: the server has already rolled back. Surface
-		// the wrapped error so the caller can display it.
-		return ApplyResult{}, nil, fmt.Errorf("cell apply: COMMIT: %w", err)
+		out.CommitUnknown = true
+		set.MarkCommitUnknown(edits, out.OriginalPKs, out.ResultPKs)
+		return out, nil, fmt.Errorf("%w: %w", ErrCommitUnknown, err)
 	}
+	out.Committed = true
 
 	// Refetch the touched rows by PK so the caller can update the grid.
 	// Distinct-PK list preserves first-seen order.
-	pkRows := distinctPKs(edits)
-	refRes, err := refetchByPK(ctx, sess, qualified, pkCols, pkRows)
+	refRes, err := refetchByPK(ctx, sess, qualified, pkCols, out.ResultPKs)
 	if err != nil {
-		return ApplyResult{RowsAffected: rowsAffected, SQL: sqlTexts}, nil,
+		return out, nil,
 			fmt.Errorf("cell apply: refetch after commit: %w", err)
 	}
-
-	out := ApplyResult{
-		RowsAffected:     rowsAffected,
-		RefetchedColumns: refRes.cols,
-		RefetchedRows:    refRes.rows,
-		SQL:              sqlTexts,
+	for _, pk := range out.ResultPKs {
+		row, ok := refetchedRow(refRes, pkCols, pk)
+		if !ok {
+			return out, nil, errors.New("cell apply: committed, but refreshed row identity is missing or ambiguous")
+		}
+		out.RefetchedRows = append(out.RefetchedRows, row)
 	}
+	out.RefetchedColumns = refRes.cols
+	out.RefetchedOriginalPKs = out.OriginalPKs
 	return out, nil, nil
+}
+
+func refetchedRow(ref refetchResult, pkCols []string, pk []any) (models.Row, bool) {
+	indexes := make([]int, len(pkCols))
+	for i, name := range pkCols {
+		indexes[i] = -1
+		for j, col := range ref.cols {
+			if col.Name == name {
+				indexes[i] = j
+				break
+			}
+		}
+		if indexes[i] < 0 {
+			return models.Row{}, false
+		}
+	}
+	var found models.Row
+	matches := 0
+	for _, row := range ref.rows {
+		key := make([]any, len(pkCols))
+		valid := true
+		for i, j := range indexes {
+			if j >= len(row.Values) {
+				valid = false
+				break
+			}
+			key[i] = row.Values[j]
+		}
+		if valid && pkSliceEqual(key, pk) {
+			found = row
+			matches++
+		}
+	}
+	return found, matches == 1
 }
 
 // Overwrite is like Apply but issues PK-only UPDATEs (no IS NOT DISTINCT
@@ -285,86 +345,8 @@ func (h *CellApplyHelper) Overwrite(
 	set *models.PendingEditSet,
 	pkCols []string,
 ) (ApplyResult, error) {
-	if h == nil || h.acquirer == nil {
-		return ApplyResult{}, ErrNoAcquirer
-	}
-	if set == nil || set.IsEmpty() {
-		return ApplyResult{}, nil
-	}
-	if len(pkCols) == 0 {
-		return ApplyResult{}, ErrMissingPKColumns
-	}
-
-	edits := set.Edits()
-	for i := range edits {
-		if len(edits[i].PrimaryKey) != len(pkCols) {
-			return ApplyResult{}, fmt.Errorf("%w: edit[%d] has %d pk values, expected %d",
-				ErrPKLengthMismatch, i, len(edits[i].PrimaryKey), len(pkCols))
-		}
-	}
-
-	if _, ok := ctx.Deadline(); !ok {
-		timeout := h.timeout
-		if timeout <= 0 {
-			timeout = DefaultCellApplyTimeout
-		}
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
-	sess, err := h.acquirer.AcquireSession(ctx)
-	if err != nil {
-		return ApplyResult{}, fmt.Errorf("%w: %w", ErrPoolExhausted, err)
-	}
-	defer func() { _ = sess.Close() }()
-
-	schema := set.Table.Schema
-	table := set.Table.Table
-	qualified := pg.QuoteQualified(schema, table)
-
-	if _, err := sess.Execute(ctx, models.Query{SQL: "BEGIN"}); err != nil {
-		return ApplyResult{}, fmt.Errorf("cell overwrite: BEGIN: %w", err)
-	}
-
-	rowsAffected := make([]int, len(edits))
-	sqlTexts := make([]string, len(edits))
-	for i := range edits {
-		e := edits[i]
-		stmt, args := buildUpdateSQL(set.Table, pkCols, e, SQLModeParameterized, false)
-		sqlTexts[i] = stmt
-		res, execErr := sess.Execute(ctx, models.Query{SQL: stmt, Args: args})
-		if execErr != nil {
-			rollback(ctx, sess)
-			return ApplyResult{}, fmt.Errorf("cell overwrite: UPDATE %s.%s.%s: %w",
-				schema, table, e.Column, execErr)
-		}
-		if res.RowsAffected > 1 {
-			rollback(ctx, sess)
-			return ApplyResult{}, fmt.Errorf("cell overwrite: unsafe row identity: UPDATE affected %d rows (expected at most one)", res.RowsAffected)
-		}
-		if res.RowsAffected == 0 {
-			rollback(ctx, sess)
-			return ApplyResult{}, fmt.Errorf("cell overwrite: row not found for %s (deleted by another session?)", e.Column)
-		}
-		rowsAffected[i] = int(res.RowsAffected)
-	}
-
-	if _, err := sess.Execute(ctx, models.Query{SQL: "COMMIT"}); err != nil {
-		return ApplyResult{}, fmt.Errorf("cell overwrite: COMMIT: %w", err)
-	}
-
-	pkRows := distinctPKs(edits)
-	refRes, err := refetchByPK(ctx, sess, qualified, pkCols, pkRows)
-	if err != nil {
-		return ApplyResult{RowsAffected: rowsAffected, SQL: sqlTexts}, fmt.Errorf("cell overwrite: refetch after commit: %w", err)
-	}
-	return ApplyResult{
-		RowsAffected:     rowsAffected,
-		RefetchedColumns: refRes.cols,
-		RefetchedRows:    refRes.rows,
-		SQL:              sqlTexts,
-	}, nil
+	out, _, err := h.apply(ctx, set, pkCols, false, true)
+	return out, err
 }
 
 // fetchServerValue issues a parameterized SELECT for a single column on a
@@ -500,45 +482,10 @@ func refetchByPK(
 	return refetchResult{cols: cols, rows: rows}, nil
 }
 
-// distinctPKs returns the unique PK tuples in first-seen order. Used by
-// the post-commit refetch so a single SELECT covers every touched row
-// regardless of how many columns each row had edited.
-func distinctPKs(edits []models.PendingEdit) [][]any {
-	out := make([][]any, 0)
-	for _, e := range edits {
-		dup := false
-		for _, p := range out {
-			if pkSliceEqual(p, e.PrimaryKey) {
-				dup = true
-				break
-			}
-		}
-		if !dup {
-			cp := make([]any, len(e.PrimaryKey))
-			copy(cp, e.PrimaryKey)
-			out = append(out, cp)
-		}
-	}
-	return out
-}
-
-// pkSliceEqual compares two []any element-wise. Mirrors the private
-// pkEqual in pkg/models/pending_edit.go (which is not exported).
+// Identity values originate in the same driver projection. Text formatting
+// would conflate distinct array/string keys; keep their typed structure.
 func pkSliceEqual(a, b []any) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		// fmt.Sprintf-based comparison is robust against the
-		// driver-decoded numeric types differing in Go-level concrete
-		// type but matching at the Postgres level (e.g. int64 vs int32
-		// after a refetch). Acceptable for the limited use here (only
-		// distinct-list collapsing).
-		if fmt.Sprintf("%v", a[i]) != fmt.Sprintf("%v", b[i]) {
-			return false
-		}
-	}
-	return true
+	return models.RowIdentityEqual(a, b)
 }
 
 // rollback issues a best-effort ROLLBACK on sess. Errors are swallowed —

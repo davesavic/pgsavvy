@@ -2,10 +2,224 @@ package models
 
 import (
 	"errors"
+	"fmt"
+	"math"
+	"math/big"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestReview_row_outcome_snapshot_ownership(t *testing.T) {
+	var s PendingEditSet
+	key := []any{[]byte{1}}
+	value := map[string]any{"items": []any{[]byte{2}}}
+	if err := s.Add(PendingEdit{PrimaryKey: key, Column: "payload", NewValue: value}); err != nil {
+		t.Fatal(err)
+	}
+	key[0].([]byte)[0] = 9
+	value["items"].([]any)[0].([]byte)[0] = 9
+	first := s.Edits()
+	if first[0].PrimaryKey[0].([]byte)[0] != 1 || first[0].NewValue.(map[string]any)["items"].([]any)[0].([]byte)[0] != 2 {
+		t.Fatal("staged snapshot aliases caller input")
+	}
+	first[0].PrimaryKey[0].([]byte)[0] = 8
+	first[0].NewValue.(map[string]any)["items"].([]any)[0].([]byte)[0] = 8
+	second := s.Edits()
+	if second[0].PrimaryKey[0].([]byte)[0] != 1 || second[0].NewValue.(map[string]any)["items"].([]any)[0].([]byte)[0] != 2 {
+		t.Fatal("Edits snapshot aliases pending state")
+	}
+}
+
+func TestReview_row_outcome_numeric_pointer_snapshot(t *testing.T) {
+	var s PendingEditSet
+	value := struct{ Int *big.Int }{Int: big.NewInt(123)}
+	if err := s.Add(PendingEdit{PrimaryKey: []any{1}, Column: "numeric", NewValue: value}); err != nil {
+		t.Fatal(err)
+	}
+	value.Int.SetInt64(9)
+	copy := s.Edits()[0].NewValue.(struct{ Int *big.Int })
+	if copy.Int.Int64() != 123 {
+		t.Fatal("numeric snapshot retained caller pointer")
+	}
+	copy.Int.SetInt64(8)
+	if s.Edits()[0].NewValue.(struct{ Int *big.Int }).Int.Int64() != 123 {
+		t.Fatal("numeric snapshot retained returned pointer")
+	}
+}
+
+func TestReview_row_outcome_NaN_retirement(t *testing.T) {
+	var s PendingEditSet
+	if err := s.Add(PendingEdit{PrimaryKey: []any{math.NaN()}, Column: "n", OldValue: math.NaN(), NewValue: math.NaN()}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := s.Edits()
+	s.Retire(snapshot)
+	if !s.IsEmpty() {
+		t.Fatal("NaN prevented confirmed snapshot retirement")
+	}
+}
+
+func TestReview_row_outcome_retire_versions(t *testing.T) {
+	var s PendingEditSet
+	e := PendingEdit{PrimaryKey: []any{1}, Column: "n", Kind: Expression, NewExpr: "n + 1"}
+	if err := s.Add(e); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := s.Edits()
+	// Even an identical restaging is a new intent, not the old committed version.
+	if err := s.Add(e); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Add(PendingEdit{PrimaryKey: []any{2}, Column: "n", NewValue: 5}); err != nil {
+		t.Fatal(err)
+	}
+	s.Retire(snapshot)
+	if s.Count() != 2 {
+		t.Fatal("old receipt retired replacement or unrelated row")
+	}
+	s.Retire(s.Edits())
+	if !s.IsEmpty() {
+		t.Fatal("matching committed snapshot not retired")
+	}
+}
+
+func TestReview_row_outcome_receipt_owner(t *testing.T) {
+	var first, second PendingEditSet
+	e := PendingEdit{PrimaryKey: []any{1}, Column: "n", NewValue: 2}
+	for _, set := range []*PendingEditSet{&first, &second} {
+		if err := set.Add(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first.Retire(second.Edits())
+	if first.Count() != 1 {
+		t.Fatal("same local revision from another owner retired this set")
+	}
+	first.Retire(first.Edits())
+	if !first.IsEmpty() {
+		t.Fatal("correct owner receipt did not retire")
+	}
+}
+
+func TestReview_row_outcome_surviving_identity(t *testing.T) {
+	var s PendingEditSet
+	for _, col := range []string{"id", "n"} {
+		if err := s.Add(PendingEdit{PrimaryKey: []any{1}, Column: col, NewValue: 2}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot := s.Edits()[:1]
+	s.RetireCommitted(snapshot, [][]any{{1}}, [][]any{{11}})
+	if s.Count() != 1 || !s.HasEdit([]any{11}, "n") || s.HasEdit([]any{1}, "n") {
+		t.Fatal("remaining same-row edit kept obsolete identity")
+	}
+}
+
+func TestReview_row_outcome_unknown_reconciliation(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "not_committed", true: "committed"}[committed], func(t *testing.T) {
+			var s PendingEditSet
+			e := PendingEdit{PrimaryKey: []any{1}, Column: "n", Kind: Expression, NewExpr: "n + 1"}
+			if err := s.Add(e); err != nil {
+				t.Fatal(err)
+			}
+			s.MarkCommitUnknown(s.Edits(), [][]any{{1}}, [][]any{{1}})
+			if err := s.Add(e); !errors.Is(err, ErrCommitOutcomeUnknown) {
+				t.Fatalf("restaging unknown row: %v", err)
+			}
+			if err := s.Add(PendingEdit{PrimaryKey: []any{2}, Column: "n", NewValue: 2}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.ReconcileCommitOutcome(committed); err != nil {
+				t.Fatal(err)
+			}
+			want := 2
+			if committed {
+				want = 1
+			}
+			if s.Count() != want || s.CommitOutcomeUnknown() {
+				t.Fatalf("reconciliation state count=%d unknown=%v", s.Count(), s.CommitOutcomeUnknown())
+			}
+		})
+	}
+	var s PendingEditSet
+	e := PendingEdit{PrimaryKey: []any{1}, Column: "n", NewValue: 2}
+	if err := s.Add(e); err != nil {
+		t.Fatal(err)
+	}
+	s.MarkCommitUnknown(s.Edits(), [][]any{{1}}, [][]any{{1}})
+	s.Clear()
+	if !s.CommitOutcomeUnknown() {
+		t.Fatal("Clear silently reconciled uncertain COMMIT")
+	}
+	if err := s.Add(e); !errors.Is(err, ErrCommitOutcomeUnknown) {
+		t.Fatalf("Clear allowed replay: %v", err)
+	}
+	if err := s.ReconcileCommitOutcome(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Add(e); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReview_row_outcome_unknown_identity_validation(t *testing.T) {
+	for _, result := range [][][]any{nil, {{}}, {{nil}}, {{11}, {12}}} {
+		t.Run(fmt.Sprint(result), func(t *testing.T) {
+			var s PendingEditSet
+			e := PendingEdit{PrimaryKey: []any{1}, Column: "n", NewValue: 2}
+			if err := s.Add(e); err != nil {
+				t.Fatal(err)
+			}
+			s.MarkCommitUnknown(s.Edits(), [][]any{{1}}, result)
+			if err := s.ReconcileCommitOutcome(true); !errors.Is(err, ErrCommitIdentityUnresolved) || !s.CommitOutcomeUnknown() || s.Count() != 1 {
+				t.Fatal("invalid mapping silently reconciled uncertain write")
+			}
+		})
+	}
+	var s PendingEditSet
+	for _, col := range []string{"id", "n"} {
+		if err := s.Add(PendingEdit{PrimaryKey: []any{1}, Column: col, NewValue: 2}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result := [][]any{{11}}
+	s.MarkCommitUnknown(s.Edits()[:1], [][]any{{1}}, result)
+	result[0][0] = 99
+	original, returned := s.CommitUnknownIdentities()
+	original[0][0] = 99
+	returned[0][0] = 99
+	if err := s.ReconcileCommitOutcome(true); err != nil {
+		t.Fatal(err)
+	}
+	if s.Count() != 1 || !s.HasEdit([]any{11}, "n") {
+		t.Fatal("unknown receipt aliased caller or failed survivor rekey")
+	}
+}
+
+func TestReview_row_outcome_unknown_ambiguous_mappings(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		original, result [][]any
+	}{
+		{"duplicate_result", [][]any{{1}, {2}}, [][]any{{99}, {99}}},
+		{"extraneous_original", [][]any{{1}, {2}, {3}}, [][]any{{11}, {12}, {33}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var s PendingEditSet
+			for _, id := range []int{1, 2, 3} {
+				if err := s.Add(PendingEdit{PrimaryKey: []any{id}, Column: "n", NewValue: 2}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s.MarkCommitUnknown(s.Edits()[:2], tc.original, tc.result)
+			if err := s.ReconcileCommitOutcome(true); !errors.Is(err, ErrCommitIdentityUnresolved) || !s.CommitOutcomeUnknown() || s.Count() != 3 || !s.HasEdit([]any{3}, "n") {
+				t.Fatal("ambiguous receipt retired snapshots or changed unrelated identity")
+			}
+		})
+	}
+}
 
 func TestPendingEditSet_AddAndCount(t *testing.T) {
 	var s PendingEditSet

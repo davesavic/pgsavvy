@@ -86,6 +86,41 @@ func newCommitDialogTestCtx() *guicontext.CommitDialogContext {
 	return guicontext.NewCommitDialogContext(base, guicontext.Deps{})
 }
 
+func TestReview_row_outcome_preview_batch(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	set := &models.PendingEditSet{Table: models.Ref{Schema: "app", Table: "items"}}
+	for _, e := range []models.PendingEdit{{PrimaryKey: []any{1}, Column: "id", OldValue: 1, NewExpr: "id + 10", Kind: models.Expression}, {PrimaryKey: []any{1}, Column: "n", OldValue: 10, NewExpr: "id + 1", Kind: models.Expression}} {
+		if err := set.Add(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := controllers.DefaultCommitDialogRender(guicontext.CommitDialogView{Set: set, Conn: &models.Connection{Name: "dev"}, Mode: guicontext.CommitDialogSqlPreview, PkCols: []string{"id"}})
+	if strings.Count(body, "UPDATE ") != 1 {
+		t.Fatal("preview still uses sequential same-row mutations")
+	}
+	for _, part := range []string{`SET "id" = id + 10, "n" = id + 1`, `"id" IS NOT DISTINCT FROM 1 AND "n" IS NOT DISTINCT FROM 10`, `RETURNING "id"`, "BEGIN;", "COMMIT;"} {
+		if !strings.Contains(body, part) {
+			t.Fatalf("preview lacks %q", part)
+		}
+	}
+}
+
+func TestReview_row_outcome_preview_structured_keys(t *testing.T) {
+	set := &models.PendingEditSet{Table: models.Ref{Schema: "app", Table: "items"}}
+	for _, key := range [][]string{{"a b"}, {"a", "b"}} {
+		if err := set.Add(models.PendingEdit{PrimaryKey: []any{key}, Column: "n", OldValue: 1, NewValue: 2}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := controllers.DefaultCommitDialogRender(guicontext.CommitDialogView{Set: set, Conn: &models.Connection{Name: "dev"}})
+	if strings.Count(body, "row ") != 2 {
+		t.Fatal("diff preview conflated separate structured keys")
+	}
+	if !strings.Contains(body, `[]string{"a b"}`) || !strings.Contains(body, `[]string{"a", "b"}`) {
+		t.Fatal("structured row labels are ambiguous")
+	}
+}
+
 // AC: keybindings cover [a], [d], [s], [c], [Esc] on COMMIT_DIALOG.
 func TestCommitDialogController_Keybindings(t *testing.T) {
 	ctx := newCommitDialogTestCtx()

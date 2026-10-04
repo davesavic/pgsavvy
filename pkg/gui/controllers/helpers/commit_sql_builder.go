@@ -85,3 +85,92 @@ func buildUpdateSQL(table models.Ref, pkCols []string, edit models.PendingEdit, 
 
 	return b.String(), args
 }
+
+// RowUpdateStatement updates all staged columns of one original row atomically.
+// EditIndexes maps its affected-row count back to the input edit snapshot.
+type RowUpdateStatement struct {
+	SQL         string
+	Args        []any
+	EditIndexes []int
+	OriginalPK  []any
+}
+
+// BuildUpdateBatch is shared by execution and preview. SET expressions read the
+// original row. Only an explicitly authorized overwrite may omit old-value guards.
+func BuildUpdateBatch(table models.Ref, pkCols []string, edits []models.PendingEdit, mode SQLMode, guardOldValue bool) ([]RowUpdateStatement, error) {
+	if len(pkCols) == 0 {
+		return nil, ErrMissingPKColumns
+	}
+	groups := make([]RowUpdateStatement, 0)
+	for i, e := range edits {
+		if len(e.PrimaryKey) != len(pkCols) {
+			return nil, ErrPKLengthMismatch
+		}
+		found := -1
+		for j := range groups {
+			if pkSliceEqual(groups[j].OriginalPK, e.PrimaryKey) {
+				found = j
+				break
+			}
+		}
+		if found < 0 {
+			groups = append(groups, RowUpdateStatement{OriginalPK: append([]any(nil), e.PrimaryKey...)})
+			found = len(groups) - 1
+		}
+		for _, j := range groups[found].EditIndexes {
+			if edits[j].Column == e.Column {
+				return nil, fmt.Errorf("cell apply: duplicate staged column %q", e.Column)
+			}
+		}
+		groups[found].EditIndexes = append(groups[found].EditIndexes, i)
+	}
+	for gi := range groups {
+		g := &groups[gi]
+		var b strings.Builder
+		value := func(v any, oid uint32) {
+			if mode == SQLModeLiteral {
+				b.WriteString(pg.QuoteLiteral(v, oid))
+			} else {
+				g.Args = append(g.Args, v)
+				fmt.Fprintf(&b, "$%d", len(g.Args))
+			}
+		}
+		b.WriteString("UPDATE " + pg.QuoteQualified(table.Schema, table.Table) + " SET ")
+		for j, i := range g.EditIndexes {
+			if j > 0 {
+				b.WriteString(", ")
+			}
+			e := edits[i]
+			b.WriteString(pg.QuoteIdent(e.Column) + " = ")
+			if e.Kind == models.Expression {
+				b.WriteString(e.NewExpr)
+			} else {
+				value(e.NewValue, e.TypeOID)
+			}
+		}
+		b.WriteString(" WHERE ")
+		for j, col := range pkCols {
+			if j > 0 {
+				b.WriteString(" AND ")
+			}
+			b.WriteString(pg.QuoteIdent(col) + " = ")
+			value(g.OriginalPK[j], 0)
+		}
+		if guardOldValue {
+			for _, i := range g.EditIndexes {
+				e := edits[i]
+				b.WriteString(" AND " + pg.QuoteIdent(e.Column) + " IS NOT DISTINCT FROM ")
+				value(e.OldValue, e.TypeOID)
+			}
+		}
+		b.WriteString(" RETURNING ")
+		for j, col := range pkCols {
+			if j > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(pg.QuoteIdent(col))
+		}
+		g.SQL = b.String()
+	}
+	return groups, nil
+}

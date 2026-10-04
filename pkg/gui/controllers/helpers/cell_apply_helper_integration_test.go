@@ -11,6 +11,7 @@ package helpers_test
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -22,6 +23,108 @@ import (
 )
 
 const cellApplyEnvDSN = "PGSAVVY_TEST_PG"
+
+func TestReview_row_outcome_live_keys(t *testing.T) {
+	for _, mode := range []string{"apply", "overwrite", "dry_run"} {
+		t.Run(mode, func(t *testing.T) {
+			conn := openIntegrationConn(t)
+			schema := fmt.Sprintf("review_outcome_%d", time.Now().UnixNano())
+			qualified := pg.QuoteQualified(schema, "items")
+			adminExec(t, conn, "CREATE SCHEMA "+pg.QuoteIdent(schema), "CREATE TABLE "+qualified+" (tenant integer, id integer, payload text, PRIMARY KEY (tenant,id))", "INSERT INTO "+qualified+" VALUES (1,2,'old'),(1,3,'unrelated')", "CREATE FUNCTION "+pg.QuoteQualified(schema, "assign_key")+"() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN NEW.id := NEW.id + 100; RETURN NEW; END'", "CREATE TRIGGER assigned BEFORE UPDATE ON "+qualified+" FOR EACH ROW EXECUTE FUNCTION "+pg.QuoteQualified(schema, "assign_key")+"()")
+			t.Cleanup(func() { adminExec(t, conn, "DROP SCHEMA "+pg.QuoteIdent(schema)+" CASCADE") })
+			set := &models.PendingEditSet{Table: models.Ref{Schema: schema, Table: "items"}}
+			for _, e := range []models.PendingEdit{
+				{PrimaryKey: []any{int32(1), int32(2)}, Column: "id", OldValue: int32(2), Kind: models.Expression, NewExpr: "id + 10"},
+				{PrimaryKey: []any{int32(1), int32(2)}, Column: "payload", OldValue: "old", NewValue: "new"},
+			} {
+				if err := set.Add(e); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: conn})
+			var result helpers.ApplyResult
+			var err error
+			if mode == "overwrite" {
+				result, err = h.Overwrite(context.Background(), set, []string{"tenant", "id"})
+			} else {
+				var conflicts []models.ConflictedEdit
+				result, conflicts, err = h.Apply(context.Background(), set, []string{"tenant", "id"}, mode == "dry_run")
+				if len(conflicts) != 0 {
+					t.Fatalf("key change stranded subsequent edit: %d conflicts", len(conflicts))
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode != "dry_run" && (len(result.RefetchedRows) != 1 || result.RefetchedRows[0].Values[1] != int32(112) || result.RefetchedRows[0].Values[2] != "new") {
+				t.Fatalf("wrong refreshed row: %+v", result.RefetchedRows)
+			}
+			sess, err := conn.AcquireSession(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = sess.Close() }()
+			rows, err := sess.Execute(context.Background(), models.Query{SQL: "SELECT id,payload FROM " + qualified + " ORDER BY id"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows.Rows) != 2 {
+				t.Fatalf("unexpected row count: %d", len(rows.Rows))
+			}
+			if mode == "dry_run" {
+				if rows.Rows[0].Values[0] != int32(2) || rows.Rows[0].Values[1] != "old" {
+					t.Fatal("dry-run changed database")
+				}
+			} else {
+				if rows.Rows[1].Values[0] != int32(112) || rows.Rows[1].Values[1] != "new" {
+					t.Fatal("committed row incorrect")
+				}
+			}
+			unrelated := rows.Rows[0]
+			if mode == "dry_run" {
+				unrelated = rows.Rows[1]
+			}
+			if unrelated.Values[0] != int32(3) || unrelated.Values[1] != "unrelated" {
+				t.Fatal("unrelated row changed")
+			}
+		})
+	}
+}
+
+func TestReview_row_outcome_live_NaN(t *testing.T) {
+	conn := openIntegrationConn(t)
+	schema := fmt.Sprintf("review_nan_%d", time.Now().UnixNano())
+	qualified := pg.QuoteQualified(schema, "items")
+	adminExec(t, conn, "CREATE SCHEMA "+pg.QuoteIdent(schema), "CREATE TABLE "+qualified+" (id double precision PRIMARY KEY,payload double precision,n integer)", "INSERT INTO "+qualified+" VALUES ('NaN','NaN',0),(1,1,0)")
+	t.Cleanup(func() { adminExec(t, conn, "DROP SCHEMA "+pg.QuoteIdent(schema)+" CASCADE") })
+	set := &models.PendingEditSet{Table: models.Ref{Schema: schema, Table: "items"}}
+	for _, e := range []models.PendingEdit{{PrimaryKey: []any{math.NaN()}, Column: "payload", OldValue: math.NaN(), NewValue: math.NaN()}, {PrimaryKey: []any{math.NaN()}, Column: "n", OldValue: int32(0), NewValue: int32(1)}} {
+		if err := set.Add(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: conn})
+	res, conflicts, err := h.Apply(context.Background(), set, []string{"id"}, false)
+	if err != nil || len(conflicts) != 0 || !res.Committed || len(res.SQL) != 1 || len(res.RefetchedRows) != 1 || !math.IsNaN(res.RefetchedRows[0].Values[0].(float64)) || res.RefetchedRows[0].Values[2] != int32(1) {
+		t.Fatal("live NaN identity did not produce one grouped committed receipt")
+	}
+	set.RetireCommitted(res.Edits, res.OriginalPKs, res.ResultPKs)
+	if !set.IsEmpty() {
+		t.Fatal("live committed NaN payload remained staged")
+	}
+	sess, err := conn.AcquireSession(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sess.Close() }()
+	check, err := sess.Execute(context.Background(), models.Query{SQL: "SELECT n FROM " + qualified + " WHERE id=1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(check.Rows) != 1 || check.Rows[0].Values[0] != int32(0) {
+		t.Fatal("NaN edit changed unrelated row")
+	}
+}
 
 // openIntegrationConn returns a live *pg.Connection ready to hand out
 // sessions via AcquireSession. The caller is expected to Close the

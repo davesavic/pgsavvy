@@ -1,6 +1,8 @@
 package grid
 
-import "github.com/davesavic/pgsavvy/pkg/models"
+import (
+	"github.com/davesavic/pgsavvy/pkg/models"
+)
 
 // UpdateRowsByPK overwrites buffered cell values with refetched
 // post-commit data, matching rows on the grid's row identity and columns
@@ -15,6 +17,19 @@ import "github.com/davesavic/pgsavvy/pkg/models"
 // in-flight Render holding a snapshot never observes a torn row — the
 // same discipline snapshot() documents for cols+widths.
 func (v *View) UpdateRowsByPK(refCols []models.ColumnMeta, refRows []models.Row) int {
+	return v.updateRowsByPK(refCols, refRows, nil)
+}
+
+// UpdateRowsFromOriginalPK maps each refreshed row to its pre-commit identity.
+// This keeps key changes from replacing a different buffered row.
+func (v *View) UpdateRowsFromOriginalPK(refCols []models.ColumnMeta, refRows []models.Row, originalPKs [][]any) int {
+	if len(originalPKs) != len(refRows) {
+		return 0
+	}
+	return v.updateRowsByPK(refCols, refRows, originalPKs)
+}
+
+func (v *View) updateRowsByPK(refCols []models.ColumnMeta, refRows []models.Row, originalPKs [][]any) int {
 	if len(refCols) == 0 || len(refRows) == 0 {
 		return 0
 	}
@@ -38,14 +53,14 @@ func (v *View) UpdateRowsByPK(refCols []models.ColumnMeta, refRows []models.Row)
 			return 0
 		}
 		ri, ok := refIdx[v.cols[idx].Name]
-		if !ok {
+		if !ok && originalPKs == nil {
 			return 0
 		}
 		pkRefIdx[i] = ri
 	}
 
 	updated := make(map[int]models.Row)
-	for _, ref := range refRows {
+	for r, ref := range refRows {
 		pk := make([]any, len(pkRefIdx))
 		skip := false
 		for i, ri := range pkRefIdx {
@@ -55,11 +70,19 @@ func (v *View) UpdateRowsByPK(refCols []models.ColumnMeta, refRows []models.Row)
 			}
 			pk[i] = ref.Values[ri]
 		}
+		if originalPKs != nil {
+			pk = originalPKs[r]
+			skip = len(pk) != len(v.rowIdentity)
+		}
 		if skip {
 			continue
 		}
 		for gi, row := range v.rows {
-			if !pkSliceEqual(rowPKValues(row, v.rowIdentity), pk) {
+			matches := pkSliceEqual(rowPKValues(row, v.rowIdentity), pk)
+			if originalPKs != nil {
+				matches = models.RowIdentityEqual(rowPKValues(row, v.rowIdentity), pk)
+			}
+			if !matches {
 				continue
 			}
 			vals := make([]any, len(row.Values))

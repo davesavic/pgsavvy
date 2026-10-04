@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -146,14 +147,18 @@ type editGroup struct {
 // preserving first-seen order so the Preview body is stable for tests.
 func groupEditsByPK(edits []models.PendingEdit) []editGroup {
 	groups := make([]editGroup, 0)
-	idx := map[string]int{}
 	for _, e := range edits {
-		key := pkKey(e.PrimaryKey)
-		if i, ok := idx[key]; ok {
-			groups[i].edits = append(groups[i].edits, e)
+		found := -1
+		for i := range groups {
+			if models.RowIdentityEqual(groups[i].pk, e.PrimaryKey) {
+				found = i
+				break
+			}
+		}
+		if found >= 0 {
+			groups[found].edits = append(groups[found].edits, e)
 			continue
 		}
-		idx[key] = len(groups)
 		groups = append(groups, editGroup{
 			pk:    append([]any(nil), e.PrimaryKey...),
 			edits: []models.PendingEdit{e},
@@ -170,25 +175,27 @@ func groupEditsByPK(edits []models.PendingEdit) []editGroup {
 	return groups
 }
 
-// pkKey returns a stable string for a primary-key tuple. fmt.Sprint
-// is enough — two distinct tuples may collide on the wire format, but
-// the group-by here only cares about render-time identity (the same
-// PendingEdit slice that produced the key drives the row).
-func pkKey(pk []any) string {
-	return fmt.Sprintf("%v", pk)
-}
-
 // formatPK renders a PK tuple as `(v1, v2, ...)`. Single-column PKs
 // drop the parens to keep the row header readable.
 func formatPK(pk []any) string {
 	if len(pk) == 1 {
-		return formatValue(pk[0])
+		return formatPKValue(pk[0])
 	}
 	parts := make([]string, len(pk))
 	for i, v := range pk {
-		parts[i] = formatValue(v)
+		parts[i] = formatPKValue(v)
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+func formatPKValue(v any) string {
+	if v != nil {
+		kind := reflect.TypeOf(v).Kind()
+		if kind == reflect.Slice || kind == reflect.Array {
+			return fmt.Sprintf("%#v", v)
+		}
+	}
+	return formatValue(v)
 }
 
 // formatValue renders an arbitrary Go value in dialog-text form. NULL
@@ -261,22 +268,27 @@ func writeCommitDialogSQL(b *strings.Builder, v guicontext.CommitDialogView) {
 	pw := connectionPassword(v.Conn)
 	edits := v.Set.Edits()
 	b.WriteString("BEGIN;\n")
-	shown := min(len(edits), commitDialogMaxStmts)
-	for i := range shown {
-		e := edits[i]
+	for i := range edits {
 		if pw != "" {
-			scrubEditPassword(&e, pw)
+			scrubEditPassword(&edits[i], pw)
 		}
-		pkCols := v.PkCols
-		if len(pkCols) == 0 {
-			pkCols = pkColumnPlaceholder(len(e.PrimaryKey))
-		}
-		stmt, _ := helpers.BuildUpdateSQL(v.Set.Table, pkCols, e, helpers.SQLModeLiteral)
-		b.WriteString(highlight.Highlight(stmt))
+	}
+	pkCols := v.PkCols
+	if len(pkCols) == 0 {
+		pkCols = pkColumnPlaceholder(len(edits[0].PrimaryKey))
+	}
+	batch, err := helpers.BuildUpdateBatch(v.Set.Table, pkCols, edits, helpers.SQLModeLiteral, true)
+	if err != nil {
+		b.WriteString("(cannot build safe SQL preview)")
+		return
+	}
+	shown := min(len(batch), commitDialogMaxStmts)
+	for i := range shown {
+		b.WriteString(highlight.Highlight(batch[i].SQL))
 		b.WriteByte('\n')
 	}
-	if len(edits) > shown {
-		fmt.Fprintf(b, "... (%d more statements)\n", len(edits)-shown)
+	if len(batch) > shown {
+		fmt.Fprintf(b, "... (%d more statements)\n", len(batch)-shown)
 	}
 	b.WriteString("COMMIT;")
 }
