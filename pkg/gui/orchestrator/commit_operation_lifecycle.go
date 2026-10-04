@@ -65,6 +65,7 @@ type commitOperation struct {
 	tab            *ui.Tab
 	grid           *grid.View
 	tabGeneration  uint64
+	gridGeneration uint64
 	helper         *helpers.CellApplyHelper
 }
 
@@ -74,6 +75,8 @@ type commitReceipt struct {
 	report    []guicontext.DryRunStmtResult
 	err       error
 }
+
+var errCommitFailed = errors.New("commit operation failed; pending edits retained")
 
 type asyncCommitHooks struct {
 	g         *Gui
@@ -111,6 +114,7 @@ func (h asyncCommitHooks) capture(set *models.PendingEditSet, conn *models.Conne
 	op := &commitOperation{
 		ctx: ctx, cancel: cancel, done: make(chan struct{}), live: set, snapshot: snapshot,
 		pkCols: pkCols, tab: tab, grid: tab.Grid(), tabGeneration: tab.EditabilityGeneration(),
+		gridGeneration: tab.Grid().CommitGeneration(),
 		// No credential-bearing profile fields are needed by execution/publication.
 		profile: models.Connection{Name: conn.Name, ReadOnly: conn.ReadOnly, ConfirmWrites: conn.ConfirmWrites, Color: conn.Color, Icon: conn.Icon, Label: conn.Label},
 	}
@@ -173,6 +177,10 @@ func (h asyncCommitHooks) launch(op *commitOperation, dryRun, overwrite bool, pu
 			}()
 			receipt = op.execute(dryRun, overwrite)
 		}()
+		if receipt.result.Committed {
+			complete := receipt.err == nil && len(receipt.result.RefetchedRows) == len(receipt.result.ResultPKs)
+			op.grid.SettleCommittedRows(op.gridGeneration, receipt.result.RefetchedColumns, receipt.result.RefetchedRows, receipt.result.RefetchedOriginalPKs, complete)
+		}
 		op.live.SettleCommit(op.snapshot, receipt.result.Committed, receipt.result.CommitUnknown, receipt.result.OriginalPKs, receipt.result.ResultPKs)
 		op.cancel()
 		if receipt.err != nil && h.deps.logger != nil {
@@ -188,7 +196,9 @@ func (h asyncCommitHooks) launch(op *commitOperation, dryRun, overwrite bool, pu
 			if !h.current(op) {
 				return nil
 			}
-			if err := publish(receipt); !errors.Is(err, context.Canceled) {
+			if err := publish(receipt); !errors.Is(err, context.Canceled) && !errors.Is(err, errCommitFailed) && !errors.Is(err, models.ErrCommitOutcomeUnknown) {
+				// Operation failures have already been reported by the dialog/toast.
+				// Only UI/control-flow failures may retire the native MainLoop.
 				return err
 			}
 			return nil
@@ -222,7 +232,7 @@ func safeCommitError(err error) error {
 	if errors.Is(err, context.Canceled) {
 		return context.Canceled
 	}
-	return errors.New("commit operation failed; pending edits retained")
+	return errCommitFailed
 }
 
 func (h asyncCommitHooks) StartApply(set *models.PendingEditSet, conn *models.Connection, done func(error) error) (func(), error) {
@@ -274,7 +284,6 @@ func (h asyncCommitHooks) publishCommitted(op *commitOperation, receipt commitRe
 	if h.deps.evictCounts != nil {
 		h.deps.evictCounts(op.snapshot.Table.Schema, op.snapshot.Table.Table)
 	}
-	op.grid.UpdateRowsFromOriginalPK(receipt.result.RefetchedColumns, receipt.result.RefetchedRows, receipt.result.RefetchedOriginalPKs)
 	if receipt.err != nil {
 		showCommitRefreshWarning(h.deps.toast, h.deps.logger)
 		return

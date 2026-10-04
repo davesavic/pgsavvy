@@ -546,8 +546,9 @@ func (g *Gui) wireInlineEditControllers(helperBag controllers.HelperBag) {
 			// grid + cursor per call; store resolves the per-(connID,
 			// baseTable) PendingEditSet via the same helperBag closure the
 			// commit dialog uses, keeping both flows on the same set.
-			cellCtrl.SetPicker(cellEditorPicker{tabs: g.resultTabsH})
-			cellCtrl.SetStore(cellEditorStore{resolve: helperBag.ActivePendingEditSet})
+			sample := &cellEditorSample{}
+			cellCtrl.SetPicker(cellEditorPicker{tabs: g.resultTabsH, sample: sample})
+			cellCtrl.SetStore(cellEditorStore{resolve: helperBag.ActivePendingEditSet, sample: sample})
 			g.controllers.CellEditor = cellCtrl
 		}
 		cdDeps := commitDialogDeps{

@@ -175,6 +175,10 @@ func TestReview_async_commit_shutdown_wiring(t *testing.T) {
 	grid.SetColumns([]models.ColumnMeta{{Name: "id"}, {Name: "data"}})
 	grid.SetEditability(true, []int{0}, "", models.Ref{Schema: "app", Table: "items"})
 	grid.AppendRows([]models.Row{{Values: []any{int64(1), "old"}}})
+	grid.SetCursor(0, 1)
+	if err := g.Controllers().CellEditor.Enter(commands.ExecCtx{}); err != nil {
+		t.Fatal(err)
+	}
 	cell := g.Registry().CellEditor
 	cell.Open("old", models.ColumnMeta{Name: "data", TypeName: "text"}, []any{int64(1)}, "new")
 	if err := g.Controllers().CellEditor.Commit(commands.ExecCtx{}); err != nil {

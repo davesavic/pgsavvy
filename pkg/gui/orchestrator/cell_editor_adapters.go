@@ -22,7 +22,15 @@ import (
 // neutral values here — the !Editable / DisabledReason gate surfaces
 // the canonical reason. StreamBlocksEdit is reported live from TabState
 // because the tab's lifecycle phase can still change after wire time.
-type cellEditorPicker struct{ tabs *ui.ResultTabsHelper }
+type cellEditorSample struct {
+	grid     *grid.View
+	baseline uint64
+}
+
+type cellEditorPicker struct {
+	tabs   *ui.ResultTabsHelper
+	sample *cellEditorSample
+}
 
 func (p cellEditorPicker) Editable() bool {
 	g := p.activeGrid()
@@ -70,35 +78,19 @@ func (p cellEditorPicker) DisabledReason() string {
 }
 
 func (p cellEditorPicker) CellSnapshot() (any, models.ColumnMeta, []any, bool) {
-	g := p.activeGrid()
-	if g == nil {
+	if p.sample != nil {
+		*p.sample = cellEditorSample{}
+	}
+	tab := p.activeTab()
+	if tab == nil || tab.Grid() == nil {
 		return nil, models.ColumnMeta{}, nil, false
 	}
-	row, col := g.CursorPosition()
-	cols := g.Columns()
-	if col < 0 || col >= len(cols) {
-		return nil, models.ColumnMeta{}, nil, false
+	g := tab.Grid()
+	value, col, pk, baseline, ok := g.CellEditSnapshot()
+	if ok && p.sample != nil {
+		*p.sample = cellEditorSample{grid: g, baseline: baseline}
 	}
-	rows := g.AllRows()
-	if row < 0 || row >= len(rows) {
-		return nil, models.ColumnMeta{}, nil, false
-	}
-	values := rows[row].Values
-	if col >= len(values) {
-		return nil, models.ColumnMeta{}, nil, false
-	}
-	ri := g.RowIdentity()
-	if len(ri) == 0 {
-		return values[col], cols[col], nil, true
-	}
-	pk := make([]any, len(ri))
-	for i, idx := range ri {
-		if idx < 0 || idx >= len(values) {
-			return nil, models.ColumnMeta{}, nil, false
-		}
-		pk[i] = values[idx]
-	}
-	return values[col], cols[col], pk, true
+	return value, col, pk, ok
 }
 
 func (p cellEditorPicker) FormatForEdit(v any, col models.ColumnMeta) string {
@@ -161,12 +153,18 @@ func (p cellEditorPicker) activeGrid() interface {
 // dialog uses, so both flows agree on which set is live.
 type cellEditorStore struct {
 	resolve func() *models.PendingEditSet
+	sample  *cellEditorSample
 }
 
 // Capture retains the editor's destination even if the active tab changes.
 func (s cellEditorStore) Capture() controllers.PendingEditStore {
 	set := s.set()
-	return cellEditorStore{resolve: func() *models.PendingEditSet { return set }}
+	captured := cellEditorStore{resolve: func() *models.PendingEditSet { return set }}
+	if s.sample != nil {
+		sample := *s.sample
+		captured.sample = &sample
+	}
+	return captured
 }
 
 func (s cellEditorStore) Add(e models.PendingEdit) error {
@@ -174,7 +172,7 @@ func (s cellEditorStore) Add(e models.PendingEdit) error {
 	if set == nil {
 		return fmt.Errorf("cell editor: no active pending edit set")
 	}
-	return set.Add(e)
+	return s.withBaseline(func() error { return set.Add(e) })
 }
 
 func (s cellEditorStore) Remove(pk []any, col string) {
@@ -182,7 +180,7 @@ func (s cellEditorStore) Remove(pk []any, col string) {
 	if set == nil {
 		return
 	}
-	set.Remove(pk, col)
+	_ = s.withBaseline(func() error { set.Remove(pk, col); return nil })
 }
 
 func (s cellEditorStore) HasEdit(pk []any, col string) bool {
@@ -190,7 +188,19 @@ func (s cellEditorStore) HasEdit(pk []any, col string) bool {
 	if set == nil {
 		return false
 	}
-	return set.HasEdit(pk, col)
+	has := false
+	_ = s.withBaseline(func() error { has = set.HasEdit(pk, col); return nil })
+	return has
+}
+
+func (s cellEditorStore) withBaseline(fn func() error) error {
+	if s.sample == nil {
+		return fn()
+	}
+	if s.sample.grid == nil {
+		return models.ErrCommitSnapshotStale
+	}
+	return s.sample.grid.WithEditBaseline(s.sample.baseline, fn)
 }
 
 func (s cellEditorStore) set() *models.PendingEditSet {

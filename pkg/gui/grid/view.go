@@ -55,6 +55,10 @@ type View struct {
 	rows []models.Row
 	cols []models.ColumnMeta
 
+	commitGeneration uint64
+	editBaseline     uint64
+	baselineInvalid  bool
+
 	// rowsAffected is the driver command-tag count for a DML statement
 	// that returned no result set (zero cols). When > 0 the empty-body
 	// renderers show "(N row(s) affected)" instead of the misleading
@@ -328,6 +332,9 @@ func (v *View) Title() string {
 func (v *View) SetColumns(cols []models.ColumnMeta) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	v.commitGeneration++
+	v.editBaseline++
+	v.baselineInvalid = false
 	v.cols = append([]models.ColumnMeta(nil), cols...)
 	v.rows = v.rows[:0]
 	v.widths = make([]int, len(cols))
@@ -383,6 +390,11 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 func (v *View) SetEditability(editable bool, rowIdentity []int, disabledReason string, ref models.Ref) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	v.commitGeneration++
+	v.editBaseline++
+	if v.baselineInvalid {
+		return
+	}
 	v.editable = editable
 	if len(rowIdentity) == 0 {
 		v.rowIdentity = nil
@@ -398,6 +410,76 @@ func (v *View) Editable() bool {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	return v.editable
+}
+
+// CommitGeneration identifies a schema/editability attachment, not a repaint.
+func (v *View) CommitGeneration() uint64 {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.commitGeneration
+}
+
+// SettleCommittedRows reconciles the buffer before row reservations are released.
+// It performs no GUI I/O. Replaced results are fenced under the same lock as the
+// update; an unproven baseline stays uneditable until a fresh schema is installed.
+func (v *View) SettleCommittedRows(generation uint64, cols []models.ColumnMeta, rows []models.Row, originalPKs [][]any, complete bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if generation != v.commitGeneration {
+		return
+	}
+	v.editBaseline++
+	projection := make(map[string]bool, len(cols))
+	for _, col := range cols {
+		projection[col.Name] = true
+	}
+	for _, col := range v.cols {
+		complete = complete && projection[col.Name]
+	}
+	for _, row := range rows {
+		complete = complete && len(row.Values) == len(cols)
+	}
+	if len(rows) == 0 || len(rows) != len(originalPKs) {
+		complete = false
+	} else if v.updateRowsByPKLocked(cols, rows, originalPKs) != len(rows) {
+		complete = false
+	}
+	if !complete {
+		v.baselineInvalid = true
+		v.editable = false
+		v.disabledReason = "committed rows require a query refresh before editing"
+	}
+}
+
+// CellEditSnapshot samples the value, identity and freshness token atomically.
+// Sampling also serves the read-only viewer; WithEditBaseline authorizes edits.
+func (v *View) CellEditSnapshot() (any, models.ColumnMeta, []any, uint64, bool) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	row, col := v.cursorRow, v.cursorCol
+	if row < 0 || row >= len(v.rows) || col < 0 || col >= len(v.cols) || col >= len(v.rows[row].Values) {
+		return nil, models.ColumnMeta{}, nil, v.editBaseline, false
+	}
+	values := v.rows[row].Values
+	pk := make([]any, len(v.rowIdentity))
+	for i, idx := range v.rowIdentity {
+		if idx < 0 || idx >= len(values) {
+			return nil, models.ColumnMeta{}, nil, v.editBaseline, false
+		}
+		pk[i] = values[idx]
+	}
+	return values[col], v.cols[col], pk, v.editBaseline, true
+}
+
+// WithEditBaseline holds the sampled baseline stable while staging/removing an
+// edit. The callback may lock a pending set, but must not reenter this grid.
+func (v *View) WithEditBaseline(baseline uint64, fn func() error) error {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if baseline != v.editBaseline || !v.editable {
+		return models.ErrCommitSnapshotStale
+	}
+	return fn()
 }
 
 // RowIdentity returns a defensive copy of the SELECT-order indexes that

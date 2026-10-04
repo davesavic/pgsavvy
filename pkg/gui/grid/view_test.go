@@ -11,6 +11,53 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
+func TestReview_commit_baseline(t *testing.T) {
+	cols := []models.ColumnMeta{{Name: "id"}, {Name: "data"}}
+	ref := models.Ref{Schema: "app", Table: "t"}
+	for _, mode := range []string{"equal_value", "key_change", "schema_reuse", "refresh_failure", "incomplete_projection"} {
+		t.Run(mode, func(t *testing.T) {
+			v := NewView()
+			v.SetColumns(cols)
+			v.SetEditability(true, []int{0}, "", ref)
+			v.AppendRows([]models.Row{{Values: []any{int64(42), "loaded"}}})
+			_, _, _, baseline, ok := v.CellEditSnapshot()
+			require.True(t, ok)
+			generation := v.CommitGeneration()
+			rows := []models.Row{{Values: []any{int64(42), "loaded"}}}
+			refreshCols := cols
+			if mode == "key_change" {
+				rows[0].Values = []any{int64(99), "server"}
+			}
+			if mode == "schema_reuse" {
+				v.SetColumns(cols)
+				v.SetEditability(true, []int{0}, "", ref)
+				v.AppendRows([]models.Row{{Values: []any{int64(42), "replacement"}}})
+			}
+			if mode == "incomplete_projection" {
+				refreshCols = cols[:1]
+				rows[0].Values = rows[0].Values[:1]
+			}
+			v.SettleCommittedRows(generation, refreshCols, rows, [][]any{{int64(42)}}, mode != "refresh_failure")
+			called := false
+			require.ErrorIs(t, v.WithEditBaseline(baseline, func() error { called = true; return nil }), models.ErrCommitSnapshotStale)
+			require.False(t, called)
+			switch mode {
+			case "schema_reuse":
+				require.Equal(t, "replacement", v.AllRows()[0].Values[1])
+			case "refresh_failure", "incomplete_projection":
+				require.False(t, v.Editable())
+				v.SetEditability(true, []int{0}, "", ref)
+				require.False(t, v.Editable(), "metadata alone cannot prove a new baseline")
+				v.SetColumns(cols)
+				v.SetEditability(true, []int{0}, "", ref)
+				require.True(t, v.Editable())
+			case "key_change":
+				require.Equal(t, int64(99), v.AllRows()[0].Values[0])
+			}
+		})
+	}
+}
+
 // newTestView returns a gocui.View sized to give a usable InnerSize the
 // grid renderer can use. InnerSize is (x1-x0+1)-2 by (y1-y0+1)-2, so
 // (0,0)-(81,25) yields 80x24 — matches the Render fallback constants.

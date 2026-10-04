@@ -211,6 +211,188 @@ func TestReview_async_commit_settlement(t *testing.T) {
 	}
 }
 
+func TestReview_async_commit_readonly_viewer(t *testing.T) {
+	for _, mode := range []string{"readonly", "refresh_invalidated"} {
+		t.Run(mode, func(t *testing.T) {
+			h, _, _ := asyncCommitFixture(t, &asyncCommitConnection{})
+			g := h.deps.tabs.Active().Grid()
+			g.SetCursor(0, 1)
+			if mode == "readonly" {
+				g.SetEditability(false, []int{0}, "read-only connection", g.IdentityRef())
+			} else {
+				g.SettleCommittedRows(g.CommitGeneration(), nil, nil, nil, false)
+			}
+			picker := cellEditorPicker{tabs: h.deps.tabs}
+			ctx := guicontext.NewCellViewerContext(guicontext.NewBaseContext(guicontext.BaseContextOpts{Key: guicontext.CellViewerKey(), ViewName: "viewer", Kind: types.PERSISTENT_POPUP}), guicontext.Deps{})
+			ctrl := controllers.NewCellViewerController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, ctx, &rowOutcomeFocus{}, picker)
+			if err := ctrl.Open(commands.ExecCtx{}); err != nil {
+				t.Fatal(err)
+			}
+			if !ctx.Active() {
+				t.Fatal("noneditable grid cannot be viewed with production picker")
+			}
+			_, _, _, baseline, ok := g.CellEditSnapshot()
+			if !ok || g.Editable() || !errors.Is(g.WithEditBaseline(baseline, func() error { t.Error("viewing authorized editing"); return nil }), models.ErrCommitSnapshotStale) {
+				t.Fatal("read-only viewing weakened editing guard")
+			}
+		})
+	}
+}
+
+type asyncReceiptSession struct {
+	rowOutcomeSession
+	value string
+}
+
+func (s *asyncReceiptSession) Execute(ctx context.Context, q models.Query) (models.Result, error) {
+	result, err := s.rowOutcomeSession.Execute(ctx, q)
+	if strings.HasPrefix(q.SQL, "SELECT *") && err == nil {
+		result.Rows[0].Values[1] = s.value
+	}
+	return result, err
+}
+
+func TestReview_async_commit_reverse_receipts(t *testing.T) {
+	first := &asyncReceiptSession{value: "first"}
+	var session drivers.Session = first
+	conn := &asyncCommitConnection{acquire: func(context.Context) (drivers.Session, error) { return session, nil }}
+	h, set, d := asyncCommitFixture(t, conn)
+	run := func() func() error {
+		op, err := h.capture(set, &models.Connection{Name: "A"}, nil, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.launch(op, false, false, func(r commitReceipt) error { h.publishCommitted(op, r, false); return nil })
+		asyncAwait(t, op.done)
+		select {
+		case fn := <-d.queue:
+			return fn
+		case <-time.After(3 * time.Second):
+			t.Fatal("receipt was not queued")
+			return nil
+		}
+	}
+	old := run()
+	g := h.deps.tabs.Active().Grid()
+	g.AppendRows([]models.Row{{Values: []any{int64(42), "reused original key"}}})
+	if err := set.Add(models.PendingEdit{PrimaryKey: []any{int64(99)}, Column: "data", OldValue: "first", NewExpr: "data || 'next'", Kind: models.Expression}); err != nil {
+		t.Fatal(err)
+	}
+	session = &asyncReceiptSession{value: "second"}
+	newer := run()
+	if err := newer(); err != nil {
+		t.Fatal(err)
+	}
+	if err := old(); err != nil {
+		t.Fatal(err)
+	}
+	rows := g.AllRows()
+	if rows[0].Values[0] != int64(99) || rows[0].Values[1] != "second" || rows[1].Values[0] != int64(42) || rows[1].Values[1] != "reused original key" {
+		t.Fatalf("out-of-order receipts reverted key/value baselines: %+v", rows)
+	}
+}
+
+func TestReview_async_commit_stale_editor(t *testing.T) {
+	for _, mode := range []string{"before_capture", "after_capture", "discard"} {
+		t.Run(mode, func(t *testing.T) {
+			h, set, _ := asyncCommitFixture(t, &asyncCommitConnection{})
+			set.Clear()
+			sample := &cellEditorSample{}
+			picker := cellEditorPicker{tabs: h.deps.tabs, sample: sample}
+			store := cellEditorStore{resolve: func() *models.PendingEditSet { return set }, sample: sample}
+			_, _, pk, ok := picker.CellSnapshot()
+			if !ok {
+				t.Fatal("cell sampling failed")
+			}
+			captured := store.Capture()
+			g := h.deps.tabs.Active().Grid()
+			// Equal values still constitute a new authoritative receipt baseline.
+			g.UpdateRowsFromOriginalPK(g.Columns(), []models.Row{{Values: []any{int64(42), "loaded"}}}, [][]any{pk})
+			if mode == "before_capture" {
+				captured = store.Capture()
+			}
+			edit := models.PendingEdit{PrimaryKey: pk, Column: "data", OldValue: "loaded", NewExpr: "data || 'next'", Kind: models.Expression}
+			if mode == "discard" {
+				if err := set.Add(edit); err != nil {
+					t.Fatal(err)
+				}
+				captured.Remove(pk, "data")
+				if !set.HasEdit(pk, "data") {
+					t.Fatal("stale editor removed newer staged intent")
+				}
+			} else {
+				if err := captured.Add(edit); !errors.Is(err, models.ErrCommitSnapshotStale) || !set.IsEmpty() {
+					t.Fatalf("stale sampled original staged: err=%v count=%d", err, set.Count())
+				}
+			}
+		})
+	}
+}
+
+func TestReview_async_commit_delayed_baseline(t *testing.T) {
+	for _, mode := range []string{"before_publication", "newer_values", "refresh_failure", "same_grid_reuse"} {
+		t.Run(mode, func(t *testing.T) {
+			entered, release := make(chan struct{}), make(chan struct{})
+			defer asyncEnsureReleased(release)
+			sess := &rowOutcomeSession{onCommit: func() { close(entered); <-release }}
+			if mode == "refresh_failure" {
+				sess.refreshErr = errors.New("synthetic refresh failure")
+			}
+			conn := &asyncCommitConnection{acquire: func(context.Context) (drivers.Session, error) { return sess, nil }}
+			h, set, d := asyncCommitFixture(t, conn)
+			op, err := h.capture(set, &models.Connection{Name: "A"}, nil, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.launch(op, false, false, func(r commitReceipt) error { h.publishCommitted(op, r, false); return nil })
+			asyncAwait(t, entered)
+			if mode == "same_grid_reuse" {
+				op.grid.SetColumns(op.grid.Columns())
+				op.grid.SetEditability(true, []int{0}, "", set.Table)
+				op.grid.AppendRows([]models.Row{{Values: []any{int64(42), "replacement"}}})
+			}
+			close(release)
+			asyncAwait(t, op.done)
+			if !set.IsEmpty() || set.CommitInFlight() || !sess.closed {
+				t.Fatal("durable settlement depends on UI publication")
+			}
+			switch mode {
+			case "before_publication":
+				rows := op.grid.AllRows()
+				if rows[0].Values[0] != int64(99) || rows[0].Values[1] != "server" {
+					t.Fatal("reservations released before grid baseline refreshed")
+				}
+				sample := &cellEditorSample{}
+				picker := cellEditorPicker{tabs: h.deps.tabs, sample: sample}
+				op.grid.SetCursor(0, 1)
+				value, _, pk, ok := picker.CellSnapshot()
+				if !ok || value != "server" || pk[0] != int64(99) {
+					t.Fatal("editor sampled stale original after settlement")
+				}
+				store := cellEditorStore{resolve: func() *models.PendingEditSet { return set }, sample: sample}
+				if err := store.Capture().Add(models.PendingEdit{PrimaryKey: pk, Column: "data", OldValue: value, NewExpr: "data || 'next'", Kind: models.Expression}); err != nil {
+					t.Fatal(err)
+				}
+			case "newer_values":
+				rows := op.grid.AllRows()
+				op.grid.UpdateRowsFromOriginalPK(op.grid.Columns(), []models.Row{{Values: []any{rows[0].Values[0], "newer"}}}, [][]any{{rows[0].Values[0]}})
+			case "refresh_failure":
+				if op.grid.Editable() {
+					t.Fatal("unproven committed baseline remains editable")
+				}
+			}
+			asyncPublish(t, d)
+			rows := op.grid.AllRows()
+			if mode == "newer_values" && rows[0].Values[1] != "newer" {
+				t.Fatal("delayed receipt overwrote newer grid values")
+			}
+			if mode == "same_grid_reuse" && rows[0].Values[1] != "replacement" {
+				t.Fatal("receipt mutated replacement schema generation")
+			}
+		})
+	}
+}
+
 func TestReview_async_commit_cancel_and_retire(t *testing.T) {
 	entered, cancelled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	defer asyncEnsureReleased(release)
@@ -293,6 +475,109 @@ func TestReview_async_commit_dryrun_and_overwrite(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReview_async_commit_native_failure(t *testing.T) {
+	for _, mode := range []string{"apply", "dry_run"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestReview_async_commit_native_failure_process$", "-test.v")
+			cmd.Env = append(os.Environ(), "PGSAVVY_ASYNC_FAILURE_PROBE="+mode)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("native failure %s: %v deadline=%v\n%s", mode, err, ctx.Err(), out)
+			}
+			t.Logf("%s", out)
+		})
+	}
+}
+
+func TestReview_async_commit_native_failure_process(t *testing.T) {
+	mode := os.Getenv("PGSAVVY_ASYNC_FAILURE_PROBE")
+	if mode == "" {
+		return
+	}
+	native, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: 80, Height: 24})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := newGocuiDriver(native)
+	defer func() { _ = d.Close() }()
+	entered, release := make(chan struct{}), make(chan struct{})
+	defer asyncEnsureReleased(release)
+	conn := &asyncCommitConnection{acquire: func(context.Context) (drivers.Session, error) {
+		close(entered)
+		<-release
+		return nil, errors.New("synthetic-secret-do-not-log")
+	}}
+	h, set, queued := asyncCommitFixture(t, conn)
+	// Hold completion outside MainLoop until settlement, then enqueue the real
+	// publication before input/quit. FIFO ordering makes post-failure input proof
+	// independent of scheduler timing or op.done closing before publication.
+	ctx := guicontext.NewCommitDialogContext(guicontext.NewBaseContext(guicontext.BaseContextOpts{Key: guicontext.CommitDialogKey(), ViewName: "commit", Kind: types.TEMPORARY_POPUP}), guicontext.Deps{})
+	ctx.Open(set, &models.Connection{Name: "A"})
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, ctx, &rowOutcomeFocus{})
+	var log bytes.Buffer
+	h.deps.logger = slog.New(slog.NewJSONHandler(&log, nil))
+	ctrl.SetAsyncHook(h)
+	store := keys.NewModeStore()
+	store.Set(types.COMMAND_LINE, types.ModeCommand)
+	matcher, err := keys.NewMatcher(keys.NewTrieSet(), keys.MatcherConfig{Modes: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer matcher.Cancel()
+	dispatcher := NewMasterEditor(native, matcher, types.COMMAND_LINE).(Dispatcher)
+	started, inputDelivered := false, false
+	native.SetManagerFunc(func(n *gocui.Gui) error {
+		v, err := n.SetView("input", 0, 0, 60, 10, 0)
+		if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+		if started {
+			return nil
+		}
+		started = true
+		run := ctrl.Apply
+		if mode == "dry_run" {
+			run = ctrl.DryRun
+		}
+		if err := run(commands.ExecCtx{}); err != nil {
+			return err
+		}
+		go func() {
+			<-entered
+			close(release)
+			completion := <-queued.queue
+			d.Update(completion)
+			d.Update(func() error {
+				if !ctx.Active() || set.IsEmpty() || set.CommitInFlight() || !ctx.ApplyEnabled() {
+					return errors.New("failure lost pending edits or disabled retry")
+				}
+				if mode == "dry_run" {
+					if len(ctx.DryRunResult()) != 1 || ctx.DryRunResult()[0].Err == nil || strings.Contains(ctx.DryRunResult()[0].Err.Error(), "synthetic-secret") {
+						return errors.New("safe retryable dry-run report missing")
+					}
+				} else if !strings.Contains(h.deps.toast.Current(), "pending edits retained") {
+					return errors.New("apply failure visibility missing")
+				}
+				if _, err := dispatcher.Dispatch(v, gocui.NewKeyRune('j')); err != nil {
+					return err
+				}
+				inputDelivered = v.TextArea.GetContent() == "j"
+				return gocui.ErrQuit
+			})
+		}()
+		return nil
+	})
+	if err := d.MainLoop(); !errors.Is(err, gocui.ErrQuit) {
+		t.Fatalf("ordinary database failure terminated MainLoop: %v", err)
+	}
+	if !inputDelivered || strings.Contains(log.String(), "synthetic-secret") {
+		t.Fatal("post-failure input missing or secret logged")
+	}
+	t.Logf("native %s failure: pending edits and retry retained; safe failure visible; post-publication input rendered; explicit quit preserved", mode)
 }
 
 func TestReview_async_commit_native(t *testing.T) {

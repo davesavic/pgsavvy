@@ -36,6 +36,13 @@ func (v *View) updateRowsByPK(refCols []models.ColumnMeta, refRows []models.Row,
 
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	return v.updateRowsByPKLocked(refCols, refRows, originalPKs)
+}
+
+func (v *View) updateRowsByPKLocked(refCols []models.ColumnMeta, refRows []models.Row, originalPKs [][]any) int {
+	if len(refCols) == 0 || len(refRows) == 0 {
+		return 0
+	}
 	if len(v.rowIdentity) == 0 || len(v.rows) == 0 {
 		return 0
 	}
@@ -107,5 +114,6 @@ func (v *View) updateRowsByPK(refCols []models.ColumnMeta, refRows []models.Row,
 		rows[gi] = row
 	}
 	v.rows = rows
+	v.editBaseline++
 	return len(updated)
 }
