@@ -3,8 +3,10 @@ package pg
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
@@ -51,7 +53,66 @@ func parsePlanJSON(raw []byte) (models.Plan, error) {
 		Settings: parseSettings(envelope[0]["Settings"]),
 	}
 	plan.ComputeDerived()
+	text, err := generatedPlanText(raw)
+	if err != nil {
+		return models.Plan{}, err
+	}
+	plan.RawText = text
 	return plan, nil
+}
+
+// Keep the captured JSON values, including unknown nested metadata and exact
+// numbers, rather than reconstructing lossy details from the typed node model.
+func generatedPlanText(raw []byte) (string, error) {
+	var envelope []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return "", fmt.Errorf("EXPLAIN text generation failed: %w", err)
+	}
+	var out strings.Builder
+	out.WriteString("Generated from captured EXPLAIN JSON (not native PostgreSQL text)")
+	var render func(json.RawMessage, int)
+	render = func(rawNode json.RawMessage, depth int) {
+		indent := strings.Repeat("  ", depth)
+		var node map[string]json.RawMessage
+		if err := json.Unmarshal(rawNode, &node); err != nil || node == nil {
+			fmt.Fprintf(&out, "\n%sUnrecognized plan entry: %s", indent, rawNode)
+			return
+		}
+		var op string
+		if err := json.Unmarshal(node["Node Type"], &op); err != nil || op == "" {
+			op = "(unknown node)"
+		} else {
+			delete(node, "Node Type")
+		}
+		fmt.Fprintf(&out, "\n%s", indent)
+		if depth > 0 {
+			out.WriteString("-> ")
+		}
+		out.WriteString(op)
+		children := node["Plans"]
+		var plans []json.RawMessage
+		if err := json.Unmarshal(children, &plans); err == nil {
+			delete(node, "Plans")
+		}
+		for _, key := range slices.Sorted(maps.Keys(node)) {
+			label := key
+			if strings.HasPrefix(key, "Actual ") {
+				label = "actual " + strings.TrimPrefix(key, "Actual ")
+			}
+			fmt.Fprintf(&out, "\n%s  %s: %s", indent, label, node[key])
+		}
+		for _, child := range plans {
+			render(child, depth+1)
+		}
+	}
+	for _, entry := range envelope {
+		render(entry["Plan"], 0)
+		delete(entry, "Plan")
+		for _, key := range slices.Sorted(maps.Keys(entry)) {
+			fmt.Fprintf(&out, "\n%s: %s", key, entry[key])
+		}
+	}
+	return out.String(), nil
 }
 
 // parseSettings lifts the top-level "Settings" object PG emits under

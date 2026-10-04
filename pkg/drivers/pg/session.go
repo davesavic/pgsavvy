@@ -2,6 +2,7 @@ package pg
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -663,17 +664,14 @@ func searchPathStmt(schema string) string {
 	return "SET search_path TO " + pgx.Identifier{schema}.Sanitize() + ", public"
 }
 
-// Explain runs EXPLAIN against q.SQL in both FORMAT JSON (parsed into
-// models.Plan.Node) and the default text format (joined into
-// models.Plan.RawText). When analyze is true, ANALYZE is included in both
-// statements — the caller is responsible for ensuring this is safe (no
+// Explain captures FORMAT JSON for models.Plan.Node. ANALYZE executes only
+// that statement and derives RawText from the captured document; estimate-only
+// requests also fetch native text. The caller is responsible for safety (no
 // side-effect-producing statements without a transaction; the auto-rollback
 // wrapping lives in the controller layer). q.Args are forwarded
 // to pgx and substituted for $N placeholders in the EXPLAIN'd statement.
 //
-// Failure of EITHER the JSON or the text EXPLAIN returns an error and a
-// zero-value Plan; we deliberately do not silently degrade because both
-// formats are part of the contract surfaced to the UI tree renderer.
+// A capture, parse or estimate-only text failure returns a zero-value Plan.
 //
 // q.Timeout, when positive, is applied as a context.WithTimeout to the
 // caller's ctx for the duration of the call. The inFlight guard is held for
@@ -712,20 +710,36 @@ func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (pl
 		logs.Event(log, "db", "explain", attrs...)
 	}()
 
-	// The enriched JSON option set captures diagnostics (buffers, verbose
-	// output, server settings) that the bare form discards; only the JSON
-	// document is parsed, so textSQL stays a bare EXPLAIN [ANALYZE] for the
-	// human-readable RawText pane.
+	// The text statement is used only for estimates: running it for ANALYZE
+	// would execute volatile SELECT functions a second time, even in a rollback.
 	jsonSQL, textSQL := enrichedExplainSQL(q.SQL, analyze)
 
 	// JSON format: a single row, single column carrying the JSON document.
 	var rawJSON []byte
 	var notice string
+	// A legacy option rejection aborts a transaction before the target runs.
+	// Recover only that proven pre-execution failure, without rolling back any
+	// caller work or masking execution errors. The unpredictable private name
+	// cannot shadow a caller's recovery boundary when an execution error leaves
+	// this savepoint in the aborted transaction.
+	protected := s.conn.Conn().PgConn().TxStatus() == 'T'
+	var savepoint string
+	if protected {
+		savepoint = pgx.Identifier{"pgsavvy_explain_" + rand.Text()}.Sanitize()
+		if _, err := s.conn.Exec(ctx, "SAVEPOINT "+savepoint); err != nil {
+			return models.Plan{}, wrapPgError(err)
+		}
+	}
 	err := s.conn.QueryRow(ctx, jsonSQL, q.Args...).Scan(&rawJSON)
-	if isUnsupportedExplainOption(err) {
+	if isUnsupportedExplainOption(err, jsonSQL) {
 		// PG<12 / a server that rejects the enriched option set: retry with
 		// the bare option set so EXPLAIN still succeeds, just without the
 		// extra diagnostics.
+		if protected {
+			if _, recoveryErr := s.conn.Exec(ctx, "ROLLBACK TO SAVEPOINT "+savepoint); recoveryErr != nil {
+				return models.Plan{}, errors.Join(wrapPgError(err), wrapPgError(recoveryErr))
+			}
+		}
 		jsonSQL, textSQL = bareExplainSQL(q.SQL, analyze)
 		notice = "EXPLAIN options unsupported by server; showing basic plan"
 		err = s.conn.QueryRow(ctx, jsonSQL, q.Args...).Scan(&rawJSON)
@@ -733,12 +747,20 @@ func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (pl
 	if err != nil {
 		return models.Plan{}, wrapPgError(err)
 	}
+	if protected {
+		if _, err := s.conn.Exec(ctx, "RELEASE SAVEPOINT "+savepoint); err != nil {
+			return models.Plan{}, wrapPgError(err)
+		}
+	}
 
 	plan, err = parsePlanJSON(rawJSON)
 	if err != nil {
 		return models.Plan{}, err
 	}
 	plan.Notice = notice
+	if analyze {
+		return plan, nil
+	}
 
 	// Text format: one row per output line.
 	rows, err := s.conn.Query(ctx, textSQL, q.Args...)
@@ -764,8 +786,8 @@ func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (pl
 // enrichedExplainSQL builds the JSON and text EXPLAIN statements with the
 // enriched option set. The JSON form adds BUFFERS, VERBOSE and SETTINGS so the
 // plan document carries diagnostics the bare form discards. The text form stays
-// a bare EXPLAIN [ANALYZE]: only the JSON document is parsed, so the text pane
-// only needs the human-readable plan.
+// bare, but is only consumed by the estimate-only path; ANALYZE text is
+// generated from the captured JSON instead of executing another statement.
 func enrichedExplainSQL(sql string, analyze bool) (jsonSQL, textSQL string) {
 	if analyze {
 		return "EXPLAIN (ANALYZE, BUFFERS, VERBOSE, SETTINGS, FORMAT JSON) " + sql,
@@ -784,16 +806,27 @@ func bareExplainSQL(sql string, analyze bool) (jsonSQL, textSQL string) {
 	return "EXPLAIN (FORMAT JSON) " + sql, "EXPLAIN " + sql
 }
 
-// isUnsupportedExplainOption reports whether err is a server-side syntax error
-// (SQLSTATE 42601), which is what PostgreSQL returns when it does not recognize
-// an EXPLAIN option (e.g. SETTINGS on PG<12). Used to trigger the bare-EXPLAIN
-// fallback. Any other error is propagated unchanged.
-func isUnsupportedExplainOption(err error) bool {
+// Retry only an option-parser rejection in our generated prefix. A function
+// executed by ANALYZE can itself raise 42601 after irreversible side effects.
+func isUnsupportedExplainOption(err error, sql string) bool {
 	if err == nil {
 		return false
 	}
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "42601"
+	if !errors.As(err, &pgErr) || pgErr.Code != "42601" || pgErr.Where != "" || pgErr.InternalQuery != "" || pgErr.InternalPosition != 0 {
+		return false
+	}
+	end := strings.Index(sql, ") ")
+	if !strings.HasPrefix(sql, "EXPLAIN (") || end < 0 {
+		return false
+	}
+	for _, option := range []string{"BUFFERS", "VERBOSE", "SETTINGS"} {
+		pos := strings.Index(sql[:end], option)
+		if pos >= 0 && pgErr.Position == int32(pos+1) && pgErr.Message == `unrecognized EXPLAIN option "`+strings.ToLower(option)+`"` {
+			return true
+		}
+	}
+	return false
 }
 
 // Begin starts a new transaction on this Session. Only one transaction may be

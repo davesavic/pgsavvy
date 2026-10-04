@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,49 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/query/plandoctor"
 )
+
+func TestReview_single_analyze_generated_text(t *testing.T) {
+	const raw = `[{"Execution Time":0.25,"Future Summary":{"counter":9007199254740993},"Plan":{"Node Type":"Result","Plan Rows":1,"Actual Rows":1,"Actual Loops":1,"Output":["42"],"Future Detail":{"nested":[true,null]},"Plans":[{"Node Type":"Seq Scan","Relation Name":"items","Actual Rows":0,"Actual Loops":0}]}}]`
+	const want = `Generated from captured EXPLAIN JSON (not native PostgreSQL text)
+Result
+  actual Loops: 1
+  actual Rows: 1
+  Future Detail: {"nested":[true,null]}
+  Output: ["42"]
+  Plan Rows: 1
+  -> Seq Scan
+    actual Loops: 0
+    actual Rows: 0
+    Relation Name: "items"
+Execution Time: 0.25
+Future Summary: {"counter":9007199254740993}`
+	for range 20 {
+		plan, err := parsePlanJSON([]byte(raw))
+		require.NoError(t, err)
+		require.Equal(t, want, plan.RawText)
+	}
+	for _, raw := range []string{"", "[]", `[{"Plan":{}}]`, `[{"Plan":{"Plans":[null,42,{"Node Type":"Custom"}],"Mystery":[1,2]}}]`} {
+		t.Run(raw, func(t *testing.T) {
+			plan, err := parsePlanJSON([]byte(raw))
+			require.NoError(t, err)
+			if plan.Node != nil {
+				require.True(t, strings.HasPrefix(plan.RawText, "Generated from captured EXPLAIN JSON"))
+			}
+		})
+	}
+	plan, err := parsePlanJSON([]byte(`[{"Plan":{"Plans":[null,42,{"Node Type":"Custom"}],"Mystery":[1,2]}}]`))
+	require.NoError(t, err)
+	require.Contains(t, plan.RawText, "(unknown node)")
+	require.Contains(t, plan.RawText, "Mystery: [1,2]")
+	require.Contains(t, plan.RawText, "Unrecognized plan entry: null")
+	require.Contains(t, plan.RawText, "Unrecognized plan entry: 42")
+	require.Contains(t, plan.RawText, "-> Custom")
+	for _, raw := range []string{`[{"Plan":{"Plans":{"unexpected":true},"Node Type":42}}]`, `[{"Plan":{"Plans":"unexpected"}}]`} {
+		plan, err := parsePlanJSON([]byte(raw))
+		require.NoError(t, err)
+		require.Contains(t, plan.RawText, "Plans:")
+	}
+}
 
 func TestReview_diagnostics_parser(t *testing.T) {
 	for _, tc := range []struct {
