@@ -66,7 +66,13 @@ type commitOperation struct {
 	grid           *grid.View
 	tabGeneration  uint64
 	gridGeneration uint64
+	siblingGrids   []commitGridBaseline
 	helper         *helpers.CellApplyHelper
+}
+
+type commitGridBaseline struct {
+	grid       *grid.View
+	generation uint64
 }
 
 type commitReceipt struct {
@@ -117,6 +123,17 @@ func (h asyncCommitHooks) capture(set *models.PendingEditSet, conn *models.Conne
 		gridGeneration: tab.Grid().CommitGeneration(),
 		// No credential-bearing profile fields are needed by execution/publication.
 		profile: models.Connection{Name: conn.Name, ReadOnly: conn.ReadOnly, ConfirmWrites: conn.ConfirmWrites, Color: conn.Color, Icon: conn.Icon, Label: conn.Label},
+	}
+	for _, sibling := range h.deps.tabs.Tabs() {
+		gv := sibling.Grid()
+		if gv == nil || gv == op.grid {
+			continue
+		}
+		generation := gv.CommitGeneration()
+		connID, _ := sibling.Identity()
+		if connID == conn.Name && gv.IdentityRef() == snapshot.Table {
+			op.siblingGrids = append(op.siblingGrids, commitGridBaseline{grid: gv, generation: generation})
+		}
 	}
 	g := h.g
 	g.connectionLife.mu.Lock()
@@ -180,6 +197,12 @@ func (h asyncCommitHooks) launch(op *commitOperation, dryRun, overwrite bool, pu
 		if receipt.result.Committed {
 			complete := receipt.err == nil && len(receipt.result.RefetchedRows) == len(receipt.result.ResultPKs)
 			op.grid.SettleCommittedRows(op.gridGeneration, receipt.result.RefetchedColumns, receipt.result.RefetchedRows, receipt.result.RefetchedOriginalPKs, complete)
+			// Siblings share reservations, not necessarily projections or row
+			// identities. Invalidate their captured baselines before releasing
+			// reservations; generation fencing leaves replacement results alone.
+			for _, sibling := range op.siblingGrids {
+				sibling.grid.SettleCommittedRows(sibling.generation, nil, nil, nil, false)
+			}
 		}
 		op.live.SettleCommit(op.snapshot, receipt.result.Committed, receipt.result.CommitUnknown, receipt.result.OriginalPKs, receipt.result.ResultPKs)
 		op.cancel()
