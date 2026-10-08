@@ -90,16 +90,16 @@ type GridStatePicker interface {
 }
 
 // PendingEditStore is the narrow write surface CellEditorController
-// uses to stage / discard edits. *models.PendingEditSet satisfies this
-// structurally; the interface keeps the controller free of having to
-// know which set is "active". Dynamic stores may implement
+// uses to stage / discard edits. The interface keeps the controller free
+// of knowing which set is "active" or how freshness is checked. Dynamic
+// stores may implement
 // Capture() PendingEditStore to bind the destination at editor entry.
 //
 // A nil store disables commit + discard with no-op semantics so unit
 // tests that skip the wiring still pass.
 type PendingEditStore interface {
 	Add(e models.PendingEdit) error
-	Remove(pk []any, col string)
+	Remove(pk []any, col string) error
 	// HasEdit reports whether (pk, col) already has a staged edit.
 	// Drives the "<c-c> on dirty cell removes + toasts" branch.
 	HasEdit(pk []any, col string) bool
@@ -120,7 +120,7 @@ type FocusPopper interface {
 //
 //   - `i` on RESULT_GRID: Enter → push CELL_EDITOR (preconditions checked).
 //   - `<cr>` / `<esc>` on CELL_EDITOR: Commit → record PendingEdit if changed.
-//   - `<c-c>` on CELL_EDITOR: Discard → pop + (on dirty) remove + toast.
+//   - `<c-g>` on CELL_EDITOR: Discard → pop + (on dirty) remove + toast.
 //
 // SetNull / Expr* bindings are declared so the user-visible chord
 // surface is stable from day one; their handlers are reserved for A2
@@ -273,7 +273,7 @@ func (e *CellEditorController) openBooleanChooser(col models.ColumnMeta, pk []an
 
 // Commit is the `<cr>` / `<esc>` handler on CELL_EDITOR. Reads the
 // buffer; if it differs from OriginalValue, stages a Literal-kind
-// PendingEdit on the active store. Pops the popup unconditionally.
+// PendingEdit on the active store. Failed staging keeps the draft open.
 //
 // "Different" is a string compare against the formatted-for-edit
 // rendering of OriginalValue — typing the same value back is treated
@@ -302,7 +302,6 @@ func (e *CellEditorController) Commit(_ commands.ExecCtx) error {
 			return nil
 		}
 	}
-	typed := e.ctx.ReadAndClearBuffer()
 	store := e.pendingStore()
 	if changed && store != nil && len(pk) > 0 {
 		// OldValue carries the ORIGINAL value (not the seed string)
@@ -313,18 +312,14 @@ func (e *CellEditorController) Commit(_ commands.ExecCtx) error {
 			Column:     col.Name,
 			ColumnType: col.TypeName,
 			OldValue:   e.ctx.OriginalValue(),
-			NewValue:   typed,
+			NewValue:   buf,
 			Kind:       models.Literal,
 			LoadedAt:   time.Now(),
 		}); err != nil {
-			// Don't swallow — surface via wrapErr so the orchestrator
-			// can log + toast at its discretion. The popup still pops
-			// below to avoid trapping the user in a broken state.
-			e.ctx.Close()
-			_ = e.popFocus()
 			return e.wrapErr("cell.edit.commit", err)
 		}
 	}
+	_ = e.ctx.ReadAndClearBuffer()
 	e.ctx.Close()
 	return e.popFocus()
 }
@@ -360,7 +355,9 @@ func (e *CellEditorController) Discard(_ commands.ExecCtx) error {
 	}
 
 	if dirty {
-		store.Remove(pk, col.Name)
+		if err := store.Remove(pk, col.Name); err != nil {
+			return e.wrapErr("cell.edit.discard", err)
+		}
 		if e.helpers.Toast != nil {
 			e.helpers.Toast.Show(
 				fmt.Sprintf("discarded pending edit on (%v, %s); <leader>cu to retry", pk, col.Name),
@@ -432,7 +429,7 @@ func (e *CellEditorController) enterDisabled() (string, bool) {
 //
 //   - `i` on RESULT_GRID (ModeNormal): Enter.
 //   - `<cr>` / `<esc>` on CELL_EDITOR (ModeInsert): Commit.
-//   - `<c-c>` on CELL_EDITOR (ModeInsert): Discard.
+//   - `<c-g>` on CELL_EDITOR (ModeInsert): Discard without quitting.
 //   - SetNull / Expr* bindings on CELL_EDITOR scope, reserved for A2.
 //     Declared here so the chord surface is stable; their handlers are
 //     registered as no-ops until A2 wires the real
@@ -474,6 +471,14 @@ func (e *CellEditorController) GetKeybindings(_ types.KeybindingsOpts) []*types.
 		// Discard — CELL_EDITOR `<c-c>`.
 		{
 			Sequence:    []types.ChordKey{{Code: 'c', Mod: types.ChordModCtrl}},
+			Mode:        types.ModeInsert,
+			Scope:       scope,
+			ActionID:    CellEditDiscard,
+			Description: "Discard edit",
+		},
+		// Ctrl-C is intercepted by emergency quit before matcher dispatch.
+		{
+			Sequence:    []types.ChordKey{{Code: 'g', Mod: types.ChordModCtrl}},
 			Mode:        types.ModeInsert,
 			Scope:       scope,
 			ActionID:    CellEditDiscard,

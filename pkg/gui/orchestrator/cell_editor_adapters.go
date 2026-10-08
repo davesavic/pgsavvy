@@ -175,12 +175,12 @@ func (s cellEditorStore) Add(e models.PendingEdit) error {
 	return s.withBaseline(func() error { return set.Add(e) })
 }
 
-func (s cellEditorStore) Remove(pk []any, col string) {
+func (s cellEditorStore) Remove(pk []any, col string) error {
 	set := s.set()
 	if set == nil {
-		return
+		return fmt.Errorf("cell editor: no active pending edit set")
 	}
-	_ = s.withBaseline(func() error { set.Remove(pk, col); return nil })
+	return s.withBaseline(func() error { set.Remove(pk, col); return nil })
 }
 
 func (s cellEditorStore) HasEdit(pk []any, col string) bool {
@@ -188,9 +188,9 @@ func (s cellEditorStore) HasEdit(pk []any, col string) bool {
 	if set == nil {
 		return false
 	}
-	has := false
-	_ = s.withBaseline(func() error { has = set.HasEdit(pk, col); return nil })
-	return has
+	// Existence is only a read hint; Remove authorizes mutation against the
+	// sampled baseline so stale pending intent cannot be mistaken for clean.
+	return set.HasEdit(pk, col)
 }
 
 func (s cellEditorStore) withBaseline(fn func() error) error {

@@ -316,13 +316,82 @@ func TestReview_async_commit_stale_editor(t *testing.T) {
 				if err := set.Add(edit); err != nil {
 					t.Fatal(err)
 				}
-				captured.Remove(pk, "data")
+				if err := captured.Remove(pk, "data"); !errors.Is(err, models.ErrCommitSnapshotStale) {
+					t.Fatalf("stale removal lost its failure: %v", err)
+				}
 				if !set.HasEdit(pk, "data") {
 					t.Fatal("stale editor removed newer staged intent")
 				}
 			} else {
 				if err := captured.Add(edit); !errors.Is(err, models.ErrCommitSnapshotStale) || !set.IsEmpty() {
 					t.Fatalf("stale sampled original staged: err=%v count=%d", err, set.Count())
+				}
+			}
+		})
+	}
+}
+
+type asyncCellEditorFocus struct {
+	onPop func()
+	pops  int
+}
+
+func (*asyncCellEditorFocus) Push(types.IBaseContext) error { return nil }
+func (f *asyncCellEditorFocus) Pop() error {
+	f.pops++
+	if f.onPop != nil {
+		f.onPop()
+	}
+	return nil
+}
+
+func TestReview_async_commit_editor_recovery(t *testing.T) {
+	for _, action := range []string{"commit", "discard_during_pop", "discard_before_pop"} {
+		t.Run(action, func(t *testing.T) {
+			entered, release := make(chan struct{}), make(chan struct{})
+			defer asyncEnsureReleased(release)
+			sess := &rowOutcomeSession{onCommit: func() { close(entered); <-release }}
+			h, set, _ := asyncCommitFixture(t, &asyncCommitConnection{acquire: func(context.Context) (drivers.Session, error) { return sess, nil }})
+			g := h.deps.tabs.Active().Grid()
+			g.AppendRows([]models.Row{{Values: []any{int64(100), "other row"}}})
+			g.SetCursor(1, 1)
+			op, err := h.capture(set, &models.Connection{Name: "A"}, nil, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.launch(op, false, false, func(commitReceipt) error { return nil })
+			asyncAwait(t, entered)
+			pk := []any{int64(100)}
+			if action != "commit" {
+				if err := set.Add(models.PendingEdit{PrimaryKey: pk, Column: "data", OldValue: "other row", NewValue: "staged", Kind: models.Literal}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sample := &cellEditorSample{}
+			ctx := guicontext.NewCellEditorContext(guicontext.NewBaseContext(guicontext.BaseContextOpts{Key: guicontext.CellEditorKey(), ViewName: "editor", Kind: types.TEMPORARY_POPUP}), guicontext.Deps{})
+			focus := &asyncCellEditorFocus{}
+			ctrl := controllers.NewCellEditorController(nil, controllers.CoreDeps{}, controllers.UIDeps{Toast: h.deps.toast}, ctx, focus,
+				cellEditorPicker{tabs: h.deps.tabs, sample: sample}, cellEditorStore{resolve: func() *models.PendingEditSet { return set }, sample: sample})
+			if err := ctrl.Enter(commands.ExecCtx{}); err != nil || !ctx.Active() {
+				t.Fatal("production cell editor did not open")
+			}
+			ctx.SetBuffer("recoverable draft")
+			settle := func() { close(release); asyncAwait(t, op.done) }
+			if action == "commit" {
+				settle()
+				err := ctrl.Commit(commands.ExecCtx{})
+				if !errors.Is(err, models.ErrCommitSnapshotStale) || set.HasEdit(pk, "data") || !ctx.Active() || ctx.Buffer() != "recoverable draft" || focus.pops != 0 {
+					t.Fatal("stale submission must reject staging without losing the draft or editor")
+				}
+			} else {
+				if action == "discard_before_pop" {
+					settle()
+				} else {
+					focus.onPop = settle
+				}
+				err := ctrl.Discard(commands.ExecCtx{})
+				if !errors.Is(err, models.ErrCommitSnapshotStale) || !set.HasEdit(pk, "data") || ctx.Active() || focus.pops != 1 || strings.Contains(h.deps.toast.Current(), "discarded pending edit") {
+					t.Fatal("stale discard must close the popup, retain pending intent and report failure without a success toast")
 				}
 			}
 		})

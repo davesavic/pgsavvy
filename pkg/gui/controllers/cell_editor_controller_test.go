@@ -21,7 +21,7 @@ type exprFocusCaptureStore struct {
 
 func (s *exprFocusCaptureStore) Capture() controllers.PendingEditStore { return s.active }
 func (s *exprFocusCaptureStore) Add(e models.PendingEdit) error        { return s.active.Add(e) }
-func (s *exprFocusCaptureStore) Remove(pk []any, col string)           { s.active.Remove(pk, col) }
+func (s *exprFocusCaptureStore) Remove(pk []any, col string) error     { return s.active.Remove(pk, col) }
 func (s *exprFocusCaptureStore) HasEdit(pk []any, col string) bool     { return s.active.HasEdit(pk, col) }
 
 func TestReview_expr_focus(t *testing.T) {
@@ -203,7 +203,7 @@ func (f *fakeEditStore) Add(e models.PendingEdit) error {
 	return nil
 }
 
-func (f *fakeEditStore) Remove(pk []any, col string) {
+func (f *fakeEditStore) Remove(pk []any, col string) error {
 	f.removes = append(f.removes, removeArgs{PK: append([]any(nil), pk...), Col: col})
 	out := f.preset[:0]
 	for _, p := range f.preset {
@@ -213,6 +213,7 @@ func (f *fakeEditStore) Remove(pk []any, col string) {
 		out = append(out, p)
 	}
 	f.preset = out
+	return nil
 }
 
 func (f *fakeEditStore) HasEdit(pk []any, col string) bool {

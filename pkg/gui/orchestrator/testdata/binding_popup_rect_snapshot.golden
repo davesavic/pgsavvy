@@ -2,6 +2,7 @@ binding	scope=all	key=:	mode=normal
 binding	scope=cell_editor	key=<c-c>	mode=insert
 binding	scope=cell_editor	key=<c-d>	mode=insert
 binding	scope=cell_editor	key=<c-e>	mode=insert
+binding	scope=cell_editor	key=<c-g>	mode=insert
 binding	scope=cell_editor	key=<c-n>	mode=insert
 binding	scope=cell_editor	key=<c-t>	mode=insert
 binding	scope=cell_editor	key=<cr>	mode=insert
