@@ -45,7 +45,9 @@ func runPasswordCommand(ctx context.Context, c *exec.Cmd) error {
 
 	stdout, stderr := c.Stdout, c.Stderr
 	originalArgs := append([]string{c.Path}, c.Args[1:]...)
-	c.Args = append([]string{c.Args[0], "-c", passwordSupervisor, c.Args[0]}, originalArgs...)
+	// The selected shell need not understand the supervisor's POSIX syntax.
+	c.Path = "/bin/sh"
+	c.Args = append([]string{c.Path, "-c", passwordSupervisor, "pgsavvy-password-supervisor"}, originalArgs...)
 	c.Stdout, c.Stderr = outW, errW
 	c.ExtraFiles = []*os.File{releaseR, lifetimeW}
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

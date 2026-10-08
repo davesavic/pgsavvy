@@ -106,7 +106,25 @@ func TestReview_password_closed_output_cancellation(t *testing.T) {
 	}
 }
 
-func TestReview_password_supervisor_startup(t *testing.T) {
+func TestReview_password_selected_shell(t *testing.T) {
+	shell := filepath.Join(t.TempDir(), "selected-shell")
+	const script = `#!/bin/sh
+if [ "$1" != -c ] || [ "$2" != selected-shell-command ]; then
+  exit 42
+fi
+printf result
+`
+	if err := os.WriteFile(shell, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", shell)
+	got, err := execPasswordCommand(context.Background(), "selected-shell-command")
+	if err != nil || got != "result" {
+		t.Fatal("selected shell must receive only the original password command")
+	}
+}
+
+func TestReview_password_shell_startup(t *testing.T) {
 	if _, err := os.Stat("/bin/bash"); err != nil {
 		t.Skip("bash startup fixture unavailable")
 	}
@@ -137,7 +155,7 @@ func TestReview_password_supervisor_startup(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		result := make(chan error, 1)
-		go func() { _, err := execPasswordCommand(ctx, "trap - EXIT; printf result"); result <- err }()
+		go func() { _, err := execPasswordCommand(ctx, "printf result"); result <- err }()
 		t.Cleanup(func() { cancel(); passwordProbeStop(dir) })
 		pid := passwordProbePID(t, dir, "pid")
 		start := time.Now()
@@ -145,7 +163,7 @@ func TestReview_password_supervisor_startup(t *testing.T) {
 		select {
 		case err := <-result:
 			if err == nil {
-				t.Fatal("supervisor exit trap lost cancellation classification")
+				t.Fatal("helper exit trap lost cancellation classification")
 			}
 			passwordProbeAwaitStopped(t, pid, start.Add(time.Second))
 		case <-time.After(time.Second):
@@ -155,7 +173,7 @@ func TestReview_password_supervisor_startup(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("supervisor fixture failed to stop")
 			}
-			t.Fatal("supervisor exit trap kept cancellation blocked beyond one second")
+			t.Fatal("helper exit trap kept cancellation blocked beyond one second")
 		}
 	})
 }
