@@ -241,6 +241,7 @@ func TestLoadConnections_WarnsOnPermissivePasswordFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	requireConnectionFileMode(t, path, 0o644)
 	var buf bytes.Buffer
 	orig := warnWriter
 	warnWriter = &buf
@@ -309,6 +310,7 @@ func TestLoadConnections_RejectsExecutableCredentialCommandFromWritableFile(t *t
 	if err := os.WriteFile(path, []byte(body), 0o622); err != nil {
 		t.Fatal(err)
 	}
+	requireConnectionFileMode(t, path, 0o622)
 
 	_, err := LoadConnections(afero.NewOsFs(), path)
 	if !errors.Is(err, ErrExecutableCredentialsInsecureMode) {
@@ -326,5 +328,20 @@ func TestLoadConnections_AllowsExecutableCredentialCommandFromPrivateFile(t *tes
 
 	if _, err := LoadConnections(afero.NewOsFs(), path); err != nil {
 		t.Fatalf("LoadConnections() error = %v", err)
+	}
+}
+
+func requireConnectionFileMode(t *testing.T, path string, mode os.FileMode) {
+	t.Helper()
+	// Creation modes are filtered by umask; these fixtures need the exact mode.
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != mode {
+		t.Fatalf("fixture mode = %04o, want %04o", got, mode)
 	}
 }
