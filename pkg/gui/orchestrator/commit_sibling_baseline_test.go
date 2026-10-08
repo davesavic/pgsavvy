@@ -12,6 +12,7 @@ import (
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/query"
@@ -65,6 +66,76 @@ func siblingEditor(h asyncCommitHooks) (*controllers.CellEditorController, *guic
 	ctrl := controllers.NewCellEditorController(nil, controllers.CoreDeps{}, controllers.UIDeps{Toast: h.deps.toast}, ctx, focus,
 		cellEditorPicker{tabs: h.deps.tabs, sample: sample}, cellEditorStore{resolve: h.activeSet, sample: sample})
 	return ctrl, ctx, focus
+}
+
+type gatedSiblingGrid struct {
+	*grid.View
+	entered, allowInvalidation, invalidated, allowReturn chan struct{}
+}
+
+func (g *gatedSiblingGrid) SettleCommittedRows(generation uint64, cols []models.ColumnMeta, rows []models.Row, originalPKs [][]any, complete bool) {
+	close(g.entered)
+	<-g.allowInvalidation
+	g.View.SettleCommittedRows(generation, cols, rows, originalPKs, complete)
+	close(g.invalidated)
+	<-g.allowReturn
+}
+
+func TestCommitSiblingInvalidationPrecedesReservationRelease(t *testing.T) {
+	for _, mode := range []string{"apply", "overwrite", "refresh_failure"} {
+		t.Run(mode, func(t *testing.T) {
+			sess := &rowOutcomeSession{}
+			if mode == "refresh_failure" {
+				sess.refreshErr = errors.New("refetch failed")
+			}
+			h, set, origin, sibling := siblingCommitFixture(t, &asyncCommitConnection{acquire: func(context.Context) (drivers.Session, error) { return sess, nil }})
+			h.deps.tabs.SwitchToTabByID(fmt.Sprint(sibling.ID()))
+			captured, edit := sampleSiblingEdit(t, h)
+			h.deps.tabs.SwitchToTabByID(fmt.Sprint(origin.ID()))
+			op, err := h.capture(set, &models.Connection{Name: "A"}, nil, mode == "overwrite")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(op.siblingGrids) != 1 || op.siblingGrids[0].grid != sibling.Grid() {
+				h.launch(op, false, mode == "overwrite", func(commitReceipt) error { return nil })
+				asyncAwait(t, op.done)
+				t.Fatal("operation did not capture the sibling grid")
+			}
+			gate := &gatedSiblingGrid{
+				View: sibling.Grid(), entered: make(chan struct{}), allowInvalidation: make(chan struct{}),
+				invalidated: make(chan struct{}), allowReturn: make(chan struct{}),
+			}
+			defer asyncEnsureReleased(gate.allowInvalidation)
+			defer asyncEnsureReleased(gate.allowReturn)
+			op.siblingGrids[0].grid = gate
+			h.launch(op, false, mode == "overwrite", func(commitReceipt) error { return nil })
+			asyncAwait(t, gate.entered)
+			// The old sibling baseline is still valid: only the reservation can
+			// reject this real editor submission while invalidation is paused.
+			if err := captured.Add(edit); !errors.Is(err, models.ErrCommitInFlight) {
+				t.Fatalf("staging before sibling invalidation: got %v, want ErrCommitInFlight", err)
+			}
+			if !set.CommitInFlight() || set.HasEdit(edit.PrimaryKey, edit.Column) {
+				t.Fatal("reservation released or stale edit staged before sibling invalidation")
+			}
+			close(gate.allowInvalidation)
+			asyncAwait(t, gate.invalidated)
+			if !set.CommitInFlight() {
+				t.Fatal("reservation released before sibling settlement returned")
+			}
+			if err := captured.Add(edit); !errors.Is(err, models.ErrCommitSnapshotStale) {
+				t.Fatalf("staging after invalidation: got %v, want ErrCommitSnapshotStale", err)
+			}
+			close(gate.allowReturn)
+			asyncAwait(t, op.done)
+			if set.CommitInFlight() || !set.IsEmpty() || sibling.Grid().Editable() {
+				t.Fatal("reservation release and sibling invalidation did not finish")
+			}
+			if err := captured.Add(edit); !errors.Is(err, models.ErrCommitSnapshotStale) {
+				t.Fatalf("staging after reservation release: got %v, want ErrCommitSnapshotStale", err)
+			}
+		})
+	}
 }
 
 func TestCommitSiblingBaselinesRejectStaleEditors(t *testing.T) {

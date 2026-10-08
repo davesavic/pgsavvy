@@ -71,7 +71,9 @@ type commitOperation struct {
 }
 
 type commitGridBaseline struct {
-	grid       *grid.View
+	grid interface {
+		SettleCommittedRows(uint64, []models.ColumnMeta, []models.Row, [][]any, bool)
+	}
 	generation uint64
 }
 
