@@ -2,13 +2,19 @@ package controllers
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/query"
+	"github.com/stretchr/testify/require"
 )
 
 // newTabWithRowIdentity opens a result tab populated with one row and stamps
@@ -37,6 +43,285 @@ func estimateFn(val int64, err error) relationshipEstimateLookup {
 	return func(_ context.Context, _ models.ForeignKey, _ []any) (int64, error) {
 		return val, err
 	}
+}
+
+type reviewCountUI struct {
+	mu   sync.Mutex
+	jobs []func() error
+}
+
+func (p *reviewCountUI) post(fn func() error) {
+	p.mu.Lock()
+	p.jobs = append(p.jobs, fn)
+	p.mu.Unlock()
+}
+
+func (p *reviewCountUI) drain(t *testing.T) {
+	t.Helper()
+	for {
+		p.mu.Lock()
+		jobs := p.jobs
+		p.jobs = nil
+		p.mu.Unlock()
+		if len(jobs) == 0 {
+			return
+		}
+		for _, fn := range jobs {
+			require.NoError(t, fn())
+		}
+	}
+}
+
+func TestReview_relationship_count_completion_order(t *testing.T) {
+	for _, order := range []string{"estimate_first", "exact_first"} {
+		for _, estimateFails := range []bool{false, true} {
+			for _, exactStatus := range []string{"success", "error", "timeout"} {
+				t.Run(fmt.Sprintf("%s/estimate_error=%t/exact_%s", order, estimateFails, exactStatus), func(t *testing.T) {
+					ctrl, _ := inboundOnlyTabAndRev(t, 42)
+					pump := &reviewCountUI{}
+					ctrl.onUIContentOnly = pump.post
+					var jobs []func()
+					ctrl.SetOnWorker(func(fn func()) { jobs = append(jobs, fn) })
+					var estimateErr, exactErr error
+					if estimateFails {
+						estimateErr = errors.New("synthetic estimate error")
+					}
+					switch exactStatus {
+					case "error":
+						exactErr = errors.New("synthetic exact error")
+					case "timeout":
+						exactErr = context.DeadlineExceeded
+					}
+					ctrl.SetEstimateResolver(estimateFn(1200, estimateErr))
+					calls := 0
+					ctrl.SetExactResolver(func(context.Context, models.ForeignKey, []any) (int64, error) { calls++; return 1187, exactErr })
+					focusInbound(t, ctrl)
+					require.Len(t, jobs, 2, "both requests must be admitted before either completes")
+					if order == "estimate_first" {
+						jobs[0]()
+						jobs[1]()
+					} else {
+						jobs[1]()
+						jobs[0]()
+					}
+					pump.drain(t)
+					key := ctrl.inbound[0].estimateKey
+					want := estimateResult{rows: 1200}
+					if estimateFails {
+						want = estimateResult{degraded: true}
+					}
+					switch exactStatus {
+					case "success":
+						want.exact, want.hasExact = 1187, true
+					case "error":
+						want.exactErr = true
+					}
+					require.Equal(t, want, ctrl.estimates[key])
+					if exactStatus == "success" {
+						require.Contains(t, ctrl.ctx.Body(), "1187")
+						require.NotContains(t, ctrl.ctx.Body(), "~1.2k")
+					}
+					if exactStatus == "error" {
+						require.Contains(t, ctrl.ctx.Body(), ctrl.tr().RelationshipPanelExactError)
+					}
+					if exactStatus == "timeout" {
+						if estimateFails {
+							require.Contains(t, ctrl.ctx.Body(), ctrl.tr().RelationshipPanelEstimateError)
+						} else {
+							require.Contains(t, ctrl.ctx.Body(), "~1.2k")
+						}
+						require.NotContains(t, ctrl.ctx.Body(), "1187")
+						require.NotContains(t, ctrl.ctx.Body(), ctrl.tr().RelationshipPanelExactError)
+					}
+					jobs = nil
+					require.NoError(t, registerAndDispatch(t, ctrl, commands.RelationshipPanelExit))
+					require.NoError(t, registerAndDispatch(t, ctrl, commands.RelationshipPanelEnter))
+					if exactStatus == "timeout" {
+						require.Len(t, jobs, 1)
+						jobs[0]()
+						require.Equal(t, 2, calls)
+					} else {
+						require.Empty(t, jobs)
+						require.Equal(t, 1, calls)
+					}
+					pump.drain(t)
+				})
+			}
+		}
+	}
+}
+
+func TestReview_relationship_count_stale_completion(t *testing.T) {
+	for _, source := range []string{"estimate", "exact"} {
+		for _, invalidate := range []string{"row", "tab", "clear", "table_eviction", "unrelated_eviction", "all_eviction", "close", "close_reopen", "result_close", "result_close_all"} {
+			t.Run(source+"/"+invalidate, func(t *testing.T) {
+				ctrl, _ := inboundOnlyTabAndRev(t, 42)
+				pump := &reviewCountUI{}
+				ctrl.onUIContentOnly = pump.post
+				var jobs []func()
+				ctrl.SetOnWorker(func(fn func()) { jobs = append(jobs, fn) })
+				arrived, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+				var once sync.Once
+				unblock := func() { once.Do(func() { close(release) }) }
+				lookup := func(context.Context, models.ForeignKey, []any) (int64, error) {
+					close(arrived)
+					<-release
+					return 1187, nil
+				}
+				if source == "estimate" {
+					ctrl.SetEstimateResolver(lookup)
+				} else {
+					ctrl.SetExactResolver(lookup)
+				}
+				focusInbound(t, ctrl)
+				require.Len(t, jobs, 1)
+				key := ctrl.inbound[0].estimateKey
+				ctrl.estimates["unrelated_completed"] = estimateResult{exact: 99, hasExact: true}
+				go func() { defer close(finished); jobs[0]() }()
+				t.Cleanup(func() {
+					unblock()
+					<-finished
+					ctrl.mu.Lock()
+					if ctrl.timer != nil {
+						ctrl.timer.Stop()
+					}
+					ctrl.mu.Unlock()
+				})
+				select {
+				case <-arrived:
+				case <-time.After(time.Second):
+					t.Fatal("count lookup did not start")
+				}
+				switch invalidate {
+				case "row":
+					grid := ctrl.mgr.Active().Grid()
+					grid.SetColumns(grid.Columns())
+					grid.AppendRows([]models.Row{{Values: []any{int64(43)}}})
+					ctrl.NotifyCursorChange(1, 0)
+				case "tab":
+					_, identity := ctrl.mgr.Active().Identity()
+					ctrl.mgr.Active().SetIdentity("new_connection", identity)
+					ctrl.NotifyActiveTabChanged()
+				case "clear":
+					ctrl.ClearCaches()
+				case "table_eviction":
+					ctrl.EvictExactCounts("public", "orders")
+				case "unrelated_eviction":
+					ctrl.EvictExactCounts("public", "unrelated")
+				case "all_eviction":
+					ctrl.EvictAllExactCounts()
+				case "result_close":
+					tabs := ctrl.mgr.(*ui.ResultTabsHelper)
+					origin := tabs.Active()
+					require.NoError(t, tabs.OpenResultTab("replacement", nil))
+					require.NoError(t, tabs.Close(origin))
+				case "result_close_all":
+					ctrl.mgr.(*ui.ResultTabsHelper).CloseAll()
+				case "close", "close_reopen":
+					require.NoError(t, registerAndDispatch(t, ctrl, commands.RelationshipPanelToggle))
+					if invalidate == "close_reopen" {
+						require.NoError(t, registerAndDispatch(t, ctrl, commands.RelationshipPanelToggle))
+					}
+				}
+				unblock()
+				select {
+				case <-finished:
+				case <-time.After(time.Second):
+					t.Fatal("count lookup did not settle")
+				}
+				pump.drain(t)
+				require.NotContains(t, ctrl.estimates, key, "late count may not repopulate invalidated cache")
+				if invalidate == "table_eviction" || invalidate == "unrelated_eviction" {
+					require.Equal(t, estimateResult{exact: 99, hasExact: true}, ctrl.estimates["unrelated_completed"])
+				}
+				require.NotContains(t, ctrl.ctx.Body(), "1187")
+			})
+		}
+	}
+}
+
+func TestReview_relationship_count_selection_retains_valid_result(t *testing.T) {
+	ctx, _ := newPanelContext(t)
+	h := newTabWithRow(t, "public.people", []string{"id"}, []any{int64(7)})
+	t.Cleanup(h.CloseAll)
+	fks := []models.ForeignKey{
+		{Schema: "public", Table: "messages", Columns: []string{"sender_id"}, RefColumns: []string{"id"}},
+		{Schema: "public", Table: "messages", Columns: []string{"recipient_id"}, RefColumns: []string{"id"}},
+	}
+	pump := &reviewCountUI{}
+	ctrl := NewRelationshipPanelController(testCommon(t), CoreDeps{}, ctx, &fakePanelTree{}, h, nil, fkList(fks...), pump.post)
+	var jobs []func()
+	ctrl.SetOnWorker(func(fn func()) { jobs = append(jobs, fn) })
+	arrived, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	calls := 0
+	ctrl.SetExactResolver(func(_ context.Context, fk models.ForeignKey, _ []any) (int64, error) {
+		calls++
+		if fk.Columns[0] == "sender_id" {
+			close(arrived)
+			<-release
+			return 11, nil
+		}
+		return 22, nil
+	})
+	focusInbound(t, ctrl)
+	require.Len(t, jobs, 1)
+	job := jobs[0]
+	go func() { defer close(finished); job() }()
+	t.Cleanup(func() { unblock(); <-finished })
+	select {
+	case <-arrived:
+	case <-time.After(time.Second):
+		t.Fatal("sender count did not start")
+	}
+	require.NoError(t, registerAndDispatch(t, ctrl, commands.RelationshipPanelDown))
+	require.Len(t, jobs, 2)
+	unblock()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("sender count did not settle")
+	}
+	pump.drain(t)
+	first, second := ctrl.inbound[0].estimateKey, ctrl.inbound[1].estimateKey
+	require.Equal(t, estimateResult{exact: 11, hasExact: true}, ctrl.estimates[first])
+	require.NotContains(t, ctrl.estimates, second)
+	require.Equal(t, 1, ctrl.selIdx)
+	jobs[1]()
+	pump.drain(t)
+	require.Equal(t, estimateResult{exact: 22, hasExact: true}, ctrl.estimates[second])
+	require.NoError(t, registerAndDispatch(t, ctrl, commands.RelationshipPanelUp))
+	require.Len(t, jobs, 2, "returning to sender uses its own completed cache")
+	require.Equal(t, 2, calls)
+}
+
+func TestReview_relationship_count_single_ui_publication(t *testing.T) {
+	ctrl, _ := inboundOnlyTabAndRev(t, 42)
+	pump := &reviewCountUI{}
+	ctrl.onUIContentOnly = pump.post
+	var jobs []func()
+	ctrl.SetOnWorker(func(fn func()) { jobs = append(jobs, fn) })
+	ctrl.SetExactResolver(exactFn(1187, nil))
+	focusInbound(t, ctrl)
+	pump.drain(t)
+	require.Len(t, jobs, 1)
+	jobs[0]()
+	pump.mu.Lock()
+	publications := pump.jobs
+	pump.jobs = nil
+	pump.mu.Unlock()
+	require.Len(t, publications, 1)
+	require.NoError(t, publications[0]())
+	require.Contains(t, ctrl.ctx.Body(), "1187", "render inside the guarded publication, not a later UI turn")
+	pump.mu.Lock()
+	queued := len(pump.jobs)
+	pump.mu.Unlock()
+	require.Zero(t, queued, "a delayed repaint would outlive the publication's tab guard")
+	beforeClose := ctrl.ctx.Body()
+	ctrl.mgr.(*ui.ResultTabsHelper).CloseAll()
+	pump.drain(t)
+	require.Equal(t, beforeClose, ctrl.ctx.Body(), "no queued count callback can repaint after tab removal")
 }
 
 func TestHumanizeEstimate(t *testing.T) {

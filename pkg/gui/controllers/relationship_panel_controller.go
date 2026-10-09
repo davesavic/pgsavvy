@@ -193,7 +193,8 @@ type RelationshipPanelController struct {
 	// estimates caches resolved inbound estimates per estimateKey. A present
 	// entry with degraded=true marks a failed/denied estimate (muted "~?"
 	// marker); degraded entries are still cached so a revisit issues no query.
-	estimates map[string]estimateResult
+	estimates       map[string]estimateResult
+	countGeneration uint64
 	// inboundDegraded is true when the current row has no row identity
 	// (join/view/PK-less): the inbound section renders the "needs a primary
 	// key" note and ZERO inbound queries are issued.
@@ -316,9 +317,10 @@ func (r *RelationshipPanelController) SetOnWorker(fn func(fn func())) {
 // caches — keyed by (row-identity, relationship) — do not grow unbounded
 // across the lifetime of a long session or leak stale values across a
 // reconnect. Safe to call concurrently with the fill workers (mu-guarded);
-// a fill in flight simply re-resolves the values it was about to cache.
+// admitted count fills cannot repopulate the invalidated cache.
 func (r *RelationshipPanelController) ClearCaches() {
 	r.mu.Lock()
+	r.countGeneration++
 	r.previews = map[string]string{}
 	r.estimates = map[string]estimateResult{}
 	r.mu.Unlock()
@@ -694,8 +696,8 @@ func (r *RelationshipPanelController) NotifyActiveTabChanged() {
 	// tab (no debounce: a tab switch is a deliberate, single event, not a motion
 	// burst). The repaint re-reads the live active tab, recomputes outbound +
 	// inbound, and re-renders the breadcrumb.
-	epoch := r.epoch.Add(1)
 	r.mu.Lock()
+	epoch := r.epoch.Add(1)
 	if r.timer != nil {
 		r.timer.Stop()
 		r.timer = nil
@@ -713,8 +715,8 @@ func (r *RelationshipPanelController) NotifyCursorChange(_, _ int) {
 	if !r.IsOpen() {
 		return
 	}
-	epoch := r.epoch.Add(1)
 	r.mu.Lock()
+	epoch := r.epoch.Add(1)
 	if r.timer != nil {
 		r.timer.Stop()
 	}
@@ -1277,10 +1279,16 @@ func (r *RelationshipPanelController) startPreviewFill(epoch uint64) {
 // survives and a revisit issues no query. Repaints are content-only +
 // epoch/open-guarded.
 func (r *RelationshipPanelController) startEstimateFill(epoch uint64) {
-	if r.estimate == nil {
+	if r.estimate == nil || !r.IsOpen() {
 		return
 	}
+	origin := r.mgr.Active()
+	if origin == nil {
+		return
+	}
+	identityGeneration := origin.EditabilityGeneration()
 	r.mu.Lock()
+	generation := r.countGeneration
 	pending := make([]inboundRel, 0, len(r.inbound))
 	for _, in := range r.inbound {
 		if in.estimateKey == "" {
@@ -1299,21 +1307,24 @@ func (r *RelationshipPanelController) startEstimateFill(epoch uint64) {
 	run := func() {
 		ctx := context.Background()
 		for _, in := range pending {
-			if epoch != r.epoch.Load() || !r.IsOpen() {
+			r.mu.Lock()
+			current := epoch == r.epoch.Load() && generation == r.countGeneration
+			r.mu.Unlock()
+			if !current {
 				return // row changed or panel closed: drop the rest
 			}
 			rows, err := r.estimate(ctx, in.fk, in.pkValues)
-			res := estimateResult{rows: rows}
 			if err != nil {
 				// Permission denied / timeout / driver error: cache degraded so
 				// the line shows the muted error marker; panel stays alive.
 				r.logErr("relationship_panel.estimate", err)
-				res = estimateResult{degraded: true}
+				rows = 0
 			}
-			r.mu.Lock()
-			r.estimates[in.estimateKey] = res
-			r.mu.Unlock()
-			r.repaintPreview(epoch)
+			r.publishCount(epoch, generation, origin, identityGeneration, func() {
+				res := r.estimates[in.estimateKey]
+				res.rows, res.degraded = rows, err != nil
+				r.estimates[in.estimateKey] = res
+			})
 		}
 	}
 
@@ -1333,10 +1344,16 @@ func (r *RelationshipPanelController) startEstimateFill(epoch uint64) {
 // retries. Runs on the worker, epoch + open + focus guarded so a count
 // returning after the cursor moved / tab switched / panel closed is discarded.
 func (r *RelationshipPanelController) maybeStartExactFill(epoch uint64) {
-	if r.exact == nil || !r.focused.Load() {
+	if r.exact == nil || !r.focused.Load() || !r.IsOpen() {
 		return
 	}
+	origin := r.mgr.Active()
+	if origin == nil {
+		return
+	}
+	identityGeneration := origin.EditabilityGeneration()
 	r.mu.Lock()
+	generation := r.countGeneration
 	in, ok := r.selectedInbound()
 	if !ok || in.estimateKey == "" || len(in.pkValues) == 0 {
 		r.mu.Unlock()
@@ -1351,7 +1368,10 @@ func (r *RelationshipPanelController) maybeStartExactFill(epoch uint64) {
 	r.mu.Unlock()
 
 	run := func() {
-		if epoch != r.epoch.Load() || !r.IsOpen() || !r.focused.Load() {
+		r.mu.Lock()
+		current := epoch == r.epoch.Load() && generation == r.countGeneration
+		r.mu.Unlock()
+		if !current || !r.focused.Load() {
 			return // row changed, panel closed, or focus left: drop
 		}
 		n, err := r.exact(context.Background(), in.fk, in.pkValues)
@@ -1361,20 +1381,18 @@ func (r *RelationshipPanelController) maybeStartExactFill(epoch uint64) {
 			r.logErr("relationship_panel.exact_count_timeout", err)
 			return
 		}
-		r.mu.Lock()
-		res := r.estimates[in.estimateKey] // preserve the existing ~estimate fields
-		if err != nil {
-			// Permission denied / driver error: muted exact-error marker; the
-			// panel + other lines stay alive. Cached so a refocus issues no query.
-			r.logErr("relationship_panel.exact_count", err)
-			res.exactErr = true
-		} else {
-			res.exact = n
-			res.hasExact = true
-		}
-		r.estimates[in.estimateKey] = res
-		r.mu.Unlock()
-		r.repaintPreview(epoch)
+		r.publishCount(epoch, generation, origin, identityGeneration, func() {
+			res := r.estimates[in.estimateKey] // preserve the existing ~estimate fields
+			if err != nil {
+				// Hard errors are cached; timeout errors leave the estimate retryable.
+				r.logErr("relationship_panel.exact_count", err)
+				res.exactErr = true
+			} else {
+				res.exact = n
+				res.hasExact = true
+			}
+			r.estimates[in.estimateKey] = res
+		})
 	}
 
 	if r.onWorker == nil {
@@ -1382,6 +1400,36 @@ func (r *RelationshipPanelController) maybeStartExactFill(epoch uint64) {
 		return
 	}
 	r.onWorker(run)
+}
+
+// Result-tab removal need not emit a motion epoch. Validate the captured tab
+// on the UI thread, including identity replacement, before publishing its count.
+func (r *RelationshipPanelController) publishCount(epoch, generation uint64, origin *ui.Tab, identityGeneration uint64, update func()) {
+	publish := func() error {
+		if !r.IsOpen() || r.mgr.Active() != origin || origin.EditabilityGeneration() != identityGeneration {
+			return nil
+		}
+		r.mu.Lock()
+		if epoch != r.epoch.Load() || generation != r.countGeneration {
+			r.mu.Unlock()
+			return nil
+		}
+		update()
+		r.mu.Unlock()
+		if r.ctx == nil {
+			return nil
+		}
+		r.ctx.SetBody(r.renderBodyFromState())
+		if r.onUIContentOnly != nil {
+			return r.ctx.HandleRender()
+		}
+		return nil
+	}
+	if r.onUIContentOnly == nil {
+		_ = publish()
+	} else {
+		r.onUIContentOnly(publish)
+	}
 }
 
 // EvictExactCounts drops every cached count (exact + estimate) for child table
@@ -1396,6 +1444,7 @@ func (r *RelationshipPanelController) EvictExactCounts(schema, table string) {
 	}
 	prefix := countTablePrefix(schema, table)
 	r.mu.Lock()
+	r.countGeneration++
 	for k := range r.estimates {
 		if strings.HasPrefix(k, prefix) {
 			delete(r.estimates, k)
@@ -1411,6 +1460,7 @@ func (r *RelationshipPanelController) EvictExactCounts(schema, table string) {
 // recomputes. Works even when the panel is closed.
 func (r *RelationshipPanelController) EvictAllExactCounts() {
 	r.mu.Lock()
+	r.countGeneration++
 	r.estimates = map[string]estimateResult{}
 	r.mu.Unlock()
 }
