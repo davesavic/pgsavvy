@@ -260,6 +260,141 @@ func TestReview_timers_text_cancel_and_complete(t *testing.T) {
 	}
 }
 
+func TestMatcher_BrokenPrefixRetriesScopedBinding(t *testing.T) {
+	for _, mode := range []types.Mode{types.ModeInsert, types.ModeCommand} {
+		for _, origin := range []types.ContextKey{types.COMMAND_LINE, types.GLOBAL} {
+			for _, fresh := range []string{"escape", "prefix", "ambiguous"} {
+				for _, globalFallback := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%v/%s/%s/global=%v", mode, origin, fresh, globalFallback), func(t *testing.T) {
+						var m *Matcher
+						text := ""
+						calls := 0
+						cmd := &commands.Command{ID: "scoped.fresh", Handler: func(ctx commands.ExecCtx) error {
+							calls++
+							if text != "界😀" || ctx.Scope != types.COMMAND_LINE || ctx.Mode != mode {
+								t.Errorf("fresh binding lost ordering/context: text=%q ctx=%+v", text, ctx)
+							}
+							m.modes.Set(types.COMMAND_LINE, types.ModeNormal)
+							return nil
+						}}
+						first := keyOf('o')
+						if fresh == "escape" {
+							first = specialKey(KeyEsc)
+						}
+						seq := []Key{first}
+						if fresh == "prefix" {
+							seq = append(seq, keyOf('q'))
+						}
+						entries := []trieEntry{
+							{mode, origin, []Key{keyOf('界'), keyOf('😀'), keyOf('x')}, fixtureCmd("abandoned")},
+							{mode, types.COMMAND_LINE, seq, cmd},
+						}
+						if fresh == "ambiguous" {
+							entries = append(entries, trieEntry{mode, types.COMMAND_LINE, []Key{first, keyOf('q')}, fixtureCmd("longer")})
+						}
+						if globalFallback {
+							entries = append(entries, trieEntry{mode, types.GLOBAL, []Key{first}, &commands.Command{
+								ID: "global.fallback", Handler: func(commands.ExecCtx) error {
+									t.Error("fresh global binding overrode scoped binding")
+									return nil
+								},
+							}})
+						}
+						var queue chan func() error
+						m, queue = reviewTimerMatcher(t, buildTrieSet(t, entries), mode, nil)
+						whichkey := NewWhichKey()
+						m.whichkey, m.wdelay = whichkey, time.Hour
+						t.Cleanup(whichkey.Hide)
+						m.OnInsertPendingFlush(types.COMMAND_LINE, func(scope types.ContextKey, r []rune) {
+							if scope != types.COMMAND_LINE {
+								t.Errorf("wrong flush scope: %s", scope)
+							}
+							text += string(r)
+						})
+						for _, r := range "界😀" {
+							if got := reviewDispatch(t, m, types.COMMAND_LINE, keyOf(r)); got != Pending {
+								t.Fatalf("prefix result=%v, want Pending", got)
+							}
+						}
+						old := reviewQueueExpiry(t, m, queue)
+						want := Pending
+						if fresh == "escape" {
+							want = Dispatched
+						}
+						if got := reviewDispatch(t, m, types.COMMAND_LINE, first); got != want || text != "界😀" {
+							t.Fatalf("fresh result=%v text=%q, want %v with abandoned text flushed once", got, text, want)
+						}
+						if err := old(); err != nil || text != "界😀" {
+							t.Fatalf("stale timer duplicated text: err=%v text=%q", err, text)
+						}
+						if fresh != "escape" {
+							scope, prefix, _ := whichkey.Snapshot()
+							if scope != types.COMMAND_LINE || len(prefix) != 1 || prefix[0] != first || !m.IsPartial() || calls != 0 {
+								t.Fatalf("fresh prefix not retained: scope=%s prefix=%v partial=%v calls=%d", scope, prefix, m.IsPartial(), calls)
+							}
+							if fresh == "prefix" {
+								if got := reviewDispatch(t, m, types.COMMAND_LINE, keyOf('q')); got != Dispatched {
+									t.Fatalf("fresh chord result=%v, want Dispatched", got)
+								}
+							} else if err := reviewQueueExpiry(t, m, queue)(); err != nil {
+								t.Fatal(err)
+							}
+						}
+						if err := old(); err != nil || calls != 1 || text != "界😀" || m.IsPartial() || m.CurrentMode(types.COMMAND_LINE) != types.ModeNormal {
+							t.Fatalf("fresh binding did not settle exactly once: err=%v calls=%d text=%q partial=%v mode=%v", err, calls, text, m.IsPartial(), m.CurrentMode(types.COMMAND_LINE))
+						}
+						if scope, prefix, visible := whichkey.Snapshot(); scope != "" || len(prefix) != 0 || visible {
+							t.Fatalf("settled binding retained which-key state: scope=%s prefix=%v visible=%v", scope, prefix, visible)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestMatcher_BrokenPrefixRestartsScopedExitChord(t *testing.T) {
+	for _, exit := range []string{"escape", "jk"} {
+		t.Run(exit, func(t *testing.T) {
+			var m *Matcher
+			text := ""
+			calls := 0
+			cmd := &commands.Command{ID: "mode.normal", Handler: func(commands.ExecCtx) error {
+				calls++
+				if text != "j" {
+					t.Errorf("exit ran before exactly one j was inserted: %q", text)
+				}
+				m.modes.Set(types.COMMAND_LINE, types.ModeNormal)
+				return nil
+			}}
+			ts := buildTrieSet(t, []trieEntry{
+				{types.ModeInsert, types.COMMAND_LINE, []Key{keyOf('j'), keyOf('k')}, cmd},
+				{types.ModeInsert, types.COMMAND_LINE, []Key{specialKey(KeyEsc)}, cmd},
+			})
+			var queue chan func() error
+			m, queue = reviewTimerMatcher(t, ts, types.ModeInsert, nil)
+			m.OnInsertPendingFlush(types.COMMAND_LINE, func(_ types.ContextKey, r []rune) { text += string(r) })
+			if got := reviewDispatch(t, m, types.COMMAND_LINE, keyOf('j')); got != Pending {
+				t.Fatalf("first j result=%v, want Pending", got)
+			}
+			old := reviewQueueExpiry(t, m, queue)
+			last := specialKey(KeyEsc)
+			if exit == "jk" {
+				if got := reviewDispatch(t, m, types.COMMAND_LINE, keyOf('j')); got != Pending || text != "j" {
+					t.Fatalf("second j failed to restart chord: result=%v text=%q", got, text)
+				}
+				last = keyOf('k')
+			}
+			if got := reviewDispatch(t, m, types.COMMAND_LINE, last); got != Dispatched || m.CurrentMode(types.COMMAND_LINE) != types.ModeNormal {
+				t.Fatalf("exit result=%v mode=%v, want Dispatched/Normal", got, m.CurrentMode(types.COMMAND_LINE))
+			}
+			if err := old(); err != nil || calls != 1 || text != "j" || m.IsPartial() {
+				t.Fatalf("stale timer changed settled exit: err=%v calls=%d text=%q partial=%v", err, calls, text, m.IsPartial())
+			}
+		})
+	}
+}
+
 func TestReview_timers_broken_prefix_before_global_binding(t *testing.T) {
 	for _, mode := range []types.Mode{types.ModeInsert, types.ModeCommand} {
 		for _, scope := range []types.ContextKey{types.COMMAND_LINE, types.GLOBAL} {
@@ -549,6 +684,7 @@ func TestMatcher_ScopeToGlobalFallThroughChord(t *testing.T) {
 	globalChord := recordingCmd("session.search_path", &fired, &mu, nil)
 	ts := buildTrieSet(t, []trieEntry{
 		{types.ModeNormal, types.QUERY_EDITOR, []Key{keyOf(' '), keyOf('t')}, scopeCmd},
+		{types.ModeNormal, types.QUERY_EDITOR, []Key{keyOf('p')}, scopeCmd},
 		{types.ModeNormal, types.GLOBAL, []Key{keyOf(' '), keyOf('p')}, globalChord},
 	})
 	m := shortMatcher(t, ts, types.QUERY_EDITOR, types.ModeNormal)

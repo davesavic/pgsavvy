@@ -421,9 +421,8 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 		if res.Found {
 			return m.handleLookup(res, seq, scope, mode, scope, nil)
 		}
-		// Not found in scope WITH pending — clear scope pending and try
-		// global with the full sequence, then k FRESH (D10 scope→global
-		// fall-through). If pending was non-empty we save and drop it.
+		// Try the full global chord before abandoning the prefix and
+		// retrying k as a fresh scoped/global key.
 		if len(m.pending) > 0 {
 			droppedPending = append([]Key(nil), m.pending...)
 			m.cancelPendingLocked()
@@ -434,7 +433,7 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 	// Attempt 2: global trie. First try the full accumulated sequence
 	// (pending + k) so that chords like <leader>p resolve even when
 	// <leader> was consumed as a prefix by the scope trie. If that
-	// misses, fall back to k alone (D10 fresh-key fall-through).
+	// misses, retry k alone with scope precedence.
 	globalTrie, _ := ts.Get(mode, types.GLOBAL)
 	if globalTrie != nil {
 		if hadChordPartial || len(m.pending) > 0 {
@@ -453,13 +452,22 @@ func (m *Matcher) Dispatch(scope types.ContextKey, k Key) (DispatchResult, error
 				hadChordPartial = true
 			}
 		}
+	}
+
+	var abandoned []Key
+	if hadChordPartial && (mode == types.ModeInsert || mode == types.ModeCommand) {
+		abandoned = droppedPending
+	}
+	if hadChordPartial && scopeTrie != nil {
+		seq := []Key{k}
+		if res := scopeTrie.Lookup(seq); res.Found {
+			return m.handleLookup(res, seq, scope, mode, scope, abandoned)
+		}
+	}
+	if globalTrie != nil {
 		seq := []Key{k}
 		res := globalTrie.Lookup(seq)
 		if res.Found {
-			var abandoned []Key
-			if hadChordPartial && (mode == types.ModeInsert || mode == types.ModeCommand) {
-				abandoned = droppedPending
-			}
 			return m.handleLookup(res, seq, types.GLOBAL, mode, scope, abandoned)
 		}
 	}
