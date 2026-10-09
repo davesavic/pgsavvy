@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -87,6 +88,89 @@ func TestWrapSorted_ClearByteForByte(t *testing.T) {
 	orig := "SELECT * FROM t;  \n"
 	if got := wrapSorted(orig, 1, sortClear); got != orig {
 		t.Fatalf("clear must return orig verbatim: got %q, want %q", got, orig)
+	}
+}
+
+func TestWrapSortedLimitOffsetLexicalBoundaries(t *testing.T) {
+	continuedEscape := "SELECT n, E'a'\n'it\\'s' AS label FROM generate_series(1,10) AS n"
+	for _, tc := range []struct {
+		name  string
+		orig  string
+		inner string
+		tail  string
+	}{
+		{name: "line comment limit", orig: "SELECT generate_series(1,10) AS n -- LIMIT 1"},
+		{name: "line comment offset", orig: "SELECT generate_series(1,10) AS n -- OFFSET 9"},
+		{name: "line comment both", orig: "SELECT 1 -- LIMIT 2 OFFSET 3"},
+		{name: "block comment", orig: "SELECT 1 /* LIMIT 2 OFFSET 3 */"},
+		{name: "nested block comment", orig: "SELECT 1 /* outer /* LIMIT 2 */ OFFSET 3 */"},
+		{name: "quoted string", orig: "SELECT 'it''s LIMIT 1 OFFSET 2' AS n"},
+		{name: "escape string", orig: `SELECT E'it\'s -- LIMIT 1' AS n`},
+		{name: "dollar string", orig: "SELECT $$one\n-- LIMIT 1 OFFSET 2\n$$ AS n"},
+		{name: "tagged dollar string", orig: "SELECT $tag$) /* LIMIT 1 */ OFFSET 2$tag$ AS n"},
+		{name: "quoted identifier", orig: `SELECT 1 AS "LIMIT 1 OFFSET 2"`},
+		{name: "nested query", orig: "SELECT * FROM (SELECT generate_series(1,10) LIMIT 4 OFFSET 1) AS n"},
+		{name: "nested with commented tail", orig: "SELECT * FROM (SELECT 1 LIMIT 4) AS n -- OFFSET 2"},
+		{name: "CTE limit", orig: "WITH n AS (SELECT 1 LIMIT 2) SELECT * FROM n"},
+		{name: "real after block comment", orig: "SELECT 1 /* LIMIT 9 */ LIMIT 3", inner: "SELECT 1 /* LIMIT 9 */", tail: "LIMIT 3"},
+		{name: "real with comment separators", orig: "SELECT 1 LIMIT /* count */ 3 OFFSET /* start */ 1", inner: "SELECT 1", tail: "LIMIT /* count */ 3 OFFSET /* start */ 1"},
+		{name: "real before line comment", orig: "SELECT 1 LIMIT 3 -- LIMIT 1", inner: "SELECT 1", tail: "LIMIT 3 -- LIMIT 1"},
+		{name: "real before block comment", orig: "SELECT 1 OFFSET 2 /* OFFSET 8 */", inner: "SELECT 1", tail: "OFFSET 2 /* OFFSET 8 */"},
+		{name: "real after line comment", orig: "SELECT 1 -- LIMIT 9\nLIMIT 3 OFFSET 1", inner: "SELECT 1 -- LIMIT 9", tail: "LIMIT 3 OFFSET 1"},
+		{name: "real offset then limit", orig: "SELECT 1 OFFSET /* skip */ 2 LIMIT 3 -- OFFSET 8", inner: "SELECT 1", tail: "OFFSET /* skip */ 2 LIMIT 3 -- OFFSET 8"},
+		{name: "nested and real", orig: "SELECT * FROM (SELECT 1 LIMIT 4) AS n LIMIT 2", inner: "SELECT * FROM (SELECT 1 LIMIT 4) AS n", tail: "LIMIT 2"},
+		{name: "escape string and real", orig: `SELECT E'it\'s -- LIMIT 9' AS n LIMIT 2`, inner: `SELECT E'it\'s -- LIMIT 9' AS n`, tail: "LIMIT 2"},
+		{name: "continued escape string", orig: continuedEscape + " LIMIT 2;", inner: continuedEscape, tail: "LIMIT 2"},
+		{name: "continued escape through line comment", orig: "SELECT E'a' -- separator\n'it\\'s -- LIMIT 9' AS n LIMIT 2", inner: "SELECT E'a' -- separator\n'it\\'s -- LIMIT 9' AS n", tail: "LIMIT 2"},
+		{name: "continued escape CRLF", orig: "SELECT e'界'\r\n'it\\'s' AS n OFFSET 1 LIMIT 2", inner: "SELECT e'界'\r\n'it\\'s' AS n", tail: "OFFSET 1 LIMIT 2"},
+		{name: "repeated escape continuation", orig: "SELECT E'a'\n'b'\n'it\\'s' AS n LIMIT 2", inner: "SELECT E'a'\n'b'\n'it\\'s' AS n", tail: "LIMIT 2"},
+		{name: "continued escape with control whitespace", orig: "SELECT E'a'\t\f\v\n'it\\'s' AS n LIMIT 2", inner: "SELECT E'a'\t\f\v\n'it\\'s' AS n", tail: "LIMIT 2"},
+		{name: "continued escape with commented tail", orig: "SELECT E'a'\n'it\\'s' AS n -- LIMIT 9"},
+		{name: "continued escape terminator and comment", orig: continuedEscape + " LIMIT 2; -- OFFSET 9", inner: continuedEscape, tail: "LIMIT 2  -- OFFSET 9"},
+		{name: "newline in literal does not qualify", orig: "SELECT E'a\nb' 'it\\'s' AS n LIMIT 2"},
+		{name: "previous gap newline does not qualify", orig: "SELECT E'a'\n'b' 'it\\'s' AS n LIMIT 2"},
+		{name: "comma resets escape mode", orig: "SELECT E'a',\n'it\\'s' AS n LIMIT 2"},
+		{name: "operator resets escape mode", orig: "SELECT E'a' ||\n'it\\'s' AS n LIMIT 2"},
+		{name: "same line does not continue escape", orig: "SELECT E'a' 'it\\'s' AS n LIMIT 2"},
+		{name: "block comment does not continue escape", orig: "SELECT E'a'\n/* separator */'it\\'s' AS n LIMIT 2"},
+		{name: "CRLF and Unicode", orig: "SELECT '界' AS n -- OFFSET 9\r\nLIMIT 2", inner: "SELECT '界' AS n -- OFFSET 9", tail: "LIMIT 2"},
+		{name: "CRLF within string", orig: "SELECT '界\r\nLIMIT 9' AS n LIMIT 2", inner: "SELECT '界\r\nLIMIT 9' AS n", tail: "LIMIT 2"},
+		{name: "dollar string and real", orig: "SELECT $界_1$LIMIT 9$界_1$ AS n LIMIT 2", inner: "SELECT $界_1$LIMIT 9$界_1$ AS n", tail: "LIMIT 2"},
+		{name: "comment semicolon preserved", orig: "SELECT 1 -- LIMIT 2;"},
+		{name: "terminator before comment", orig: "SELECT 1 LIMIT 2; -- LIMIT 9", inner: "SELECT 1", tail: "LIMIT 2  -- LIMIT 9"},
+		{name: "ordinary string backslash conservative", orig: `SELECT 'it\'s -- LIMIT 9' AS n LIMIT 2`},
+		{name: "ordinary backslash terminator", orig: `SELECT 'C:\path' AS n;`, inner: `SELECT 'C:\path' AS n`},
+		{name: "ordinary backslash and real", orig: `SELECT 'C:\path' AS n LIMIT 2`, inner: `SELECT 'C:\path' AS n`, tail: "LIMIT 2"},
+		{name: "ordinary even backslashes", orig: `SELECT '\\' AS n LIMIT 2`, inner: `SELECT '\\' AS n`, tail: "LIMIT 2"},
+		{name: "ambiguous backslash terminator", orig: `SELECT 'it\'s' AS n;`, inner: `SELECT 'it\'s' AS n`},
+		{name: "parameter tail unchanged", orig: "SELECT 1 LIMIT $1"},
+		{name: "unclosed block comment", orig: "SELECT 1 /* LIMIT 2"},
+		{name: "unclosed dollar string", orig: "SELECT $tag$ LIMIT 2"},
+		{name: "unclosed single string", orig: "SELECT ' LIMIT 2"},
+		{name: "unclosed nesting", orig: "SELECT (SELECT 1 LIMIT 2"},
+	} {
+		for _, dir := range []sortDir{sortAsc, sortDesc} {
+			t.Run(fmt.Sprintf("%s/%d", tc.name, dir), func(t *testing.T) {
+				inner := tc.inner
+				if inner == "" {
+					inner = tc.orig
+				}
+				keyword := "ASC"
+				if dir == sortDesc {
+					keyword = "DESC"
+				}
+				want := fmt.Sprintf("SELECT * FROM (\n%s\n) _pgsavvy_sort\nORDER BY 1 %s", inner, keyword)
+				if tc.tail != "" {
+					want += "\n" + tc.tail
+				}
+				if got := wrapSorted(tc.orig, 1, dir); got != want {
+					t.Errorf("wrapSorted() = %q, want %q", got, want)
+				}
+				if got := wrapSorted(tc.orig, 1, sortClear); got != tc.orig {
+					t.Errorf("clear changed original SQL: %q", got)
+				}
+			})
+		}
 	}
 }
 

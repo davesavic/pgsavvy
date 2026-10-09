@@ -33,6 +33,30 @@ func TestSortActiveTab_JoinResultIsSortable(t *testing.T) {
 	}
 }
 
+func TestSortActiveTabPreservesCommentedLimitThroughCycle(t *testing.T) {
+	h := NewResultTabsHelper(ResultTabsHelperDeps{})
+	if err := h.OpenResultTab("synthetic", nil); err != nil {
+		t.Fatal(err)
+	}
+	tab := h.Active()
+	tab.Grid().SetColumns([]models.ColumnMeta{{Name: "n"}})
+	orig := "SELECT generate_series(1,10) AS n -- LIMIT 1"
+	tab.SetOrigin(orig, nil, "")
+	for _, direction := range []string{"ASC", "DESC", ""} {
+		got, run, toast := h.SortActiveTab(0)
+		want := orig
+		if direction != "" {
+			want = "SELECT * FROM (\n" + orig + "\n) _pgsavvy_sort\nORDER BY 1 " + direction
+		}
+		if !run || toast != "" || got != want {
+			t.Errorf("%s sort = (%q, run=%v, toast=%q), want %q", direction, got, run, toast, want)
+		}
+		if saved, _, _ := tab.Origin(); saved != orig {
+			t.Errorf("sort replaced original SQL with %q", saved)
+		}
+	}
+}
+
 // TestSortActiveTab_PendingEditsBlocks verifies the pending-edits guard:
 // staged edits surface the toast and return run=false (no re-run).
 func TestSortActiveTab_PendingEditsBlocks(t *testing.T) {
