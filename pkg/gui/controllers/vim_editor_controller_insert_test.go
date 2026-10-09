@@ -1115,6 +1115,73 @@ func TestCompletionAcceptAlreadyQualifiedNotDoubled(t *testing.T) {
 	}
 }
 
+func TestManualSnippetAcceptOnEmptyBuffer(t *testing.T) {
+	for _, initial := range []struct {
+		name string
+		rows int
+	}{{"zero_lines", 0}, {"one_empty_line", 1}} {
+		for _, accept := range []string{"enter", "ctrl_y"} {
+			t.Run(initial.name+"/"+accept, func(t *testing.T) {
+				ctrl, reg, buf, sugg, _ := newCompletionRig(t, "", 0, nil)
+				if initial.rows == 0 {
+					buf.Lines = nil
+				}
+				ctrl.SetCompletionEngine(editor.NewEngine([]editor.Source{editor.NewSnippetSource(editor.BuiltinSnippetProvider{})}))
+				if err := ctrl.TriggerCompletion(); err != nil {
+					t.Fatal(err)
+				}
+				if !sugg.IsVisible() || sugg.Selected() < 0 {
+					t.Fatal("manual completion did not offer built-in snippets")
+				}
+				selected := sugg.Suggestions()[sugg.Selected()]
+				if selected.Kind != editor.KindSnippet || selected.Body == "" {
+					t.Fatal("expected a real built-in snippet body")
+				}
+				if accept == "enter" {
+					if !ctrl.CompletionKey(keys.Key{Special: keys.KeyEnter}) {
+						t.Fatal("snippet Enter was not consumed")
+					}
+				} else {
+					dispatchAction(t, reg, commands.EditorCompletionAccept, commands.ExecCtx{Mode: types.ModeInsert})
+				}
+				if buf.String() != selected.Body || buf.CursorPos() != editor.EndOfInsert(editor.Position{}, selected.Body) || sugg.IsVisible() {
+					t.Fatal("snippet acceptance lost body, cursor or popup dismissal")
+				}
+				if buf.History == nil || buf.History.NodeCount() != 1 {
+					t.Fatal("snippet acceptance must be one undo step")
+				}
+				if err := buf.Undo(); err != nil {
+					t.Fatal(err)
+				}
+				if buf.String() != "" || buf.LineCount() != initial.rows {
+					t.Fatal("undo did not restore the exact initial empty row count")
+				}
+				if err := buf.Redo(); err != nil {
+					t.Fatal(err)
+				}
+				if buf.String() != selected.Body {
+					t.Fatal("redo did not restore the whole snippet")
+				}
+				if err := buf.Undo(); err != nil {
+					t.Fatal(err)
+				}
+				if err := buf.Apply(editor.Edit{Kind: editor.EditKindInsert, Text: "next"}); err != nil {
+					t.Fatal(err)
+				}
+				if buf.String() != "next" {
+					t.Fatal("subsequent insertion failed")
+				}
+				if err := buf.Undo(); err != nil {
+					t.Fatal(err)
+				}
+				if buf.String() != "" || buf.LineCount() != initial.rows {
+					t.Fatal("subsequent undo changed the initial empty row count")
+				}
+			})
+		}
+	}
+}
+
 // newSnippetRig wires a controller + buffer with a SuggestionsContext that
 // has a single Kind==snippet suggestion already shown, anchored at the
 // cursor (so the accept-time stale guard passes). The Body carries the

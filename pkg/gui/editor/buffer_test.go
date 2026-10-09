@@ -271,6 +271,132 @@ func TestBufferEmptyVsOneEmptyLineDistinct(t *testing.T) {
 	}
 }
 
+func TestEmptyCharacterwiseOperations(t *testing.T) {
+	for _, initial := range []struct {
+		name  string
+		lines []string
+	}{{"zero_lines", nil}, {"one_empty_line", []string{""}}} {
+		for _, operation := range []string{"extract", "operator_delete", "apply_delete", "apply_replace"} {
+			t.Run(initial.name+"/"+operation, func(t *testing.T) {
+				defer func() {
+					if p := recover(); p != nil {
+						t.Fatalf("empty characterwise operation panicked: %v", p)
+					}
+				}()
+				b := bufFromLines(initial.lines...)
+				original := b.LinesCopy()
+				switch operation {
+				case "extract":
+					if got := b.TextInRange(Range{}); got != "" {
+						t.Fatalf("extracted %q from empty buffer", got)
+					}
+				case "operator_delete":
+					if cut, err := Delete(b, Range{}); err != nil || cut != "" {
+						t.Fatalf("Delete = %q, %v; want empty no-op", cut, err)
+					}
+				case "apply_delete":
+					if err := b.Apply(Edit{Kind: EditKindDelete}); err != nil {
+						t.Fatal(err)
+					}
+				case "apply_replace":
+					if err := b.Apply(Edit{Kind: EditKindReplace}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				reviewUndoAssert(t, b, original, Position{})
+				if strings.HasPrefix(operation, "apply_") {
+					if !b.Dirty || b.History == nil || b.History.NodeCount() != 1 {
+						t.Fatal("valid direct Apply must retain its history/dirty contract")
+					}
+				} else if b.Dirty || b.History != nil {
+					t.Fatal("empty extraction/operator deletion must be a no-op")
+				}
+				for _, replay := range []func() error{b.Undo, b.Redo} {
+					if err := replay(); err != nil {
+						t.Fatal(err)
+					}
+					reviewUndoAssert(t, b, original, Position{})
+				}
+			})
+		}
+	}
+}
+
+func TestReplaceEmptyBufferRoundTrip(t *testing.T) {
+	for _, initial := range []struct {
+		name  string
+		lines []string
+	}{{"zero_lines", nil}, {"one_empty_line", []string{""}}} {
+		for _, text := range []string{"", "x", "x\ny", "x\n", "\n", "界🙂\nα"} {
+			t.Run(initial.name+"/"+text, func(t *testing.T) {
+				b := bufFromLines(initial.lines...)
+				original := b.LinesCopy()
+				if err := b.Apply(Edit{Kind: EditKindReplace, Text: text}); err != nil {
+					t.Fatal(err)
+				}
+				inserted := original
+				if text != "" {
+					inserted = bufFromLines(strings.Split(text, "\n")...).LinesCopy()
+				}
+				reviewUndoAssert(t, b, inserted, Position{})
+				for range 3 {
+					if err := b.Undo(); err != nil {
+						t.Fatal(err)
+					}
+					reviewUndoAssert(t, b, original, Position{})
+					if err := b.Redo(); err != nil {
+						t.Fatal(err)
+					}
+					reviewUndoAssert(t, b, inserted, Position{})
+				}
+				if b.History.NodeCount() != 1 {
+					t.Fatal("replacement must remain a single history node")
+				}
+				if err := b.Undo(); err != nil {
+					t.Fatal(err)
+				}
+				if err := b.Apply(Edit{Kind: EditKindInsert, Text: "ab"}); err != nil {
+					t.Fatal(err)
+				}
+				if err := b.Apply(Edit{Kind: EditKindReplace, Range: Range{End: Position{Col: 1}}, Text: "Z"}); err != nil {
+					t.Fatal(err)
+				}
+				reviewUndoAssert(t, b, bufFromLines("Zb").LinesCopy(), Position{})
+				if err := b.Undo(); err != nil {
+					t.Fatal(err)
+				}
+				reviewUndoAssert(t, b, bufFromLines("ab").LinesCopy(), Position{})
+				if err := b.Undo(); err != nil {
+					t.Fatal(err)
+				}
+				reviewUndoAssert(t, b, original, Position{})
+			})
+		}
+	}
+}
+
+func TestReplaceAfterWholeBufferDelete(t *testing.T) {
+	b := bufFromLines("aaa", "bbb")
+	original := b.LinesCopy()
+	if err := b.Apply(Edit{Kind: EditKindDelete, Range: Range{End: Position{Line: 1}, LineWise: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Apply(Edit{Kind: EditKindReplace, Text: "界🙂\nα\n"}); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		for _, step := range []struct {
+			replay func() error
+			lines  []Line
+		}{{b.Undo, nil}, {b.Undo, original}, {b.Redo, nil}, {b.Redo, bufFromLines("界🙂", "α", "").LinesCopy()}} {
+			if err := step.replay(); err != nil {
+				t.Fatal(err)
+			}
+			reviewUndoAssert(t, b, step.lines, Position{})
+		}
+	}
+}
+
 func TestBufferApplyInsertSingleLine(t *testing.T) {
 	b := bufFromLines("SELECT 1")
 	err := b.Apply(Edit{

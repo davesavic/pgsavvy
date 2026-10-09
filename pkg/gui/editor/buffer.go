@@ -222,7 +222,7 @@ func (b *Buffer) textInRangeLocked(r Range) string {
 	if r.BlockWise {
 		return b.blockTextLocked(r)
 	}
-	if !b.rangeInBoundsLocked(r) {
+	if len(b.Lines) == 0 || !b.rangeInBoundsLocked(r) {
 		return ""
 	}
 	if r.LineWise {
@@ -511,14 +511,14 @@ func (b *Buffer) positionInBoundsLocked(p Position) bool {
 // textInRangeLocked; Insert/Replace compute the post-insert end
 // Position analytically from e.Text.
 func (b *Buffer) buildReverseLocked(e Edit) Edit {
+	if len(b.Lines) == 0 && e.Text != "" && (e.Kind == EditKindInsert || e.Kind == EditKindReplace) {
+		// Every inserted row is new; character deletion would leave a
+		// phantom empty row and break earlier linewise history replay.
+		return Edit{Kind: EditKindDelete, Range: Range{Start: e.Range.Start, End: advancePos(e.Range.Start, e.Text), LineWise: true}}
+	}
 	switch e.Kind {
 	case EditKindInsert:
 		endPos := advancePos(e.Range.Start, e.Text)
-		if len(b.Lines) == 0 && e.Text != "" {
-			// Every inserted row is new; character deletion would leave a
-			// phantom empty row and break earlier linewise history replay.
-			return Edit{Kind: EditKindDelete, Range: Range{Start: e.Range.Start, End: endPos, LineWise: true}}
-		}
 		return Edit{
 			Kind:  EditKindDelete,
 			Range: Range{Start: e.Range.Start, End: endPos},
