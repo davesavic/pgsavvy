@@ -429,7 +429,14 @@ func (f *FilePickerContext) NavigateHome() {
 }
 
 // SetView records the gocui view the layout pass passes in each frame.
-func (f *FilePickerContext) SetView(v types.View) { f.view = v }
+func (f *FilePickerContext) SetView(v types.View) {
+	if f.inputFocused && v != nil && v.TextArea != nil && v != f.view {
+		text := f.Buffer()
+		v.TextArea.Clear()
+		v.TextArea.TypeString(text)
+	}
+	f.view = v
+}
 
 // SetModes records the mode setter for focus/blur hooks. Nil-safe.
 func (f *FilePickerContext) SetModes(m types.ModeSetter) { f.modes = m }
@@ -439,6 +446,9 @@ func (f *FilePickerContext) SetModes(m types.ModeSetter) { f.modes = m }
 func (f *FilePickerContext) Buffer() string {
 	if f.view != nil && f.view.TextArea != nil && f.inputFocused {
 		return f.view.TextArea.GetContent()
+	}
+	if f.inputFocused && f.inputKind != inputKindFilename {
+		return ""
 	}
 	return f.filename
 }
@@ -451,11 +461,8 @@ func (f *FilePickerContext) ClearViewBuffer() {
 }
 
 // HandleFocus sets the mode to Command or Insert based on whether the
-// filename input is focused. The terminal caret is enabled only in
-// filename-input mode (Insert) so printable characters reach the TextArea.
-// On initial focus with input pre-focused (save mode), it seeds the
-// TextArea with the pre-filled filename (ToggleInputFocus handles toggles;
-// HandleFocus covers the initial push).
+// input is focused. Refocusing must preserve its current text and cursor;
+// activation and initial view attachment seed the TextArea instead.
 func (f *FilePickerContext) HandleFocus(_ types.OnFocusOpts) error {
 	if f.modes != nil {
 		if f.inputFocused {
@@ -466,10 +473,6 @@ func (f *FilePickerContext) HandleFocus(_ types.OnFocusOpts) error {
 	}
 	if f.deps.GuiDriver != nil {
 		f.deps.GuiDriver.SetCaretEnabled(f.inputFocused)
-	}
-	if f.inputFocused && f.view != nil && f.view.TextArea != nil {
-		f.view.TextArea.Clear()
-		f.view.TextArea.TypeString(f.filename)
 	}
 	return nil
 }
@@ -499,27 +502,28 @@ func (f *FilePickerContext) InputKind() pickerInputKind { return f.inputKind }
 // activateInput clears the TextArea, seeds it, focuses, and sets the
 // given kind. Caller must call HandleRender afterwards.
 func (f *FilePickerContext) activateInput(k pickerInputKind) {
-	f.inputKind = k
-	if !f.inputFocused {
-		f.ClearViewBuffer()
-		if f.view != nil && f.view.TextArea != nil {
-			f.view.TextArea.TypeString(f.filename)
-		}
-		if f.deps.GuiDriver != nil {
-			f.deps.GuiDriver.SetCaretEnabled(true)
-		}
-		if f.modes != nil {
-			f.modes.Set(types.FILE_PICKER, types.ModeInsert)
-		}
-		f.inputFocused = true
+	if f.inputFocused && f.inputKind == inputKindFilename {
+		f.filename = f.Buffer()
 	}
+	f.inputKind = k
+	f.ClearViewBuffer()
+	if k == inputKindFilename && f.view != nil && f.view.TextArea != nil {
+		f.view.TextArea.TypeString(f.filename)
+	}
+	if f.deps.GuiDriver != nil {
+		f.deps.GuiDriver.SetCaretEnabled(true)
+	}
+	if f.modes != nil {
+		f.modes.Set(types.FILE_PICKER, types.ModeInsert)
+	}
+	f.inputFocused = true
 }
 
-// deactivateInput returns focus to the directory listing, saving the
-// current TextArea content into filename.
+// deactivateInput returns focus to the listing, retaining filename edits
+// but never committing transient search or directory input as the filename.
 func (f *FilePickerContext) deactivateInput() {
-	if f.view != nil && f.view.TextArea != nil {
-		f.filename = f.view.TextArea.GetContent()
+	if f.inputFocused && f.inputKind == inputKindFilename {
+		f.filename = f.Buffer()
 	}
 	if f.deps.GuiDriver != nil {
 		f.deps.GuiDriver.SetCaretEnabled(false)
@@ -615,18 +619,7 @@ func (f *FilePickerContext) ToggleInputFocus() {
 	if f.inputFocused {
 		f.deactivateInput()
 	} else {
-		f.inputKind = inputKindFilename
-		f.ClearViewBuffer()
-		if f.view != nil && f.view.TextArea != nil {
-			f.view.TextArea.TypeString(f.filename)
-		}
-		if f.deps.GuiDriver != nil {
-			f.deps.GuiDriver.SetCaretEnabled(true)
-		}
-		if f.modes != nil {
-			f.modes.Set(types.FILE_PICKER, types.ModeInsert)
-		}
-		f.inputFocused = true
+		f.activateInput(inputKindFilename)
 	}
 }
 

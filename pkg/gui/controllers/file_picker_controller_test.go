@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
@@ -51,6 +52,8 @@ func (d *reviewPickerDriver) SetContent(_ string, content string) error {
 }
 
 func (d *reviewPickerDriver) SetCaretEnabled(bool) {}
+
+func (d *reviewPickerDriver) SetViewCursor(string, int, int) error { return nil }
 
 func TestReview_picker_links_controller(t *testing.T) {
 	for _, scenario := range []string{"directory", "file", "relative_directory", "relative_file", "dangling", "stat_denied", "directory_read_denied", "disappeared_directory", "disappeared_file", "retry_after_stat_denied", "save_new_filename", "save_file_link", "save_directory_link", "save_dangling_link", "save_disappeared_link", "unsafe_file_error", "unsafe_directory_error"} {
@@ -156,4 +159,86 @@ func TestReview_picker_links_controller(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFilePickerActionsKeepSaveDestination(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/exports", 0o700))
+	require.NoError(t, afero.WriteFile(fs, "/exports/notes.sql", []byte("select 1;"), 0o600))
+	driver := &reviewPickerDriver{}
+	base := guicontext.NewBaseContext(guicontext.BaseContextOpts{Key: types.FILE_PICKER, ViewName: string(types.FILE_PICKER), Kind: types.TEMPORARY_POPUP})
+	fp := guicontext.NewFilePickerContext(base, guicontext.Deps{GuiDriver: driver})
+	fp.SetFs(fs)
+	fp.SetViewSize(80, 20)
+	var events []string
+	fp.Push(guicontext.PickerSave, "/exports/report.csv", func(path string) {
+		events = append(events, "confirm:"+path)
+	}, func() { events = append(events, "cancel") }, func() error {
+		events = append(events, "pop")
+		return nil
+	})
+	view := gocui.NewView(string(types.FILE_PICKER), 0, 0, 80, 20, gocui.OutputNormal)
+	fp.SetView(view)
+	ctrl := controllers.NewFilePickerController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, func() *guicontext.FilePickerContext { return fp })
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	run := func(id string) {
+		t.Helper()
+		cmd, ok := reg.Get(id)
+		require.True(t, ok)
+		require.NoError(t, cmd.Handler(commands.ExecCtx{}))
+	}
+	typeText := func(text string) {
+		view.TextArea.Clear()
+		view.TextArea.TypeString(text)
+	}
+	run(commands.FilePickerFocusInput)
+	typeText("edited.csv")
+	run(commands.FilePickerSearch)
+	require.Empty(t, fp.Buffer())
+	typeText("notes")
+	run(commands.FilePickerConfirm)
+	require.Equal(t, "edited.csv", fp.Buffer())
+	_, total, _ := fp.SearchStatus()
+	require.Equal(t, 1, total)
+	run(commands.FilePickerNewDir)
+	require.Empty(t, fp.Buffer())
+	typeText("cancelled")
+	run(commands.FilePickerFocusInput)
+	exists, err := afero.Exists(fs, "/exports/cancelled")
+	require.NoError(t, err)
+	require.False(t, exists)
+	run(commands.FilePickerNewDir)
+	require.Empty(t, fp.Buffer())
+	typeText("nested")
+	run(commands.FilePickerConfirm)
+	info, err := fs.Stat("/exports/nested")
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+	require.Equal(t, os.FileMode(0o755), info.Mode().Perm())
+	require.Empty(t, events)
+	for i, item := range fp.Items() {
+		if item.Name == "nested" {
+			fp.SetCursor(i)
+		}
+	}
+	run(commands.FilePickerConfirm)
+	require.Equal(t, "/exports/nested", fp.CurrentPath())
+	run(commands.FilePickerAscend)
+	require.Equal(t, "/exports", fp.CurrentPath())
+	run(commands.FilePickerSearch)
+	typeText("discard")
+	run(commands.FilePickerFocusInput)
+	require.False(t, fp.SearchActive())
+	require.Empty(t, events)
+	run(commands.FilePickerFocusInput)
+	require.Equal(t, "edited.csv", fp.Buffer())
+	run(commands.FilePickerConfirm)
+	require.Equal(t, []string{"pop", "confirm:/exports/edited.csv"}, events)
+	content, err := afero.ReadFile(fs, "/exports/notes.sql")
+	require.NoError(t, err)
+	require.Equal(t, "select 1;", string(content))
+	exists, err = afero.Exists(fs, "/exports/edited.csv")
+	require.NoError(t, err)
+	require.False(t, exists, "picker confirmation must not write the destination")
 }

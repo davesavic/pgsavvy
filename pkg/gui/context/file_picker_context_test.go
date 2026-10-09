@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jesseduffield/lazygit/pkg/gocui"
+
+	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -498,6 +501,174 @@ func TestFilePickerContext_SaveModeFilename(t *testing.T) {
 	fp.Push(PickerSave, "/home/user/schema.sql", nil, nil, nil)
 	if fp.Buffer() != "schema.sql" {
 		t.Errorf("Buffer = %q, want schema.sql", fp.Buffer())
+	}
+}
+
+type pickerInputFS struct {
+	afero.Fs
+	denyMkdir bool
+	created   []string
+}
+
+func (fs *pickerInputFS) Mkdir(path string, perm os.FileMode) error {
+	fs.created = append(fs.created, path)
+	if fs.denyMkdir {
+		return os.ErrPermission
+	}
+	return fs.Fs.Mkdir(path, perm)
+}
+
+func TestFilePickerTransientInputPreservesFilename(t *testing.T) {
+	for _, tc := range []struct {
+		name, text                string
+		search, cancel, denyMkdir bool
+		wantError, wantDirectory  bool
+	}{
+		{name: "search apply", text: "schema", search: true},
+		{name: "search cancel", text: "discard", search: true, cancel: true},
+		{name: "directory create", text: "reports", wantDirectory: true},
+		{name: "directory cancel", text: "discard", cancel: true},
+		{name: "directory empty"},
+		{name: "directory exists", text: "projects", wantError: true},
+		{name: "directory denied", text: "denied", denyMkdir: true, wantError: true},
+	} {
+		for _, fromInput := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/filenameFocused=%v", tc.name, fromInput), func(t *testing.T) {
+				fs := &pickerInputFS{Fs: newTestPickerFs(), denyMkdir: tc.denyMkdir}
+				fp := NewFilePickerContext(BaseContext{}, Deps{})
+				fp.SetFs(fs)
+				var events []string
+				fp.Push(PickerSave, "/home/user/report.csv", func(path string) {
+					events = append(events, "confirm:"+path)
+				}, func() { events = append(events, "cancel") }, func() error {
+					events = append(events, "pop")
+					return nil
+				})
+				view := gocui.NewView(string(types.FILE_PICKER), 0, 0, 60, 12, gocui.OutputNormal)
+				fp.SetView(view)
+				wantName := "report.csv"
+				if fromInput {
+					fp.ToggleInputFocus()
+					view.TextArea.Clear()
+					view.TextArea.TypeString("edited.csv")
+					wantName = "edited.csv"
+				}
+				fp.SetSearch("sql")
+				if tc.search {
+					fp.ActivateSearch()
+				} else {
+					fp.ActivateNewDir()
+				}
+				if got := fp.Buffer(); got != "" {
+					t.Errorf("transient input seeded with %q, want empty", got)
+				}
+				view.TextArea.Clear()
+				view.TextArea.TypeString(tc.text)
+				require.NoError(t, fp.HandleFocus(types.OnFocusOpts{}))
+				require.Equal(t, tc.text, fp.Buffer(), "refocus must retain transient text")
+				if tc.search {
+					if tc.cancel {
+						fp.CancelSearch()
+					} else {
+						fp.ApplySearch()
+					}
+					require.Equal(t, !tc.cancel, fp.SearchActive())
+					if !tc.cancel {
+						_, total, _ := fp.SearchStatus()
+						require.Equal(t, 1, total)
+						require.Equal(t, "schema.sql", fp.Selected().Name)
+					}
+				} else if tc.cancel {
+					fp.CancelNewDir()
+				} else {
+					fp.ApplyNewDir()
+				}
+				require.Equal(t, tc.wantError, fp.errMsg != "")
+				require.Empty(t, events, "transient input must not confirm, cancel, or pop the picker")
+				require.False(t, fp.InputFocused())
+				if !tc.search && !tc.cancel && tc.text != "" {
+					require.Equal(t, []string{filepath.Join("/home/user", tc.text)}, fs.created)
+				} else {
+					require.Empty(t, fs.created)
+				}
+				exists, err := afero.DirExists(fs, "/home/user/reports")
+				require.NoError(t, err)
+				require.Equal(t, tc.wantDirectory, exists)
+				require.Equal(t, wantName, fp.Buffer(), "transient input must not overwrite the save filename")
+				fp.ToggleInputFocus()
+				require.Equal(t, wantName, fp.Buffer())
+				require.NoError(t, fp.Confirm())
+				require.Equal(t, []string{"pop", "confirm:" + filepath.Join("/home/user", wantName)}, events)
+				exists, err = afero.Exists(fs, filepath.Join("/home/user", wantName))
+				require.NoError(t, err)
+				require.False(t, exists, "path confirmation itself must not write a file")
+			})
+		}
+	}
+}
+
+func TestFilePickerInputRefocusAndMount(t *testing.T) {
+	for _, kind := range []pickerInputKind{inputKindFilename, inputKindSearch, inputKindNewDir} {
+		activate := func(fp *FilePickerContext) {
+			switch kind {
+			case inputKindFilename:
+				fp.ToggleInputFocus()
+			case inputKindSearch:
+				fp.ActivateSearch()
+			case inputKindNewDir:
+				fp.ActivateNewDir()
+			}
+		}
+		for _, noTextArea := range []bool{false, true} {
+			for _, focusFirst := range []bool{false, true} {
+				t.Run(fmt.Sprintf("kind=%d/noTextArea=%v/focusFirst=%v", kind, noTextArea, focusFirst), func(t *testing.T) {
+					fp := NewFilePickerContext(BaseContext{}, Deps{})
+					fp.SetFs(newTestPickerFs())
+					fp.Push(PickerSave, "/home/user/report.csv", nil, nil, nil)
+					if noTextArea {
+						view := gocui.NewView(string(types.FILE_PICKER), 0, 0, 60, 12, gocui.OutputNormal)
+						view.TextArea = nil
+						fp.SetView(view)
+					}
+					activate(fp)
+					want := ""
+					if kind == inputKindFilename {
+						want = "report.csv"
+					}
+					require.Equal(t, want, fp.Buffer(), "fallback must respect input kind")
+					if focusFirst {
+						require.NoError(t, fp.HandleFocus(types.OnFocusOpts{}))
+					}
+					view := gocui.NewView(string(types.FILE_PICKER), 0, 0, 60, 12, gocui.OutputNormal)
+					fp.SetView(view)
+					if !focusFirst {
+						require.NoError(t, fp.HandleFocus(types.OnFocusOpts{}))
+					}
+					require.Equal(t, want, fp.Buffer(), "late view attachment must seed the correct input")
+					for _, draft := range []string{"unsubmitted", ""} {
+						view.TextArea.Clear()
+						view.TextArea.TypeString(draft)
+						view.TextArea.MoveCursorLeft()
+						x, y := view.TextArea.GetCursorXY()
+						for range 2 {
+							fp.SetView(view)
+							require.NoError(t, fp.HandleFocus(types.OnFocusOpts{}))
+							require.Equal(t, draft, fp.Buffer())
+							x2, y2 := view.TextArea.GetCursorXY()
+							require.Equal(t, [2]int{x, y}, [2]int{x2, y2}, "refocus must preserve cursor position")
+						}
+					}
+					fp.ToggleInputFocus()
+					fp.ToggleInputFocus()
+					if kind == inputKindFilename {
+						want = ""
+					} else {
+						want = "report.csv"
+					}
+					require.Equal(t, want, fp.Buffer(), "only filename input can replace the stored filename")
+				})
+			}
+		}
 	}
 }
 
