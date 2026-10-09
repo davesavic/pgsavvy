@@ -72,6 +72,13 @@ func buildPickerGui(
 	provider func() []models.Connection,
 ) (*orchestrator.Gui, *testfake.RecorderGuiDriver, *common.AppStateStore) {
 	t.Helper()
+	rec := testfake.NewRecorderGuiDriver()
+	g, store := buildPickerGuiWithDriver(t, provider, rec)
+	return g, rec, store
+}
+
+func buildPickerGuiWithDriver(t *testing.T, provider func() []models.Connection, driver types.GuiDriver) (*orchestrator.Gui, *common.AppStateStore) {
+	t.Helper()
 	fs := afero.NewMemMapFs()
 	log := slog.New(slog.DiscardHandler)
 	cfg := config.GetDefaultConfig()
@@ -91,12 +98,11 @@ func buildPickerGui(
 			return query.New(filepath.Join(tmp, "history.sqlite"))
 		},
 	})
-	rec := testfake.NewRecorderGuiDriver()
-	if err := g.UseDriverForTest(rec); err != nil {
+	if err := g.UseDriverForTest(driver); err != nil {
 		t.Fatalf("UseDriverForTest: %v", err)
 	}
 	t.Cleanup(func() { _ = g.Close() })
-	return g, rec, store
+	return g, store
 }
 
 // AC: startup lands on the CONNECTIONS picker with ZERO connect attempts —

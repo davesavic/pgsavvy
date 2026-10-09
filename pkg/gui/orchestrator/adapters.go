@@ -872,7 +872,7 @@ func (c *connectInvoker) connectWithGen(ctx context.Context, profile *models.Con
 		if savedSchemaIdx >= 0 && c.g.registry != nil && c.g.registry.Schemas != nil {
 			c.g.registry.Schemas.SetCursor(savedSchemaIdx)
 		}
-		if tableItems != nil && c.g.registry != nil && c.g.registry.Tables != nil {
+		if c.g != nil && c.g.registry != nil && c.g.registry.Tables != nil {
 			c.g.registry.Tables.SetItems(tableItems)
 			if savedTableIdx >= 0 {
 				c.g.registry.Tables.SetCursor(savedTableIdx)
