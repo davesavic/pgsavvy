@@ -27,14 +27,13 @@ func TestReview_password_contracts(t *testing.T) {
 			}
 		})
 	}
-	t.Run("capped_exit_stderr", func(t *testing.T) {
+	t.Run("discarded_exit_stderr", func(t *testing.T) {
 		_, err := execPasswordCommand(context.Background(), "i=0; while [ $i -lt 5000 ]; do printf x >&2; i=$((i+1)); done; exit 7")
 		if err == nil || !strings.Contains(err.Error(), "exit code 7") {
 			t.Fatal("exit-code contract changed")
 		}
-		_, stderr, ok := strings.Cut(err.Error(), "stderr=")
-		if !ok || strings.Count(stderr, "x") != maxStderrBytes {
-			t.Fatal("exit-code or capped stderr contract changed")
+		if strings.Contains(err.Error(), "stderr=") || strings.Contains(err.Error(), strings.Repeat("x", 10)) || len(err.Error()) > 256 {
+			t.Fatal("helper stderr must not appear in the bounded exit diagnostic")
 		}
 	})
 	t.Run("precanceled", func(t *testing.T) {
@@ -64,10 +63,10 @@ func TestPasswordCommandChildEnvLacksKeyringPassphrase(t *testing.T) {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if strings.Contains(out, keyringPassphraseEnv+"=") {
-		t.Fatalf("env scrub failed; child saw %q in env output: %s", keyringPassphraseEnv, out)
+		t.Fatal("env scrub failed; child saw the keyring-passphrase variable")
 	}
 	if strings.Contains(out, "should-not-leak") {
-		t.Fatalf("env scrub failed; secret value leaked: %s", out)
+		t.Fatal("env scrub failed; child saw the synthetic passphrase")
 	}
 }
 
@@ -82,8 +81,11 @@ func TestPasswordCommandStderrScrub(t *testing.T) {
 	if strings.Contains(msg, "hunter2") {
 		t.Fatalf("stderr scrub failed; password leaked in error: %s", msg)
 	}
-	if !strings.Contains(msg, "[REDACTED]") {
-		t.Fatalf("expected [REDACTED] marker in error: %s", msg)
+	if strings.Contains(msg, "leaked") || strings.Contains(msg, "stderr=") {
+		t.Fatal("helper stderr must be omitted, not partially scrubbed")
+	}
+	if !strings.Contains(msg, "exit code 1") {
+		t.Fatal("helper error lost its exit code")
 	}
 }
 

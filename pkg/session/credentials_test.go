@@ -64,15 +64,15 @@ func TestResolvePassword_PasswordCommandSuccess(t *testing.T) {
 	}
 }
 
-func TestResolvePassword_PasswordCommandFailureSurfacesStderr(t *testing.T) {
+func TestResolvePassword_PasswordCommandFailureOmitsStderr(t *testing.T) {
 	profile := models.Connection{Name: "p", PasswordCommand: "echo BOOM 1>&2; exit 7"}
 	_, err := ResolvePassword(context.Background(), profile, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "BOOM") {
-		t.Errorf("stderr 'BOOM' missing from error: %s", msg)
+	if strings.Contains(msg, "BOOM") || strings.Contains(msg, "stderr=") {
+		t.Error("password-helper stderr must not appear in errors")
 	}
 	if !strings.Contains(msg, "exit code 7") && !strings.Contains(msg, "exit status 7") {
 		t.Errorf("exit code 7 missing from error: %s", msg)

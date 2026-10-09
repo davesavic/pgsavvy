@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -17,10 +18,6 @@ import (
 // from password_command child env so external helpers cannot exfiltrate it.
 const keyringPassphraseEnv = "PGSAVVY_KEYRING_PASSPHRASE"
 
-// maxStderrBytes caps the size of stderr included in password_command exit
-// errors so a runaway helper cannot blow up an error message.
-const maxStderrBytes = 4 * 1024
-
 // execPasswordCommand runs cmd via a POSIX shell with the user's
 // environment (minus PGSAVVY_KEYRING_PASSPHRASE), enforces ctx as the
 // timeout, and returns trimmed stdout on exit 0.
@@ -28,12 +25,9 @@ const maxStderrBytes = 4 * 1024
 // Shell resolution: $SHELL → /bin/bash → /bin/sh. If none exist as
 // executables, returns errNoUsableShell.
 //
-// On non-zero exit, the returned error includes the exit code and the
-// child's stderr capped at maxStderrBytes, substring-scrubbed to redact the
-// resolved password (if it happened to leak there).
-//
-// On exit 0, stderr is silently discarded — we never log or echo it
-// (epic Critic resolution: avoid noise that could carry secret material).
+// Errors retain exit and cancellation diagnostics, never helper output.
+// Stderr is always discarded: it can contain secrets absent from stdout,
+// including partial credentials that substring scrubbing cannot recognize.
 func execPasswordCommand(ctx context.Context, cmd string) (string, error) {
 	shell, err := resolvePosixShell()
 	if err != nil {
@@ -44,27 +38,17 @@ func execPasswordCommand(ctx context.Context, cmd string) (string, error) {
 	c.Env = scrubbedEnv(os.Environ())
 	c.Stdin = nil // explicit: no stdin
 
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
 	c.Stdout = &stdout
-	c.Stderr = &stderr
+	c.Stderr = io.Discard
 
 	runErr := runPasswordCommand(ctx, c)
 	if runErr != nil {
-		stderrBytes := stderr.Bytes()
-		if len(stderrBytes) > maxStderrBytes {
-			stderrBytes = stderrBytes[:maxStderrBytes]
-		}
-		stderrStr := string(stderrBytes)
-		// Scrub: if the (would-be) password appears in stderr, redact it.
-		// We only know the candidate password from stdout; trim and use it.
-		if pw := strings.TrimRight(stdout.String(), "\r\n"); pw != "" && strings.Contains(stderrStr, pw) {
-			stderrStr = strings.ReplaceAll(stderrStr, pw, "[REDACTED]")
-		}
 		var exitErr *exec.ExitError
 		if errors.As(runErr, &exitErr) {
-			return "", fmt.Errorf("exit code %d: %s: stderr=%q", exitErr.ExitCode(), runErr, strings.TrimSpace(stderrStr))
+			return "", fmt.Errorf("exit code %d: %w", exitErr.ExitCode(), runErr)
 		}
-		return "", fmt.Errorf("%w: stderr=%q", runErr, strings.TrimSpace(stderrStr))
+		return "", runErr
 	}
 
 	return strings.TrimRight(stdout.String(), "\r\n"), nil
