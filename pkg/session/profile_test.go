@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"math/rand/v2"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -603,6 +604,51 @@ func TestBuildPgxConfig_ParseErrorRedactsInlinePassword(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "app:***@") {
 		t.Fatalf("expected app:***@ in redacted error, got: %v", err)
+	}
+}
+
+func TestURLRedactionEmptyUsername(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"empty-user", "postgres://:R33_SYNTHETIC_SECRET@localhost/db", "postgres://:***@localhost/db"},
+		{"encoded-password", "opening postgresql://:R33%40SYNTHETIC%2FSECRET@localhost:5432/db?sslmode=require failed", "opening postgresql://:***@localhost:5432/db?sslmode=require failed"},
+		{"multiple", "postgres://:R33_SYNTHETIC_SECRET@host/db or custom+db://user%40name:R33_SYNTHETIC_SECRET@backup/other", "postgres://:***@host/db or custom+db://user%40name:***@backup/other"},
+		{"ordinary-user", "postgres://user:R33_SYNTHETIC_SECRET@localhost/db", "postgres://user:***@localhost/db"},
+		{"no-password", "postgres://user@localhost:5432/db", "postgres://user@localhost:5432/db"},
+		{"empty-password", "postgres://:@localhost/db", "postgres://:@localhost/db"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, redact := range []func(string) string{RedactDSN, RedactConnectionString} {
+				got := redact(tc.in)
+				if got != tc.want {
+					t.Error("URL redaction mismatch; raw values omitted")
+				}
+				if redact(got) != got {
+					t.Error("URL redaction is not idempotent")
+				}
+			}
+		})
+	}
+}
+
+func TestBuildPgxConfigEmptyUsernamePassword(t *testing.T) {
+	t.Setenv("PGPASSFILE", filepath.Join(t.TempDir(), "absent-pgpass"))
+	t.Setenv("PGPASSWORD", "")
+	for _, password := range []string{"R33_SYNTHETIC_SECRET", "R33%40SYNTHETIC%2FSECRET"} {
+		profile := models.Connection{DSN: "postgres://:" + password + "@localhost:notaport/db?sslmode=require"}
+		_, err := BuildPgxConfig(context.Background(), profile, "")
+		if err == nil {
+			t.Fatal("expected invalid-port parse error without dialing")
+		}
+		if strings.Contains(err.Error(), "SYNTHETIC") || !strings.Contains(err.Error(), ":***@localhost:notaport/db?sslmode=require") {
+			t.Error("parse diagnostics leaked the password or lost nonsecret connection details")
+		}
+	}
+	cfg, err := BuildPgxConfig(context.Background(), models.Connection{DSN: "postgres://:R33%40SYNTHETIC%2FSECRET@localhost:5432/db?sslmode=require"}, "")
+	if err != nil {
+		t.Fatal("valid empty-user URL did not parse")
+	}
+	if cfg.ConnConfig.Password != "R33@SYNTHETIC/SECRET" || cfg.ConnConfig.Database != "db" {
+		t.Error("diagnostic redaction altered actual connection credentials")
 	}
 }
 

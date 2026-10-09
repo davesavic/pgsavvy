@@ -34,7 +34,7 @@ const (
 )
 
 // The URL pattern mirrors pkg/session/profile.go without importing session.
-var logsDSNInlineCredRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^:/@?\s]+):[^@/?\s]+@`)
+var logsDSNInlineCredRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^:/@?\s]*):[^@/?\s]+@`)
 
 type defaultRedactor struct {
 	depthWarnOnce sync.Once

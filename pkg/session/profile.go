@@ -360,7 +360,7 @@ func unquoteKVValue(v string) string {
 // password can be replaced with "***" without dropping the user. Only
 // URL-form DSNs are covered; keyword/value DSNs ("user=... password=...")
 // are out of scope for v1 (see parseDSNFields).
-var dsnInlineCredRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^:/@?\s]+):[^@/?\s]+@`)
+var dsnInlineCredRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^:/@?\s]*):[^@/?\s]+@`)
 
 // RedactDSN scrubs inline passwords from any string that may embed a
 // URL-form Postgres DSN. Used by BuildPgxConfig and

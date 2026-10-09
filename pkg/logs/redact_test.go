@@ -166,6 +166,36 @@ func TestDefaultRedactor_DSNRegex_URLForm(t *testing.T) {
 	}
 }
 
+func TestDefaultRedactor_EmptyUsernameURL(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"empty-user", "postgres://:R33_SYNTHETIC_SECRET@localhost/db", "postgres://:***@localhost/db"},
+		{"encoded-password", "opening postgresql://:R33%40SYNTHETIC%2FSECRET@localhost:5432/db?sslmode=require failed", "opening postgresql://:***@localhost:5432/db?sslmode=require failed"},
+		{"multiple", "postgres://:R33_SYNTHETIC_SECRET@host/db or custom+db://user%40name:R33_SYNTHETIC_SECRET@backup/other", "postgres://:***@host/db or custom+db://user%40name:***@backup/other"},
+		{"ordinary-user", "postgres://user:R33_SYNTHETIC_SECRET@localhost/db", "postgres://user:***@localhost/db"},
+		{"no-password", "postgres://user@localhost:5432/db", "postgres://user@localhost:5432/db"},
+		{"empty-password", "postgres://:@localhost/db", "postgres://:@localhost/db"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := DefaultRedactor()
+			rec := redactRecord(t, r, tc.in, slog.String("dsn", tc.in), slog.Any("nested", map[string]any{"dsn": tc.in}))
+			for range 2 {
+				if rec.Message != tc.want {
+					t.Error("URL message redaction mismatch; raw values omitted")
+				}
+				attr, ok := attrByKey(rec, "dsn")
+				if !ok || attr.String() != tc.want {
+					t.Error("URL attribute redaction mismatch; raw values omitted")
+				}
+				attr, ok = attrByKey(rec, "nested")
+				if !ok || attr.Any().(map[string]any)["dsn"] != tc.want {
+					t.Error("nested URL redaction mismatch; raw values omitted")
+				}
+				r.Redact(&rec)
+			}
+		})
+	}
+}
+
 func TestDefaultRedactor_DSNRegex_KVForm(t *testing.T) {
 	r := DefaultRedactor()
 	cases := []struct {

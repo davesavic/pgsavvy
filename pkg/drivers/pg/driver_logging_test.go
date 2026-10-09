@@ -4,11 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/spf13/afero"
+
+	"github.com/davesavic/pgsavvy/pkg/logs"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
@@ -116,6 +121,61 @@ func TestOpen_EmitsConnOpenEvents(t *testing.T) {
 	}
 	if redacted, _ := opens[0]["redacted_dsn"].(string); !strings.Contains(redacted, "***") {
 		t.Errorf("conn_open redacted_dsn missing marker: %v", opens[0]["redacted_dsn"])
+	}
+}
+
+func TestOpenEmptyUsernamePreParseDiagnostics(t *testing.T) {
+	t.Setenv("PGPASSFILE", filepath.Join(t.TempDir(), "absent-pgpass"))
+	for _, password := range []string{"R33_SYNTHETIC_SECRET", "R33%40SYNTHETIC%2FSECRET"} {
+		fs := afero.NewMemMapFs()
+		logger, closer, err := logs.Open(logs.Options{Dir: "/r33-logs", FS: fs, Redactor: logs.DefaultRedactor(), Stderr: io.Discard})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = closer.Close() })
+		previous := globalLogger.Load()
+		t.Cleanup(func() { globalLogger.Store(previous) })
+		SetGlobalLogger(logger)
+		driver, err := New(stubPrompter{})(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = driver.Open(context.Background(), models.Connection{
+			Name: "r33-synthetic", Driver: "postgres", Password: "R33_SYNTHETIC_OVERRIDE",
+			DSN: "postgres://:" + password + "@localhost:notaport/db?sslmode=require",
+		}, nil)
+		if err == nil || !strings.Contains(err.Error(), "invalid port") {
+			t.Fatal("expected a local pre-dial parse failure")
+		}
+		if strings.Contains(err.Error(), "SYNTHETIC") {
+			t.Error("returned parse error exposed synthetic credentials")
+		}
+		if err := closer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		files, err := afero.ReadDir(fs, "/r33-logs/sessions")
+		if err != nil || len(files) != 1 {
+			t.Fatal("expected exactly one synthetic session log")
+		}
+		raw, err := afero.ReadFile(fs, filepath.Join("/r33-logs/sessions", files[0].Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "SYNTHETIC") {
+			t.Error("session file exposed synthetic credentials; contents omitted")
+		}
+		capture := &syncBuf{}
+		_, _ = capture.Write(raw)
+		for _, event := range []string{"conn_open", "conn_open_done"} {
+			records := findEvents(t, capture, event)
+			if len(records) != 1 {
+				t.Fatalf("%s events = %d, want one", event, len(records))
+			}
+			if records[0]["redacted_dsn"] != "postgres://:***@localhost:notaport/db?sslmode=require" {
+				t.Error("event lost nonsecret DSN details or retained the password")
+			}
+		}
+		globalLogger.Store(previous)
 	}
 }
 
