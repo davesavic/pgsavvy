@@ -6,6 +6,7 @@ import (
 
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/theme"
+	"github.com/davesavic/pgsavvy/pkg/theme/builtin"
 )
 
 // TestDecorateDirtyCell_NotDirtyReturnsValueUnchanged proves the
@@ -107,6 +108,39 @@ func TestDirtyCellRendersBackgroundTint(t *testing.T) {
 	}
 	if strings.Contains(clean, bg) {
 		t.Errorf("clean cell %q must not carry the dirty tint", clean)
+	}
+}
+
+func TestDirtyCellConfiguredAttributeBackground(t *testing.T) {
+	t.Cleanup(func() { _ = theme.Apply(builtin.DefaultDark()) })
+	for _, tc := range []struct{ input, background string }{
+		{"bold red", "\x1b[41m"},
+		{"red underline", "\x1b[41m"},
+		{"italic #5a4410 bold", "\x1b[48;2;90;68;16m"},
+		{"bold blue on red", "\x1b[41m"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			cfg := builtin.DefaultDark()
+			cfg.DirtyCell = tc.input
+			if warnings := theme.ApplyUserConfig(cfg); len(warnings) != 0 {
+				t.Fatalf("valid style warnings: %v", warnings)
+			}
+			for _, mode := range []string{"color", "monochrome"} {
+				t.Run(mode, func(t *testing.T) {
+					t.Cleanup(theme.SetMonochromeForTest(mode == "monochrome"))
+					col := models.ColumnMeta{Name: "c", TypeName: "text"}
+					clean := renderCellPadded("hello", col, 10, false)
+					dirty := renderCellPadded("hello", col, 10, true)
+					if mode == "monochrome" {
+						if strings.ContainsRune(dirty, '\x1b') || dirty != clean {
+							t.Errorf("monochrome dirty cell = %q, clean = %q", dirty, clean)
+						}
+					} else if !strings.Contains(dirty, tc.background) || strings.Contains(clean, tc.background) {
+						t.Errorf("dirty cell = %q, clean = %q, want background %q only when dirty", dirty, clean, tc.background)
+					}
+				})
+			}
+		})
 	}
 }
 

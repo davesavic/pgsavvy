@@ -159,20 +159,19 @@ func parseStyle(s string) *Style {
 
 // parseBgStyle parses a style string where the colour should be routed to the
 // Bg field (not Fg). If the user has already used the "on" keyword the string is
-// parsed normally; otherwise "on " is prepended so the colour lands in Bg.
+// parsed normally; otherwise the parsed foreground becomes the background.
 // This allows bg-only fields like DirtyCell to accept a plain colour value
 // (e.g. "#5a4410") without requiring the confusing "on" prefix.
 func parseBgStyle(s string) *Style {
-	if s == "" {
-		return &Style{}
-	}
+	style := parseStyle(s)
 	tokens := strings.Fields(s)
 	for _, t := range tokens {
-		if strings.ToLower(t) == "on" {
-			return parseStyle(s)
+		if strings.EqualFold(t, "on") {
+			return style
 		}
 	}
-	return parseStyle("on " + s)
+	style.Bg, style.Fg = style.Fg, ""
+	return style
 }
 
 // PreviewSGR returns a combined ANSI SGR escape that renders a style string in

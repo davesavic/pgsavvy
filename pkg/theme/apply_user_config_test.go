@@ -110,6 +110,45 @@ func TestApplyUserConfig_CompoundBackground(t *testing.T) {
 	})
 }
 
+func TestApplyUserConfigDirtyCellAttributeGrammar(t *testing.T) {
+	restoreDefaultThemeAfter(t)
+	for _, tc := range []struct {
+		input string
+		want  Style
+		warn  string
+	}{
+		{input: "bold red", want: Style{Bg: "red", Bold: true}},
+		{input: "red bold", want: Style{Bg: "red", Bold: true}},
+		{input: "ITALIC Red UNDERLINE BOLD", want: Style{Bg: "Red", Bold: true, Italic: true, Underline: true}},
+		{input: "underline #aabbcc italic", want: Style{Bg: "#aabbcc", Italic: true, Underline: true}},
+		{input: "#abc bold", want: Style{Bg: "#abc", Bold: true}},
+		{input: "red", want: Style{Bg: "red"}},
+		{input: "bold blue on red", want: Style{Fg: "blue", Bg: "red", Bold: true}},
+		{input: "on red bold", want: Style{Bg: "red", Bold: true}},
+		{input: "bold notacolor", want: Style{Bg: "notacolor", Bold: true}, warn: `theme.dirty_cell: unknown color "notacolor"`},
+		{input: "on bold red", want: Style{Fg: "red", Bg: "bold"}, warn: `theme.dirty_cell: unknown color "bold"`},
+		{input: "bold red notacolor", want: Style{Bg: "red", Bold: true}},
+		{input: "bold underline", want: Style{Bold: true, Underline: true}},
+		{input: "", want: Style{}},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			cfg := builtin.DefaultDark()
+			cfg.DirtyCell = tc.input
+			warnings := ApplyUserConfig(cfg)
+			if got := *Current().DirtyCell; got != tc.want {
+				t.Errorf("DirtyCell = %+v, want %+v", got, tc.want)
+			}
+			if tc.warn == "" {
+				if len(warnings) != 0 {
+					t.Errorf("valid style produced warnings: %v", warnings)
+				}
+			} else if len(warnings) != 1 || warnings[0] != tc.warn {
+				t.Errorf("warnings = %v, want [%s]", warnings, tc.warn)
+			}
+		})
+	}
+}
+
 func TestApplyUserConfig_AttributesAndCaseAreNotClassified(t *testing.T) {
 	restoreDefaultThemeAfter(t)
 
