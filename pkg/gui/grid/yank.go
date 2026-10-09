@@ -119,8 +119,9 @@ func (v *View) writeClipboard(value string) error {
 // selection is active) with column headers in the configured format and
 // publishes through the ClipboardWriter. The format is read from
 // YankFormat(). ok is false when the grid is empty (no rows or no cols).
-// Returns ErrClipboardTooLarge when the serialized payload exceeds the
-// configured maximum.
+// JSON formats reject duplicate selected column names without writing the
+// clipboard. Returns ErrClipboardTooLarge when the serialized payload
+// exceeds the configured maximum.
 func (v *View) YankSelection() (value string, ok bool, err error) {
 	v.mu.RLock()
 	if v.beforeYankSnapshot != nil {
@@ -162,13 +163,16 @@ func (v *View) YankSelection() (value string, ok bool, err error) {
 	var serialized string
 	switch yankFmt {
 	case "json":
-		serialized = buildYankJSON(snap, r0, c0, r1, c1)
+		serialized, err = buildYankJSON(snap, r0, c0, r1, c1)
 	case "csv":
 		serialized = buildYankCSV(snap, r0, c0, r1, c1)
 	case "ndjson":
-		serialized = buildYankNDJSON(snap, r0, c0, r1, c1)
+		serialized, err = buildYankNDJSON(snap, r0, c0, r1, c1)
 	default:
 		serialized = buildYankTSV(snap, r0, c0, r1, c1)
+	}
+	if err != nil {
+		return "", true, err
 	}
 
 	if int64(len(serialized)) > maxBytes {
@@ -203,13 +207,16 @@ func (v *View) YankRowWithHeaders() (value string, ok bool, err error) {
 	var serialized string
 	switch yankFmt {
 	case "json":
-		serialized = buildYankJSON(snap, r, 0, r, lastCol)
+		serialized, err = buildYankJSON(snap, r, 0, r, lastCol)
 	case "csv":
 		serialized = buildYankCSV(snap, r, 0, r, lastCol)
 	case "ndjson":
-		serialized = buildYankNDJSON(snap, r, 0, r, lastCol)
+		serialized, err = buildYankNDJSON(snap, r, 0, r, lastCol)
 	default:
 		serialized = buildYankTSV(snap, r, 0, r, lastCol)
+	}
+	if err != nil {
+		return "", true, err
 	}
 
 	if int64(len(serialized)) > maxBytes {
@@ -302,10 +309,27 @@ func buildTSV(snap viewSnapshot) string {
 	return sb.String()
 }
 
+// Match the exporter policy without including untrusted column names in
+// error text. Only columns present in the selected output can collide.
+func validateYankJSONColumns(snap viewSnapshot, c0, c1 int) error {
+	seen := make(map[string]int, c1-c0+1)
+	for c := c0; c <= c1; c++ {
+		name := snap.cols[c].Name
+		if first, exists := seen[name]; exists {
+			return fmt.Errorf("grid: duplicate JSON column names at columns %d and %d; use distinct SQL aliases", first+1, c+1)
+		}
+		seen[name] = c
+	}
+	return nil
+}
+
 // buildYankJSON returns a JSON array of objects. Each object maps column
 // names to cell values: null for SQL NULL, string via renderCellPlain
 // otherwise.
-func buildYankJSON(snap viewSnapshot, r0, c0, r1, c1 int) string {
+func buildYankJSON(snap viewSnapshot, r0, c0, r1, c1 int) (string, error) {
+	if err := validateYankJSONColumns(snap, c0, c1); err != nil {
+		return "", err
+	}
 	var sb strings.Builder
 	sb.WriteString("[")
 	for r := r0; r <= r1; r++ {
@@ -334,13 +358,16 @@ func buildYankJSON(snap viewSnapshot, r0, c0, r1, c1 int) string {
 		sb.WriteString("\n  }")
 	}
 	sb.WriteString("\n]")
-	return sb.String()
+	return sb.String(), nil
 }
 
 // buildYankNDJSON returns newline-delimited JSON objects, one per row.
 // Each object maps column names to cell values: null for SQL NULL,
 // string via renderCellPlain otherwise.
-func buildYankNDJSON(snap viewSnapshot, r0, c0, r1, c1 int) string {
+func buildYankNDJSON(snap viewSnapshot, r0, c0, r1, c1 int) (string, error) {
+	if err := validateYankJSONColumns(snap, c0, c1); err != nil {
+		return "", err
+	}
 	var sb strings.Builder
 	for r := r0; r <= r1; r++ {
 		if r > r0 {
@@ -366,7 +393,7 @@ func buildYankNDJSON(snap viewSnapshot, r0, c0, r1, c1 int) string {
 		}
 		sb.WriteString("}")
 	}
-	return sb.String()
+	return sb.String(), nil
 }
 
 // buildYankCSV returns RFC 4180 CSV with a header row and data rows.

@@ -1,6 +1,7 @@
 package grid
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -150,6 +151,97 @@ func TestYankCell_PropagatesClipboardError(t *testing.T) {
 	_, ok, err := v.YankCell()
 	require.True(t, ok)
 	require.ErrorIs(t, err, ErrClipboardTooLarge)
+}
+
+func TestFormattedYankRejectsDuplicateJSONColumns(t *testing.T) {
+	for _, format := range []string{"json", "ndjson"} {
+		for _, variant := range []string{"row", "fallback", "rows", "block"} {
+			for _, name := range []string{"x", "", "界", "\x1b[31mprivate"} {
+				t.Run(fmt.Sprintf("%s/%s/%q", format, variant, name), func(t *testing.T) {
+					v := NewView()
+					v.SetColumns([]models.ColumnMeta{{Name: name}, {Name: name}})
+					v.AppendRows([]models.Row{{Values: []any{1, 2}}, {Values: []any{3, nil}}})
+					v.SetYankFormat(format)
+					rc := &recordingClipboard{got: "previous clipboard contents"}
+					v.SetClipboard(rc)
+					yank := v.YankSelection
+					switch variant {
+					case "row":
+						yank = v.YankRowWithHeaders
+					case "rows":
+						v.EnterRowMode()
+						v.MoveCursorDown()
+					case "block":
+						v.EnterBlockMode()
+						v.MoveCursorRight()
+						v.MoveCursorDown()
+					}
+					value, ok, err := yank()
+					require.True(t, ok, "a nonempty result must surface the error through the controller")
+					require.EqualError(t, err, "grid: duplicate JSON column names at columns 1 and 2; use distinct SQL aliases")
+					require.Empty(t, value, "do not return an ambiguous object as usable output")
+					require.Equal(t, "previous clipboard contents", rc.lastWrite())
+				})
+			}
+		}
+	}
+}
+
+func TestFormattedYankChecksOnlySelectedJSONColumns(t *testing.T) {
+	for _, format := range []string{"json", "ndjson"} {
+		for _, selection := range []string{"cell", "block"} {
+			t.Run(format+"/"+selection, func(t *testing.T) {
+				v := NewView()
+				v.SetColumns([]models.ColumnMeta{{Name: "x"}, {Name: "y"}, {Name: "x"}})
+				v.AppendRows([]models.Row{{Values: []any{1, 2, 3}}})
+				v.SetYankFormat(format)
+				rc := &recordingClipboard{}
+				v.SetClipboard(rc)
+				v.MoveCursorRight()
+				want := `{"x":"3"}`
+				if selection == "cell" {
+					v.MoveCursorRight()
+					v.EnterCellMode()
+				} else {
+					v.EnterBlockMode()
+					v.MoveCursorRight()
+					want = `{"y":"2","x":"3"}`
+				}
+				if format == "json" {
+					want = "[" + want + "]"
+				}
+				value, ok, err := v.YankSelection()
+				require.True(t, ok)
+				require.NoError(t, err)
+				require.JSONEq(t, want, value)
+				require.Equal(t, value, rc.lastWrite())
+			})
+		}
+	}
+}
+
+func TestFormattedYankNonJSONAllowsDuplicateColumns(t *testing.T) {
+	for _, format := range []string{"tsv", "csv"} {
+		t.Run(format, func(t *testing.T) {
+			v := NewView()
+			v.SetColumns([]models.ColumnMeta{{Name: "x"}, {Name: "x"}})
+			v.AppendRows([]models.Row{{Values: []any{1, 2}}})
+			v.SetYankFormat(format)
+			rc := &recordingClipboard{}
+			v.SetClipboard(rc)
+			for _, yank := range []func() (string, bool, error){v.YankSelection, v.YankRowWithHeaders} {
+				value, ok, err := yank()
+				require.True(t, ok)
+				require.NoError(t, err)
+				want := "x\tx\n1\t2"
+				if format == "csv" {
+					want = "x,x\r\n1,2"
+				}
+				require.Equal(t, want, value)
+				require.Equal(t, value, rc.lastWrite())
+			}
+		})
+	}
 }
 
 func TestYankSelection_JSON_RowSelection(t *testing.T) {

@@ -5,8 +5,45 @@ import (
 
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+func TestResultYankRowDuplicateJSON(t *testing.T) {
+	for _, format := range []string{"json", "ndjson"} {
+		for _, branch := range []string{"row", "selection"} {
+			t.Run(format+"/"+branch, func(t *testing.T) {
+				b := newBag()
+				mgr := ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{})
+				if err := mgr.OpenResultTab("test", nil); err != nil {
+					t.Fatal(err)
+				}
+				g := mgr.Active().Grid()
+				g.SetColumns([]models.ColumnMeta{{Name: "x"}, {Name: "x"}})
+				g.AppendRows([]models.Row{{Values: []any{1, 2}}})
+				g.SetYankFormat(format)
+				cb := &fakeClipboard{writes: []string{"previous clipboard"}}
+				g.SetClipboard(cb)
+				if branch == "selection" {
+					mgr.SelectRow()
+				}
+				ctrl := controllers.NewResultTabsController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps, b.HelperBag.EditDeps, mgr)
+				reg := commands.NewRegistry()
+				ctrl.RegisterActions(reg)
+				runHandler(t, reg, commands.ResultYankRow, commands.ExecCtx{})
+
+				const want = "clipboard: grid: duplicate JSON column names at columns 1 and 2; use distinct SQL aliases"
+				if len(b.Toast.msgs) != 1 || b.Toast.msgs[0].Msg != want {
+					t.Errorf("toasts = %+v; want %q", b.Toast.msgs, want)
+				}
+				if len(cb.writes) != 1 || cb.writes[0] != "previous clipboard" {
+					t.Errorf("clipboard writes changed: %q", cb.writes)
+				}
+			})
+		}
+	}
+}
 
 // TestResultTabsControllerGBindingJumpsLast guards the regression:
 // `G` in the result grid must dispatch ResultJumpLast (jump
