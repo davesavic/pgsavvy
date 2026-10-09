@@ -7,7 +7,10 @@ import (
 	iofs "io/fs"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 )
@@ -92,6 +95,64 @@ func TestSaveBufferContentNilFs(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "nil fs") {
 		t.Errorf("err = %v; want nil-fs message", err)
+	}
+}
+
+type overlappingBufferFS struct {
+	afero.Fs
+	started chan struct{}
+	release chan struct{}
+	paths   chan string
+	renames atomic.Int32
+}
+
+func (fs *overlappingBufferFS) Rename(old, new string) error {
+	fs.paths <- old
+	if fs.renames.Add(1) == 1 {
+		close(fs.started)
+		<-fs.release
+	}
+	return fs.Fs.Rename(old, new)
+}
+
+func TestSaveBufferContentOwnsUniqueTemporaryFile(t *testing.T) {
+	fs := &overlappingBufferFS{
+		Fs: afero.NewMemMapFs(), started: make(chan struct{}),
+		release: make(chan struct{}), paths: make(chan string, 2),
+	}
+	release := sync.OnceFunc(func() { close(fs.release) })
+	defer release()
+	const uuid = "deadbeef-1234-4567-89ab-cdef01234567"
+	first := make(chan error, 1)
+	go func() { first <- SaveBufferContent(fs, "/state", "conn", uuid, "SELECT first") }()
+	select {
+	case <-fs.started:
+	case <-time.After(time.Second):
+		t.Fatal("first writer did not reach rename gate")
+	}
+	if err := SaveBufferContent(fs, "/state", "conn", uuid, "SELECT second"); err != nil {
+		t.Fatal(err)
+	}
+	old1, old2 := <-fs.paths, <-fs.paths
+	if old1 == old2 {
+		t.Error("concurrent saves shared temporary-file ownership")
+	}
+	release()
+	select {
+	case err := <-first:
+		if err != nil {
+			t.Errorf("second writer consumed first writer's temporary file: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first writer did not complete")
+	}
+	path := bufferPathFor("/state", "conn", uuid)
+	entries, err := afero.ReadDir(fs, filepath.Dir(path))
+	if err != nil || len(entries) != 1 || entries[0].Name() != uuid+".sql" {
+		t.Fatalf("unexpected files after concurrent saves: %v, %v", entries, err)
+	}
+	if entries[0].Mode().Perm() != 0o600 {
+		t.Fatalf("saved buffer permissions = %o, want 600", entries[0].Mode().Perm())
 	}
 }
 

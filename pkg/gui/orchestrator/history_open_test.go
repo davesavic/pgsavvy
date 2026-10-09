@@ -303,11 +303,9 @@ func TestHistoryOpen_ConfirmInsertsSQLAndSwitchesToEditor(t *testing.T) {
 // DIRTY buffer, switching to a list tab must (a) reset the editor's mode to
 // Normal via the editor leaf's HandleFocusLost, and (b) persist the dirty
 // buffer through the editor's SaveBuffer path (Dirty cleared on the happy
-// path). NOTE: the clear-on-save-failure remark (toast + clear) is DEFERRED
-// (pgsavvy-z4a3) and unsatisfiable today, so it is intentionally not tested
-// here — only the happy path is asserted.
+// path). Only successful persistence may clear Dirty.
 func TestQueryRailSwitchAwayMidInsert_ResetsModeAndPersistsDirtyBuffer(t *testing.T) {
-	g, _ := buildTestGuiWithHistory(t)
+	g, driver, fs, _ := buildBufferSaveGui(t, false)
 
 	rail := g.Registry().QueryRail
 	// Start on the editor tab.
@@ -321,12 +319,13 @@ func TestQueryRailSwitchAwayMidInsert_ResetsModeAndPersistsDirtyBuffer(t *testin
 	}
 	buf.ConnectionID = "conn-1"
 	buf.UUID = "deadbeef-1234-4567-89ab-cdef01234567"
-	buf.Dirty = true
+	setBufferSaveText(buf, "SELECT persisted_switch")
 
 	// Switch away to a list tab. The container fires the editor leaf's
 	// HandleFocusLost (mode reset + saveBufferIfDirty).
 	rail.SetActiveTab(controllers.QueryRailHistoryTab)
 	g.WaitForWorkersForTest()
+	driver.drainPending()
 
 	// (a) Mode reset: Get returns ModeNormal after the leaf's modes.Reset.
 	if mode := g.ModeStore().Get(types.QUERY_EDITOR); mode != types.ModeNormal {
@@ -336,6 +335,7 @@ func TestQueryRailSwitchAwayMidInsert_ResetsModeAndPersistsDirtyBuffer(t *testin
 	if buf.Dirty {
 		t.Fatal("buffer.Dirty == true after switch-away; want false (SaveBuffer must have flushed the dirty buffer)")
 	}
+	assertBufferSaveText(t, fs, buf, buf.String())
 }
 
 // TestQueryRailContainerFlushOnModalPush covers the D3 container-flush path:
@@ -345,7 +345,7 @@ func TestQueryRailSwitchAwayMidInsert_ResetsModeAndPersistsDirtyBuffer(t *testin
 // list tab is active. Without the unconditional flush, edits typed in the
 // editor then left via a list tab would be silently dropped.
 func TestQueryRailContainerFlushOnModalPush(t *testing.T) {
-	g, _ := buildTestGuiWithHistory(t)
+	g, driver, fs, _ := buildBufferSaveGui(t, false)
 
 	rail := g.Registry().QueryRail
 	// Make QUERY_RAIL the current MAIN_CONTEXT so a subsequent MAIN push
@@ -354,19 +354,19 @@ func TestQueryRailContainerFlushOnModalPush(t *testing.T) {
 		t.Fatalf("Push(QueryRail): %v", err)
 	}
 
-	// Dirty the editor buffer, then move to a LIST tab so the editor leaf is
-	// NOT the active leaf — the flush must still reach it.
+	// Move to a LIST tab before dirtying the editor, so a tab-switch save
+	// cannot satisfy the container-flush assertion.
 	buf := g.Registry().QueryEditor.Buffer()
 	if buf == nil {
 		t.Fatal("QueryEditor buffer is nil")
 	}
 	buf.ConnectionID = "conn-1"
 	buf.UUID = "deadbeef-1234-4567-89ab-cdef01234567"
-	buf.Dirty = true
 	rail.SetActiveTab(controllers.QueryRailHistoryTab)
 	if got := rail.ActiveLeafKey(); got != types.HISTORY {
 		t.Fatalf("ActiveLeafKey() = %q, want HISTORY (list tab must be active for the D3 path)", got)
 	}
+	setBufferSaveText(buf, "SELECT persisted_modal")
 
 	// Open the CONNECTION_MANAGER (a MAIN_CONTEXT). The push runs removeMain,
 	// which fires QUERY_RAIL.HandleFocusLost -> flushEditorLeaf.
@@ -374,9 +374,11 @@ func TestQueryRailContainerFlushOnModalPush(t *testing.T) {
 		t.Fatalf("Push(ConnectionManager): %v", err)
 	}
 	g.WaitForWorkersForTest()
+	driver.drainPending()
 
 	// The editor's dirty buffer was flushed despite a list tab being active.
 	if buf.Dirty {
 		t.Fatal("buffer.Dirty == true after CONNECTION_MANAGER push; want false (container flush must reach the editor leaf)")
 	}
+	assertBufferSaveText(t, fs, buf, buf.String())
 }

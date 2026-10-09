@@ -26,6 +26,8 @@ type QueryEditorContext struct {
 	matcher types.MatcherCanceller
 	buf     *editor.Buffer
 	repeat  *editor.RepeatStore
+
+	saveGeneration uint64
 }
 
 // Compile-time assertion that the live type satisfies the lifecycle
@@ -165,9 +167,8 @@ func (c *QueryEditorContext) SetMode(m types.Mode) {
 // the live *editor.Buffer is Dirty. The buffer's String() snapshot is
 // taken on the MainLoop (cheap — Buffer.String holds RLock for the
 // duration) so the worker the orchestrator-bound SaveBuffer dispatches
-// receives an immutable string and never touches Buffer state. After
-// dispatch the Dirty flag is cleared so a focus-blur cycle without an
-// intervening edit doesn't re-fire the save.
+// receives an immutable string and never touches Buffer state. A successful
+// UI-thread acknowledgement clears Dirty only for the latest saved snapshot.
 //
 // Missing inputs (nil buf, nil hook, empty ConnectionID/UUID) make the
 // call a silent no-op so test wiring without a Common.Fs / StateDir
@@ -188,8 +189,15 @@ func (c *QueryEditorContext) saveBufferIfDirty() error {
 		return nil
 	}
 	content := c.buf.String()
-	c.deps.SaveBuffer(connID, uuid, content)
-	c.buf.Dirty = false
+	buf := c.buf
+	c.saveGeneration++
+	generation := c.saveGeneration
+	c.deps.SaveBuffer(connID, uuid, content, func(err error) {
+		if err == nil && generation == c.saveGeneration && c.buf == buf &&
+			buf.ConnectionID == connID && buf.UUID == uuid && buf.String() == content {
+			buf.Dirty = false
+		}
+	})
 	return nil
 }
 

@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	googleuuid "github.com/google/uuid"
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/spf13/afero"
 
@@ -245,6 +246,9 @@ type Gui struct {
 
 	// Query-execution state surfaced by the query runtime.
 	queryState queryState
+
+	bufferSaveMu   sync.Mutex
+	bufferSaveTail <-chan struct{}
 
 	// closed is true once Close has run; idempotent guard. Atomic (AD7)
 	// so a concurrent second Close is a no-op and the OnUIThread /
@@ -1765,7 +1769,7 @@ const closeDrainBound = 2 * time.Second
 // Close runs the M15c shutdown sequence:
 //  1. Set the atomic closed gate and cancel the connect attempt (concurrent
 //     Close calls become no-ops; UI publication stops delivering into the dead UI)
-//  2. Flush the query-editor buffer
+//  2. Cancel outstanding UI operations
 //  3. PreemptInFlight — stop in-flight result-tab streams (solves the
 //     parked-RBM-worker class of hang; see below)
 //  4. stopSpinner — stop the busy-spinner ticker unconditionally so the
@@ -1775,7 +1779,7 @@ const closeDrainBound = 2 * time.Second
 //     session we are about to close, and no ack can be pending into the
 //     dead UI afterwards
 //  6. Wait for in-flight OnWorker goroutines (bounded — fail loud on
-//     expiry instead of hanging on a leaked worker)
+//     expiry instead of hanging on a leaked worker), then flush the editor
 //  7. Close published/pending query sessions, then helper session/pool/tunnel
 //  8. queryRunner.Unbind
 //  9. history.Close
@@ -1794,6 +1798,7 @@ func (g *Gui) Close() error {
 	if !g.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	var firstErr error
 	g.cancelCommitOperations()
 	g.cancelTableInspect()
 	g.cancelSchemaActivation()
@@ -1812,10 +1817,6 @@ func (g *Gui) Close() error {
 		g.connectionLife.cancel()
 	}
 	g.connectionLife.mu.Unlock()
-	// Flush the query editor buffer to disk synchronously. The MainLoop
-	// has already exited so HandleFocusLost was never fired — save the
-	// buffer directly rather than dispatching via OnWorker.
-	g.flushQueryEditorBuffer()
 	// Stop in-flight result-tab streams BEFORE draining workers. A
 	// ResultBufferManager task that has reached EOF parks forever in its
 	// post-EOF chan loop (result_buffer_manager.go) and only exits when
@@ -1846,6 +1847,7 @@ func (g *Gui) Close() error {
 	// wait covers it, and the session Close below cancels the live wire.
 	if g.queryState.queryRunner != nil {
 		if err := g.queryState.queryRunner.CancelQueuedAndWaitIdle(closeDrainBound); err != nil {
+			firstErr = fmt.Errorf("gui: launch-queue drain on close: %w", err)
 			if g.deps.Common != nil {
 				g.deps.Common.Logger().Error("gui: launch-queue drain on Close", slog.Any("err", err))
 			}
@@ -1857,18 +1859,22 @@ func (g *Gui) Close() error {
 	// the zero-count fast path returns immediately. Bounded: a leaked
 	// worker cannot hang Close, only fail loud (logged above).
 	if err := g.spinnerState.workersWG.WaitTimeout(closeDrainBound); err != nil {
+		if firstErr == nil {
+			firstErr = fmt.Errorf("gui: worker drain on close: %w", err)
+		}
 		if g.deps.Common != nil {
 			g.deps.Common.Logger().Error("gui: worker drain on Close", slog.Any("err", err))
 		}
+	} else if err := g.flushQueryEditorBuffer(); err != nil && firstErr == nil {
+		firstErr = err
 	}
-	var firstErr error
 	// Close the active SQLSession FIRST so an in-flight Stream gets
 	// cancelled (SQLSession.Close cancels the live RunHandle and waits
 	// briefly for it to terminate) before the history writer drains.
 	// Without this ordering a finishing run could push one more
 	// historyEntry into a channel whose receiver has already exited.
 	if g.queryState.activeSQLSession != nil {
-		if err := g.queryState.activeSQLSession.Close(); err != nil {
+		if err := g.queryState.activeSQLSession.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 		g.queryState.activeSQLSession = nil
@@ -1890,7 +1896,7 @@ func (g *Gui) Close() error {
 		g.queryState.history = nil
 	}
 	if g.deps.Store != nil {
-		if err := g.deps.Store.Flush(); err != nil {
+		if err := g.deps.Store.Flush(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 		if err := g.deps.Store.Close(); err != nil && firstErr == nil {
@@ -1929,13 +1935,11 @@ func defaultHistoryProvider() (*query.History, error) {
 // saveQueryEditorBuffer is the SaveBuffer closure bound into ContextTreeDeps.
 // The MainLoop caller (QueryEditorContext.HandleFocusLost)
 // has already taken Buffer.String() under the buffer's RLock, so content is
-// an immutable string. The closure dispatches the actual fs write to a
-// worker so HandleFocusLost returns immediately and the gocui MainLoop is
-// never blocked on disk I/O. Empty Common / Fs / StateDir is a silent
-// no-op via SaveBufferLines' empty-path guard, which keeps test wiring
-// (no Common at construction) safe.
-func (g *Gui) saveQueryEditorBuffer(connID, uuid, content string) {
-	if g == nil || g.deps.Common == nil {
+// an immutable string. Admission orders workers before any disk I/O, so
+// scheduling cannot let an older snapshot overwrite a later one. Completion
+// never waits for the UI: Close drops acknowledgements while draining workers.
+func (g *Gui) saveQueryEditorBuffer(connID, uuid, content string, done func(error)) {
+	if g == nil || g.deps.Common == nil || g.closed.Load() {
 		return
 	}
 	fs := g.deps.Common.Fs
@@ -1943,42 +1947,75 @@ func (g *Gui) saveQueryEditorBuffer(connID, uuid, content string) {
 	if fs == nil || stateDir == "" || connID == "" || uuid == "" {
 		return
 	}
+	if err := validateBufferSaveUUID(uuid); err != nil {
+		if done != nil {
+			done(err)
+		}
+		return
+	}
+	g.bufferSaveMu.Lock()
+	previous := g.bufferSaveTail
+	saved := make(chan struct{})
+	g.bufferSaveTail = saved
 	g.OnWorker(func(_ gocui.Task) error {
-		if err := editor.SaveBufferContent(fs, stateDir, connID, uuid, content); err != nil {
+		defer close(saved)
+		if previous != nil {
+			<-previous
+		}
+		err := editor.SaveBufferContent(fs, stateDir, connID, uuid, content)
+		if err != nil {
 			g.deps.Common.Logger().Warn("gui: save query-editor buffer", "err", err)
+		}
+		if done != nil {
+			g.OnUIThread(func() error {
+				done(err)
+				return nil
+			})
 		}
 		return nil
 	})
+	g.bufferSaveMu.Unlock()
+}
+
+func validateBufferSaveUUID(uuid string) error {
+	// SaveBufferContent treats an invalid path as a no-op, not a saved buffer.
+	if len(uuid) != 36 || googleuuid.Validate(uuid) != nil {
+		return fmt.Errorf("gui: invalid query-editor buffer UUID")
+	}
+	return nil
 }
 
 // flushQueryEditorBuffer saves the query editor buffer to disk
-// synchronously. Called from Close() where the MainLoop has already
-// exited — HandleFocusLost never fired so saveBufferIfDirty never ran.
-// A synchronous write is safe (and desirable) here because there is no
-// UI thread to block.
-func (g *Gui) flushQueryEditorBuffer() {
+// synchronously after workers have drained. Never flush while an older save
+// can still finish later; a drain timeout leaves the latest buffer dirty.
+func (g *Gui) flushQueryEditorBuffer() error {
 	if g.registry == nil || g.registry.QueryEditor == nil {
-		return
+		return nil
 	}
 	buf := g.registry.QueryEditor.Buffer()
 	if buf == nil || !buf.Dirty {
-		return
+		return nil
 	}
 	if g.deps.Common == nil {
-		return
+		return nil
 	}
 	fs := g.deps.Common.Fs
 	stateDir := g.deps.Common.StateDir
 	connID := buf.ConnectionID
 	uuid := buf.UUID
 	if fs == nil || stateDir == "" || connID == "" || uuid == "" {
-		return
+		return nil
+	}
+	if err := validateBufferSaveUUID(uuid); err != nil {
+		return err
 	}
 	content := buf.String()
 	if err := editor.SaveBufferContent(fs, stateDir, connID, uuid, content); err != nil {
 		g.deps.Common.Logger().Warn("gui: flush query-editor buffer on close", "err", err)
+		return fmt.Errorf("gui: flush query-editor buffer on close: %w", err)
 	}
 	buf.Dirty = false
+	return nil
 }
 
 // hiddenSchemasForActiveConn returns the hidden-schemas list for the active

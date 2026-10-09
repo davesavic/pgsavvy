@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -196,6 +197,8 @@ func TestStressCloseDuringRunBounded(t *testing.T) {
 	bag := g.HelperBagForTest()
 
 	releaseGate := make(chan struct{})
+	release := sync.OnceFunc(func() { close(releaseGate) })
+	defer release()
 	inner := &gatedStressSession{started: make(chan struct{}), release: releaseGate}
 	sess := session.New(&gatedStressConn{}, inner, session.Options{})
 	bag.QueryRunner.Bind(sess, drivers.Capabilities{HasLiveCancel: true})
@@ -212,8 +215,8 @@ func TestStressCloseDuringRunBounded(t *testing.T) {
 	go func() { closeDone <- g.Close() }()
 	select {
 	case err := <-closeDone:
-		if err != nil {
-			t.Fatalf("Close: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "launch-queue drain") {
+			t.Errorf("Close = %v, want launch-queue drain timeout", err)
 		}
 		if elapsed := time.Since(start); elapsed > 5*time.Second {
 			t.Fatalf("Close took %v — beyond the C6 bounded-shutdown ceiling", elapsed)
@@ -224,7 +227,7 @@ func TestStressCloseDuringRunBounded(t *testing.T) {
 
 	// Release the parked op; the abandoned launch settles and the launcher
 	// drains to idle.
-	close(releaseGate)
+	release()
 	select {
 	case <-ack:
 	case <-time.After(2 * time.Second):

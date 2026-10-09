@@ -106,8 +106,8 @@ func TestCloseReturnsWithinBoundWithStuckWorker(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if err != nil {
-			t.Fatalf("Close: %v", err)
+		if err == nil {
+			t.Error("Close returned nil after a worker drain timeout")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close hung >5s on a stuck worker — the bounded wait did not fire")

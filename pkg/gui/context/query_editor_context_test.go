@@ -1,8 +1,10 @@
 package context
 
 import (
+	"errors"
 	"testing"
 
+	"github.com/davesavic/pgsavvy/pkg/gui/editor"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
 
@@ -207,9 +209,11 @@ func TestQueryEditorContext_SetBuffer(t *testing.T) {
 func TestQueryEditorContext_HandleFocusLost_DirtyDispatchesSave(t *testing.T) {
 	var sawConnID, sawUUID, sawContent string
 	var calls int
+	var acknowledge func(error)
 	deps := depsAlias{
-		SaveBuffer: func(connID, uuid, content string) {
+		SaveBuffer: func(connID, uuid, content string, done func(error)) {
 			calls++
+			acknowledge = done
 			sawConnID = connID
 			sawUUID = uuid
 			sawContent = content
@@ -240,15 +244,66 @@ func TestQueryEditorContext_HandleFocusLost_DirtyDispatchesSave(t *testing.T) {
 	if sawConnID != "conn-1" || sawUUID != "deadbeef-1234-4567-89ab-cdef01234567" {
 		t.Errorf("hook args = (%q, %q, %q); want (\"conn-1\", uuid, content)", sawConnID, sawUUID, sawContent)
 	}
+	if !buf.Dirty {
+		t.Error("save dispatch cleared Dirty before persistence")
+	}
+	acknowledge(errors.New("save failed"))
+	if !buf.Dirty {
+		t.Error("failed persistence cleared Dirty")
+	}
+	acknowledge(nil)
 	if buf.Dirty {
-		t.Error("Dirty stayed true after focus-loss save dispatch")
+		t.Error("successful persistence did not clear Dirty")
+	}
+}
+
+func TestQueryEditorContext_SaveAckRejectsStaleSnapshot(t *testing.T) {
+	for _, change := range []string{"content", "identity", "buffer", "newer-save", "edit-back"} {
+		t.Run(change, func(t *testing.T) {
+			ctx, _, _ := newTestQueryEditorContext()
+			var acks []func(error)
+			ctx.deps.SaveBuffer = func(_, _, _ string, done func(error)) { acks = append(acks, done) }
+			buf := ctx.Buffer()
+			buf.ConnectionID, buf.UUID, buf.Dirty = "conn", "deadbeef-1234-4567-89ab-cdef01234567", true
+			if err := ctx.FlushDirty(); err != nil {
+				t.Fatal(err)
+			}
+			switch change {
+			case "content":
+				buf.Lines = []editor.Line{{Runes: []rune("newer edit")}}
+			case "identity":
+				buf.ConnectionID = "another connection"
+			case "buffer":
+				replacement := editor.NewBuffer()
+				replacement.Dirty = true
+				ctx.SetBuffer(replacement)
+			case "newer-save", "edit-back":
+				buf.Lines = []editor.Line{{Runes: []rune("newer save")}}
+				if err := ctx.FlushDirty(); err != nil {
+					t.Fatal(err)
+				}
+				if change == "edit-back" {
+					buf.Lines = nil
+				}
+			}
+			acks[0](nil)
+			if !buf.Dirty || !ctx.Buffer().Dirty {
+				t.Fatal("stale acknowledgement cleared unsaved state")
+			}
+			if change == "newer-save" {
+				acks[1](nil)
+				if buf.Dirty {
+					t.Fatal("latest matching acknowledgement did not clear Dirty")
+				}
+			}
+		})
 	}
 }
 
 func TestQueryEditorContext_HandleFocusLost_NotDirtyIsNoOp(t *testing.T) {
 	var calls int
 	deps := depsAlias{
-		SaveBuffer: func(_, _, _ string) { calls++ },
+		SaveBuffer: func(_, _, _ string, _ func(error)) { calls++ },
 	}
 	modes := newFakeModeStore()
 	matcher := &fakeMatcherCanceller{}
@@ -277,7 +332,7 @@ func TestQueryEditorContext_HandleFocusLost_NotDirtyIsNoOp(t *testing.T) {
 func TestQueryEditorContext_HandleFocusLost_EmptyConnIDSkipsSave(t *testing.T) {
 	var calls int
 	deps := depsAlias{
-		SaveBuffer: func(_, _, _ string) { calls++ },
+		SaveBuffer: func(_, _, _ string, _ func(error)) { calls++ },
 	}
 	ctx := NewQueryEditorContext(
 		NewBaseContext(BaseContextOpts{

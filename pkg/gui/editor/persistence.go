@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	iofs "io/fs"
 	"path/filepath"
 	"regexp"
@@ -52,8 +53,8 @@ func bufferPathFor(stateDir, connID, uuid string) string {
 // SaveBufferLines writes the supplied Lines snapshot to the per-connID
 // buffer file as raw `.sql` text (no struct serialization — Cursor /
 // Selection / History / Jumps are NOT persisted). The write is
-// atomic: a sibling `.tmp` is written at mode 0o600, then renamed to
-// the final path; a failed rename removes the tmp best-effort.
+// atomic: a unique sibling `.tmp` is written at mode 0o600, then renamed to
+// the final path; any failure removes that writer's tmp best-effort.
 //
 // Empty connID or invalid uuid is a no-op (returns nil). lines may be
 // nil; the resulting file is empty in that case.
@@ -78,12 +79,18 @@ func SaveBufferContent(fs afero.Fs, stateDir, connID, uuid, content string) erro
 	if err := fs.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("editor: mkdir buffer dir: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := afero.WriteFile(fs, tmp, []byte(content), 0o600); err != nil {
+	file, err := afero.TempFile(fs, dir, "."+uuid+"-*.tmp")
+	if err != nil {
+		return fmt.Errorf("editor: create buffer tmp: %w", err)
+	}
+	tmp := file.Name()
+	defer func() { _ = fs.Remove(tmp) }()
+	_, writeErr := io.Copy(file, strings.NewReader(content))
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
 		return fmt.Errorf("editor: write buffer tmp: %w", err)
 	}
 	if err := fs.Rename(tmp, path); err != nil {
-		_ = fs.Remove(tmp)
 		return fmt.Errorf("editor: rename buffer tmp: %w (tmp removed best-effort)", err)
 	}
 	return nil
