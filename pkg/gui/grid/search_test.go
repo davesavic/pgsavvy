@@ -337,6 +337,9 @@ func TestSetSearch_NoDeadlockWithAppendRows(t *testing.T) {
 	wg.Wait()
 
 	require.Equal(t, goroutines*perGoroutine, v.RowCount())
+	_, _, total, active := v.SearchStatus()
+	require.True(t, active)
+	require.Equal(t, goroutines*perGoroutine, total, "every row matches either concurrent query")
 }
 
 // TestSetSearch_SnapshotIsDefensiveCopy pins: the snapshot's match list is
@@ -352,4 +355,87 @@ func TestSetSearch_SnapshotIsDefensiveCopy(t *testing.T) {
 	v.SetSearch("zzz")
 	require.Len(t, snap.searchMatches, 1, "snapshot match list must be a defensive copy")
 	require.Equal(t, "a", snap.searchQuery)
+}
+
+func TestSearchIncludesAppendedRows(t *testing.T) {
+	v := twoColView(t, [][]any{{"before", ""}})
+	v.SetSearch("hit")
+	empty := v.snapshot()
+	v.AppendRows([]models.Row{
+		{Values: []any{"hit hit", "HiT"}},
+		{Values: []any{"éhit", "x"}},
+	})
+	query, cur, total, active := v.SearchStatus()
+	require.Equal(t, "hit", query)
+	require.True(t, active)
+	require.Equal(t, 1, cur)
+	require.Equal(t, 4, total)
+	want := []cellMatch{
+		{row: 1, col: 0, byteStart: 0, byteEnd: 3},
+		{row: 1, col: 0, byteStart: 4, byteEnd: 7},
+		{row: 1, col: 1, byteStart: 0, byteEnd: 3},
+		{row: 2, col: 0, byteStart: 2, byteEnd: 5},
+	}
+	snap := v.snapshot()
+	require.Equal(t, want, snap.searchMatches)
+	require.Empty(t, empty.searchMatches, "an earlier frame must not gain new matches")
+	line := renderDataLine(snap, 1, 80)
+	require.Contains(t, line, curSearchSGR+"hit"+ansiReset)
+	require.Contains(t, line, searchSGR+"hit"+ansiReset)
+	require.Contains(t, line, searchSGR+"HiT"+ansiReset)
+	for _, step := range []struct {
+		previous bool
+		row, col int
+		current  int
+	}{
+		{previous: true, row: 2, col: 0, current: 4},
+		{row: 1, col: 0, current: 1},
+		{row: 1, col: 0, current: 2},
+		{row: 1, col: 1, current: 3},
+	} {
+		if step.previous {
+			v.PrevMatch()
+		} else {
+			v.NextMatch()
+		}
+		row, col := v.CursorPosition()
+		require.Equal(t, [2]int{step.row, step.col}, [2]int{row, col})
+		_, current, _, _ := v.SearchStatus()
+		require.Equal(t, step.current, current)
+	}
+	v.AppendRows(nil)
+	v.AppendRows([]models.Row{{Values: []any{"more hit", "hit"}}})
+	want = append(want, cellMatch{row: 3, col: 0, byteStart: 5, byteEnd: 8}, cellMatch{row: 3, col: 1, byteStart: 0, byteEnd: 3})
+	require.Equal(t, want, v.snapshot().searchMatches)
+	require.Equal(t, want[:4], snap.searchMatches, "held frame must retain its original match list")
+	_, current, total, _ := v.SearchStatus()
+	require.Equal(t, 3, current)
+	require.Equal(t, 6, total)
+}
+
+func TestSearchAppendPreservesCurrentAndResets(t *testing.T) {
+	v := twoColView(t, [][]any{{"hit hit", "hit"}})
+	v.SetSearch("hit")
+	v.NextMatch()
+	before := v.snapshot()
+	v.AppendRows([]models.Row{{Values: []any{"hit", "hit"}}})
+	after := v.snapshot()
+	require.Equal(t, before.searchCurrentIdx, after.searchCurrentIdx)
+	require.Equal(t, before.searchMatches[before.searchCurrentIdx], after.searchMatches[after.searchCurrentIdx])
+	row, col := v.CursorPosition()
+	require.Equal(t, [2]int{0, 0}, [2]int{row, col}, "streaming must not move the cursor")
+	v.SetSearch("Hit")
+	v.AppendRows([]models.Row{{Values: []any{"hit", "Hit"}}})
+	require.Equal(t, []cellMatch{{row: 2, col: 1, byteStart: 0, byteEnd: 3}}, v.snapshot().searchMatches, "new query and smart case replace the old match set")
+	v.ClearSearch()
+	v.AppendRows([]models.Row{{Values: []any{"Hit", "hit"}}})
+	require.False(t, v.SearchActive())
+	require.Empty(t, v.snapshot().searchMatches)
+	v.SetSearch("hit")
+	v.SetColumns([]models.ColumnMeta{{Name: "filtered", TypeName: "text"}})
+	v.AppendRows([]models.Row{{Values: []any{"hit"}}})
+	require.False(t, v.SearchActive(), "new result schema must not retain an earlier search")
+	require.Empty(t, v.snapshot().searchMatches)
+	v.SetSearch("hit")
+	require.Equal(t, []cellMatch{{row: 0, col: 0, byteStart: 0, byteEnd: 3}}, v.snapshot().searchMatches)
 }

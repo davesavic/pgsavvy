@@ -605,6 +605,14 @@ func (v *View) AppendRows(rows []models.Row) {
 	defer v.mu.Unlock()
 	wasEmpty := len(v.rows) == 0
 	v.rows = append(v.rows, rows...)
+	if v.searchState.query != "" {
+		matches := computeMatchesLocked(rows, v.cols, v.searchState.query, v.searchState.smartCase)
+		for i := range matches {
+			matches[i].row += len(v.rows) - len(rows)
+		}
+		// Appends cannot reorder existing matches or change the current one.
+		v.searchState.matches = append(v.searchState.matches, matches...)
+	}
 	if !v.widthsLocked {
 		v.autoSizeFromSampleLocked()
 	}

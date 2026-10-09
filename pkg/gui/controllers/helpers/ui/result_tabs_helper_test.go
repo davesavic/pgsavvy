@@ -3080,6 +3080,87 @@ func TestChunkPaintRendersRowsBeforeCompletion(t *testing.T) {
 	}
 }
 
+func TestStreamingSearchTracksAppendsEOFAndRequery(t *testing.T) {
+	h, runner, rec := newPaintHelper(t)
+	searcher := &fakeSearcher{}
+	h.deps.Search = searcher
+	rh := newFakeRunHandle()
+	rh.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "value", TypeName: "text"}}}
+	if err := h.openTab("SELECT value", rh); err != nil {
+		t.Fatal(err)
+	}
+	tab := h.Active()
+	paintViewName(rec, tab.ViewName())
+	check := func(wantQuery string, wantCurrent, wantTotal int) {
+		t.Helper()
+		query, current, total, active := tab.Grid().SearchStatus()
+		if query != wantQuery || current != wantCurrent || total != wantTotal || active != (wantQuery != "") {
+			t.Fatalf("search=(%q,%d,%d,%v), want (%q,%d,%d,%v)", query, current, total, active, wantQuery, wantCurrent, wantTotal, wantQuery != "")
+		}
+	}
+	appendText := func(text string) {
+		runner.appendRows([]models.Row{{Values: []any{text}}})
+	}
+	appendText("before")
+	h.SearchPrompt()
+	searcher.typeQuery("needle")
+	check("needle", 0, 0)
+	appendText("needle")
+	check("needle", 1, 1)
+	h.SearchNextMatch()
+	appendText("other needle")
+	check("needle", 1, 2)
+	if row, col := tab.Grid().CursorPosition(); row != 1 || col != 0 {
+		t.Fatalf("append moved selected match to (%d,%d)", row, col)
+	}
+	h.SearchNextMatch()
+	appendText("needle")
+	runner.appendRows(nil)
+	check("needle", 2, 3)
+	if row, col := tab.Grid().CursorPosition(); row != 2 || col != 0 {
+		t.Fatalf("append moved selected match to (%d,%d)", row, col)
+	}
+	if got := rec.RealView(tab.ViewName()).Buffer(); !strings.Contains(got, "other needle") {
+		t.Fatalf("progressive render omitted the matching row: %q", got)
+	}
+	runner.fireOnDone()
+	if !tab.Complete() {
+		t.Fatal("EOF did not complete the tab")
+	}
+	check("needle", 2, 3)
+	h.LayoutPaint(rec, 0, 0, 80, 24)
+	if footer := rec.RealView(tab.ViewName()).Footer; !strings.Contains(footer, "4 rows") {
+		t.Fatalf("EOF footer=%q, want final row count", footer)
+	}
+	searcher.typeQuery("other")
+	check("other", 1, 1)
+	searcher.cancel()
+	check("", 0, 0)
+	searcher.typeQuery("needle")
+	runner.mu.Lock()
+	staleAppend := runner.lastAppend
+	runner.mu.Unlock()
+	h.PreemptInFlight()
+	next := newFakeRunHandle()
+	next.rows = &stubColumnStream{cols: []models.ColumnMeta{{Name: "replacement", TypeName: "text"}}}
+	h.reattachActiveTab(next, "SELECT replacement", "SELECT value")
+	check("", 0, 0)
+	staleAppend([]models.Row{{Values: []any{"stale needle"}}})
+	if tab.Grid().RowCount() != 0 {
+		t.Fatal("retired stream repopulated the fresh grid")
+	}
+	appendText("fresh needle")
+	check("", 0, 0)
+	h.SearchPrompt()
+	searcher.typeQuery("needle")
+	check("needle", 1, 1)
+	runner.fireOnDone()
+	if !tab.Complete() || tab.RowCount() != 1 {
+		t.Fatal("replacement stream did not complete with its own row")
+	}
+	check("needle", 1, 1)
+}
+
 // TestChunkPaintBeforeFirstLayoutIsNoOp verifies the pre-LayoutPaint race:
 // appendRows called when the driver cannot resolve the tab's view (first
 // chunks may arrive before the first LayoutPaint creates it) must be a
