@@ -12,6 +12,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query"
 	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
@@ -273,6 +274,12 @@ func (h *FKForwardHelper) Jump(ctx context.Context, tab CurrentTab, cursorRow, c
 	// QuoteIdent / QuoteQualified per ADR-21.
 	sql := buildFKForwardSQL(chosen, h.limit)
 	q := models.Query{SQL: sql, Args: args}
+	connID := ""
+	if origin, ok := tab.(interface {
+		Identity() (string, query.ResultIdentity)
+	}); ok {
+		connID, _ = origin.Identity()
+	}
 
 	// Push the jump entry BEFORE running. If RunQuery / OpenResultTab
 	// fail we still want the entry in the list so the user can <C-o>
@@ -308,6 +315,14 @@ func (h *FKForwardHelper) Jump(ctx context.Context, tab CurrentTab, cursorRow, c
 			h.emitToast("result tabs at cap; unpin a tab to free a slot")
 		}
 		return fmt.Errorf("fk forward: open result tab: %w", err)
+	}
+	if attacher, ok := h.tabs.(interface {
+		AttachActiveTabIdentity(string, query.ResultIdentity)
+	}); ok {
+		attacher.AttachActiveTabIdentity(connID, query.DetectFromQuery(q.SQL))
+	}
+	if attacher, ok := h.tabs.(interface{ AttachActiveTabOrigin(string, []any, string) }); ok {
+		attacher.AttachActiveTabOrigin(q.SQL, q.Args, q.DefaultSchema)
 	}
 	return nil
 }

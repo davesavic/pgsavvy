@@ -12,7 +12,9 @@ import (
 	helpers "github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query"
 	"github.com/davesavic/pgsavvy/pkg/session"
+	"github.com/stretchr/testify/require"
 )
 
 // --- Fakes ---------------------------------------------------------------
@@ -91,6 +93,83 @@ type fakeTab struct {
 	table  string
 	cols   []string
 	rows   map[int][]any
+}
+
+type reviewFKIdentityTab struct {
+	*fakeTab
+	connID string
+}
+
+func (t *reviewFKIdentityTab) Identity() (string, query.ResultIdentity) {
+	return t.connID, query.DetectFromQuery("SELECT * FROM app.orders")
+}
+
+type reviewFKMetadataTabs struct {
+	fakeTabs
+	connID   string
+	identity query.ResultIdentity
+	origin   models.Query
+	events   []string
+}
+
+func (t *reviewFKMetadataTabs) OpenResultTab(label string, rh *session.RunHandle) error {
+	t.events = append(t.events, "open")
+	return t.fakeTabs.OpenResultTab(label, rh)
+}
+
+func (t *reviewFKMetadataTabs) AttachActiveTabIdentity(connID string, identity query.ResultIdentity) {
+	t.events = append(t.events, "identity")
+	t.connID, t.identity = connID, identity
+}
+
+func (t *reviewFKMetadataTabs) AttachActiveTabOrigin(sql string, args []any, schema string) {
+	t.events = append(t.events, "origin")
+	t.origin = models.Query{SQL: sql, Args: append([]any(nil), args...), DefaultSchema: schema}
+}
+
+type reviewFKMetadataRunner struct {
+	fakeRunner
+	tab *reviewFKIdentityTab
+}
+
+func (r *reviewFKMetadataRunner) RunQuery(ctx context.Context, q models.Query) (*session.RunHandle, error) {
+	r.tab.connID = "changed_during_run"
+	return r.fakeRunner.RunQuery(ctx, q)
+}
+
+func TestReview_forward_metadata_success_only(t *testing.T) {
+	for _, scenario := range []string{"accepted", "allocation_error", "query_error"} {
+		t.Run(scenario, func(t *testing.T) {
+			tab := &reviewFKIdentityTab{fakeTab: &fakeTab{schema: "app", table: "orders", cols: []string{"user_id"}, rows: map[int][]any{0: {int64(42)}}}, connID: "origin_connection"}
+			runner := &reviewFKMetadataRunner{tab: tab}
+			tabs := &reviewFKMetadataTabs{connID: "previous_connection", identity: query.DetectFromQuery("SELECT * FROM app.previous"), origin: models.Query{SQL: "previous", Args: []any{1}, DefaultSchema: "previous_schema"}}
+			if scenario == "allocation_error" {
+				tabs.err = errors.New("synthetic allocation failure")
+			}
+			if scenario == "query_error" {
+				runner.err = errors.New("synthetic query failure")
+			}
+			h := newHelper(t, helpers.FKForwardDeps{Cache: &fakeCache{fks: []models.ForeignKey{simpleFK()}}, Runner: runner, Tabs: tabs, JumpList: &fakeJumpList{}, Limit: 10})
+			err := h.Jump(context.Background(), tab, 0, 0)
+			if scenario == "accepted" {
+				require.NoError(t, err)
+				require.Equal(t, []string{"open", "identity", "origin"}, tabs.events)
+				require.Equal(t, "origin_connection", tabs.connID, "capture the source before RunQuery can change UI state")
+				require.Equal(t, query.DetectFromQuery(runner.gotQuery.SQL), tabs.identity)
+				require.Equal(t, runner.gotQuery, tabs.origin)
+			} else {
+				require.Error(t, err)
+				require.Equal(t, "previous_connection", tabs.connID)
+				require.Equal(t, query.DetectFromQuery("SELECT * FROM app.previous"), tabs.identity)
+				require.Equal(t, models.Query{SQL: "previous", Args: []any{1}, DefaultSchema: "previous_schema"}, tabs.origin)
+				if scenario == "allocation_error" {
+					require.Equal(t, []string{"open"}, tabs.events)
+				} else {
+					require.Empty(t, tabs.events)
+				}
+			}
+		})
+	}
 }
 
 func (f *fakeTab) Slot() int                       { return f.slot }

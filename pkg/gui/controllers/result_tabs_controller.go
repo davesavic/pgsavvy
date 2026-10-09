@@ -13,6 +13,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/grid"
 	"github.com/davesavic/pgsavvy/pkg/gui/keys"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/query"
 )
 
 // ResultTabsManager is the narrow surface ResultTabsController dispatches
@@ -589,6 +590,8 @@ type fkCurrentTabAdapter struct {
 
 func (a *fkCurrentTabAdapter) Slot() int { return a.tab.Slot() }
 func (a *fkCurrentTabAdapter) ID() int64 { return a.tab.ID() }
+
+func (a *fkCurrentTabAdapter) Identity() (string, query.ResultIdentity) { return a.tab.Identity() }
 
 // BaseTable splits the tab's ResultIdentity.BaseTable on the first dot
 // into (schema, table). A bare identifier (no dot) returns ("", id).
