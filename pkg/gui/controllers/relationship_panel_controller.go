@@ -1,9 +1,12 @@
 package controllers
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -825,7 +828,7 @@ func (r *RelationshipPanelController) rebuildOutboundLocked(schema, table string
 // inboundDegraded and issues ZERO inbound queries (not even the FK lookup).
 // Caller holds mu.
 func (r *RelationshipPanelController) rebuildInboundLocked(tab *ui.Tab, schema, table string, cols []string, values []any) {
-	_, ri := tab.Identity()
+	connID, ri := tab.Identity()
 	if !ri.HasRowIdentity {
 		r.inboundDegraded = true
 		return
@@ -841,7 +844,7 @@ func (r *RelationshipPanelController) rebuildInboundLocked(tab *ui.Tab, schema, 
 		if len(r.inbound) >= relationshipPanelMaxRels {
 			break
 		}
-		r.inbound = append(r.inbound, buildInboundRel(fk, cols, values))
+		r.inbound = append(r.inbound, buildInboundRel(connID, fk, cols, values))
 	}
 	if extra := len(fks) - len(r.inbound); extra > 0 {
 		r.inboundOverflow = extra
@@ -1077,7 +1080,7 @@ func buildOutboundRel(fk models.ForeignKey, cols []string, values []any) outboun
 // columns ($1..$N). A NULL in any referenced value, an unbound column, or a
 // composite-length mismatch yields empty pkValues + an empty estimateKey, so
 // the fill worker refuses it (no query) and Enter is a no-op for that line.
-func buildInboundRel(fk models.ForeignKey, cols []string, values []any) inboundRel {
+func buildInboundRel(connID string, fk models.ForeignKey, cols []string, values []any) inboundRel {
 	in := inboundRel{fk: fk}
 	if len(fk.RefColumns) == 0 || len(fk.RefColumns) != len(fk.Columns) {
 		return in
@@ -1091,26 +1094,73 @@ func buildInboundRel(fk models.ForeignKey, cols []string, values []any) inboundR
 		pkValues = append(pkValues, values[idx])
 	}
 	in.pkValues = pkValues
-	in.estimateKey = estimateCacheKey(fk, pkValues)
+	in.estimateKey = estimateCacheKey(connID, fk, pkValues)
 	return in
 }
 
-// estimateCacheKey keys a resolved inbound estimate by the child table + the
-// parent-key value tuple: "schema.table|v1,v2". A revisited row hits the cache
-// and issues no query. Values only flow into this in-process key (never logged).
-func estimateCacheKey(fk models.ForeignKey, pkValues []any) string {
-	var b strings.Builder
-	b.WriteString(fk.Schema)
-	b.WriteByte('.')
-	b.WriteString(fk.Table)
-	b.WriteByte('|')
-	for i, v := range pkValues {
-		if i > 0 {
-			b.WriteByte(',')
+var uncachedCountIdentity atomic.Uint64
+
+func countTablePrefix(schema, table string) string {
+	return strconv.Quote(schema) + "|" + strconv.Quote(table) + "|"
+}
+
+// Values are encoded only for this in-process key, never logged or decoded.
+// An unencodable tuple gets a snapshot-local identity: it remains queryable,
+// but cannot reuse another snapshot's count through a lossy fallback key.
+func estimateCacheKey(connID string, fk models.ForeignKey, pkValues []any) string {
+	prefix := countTablePrefix(fk.Schema, fk.Table)
+	var b bytes.Buffer
+	encoder := gob.NewEncoder(&b)
+	values := []any{connID, fk, len(pkValues)}
+	for _, v := range pkValues {
+		if !countValueCacheable(reflect.ValueOf(v), 0) {
+			return prefix + "snapshot:" + strconv.FormatUint(uncachedCountIdentity.Add(1), 10)
 		}
-		fmt.Fprintf(&b, "%v", v)
+		// Gob shares integer wire types; retain each bound value's Go type.
+		values = append(values, fmt.Sprintf("%T", v), v)
 	}
-	return b.String()
+	for _, v := range values {
+		if err := encoder.Encode(v); err != nil {
+			return prefix + "snapshot:" + strconv.FormatUint(uncachedCountIdentity.Add(1), 10)
+		}
+	}
+	return prefix + "gob:" + b.String()
+}
+
+// Gob omits nil/empty distinctions within compound values. Avoid sharing
+// those keys, unordered maps, and recursive/unsupported values across rows.
+func countValueCacheable(v reflect.Value, depth int) bool {
+	if !v.IsValid() || depth > 16 {
+		return false
+	}
+	if (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface || v.Kind() == reflect.Slice) && v.IsNil() {
+		return false
+	}
+	// Native values such as time.Time and *big.Int encode their private state.
+	if v.CanInterface() && (v.Kind() == reflect.Struct || (v.Kind() == reflect.Pointer && v.Elem().Kind() == reflect.Struct)) {
+		if _, ok := v.Interface().(gob.GobEncoder); ok {
+			return true
+		}
+	}
+	switch v.Kind() {
+	case reflect.Interface, reflect.Pointer:
+		return countValueCacheable(v.Elem(), depth+1)
+	case reflect.Slice, reflect.Array:
+		for i := range v.Len() {
+			if !countValueCacheable(v.Index(i), depth+1) {
+				return false
+			}
+		}
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if !v.Type().Field(i).IsExported() || !countValueCacheable(v.Field(i), depth+1) {
+				return false
+			}
+		}
+	case reflect.Map, reflect.Func, reflect.Chan, reflect.UnsafePointer:
+		return false
+	}
+	return true
 }
 
 // humanizeEstimate renders an estimate count compactly: 0 -> "0", < 1000 exact,
@@ -1335,7 +1385,7 @@ func (r *RelationshipPanelController) maybeStartExactFill(epoch uint64) {
 }
 
 // EvictExactCounts drops every cached count (exact + estimate) for child table
-// (schema, table) — every cache entry whose key is prefixed "schema.table|".
+// (schema, table), across every connection, foreign key, and parent tuple.
 // Called on a DML commit affecting that table so the next focus recomputes
 // against the committed data. Works even when the panel is CLOSED: the cache
 // survives close, so a committed-then-revisited row must not serve a stale
@@ -1344,7 +1394,7 @@ func (r *RelationshipPanelController) EvictExactCounts(schema, table string) {
 	if table == "" {
 		return
 	}
-	prefix := schema + "." + table + "|"
+	prefix := countTablePrefix(schema, table)
 	r.mu.Lock()
 	for k := range r.estimates {
 		if strings.HasPrefix(k, prefix) {
