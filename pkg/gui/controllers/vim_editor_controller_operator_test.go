@@ -1775,6 +1775,50 @@ func TestToggleCaseVisualFlipsSelection(t *testing.T) {
 	}
 }
 
+func TestVisualBlockCaseActionsPreserveTextAndUndo(t *testing.T) {
+	for _, tt := range []struct {
+		action string
+		want   string
+	}{
+		{commands.OperatorUpper, "aBCdef\nuVWxyz"},
+		{commands.OperatorLower, "abcdef\nuvwxyz"},
+		{commands.EditorToggleCase, "abCdef\nuvWxyz"},
+	} {
+		t.Run(tt.action, func(t *testing.T) {
+			_, reg, qec, _, modes := opCtrl(t)
+			buf := qec.Buffer()
+			buf.Lines = []editor.Line{{Runes: []rune("aBcdef")}, {Runes: []rune("uVwxyz")}}
+			original := buf.String()
+			buf.SetCursor(editor.Position{Line: 0, Col: 1})
+			editor.EnterVisual(buf, types.ModeVisualBlock)
+			editor.ExtendSelection(buf, editor.Position{Line: 1, Col: 3})
+			modes.Set(types.QUERY_EDITOR, types.ModeVisualBlock)
+			runHandler(t, reg, tt.action, commands.ExecCtx{Mode: types.ModeVisualBlock})
+			if got := buf.String(); got != tt.want {
+				t.Errorf("text = %q, want %q", got, tt.want)
+			}
+			if buf.Selection != nil || modes.Get(types.QUERY_EDITOR) != types.ModeNormal {
+				t.Fatal("case action did not exit visual mode and clear selection")
+			}
+			if buf.History == nil || buf.History.NodeCount() != 1 {
+				t.Fatal("case action must record exactly one undo node")
+			}
+			if err := buf.Undo(); err != nil {
+				t.Fatal(err)
+			}
+			if got := buf.String(); got != original {
+				t.Errorf("undo = %q, want %q", got, original)
+			}
+			if err := buf.Redo(); err != nil {
+				t.Fatal(err)
+			}
+			if got := buf.String(); got != tt.want {
+				t.Errorf("redo = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // --- P paste-before -----------------------------------------------------
 
 func TestPasteBeforeFromEmptyRegisterIsNoOp(t *testing.T) {

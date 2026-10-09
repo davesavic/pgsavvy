@@ -209,7 +209,24 @@ func transformRange(b *Buffer, r Range, fold func(rune) rune) error {
 		// doesn't grow with no-op entries.
 		return nil
 	}
-	if r.LineWise {
+	if r.BlockWise {
+		minLine, maxLine := minMax(r.Start.Line, r.End.Line)
+		minCol, maxCol := minMax(r.Start.Col, r.End.Col)
+		rows := make([]string, 0, maxLine-minLine+1)
+		for line := minLine; line <= maxLine; line++ {
+			runes := lineRunesSnapshot(b, line)
+			for col := min(minCol, len(runes)); col < min(maxCol, len(runes)); col++ {
+				runes[col] = fold(runes[col])
+			}
+			rows = append(rows, string(runes))
+		}
+		// Capture whole rows in one inverse, including unselected text.
+		r = Range{
+			Start: Position{Line: minLine, Col: 0},
+			End:   Position{Line: maxLine, Col: lineRuneLenSnapshot(b, maxLine)},
+		}
+		folded = strings.Join(rows, "\n")
+	} else if r.LineWise {
 		// LineWise Replace is awkward (whole-line semantics + a string).
 		// Re-build the range as character-wise covering the same span.
 		runes := lineRunesSnapshot(b, r.End.Line)

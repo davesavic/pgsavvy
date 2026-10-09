@@ -233,6 +233,112 @@ func TestToggleCaseFlipsRuneCase(t *testing.T) {
 	}
 }
 
+func TestBlockCasePreservesTextAndUndo(t *testing.T) {
+	ops := []struct {
+		name  string
+		apply func(*editor.Buffer, editor.Range) error
+	}{
+		{"upper", editor.Upper},
+		{"lower", editor.Lower},
+		{"toggle", editor.ToggleCase},
+	}
+	for _, tt := range []struct {
+		name       string
+		text       string
+		start, end editor.Position
+		want       [3]string
+	}{
+		{"reported", "abcdef\nuvwxyz", editor.Position{Line: 0, Col: 1}, editor.Position{Line: 1, Col: 3}, [3]string{"aBCdef\nuVWxyz", "abcdef\nuvwxyz", "aBCdef\nuVWxyz"}},
+		{"mixed", "aBcdef\nuVwxyz", editor.Position{Line: 0, Col: 1}, editor.Position{Line: 1, Col: 3}, [3]string{"aBCdef\nuVWxyz", "abcdef\nuvwxyz", "abCdef\nuvWxyz"}},
+		{"ragged", "Abcdef\nx\n\nUVwxyz", editor.Position{Line: 0, Col: 1}, editor.Position{Line: 3, Col: 3}, [3]string{"ABCdef\nx\n\nUVWxyz", "Abcdef\nx\n\nUvwxyz", "ABCdef\nx\n\nUvWxyz"}},
+		{"partial_tail", "abcde\nxy\nUVWXYZ", editor.Position{Line: 0, Col: 1}, editor.Position{Line: 2, Col: 3}, [3]string{"aBCde\nxY\nUVWXYZ", "abcde\nxy\nUvwXYZ", "aBCde\nxY\nUvwXYZ"}},
+		{"blank_endpoints", "\nabcdef\n", editor.Position{Line: 0, Col: 1}, editor.Position{Line: 2, Col: 3}, [3]string{"\naBCdef\n", "\nabcdef\n", "\naBCdef\n"}},
+		{"unicode", "aéΩz\nxßλy", editor.Position{Line: 0, Col: 1}, editor.Position{Line: 1, Col: 3}, [3]string{"aÉΩz\nxßΛy", "aéωz\nxßλy", "aÉωz\nxßΛy"}},
+		{"single_row", "aBcde", editor.Position{Line: 0, Col: 1}, editor.Position{Line: 0, Col: 3}, [3]string{"aBCde", "abcde", "abCde"}},
+		{"zero_width", "abc\nxyz", editor.Position{Line: 0, Col: 2}, editor.Position{Line: 1, Col: 2}, [3]string{"abc\nxyz", "abc\nxyz", "abc\nxyz"}},
+		{"empty_intersections", "a\nx", editor.Position{Line: 0, Col: 3}, editor.Position{Line: 1, Col: 5}, [3]string{"a\nx", "a\nx", "a\nx"}},
+		{"nonletters", "a12z\nx34y", editor.Position{Line: 0, Col: 1}, editor.Position{Line: 1, Col: 3}, [3]string{"a12z\nx34y", "a12z\nx34y", "a12z\nx34y"}},
+		{"outside_rows", "outside\nabcdef\nuvwxyz\noutside", editor.Position{Line: 1, Col: 1}, editor.Position{Line: 2, Col: 3}, [3]string{"outside\naBCdef\nuVWxyz\noutside", "outside\nabcdef\nuvwxyz\noutside", "outside\naBCdef\nuVWxyz\noutside"}},
+	} {
+		for i, op := range ops {
+			for _, direction := range []struct {
+				name       string
+				start, end editor.Position
+			}{
+				{"forward", tt.start, tt.end},
+				{"reverse", tt.end, tt.start},
+				{"crossed", editor.Position{Line: tt.start.Line, Col: tt.end.Col}, editor.Position{Line: tt.end.Line, Col: tt.start.Col}},
+				{"crossed_reverse", editor.Position{Line: tt.end.Line, Col: tt.start.Col}, editor.Position{Line: tt.start.Line, Col: tt.end.Col}},
+			} {
+				t.Run(tt.name+"/"+op.name+"/"+direction.name, func(t *testing.T) {
+					b := bufFrom(tt.text)
+					if err := op.apply(b, editor.Range{Start: direction.start, End: direction.end, BlockWise: true}); err != nil {
+						t.Fatal(err)
+					}
+					if got := b.String(); got != tt.want[i] {
+						t.Errorf("text = %q, want %q", got, tt.want[i])
+					}
+					if tt.want[i] == tt.text {
+						if b.History != nil || b.Dirty {
+							t.Fatal("no-op changed history or dirty state")
+						}
+						return
+					}
+					if b.History == nil || b.History.NodeCount() != 1 || !b.Dirty {
+						t.Fatal("case conversion must record exactly one dirty edit")
+					}
+					if err := b.Undo(); err != nil {
+						t.Fatal(err)
+					}
+					if got := b.String(); got != tt.text {
+						t.Errorf("after undo = %q, want %q", got, tt.text)
+					}
+					if err := b.Redo(); err != nil {
+						t.Fatal(err)
+					}
+					if got := b.String(); got != tt.want[i] {
+						t.Errorf("after redo = %q, want %q", got, tt.want[i])
+					}
+				})
+			}
+		}
+	}
+	for _, op := range ops {
+		t.Run("zero_lines/"+op.name, func(t *testing.T) {
+			b := editor.NewBuffer()
+			if err := op.apply(b, editor.Range{BlockWise: true}); err != nil {
+				t.Fatal(err)
+			}
+			if len(b.Lines) != 0 || b.History != nil || b.Dirty {
+				t.Fatal("empty block conversion changed the buffer")
+			}
+		})
+	}
+}
+
+func TestBlockCaseNoOpPreservesRedo(t *testing.T) {
+	b := bufFrom("abc\nxyz")
+	if err := b.Apply(editor.Edit{Kind: editor.EditKindInsert, Text: "!"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	before, dirty := b.History.Current(), b.Dirty
+	if err := editor.Lower(b, editor.Range{Start: editor.Position{Col: 1}, End: editor.Position{Line: 1, Col: 3}, BlockWise: true}); err != nil {
+		t.Fatal(err)
+	}
+	if b.History.Current() != before || b.History.NodeCount() != 1 || b.Dirty != dirty {
+		t.Fatal("no-op changed existing history or dirty state")
+	}
+	if err := b.Redo(); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.String(); got != "!abc\nxyz" {
+		t.Fatalf("redo = %q, want preserved branch", got)
+	}
+}
+
 func TestIndentRightInsertsShiftWidthSpaces(t *testing.T) {
 	b := bufFrom("aaa\nbbb")
 	if err := editor.IndentRight(b, 0, 0); err != nil {
