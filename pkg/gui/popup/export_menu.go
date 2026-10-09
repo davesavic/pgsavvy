@@ -345,6 +345,11 @@ func (m *ExportMenu) SetBufferedThresholdLabel(s string) {
 	m.bufferedThresholdLabel = s
 }
 
+// SetBufferedThresholdExceeded refreshes the gate for the selected row scope.
+func (m *ExportMenu) SetBufferedThresholdExceeded(exceeded bool) {
+	m.bufferedThresholdExceeded = exceeded
+}
+
 // SetScopeDescriptions installs the per-scope row-count descriptions
 // rendered under the Scope field line. The slice parallels scopes[]:
 // descriptions[i] belongs to scopes[i]. A nil or empty slice clears

@@ -175,6 +175,32 @@ func TestExportMenu_ConfirmBlockedWhenBufferedThresholdExceeded(t *testing.T) {
 	}
 }
 
+func TestExportMenu_RefreshBufferedThreshold(t *testing.T) {
+	for _, format := range []string{"Markdown", "JSON Array", "NDJSON"} {
+		t.Run(format, func(t *testing.T) {
+			m := NewExportMenu([]string{format}, defaultDestinations(), defaultScopes(), -1, true)
+			switch format {
+			case "Markdown":
+				m.SetBufferedFormatIndexes(0, -1)
+			case "JSON Array":
+				m.SetBufferedFormatIndexes(-1, 0)
+			}
+			m.MoveField(3)
+			for _, exceeded := range []bool{false, true, false} {
+				m.MoveValue(1)
+				m.SetBufferedThresholdExceeded(exceeded)
+				blocked := exceeded && format != "NDJSON"
+				if (m.ConfirmBlockedReason() != "") != blocked {
+					t.Errorf("exceeded=%v: reason=%q", exceeded, m.ConfirmBlockedReason())
+				}
+				if strings.Contains(m.Body(), "Confirm disabled") != blocked {
+					t.Errorf("exceeded=%v: warning disagrees with confirmation gate", exceeded)
+				}
+			}
+		})
+	}
+}
+
 func TestExportMenu_Body_HighlightsCursorField(t *testing.T) {
 	m := NewExportMenu(defaultFormats(), defaultDestinations(), defaultScopes(), -1, false)
 

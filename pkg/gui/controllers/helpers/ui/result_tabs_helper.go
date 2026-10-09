@@ -3340,22 +3340,12 @@ func (h *ResultTabsHelper) PromptExport() {
 	connID, ri := t.Identity()
 	formats := exportFormatLabels(ri.HasRowIdentity)
 
-	var estimated int64
-	if r := t.Runner(); r != nil {
-		estimated = r.EstimatedRows()
-	}
-	threshold := h.deps.ExportBufferedRowWarnThreshold
-	if threshold <= 0 {
-		threshold = defaultExportBufferedRowWarnThreshold
-	}
-	bufferedThresholdExceeded := estimated > threshold
-
 	destinations := []string{"Clipboard", "File"}
 	scopes := []string{"On screen", "Buffered", "All rows"}
 
 	// Snapshot row counts for scope descriptions.
 	visibleCount := len(g.VisibleRows())
-	bufferedCount := len(g.AllRows())
+	bufferedCount := g.RowCount()
 	var estimatedTotal int64
 	if r := t.Runner(); r != nil {
 		estimatedTotal = r.EstimatedRows()
@@ -3392,9 +3382,10 @@ func (h *ResultTabsHelper) PromptExport() {
 		}
 	}
 
-	m := popup.NewExportMenu(formats, destinations, scopes, sqlInsertsIdx, bufferedThresholdExceeded)
+	threshold := h.exportBufferedRowThreshold()
+	m := popup.NewExportMenu(formats, destinations, scopes, sqlInsertsIdx, int64(visibleCount) > threshold)
 	m.SetBufferedFormatIndexes(indexOf(formats, "Markdown"), indexOf(formats, "JSON Array"))
-	m.SetBufferedThresholdLabel(fmt.Sprintf("≥ %d rows", threshold))
+	m.SetBufferedThresholdLabel(fmt.Sprintf("> %d rows", threshold))
 	if sqlInsertsReason != "" {
 		m.SetSQLInsertsDisabledReason(sqlInsertsReason)
 	}
@@ -3437,6 +3428,29 @@ func indexOf(ss []string, s string) int {
 	return -1
 }
 
+func (h *ResultTabsHelper) exportBufferedRowThreshold() int64 {
+	if threshold := h.deps.ExportBufferedRowWarnThreshold; threshold > 0 {
+		return threshold
+	}
+	return defaultExportBufferedRowWarnThreshold
+}
+
+func (h *ResultTabsHelper) refreshExportThreshold(m *activeExportMenu) {
+	var count int64
+	if m.menu.ScopeIdx() == exportScopeFull {
+		if r := m.tab.Runner(); r != nil {
+			count = r.EstimatedRows()
+		}
+	} else if g := m.tab.Grid(); g != nil {
+		if m.menu.ScopeIdx() == exportScopeVisible {
+			count = int64(len(g.VisibleRows()))
+		} else {
+			count = int64(g.RowCount())
+		}
+	}
+	m.menu.SetBufferedThresholdExceeded(count > h.exportBufferedRowThreshold())
+}
+
 // ExportMenuBody returns the current menu body for rendering, "" when no
 // menu is active.
 func (h *ResultTabsHelper) ExportMenuBody() string {
@@ -3446,6 +3460,7 @@ func (h *ResultTabsHelper) ExportMenuBody() string {
 	if m == nil || m.menu == nil {
 		return ""
 	}
+	h.refreshExportThreshold(m)
 	return m.menu.Body()
 }
 
@@ -3477,6 +3492,7 @@ func (h *ResultTabsHelper) ExportMenuMoveValue(d int) {
 		return
 	}
 	m.menu.MoveValue(d)
+	h.refreshExportThreshold(m)
 }
 
 // ExportMenuCancel pops the menu. If an export is in flight, also
@@ -3580,6 +3596,7 @@ func (h *ResultTabsHelper) ExportMenuConfirm() {
 	if m == nil || m.menu == nil {
 		return
 	}
+	h.refreshExportThreshold(m)
 	if reason := m.menu.ConfirmBlockedReason(); reason != "" {
 		h.toast(reason)
 		return
@@ -3709,6 +3726,10 @@ func (h *ResultTabsHelper) dispatchExport(source exportSource, format exporter.F
 			defer stopGeneration()
 		}
 		src, err := h.buildRowSource(ctx, source, scopeIdx)
+		// Rows can arrive after confirmation but before this snapshot is taken.
+		if err == nil && scopeIdx != exportScopeFull && !format.IsStreaming() && int64(len(src.rows)) > h.exportBufferedRowThreshold() {
+			err = fmt.Errorf("buffered format over threshold of %d rows — pick a streaming format", h.exportBufferedRowThreshold())
+		}
 		var descriptor string
 		if err == nil {
 			descriptor, err = exporter.Run(ctx, format, dest, src, h.progressFn())
@@ -3846,7 +3867,7 @@ func captureExportSource(t *Tab) exportSource {
 	return exportSource{tab: t, grid: t.grid, runner: t.runner, generation: t.streamGen, ctx: t.streamCtx}
 }
 
-func (h *ResultTabsHelper) buildRowSource(ctx context.Context, source exportSource, scopeIdx int) (exporter.RowSource, error) {
+func (h *ResultTabsHelper) buildRowSource(ctx context.Context, source exportSource, scopeIdx int) (*staticRowSource, error) {
 	t, g := source.tab, source.grid
 	if g == nil {
 		return &staticRowSource{}, nil
