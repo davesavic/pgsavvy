@@ -123,7 +123,10 @@ func (v *View) writeClipboard(value string) error {
 // configured maximum.
 func (v *View) YankSelection() (value string, ok bool, err error) {
 	v.mu.RLock()
-	snap := v.snapshot()
+	if v.beforeYankSnapshot != nil {
+		v.beforeYankSnapshot()
+	}
+	snap := v.snapshotLocked()
 	yankFmt := v.yankFormat
 	maxBytes := v.maxClipboardBytes
 	v.mu.RUnlock()
@@ -179,7 +182,10 @@ func (v *View) YankSelection() (value string, ok bool, err error) {
 // the configured format and publishes through the ClipboardWriter.
 func (v *View) YankRowWithHeaders() (value string, ok bool, err error) {
 	v.mu.RLock()
-	snap := v.snapshot()
+	if v.beforeYankSnapshot != nil {
+		v.beforeYankSnapshot()
+	}
+	snap := v.snapshotLocked()
 	yankFmt := v.yankFormat
 	maxBytes := v.maxClipboardBytes
 	v.mu.RUnlock()

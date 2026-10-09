@@ -145,6 +145,9 @@ type View struct {
 
 	clipboard ClipboardWriter
 
+	// Test-only interleaving gate, called while a formatted yank holds RLock.
+	beforeYankSnapshot func()
+
 	// searchState carries the active plain-substring SEARCH, if any. See
 	// search.go for the type definition and the SetSearch / ClearSearch /
 	// NextMatch / PrevMatch / SearchStatus surface. The search never hides
@@ -788,6 +791,11 @@ func (v *View) FrozenFirstColumn() bool {
 func (v *View) snapshot() viewSnapshot {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
+	return v.snapshotLocked()
+}
+
+// snapshotLocked requires v.mu to be held for reading or writing.
+func (v *View) snapshotLocked() viewSnapshot {
 	return viewSnapshot{
 		rows: v.rows,
 		cols: v.cols,
