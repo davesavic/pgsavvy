@@ -602,13 +602,16 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 	// The derived context.CancelFunc is handed to the returned pgRowStream,
 	// which invokes it exactly once in release() (EOF / terminal error /
 	// explicit Close) so the deadline timer never leaks past the stream.
-	// q.Timeout == 0 leaves ctx untouched (no ceiling) and cancel stays nil.
+	// Even without a timeout, own a cancellable context so consumer cancellation
+	// can interrupt the query before RowStream cleanup starts draining.
 	// The non-zero q.Timeout is the override the run
 	// path sets when it wants a different ceiling than the configured
 	// default; the default itself is folded into q.Timeout by the caller.
 	var cancel context.CancelFunc
 	if q.Timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, q.Timeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
 	}
 
 	// Resolve unqualified object names against q.DefaultSchema (then public)

@@ -3,6 +3,7 @@ package pg
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 
 	"github.com/jackc/pgx/v5"
@@ -45,22 +46,17 @@ type pgRowStream struct {
 	// can release on its own without dialing back into Session.
 	releaseGuard func()
 
-	// cancel is the context.CancelFunc of the statement-timeout deadline
-	// derived in Session.Stream (context.WithTimeout). It is captured here
-	// so release() can stop the deadline timer EXACTLY ONCE, on the same
-	// CAS-guarded path as rows.Close + releaseGuard — no leaked timer
-	// goroutine or pooled-connection deadline past release. nil when the
-	// stream had no timeout (q.Timeout == 0 and no default ceiling), in
-	// which case release() skips it.
-	cancel context.CancelFunc
+	// Cancellation must reach the original query context before Rows.Close
+	// drains the protocol. Ordinary Close still drains before cancelling.
+	cancel     context.CancelFunc
+	cancelOnce sync.Once
+	rowsMu     sync.Mutex // Next and Close must not concurrently touch pgx.Rows.
 
 	// sample refreshes the parent Session's cached transaction status. It is
 	// invoked by release() ONLY on the clean drain path (EOF / terminal pgx
 	// error / explicit Close) AFTER rows.Close, so the pgconn status byte is
-	// final. It is deliberately NOT called from the ctx.Done force-close branch
-	// of Next, where a Next goroutine may still be blocked on the connection —
-	// reading pgconn there would race the protocol (Decision ⑥). nil for
-	// sessions without a sampler (e.g. tests).
+	// final. Cancellation does not sample the interrupted protocol state
+	// (Decision ⑥). nil for sessions without a sampler (e.g. tests).
 	sample func()
 
 	closed atomic.Bool
@@ -78,10 +74,8 @@ type pgRowStream struct {
 // is responsible for having already acquired the parent session's inFlight
 // guard; releaseGuard MUST be the session.releaseInFlight bound method.
 //
-// cancel is the statement-timeout deadline's context.CancelFunc (from the
-// context.WithTimeout derived in Session.Stream), or nil when the stream has
-// no timeout. release() invokes it exactly once so the deadline timer is
-// stopped on EOF / terminal-error / explicit Close without leaking.
+// cancel owns the query context, including streams without a timeout. It runs
+// exactly once on cancellation or release. Tests may omit it for inert rows.
 func newPgRowStream(rows pgx.Rows, qid models.QueryID, releaseGuard func(), cancel context.CancelFunc, sample func()) *pgRowStream {
 	return &pgRowStream{
 		rows:         rows,
@@ -114,12 +108,12 @@ func (s *pgRowStream) RowsAffected() int64 { return s.rowsAffected.Load() }
 //   - (zero, false, nil) — clean end-of-result
 //   - (zero, false, err) — pgx error, ctx cancellation, or use-after-Close
 //
-// watchdog: ctx is now observed. If ctx is cancelled while
-// pgx.Rows.Next is blocked on a dead socket, the watchdog goroutine
-// force-closes the rows so the read unblocks and streamMu is released
-// within a bounded window rather than hanging until TCP keepalive fires
-// (potentially minutes).
+// Consumer cancellation interrupts the original query context, then joins the
+// reader before draining or releasing guards. The transport must support pgx's
+// context interruption; Rows.Close alone cannot interrupt blocked I/O.
 func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
+	s.rowsMu.Lock()
+	defer s.rowsMu.Unlock()
 	if s.closed.Load() {
 		return models.Row{}, false, ErrRowStreamClosed
 	}
@@ -127,6 +121,7 @@ func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 	// Fast path: context already done. Do not sample — the connection's tx
 	// status may be mid-protocol on a cancelled context (Decision ⑥).
 	if err := ctx.Err(); err != nil {
+		s.cancelQuery()
 		s.release(false)
 		return models.Row{}, false, err
 	}
@@ -168,12 +163,8 @@ func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 		return models.Row{Values: vals}, true, nil
 
 	case <-ctx.Done():
-		// Context cancelled while rows.Next was blocked (dead
-		// connection or Stop). Force-close the underlying rows to
-		// unblock the goroutine. Close/release is idempotent via
-		// the CAS on closed. Do NOT sample: the Next goroutine is still
-		// blocked on the connection, so reading pgconn would race the
-		// protocol (Decision ⑥).
+		s.cancelQuery()
+		<-ch // pgx.Rows is not safe for concurrent Next and cleanup.
 		s.release(false)
 		return models.Row{}, false, ctx.Err()
 	}
@@ -185,6 +176,8 @@ func (s *pgRowStream) Next(ctx context.Context) (models.Row, bool, error) {
 // closed flag is set BEFORE rows.Close so a concurrent Next observes the
 // sentinel rather than a pgx "rows are closed" string.
 func (s *pgRowStream) Close() error {
+	s.rowsMu.Lock()
+	defer s.rowsMu.Unlock()
 	// Explicit consumer Close is a clean drain — the consumer has stopped
 	// calling Next, so sampling the live tx status is safe.
 	s.release(true)
@@ -198,10 +191,9 @@ func (s *pgRowStream) Close() error {
 // rows.Close or releaseGuard.
 // release runs the single-shot cleanup. sample requests a refresh of the
 // parent Session's cached transaction status; pass true only on the clean
-// drain path (EOF / terminal error / explicit Close) where no Next goroutine
-// is still touching the connection, and false on the ctx.Done force-close
-// path (Decision ⑥). The sampler runs AFTER rows.Close so the trailing
-// ReadyForQuery has settled the pgconn status byte.
+// drain path (EOF / terminal error / explicit Close), and false on consumer
+// cancellation (Decision ⑥). Callers hold rowsMu and have joined any reader.
+// The sampler runs AFTER rows.Close so ReadyForQuery has settled pgconn state.
 func (s *pgRowStream) release(sample bool) {
 	if !s.closed.CompareAndSwap(false, true) {
 		return
@@ -211,19 +203,21 @@ func (s *pgRowStream) release(sample bool) {
 	// affected-row count here (after Close) rather than at the EOF branch
 	// of Next where it would still be zero.
 	s.rowsAffected.Store(s.rows.CommandTag().RowsAffected())
-	// Stop the statement-timeout deadline timer (if any) on the same
-	// once-guarded path. Calling cancel after the deadline already fired is
-	// a documented no-op, so this is safe regardless of WHY we released
-	// (EOF, terminal error, timeout, or explicit Close).
-	if s.cancel != nil {
-		s.cancel()
+	s.cancelQuery()
+	if sample && s.sample != nil {
+		s.sample()
 	}
 	if s.releaseGuard != nil {
 		s.releaseGuard()
 	}
-	if sample && s.sample != nil {
-		s.sample()
-	}
+}
+
+func (s *pgRowStream) cancelQuery() {
+	s.cancelOnce.Do(func() {
+		if s.cancel != nil {
+			s.cancel()
+		}
+	})
 }
 
 var _ drivers.RowStream = (*pgRowStream)(nil)
