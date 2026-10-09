@@ -5,6 +5,9 @@ import (
 	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -151,6 +154,70 @@ func TestCSV_NULL_RendersAsEmpty(t *testing.T) {
 	if got != want {
 		t.Fatalf("got=%q want=%q", got, want)
 	}
+}
+
+func TestCSVPreservesNullAndEmptyText(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		values []any
+		want   string
+		parsed []any
+	}{
+		{name: "NULL", values: []any{nil}, want: ",guard\r\n", parsed: []any{nil, "guard"}},
+		{name: "empty text", values: []any{""}, want: "\"\",guard\r\n", parsed: []any{"", "guard"}},
+		{name: "mixed", values: []any{nil, "", "NULL", "a,b", `say "hi"`, "a\nb"}, want: ",\"\",NULL,\"a,b\",\"say \"\"hi\"\"\",\"a\nb\",guard\r\n", parsed: []any{nil, "", "NULL", "a,b", `say "hi"`, "a\nb", "guard"}},
+		{name: "empty after multiline", values: []any{"a\nb", "", nil}, want: "\"a\nb\",\"\",,guard\r\n", parsed: []any{"a\nb", "", nil, "guard"}},
+		{name: "sanitized non-null", values: []any{"\x1b]0;evil\x07", "\r", nil}, want: "\"\",\"\",,guard\r\n", parsed: []any{"", "", nil, "guard"}},
+	} {
+		values := append(append([]any(nil), tc.values...), "guard")
+		for _, metadataCount := range []int{0, 1, len(values)} {
+			t.Run(fmt.Sprintf("%s/metadata=%d", tc.name, metadataCount), func(t *testing.T) {
+				f := NewCSV()
+				cols := make([]models.ColumnMeta, metadataCount)
+				for i := range cols {
+					cols[i] = models.ColumnMeta{Name: fmt.Sprintf("c%d", i), TypeName: "text"}
+				}
+				if err := f.Header(cols, io.Discard); err != nil {
+					t.Fatal(err)
+				}
+				var buf bytes.Buffer
+				if err := f.Row(models.Row{Values: values}, &buf); err != nil {
+					t.Fatal(err)
+				}
+				if got := buf.String(); got != tc.want {
+					t.Errorf("CSV bytes=%q, want %q", got, tc.want)
+				}
+				if got := readCSVWithCopyNullConvention(t, buf.String()); !reflect.DeepEqual(got, tc.parsed) {
+					t.Errorf("logical round trip=%#v, want %#v", got, tc.parsed)
+				}
+			})
+		}
+	}
+}
+
+// encoding/csv parses escaping but discards quote identity. FieldPos recovers
+// that source marker to apply COPY CSV's unquoted-empty=NULL convention. This
+// is a logical round trip, not a live PostgreSQL import test.
+func readCSVWithCopyNullConvention(t *testing.T, raw string) []any {
+	t.Helper()
+	reader := csv.NewReader(strings.NewReader(raw))
+	fields, err := reader.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(raw, "\n")
+	values := make([]any, len(fields))
+	for i, field := range fields {
+		line, column := reader.FieldPos(i)
+		if field == "" && lines[line-1][column-1] != '"' {
+			continue
+		}
+		values[i] = field
+	}
+	if _, err := reader.Read(); err != io.EOF {
+		t.Fatalf("expected exactly one CSV record: %v", err)
+	}
+	return values
 }
 
 func TestCSV_SanitizesEscapeSequences(t *testing.T) {

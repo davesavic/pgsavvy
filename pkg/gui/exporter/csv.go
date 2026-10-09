@@ -26,15 +26,29 @@ func (c *csvFormat) Header(cols []models.ColumnMeta, w io.Writer) error {
 }
 
 func (c *csvFormat) Row(r models.Row, w io.Writer) error {
-	fields := make([]string, len(r.Values))
+	var b strings.Builder
 	for i, v := range r.Values {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		if v == nil {
+			continue
+		}
+		var col models.ColumnMeta
 		if i < len(c.cols) {
-			fields[i] = stringifyAndSanitize(v, c.cols[i])
+			col = c.cols[i]
+		}
+		field := stringifyAndSanitize(v, col)
+		if field == "" {
+			// COPY CSV distinguishes quoted empty text from unquoted NULL.
+			b.WriteString(`""`)
 		} else {
-			fields[i] = stringifyAndSanitize(v, models.ColumnMeta{})
+			b.WriteString(grid.Rfc4180Quote(field, ','))
 		}
 	}
-	return writeDelimitedRow(w, fields, ',')
+	b.WriteString("\r\n")
+	_, err := io.WriteString(w, b.String())
+	return err
 }
 
 func (c *csvFormat) Footer(w io.Writer) error { return nil }
