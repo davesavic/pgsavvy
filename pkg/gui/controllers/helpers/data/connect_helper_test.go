@@ -696,6 +696,162 @@ func TestConnectHelperLoadFunctionDetailEmptyResultPopulatesKey(t *testing.T) {
 	}
 }
 
+func TestFunctionDetailCacheConnectionLifetime(t *testing.T) {
+	h := NewConnectHelper()
+	t.Cleanup(h.Disconnect)
+	a := &fakeSession{describeFuncOut: []models.FunctionDetail{{Schema: "public", Name: "f", ReturnType: "int4"}}}
+	attachFunctionDetailSession(t, h, a)
+	boundA, _ := h.BindSessionContext(context.Background())
+	if _, err := h.LoadFunctionDetail(context.Background(), "public", "f"); err != nil {
+		t.Fatal(err)
+	}
+	ready := 0
+	h.WarmFunctionDetail("public", "f", func() { ready++ })
+	if ready != 1 || a.describeFuncCalls.Load() != 1 {
+		t.Fatal("same-connection cache hit did not reuse the loaded detail")
+	}
+	h.Disconnect()
+	if details, ok := h.FunctionDetail("public", "f"); ok || details != nil {
+		t.Errorf("disconnected cache retained details: %v", details)
+	}
+	b := &fakeSession{describeFuncOut: []models.FunctionDetail{{Schema: "public", Name: "f", ReturnType: "text"}}}
+	attachFunctionDetailSession(t, h, b)
+	if details, ok := h.FunctionDetail("public", "f"); ok || details != nil {
+		t.Errorf("new connection inherited old details: %v", details)
+	}
+	if _, err := h.LoadFunctionDetail(boundA, "public", "f"); !errors.Is(err, ErrSessionReplaced) {
+		t.Errorf("retired bound load error=%v, want ErrSessionReplaced", err)
+	}
+	done := make(chan struct{}, 1)
+	h.WarmFunctionDetail("public", "f", func() { done <- struct{}{} })
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("new connection did not warm same-named function")
+	}
+	details, ok := h.FunctionDetail("public", "f")
+	if !ok || len(details) != 1 || details[0].ReturnType != "text" || b.describeFuncCalls.Load() != 1 {
+		t.Fatalf("new connection detail=%v, found=%v, calls=%d", details, ok, b.describeFuncCalls.Load())
+	}
+}
+
+func TestFunctionDetailReadyDropsRetiredConnection(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cached=%v", cached), func(t *testing.T) {
+			h := NewConnectHelper()
+			t.Cleanup(h.Disconnect)
+			a := &fakeSession{describeFuncOut: []models.FunctionDetail{{Name: "f", ReturnType: "int4"}}}
+			attachFunctionDetailSession(t, h, a)
+			if cached {
+				if _, err := h.LoadFunctionDetail(context.Background(), "public", "f"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ui := make(chan func() error, 2)
+			h.SetUIScheduler(func(fn func() error) { ui <- fn })
+			readyA := 0
+			h.WarmFunctionDetail("public", "f", func() { readyA++ })
+			var pendingA func() error
+			select {
+			case pendingA = <-ui:
+			case <-time.After(2 * time.Second):
+				t.Fatal("old connection did not schedule ready callback")
+			}
+			h.Disconnect()
+			b := &fakeSession{describeFuncOut: []models.FunctionDetail{{Name: "f", ReturnType: "text"}}}
+			attachFunctionDetailSession(t, h, b)
+			if err := pendingA(); err != nil {
+				t.Fatal(err)
+			}
+			if readyA != 0 {
+				t.Errorf("retired connection delivered %d ready callbacks", readyA)
+			}
+			readyB := 0
+			h.WarmFunctionDetail("public", "f", func() { readyB++ })
+			select {
+			case pendingB := <-ui:
+				if err := pendingB(); err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("current connection did not schedule ready callback")
+			}
+			details, ok := h.FunctionDetail("public", "f")
+			if readyB != 1 || !ok || len(details) != 1 || details[0].ReturnType != "text" || b.describeFuncCalls.Load() != 1 {
+				t.Fatalf("current completion ready=%d details=%v found=%v calls=%d", readyB, details, ok, b.describeFuncCalls.Load())
+			}
+		})
+	}
+}
+
+func TestFunctionDetailInFlightCannotPublishAfterDisconnect(t *testing.T) {
+	h := NewConnectHelper()
+	t.Cleanup(h.Disconnect)
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	sess := &blockingDescribeSession{
+		fakeSession: &fakeSession{describeFuncOut: []models.FunctionDetail{{Name: "f", ReturnType: "old"}}},
+		release:     release,
+		started:     started,
+	}
+	attachFunctionDetailSession(t, h, sess)
+	loaded := make(chan error, 1)
+	go func() {
+		_, err := h.LoadFunctionDetail(context.Background(), "public", "f")
+		loaded <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("DescribeFunction did not start")
+	}
+	disconnected := make(chan struct{})
+	go func() { h.Disconnect(); close(disconnected) }()
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for h.Connection() != nil {
+		select {
+		case <-tick.C:
+		case <-deadline.C:
+			t.Fatal("Disconnect did not retire the state")
+		}
+	}
+	unblock()
+	select {
+	case err := <-loaded:
+		if !errors.Is(err, ErrSessionReplaced) {
+			t.Errorf("retired in-flight result error=%v, want ErrSessionReplaced", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("retired load did not finish")
+	}
+	select {
+	case <-disconnected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Disconnect did not finish")
+	}
+	if details, ok := h.FunctionDetail("public", "f"); ok || details != nil {
+		t.Fatalf("retired in-flight result repopulated cache: %v", details)
+	}
+}
+
+var functionDetailSessionID atomic.Uint64
+
+func attachFunctionDetailSession(t *testing.T, h *ConnectHelper, sess drivers.Session) {
+	t.Helper()
+	name := fmt.Sprintf("function-detail-lifetime-%d", functionDetailSessionID.Add(1))
+	drv := &blockingDriver{conn: &blockingConnection{sess: sess}}
+	drivers.Register(name, func(context.Context) (drivers.Driver, error) { return drv, nil })
+	if _, _, err := h.Connect(context.Background(), &models.Connection{Driver: name}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestConnectHelperWarmFunctionDetailFiresOnReadyOnce(t *testing.T) {
 	want := []models.FunctionDetail{{Schema: "public", Name: "f"}}
 	sess := &fakeSession{describeFuncOut: want}
@@ -810,11 +966,15 @@ func TestConnectHelperWarmFunctionDetailConcurrentSingleRoundTrip(t *testing.T) 
 type blockingDescribeSession struct {
 	*fakeSession
 	release       chan struct{}
+	started       chan struct{}
 	describeCalls atomic.Int32
 }
 
 func (s *blockingDescribeSession) DescribeFunction(ctx context.Context, _, _ string) ([]models.FunctionDetail, error) {
 	s.describeCalls.Add(1)
+	if s.started != nil {
+		s.started <- struct{}{}
+	}
 	select {
 	case <-s.release:
 	case <-ctx.Done():

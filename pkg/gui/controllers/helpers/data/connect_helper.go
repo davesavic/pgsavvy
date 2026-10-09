@@ -59,13 +59,6 @@ type ConnectHelper struct {
 	state   *helperState // nil ⇔ not connected
 	stateMu sync.RWMutex // protects publish/unpublish of state pointer
 
-	// funcDetailMu guards the function-detail cache and the warm-in-flight set.
-	// Separate from stateMu so a cache read never contends with connect/disconnect
-	// state churn.
-	funcDetailMu       sync.Mutex
-	funcDetail         map[string][]models.FunctionDetail // schema+name -> details; nil until first populate
-	funcDetailInflight map[string]struct{}                // keys with a WarmFunctionDetail load in flight
-
 	// uiThread schedules onReady callbacks onto the gocui MainLoop. Optional:
 	// when nil (default / unit tests) callbacks run inline on the loading
 	// goroutine. Set via SetUIScheduler during gui wiring so WarmFunctionDetail
@@ -98,6 +91,11 @@ type helperState struct {
 	session drivers.Session
 	queue   chan workItem
 	done    chan struct{} // closed by the worker after the queue drains
+
+	// A retired session must never populate or deduplicate a new session's cache.
+	funcDetailMu       sync.Mutex
+	funcDetail         map[string][]models.FunctionDetail
+	funcDetailInflight map[string]struct{}
 }
 
 // workItem is one queued closure plus its caller's reply channel and ctx.
@@ -454,20 +452,22 @@ func (h *ConnectHelper) LoadFunctions(ctx context.Context) ([]string, error) {
 // LoadColumns: the DescribeFunction call runs ONLY inside submit() on the
 // per-Session worker queue (never on the calling goroutine), honoring the
 // per-Session serialization contract. On success the result is cached under
-// schema+name so the synchronous FunctionDetail read can serve completion
+// schema+name within the owning session so FunctionDetail can serve completion
 // without blocking. A load error is logged via logs.Event and leaves the cache
 // entry unpopulated.
 func (h *ConnectHelper) LoadFunctionDetail(ctx context.Context, schema, name string) ([]models.FunctionDetail, error) {
 	var out []models.FunctionDetail
+	var owner *helperState
 	err := h.submit(ctx, func(ctx context.Context) error {
-		sess, err := h.requireSession(ctx)
+		st, err := h.requireState(ctx)
 		if err != nil {
 			return err
 		}
-		result, err := sess.DescribeFunction(ctx, schema, name)
+		result, err := st.session.DescribeFunction(ctx, schema, name)
 		if err != nil {
 			return err
 		}
+		owner = st
 		out = result
 		return nil
 	})
@@ -479,7 +479,9 @@ func (h *ConnectHelper) LoadFunctionDetail(ctx context.Context, schema, name str
 		)
 		return nil, err
 	}
-	h.storeFunctionDetail(schema, name, out)
+	if !h.storeFunctionDetail(owner, schema, name, out) {
+		return nil, ErrSessionReplaced
+	}
 	return out, nil
 }
 
@@ -492,10 +494,16 @@ func (h *ConnectHelper) LoadFunctionDetail(ctx context.Context, schema, name str
 // the caller may mutate or append to them without corrupting the cache or
 // aliasing a concurrent reader.
 func (h *ConnectHelper) FunctionDetail(schema, name string) ([]models.FunctionDetail, bool) {
+	h.stateMu.RLock()
+	defer h.stateMu.RUnlock()
+	st := h.state
+	if st == nil {
+		return nil, false
+	}
 	key := funcDetailKey(schema, name)
-	h.funcDetailMu.Lock()
-	defer h.funcDetailMu.Unlock()
-	v, ok := h.funcDetail[key]
+	st.funcDetailMu.Lock()
+	defer st.funcDetailMu.Unlock()
+	v, ok := st.funcDetail[key]
 	if !ok {
 		return nil, false
 	}
@@ -512,57 +520,75 @@ func (h *ConnectHelper) FunctionDetail(schema, name string) ([]models.FunctionDe
 // onReady still fires when that single load completes). A load failure does NOT
 // invoke onReady (the cache stays empty); the error is logged inside
 // LoadFunctionDetail. A nil onReady is safe (the load still warms the cache).
+// Retiring the connection invalidates its cache and suppresses queued callbacks.
 func (h *ConnectHelper) WarmFunctionDetail(schema, name string, onReady func()) {
-	if _, ok := h.FunctionDetail(schema, name); ok {
-		h.fireOnReady(onReady)
+	h.stateMu.RLock()
+	st := h.state
+	if st == nil {
+		h.stateMu.RUnlock()
 		return
 	}
 
 	key := funcDetailKey(schema, name)
-	h.funcDetailMu.Lock()
-	if h.funcDetailInflight == nil {
-		h.funcDetailInflight = make(map[string]struct{})
+	st.funcDetailMu.Lock()
+	if _, cached := st.funcDetail[key]; cached {
+		st.funcDetailMu.Unlock()
+		h.stateMu.RUnlock()
+		h.fireOnReady(st, onReady)
+		return
 	}
-	if _, inflight := h.funcDetailInflight[key]; inflight {
+	if _, inflight := st.funcDetailInflight[key]; inflight {
 		// A load for this key is already running; that load's onReady will fire.
 		// We could chain additional callbacks here, but the contract only
 		// requires at-most-one round-trip and that *an* onReady fires once. The
 		// caller that started the in-flight load owns the callback.
-		h.funcDetailMu.Unlock()
+		st.funcDetailMu.Unlock()
+		h.stateMu.RUnlock()
 		return
 	}
-	h.funcDetailInflight[key] = struct{}{}
-	h.funcDetailMu.Unlock()
+	if st.funcDetailInflight == nil {
+		st.funcDetailInflight = make(map[string]struct{})
+	}
+	st.funcDetailInflight[key] = struct{}{}
+	st.funcDetailMu.Unlock()
+	h.stateMu.RUnlock()
 
+	ctx := context.WithValue(context.Background(), sessionBindingKey{}, &sessionBinding{helper: h, state: st})
 	go func() {
-		_, err := h.LoadFunctionDetail(context.Background(), schema, name)
+		_, err := h.LoadFunctionDetail(ctx, schema, name)
 
-		h.funcDetailMu.Lock()
-		delete(h.funcDetailInflight, key)
-		h.funcDetailMu.Unlock()
+		st.funcDetailMu.Lock()
+		delete(st.funcDetailInflight, key)
+		st.funcDetailMu.Unlock()
 
 		// A failed load leaves the cache unpopulated and does NOT signal ready.
 		if err != nil {
 			return
 		}
-		h.fireOnReady(onReady)
+		h.fireOnReady(st, onReady)
 	}()
 }
 
-// fireOnReady runs onReady on the UI loop when a scheduler is wired, else
-// inline. nil onReady is a no-op.
-func (h *ConnectHelper) fireOnReady(onReady func()) {
+// fireOnReady checks ownership at delivery, not just before scheduling: a queued
+// UI callback may outlive the connection that requested it.
+func (h *ConnectHelper) fireOnReady(st *helperState, onReady func()) {
 	if onReady == nil {
 		return
 	}
-	if h.uiThread == nil {
-		onReady()
-		return
-	}
-	h.uiThread(func() error {
-		onReady()
+	deliver := func() error {
+		h.stateMu.RLock()
+		current := h.state == st
+		h.stateMu.RUnlock()
+		if current {
+			onReady()
+		}
 		return nil
-	})
+	}
+	if h.uiThread != nil {
+		h.uiThread(deliver)
+	} else {
+		_ = deliver()
+	}
 }
 
 // storeFunctionDetail populates the cache for schema+name. A nil/empty detail
@@ -571,15 +597,21 @@ func (h *ConnectHelper) fireOnReady(onReady func()) {
 // copy (outer slice + each entry's Args), so the cache shares no mutable backing
 // array with the caller-supplied slice nor with any value later returned by
 // FunctionDetail.
-func (h *ConnectHelper) storeFunctionDetail(schema, name string, details []models.FunctionDetail) {
+func (h *ConnectHelper) storeFunctionDetail(st *helperState, schema, name string, details []models.FunctionDetail) bool {
 	key := funcDetailKey(schema, name)
 	cp := cloneFunctionDetails(details)
-	h.funcDetailMu.Lock()
-	defer h.funcDetailMu.Unlock()
-	if h.funcDetail == nil {
-		h.funcDetail = make(map[string][]models.FunctionDetail)
+	h.stateMu.RLock()
+	defer h.stateMu.RUnlock()
+	if st == nil || h.state != st {
+		return false
 	}
-	h.funcDetail[key] = cp
+	st.funcDetailMu.Lock()
+	defer st.funcDetailMu.Unlock()
+	if st.funcDetail == nil {
+		st.funcDetail = make(map[string][]models.FunctionDetail)
+	}
+	st.funcDetail[key] = cp
+	return true
 }
 
 // cloneFunctionDetails returns a deep copy of details: a fresh outer slice and,
@@ -613,18 +645,26 @@ func funcDetailKey(schema, name string) string {
 // closure path always sees a live Session of the SAME state that owned the
 // closure.
 func (h *ConnectHelper) requireSession(ctx context.Context) (drivers.Session, error) {
+	st, err := h.requireState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return st.session, nil
+}
+
+func (h *ConnectHelper) requireState(ctx context.Context) (*helperState, error) {
 	h.stateMu.RLock()
 	defer h.stateMu.RUnlock()
 	if binding, ok := ctx.Value(sessionBindingKey{}).(*sessionBinding); ok {
 		if binding.helper != h || binding.state == nil || h.state != binding.state {
 			return nil, ErrSessionReplaced
 		}
-		return binding.state.session, nil
+		return binding.state, nil
 	}
 	if h.state == nil {
 		return nil, errNotConnected
 	}
-	return h.state.session, nil
+	return h.state, nil
 }
 
 // submit enqueues run on the current Session's worker and blocks until either
