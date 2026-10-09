@@ -654,6 +654,208 @@ func TestRapidActionSpamIsLastWinsAndBounded(t *testing.T) {
 	}
 }
 
+func TestBatchCancellationAfterFirstStatement(t *testing.T) {
+	for _, firstResult := range []string{"finished-handle", "nil-handle", "error"} {
+		for _, phase := range []string{"first-ack", "second-statement"} {
+			for _, action := range []string{"cancel", "replace", "replace-without-live-cancel"} {
+				t.Run(firstResult+"/"+phase+"/"+action, func(t *testing.T) {
+					ignore := goleak.IgnoreCurrent()
+					t.Cleanup(func() { goleak.VerifyNone(t, ignore) })
+					var first *session.RunHandle
+					var firstErr error
+					switch firstResult {
+					case "finished-handle":
+						inner := &recInnerSession{}
+						inner.stage(recInnerStream{})
+						sess := session.New(&parkedConn{}, inner, session.Options{})
+						t.Cleanup(func() { _ = sess.Close() })
+						var err error
+						first, err = sess.Stream(context.Background(), models.Query{SQL: "SELECT first"})
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := first.Rows().Close(); err != nil {
+							t.Fatal(err)
+						}
+						<-first.Done()
+					case "error":
+						firstErr = errors.New("first statement failed")
+					}
+
+					gate := make(chan struct{})
+					release := sync.OnceFunc(func() { close(gate) })
+					defer release()
+					gs := &gateSess{}
+					gs.stage(gateStagedStream{rh: first, err: firstErr})
+					second := gateStagedStream{}
+					if phase == "second-statement" {
+						second.gate = gate
+					}
+					gs.stage(second)
+					gs.stage(gateStagedStream{})
+					gs.stage(gateStagedStream{})
+					liveCancel := action != "replace-without-live-cancel"
+					r := data.NewQueryRunner(gs, drivers.Capabilities{HasLiveCancel: liveCancel})
+					acks := make(chan ackResult, 3)
+					r.RunStatementsAsync(context.Background(), []data.StatementLaunch{
+						{SQL: "SELECT first"}, {SQL: "SELECT second"}, {SQL: "DELETE FROM synthetic_fixture"},
+					}, func(i int, rh *session.RunHandle, err error) {
+						acks <- ackResult{rh, err}
+						if i == 0 && phase == "first-ack" {
+							<-gate
+						}
+					})
+					if got := waitAck(t, acks, "first statement"); got.rh != first || !errors.Is(got.err, firstErr) {
+						t.Fatalf("first ack = (%v, %v), want (%v, %v)", got.rh, got.err, first, firstErr)
+					}
+					if phase == "second-statement" {
+						waitForEvent(t, gs, "stream:SELECT second:start")
+					}
+
+					replacement := make(chan ackResult, 1)
+					if action == "cancel" {
+						if err := r.Cancel(); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						r.RunAsync(context.Background(), "SELECT replacement", data.RunOptions{}, func(rh *session.RunHandle, err error) {
+							replacement <- ackResult{rh, err}
+						})
+					}
+					wantCancels := 0
+					if liveCancel {
+						wantCancels = 1
+					}
+					if got := gs.cancelCurrentCount(); got != wantCancels {
+						t.Errorf("wire cancels = %d, want %d", got, wantCancels)
+					}
+					release() // The fake records wire cancellation but cannot release Stream itself.
+					for i := 1; i < 3; i++ {
+						if got := waitAck(t, acks, "cancelled remainder"); got.rh != nil || !errors.Is(got.err, context.Canceled) {
+							t.Errorf("statement %d ack = (%v, %v), want (nil, context.Canceled)", i+1, got.rh, got.err)
+						}
+					}
+					if action != "cancel" {
+						if got := waitAck(t, replacement, "replacement"); got.err != nil {
+							t.Errorf("replacement failed: %v", got.err)
+						}
+					}
+					for _, ev := range gs.snapshot() {
+						if strings.Contains(ev, "DELETE FROM synthetic_fixture") ||
+							(phase == "first-ack" && strings.HasPrefix(ev, "stream:SELECT second:")) ||
+							strings.HasSuffix(ev, ":ctx-aborted") {
+							t.Errorf("cancelled batch dispatched a later statement or aborted its detached context: %s", ev)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestBatchFinalResultWaitsForEarlierHandle(t *testing.T) {
+	for _, finalErr := range []error{nil, errors.New("final statement failed")} {
+		name := "nil-handle"
+		if finalErr != nil {
+			name = "error"
+		}
+		t.Run(name, func(t *testing.T) {
+			ignore := goleak.IgnoreCurrent()
+			t.Cleanup(func() { goleak.VerifyNone(t, ignore) })
+			inner := &recInnerSession{}
+			inner.stage(recInnerStream{})
+			sess := session.New(&parkedConn{}, inner, session.Options{})
+			t.Cleanup(func() { _ = sess.Close() })
+			first, err := sess.Stream(context.Background(), models.Query{SQL: "SELECT first"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = first.Rows().Close() }()
+			gs := &gateSess{}
+			gs.stage(gateStagedStream{rh: first})
+			gs.stage(gateStagedStream{err: finalErr})
+			r := data.NewQueryRunner(gs, drivers.Capabilities{HasLiveCancel: true})
+			acks := make(chan ackResult, 2)
+			r.RunStatementsAsync(context.Background(), []data.StatementLaunch{{SQL: "SELECT first"}, {SQL: "SELECT final"}},
+				func(_ int, rh *session.RunHandle, err error) { acks <- ackResult{rh, err} })
+			if got := waitAck(t, acks, "first"); got.rh != first || got.err != nil {
+				t.Fatalf("unexpected first result: %+v", got)
+			}
+			if got := waitAck(t, acks, "final"); got.rh != nil || !errors.Is(got.err, finalErr) {
+				t.Fatalf("unexpected final result: %+v", got)
+			}
+			waited := make(chan bool, 1)
+			go func() { waited <- r.CancelAndWaitActiveRun() }()
+			select {
+			case <-waited:
+				t.Fatal("batch wait returned while an earlier handle was still live")
+			case <-time.After(100 * time.Millisecond):
+			}
+			_ = first.Rows().Close()
+			select {
+			case nonDrainable := <-waited:
+				if nonDrainable {
+					t.Fatal("completed batch reported non-drainable Explain")
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("batch wait did not finish after the earlier handle closed")
+			}
+		})
+	}
+}
+
+func TestBatchCancelAndWaitDuringSecondStatement(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	gate := make(chan struct{})
+	release := sync.OnceFunc(func() { close(gate) })
+	defer release()
+	gs := &gateSess{}
+	gs.stage(gateStagedStream{})
+	gs.stage(gateStagedStream{gate: gate})
+	gs.stage(gateStagedStream{})
+	r := data.NewQueryRunner(gs, drivers.Capabilities{HasLiveCancel: true})
+	acks := make(chan ackResult, 3)
+	r.RunStatementsAsync(context.Background(), []data.StatementLaunch{
+		{SQL: "SELECT first"}, {SQL: "SELECT second"}, {SQL: "DELETE FROM synthetic_fixture"},
+	}, func(_ int, rh *session.RunHandle, err error) { acks <- ackResult{rh, err} })
+	waitAck(t, acks, "first")
+	waitForEvent(t, gs, "stream:SELECT second:start")
+	waited := make(chan bool, 1)
+	go func() { waited <- r.CancelAndWaitActiveRun() }()
+	deadline := time.After(2 * time.Second)
+	for gs.cancelCurrentCount() == 0 {
+		select {
+		case <-waited:
+			t.Fatal("wait returned without cancelling the active batch")
+		case <-deadline:
+			t.Fatal("wait did not cancel the active batch")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	select {
+	case <-waited:
+		t.Fatal("wait returned while statement two was still in flight")
+	default:
+	}
+	release()
+	if got := waitAck(t, acks, "detached second statement"); got.err != nil {
+		t.Fatalf("detached statement did not complete cleanly: %v", got.err)
+	}
+	if got := waitAck(t, acks, "cancelled third statement"); !errors.Is(got.err, context.Canceled) {
+		t.Fatalf("remaining statement ack = %v, want context.Canceled", got.err)
+	}
+	select {
+	case <-waited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("batch wait did not finish")
+	}
+	for _, ev := range gs.snapshot() {
+		if strings.Contains(ev, "DELETE FROM synthetic_fixture") || strings.HasSuffix(ev, ":ctx-aborted") {
+			t.Errorf("unexpected dispatch or detached-context cancellation: %s", ev)
+		}
+	}
+}
+
 // --- real-SQLSession fixtures (sentinel Done span + sequence exclusivity) ---
 
 // recInnerSession is a recording drivers.Session for real-SQLSession

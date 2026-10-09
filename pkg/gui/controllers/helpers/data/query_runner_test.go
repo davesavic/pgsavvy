@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -103,6 +104,97 @@ func (f *fakeRunnerSession) Cancel(qid models.QueryID) error {
 func (f *fakeRunnerSession) SetDisconnected(_ bool) {}
 func (f *fakeRunnerSession) IsDisconnected() bool   { return false }
 func (f *fakeRunnerSession) MarkPreemptPending()    { f.preemptMarked++ }
+
+func TestLaunchPublicationRequiresOriginalOwner(t *testing.T) {
+	for _, state := range []string{"removed", "newer-pending", "newer-resolved"} {
+		t.Run(state, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			root := &runSlot{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+			var current *runSlot
+			switch state {
+			case "newer-pending":
+				current = &runSlot{cancel: func() { t.Error("cancelled the newer action") }}
+			case "newer-resolved":
+				current = &runSlot{}
+			}
+			r := NewQueryRunner(&fakeRunnerSession{}, drivers.Capabilities{})
+			r.last.Store(current)
+			var ackErr error
+			r.execLaunch(&launchRequest{
+				slot: root,
+				stmts: []launchStmt{{op: func(context.Context) (launchResult, error) {
+					return launchResult{}, nil
+				}}},
+				ack: func(_ int, _ launchResult, err error) { ackErr = err },
+			})
+			if r.last.Load() != current {
+				t.Fatal("publication displaced the cancellation or newer action")
+			}
+			if !errors.Is(ackErr, context.Canceled) {
+				t.Fatalf("ownership-losing ack = %v, want context.Canceled", ackErr)
+			}
+			select {
+			case <-root.done:
+			case <-time.After(time.Second):
+				t.Fatal("rejected launch did not finish")
+			}
+		})
+	}
+}
+
+type gatedPublicationSession struct {
+	*fakeRunnerSession
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *gatedPublicationSession) Stream(context.Context, models.Query) (*session.RunHandle, error) {
+	close(s.started)
+	<-s.release
+	return nil, nil
+}
+
+func TestSynchronousPublicationPreservesActiveBatch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	root := &runSlot{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	fs := &gatedPublicationSession{fakeRunnerSession: &fakeRunnerSession{}, started: make(chan struct{}), release: make(chan struct{})}
+	r := NewQueryRunner(fs, drivers.Capabilities{})
+	returned := make(chan error, 1)
+	go func() {
+		_, err := r.RunQuery(context.Background(), models.Query{SQL: "SELECT concurrent"})
+		returned <- err
+	}()
+	<-fs.started
+	r.last.Store(root)
+	r.execLaunch(&launchRequest{
+		slot: root,
+		stmts: []launchStmt{
+			{op: func(context.Context) (launchResult, error) { return launchResult{}, nil }},
+			{op: func(context.Context) (launchResult, error) { return launchResult{}, nil }},
+		},
+		ack: func(i int, _ launchResult, err error) {
+			if err != nil {
+				t.Errorf("batch statement %d failed: %v", i, err)
+			}
+			if i != 0 {
+				return
+			}
+			current := r.last.Load()
+			// A synchronous call that was already in flight can return in this
+			// gap without displacing the newer batch's cancellation owner.
+			close(fs.release)
+			if err := <-returned; err != nil {
+				t.Errorf("synchronous result: %v", err)
+			}
+			if r.last.Load() != current {
+				t.Error("synchronous publication displaced the active batch")
+			}
+		},
+	})
+	<-root.done
+}
 
 func TestQueryRunnerRunDispatchesStream(t *testing.T) {
 	fs := &fakeRunnerSession{}

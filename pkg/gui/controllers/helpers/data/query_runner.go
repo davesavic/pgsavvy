@@ -216,10 +216,9 @@ type QueryRunner struct {
 //
 //   - pending sentinel: ctx/cancel/done set, rh nil. Created on the
 //     enqueueing (UI) thread before the request is queued.
-//   - resolved slot: rh set (may be nil when the op errored or the fake
-//     returned no handle), cancel nil — a resolved launch is never
-//     context-cancelled (that would kill the live row stream sharing the
-//     sentinel ctx). done is nil; waiters use rh.Done().
+//   - resolved slot: rh set (possibly nil on error), owner identifies the
+//     original sentinel. more keeps that sentinel cancellable until the last
+//     statement resolves; afterwards cancellation targets only the handle.
 //
 // done closes only when the launch has resolved AND the resulting
 // RunHandle has terminated (watcher goroutine), so a quit-during-gap
@@ -229,14 +228,12 @@ type runSlot struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	rh     *session.RunHandle
+	owner  *runSlot
+	more   bool
+	batch  bool
 
-	// abandoned is set by the goroutine that exclusively removed a
-	// pending sentinel from last. A launch that resolves after being
-	// abandoned is suppressed from its ack as a cancellation (last-wins)
-	// and its RunHandle is closed promptly. Suppression is a best-effort
-	// check-then-act, not atomic with the removal: a launch resolving
-	// concurrently with its abandonment may surface a success ack —
-	// harmless, since the successor action's preempt hook stops its tab.
+	// abandoned is set on the root sentinel after cancellation removes its
+	// current slot. A losing publisher must close its result and ack cancellation.
 	abandoned atomic.Bool
 
 	// explain marks an ExplainAsync launch (C6): such an op has no
@@ -476,38 +473,54 @@ func (r *QueryRunner) preemptBeforeLaunch() {
 	}
 }
 
-// cancelPendingLaunch atomically removes and cancels the pending
-// sentinel currently published in last. The CompareAndSwap makes exactly
-// one caller the winner: if the launch resolved first, the CAS fails and
-// no cancellation happens — resolution owns the slot from then on, and
-// cancellation of a resolved launch goes through the RunHandle's
-// out-of-band Cancel instead.
+// cancelPendingLaunch cancels the current action, including an intermediate
+// result whose batch still has statements to dispatch.
 func (r *QueryRunner) cancelPendingLaunch() {
 	if r == nil {
 		return
 	}
-	for {
-		s := r.last.Load()
-		if s == nil || s.cancel == nil {
-			return
+	r.cancelPendingSlot(r.last.Load())
+}
+
+func (s *runSlot) pendingRoot() *runSlot {
+	if s == nil {
+		return nil
+	}
+	if s.cancel != nil {
+		return s
+	}
+	if s.more {
+		return s.owner
+	}
+	return nil
+}
+
+// cancelPendingSlot retries only within the selected action. A final result
+// that wins publication is returned so Cancel can target its handle instead.
+func (r *QueryRunner) cancelPendingSlot(s *runSlot) *runSlot {
+	root := s.pendingRoot()
+	if root == nil {
+		return s
+	}
+	for s != nil && (s == root || s.owner == root) {
+		if s.pendingRoot() == nil {
+			return s
 		}
 		if !r.last.CompareAndSwap(s, nil) {
-			continue // someone resolved or replaced it; re-load
+			s = r.last.Load()
+			continue
 		}
-		s.abandoned.Store(true)
-		s.cancel()
-		// Last-wins at the wire: if the superseded launch is the one currently
-		// blocked inside Stream (still pending), abort it server-side so the
-		// queue drains promptly instead of running to completion. Synchronous
-		// and race-free: the CAS above proved this sentinel was still pending,
-		// so the launcher cannot yet have started a successor op for the cancel
-		// to target by mistake. Bounded by wireCancelBound (mirrors the
-		// <leader>x UI-thread precedent).
+		root.abandoned.Store(true)
+		root.cancel()
+		// The last published handle may already be finished while a later
+		// statement is blocked in Stream. Cancel that current operation, not
+		// the stale handle; do not issue duplicate handle and wire cancels.
 		ctx, ctxCancel := context.WithTimeout(context.Background(), wireCancelBound)
 		r.cancelCurrentWire(ctx)
 		ctxCancel()
-		return
+		return nil
 	}
+	return nil
 }
 
 // cancelLastResolvedLaunch asks the last RESOLVED RunHandle to terminate
@@ -674,7 +687,7 @@ func (r *QueryRunner) Run(ctx context.Context, sql string, opts RunOptions) (*se
 	if err != nil {
 		return nil, err
 	}
-	r.publishResolved(nil, rh)
+	r.publishResolved(nil, rh, false)
 	return rh, nil
 }
 
@@ -693,7 +706,7 @@ func (r *QueryRunner) RunQuery(ctx context.Context, q models.Query) (*session.Ru
 	if err != nil {
 		return nil, err
 	}
-	r.publishResolved(nil, rh)
+	r.publishResolved(nil, rh, false)
 	return rh, nil
 }
 
@@ -812,7 +825,7 @@ func (r *QueryRunner) RunStatementsAsync(ctx context.Context, stmts []StatementL
 // the slot as an ExplainAsync op (no RunHandle, non-drainable; see C6).
 func (r *QueryRunner) enqueueLaunch(isExplain bool, stmts []launchStmt, ack func(index int, res launchResult, err error)) {
 	lctx, cancel := context.WithCancel(context.Background())
-	slot := &runSlot{ctx: lctx, cancel: cancel, done: make(chan struct{}), explain: isExplain}
+	slot := &runSlot{ctx: lctx, cancel: cancel, done: make(chan struct{}), explain: isExplain, batch: len(stmts) > 1}
 
 	// Synchronous (cheap, non-blocking) last-wins: cancel the prior
 	// tab-less launch BEFORE this one is queued, so a rapid second Enter
@@ -879,7 +892,7 @@ func (r *QueryRunner) execLaunch(req *launchRequest) {
 		}
 		res, err := stmt.op(req.slot.ctx)
 
-		if req.slot.abandoned.Load() {
+		if req.slot.abandoned.Load() || !r.publishResolved(req.slot, res.rh, i+1 < len(req.stmts)) {
 			// Last-wins: this launch was preempted. Close the orphaned
 			// stream promptly (releases the session queue lock without a
 			// tab) and surface a cancellation, not a doomed tab — even when
@@ -892,10 +905,6 @@ func (r *QueryRunner) execLaunch(req *launchRequest) {
 			}
 			err = context.Canceled
 		}
-
-		// Resolve per statement: publish the handle unless a NEWER pending
-		// launch owns last (its enqueue cancelled this slot).
-		r.publishResolved(req.slot, res.rh)
 
 		// Sentinel Done spans the whole launch: every statement's
 		// RunHandle must terminate before it closes.
@@ -940,18 +949,24 @@ func (r *QueryRunner) execLaunch(req *launchRequest) {
 	}()
 }
 
-// publishResolved publishes a resolved slot for slot's statement result
-// without displacing a NEWER pending sentinel some concurrent enqueue
-// published while this op ran (that launch owns last now; last-wins).
-// cur == slot is the normal pending → resolved transition.
-func (r *QueryRunner) publishResolved(slot *runSlot, rh *session.RunHandle) {
+// publishResolved replaces only this action's current slot. Retaining its
+// owner keeps intermediate results cancellable and preserves the whole-batch
+// drain even if the final statement returns no handle.
+func (r *QueryRunner) publishResolved(slot *runSlot, rh *session.RunHandle, more bool) bool {
+	resolved := &runSlot{rh: rh, owner: slot, more: more}
 	for {
 		cur := r.last.Load()
-		if cur != nil && cur.cancel != nil && cur != slot {
-			return
+		if slot != nil {
+			if cur != slot && (cur == nil || cur.owner != slot) {
+				return false
+			}
+		} else if cur.pendingRoot() != nil {
+			// Synchronous callers have no sentinel; they must not overwrite
+			// a newer pending launch or an active batch.
+			return false
 		}
-		if r.last.CompareAndSwap(cur, &runSlot{rh: rh}) {
-			return
+		if r.last.CompareAndSwap(cur, resolved) {
+			return true
 		}
 	}
 }
@@ -1096,19 +1111,12 @@ func (r *QueryRunner) Cancel() error {
 	if !b.caps.HasLiveCancel {
 		return nil
 	}
-	s := r.last.Load()
+	s := r.cancelPendingSlot(r.last.Load())
 	if s == nil {
 		return nil
 	}
 	if rh := s.rh; rh != nil {
 		return b.sess.Cancel(rh.QueryID())
-	}
-	if s.cancel != nil {
-		// A still-pending (tab-less) launch: abandon + cancel its sentinel and
-		// wire-cancel the currently-executing op — which may still be blocked
-		// inside Stream (pg_sleep / row-less DML), where no RunHandle exists to
-		// target yet. cancelPendingLaunch performs all three atomically.
-		r.cancelPendingLaunch()
 	}
 	return nil
 }
@@ -1133,11 +1141,8 @@ func (r *QueryRunner) CancelAndWaitActiveRun() bool {
 		return false
 	}
 	var done <-chan struct{}
-	if rh := s.rh; rh != nil {
-		_ = rh.Cancel()
-		done = rh.Done()
-	} else if s.cancel != nil {
-		s.cancel()
+	if root := s.pendingRoot(); root != nil {
+		root.cancel()
 		// Abort the currently-executing op at the wire too: it may be blocked
 		// inside Stream (pg_sleep / row-less DML), where no RunHandle exists to
 		// Cancel — without this, done would only close after the query ran to
@@ -1145,7 +1150,13 @@ func (r *QueryRunner) CancelAndWaitActiveRun() bool {
 		ctx, ctxCancel := context.WithTimeout(context.Background(), wireCancelBound)
 		r.cancelCurrentWire(ctx)
 		ctxCancel()
-		done = s.done
+		done = root.done
+	} else if rh := s.rh; rh != nil {
+		_ = rh.Cancel()
+		done = rh.Done()
+	}
+	if s.owner != nil && s.owner.batch {
+		done = s.owner.done
 	}
 	if done == nil {
 		return false
