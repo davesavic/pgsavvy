@@ -1039,6 +1039,40 @@ func TestRunLayoutSeedsCellEditorTextAreaFromInitial(t *testing.T) {
 	}
 }
 
+func TestRunLayoutCellViewerUsesLiveGeometry(t *testing.T) {
+	for _, size := range [][2]int{{120, 40}, {90, 30}} {
+		g, rec := buildTestGui(t)
+		viewer := g.Registry().CellViewer
+		if viewer == nil {
+			t.Fatal("CellViewer is nil")
+		}
+		name := viewer.GetViewName()
+		rec.EnableRealView(name)
+		viewer.Open(strings.Repeat("x", 4000), models.ColumnMeta{Name: "value", TypeName: "text"}, nil)
+		viewer.SetScrollY(3)
+		if err := g.ContextTree().Push(viewer); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.RunLayout(size[0], size[1]); err != nil {
+			t.Fatal(err)
+		}
+		view := rec.RealView(name)
+		if view == nil {
+			t.Fatal("layout did not create native viewer")
+		}
+		width := view.InnerWidth()
+		if got, want := viewer.TotalWrappedLines(), (4000+width-1)/width; got != want {
+			t.Errorf("size=%v extent=%d, want %d from live width=%d", size, got, want, width)
+		}
+		if got, want := len(strings.Split(rec.GetViewBuffer(name), "\n")), view.InnerHeight()-1; got != want {
+			t.Errorf("size=%v page height=%d, want %d", size, got, want)
+		}
+		if view.OriginY() != 0 || viewer.ScrollY() != 3 {
+			t.Errorf("size=%v native origin=%d context scroll=%d, want 0/3", size, view.OriginY(), viewer.ScrollY())
+		}
+	}
+}
+
 // TestRunLayoutCellEditorRePushSeedsNewValue: popping the
 // CELL_EDITOR and running a layout pass tears down the view (the off-stack
 // teardown loop DeleteViews it, which evicts the recorder's cached real

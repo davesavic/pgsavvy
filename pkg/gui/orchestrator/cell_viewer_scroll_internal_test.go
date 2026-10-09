@@ -1,13 +1,19 @@
 package orchestrator
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
+	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
 // testCellViewerScroller satisfies cellViewerScroller and types.IBaseContext
@@ -66,7 +72,7 @@ func TestApplyCellViewerScroll_PersistsClampWithG(t *testing.T) {
 		totalWrappedLines: 54,
 	}
 	v := cellViewerView(t, 28, 54)
-	wantBottom := max(sc.TotalWrappedLines()-v.InnerHeight(), 0)
+	wantBottom := max(sc.TotalWrappedLines()-(v.InnerHeight()-1), 0)
 	if wantBottom == 0 {
 		t.Fatalf("test setup: expected real scroll room, got maxOY 0")
 	}
@@ -97,5 +103,113 @@ func TestApplyCellViewerScroll_WrapModeZeroClamp(t *testing.T) {
 	}
 	if oy := v.OriginY(); oy != 0 {
 		t.Fatalf("display origin Y = %d, want 0 (clamped to display-only zero)", oy)
+	}
+}
+
+func TestCellViewerNativeVerticalWindow(t *testing.T) {
+	for _, wrap := range []bool{true, false} {
+		t.Run(fmt.Sprintf("wrap=%v", wrap), func(t *testing.T) {
+			drv := testfake.NewRecorderGuiDriver()
+			ctx := guicontext.NewCellViewerContext(guicontext.NewBaseContext(guicontext.BaseContextOpts{
+				Key: types.CELL_VIEWER, ViewName: string(types.CELL_VIEWER), Kind: types.PERSISTENT_POPUP,
+			}), guicontext.Deps{GuiDriver: drv})
+			var source []string
+			for i := range 40 {
+				source = append(source, fmt.Sprintf("a%03db%03d", i, i))
+			}
+			ctx.Open(strings.Join(source, "\n"), models.ColumnMeta{Name: "value", TypeName: "text"}, nil)
+			if !wrap {
+				ctx.ToggleWrap()
+			}
+			ctrl := controllers.NewCellViewerController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, ctx, nil, nil)
+			registry := commands.NewRegistry()
+			ctrl.RegisterActions(registry)
+			width, height, wantScroll := 4, 8, 0
+			for _, step := range []struct {
+				name, action  string
+				width, height int
+			}{
+				{name: "initial"},
+				{name: "j once", action: "scroll_down"},
+				{name: "j twice", action: "scroll_down"},
+				{name: "j thrice", action: "scroll_down"},
+				{name: "page down", action: "page_down"},
+				{name: "page up", action: "page_up"},
+				{name: "G", action: "jump_bottom"},
+				{name: "grow height", height: 20},
+				{name: "shrink height", height: 4},
+				{name: "grow width", width: 8},
+				{name: "shrink width", width: 4},
+				{name: "temporarily no scroll room", height: 200},
+				{name: "restore height", height: 8},
+				{name: "gg", action: "jump_top"},
+			} {
+				t.Run(step.name, func(t *testing.T) {
+					if step.width != 0 {
+						width = step.width
+					}
+					if step.height != 0 {
+						height = step.height
+					}
+					var allLines []string
+					for _, line := range source {
+						if wrap && width == 4 {
+							allLines = append(allLines, line[:4], line[4:])
+						} else {
+							allLines = append(allLines, line)
+						}
+					}
+					if step.action != "" {
+						cmd, ok := registry.Get("cell_viewer." + step.action)
+						if !ok {
+							t.Fatalf("missing action %s", step.action)
+						}
+						if err := cmd.Handler(commands.ExecCtx{}); err != nil {
+							t.Fatal(err)
+						}
+						switch step.action {
+						case "scroll_down":
+							wantScroll++
+						case "page_down":
+							wantScroll += 24 // Preserve the controller's existing page motion.
+						case "page_up":
+							wantScroll = max(wantScroll-24, 0)
+						case "jump_bottom":
+							wantScroll = len(allLines) - 1
+						case "jump_top":
+							wantScroll = 0
+						}
+					}
+					bodyHeight := height - 1
+					maxScroll := max(len(allLines)-bodyHeight, 0)
+					start := min(wantScroll, maxScroll)
+					if maxScroll > 0 {
+						wantScroll = start
+					}
+					view := gocui.NewView(string(types.CELL_VIEWER), 0, 0, width+1, height+1, gocui.OutputNormal)
+					view.Wrap = false
+					view.SetOriginY(5) // A reused native view can retain an old origin.
+					drv.SetRealView(string(types.CELL_VIEWER), view)
+					ctx.SetView(view)
+					if err := ctx.HandleRender(); err != nil {
+						t.Fatal(err)
+					}
+					view.SetContent(drv.GetViewBuffer(string(types.CELL_VIEWER)))
+					applyCellViewerScroll(view, ctx)
+					lines := view.ViewBufferLines()
+					if len(lines) == 0 {
+						t.Fatal("native view has no lines")
+					}
+					// Match gocui's draw start: origin is relative to the rendered
+					// buffer, not the complete original cell.
+					nativeStart := min(view.OriginY(), len(lines)-1)
+					got := lines[nativeStart:min(nativeStart+bodyHeight, len(lines))]
+					want := allLines[start:min(start+bodyHeight, len(allLines))]
+					if !reflect.DeepEqual(got, want) || view.OriginY() != 0 || ctx.ScrollY() != wantScroll {
+						t.Errorf("page=%v origin=%d scroll=%d; want %v origin=0 scroll=%d", got, view.OriginY(), ctx.ScrollY(), want, wantScroll)
+					}
+				})
+			}
+		})
 	}
 }

@@ -179,23 +179,18 @@ func (c *CellViewerContext) HandleRender() error {
 
 	var visibleLines []string
 	if c.wrap {
-		w := grid.WrapWindow(sanitized, width, c.scroll[1], bodyHeight)
+		start := c.scroll[1]
+		w := grid.WrapWindow(sanitized, width, start, bodyHeight)
 		c.totalWrappedLines = w.Lines()
+		if clamped := c.verticalWindowStart(bodyHeight); clamped != start {
+			w = grid.WrapWindow(sanitized, width, clamped, bodyHeight)
+		}
 		visibleLines = w.Slice()
 	} else {
 		lines := strings.Split(sanitized, "\n")
 		c.totalWrappedLines = len(lines)
-		start := c.scroll[1]
-		if start < 0 {
-			start = 0
-		}
-		if start > len(lines) {
-			start = len(lines)
-		}
-		end := start + bodyHeight
-		if end > len(lines) {
-			end = len(lines)
-		}
+		start := c.verticalWindowStart(bodyHeight)
+		end := min(start+bodyHeight, len(lines))
 		visibleLines = lines[start:end]
 	}
 
@@ -211,6 +206,16 @@ func (c *CellViewerContext) HandleRender() error {
 		return c.deps.GuiDriver.SetContent(viewName, visibleBody)
 	})
 	return nil
+}
+
+func (c *CellViewerContext) verticalWindowStart(bodyHeight int) int {
+	maxY := max(c.totalWrappedLines-bodyHeight, 0)
+	start := min(c.scroll[1], maxY)
+	// Preserve the stored offset on a temporary no-scroll frame during resize.
+	if maxY > 0 {
+		c.scroll[1] = start
+	}
+	return start
 }
 
 func (c *CellViewerContext) buildTitle() string {

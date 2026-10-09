@@ -744,10 +744,12 @@ func (g *Gui) RunLayout(w, h int) error {
 			// by the Tier-1 applyFocusFrameColors pass; gocui resets FrameColor
 			// on SetView, so this runs every frame). No Wrap: the body is
 			// pre-formatted (wrapped/non-wrapped at the context level) and would
-			// be mangled by reflow. The scroll origin is applied AFTER
-			// HandleRender below so view.LinesHeight reflects the freshly
-			// written body.
+			// be mangled by reflow. The context owns the vertical window;
+			// the native vertical origin is reset after rendering below.
 			if ctx.GetKey() == types.CELL_VIEWER && view != nil {
+				if cl, ok := ctx.(interface{ SetView(types.View) }); ok {
+					cl.SetView(view)
+				}
 				view.Title = ctx.GetTitle()
 				view.FrameColor = frameAttr(theme.Current().ActiveBorder)
 				view.Wrap = false
@@ -1751,9 +1753,8 @@ func applyTableInspectScroll(view *gocui.View, ctx types.IBaseContext) {
 	view.SetOrigin(ox, oy)
 }
 
-// cellViewerScroller is the scroll surface CellViewerContext exposes. The
-// layout owns the vertical clamp (it alone knows the rendered content extent
-// vs the viewport); the context owns top/left clamp.
+// cellViewerScroller lets layout settle the stored last-page bound while the
+// context owns slicing the vertical window.
 type cellViewerScroller interface {
 	ScrollY() int
 	SetScrollY(int)
@@ -1788,12 +1789,8 @@ func applyChangelogScroll(view *gocui.View, ctx types.IBaseContext) {
 	view.SetOriginY(oy)
 }
 
-// applyCellViewerScroll pins the viewer's vertical origin to the context's
-// scroll offset, clamped to the content's last page using the context-owned
-// TotalWrappedLines() extent. Called after HandleRender so the context's
-// wrapped-line count reflects the freshly written body. The clamped value is
-// written back so the `G` sentinel and any over-scroll settle exactly on the
-// last page.
+// applyCellViewerScroll clears the native origin: HandleRender already sliced
+// the vertical window. Applying ScrollY again would skip rows inside that page.
 //
 // The clamp is persisted ONLY when the axis has real scroll room (maxOY>0):
 // on a resize the shared view may momentarily hold a stale-short body for one
@@ -1806,7 +1803,8 @@ func applyCellViewerScroll(view *gocui.View, ctx types.IBaseContext) {
 	if !ok {
 		return
 	}
-	maxOY := max(sc.TotalWrappedLines()-view.InnerHeight(), 0)
+	bodyHeight := max(view.InnerHeight()-1, 1)
+	maxOY := max(sc.TotalWrappedLines()-bodyHeight, 0)
 	oy := sc.ScrollY()
 	if oy > maxOY {
 		oy = maxOY
@@ -1814,7 +1812,7 @@ func applyCellViewerScroll(view *gocui.View, ctx types.IBaseContext) {
 			sc.SetScrollY(oy)
 		}
 	}
-	view.SetOriginY(oy)
+	view.SetOriginY(0)
 }
 
 // maxLineWidth returns the display width of the widest line in the view's

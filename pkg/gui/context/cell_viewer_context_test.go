@@ -1,6 +1,7 @@
 package context
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -478,5 +479,37 @@ func TestCellViewer_OpenResetsScroll(t *testing.T) {
 	c.Open("v", models.ColumnMeta{Name: "a"}, nil)
 	if c.ScrollX() != 0 || c.ScrollY() != 0 {
 		t.Errorf("scroll = (%d,%d) after Open(), want (0,0)", c.ScrollX(), c.ScrollY())
+	}
+}
+
+func TestCellViewerLastPageClampedBeforeRendering(t *testing.T) {
+	for _, wrap := range []bool{true, false} {
+		t.Run(fmt.Sprintf("wrap=%v", wrap), func(t *testing.T) {
+			drv := newRecorderWithViewerViews()
+			c := newCellViewerForTest(drv)
+			view := gocui.NewView(string(types.CELL_VIEWER), 0, 0, 9, 9, gocui.OutputNormal)
+			c.SetView(view)
+			var lines []string
+			for i := range 50 {
+				lines = append(lines, fmt.Sprintf("row%03d", i))
+			}
+			c.Open(strings.Join(lines, "\n"), models.ColumnMeta{Name: "value", TypeName: "text"}, nil)
+			if !wrap {
+				c.ToggleWrap()
+			}
+			c.SetScrollY(49)
+			if err := c.HandleRender(); err != nil {
+				t.Fatal(err)
+			}
+			view.SetContent(drv.GetViewBuffer(string(types.CELL_VIEWER)))
+			bodyHeight := view.InnerHeight() - 1
+			want := strings.Join(lines[len(lines)-bodyHeight:], "\n")
+			if got := strings.Join(view.ViewBufferLines(), "\n"); got != want {
+				t.Errorf("last page=%q, want %q", got, want)
+			}
+			if c.ScrollY() != len(lines)-bodyHeight {
+				t.Errorf("scroll=%d, want %d", c.ScrollY(), len(lines)-bodyHeight)
+			}
+		})
 	}
 }
