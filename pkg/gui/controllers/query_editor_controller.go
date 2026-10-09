@@ -1346,7 +1346,13 @@ func (q *QueryEditorController) openResultTab(stmt string, rh *session.RunHandle
 	if q.helpers.ResultTabs == nil || rh == nil {
 		return
 	}
-	_ = q.helpers.ResultTabs.OpenResultTab(tabLabel(stmt), rh)
+	if err := q.helpers.ResultTabs.OpenResultTab(tabLabel(stmt), rh); err != nil {
+		// Allocation transfers ownership only on success. Cancel alone does
+		// not release the unadopted stream; close it even when cancel fails.
+		q.logErr("result_tab_cancel", rh.Cancel())
+		q.logErr("result_tab_close", rh.Rows().Close())
+		return
+	}
 	// record (connID, ResultIdentity) on the now-active
 	// tab so the <leader>gH overlay can gate persistence and seed the
 	// grid's hidden-col set from AppState. Optional surface — fake test

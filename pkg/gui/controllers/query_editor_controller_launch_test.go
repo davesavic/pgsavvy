@@ -2,6 +2,7 @@ package controllers_test
 
 import (
 	stdcontext "context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -19,7 +20,11 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/logs"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query"
 	"github.com/davesavic/pgsavvy/pkg/session"
+	"github.com/davesavic/pgsavvy/pkg/tasks"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // C2 async-launch controller tests: with a UI scheduler wired
@@ -164,6 +169,238 @@ func (e *eofRowStream) Next(stdcontext.Context) (models.Row, bool, error) {
 
 // launchConn is the inert drivers.Connection session.New requires.
 type launchConn struct{}
+
+type reviewAllocationLog struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (l *reviewAllocationLog) record(event string) {
+	l.mu.Lock()
+	l.events = append(l.events, event)
+	l.mu.Unlock()
+}
+
+func (l *reviewAllocationLog) snapshot() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.events...)
+}
+
+type reviewAllocationConn struct {
+	launchConn
+	log       *reviewAllocationLog
+	cancelErr error
+}
+
+func (c *reviewAllocationConn) Cancel(stdcontext.Context, models.QueryID) error {
+	c.log.record("cancel")
+	return c.cancelErr
+}
+
+type reviewAllocationSession struct {
+	launchInner
+	log      *reviewAllocationLog
+	queries  chan models.Query
+	closeErr error
+}
+
+func (s *reviewAllocationSession) Stream(_ stdcontext.Context, q models.Query) (drivers.RowStream, error) {
+	s.queries <- q
+	return &reviewAllocationRows{log: s.log, closeErr: s.closeErr}, nil
+}
+
+type reviewAllocationRows struct {
+	eofRowStream
+	log      *reviewAllocationLog
+	closeErr error
+}
+
+func (r *reviewAllocationRows) Columns() []models.ColumnMeta {
+	return []models.ColumnMeta{{Name: "id"}}
+}
+
+func (r *reviewAllocationRows) Close() error {
+	r.log.record("close")
+	return r.closeErr
+}
+
+type reviewAllocationTabs struct {
+	*ui.ResultTabsHelper
+	opened      []*session.RunHandle
+	reattached  []*session.RunHandle
+	sortHook    func(int)
+	rejectErr   error
+	lastOpenErr error
+}
+
+func (h *reviewAllocationTabs) OpenResultTab(label string, rh *session.RunHandle) error {
+	h.opened = append(h.opened, rh)
+	if h.rejectErr != nil {
+		h.lastOpenErr = h.rejectErr
+		return h.rejectErr
+	}
+	h.lastOpenErr = h.ResultTabsHelper.OpenResultTab(label, rh)
+	return h.lastOpenErr
+}
+
+func (h *reviewAllocationTabs) SetOnSortRequest(fn func(int)) {
+	h.sortHook = fn
+	h.ResultTabsHelper.SetOnSortRequest(fn)
+}
+
+func (h *reviewAllocationTabs) ReattachActiveTab(rh *session.RunHandle, runSQL, origSQL string) {
+	h.reattached = append(h.reattached, rh)
+	h.ResultTabsHelper.ReattachActiveTab(rh, runSQL, origSQL)
+}
+
+func TestReview_result_tab_allocation(t *testing.T) {
+	for _, mode := range []string{"async", "sync"} {
+		for _, scenario := range []string{"pinned_edits", "pinned_sort", "cancel_error", "close_error", "both_errors", "other_rejection", "accepted"} {
+			t.Run(mode+"/"+scenario, func(t *testing.T) {
+				log := &reviewAllocationLog{}
+				inner := &reviewAllocationSession{log: log, queries: make(chan models.Query, 16)}
+				conn := &reviewAllocationConn{log: log}
+				if scenario == "cancel_error" || scenario == "both_errors" {
+					conn.cancelErr = errors.New("synthetic cancellation failure")
+				}
+				if scenario == "close_error" || scenario == "both_errors" {
+					inner.closeErr = errors.New("synthetic row close failure")
+				}
+				sqlSession := session.New(conn, inner, session.Options{})
+				runner := data.NewQueryRunnerForSession(sqlSession, drivers.Capabilities{HasLiveCancel: true})
+				pump := &uiPump{}
+				var workers sync.WaitGroup
+				onWorker := func(fn func(gocui.Task) error) { workers.Go(func() { _ = fn(nil) }) }
+				base := newBag()
+				maxTabs := 1
+				if scenario == "accepted" {
+					maxTabs = 2
+				}
+				tabs := &reviewAllocationTabs{ResultTabsHelper: ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{
+					MaxTabs: maxTabs, Toast: base.Toast, OnUIThread: pump.post,
+					StreamFactory: func() ui.StreamRunner { return tasks.New(onWorker, pump.post) },
+				})}
+				t.Cleanup(func() {
+					tabs.CloseAll()
+					for _, rh := range tabs.opened {
+						_ = rh.Rows().Close()
+					}
+					runner.Unbind()
+					_ = sqlSession.Close()
+					workers.Wait()
+				})
+				require.NoError(t, tabs.ResultTabsHelper.OpenResultTab("original", nil))
+				original := tabs.Active()
+				require.True(t, tabs.PinActive())
+				const origSQL = "SELECT id FROM app.original WHERE id = $1"
+				origArgs := []any{int64(17)}
+				origIdentity := query.DetectFromQuery(origSQL)
+				original.SetIdentity("original_connection", origIdentity)
+				original.SetOrigin(origSQL, origArgs, "original_schema")
+				grid := original.Grid()
+				grid.SetColumns([]models.ColumnMeta{{Name: "id"}})
+				rows := []models.Row{{Values: []any{int64(17)}}}
+				grid.AppendRows(rows)
+				grid.SetEditability(true, []int{0}, "", models.Ref{Schema: "app", Table: "original"})
+				var edits *models.PendingEditSet
+				var editSnapshot []models.PendingEdit
+				if scenario == "pinned_edits" {
+					edits = &models.PendingEditSet{}
+					require.NoError(t, edits.Add(models.PendingEdit{PrimaryKey: []any{int64(17)}, Column: "id", NewValue: int64(18), Kind: models.Literal, LoadedAt: time.Now()}))
+					grid.SetPendingEdits(edits)
+					editSnapshot = edits.Edits()
+				}
+				generation := original.EditabilityGeneration()
+				base.Active.id = "incoming_connection"
+				base.SchemaPicker.name = "incoming_schema"
+				base.HelperBag.QueryRunner = runner
+				base.HelperBag.ResultTabs = tabs
+				base.HelperBag.OnWorker = onWorker
+				if mode == "async" {
+					base.HelperBag.OnUIThread = pump.post
+				}
+				focusCalls := 0
+				base.HelperBag.FocusResults = func() error { focusCalls++; return nil }
+				ctrl := controllers.NewQueryEditorController(nil, base.HelperBag.CoreDeps, base.HelperBag.NavDeps, base.HelperBag.UIDeps, base.HelperBag.QueryDeps, base.HelperBag.ThreadingDeps)
+				if scenario == "other_rejection" {
+					tabs.rejectErr = errors.New("synthetic allocation failure")
+				}
+				const incomingSQL = "SELECT id FROM other.incoming"
+				require.True(t, ctrl.RunSQL(incomingSQL))
+				pump.pumpUntil(t, time.Second, "result allocation", func() bool { return len(tabs.opened) == 1 })
+				rh := tabs.opened[0]
+				require.Equal(t, incomingSQL, (<-inner.queries).SQL)
+				assert.Same(t, grid, original.Grid())
+				assert.Equal(t, rows, grid.AllRows())
+				assert.Equal(t, generation, original.EditabilityGeneration())
+				assert.True(t, grid.Editable())
+				assert.Same(t, edits, grid.PendingEdits())
+				if edits != nil {
+					assert.Equal(t, editSnapshot, edits.Edits())
+				}
+				gotConn, gotIdentity := original.Identity()
+				assert.Equal(t, "original_connection", gotConn)
+				assert.Equal(t, origIdentity, gotIdentity)
+				gotSQL, gotArgs, gotSchema := original.Origin()
+				assert.Equal(t, origSQL, gotSQL)
+				assert.Equal(t, origArgs, gotArgs)
+				assert.Equal(t, "original_schema", gotSchema)
+				if scenario == "accepted" {
+					require.NoError(t, tabs.lastOpenErr)
+					require.Len(t, tabs.Tabs(), 2)
+					require.NotSame(t, original, tabs.Active())
+					require.Equal(t, 1, focusCalls)
+					gotConn, gotIdentity = tabs.Active().Identity()
+					require.Equal(t, "incoming_connection", gotConn)
+					require.Equal(t, query.DetectFromQuery(incomingSQL), gotIdentity)
+					gotSQL, gotArgs, gotSchema = tabs.Active().Origin()
+					require.Equal(t, incomingSQL, gotSQL)
+					require.Empty(t, gotArgs)
+					require.Equal(t, "incoming_schema", gotSchema)
+					require.NotContains(t, log.snapshot(), "cancel", "accepted handles belong to the tab")
+					return
+				}
+				require.Error(t, tabs.lastOpenErr)
+				assert.Same(t, original, tabs.Active())
+				assert.Len(t, tabs.Tabs(), 1)
+				assert.Zero(t, focusCalls)
+				assert.Equal(t, []string{"cancel", "close"}, log.snapshot())
+				select {
+				case <-rh.Done():
+					require.ErrorIs(t, rh.Err(), inner.closeErr)
+				default:
+					t.Fatal("rejected handle did not release its stream before cleanup")
+				}
+				// Direct session access cannot hide a leaked lock by preempting it.
+				probe, err := sqlSession.Stream(stdcontext.Background(), models.Query{SQL: "SELECT probe"})
+				require.NoError(t, err)
+				_ = probe.Rows().Close()
+				<-inner.queries
+				switch scenario {
+				case "pinned_edits":
+					tabs.sortHook(0)
+					require.Same(t, edits, grid.PendingEdits())
+					require.Equal(t, 1, grid.PendingEdits().Count())
+					require.Empty(t, tabs.reattached)
+					select {
+					case <-inner.queries:
+						t.Fatal("pending edits no longer block sorting")
+					default:
+					}
+				case "pinned_sort":
+					tabs.sortHook(0)
+					pump.pumpUntil(t, time.Second, "original tab sort", func() bool { return len(tabs.reattached) == 1 })
+					sorted := <-inner.queries
+					require.Equal(t, "SELECT * FROM (\n"+origSQL+"\n) _pgsavvy_sort\nORDER BY 1 ASC", sorted.SQL)
+					require.Equal(t, origArgs, sorted.Args)
+					require.Equal(t, "original_schema", sorted.DefaultSchema)
+					require.Same(t, original, tabs.Active())
+				}
+			})
+		}
+	}
+}
 
 func (launchConn) Close() error                  { return nil }
 func (launchConn) Ping(stdcontext.Context) error { return nil }
