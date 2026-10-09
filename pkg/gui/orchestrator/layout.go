@@ -1790,7 +1790,7 @@ func applyChangelogScroll(view *gocui.View, ctx types.IBaseContext) {
 }
 
 // applyCellViewerScroll clears the native origin: HandleRender already sliced
-// the vertical window. Applying ScrollY again would skip rows inside that page.
+// both axes. Applying an offset again would skip content inside that page.
 //
 // The clamp is persisted ONLY when the axis has real scroll room (maxOY>0):
 // on a resize the shared view may momentarily hold a stale-short body for one
@@ -1812,7 +1812,7 @@ func applyCellViewerScroll(view *gocui.View, ctx types.IBaseContext) {
 			sc.SetScrollY(oy)
 		}
 	}
-	view.SetOriginY(0)
+	view.SetOrigin(0, 0)
 }
 
 // maxLineWidth returns the display width of the widest line in the view's

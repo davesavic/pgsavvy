@@ -19,6 +19,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.23
 	github.com/minio/selfupdate v0.6.0
 	github.com/mjibson/sqlfmt v0.5.0
+	github.com/rivo/uniseg v0.4.7
 	github.com/spf13/afero v1.15.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/goleak v1.3.0
@@ -72,7 +73,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/samber/lo v1.53.0 // indirect
 	github.com/sasha-s/go-deadlock v0.3.9 // indirect

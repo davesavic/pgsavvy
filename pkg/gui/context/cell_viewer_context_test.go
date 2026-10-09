@@ -7,6 +7,7 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
 	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -458,7 +459,7 @@ func TestCellViewer_HandleRenderWrapOff(t *testing.T) {
 	c := newCellViewerForTest(drv)
 	c.SetView(drv.RealView(string(types.CELL_VIEWER)))
 
-	longText := strings.Repeat("x", 200)
+	longText := "prefix-" + strings.Repeat("x", 200) + "-suffix"
 	c.Open(longText, models.ColumnMeta{Name: "c", TypeName: "text"}, nil)
 	c.ToggleWrap()
 
@@ -466,9 +467,19 @@ func TestCellViewer_HandleRenderWrapOff(t *testing.T) {
 		t.Fatalf("HandleRender: %v", err)
 	}
 
-	buf := drv.GetViewBuffer(string(types.CELL_VIEWER))
-	if !strings.Contains(buf, longText) {
-		t.Errorf("output missing full long text with nowrap: %q", buf)
+	width := c.view.InnerWidth()
+	if got := grid.SanitizeCellEscapes(drv.GetViewBuffer(string(types.CELL_VIEWER))); got != longText[:width] {
+		t.Errorf("first nowrap page=%q, want %q", got, longText[:width])
+	}
+	c.SetScrollX(len(longText))
+	if err := c.HandleRender(); err != nil {
+		t.Fatal(err)
+	}
+	if got := grid.SanitizeCellEscapes(drv.GetViewBuffer(string(types.CELL_VIEWER))); got != longText[len(longText)-width:] {
+		t.Errorf("last nowrap page=%q, want %q", got, longText[len(longText)-width:])
+	}
+	if c.OriginalValue() != longText || c.TotalWrappedLines() != 1 {
+		t.Fatal("nowrap must preserve the complete underlying value as one logical line")
 	}
 }
 
@@ -509,6 +520,116 @@ func TestCellViewerLastPageClampedBeforeRendering(t *testing.T) {
 			}
 			if c.ScrollY() != len(lines)-bodyHeight {
 				t.Errorf("scroll=%d, want %d", c.ScrollY(), len(lines)-bodyHeight)
+			}
+		})
+	}
+}
+
+func TestCellViewerHorizontalWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+		width, x, y      int
+		wantX            int
+		tabWidth         int
+	}{
+		{name: "ASCII middle", body: "abcdefghi", width: 4, x: 2, wantX: 2, want: "cdef"},
+		{name: "left boundary", body: "abcdefghi", width: 4, x: -9, wantX: 0, want: "abcd"},
+		{name: "right boundary", body: "abcdefghi", width: 4, x: 999, wantX: 5, want: "fghi"},
+		{name: "CJK left partial", body: "界ab語cd", width: 4, x: 1, wantX: 1, want: " ab"},
+		{name: "CJK aligned", body: "界ab語cd", width: 4, x: 2, wantX: 2, want: "ab語"},
+		{name: "CJK right partial", body: "a界bcde", width: 2, want: "a"},
+		{name: "CJK one column", body: "界ab", width: 1, x: 1, wantX: 1, want: " "},
+		{name: "CJK right boundary", body: "界ab語cd", width: 4, x: 999, wantX: 4, want: "語cd"},
+		{name: "combining cluster", body: "e\u0301abcd", width: 3, want: "e\u0301ab"},
+		{name: "combining cluster skipped", body: "e\u0301abcd", width: 3, x: 1, wantX: 1, want: "abc"},
+		{name: "ZWJ emoji", body: "A👩‍💻BCDE", width: 3, x: 1, wantX: 1, want: "👩‍💻B"},
+		{name: "ZWJ left partial", body: "A👩‍💻BCDE", width: 3, x: 2, wantX: 2, want: " BC"},
+		{name: "modifier emoji", body: "A👍🏽BCDE", width: 3, x: 1, wantX: 1, want: "👍🏽B"},
+		{name: "variation selector", body: "A✈️BCDE", width: 3, x: 1, wantX: 1, want: "✈️B"},
+		{name: "short line", body: "hi", width: 4, x: 9, wantX: 9, want: "hi"},
+		{name: "short and empty page retains full extent", body: "abcdef\n\nabcdefghijkl\nlast", width: 4, x: 6, wantX: 6, want: "\n"},
+		{name: "vertical and horizontal", body: "abcdefghijkl\nxy\n\n0123456789ab", width: 4, x: 5, y: 2, wantX: 5, want: "\n5678"},
+		{name: "escapes removed before width", body: "\x1b[31mabcdef\x1b[0m", width: 4, x: 999, wantX: 2, want: "cdef"},
+		{name: "ASCII tab", body: "a\tbcd", width: 5, x: 1, wantX: 1, want: "   bc"},
+		{name: "CJK tab retains native stops", body: "界\tBCDE", width: 4, x: 2, wantX: 2, want: "   B"},
+		{name: "custom tab stop", body: "a\tBCDE", width: 4, x: 6, wantX: 6, tabWidth: 8, want: "  BC"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			drv := newRecorderWithViewerViews()
+			c := newCellViewerForTest(drv)
+			view := gocui.NewView(string(types.CELL_VIEWER), 0, 0, tc.width+1, 4, gocui.OutputNormal)
+			view.TabWidth = tc.tabWidth
+			c.SetView(view)
+			c.Open(tc.body, models.ColumnMeta{Name: "value", TypeName: "text"}, nil)
+			c.ToggleWrap()
+			c.SetScrollX(tc.x)
+			c.SetScrollY(tc.y)
+			if err := c.HandleRender(); err != nil {
+				t.Fatal(err)
+			}
+			if got := grid.SanitizeCellEscapes(drv.GetViewBuffer(string(types.CELL_VIEWER))); got != tc.want {
+				t.Errorf("page=%q, want %q", got, tc.want)
+			}
+			if c.ScrollX() != tc.wantX {
+				t.Errorf("stored X=%d, want %d", c.ScrollX(), tc.wantX)
+			}
+			if c.OriginalValue() != tc.body {
+				t.Fatal("rendering changed the underlying cell value")
+			}
+		})
+	}
+}
+
+func BenchmarkCellViewerLargeWindow(b *testing.B) {
+	for _, wrap := range []bool{true, false} {
+		b.Run(fmt.Sprintf("wrap=%v", wrap), func(b *testing.B) {
+			drv := newRecorderWithViewerViews()
+			c := newCellViewerForTest(drv)
+			c.SetView(drv.RealView(string(types.CELL_VIEWER)))
+			body := strings.Repeat("a\tb\n", 1<<16)
+			c.Open(body, models.ColumnMeta{Name: "value", TypeName: "text"}, nil)
+			if !wrap {
+				c.ToggleWrap()
+			}
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if err := c.HandleRender(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestCellViewerLargeWindowKeepsFullExtent(t *testing.T) {
+	const lines = 1 << 12
+	for _, wrap := range []bool{true, false} {
+		t.Run(fmt.Sprintf("wrap=%v", wrap), func(t *testing.T) {
+			drv := newRecorderWithViewerViews()
+			c := newCellViewerForTest(drv)
+			c.SetView(gocui.NewView(string(types.CELL_VIEWER), 0, 0, 5, 4, gocui.OutputNormal))
+			body := strings.Repeat("a\tb\n", lines) + "0123456789abcdef"
+			c.Open(body, models.ColumnMeta{Name: "value", TypeName: "text"}, nil)
+			wantLines, wantBody := lines*2+4, "89ab\ncdef"
+			if !wrap {
+				c.ToggleWrap()
+				c.SetScrollX(999)
+				wantLines, wantBody = lines+1, "\ncdef"
+			}
+			c.SetScrollY(1 << 20)
+			if err := c.HandleRender(); err != nil {
+				t.Fatal(err)
+			}
+			if got := grid.SanitizeCellEscapes(drv.GetViewBuffer(string(types.CELL_VIEWER))); got != wantBody {
+				t.Errorf("last page=%q, want %q", got, wantBody)
+			}
+			if c.TotalWrappedLines() != wantLines || c.ScrollY() != wantLines-2 || c.OriginalValue() != body {
+				t.Errorf("extent=%d scroll=%d; want %d/%d and unchanged original", c.TotalWrappedLines(), c.ScrollY(), wantLines, wantLines-2)
+			}
+			if !wrap && c.ScrollX() != 12 {
+				t.Errorf("full-body X bound=%d, want 12", c.ScrollX())
 			}
 		})
 	}

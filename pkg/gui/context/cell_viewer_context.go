@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gdamore/tcell/v3"
+	"github.com/rivo/uniseg"
+
 	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/pgsavvy/pkg/gui/grid"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
@@ -176,22 +179,44 @@ func (c *CellViewerContext) HandleRender() error {
 
 	body, _ := grid.FormatViewerBody(c.originalValue, c.column, c.pretty)
 	sanitized := grid.SanitizeCellEscapes(body)
+	tabWidth := 4
+	if c.view != nil && c.view.TabWidth > 0 {
+		tabWidth = c.view.TabWidth
+	}
+	var measure cellViewerWidthMeasure
+	measure.buffer.Resize(2, 1)
 
 	var visibleLines []string
 	if c.wrap {
 		start := c.scroll[1]
-		w := grid.WrapWindow(sanitized, width, start, bodyHeight)
-		c.totalWrappedLines = w.Lines()
+		visibleLines, c.totalWrappedLines = measure.wrappedWindow(sanitized, tabWidth, width, start, bodyHeight)
 		if clamped := c.verticalWindowStart(bodyHeight); clamped != start {
-			w = grid.WrapWindow(sanitized, width, clamped, bodyHeight)
+			visibleLines, _ = measure.wrappedWindow(sanitized, tabWidth, width, clamped, bodyHeight)
 		}
-		visibleLines = w.Slice()
 	} else {
-		lines := strings.Split(sanitized, "\n")
-		c.totalWrappedLines = len(lines)
+		maxWidth := 0
+		c.totalWrappedLines = 0
+		for line := range strings.SplitSeq(sanitized, "\n") {
+			maxWidth = max(maxWidth, measure.lineWidth(line, tabWidth))
+			c.totalWrappedLines++
+		}
+		maxX := max(maxWidth-width, 0)
+		x := min(c.scroll[0], maxX)
+		// Keep X across temporary no-scroll frames, as with the vertical window.
+		if maxX > 0 {
+			c.scroll[0] = x
+		}
 		start := c.verticalWindowStart(bodyHeight)
-		end := min(start+bodyHeight, len(lines))
-		visibleLines = lines[start:end]
+		row := 0
+		for line := range strings.SplitSeq(sanitized, "\n") {
+			if row >= start {
+				visibleLines = append(visibleLines, measure.horizontalWindow(expandCellViewerTabs(line, tabWidth), x, width))
+				if len(visibleLines) == bodyHeight {
+					break
+				}
+			}
+			row++
+		}
 	}
 
 	var highlightedLines []string
@@ -216,6 +241,162 @@ func (c *CellViewerContext) verticalWindowStart(bodyHeight int) int {
 		c.scroll[1] = start
 	}
 	return start
+}
+
+// Use a private buffer to ask the actual tcell backend for its width policy,
+// including its startup locale settings, without touching the global screen.
+type cellViewerWidthMeasure struct{ buffer tcell.CellBuffer }
+
+func (m *cellViewerWidthMeasure) clusterWidth(cluster string) int {
+	if len(cluster) == 1 && cluster[0] >= ' ' && cluster[0] <= '~' {
+		return 1
+	}
+	_, width := m.buffer.Put(0, 0, cluster, tcell.StyleDefault)
+	return max(width, uniseg.StringWidth(cluster))
+}
+
+func (m *cellViewerWidthMeasure) lineWidth(line string, tabWidth int) int {
+	if width, ascii := asciiCellViewerWidth(line, tabWidth); ascii {
+		return width
+	}
+	width, cells := 0, 0
+	clusters := uniseg.NewGraphemes(line)
+	for clusters.Next() {
+		if clusters.Str() == "\t" {
+			spaces := tabWidth - cells%tabWidth
+			width += spaces
+			cells += spaces
+		} else {
+			width += m.clusterWidth(clusters.Str())
+			cells++
+		}
+	}
+	return width
+}
+
+func writeCellViewerCluster(b *strings.Builder, cluster string, width int) {
+	b.WriteString(cluster)
+	// gocui counts VS15 text-style emoji as one column while tcell uses two.
+	// The extra space advances gocui into the next free column; tcell skips
+	// this covered continuation cell when drawing the intact wide grapheme.
+	b.WriteString(strings.Repeat(" ", width-uniseg.StringWidth(cluster)))
+}
+
+func (m *cellViewerWidthMeasure) horizontalWindow(line string, offset, width int) string {
+	if _, ascii := asciiCellViewerWidth(line, 4); ascii {
+		start := min(offset, len(line))
+		return line[start:min(start+width, len(line))]
+	}
+	var b strings.Builder
+	column := 0
+	clusters := uniseg.NewGraphemes(line)
+	for clusters.Next() {
+		start := column
+		cellWidth := m.clusterWidth(clusters.Str())
+		column += cellWidth
+		if column <= offset {
+			continue
+		}
+		if column > offset+width {
+			break // Never draw a partial grapheme over the right border.
+		}
+		if start < offset {
+			b.WriteString(strings.Repeat(" ", column-offset))
+		} else {
+			writeCellViewerCluster(&b, clusters.Str(), cellWidth)
+		}
+	}
+	return b.String()
+}
+
+func (m *cellViewerWidthMeasure) wrappedWindow(body string, tabWidth, width, offset, height int) ([]string, int) {
+	if body == "" {
+		return nil, 0
+	}
+	var visible []string
+	var b strings.Builder
+	total, used := 0, 0
+	flush := func() {
+		if total >= offset && total-offset < height {
+			visible = append(visible, b.String())
+		}
+		total++
+		b.Reset()
+		used = 0
+	}
+	for line := range strings.SplitSeq(strings.TrimSuffix(body, "\n"), "\n") {
+		if lineWidth, ascii := asciiCellViewerWidth(line, tabWidth); ascii {
+			rows := max((lineWidth+width-1)/width, 1)
+			first := max(offset-total, 0)
+			last := min(offset+height-total, rows)
+			if first < last {
+				line = expandCellViewerTabs(line, tabWidth)
+				for row := first; row < last; row++ {
+					start := row * width
+					visible = append(visible, line[start:min(start+width, len(line))])
+				}
+			}
+			total += rows
+			continue
+		}
+		line = expandCellViewerTabs(line, tabWidth)
+		clusters := uniseg.NewGraphemes(line)
+		for clusters.Next() {
+			cellWidth := m.clusterWidth(clusters.Str())
+			if used+cellWidth > width && used > 0 {
+				flush()
+			}
+			if cellWidth > width {
+				if total >= offset && total-offset < height {
+					b.WriteString(strings.Repeat(" ", width))
+				}
+				used = width
+			} else {
+				if total >= offset && total-offset < height {
+					writeCellViewerCluster(&b, clusters.Str(), cellWidth)
+				}
+				used += cellWidth
+			}
+		}
+		flush()
+	}
+	return visible, total
+}
+
+func asciiCellViewerWidth(line string, tabWidth int) (int, bool) {
+	width := 0
+	for i := range len(line) {
+		switch c := line[i]; {
+		case c >= 0x80:
+			return 0, false
+		case c == '\t':
+			width += tabWidth - width%tabWidth
+		default:
+			width++
+		}
+	}
+	return width, true
+}
+
+func expandCellViewerTabs(line string, tabWidth int) string {
+	if !strings.ContainsRune(line, '\t') {
+		return line
+	}
+	var b strings.Builder
+	cells := 0
+	clusters := uniseg.NewGraphemes(line)
+	for clusters.Next() {
+		if clusters.Str() == "\t" {
+			// gocui tab stops count grapheme cells, not their display widths.
+			spaces := tabWidth - cells%tabWidth
+			b.WriteString(strings.Repeat(" ", spaces))
+			cells += spaces
+		} else {
+			b.WriteString(clusters.Str())
+			cells++
+		}
+	}
+	return b.String()
 }
 
 func (c *CellViewerContext) buildTitle() string {
