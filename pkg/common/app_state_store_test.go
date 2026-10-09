@@ -637,7 +637,7 @@ func TestReview_settings_storage_rejected_writes(t *testing.T) {
 			require.ErrorIs(t, s.SetCanonicalSessionSetting(tc.connID, tc.key, tc.value), ErrInvalidCanonicalSessionSetting)
 			require.Equal(t, &AppState{}, s.state)
 			require.Empty(t, clk.timers)
-			require.False(t, s.pending)
+			require.Zero(t, s.pending)
 		})
 	}
 	s := NewAppStateStore(afero.NewMemMapFs(), "/state.yml", newFakeClock())
@@ -769,6 +769,316 @@ func (r *recordingFs) Rename(oldname, newname string) error {
 }
 
 func (r *recordingFs) Name() string { return "recordingFs" }
+
+type reviewStoreWrite struct {
+	value   string
+	release chan error
+}
+
+type reviewStoreFS struct {
+	afero.Fs
+	writes chan reviewStoreWrite
+	stop   chan struct{}
+}
+
+func (f *reviewStoreFS) Rename(oldname, newname string) error {
+	var state AppState
+	if err := state.Load(f.Fs, oldname); err != nil {
+		return err
+	}
+	write := reviewStoreWrite{value: state.LastConnectionID, release: make(chan error, 1)}
+	select {
+	case f.writes <- write:
+	case <-f.stop:
+		return errReviewState
+	}
+	select {
+	case err := <-write.release:
+		if err != nil {
+			return err
+		}
+	case <-f.stop:
+		return errReviewState
+	}
+	return f.Fs.Rename(oldname, newname)
+}
+
+func reviewStoreFixture(t *testing.T) (*AppStateStore, *fakeClock, *reviewStoreFS, *sync.WaitGroup) {
+	t.Helper()
+	fs := &reviewStoreFS{Fs: afero.NewMemMapFs(), writes: make(chan reviewStoreWrite, 16), stop: make(chan struct{})}
+	require.NoError(t, (&AppState{LastConnectionID: "seed"}).Save(fs.Fs, "/state.yml"))
+	clock := newFakeClock()
+	store := NewAppStateStore(fs, "/state.yml", clock)
+	var workers sync.WaitGroup
+	t.Cleanup(func() {
+		close(fs.stop)
+		workers.Wait()
+		_ = store.Close()
+	})
+	return store, clock, fs, &workers
+}
+
+func reviewStoreStart(workers *sync.WaitGroup, fn func() error) <-chan error {
+	done := make(chan error, 1)
+	workers.Go(func() { done <- fn() })
+	return done
+}
+
+func reviewStoreNext(t *testing.T, fs *reviewStoreFS) reviewStoreWrite {
+	t.Helper()
+	select {
+	case write := <-fs.writes:
+		return write
+	case <-time.After(time.Second):
+		t.Fatal("state write did not reach the publication gate")
+		return reviewStoreWrite{}
+	}
+}
+
+func reviewStoreResult(t *testing.T, done <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(time.Second):
+		t.Fatal("state operation did not settle")
+		return nil
+	}
+}
+
+func reviewStoreBlocked(t *testing.T, done <-chan error) {
+	t.Helper()
+	select {
+	case err := <-done:
+		t.Fatalf("state waiter returned with outstanding work: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestReview_store_flush_tracks_newer_timer(t *testing.T) {
+	s, clock, fs, workers := reviewStoreFixture(t)
+	s.MutateAndSave(func(a *AppState) { a.LastConnectionID = "old" })
+	oldDone := reviewStoreStart(workers, func() error { clock.Advance(DebounceWindow); return nil })
+	old := reviewStoreNext(t, fs)
+	s.MutateAndSave(func(a *AppState) { a.LastConnectionID = "new" })
+	old.release <- nil
+	require.NoError(t, reviewStoreResult(t, oldDone))
+	flushed := reviewStoreStart(workers, s.Flush)
+	reviewStoreBlocked(t, flushed)
+	newDone := reviewStoreStart(workers, func() error { clock.Advance(DebounceWindow); return nil })
+	newWrite := reviewStoreNext(t, fs)
+	require.Equal(t, "new", newWrite.value)
+	newWrite.release <- nil
+	require.NoError(t, reviewStoreResult(t, newDone))
+	require.NoError(t, reviewStoreResult(t, flushed))
+}
+
+func TestReview_store_ordered_writes(t *testing.T) {
+	for _, later := range []string{"debounced", "direct"} {
+		for _, failure := range []string{"none", "old", "new", "both"} {
+			t.Run(later+"/"+failure, func(t *testing.T) {
+				s, clock, fs, workers := reviewStoreFixture(t)
+				s.MutateAndSave(func(a *AppState) { a.LastConnectionID = "old" })
+				oldDone := reviewStoreStart(workers, func() error { clock.Advance(DebounceWindow); return nil })
+				old := reviewStoreNext(t, fs)
+				require.Equal(t, "old", old.value)
+				mutated := reviewStoreStart(workers, func() error {
+					for i := range 20 {
+						s.MutateAndSave(func(a *AppState) { a.LastConnectionID = "new-" + intToStr(i) })
+					}
+					return nil
+				})
+				require.NoError(t, reviewStoreResult(t, mutated), "slow I/O must not block mutations")
+				var oldErr, newErr error
+				if failure == "old" || failure == "both" {
+					oldErr = errReviewState
+				}
+				if failure == "new" || failure == "both" {
+					newErr = errors.New("synthetic newer save failure")
+				}
+				newDone := reviewStoreStart(workers, func() error {
+					if later == "direct" {
+						return s.Save()
+					}
+					clock.Advance(DebounceWindow)
+					return nil
+				})
+				var fresh reviewStoreWrite
+				select {
+				case fresh = <-fs.writes:
+					// An unserialized implementation permits the newer rename first.
+					fresh.release <- newErr
+					want := error(nil)
+					if later == "direct" {
+						want = newErr
+					}
+					require.ErrorIs(t, reviewStoreResult(t, newDone), want)
+					old.release <- oldErr
+					require.NoError(t, reviewStoreResult(t, oldDone))
+				case <-time.After(100 * time.Millisecond):
+					// Correct serialization holds the newer write behind the old one.
+					old.release <- oldErr
+					require.NoError(t, reviewStoreResult(t, oldDone))
+					fresh = reviewStoreNext(t, fs)
+					fresh.release <- newErr
+					want := error(nil)
+					if later == "direct" {
+						want = newErr
+					}
+					require.ErrorIs(t, reviewStoreResult(t, newDone), want)
+				}
+				require.Equal(t, "new-19", fresh.value)
+				wantErr := newErr
+				if later == "direct" {
+					// Direct Save does not replace the debounced error; Close cancels
+					// the still-unfired debounce without hiding write-order failures.
+					wantErr = oldErr
+					require.ErrorIs(t, s.Close(), wantErr)
+				}
+				require.ErrorIs(t, s.Flush(), wantErr)
+				require.ErrorIs(t, s.LastSaveErr(), wantErr)
+				var disk AppState
+				require.NoError(t, disk.Load(fs.Fs, "/state.yml"))
+				wantValue := "new-19"
+				if newErr != nil {
+					wantValue = "old"
+					if oldErr != nil {
+						wantValue = "seed"
+					}
+				}
+				require.Equal(t, wantValue, disk.LastConnectionID, "older snapshots may not overwrite newer durable state")
+				if later == "debounced" {
+					s.MutateAndSave(func(a *AppState) { a.LastConnectionID = "recovered" })
+					recovered := reviewStoreStart(workers, func() error { clock.Advance(DebounceWindow); return nil })
+					write := reviewStoreNext(t, fs)
+					require.Equal(t, "recovered", write.value)
+					write.release <- nil
+					require.NoError(t, reviewStoreResult(t, recovered))
+					require.NoError(t, s.Flush())
+					require.NoError(t, s.LastSaveErr())
+				}
+			})
+		}
+	}
+}
+
+func TestReview_store_flush_direct_save(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "error"}[fail], func(t *testing.T) {
+			s, _, fs, workers := reviewStoreFixture(t)
+			saved := reviewStoreStart(workers, s.Save)
+			write := reviewStoreNext(t, fs)
+			flushed := reviewStoreStart(workers, s.Flush)
+			reviewStoreBlocked(t, flushed)
+			var wantErr error
+			if fail {
+				wantErr = errReviewState
+			}
+			write.release <- wantErr
+			require.ErrorIs(t, reviewStoreResult(t, saved), wantErr)
+			require.NoError(t, reviewStoreResult(t, flushed), "direct Save owns its error")
+			require.NoError(t, s.LastSaveErr())
+		})
+	}
+}
+
+// Stop must report false once a timer fires, even before its callback enters.
+func reviewStoreFiredCallback(clock *fakeClock) func() {
+	clock.mu.Lock()
+	defer clock.mu.Unlock()
+	timer := clock.timers[len(clock.timers)-1]
+	timer.fired = true
+	return timer.fn
+}
+
+func TestReview_store_shutdown_accounting(t *testing.T) {
+	for _, scenario := range []string{"debounced", "new_unfired_timer", "queued_debounced", "direct", "fired_before_entry"} {
+		for _, fail := range []bool{false, true} {
+			name := scenario + "/success"
+			if fail {
+				name = scenario + "/error"
+			}
+			t.Run(name, func(t *testing.T) {
+				s, clock, fs, workers := reviewStoreFixture(t)
+				var oldDone, freshDone <-chan error
+				var old reviewStoreWrite
+				var admit func()
+				switch scenario {
+				case "direct":
+					oldDone = reviewStoreStart(workers, s.Save)
+					old = reviewStoreNext(t, fs)
+				case "fired_before_entry":
+					s.MutateAndSave(func(a *AppState) { a.LastConnectionID = "old" })
+					callback := reviewStoreFiredCallback(clock)
+					start := make(chan struct{})
+					var once sync.Once
+					admit = func() { once.Do(func() { close(start) }) }
+					t.Cleanup(admit)
+					oldDone = reviewStoreStart(workers, func() error { <-start; callback(); return nil })
+				default:
+					s.MutateAndSave(func(a *AppState) { a.LastConnectionID = "old" })
+					oldDone = reviewStoreStart(workers, func() error { clock.Advance(DebounceWindow); return nil })
+					old = reviewStoreNext(t, fs)
+					if scenario == "new_unfired_timer" || scenario == "queued_debounced" {
+						s.MutateAndSave(func(a *AppState) { a.LastConnectionID = "new" })
+					}
+					if scenario == "queued_debounced" {
+						callback := reviewStoreFiredCallback(clock)
+						freshDone = reviewStoreStart(workers, func() error { callback(); return nil })
+					}
+				}
+				closed := reviewStoreStart(workers, s.Close)
+				require.Eventually(t, s.closed.Load, time.Second, time.Millisecond)
+				repeatClose := reviewStoreStart(workers, s.Close)
+				reviewStoreBlocked(t, closed)
+				reviewStoreBlocked(t, repeatClose)
+				if admit != nil {
+					admit()
+					old = reviewStoreNext(t, fs)
+				}
+				var writeErr error
+				if fail {
+					writeErr = errReviewState
+				}
+				old.release <- writeErr
+				wantSaveErr := error(nil)
+				wantCloseErr := writeErr
+				if scenario == "direct" {
+					wantSaveErr = writeErr
+					wantCloseErr = nil
+				}
+				require.ErrorIs(t, reviewStoreResult(t, oldDone), wantSaveErr)
+				if freshDone != nil {
+					fresh := reviewStoreNext(t, fs)
+					reviewStoreBlocked(t, closed)
+					reviewStoreBlocked(t, repeatClose)
+					require.Equal(t, "new", fresh.value)
+					fresh.release <- nil
+					require.NoError(t, reviewStoreResult(t, freshDone))
+					wantCloseErr = nil
+				}
+				require.ErrorIs(t, reviewStoreResult(t, closed), wantCloseErr)
+				require.NoError(t, reviewStoreResult(t, repeatClose), "repeat Close preserves its nil return")
+				clock.Advance(DebounceWindow)
+				select {
+				case <-fs.writes:
+					t.Fatal("shutdown persisted an unexpired debounce")
+				default:
+				}
+				// Save remains permitted after the shutdown-completion boundary;
+				// Flush accounts for it, but repeat Close does not restart shutdown.
+				afterClose := reviewStoreStart(workers, s.Save)
+				write := reviewStoreNext(t, fs)
+				require.NoError(t, s.Close())
+				flushed := reviewStoreStart(workers, s.Flush)
+				reviewStoreBlocked(t, flushed)
+				write.release <- nil
+				require.NoError(t, reviewStoreResult(t, afterClose))
+				require.ErrorIs(t, reviewStoreResult(t, flushed), wantCloseErr)
+			})
+		}
+	}
+}
 
 // intToStr is a tiny stdlib-free int formatter to keep the test file's import
 // surface minimal (we already pull in testify + afero).

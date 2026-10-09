@@ -71,28 +71,26 @@ func DefaultClock() Clock { return realClock{} }
 //     marshals the snapshot. This eliminates the yaml.Marshal-vs-concurrent-
 //     map-write panic flagged by Adv-A (M06b).
 type AppStateStore struct {
-	mu    sync.Mutex
-	state *AppState
-	fs    afero.Fs
-	path  string
-	clock Clock
+	// Writers take writeMu before snapshotting; never wait for it under mu.
+	writeMu sync.Mutex
+	mu      sync.Mutex
+	state   *AppState
+	fs      afero.Fs
+	path    string
+	clock   Clock
 
-	// Debounce coordination. timer is reset on every MutateAndSave; on fire it
-	// signals saveTrigger. The background loop performs the actual write and
-	// updates saveInflight so Flush can wait.
-	timer Timer
-
-	// pending is true when a MutateAndSave has scheduled a save that has not
-	// yet completed (either the debounce timer is running OR a save is in
-	// flight). pendingCond broadcasts when pending transitions to false so
-	// Flush can wake.
-	pending     bool
+	// A stopped timer cancels only its own ticket; older fired callbacks may
+	// still be writing. Direct Save calls are accounted for separately.
+	timer       *debouncedSave
+	pending     int
+	saving      int
 	pendingCond *sync.Cond
 
 	// closed transitions to true exactly once when Close is called.
-	closed atomic.Bool
+	closed    atomic.Bool
+	closeDone chan struct{}
 
-	// lastSaveErr records the most recent debounced-save error. Read under mu.
+	// lastSaveErr records background-save, mutation, and load errors. Read under mu.
 	lastSaveErr error
 	// A failed load must not be followed by overwriting that file with
 	// the previous (or zero) state. Cleared only by a successful Load.
@@ -105,6 +103,10 @@ type AppStateStore struct {
 	// call sites that don't care about logging. Nil-tolerant — every emit
 	// goes through logs.Event which no-ops on nil.
 	log *slog.Logger
+}
+
+type debouncedSave struct {
+	timer Timer
 }
 
 // SetLogger wires the per-session structured logger used by the
@@ -121,10 +123,11 @@ func NewAppStateStore(fs afero.Fs, path string, clock Clock) *AppStateStore {
 		clock = DefaultClock()
 	}
 	s := &AppStateStore{
-		state: &AppState{},
-		fs:    fs,
-		path:  path,
-		clock: clock,
+		state:     &AppState{},
+		fs:        fs,
+		path:      path,
+		clock:     clock,
+		closeDone: make(chan struct{}),
 	}
 	s.pendingCond = sync.NewCond(&s.mu)
 	return s
@@ -156,30 +159,30 @@ func (s *AppStateStore) mutationErrLocked() error {
 }
 
 func (s *AppStateStore) scheduleSaveLocked() bool {
-	// Mark pending and (re)arm the debounce timer.
-	hadPending := s.pending
-	s.pending = true
-	if s.timer != nil {
-		s.timer.Stop()
+	hadPending := s.pending > 0
+	if s.timer != nil && s.timer.timer.Stop() {
+		s.pending--
 	}
-	s.timer = s.clock.AfterFunc(DebounceWindow, s.debouncedFire)
+	ticket := &debouncedSave{}
+	s.timer = ticket
+	s.pending++
+	ticket.timer = s.clock.AfterFunc(DebounceWindow, func() { s.debouncedFire(ticket) })
 	return hadPending
 }
 
 // debouncedFire is invoked by the Clock after the debounce window elapses. It
-// performs a synchronous Save on a defensive snapshot, then clears the pending
-// flag and broadcasts to Flush waiters.
-func (s *AppStateStore) debouncedFire() {
-	// If Close happened between the timer scheduling and firing, do nothing —
-	// Close already cleared pending and broadcast.
-	if s.closed.Load() {
-		return
-	}
+// drains its admitted ticket even if Close began after the timer fired.
+func (s *AppStateStore) debouncedFire(ticket *debouncedSave) {
 	start := time.Now()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	err := s.saveSnapshot()
 	s.mu.Lock()
 	s.lastSaveErr = err
-	s.pending = false
+	s.pending--
+	if s.timer == ticket {
+		s.timer = nil
+	}
 	s.pendingCond.Broadcast()
 	s.mu.Unlock()
 	logs.Event(s.log, "state", "appstate_save_fire",
@@ -189,7 +192,7 @@ func (s *AppStateStore) debouncedFire() {
 }
 
 // saveSnapshot is the shared core: under mu, take a deep-copy snapshot of the
-// AppState; release mu; yaml.Marshal + atomic write outside the lock. This is
+// AppState; release mu; yaml.Marshal + atomic write while holding writeMu. This is
 // what eliminates the yaml.Marshal vs concurrent map-write panic (Adv-A / M06b).
 func (s *AppStateStore) saveSnapshot() error {
 	s.mu.Lock()
@@ -208,9 +211,19 @@ func (s *AppStateStore) saveSnapshot() error {
 // Save synchronously writes the current state to disk via the snapshot
 // pattern. Unlike MutateAndSave it does NOT debounce — useful for bootstrap /
 // shutdown paths that want a definitive on-disk write. Safe to call
-// concurrently with MutateAndSave.
+// concurrently with MutateAndSave, and remains allowed after Close.
 func (s *AppStateStore) Save() error {
-	return s.saveSnapshot()
+	s.mu.Lock()
+	s.saving++
+	s.mu.Unlock()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	err := s.saveSnapshot()
+	s.mu.Lock()
+	s.saving--
+	s.pendingCond.Broadcast()
+	s.mu.Unlock()
+	return err
 }
 
 // Load synchronously reads the YAML file at the store's path into the wrapped
@@ -234,12 +247,12 @@ func (s *AppStateStore) Load() error {
 	return err
 }
 
-// Flush blocks until any pending debounced Save has completed. Safe to call
-// from a signal handler. If no save is pending, Flush returns immediately.
-// Returns the last save error, if any.
+// Flush waits for all scheduled callbacks and admitted direct saves. It does
+// not expedite the debounce timer. Direct Save errors remain caller-owned;
+// Flush returns the last background-save, mutation, or load error.
 func (s *AppStateStore) Flush() error {
 	s.mu.Lock()
-	for s.pending {
+	for s.pending > 0 || s.saving > 0 {
 		s.pendingCond.Wait()
 	}
 	err := s.lastSaveErr
@@ -247,48 +260,39 @@ func (s *AppStateStore) Flush() error {
 	return err
 }
 
-// Close drains any in-flight debounced Save and stops the background timer.
+// Close stops unexpired debounce work and drains all admitted writes.
 // After Close returns, MutateAndSave is a no-op (records errStoreClosed).
 // Close is idempotent and safe to call concurrently with other operations.
 func (s *AppStateStore) Close() error {
 	// Set closed first so MutateAndSave callers stop arming new timers.
 	if !s.closed.CompareAndSwap(false, true) {
+		<-s.closeDone
 		return nil
 	}
 	s.mu.Lock()
 	drainedPending := 0
-	if s.pending {
+	if s.pending > 0 {
 		drainedPending = 1
 	}
 	if s.timer != nil {
-		// If Stop returns false the timer either already fired (debouncedFire
-		// is running concurrently — we'll wait via pendingCond) or was already
-		// stopped. Either way the pending flag will be cleared by the firing
-		// goroutine.
-		if s.timer.Stop() {
-			// We stopped the timer before it fired; clear pending ourselves
-			// and broadcast for any Flush waiters.
-			s.pending = false
+		if s.timer.timer.Stop() {
+			s.pending--
 			s.pendingCond.Broadcast()
 		}
 		s.timer = nil
-	} else {
-		// No timer ever armed; ensure waiters are released.
-		s.pending = false
-		s.pendingCond.Broadcast()
 	}
-	// Wait for any in-flight debouncedFire to drain.
-	for s.pending {
+	for s.pending > 0 || s.saving > 0 {
 		s.pendingCond.Wait()
 	}
 	err := s.lastSaveErr
+	close(s.closeDone)
 	s.mu.Unlock()
 	logs.Event(s.log, "state", "appstate_close", slog.Int("drained_pending", drainedPending))
 	return err
 }
 
-// LastSaveErr returns the most recent save error (debounced or synchronous).
-// Returns nil if the last save succeeded or no save has been attempted.
+// LastSaveErr returns the latest background-save, mutation, or load error.
+// Synchronous Save reports its error only to its caller.
 func (s *AppStateStore) LastSaveErr() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
