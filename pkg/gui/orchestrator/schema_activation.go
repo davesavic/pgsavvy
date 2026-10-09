@@ -16,6 +16,9 @@ type schemaActivationRequest struct {
 }
 
 func (g *Gui) cancelSchemaActivation() {
+	// Activation and refresh both publish the same rails. Lifecycle changes
+	// must revoke queued refresh publications as well as in-flight loads.
+	g.cancelSchemaRefreshes()
 	g.schemaActivationMu.Lock()
 	r := g.schemaActivationRequest
 	g.schemaActivationRequest = nil
@@ -133,12 +136,12 @@ func (g *Gui) activateSchema(inv *connectInvoker, schema string) {
 			if schemaErr != nil {
 				g.deps.Common.Logger().Warn("gui: load schemas after connect", "err", schemaErr)
 			}
-			if schemaItems != nil {
+			if schemaItems != nil && g.schemaRefreshCurrent(guicontext.SchemaRailTabSchemas, nil) {
 				inv.publishSchemaItems(schemaItems, true)
 			}
 			if tableErr != nil {
 				g.deps.Common.Logger().Warn(fmt.Sprintf("gui: load tables for schema %q: %v", schema, tableErr))
-			} else if registry.Tables != nil {
+			} else if registry.Tables != nil && g.schemaRefreshCurrent(guicontext.SchemaRailTabTables, nil) {
 				registry.Tables.SetItems(tableItems)
 			}
 			if registry.SchemaRail != nil {

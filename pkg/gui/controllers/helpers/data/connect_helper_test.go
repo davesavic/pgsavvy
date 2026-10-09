@@ -60,6 +60,7 @@ func TestReview_inspector_session_binding(t *testing.T) {
 		"constraints": func(ctx context.Context) error { _, err := h.LoadConstraints(ctx, "public", "t"); return err },
 		"stats":       func(ctx context.Context) error { _, _, err := h.LoadTableStats(ctx, "public", "t"); return err },
 		"tables":      func(ctx context.Context) error { _, err := h.LoadTables(ctx, "public"); return err },
+		"schemas":     func(ctx context.Context) error { _, err := h.LoadSchemas(ctx, ""); return err },
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := load(bound); !errors.Is(err, ErrSessionReplaced) {
@@ -97,6 +98,7 @@ type fakeSession struct {
 	inFlight      atomic.Int32
 	maxInFlight   atomic.Int32
 	tablesCalls   atomic.Int32
+	schemasCalls  atomic.Int32
 	tablesBlock   chan struct{} // when non-nil, ListTables blocks on receive
 	tablesObserve chan struct{} // when non-nil, ListTables sends here on entry
 	listTablesErr error
@@ -120,7 +122,85 @@ func (s *fakeSession) ListDatabases(_ context.Context) ([]models.Database, error
 }
 
 func (s *fakeSession) ListSchemas(_ context.Context, _ string) ([]models.Schema, error) {
+	s.schemasCalls.Add(1)
 	return []models.Schema{{Name: "public"}}, nil
+}
+
+type refreshQueueContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *refreshQueueContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+func TestConnectHelperRailRefreshFullQueueCancellation(t *testing.T) {
+	for _, schemas := range []bool{false, true} {
+		t.Run(fmt.Sprint(schemas), func(t *testing.T) {
+			sess := &fakeSession{tablesBlock: make(chan struct{}), tablesObserve: make(chan struct{}, 1)}
+			h := connectFakeFuncDetail(t, fmt.Sprintf("refresh-full-%d", reviewInspectorBindingID.Add(1)), sess)
+			ctx, cancel := context.WithCancel(context.Background())
+			var wg sync.WaitGroup
+			t.Cleanup(func() { cancel(); wg.Wait() })
+			queue := h.state.queue
+			for i := 0; i <= cap(queue); i++ {
+				wg.Go(func() { _, _ = h.LoadTables(ctx, "public") })
+			}
+			select {
+			case <-sess.tablesObserve:
+			case <-time.After(time.Second):
+				t.Fatal("queue blocker did not enter")
+			}
+			deadline := time.Now().Add(time.Second)
+			for len(queue) != cap(queue) && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+			if len(queue) != cap(queue) {
+				t.Fatal("metadata queue did not fill")
+			}
+			parent, cancelTarget := context.WithCancel(context.Background())
+			t.Cleanup(cancelTarget)
+			waiting := &refreshQueueContext{Context: parent, waiting: make(chan struct{})}
+			target, _ := h.BindSessionContext(waiting)
+			done := make(chan error, 1)
+			go func() {
+				if schemas {
+					_, err := h.LoadSchemas(target, "")
+					done <- err
+				} else {
+					_, err := h.LoadTables(target, "public")
+					done <- err
+				}
+			}()
+			// Done is first evaluated by safeSend, after submit's pre-cancel
+			// check. The queue remains full, so this cannot test only the fast path.
+			select {
+			case <-waiting.waiting:
+			case <-time.After(time.Second):
+				t.Fatal("refresh did not reach the full-queue send")
+			}
+			select {
+			case err := <-done:
+				t.Fatalf("full queue admitted target: %v", err)
+			default:
+			}
+			cancelTarget()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("canceled full queue request returned %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("full queue prevented refresh cancellation")
+			}
+			if sess.tablesCalls.Load() != 1 || sess.schemasCalls.Load() != 0 || sess.maxInFlight.Load() != 1 {
+				t.Fatal("queued/canceled refresh bypassed the metadata serializer")
+			}
+		})
+	}
 }
 
 func (s *fakeSession) ListTables(ctx context.Context, _ string) ([]*models.Table, error) {

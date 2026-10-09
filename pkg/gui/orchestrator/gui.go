@@ -242,6 +242,8 @@ type Gui struct {
 	schemaActivationMu      sync.Mutex
 	schemaActivationRequest *schemaActivationRequest
 	schemaActivationRunMu   sync.Mutex
+	schemaRefreshMu         sync.Mutex
+	schemaRefreshRequests   [2]*schemaRefreshRequest
 	settingsRunMu           sync.Mutex
 
 	// Query-execution state surfaced by the query runtime.

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/query"
 )
@@ -60,3 +61,7 @@ func (g *Gui) ToastHelpForTest() *ui.ToastHelper {
 	}
 	return g.toastHelp
 }
+
+func (g *Gui) MetadataHelperForTest() *data.ConnectHelper { return g.connectHelper }
+
+func (g *Gui) RefreshHelperForTest() *data.RefreshHelper { return g.refreshHelper }

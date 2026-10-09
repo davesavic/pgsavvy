@@ -316,38 +316,14 @@ func (g *Gui) wireUIHelpers(tr *i18n.TranslationSet) {
 	g.tipHelp = ui.NewTipHelper(g.tree, g.deps.Store)
 }
 
-// wireRefreshHelperDeps wires the RefreshHelper closures over the live
-// populateXxxRail helpers + refreshConnectionsRail. Extracted verbatim from
-// wireWithDriver.
+// wireRefreshHelperDeps binds refresh actions to the active connection.
 func (g *Gui) wireRefreshHelperDeps(connectInv *connectInvoker) {
-	// wire the RefreshHelper closures over the live
-	// populateXxxRail helpers + refreshConnectionsRail. Each closure
-	// reloads driver data AND pushes it through the rail context's
-	// SetItems. RefreshTables/Columns/Indexes apply a stale-guard
-	// against the rail's currently-selected schema/table identifier:
-	// if the user navigated away while Load was in flight, the load
-	// result is discarded so a stale list never overwrites the new
-	// focus's rail.
 	g.refreshHelper.SetSchemasRefresher(func(ctx context.Context) error {
-		// a manual schemas-rail refresh is the user's signal
-		// that on-disk schema/table shape may have changed, so drop the FK
-		// metadata cache; B5/B6 navigation will repopulate on demand.
-		if g.queryState.activeSQLSession != nil {
-			if fkc := g.queryState.activeSQLSession.FKCache(); fkc != nil {
-				fkc.InvalidateAll()
-			}
-		}
-		connectInv.populateSchemasRail(ctx)
+		g.refreshSchemaRail(ctx, connectInv, guicontext.SchemaRailTabSchemas, "")
 		return nil
 	})
 	g.refreshHelper.SetTablesRefresher(func(ctx context.Context, schema string) error {
-		if g.registry != nil && g.registry.Schemas != nil {
-			cur := schemasPickerAdapter{registry: g.registry.Schemas}.SelectedSchemaName()
-			if cur != "" && cur != schema {
-				return nil
-			}
-		}
-		connectInv.populateTablesRail(ctx, schema)
+		g.refreshSchemaRail(ctx, connectInv, guicontext.SchemaRailTabTables, schema)
 		return nil
 	})
 	g.refreshHelper.SetColumnsRefresher(func(ctx context.Context, schema, table string) error {
@@ -381,6 +357,150 @@ func (g *Gui) wireRefreshHelperDeps(connectInv *connectInvoker) {
 		connectInv.populateIndexesRail(ctx, schema, table)
 		return nil
 	})
+}
+
+type schemaRefreshRequest struct {
+	cancel context.CancelFunc
+}
+
+func (g *Gui) cancelSchemaRefreshes() {
+	g.schemaRefreshMu.Lock()
+	requests := g.schemaRefreshRequests
+	g.schemaRefreshRequests = [2]*schemaRefreshRequest{}
+	g.schemaRefreshMu.Unlock()
+	for _, request := range requests {
+		if request != nil {
+			request.cancel()
+		}
+	}
+}
+
+func (g *Gui) schemaRefreshCurrent(tab int, request *schemaRefreshRequest) bool {
+	g.schemaRefreshMu.Lock()
+	defer g.schemaRefreshMu.Unlock()
+	return g.schemaRefreshRequests[tab] == request
+}
+
+// Reconnect also calls this from a worker. Reserve ownership on either lane,
+// then marshal UI-state capture before dispatching the metadata load.
+func (g *Gui) refreshSchemaRail(parent context.Context, inv *connectInvoker, tab int, schema string) {
+	if g.closed.Load() || inv == nil || inv.helper == nil {
+		return
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	ctx, sessionCurrent := inv.helper.BindSessionContext(ctx)
+	request := &schemaRefreshRequest{cancel: cancel}
+	g.schemaRefreshMu.Lock()
+	previous := g.schemaRefreshRequests[tab]
+	g.schemaRefreshRequests[tab] = request
+	g.schemaRefreshMu.Unlock()
+	if previous != nil {
+		previous.cancel()
+	}
+	gen := g.connectionState.connectGen.Load()
+	current := func() bool {
+		// Worker completion releases its load context without revoking queued
+		// publication. Supersession/retirement revoke request ownership instead.
+		return g.schemaRefreshCurrent(tab, request) && !g.closed.Load() && parent.Err() == nil &&
+			g.connectionState.connectGen.Load() == gen && sessionCurrent()
+	}
+	g.OnUIThread(func() error {
+		if !current() || g.registry == nil || g.registry.Schemas == nil || g.registry.Tables == nil {
+			cancel()
+			return nil
+		}
+		registry, schemasHelper := g.registry, g.schemasHelper
+		if tab == guicontext.SchemaRailTabTables && (schemasPickerAdapter{registry: registry.Schemas}).SelectedSchemaName() != schema {
+			cancel()
+			return nil
+		}
+		sess, connID := g.queryState.activeSQLSession, g.connectionState.activeConnID
+		if tab == guicontext.SchemaRailTabSchemas && sess != nil {
+			// Manual refresh signals changed schema shape; navigation repopulates
+			// the FK cache on demand. Read the active SQL session only on MainLoop.
+			if cache := sess.FKCache(); cache != nil {
+				cache.InvalidateAll()
+			}
+		}
+		g.OnWorker(func(gocui.Task) error {
+			defer cancel()
+			if !current() {
+				return nil
+			}
+			var items []any
+			var err error
+			if tab == guicontext.SchemaRailTabSchemas {
+				var schemas []models.Schema
+				schemas, err = inv.helper.LoadSchemas(ctx, "")
+				if err == nil {
+					if schemasHelper != nil {
+						builtin, profile := defaultHiddenPatterns()
+						schemas, _ = schemasHelper.FilterHidden(schemas, builtin, profile, nil)
+					}
+					items = make([]any, len(schemas))
+					for i := range schemas {
+						items[i] = schemas[i]
+					}
+				}
+			} else {
+				var tables []*models.Table
+				tables, err = inv.helper.LoadTables(ctx, schema)
+				items = make([]any, len(tables))
+				for i := range tables {
+					items[i] = tables[i]
+				}
+			}
+			if !current() {
+				return nil
+			}
+			g.OnUIThread(func() error {
+				if !current() || g.queryState.activeSQLSession != sess || g.connectionState.activeConnID != connID {
+					return nil
+				}
+				if tab == guicontext.SchemaRailTabTables && (schemasPickerAdapter{registry: registry.Schemas}).SelectedSchemaName() != schema {
+					return nil
+				}
+				if err != nil {
+					g.deps.Common.Logger().Warn("gui: refresh schema rail", "schema", schema, "err", err)
+					return nil
+				}
+				if tab == guicontext.SchemaRailTabSchemas {
+					selected := schemasPickerAdapter{registry: registry.Schemas}.SelectedSchemaName()
+					registry.Schemas.SetItems(items)
+					for i, item := range items {
+						if item.(models.Schema).Name == selected {
+							registry.Schemas.SetCursor(i)
+							break
+						}
+					}
+				} else {
+					selected := tablesPickerAdapter{registry: registry.Tables}.SelectedTable()
+					registry.Tables.SetItems(items)
+					if selected != nil {
+						for i, item := range items {
+							table := item.(*models.Table)
+							if table != nil && table.Schema == selected.Schema && table.Name == selected.Name {
+								registry.Tables.SetCursor(i)
+								break
+							}
+						}
+					}
+				}
+				return nil
+			})
+			return nil
+		})
+		if g.closed.Load() {
+			cancel()
+		}
+		return nil
+	})
+	if g.closed.Load() || g.driver == nil {
+		cancel()
+	}
 }
 
 // wireNavDeps builds the NavDeps bundle. Connect is the required (compile-time)
