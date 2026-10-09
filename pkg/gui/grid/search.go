@@ -11,7 +11,7 @@ import (
 // searchState carries the in-grid plain-substring SEARCH.
 // Search never hides rows — it produces a
 // cell-major match list with UTF-8 byte offsets into each cell's
-// renderCellPlain output, and drives n/N cursor navigation across cells
+// renderGridCellText output, and drives n/N cursor navigation across cells
 // in reading order. The match list is recomputed under the write lock on
 // SetSearch and copied defensively into the snapshot under RLock so a
 // held render frame can't tear while a concurrent SetSearch / Next / Prev
@@ -166,7 +166,7 @@ func copyMatches(in []cellMatch) []cellMatch {
 
 // computeMatchesLocked builds the cell-major match list in reading order
 // (row ascending, then col ascending) over every loaded cell. Each cell
-// is stringified via renderCellPlain so byte offsets align exactly with
+// is stringified via renderGridCellText so byte offsets align exactly with
 // what the highlight pass will render. Caller holds v.mu.
 func computeMatchesLocked(rows []models.Row, cols []models.ColumnMeta, query string, caseSensitive bool) []cellMatch {
 	out := make([]cellMatch, 0)
@@ -177,7 +177,7 @@ func computeMatchesLocked(rows []models.Row, cols []models.ColumnMeta, query str
 			if c < len(row.Values) {
 				val = row.Values[c]
 			}
-			cell := renderCellPlain(val, cols[c])
+			cell := renderGridCellText(val, cols[c])
 			for _, span := range substringMatches(cell, query, caseSensitive) {
 				out = append(out, cellMatch{
 					row:       r,

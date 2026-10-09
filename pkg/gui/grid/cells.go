@@ -112,7 +112,7 @@ func classifyColumn(col models.ColumnMeta) cellKind {
 // Returns (visible, ansi-decorated). The visible string is the same
 // content without SGR escapes, used for width computation.
 func renderCell(value any, col models.ColumnMeta) (visible, decorated string) {
-	visible = renderCellPlain(value, col)
+	visible = renderGridCellText(value, col)
 	style := styleForCell(value, col)
 	decorated = wrapWithStyle(visible, style)
 	return visible, decorated
@@ -141,7 +141,7 @@ func renderCellWithDirty(value any, col models.ColumnMeta, isDirty bool) (visibl
 // visible string before wrapping mirrors renderDataLine's clean path so a
 // digit in the SGR prefix can never collide with a padded value.
 func renderCellPadded(value any, col models.ColumnMeta, w int, isDirty bool) string {
-	visible := renderCellPlain(value, col)
+	visible := renderGridCellText(value, col)
 	padded := padRight(visible, w)
 	styled := wrapWithStyle(padded, styleForCell(value, col))
 	if isDirty {
@@ -150,8 +150,19 @@ func renderCellPadded(value any, col models.ColumnMeta, w int, isDirty bool) str
 	return styled
 }
 
-// renderCellPlain is the unstyled cell stringifier. Used for column
-// auto-sizing (where SGR escapes would skew the width) and for TSV
+func renderGridCellText(value any, col models.ColumnMeta) string {
+	return gridDisplayText(renderCellPlain(value, col))
+}
+
+// Only the grid projects control characters onto one physical line. Viewers,
+// yanks and exporters retain their existing multiline value representations.
+func gridDisplayText(s string) string {
+	s = SanitizeCellEscapes(s)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	return strings.ReplaceAll(s, "\t", `\t`)
+}
+
+// renderCellPlain is the unstyled cell stringifier. Used for TSV
 // yank output (which must not carry colour codes). All non-NULL
 // strings are routed through SanitizeCellEscapes
 // so untrusted server output cannot bleed terminal escapes into the

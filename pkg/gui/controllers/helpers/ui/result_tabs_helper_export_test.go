@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"encoding/csv"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -256,4 +258,40 @@ func selectExportClipboardScope(h *ResultTabsHelper, format string, scope int) {
 	h.ExportMenuMoveValue(-1)
 	h.ExportMenuMoveField(1)
 	h.ExportMenuMoveValue(scope)
+}
+
+func TestGridVisibleExportRetainsControls(t *testing.T) {
+	h, runner, clipboard, _ := newScopedExportHelper(t, 0, 0)
+	g := h.Active().Grid()
+	values := []string{"before", "line\n界\tvalue", "after\trow", "tail"}
+	for _, value := range values {
+		g.AppendRows([]models.Row{{Values: []any{value}}})
+	}
+	target := gocui.NewView("visible-controls", 0, 0, 60, 4, gocui.OutputNormal)
+	target.Wrap = false
+	for i, cursor := range []int{0, 2, 3} {
+		g.SetCursor(cursor, 0)
+		g.Render(target)
+		lines := target.ViewBufferLines()
+		if len(lines) != 3 {
+			t.Fatalf("native view has %d lines, want header and two database rows", len(lines))
+		}
+		for j, value := range values[i : i+2] {
+			visible := strings.NewReplacer("\n", `\n`, "\t", `\t`).Replace(value)
+			if !strings.Contains(lines[j+1], visible) {
+				t.Fatalf("native row %d does not show expected record %q: %q", j, value, lines[j+1])
+			}
+		}
+		h.PromptExport()
+		selectExportClipboardScope(h, "CSV", exportScopeVisible)
+		h.ExportMenuConfirm()
+		records, err := csv.NewReader(strings.NewReader(clipboard.got)).ReadAll()
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := [][]string{{"value"}, {values[i]}, {values[i+1]}}
+		if !reflect.DeepEqual(records, want) || clipboard.calls != i+1 || runner.ReadToEndCount() != 0 {
+			t.Fatalf("visible export changed raw values or scope: records=%q calls=%d drains=%d", records, clipboard.calls, runner.ReadToEndCount())
+		}
+	}
 }

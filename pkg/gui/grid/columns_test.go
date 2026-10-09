@@ -1,6 +1,8 @@
 package grid
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -145,9 +147,15 @@ func TestReview_width_truncate_clusters(t *testing.T) {
 }
 
 func TestReview_width_eastasian_markers(t *testing.T) {
-	previous := runewidth.DefaultCondition
-	runewidth.DefaultCondition = &runewidth.Condition{EastAsianWidth: true, StrictEmojiNeutral: true}
-	t.Cleanup(func() { runewidth.DefaultCondition = previous })
+	// tcell fixes its locale policy at startup; mutating go-runewidth alone
+	// no longer exercises the actual native width branch.
+	if os.Getenv("PGSAVVY_NATIVE_WIDTH_CHILD") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestReview_width_eastasian_markers$", "-test.timeout=30s")
+		cmd.Env = append(os.Environ(), "RUNEWIDTH_EASTASIAN=1", "PGSAVVY_NATIVE_WIDTH_CHILD=1")
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		return
+	}
 	require.Equal(t, 2, displayWidth("…"), "exercise the wide-marker branch")
 	for _, input := range []string{"abcdefgh", "中文测试", "e\u0301xyz", "👩‍💻abc", "👍🏽abc"} {
 		for w := 0; w <= 8; w++ {

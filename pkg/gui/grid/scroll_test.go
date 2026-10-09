@@ -851,3 +851,92 @@ func TestReview_width_header_body_hit_coordinates(t *testing.T) {
 		require.Equal(t, width, runewidth.StringWidth(line))
 	}
 }
+
+func TestGridControlsKeepRowsAndRawValues(t *testing.T) {
+	rows := []models.Row{
+		{Values: []any{"before"}},
+		{Values: []any{"A\nB\t界\r\x1b[31m"}},
+		{Values: []any{"after"}},
+		{Values: []any{"tail"}},
+	}
+	v := makeView(makeSingleCol("value", "text"), rows)
+	target := gocui.NewView("controls", 0, 0, 61, 4, gocui.OutputNormal)
+	target.Wrap = false
+	for _, tc := range []struct {
+		cursor int
+		first  string
+		last   string
+		start  int
+	}{
+		{0, "before", `A\nB\t界`, 0},
+		{2, `A\nB\t界`, "after", 1},
+		{3, "after", "tail", 2},
+		{0, "before", `A\nB\t界`, 0},
+	} {
+		v.SetCursor(tc.cursor, 0)
+		v.Render(target)
+		lines := target.ViewBufferLines()
+		require.Len(t, lines, 3, "one header plus two database rows")
+		require.Contains(t, lines[1], tc.first)
+		require.Contains(t, lines[2], tc.last)
+		require.Equal(t, rows[tc.start:tc.start+2], v.VisibleRows())
+		value, _, _, _, ok := v.CellEditSnapshot()
+		require.True(t, ok)
+		require.Equal(t, rows[tc.cursor].Values[0], value, "viewer/editor must retain original controls")
+	}
+	require.Equal(t, rows, v.AllRows())
+	require.Equal(t, []int{8}, v.snapshot().widths, "autosize must include visible escapes")
+}
+
+func TestGridControlTextMatchesRendering(t *testing.T) {
+	const raw = "A\nhit\thit"
+	v := makeView(makeSingleCol("value", "text"), []models.Row{{Values: []any{raw}}})
+	v.SetSearch("hit")
+	snap := v.snapshot()
+	require.Equal(t, []cellMatch{{row: 0, col: 0, byteStart: 3, byteEnd: 6}, {row: 0, col: 0, byteStart: 8, byteEnd: 11}}, snap.searchMatches)
+	line := renderDataLine(snap, 0, 80)
+	require.Contains(t, line, curSearchSGR+"hit"+ansiReset)
+	require.Contains(t, line, searchSGR+"hit"+ansiReset)
+	require.Contains(t, stripANSI(line), `A\nhit\thit`)
+	for _, typ := range []string{"text", "bytea"} {
+		for _, dirty := range []bool{false, true} {
+			padded := stripANSI(renderCellPadded("A\nB\tC\x1b[31m", models.ColumnMeta{TypeName: typ}, 50, dirty))
+			require.NotContains(t, padded, "\n", typ)
+			require.NotContains(t, padded, "\t", typ)
+			require.Equal(t, `A\nB\tC`, strings.TrimSpace(padded), typ)
+		}
+	}
+}
+
+func TestGridHeaderPreservesCellText(t *testing.T) {
+	for _, tc := range []struct{ name, display string }{
+		{"cost|", "cost|"}, {"cost│", "cost│"}, {"val\nue\t", `val\nue\t`},
+	} {
+		v := makeView([]models.ColumnMeta{textCol(tc.name)}, nil)
+		header := stripANSI(renderHeaderLine(v.snapshot(), 24, false, false))
+		require.True(t, strings.HasPrefix(header, tc.display), "%q became %q", tc.name, header)
+		require.Equal(t, tc.name, v.snapshot().cols[0].Name)
+		require.NotContains(t, header, "\n")
+		require.NotContains(t, header, "\t")
+	}
+}
+
+func BenchmarkGridCellDisplay(b *testing.B) {
+	for _, value := range []string{"ASCII text with a hit", "界⌛︎ hit\n👩‍💻\tvalue"} {
+		b.Run(value, func(b *testing.B) {
+			v := NewView()
+			v.SetColumns([]models.ColumnMeta{textCol("first"), textCol("second"), textCol("third")})
+			rows := make([]models.Row, 24)
+			for i := range rows {
+				rows[i] = models.Row{Values: []any{value, value, value}}
+			}
+			v.AppendRows(rows)
+			v.SetSearch("hit")
+			target := newTallTestView("benchmark", 24)
+			b.ReportAllocs()
+			for b.Loop() {
+				v.Render(target)
+			}
+		})
+	}
+}

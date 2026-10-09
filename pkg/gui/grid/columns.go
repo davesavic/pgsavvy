@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/mattn/go-runewidth"
+
+	"github.com/davesavic/pgsavvy/pkg/gui/internal/textcells"
 )
 
 // autoSizeFromSampleLocked walks the first AutoSizeSampleRowCount rows
@@ -35,14 +37,14 @@ func (v *View) autoSizeFromSampleLocked() {
 		// Seed against the rendered header label (col.Name plus the FK
 		// `→ ` prefix when IsForeignKey) so the locked width accommodates
 		// the glyph and the header never overflows.
-		best := displayWidth(headerLabel(col))
+		best := displayWidth(gridDisplayText(headerLabel(col)))
 		for r := range sample {
 			row := v.rows[r]
 			var cell any
 			if c < len(row.Values) {
 				cell = row.Values[c]
 			}
-			rendered := renderCellPlain(cell, v.cols[c])
+			rendered := renderGridCellText(cell, v.cols[c])
 			if w := displayWidth(rendered); w > best {
 				best = w
 			}
@@ -62,7 +64,8 @@ func (v *View) autoSizeFromSampleLocked() {
 
 // displayWidth budgets terminal cells, including wide and combining characters.
 func displayWidth(s string) int {
-	return displayCols(s)
+	var measure textcells.Measure
+	return measure.StringWidth(s)
 }
 
 // displayCols returns the terminal display width of s in columns,
@@ -100,18 +103,19 @@ func cellText(s string, w int) (prefix, tail string) {
 	if w <= 0 {
 		return "", ""
 	}
-	if displayWidth(s) <= w {
+	var measure textcells.Measure
+	if measure.StringWidth(s) <= w {
 		return s, ""
 	}
 	if w == 1 {
-		prefix = runewidth.Truncate(s, w, "")
+		prefix = measure.Prefix(s, w)
 		if displayWidth(prefix) == 1 {
 			return prefix, ""
 		}
 		return "", overflowMarker(w)
 	}
 	tail = overflowMarker(w)
-	return runewidth.Truncate(s, w-displayWidth(tail), ""), tail
+	return measure.Prefix(s, w-displayWidth(tail)), tail
 }
 
 // padRight fills exactly w terminal cells without splitting a grapheme.

@@ -6,6 +6,7 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
+	"github.com/davesavic/pgsavvy/pkg/gui/internal/textcells"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
@@ -1013,7 +1014,7 @@ func (v *View) Render(target *gocui.View) {
 		v.mu.Unlock()
 	} else {
 		snap.rowOffset, snap.colOffset = v.clampOffsetsLocked(snap, innerW, innerH)
-		body = renderBody(snap, innerW, innerH)
+		body = textcells.Render(renderBody(snap, innerW, innerH))
 	}
 	if target != nil {
 		target.WriteString(body)

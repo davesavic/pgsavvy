@@ -3,12 +3,14 @@ package grid
 import (
 	"unicode/utf8"
 
+	"github.com/rivo/uniseg"
+
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/theme"
 )
 
 // highlightSpan is a single matched substring to paint inside one cell,
-// expressed as BYTE offsets into the cell's renderCellPlain output (the
+// expressed as BYTE offsets into the cell's renderGridCellText output (the
 // same string cellMatch.byteStart/byteEnd index). current marks the span
 // the cursor is on — it gets the stronger CurSearch style.
 type highlightSpan struct {
@@ -20,7 +22,7 @@ type highlightSpan struct {
 // renderCellPaddedHighlighted renders value for col, padded to display
 // width w, with the type-aware cell style, then layers the search-match
 // highlight onto the matched runes. spans are byte offsets into the plain
-// renderCellPlain(value,col) string (the exact string cellMatch indexes).
+// renderGridCellText(value,col) string (the exact string cellMatch indexes).
 //
 // The base styling/padding mirror renderCellPadded exactly so a cell with
 // zero surviving highlight renders byte-identically to the clean path. The
@@ -31,7 +33,7 @@ type highlightSpan struct {
 // any offset is out of range the WHOLE rendered cell is highlighted instead
 // (whole-cell fallback) so we never slice out of range or mid-rune.
 func renderCellPaddedHighlighted(value any, col models.ColumnMeta, w int, isDirty bool, spans []highlightSpan) string {
-	visible := renderCellPlain(value, col)
+	visible := renderGridCellText(value, col)
 	padded := padRight(visible, w)
 	highlighted := applyMatchHighlights(visible, padded, w, spans)
 	styled := wrapWithStyle(highlighted, styleForCell(value, col))
@@ -58,6 +60,27 @@ func applyMatchHighlights(visible, padded string, w int, spans []highlightSpan) 
 	runeSpans, ok := byteSpansToRuneSpans(visible, spans)
 	if !ok {
 		return wholeCellFallback(padded, spans)
+	}
+	// An SGR boundary inside a combining/emoji cluster splits gocui's parser
+	// input and changes its cell width. Use the existing whole-cell fallback.
+	if utf8.RuneCountInString(visible) != len(visible) {
+		boundaries := make(map[int]bool, len(spans)*2)
+		for _, span := range spans {
+			boundaries[span.byteStart] = span.byteStart == 0
+			boundaries[span.byteEnd] = span.byteEnd == 0
+		}
+		clusters := uniseg.NewGraphemes(visible)
+		for clusters.Next() {
+			_, end := clusters.Positions()
+			if _, needed := boundaries[end]; needed {
+				boundaries[end] = true
+			}
+		}
+		for _, boundary := range boundaries {
+			if !boundary {
+				return wholeCellFallback(padded, spans)
+			}
+		}
 	}
 
 	prefix, _ := cellText(visible, w)

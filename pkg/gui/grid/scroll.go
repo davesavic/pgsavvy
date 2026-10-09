@@ -433,23 +433,27 @@ func hideFooterLine(snap viewSnapshot) string {
 func renderHeaderLine(snap viewSnapshot, innerW int, moreLeft, moreRight bool) string {
 	var sb strings.Builder
 	visibleCols := visibleColumnOrder(snap)
+	separator := " │ "
+	if displayWidth("│") != 1 {
+		separator = " | "
+	}
 	used := 0
 	for _, c := range visibleCols {
 		w := effectiveWidth(snap.widths, c)
 		// headerLabel folds in the FK `→ ` prefix when col.IsForeignKey;
 		// padRight handles the truncation case if a narrow locked width
 		// can't accommodate the full label.
-		name := padRight(headerLabel(snap.cols[c]), w)
+		name := padRight(gridDisplayText(headerLabel(snap.cols[c])), w)
 		if used+w > innerW {
 			break
 		}
 		sb.WriteString(name)
-		sb.WriteString(" │ ")
+		sb.WriteString(separator)
 		used += w + ColSepWidth
 	}
 	// Apply TableHeader styling around the whole line. We resolve at
 	// render time so a theme hot-reload is picked up on next paint.
-	line := strings.TrimRight(sb.String(), " │")
+	line := strings.TrimSuffix(sb.String(), separator)
 	// Pad to innerW so the underline / inverted style covers the
 	// full width if the theme sets a background.
 	if displayWidth(line) < innerW {
@@ -602,7 +606,7 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 				isDirty = true
 			}
 		}
-		styled := renderCellPadded(value, snap.cols[c], w, isDirty)
+		var styled string
 		// When an in-grid search is active and this cell
 		// carries match spans, re-render it with the matched substrings
 		// highlighted. Cells without spans (and the no-search state) keep
@@ -616,13 +620,14 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 		// skip the reverse-video wrap so the highlight stays visible.
 		if spans := cellHighlightSpans(snap, r, c); len(spans) > 0 {
 			styled = renderCellPaddedHighlighted(value, snap.cols[c], w, isDirty, spans)
-		} else if inYankFlash(snap, r, c) {
-			// The transient post-yank flash wins over the
-			// selection highlight for its TTL so the just-yanked cell/row is
-			// unmistakably the one that landed on the clipboard.
-			styled = applyYankFlashHighlight(styled)
-		} else if inSelection(snap, r, c) {
-			styled = applySelectionHighlight(styled)
+		} else {
+			styled = renderCellPadded(value, snap.cols[c], w, isDirty)
+			if inYankFlash(snap, r, c) {
+				// A recent yank flash takes precedence over selection.
+				styled = applyYankFlashHighlight(styled)
+			} else if inSelection(snap, r, c) {
+				styled = applySelectionHighlight(styled)
+			}
 		}
 		sb.WriteString(styled)
 		sb.WriteString("   ")

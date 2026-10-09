@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gdamore/tcell/v3"
 	"github.com/rivo/uniseg"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/pgsavvy/pkg/gui/grid"
+	"github.com/davesavic/pgsavvy/pkg/gui/internal/textcells"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
@@ -184,7 +184,6 @@ func (c *CellViewerContext) HandleRender() error {
 		tabWidth = c.view.TabWidth
 	}
 	var measure cellViewerWidthMeasure
-	measure.buffer.Resize(2, 1)
 
 	var visibleLines []string
 	if c.wrap {
@@ -243,17 +242,7 @@ func (c *CellViewerContext) verticalWindowStart(bodyHeight int) int {
 	return start
 }
 
-// Use a private buffer to ask the actual tcell backend for its width policy,
-// including its startup locale settings, without touching the global screen.
-type cellViewerWidthMeasure struct{ buffer tcell.CellBuffer }
-
-func (m *cellViewerWidthMeasure) clusterWidth(cluster string) int {
-	if len(cluster) == 1 && cluster[0] >= ' ' && cluster[0] <= '~' {
-		return 1
-	}
-	_, width := m.buffer.Put(0, 0, cluster, tcell.StyleDefault)
-	return max(width, uniseg.StringWidth(cluster))
-}
+type cellViewerWidthMeasure struct{ textcells.Measure }
 
 func (m *cellViewerWidthMeasure) lineWidth(line string, tabWidth int) int {
 	if width, ascii := asciiCellViewerWidth(line, tabWidth); ascii {
@@ -267,19 +256,11 @@ func (m *cellViewerWidthMeasure) lineWidth(line string, tabWidth int) int {
 			width += spaces
 			cells += spaces
 		} else {
-			width += m.clusterWidth(clusters.Str())
+			width += m.ClusterWidth(clusters.Str())
 			cells++
 		}
 	}
 	return width
-}
-
-func writeCellViewerCluster(b *strings.Builder, cluster string, width int) {
-	b.WriteString(cluster)
-	// gocui counts VS15 text-style emoji as one column while tcell uses two.
-	// The extra space advances gocui into the next free column; tcell skips
-	// this covered continuation cell when drawing the intact wide grapheme.
-	b.WriteString(strings.Repeat(" ", width-uniseg.StringWidth(cluster)))
 }
 
 func (m *cellViewerWidthMeasure) horizontalWindow(line string, offset, width int) string {
@@ -292,7 +273,7 @@ func (m *cellViewerWidthMeasure) horizontalWindow(line string, offset, width int
 	clusters := uniseg.NewGraphemes(line)
 	for clusters.Next() {
 		start := column
-		cellWidth := m.clusterWidth(clusters.Str())
+		cellWidth := m.ClusterWidth(clusters.Str())
 		column += cellWidth
 		if column <= offset {
 			continue
@@ -303,7 +284,7 @@ func (m *cellViewerWidthMeasure) horizontalWindow(line string, offset, width int
 		if start < offset {
 			b.WriteString(strings.Repeat(" ", column-offset))
 		} else {
-			writeCellViewerCluster(&b, clusters.Str(), cellWidth)
+			textcells.WriteCluster(&b, clusters.Str(), cellWidth)
 		}
 	}
 	return b.String()
@@ -342,7 +323,7 @@ func (m *cellViewerWidthMeasure) wrappedWindow(body string, tabWidth, width, off
 		line = expandCellViewerTabs(line, tabWidth)
 		clusters := uniseg.NewGraphemes(line)
 		for clusters.Next() {
-			cellWidth := m.clusterWidth(clusters.Str())
+			cellWidth := m.ClusterWidth(clusters.Str())
 			if used+cellWidth > width && used > 0 {
 				flush()
 			}
@@ -353,7 +334,7 @@ func (m *cellViewerWidthMeasure) wrappedWindow(body string, tabWidth, width, off
 				used = width
 			} else {
 				if total >= offset && total-offset < height {
-					writeCellViewerCluster(&b, clusters.Str(), cellWidth)
+					textcells.WriteCluster(&b, clusters.Str(), cellWidth)
 				}
 				used += cellWidth
 			}
