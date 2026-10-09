@@ -11,6 +11,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 // ConnectionManagerController owns the CONNECTION_MANAGER modal's bindings
@@ -434,13 +435,18 @@ func (cm *ConnectionManagerController) PasteDSN(_ commands.ExecCtx) error {
 // connection being edited and reports pass/fail INLINE in the form, without
 // establishing the real session, touching the live active connection, or
 // popping the modal. The injected closure owns threading + the inline publish;
-// this handler only gates on form mode and forwards a copy of the in-progress
-// connection. No-op outside form mode or when unwired.
+// this handler validates SSH completeness and forwards a copy of the in-progress
+// connection. Profile-name validation belongs to save, not test. No-op outside
+// form mode or when unwired.
 func (cm *ConnectionManagerController) TestConnection(_ commands.ExecCtx) error {
 	if !cm.inFormMode() || cm.deps.Ctx == nil || cm.deps.TestConnection == nil {
 		return nil
 	}
 	conn := cm.deps.Ctx.FormConnection()
+	if err := session.ValidateSSHTunnel(conn.SSHTunnel); err != nil {
+		cm.deps.Ctx.FormSetError(err.Error())
+		return nil
+	}
 	cm.deps.TestConnection(&conn)
 	return nil
 }

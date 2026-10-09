@@ -1,11 +1,13 @@
 package controllers_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
+	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -168,5 +170,108 @@ func TestReview_form_probe_save_and_prompt_controls(t *testing.T) {
 	dispatchCM(t, ctrl, commands.ConnectionManagerConfirm)
 	if saves != 1 || invalidated != 1 || ctx.Mode() != guicontext.ModeForm {
 		t.Error("invalid save did not cancel probe while preserving form")
+	}
+}
+
+func TestControllerProbeUsesVisibleSSH(t *testing.T) {
+	for _, scenario := range []string{"disable", "enable default agent", "agent", "password", "key file", "missing host", "missing user", "disabled incomplete", "re-enable", "duplicate name"} {
+		t.Run(scenario, func(t *testing.T) {
+			rec := testfake.NewRecorderGuiDriver()
+			_, _ = rec.SetView(string(types.CONNECTION_MANAGER), 0, 0, 80, 30, 0)
+			base := guicontext.NewBaseContext(guicontext.BaseContextOpts{Key: types.CONNECTION_MANAGER, ViewName: string(types.CONNECTION_MANAGER), Kind: types.MAIN_CONTEXT})
+			ctx := guicontext.NewConnectionManagerContext(base, types.ContextTreeDeps{GuiDriver: rec})
+			original := models.Connection{Name: "stored", Driver: "postgres", SSHTunnel: &models.SSHTunnelConfig{Host: "bastion", User: "ssh-user", IdentityFile: "/key", SSHPasswordCommand: "synthetic-helper-secret"}}
+			if scenario == "key file" {
+				original.SSHTunnel.IdentityFromAgent = true
+				original.SSHTunnel.IdentityFile = ""
+			}
+			ctx.OpenEditForm(original, []string{"occupied"}, driverNames)
+			focus := func(label string) {
+				t.Helper()
+				ctx.FormMoveFocus(-100)
+				for range 32 {
+					if ctx.FormFocusedLabel() == label {
+						return
+					}
+					ctx.FormMoveFocus(1)
+				}
+				t.Fatalf("field %q not reachable", label)
+			}
+			set := func(label, value string) { focus(label); ctx.FormSetFocusedValue(value) }
+			toggle := func(label string) { focus(label); ctx.FormToggleFocused() }
+			wantAgent, wantKey, wantError := false, "/key", ""
+			switch scenario {
+			case "disable":
+				toggle("use_ssh_tunnel")
+			case "enable default agent":
+				ctx.OpenAddForm(nil, driverNames)
+				toggle("use_ssh_tunnel")
+				set("ssh_host", "bastion")
+				set("ssh_user", "ssh-user")
+				wantAgent, wantKey = true, ""
+			case "agent":
+				toggle("ssh_auth")
+				toggle("ssh_auth")
+				wantAgent, wantKey = true, ""
+			case "password":
+				toggle("ssh_auth")
+				wantKey = ""
+			case "key file":
+				toggle("ssh_auth")
+				set("identity_file", "/new-key")
+				wantKey = "/new-key"
+			case "missing host", "disabled incomplete":
+				set("ssh_host", "")
+				wantError = "session: ssh tunnel requires a host"
+				if scenario == "disabled incomplete" {
+					toggle("use_ssh_tunnel")
+					wantError = ""
+				}
+			case "missing user":
+				set("ssh_user", "")
+				wantError = "session: ssh tunnel requires a user"
+			case "re-enable":
+				toggle("use_ssh_tunnel")
+				toggle("use_ssh_tunnel")
+			case "duplicate name":
+				set("name", "occupied")
+			}
+			var got []*models.Connection
+			ctrl := newTestConnController(ctx, &got, true)
+			dispatchCM(t, ctrl, commands.ConnectionManagerTestConnection)
+			if ctx.Mode() != guicontext.ModeForm {
+				t.Fatal("probing dismissed the unsaved form")
+			}
+			if wantError != "" {
+				if len(got) != 0 {
+					t.Fatal("incomplete enabled SSH configuration reached the probe")
+				}
+				if err := ctx.HandleRender(); err != nil {
+					t.Fatal(err)
+				}
+				body := rec.GetViewBuffer(string(types.CONNECTION_MANAGER))
+				if !strings.Contains(body, wantError) || strings.Contains(body, "synthetic-helper-secret") {
+					t.Fatal("missing inline SSH validation or exposed credential helper")
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatal("valid unsaved configuration did not reach the probe exactly once")
+			}
+			tunnel := got[0].SSHTunnel
+			if scenario == "disable" || scenario == "disabled incomplete" {
+				if tunnel != nil {
+					t.Fatal("disabled SSH configuration reached the probe")
+				}
+			} else {
+				if tunnel == nil || tunnel.Host != "bastion" || tunnel.User != "ssh-user" || tunnel.IdentityFromAgent != wantAgent || tunnel.IdentityFile != wantKey {
+					t.Fatal("probe configuration differs from the visible form")
+				}
+				tunnel.Host = "consumer-mutated"
+				if ctx.FormConnection().SSHTunnel.Host != "bastion" || original.SSHTunnel.Host != "bastion" {
+					t.Fatal("probe consumer modified the draft or original profile")
+				}
+			}
+		})
 	}
 }

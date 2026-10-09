@@ -245,7 +245,7 @@ func (c *ConnectionManagerContext) FormSetStatus(msg string) {
 // reflecting every field edited so far. Used by the test-connection action to
 // dial the connection being edited without saving it.
 func (c *ConnectionManagerContext) FormConnection() models.Connection {
-	return copyFormConnection(c.form.conn)
+	return c.form.materializedConnection()
 }
 
 // SetLabelWrapWidth records the modal's inner column count so the form clips

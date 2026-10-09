@@ -1,11 +1,13 @@
 package context
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 // TestForm_SSHAuthVisibility asserts the auth method gates identity_file: it is
@@ -275,6 +277,79 @@ func TestReview_form_copy(t *testing.T) {
 			}
 			if _, _, _, ok := c.FormValidateAll(tr); !ok || !reflect.DeepEqual(*original.SSHTunnel, want) {
 				t.Error("derived auth validation changed stored tunnel")
+			}
+		})
+	}
+}
+
+func TestFormConnectionMaterializesSSHWithoutMutatingDraft(t *testing.T) {
+	for _, tc := range []struct {
+		name, auth, host, user string
+		fresh, disabled        bool
+		wantError              error
+	}{
+		{name: "disable existing", disabled: true},
+		{name: "enable agent default", fresh: true, auth: sshAuthAgent, host: "new-host", user: "new-user"},
+		{name: "agent selection", auth: sshAuthAgent, host: "edited-host", user: "edited-user"},
+		{name: "password selection", auth: sshAuthPassword, host: "edited-host", user: "edited-user"},
+		{name: "key selection", auth: sshAuthKeyFile, host: "edited-host", user: "edited-user"},
+		{name: "enabled empty tunnel", fresh: true, auth: sshAuthAgent, wantError: session.ErrSSHTunnelHostMissing},
+		{name: "missing user", fresh: true, auth: sshAuthAgent, host: "new-host", wantError: session.ErrSSHTunnelUserMissing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := models.Connection{Name: "profile", Driver: "postgres", Host: "db", ReadOnly: true, ConfirmWrites: true, ConfirmDDL: true}
+			if !tc.fresh {
+				original.SSHTunnel = &models.SSHTunnelConfig{Host: "old-host", User: "old-user", IdentityFile: "/key", KnownHosts: "/hosts", PassphraseCommand: "synthetic-key-helper", SSHPasswordCommand: "synthetic-password-helper"}
+			}
+			stored := copyFormConnection(original)
+			c := newTestConnectionManager(&captureDriver{}, nil, nil)
+			c.OpenEditForm(original, nil, testDrivers)
+			if tc.fresh || tc.disabled {
+				c.form.toggle(fieldUseSSHTunnel)
+			}
+			if !tc.disabled {
+				for range len(sshAuthOptions) {
+					if c.form.sshAuth == tc.auth {
+						break
+					}
+					c.form.toggle(fieldSSHAuthMethod)
+				}
+				c.form.setTextValue(fieldSSHHost, tc.host)
+				c.form.setTextValue(fieldSSHUser, tc.user)
+			}
+			draft := copyFormConnection(c.form.conn)
+			revision := c.FormRevision()
+			probe := c.FormConnection()
+			if !reflect.DeepEqual(c.form.conn, draft) || !reflect.DeepEqual(original, stored) || !c.FormMatches(revision) {
+				t.Fatal("reading a probe snapshot mutated the draft, stored profile, or probe revision")
+			}
+			if tc.disabled {
+				if probe.SSHTunnel != nil {
+					t.Fatal("disabled tunnel was included in the probe")
+				}
+			} else {
+				if probe.SSHTunnel == nil || probe.SSHTunnel.IdentityFromAgent != (tc.auth == sshAuthAgent) {
+					t.Fatal("probe does not reflect the selected SSH authentication method")
+				}
+				if tc.auth != sshAuthKeyFile && probe.SSHTunnel.IdentityFile != "" {
+					t.Fatal("unselected identity file leaked into probe configuration")
+				}
+				if probe.SSHTunnel == c.form.conn.SSHTunnel || probe.SSHTunnel == original.SSHTunnel {
+					t.Fatal("probe aliases mutable tunnel state")
+				}
+			}
+			if err := session.ValidateSSHTunnel(probe.SSHTunnel); !errors.Is(err, tc.wantError) {
+				t.Error("probe snapshot did not retain the expected SSH validation outcome")
+			}
+			saved, _, _, ok := c.FormValidateAll(i18n.EnglishTranslationSet())
+			if ok != (tc.wantError == nil) {
+				t.Fatal("save and probe validation disagree")
+			}
+			if ok && !reflect.DeepEqual(probe, saved) {
+				t.Error("save and probe snapshots differ")
+			}
+			if !reflect.DeepEqual(original, stored) {
+				t.Error("saving the draft mutated the stored profile")
 			}
 		})
 	}

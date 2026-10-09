@@ -255,7 +255,7 @@ func (f *connForm) cycleSSLMode() {
 }
 
 // SSH auth methods. These are TRANSIENT selector values (connForm.sshAuth),
-// never persisted: applySSHAuth maps them onto Connection.SSHTunnel at save.
+// never persisted: applySSHAuth maps them onto Connection.SSHTunnel for test/save.
 const (
 	sshAuthAgent    = "agent"
 	sshAuthKeyFile  = "key-file"
@@ -291,8 +291,8 @@ func (f *connForm) toggleSSHEnabled() {
 	f.clampFocus()
 }
 
-// applySSHAuth maps the transient auth method onto the tunnel config at save
-// time so IdentityFromAgent/IdentityFile reflect the picker without a persisted
+// applySSHAuth maps the transient auth method onto the tunnel config so
+// IdentityFromAgent/IdentityFile reflect the picker without a persisted
 // auth-method key (A3). No-op when the tunnel is nil.
 func (f *connForm) applySSHAuth() {
 	t := f.conn.SSHTunnel
@@ -336,6 +336,20 @@ func copyFormConnection(conn models.Connection) models.Connection {
 		conn.SSHTunnel = &tunnel
 	}
 	return conn
+}
+
+// Normalize a private copy so testing cannot discard disabled SSH fields or
+// an unselected identity file that the user may switch back to.
+func (f *connForm) materializedConnection() models.Connection {
+	snapshot := *f
+	snapshot.conn = copyFormConnection(f.conn)
+	if snapshot.sshEnabled {
+		snapshot.ensureSSHTunnel()
+		snapshot.applySSHAuth()
+	} else {
+		snapshot.conn.SSHTunnel = nil
+	}
+	return snapshot.conn
 }
 
 // toggleFocused flips the focused toggle, or cycles the driver when the
@@ -649,12 +663,7 @@ func (f *connForm) validateAll(tr *i18n.TranslationSet) (msg string, fieldIdx in
 	// When the SSH gate is on, the tunnel must exist and be complete: apply the
 	// picker's auth choice, then let the session-layer rule require host+user.
 	// When off, drop the tunnel entirely so a disabled section never persists.
-	if f.sshEnabled {
-		f.ensureSSHTunnel()
-		f.applySSHAuth()
-	} else {
-		f.conn.SSHTunnel = nil
-	}
+	f.conn = f.materializedConnection()
 	if err := session.ValidateSSHTunnel(f.conn.SSHTunnel); err != nil {
 		return err.Error(), f.focusIndexOf(fieldSSHHost), false
 	}
