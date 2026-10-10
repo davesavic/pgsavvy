@@ -10,14 +10,23 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        # The locked nixpkgs compiler predates the required security fixes.
+        go = pkgs.go_1_26.overrideAttrs (_: {
+          version = "1.26.9";
+          src = pkgs.fetchurl {
+            url = "https://go.dev/dl/go1.26.9.src.tar.gz";
+            hash = "sha256-lzXX3Ntls10/pXfwQGRzfAO4nPGitx5uaf4vPG+f1Mo=";
+          };
+        });
+        buildGoModule = pkgs.buildGoModule.override { inherit go; };
       in
       {
-        packages.default = pkgs.buildGoModule {
+        packages.default = buildGoModule {
           pname = "pgsavvy";
           version = self.shortRev or "dev";
           src = self;
 
-          vendorHash = "sha256-1tdhiCXUtxacOxNhi1zlrQW6YD4vSrdxq/oX/2JBzRk=";
+          vendorHash = "sha256-CiI7LZjmOg1l6/AwCZexa1j48z7msBnBBKt26F7GZKA=";
 
           ldflags = [
             "-s"
@@ -45,7 +54,7 @@
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            go_1_26
+            go
             golangci-lint
             go-task
             gopls
