@@ -9,6 +9,10 @@ bin/
 dist/
 /pgsavvy
 
+# Personal mise overrides
+/mise.local.toml
+/mise.*.local.toml
+
 # Test & coverage artifacts
 *.test
 *.out

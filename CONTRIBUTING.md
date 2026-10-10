@@ -11,6 +11,59 @@ running, the test and lint workflow, and how to propose changes.
 - [golangci-lint](https://golangci-lint.run) v2 — `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`
 - [Docker Compose](https://docs.docker.com/compose/) — only for the integration-test fixtures
 
+## Mise development setup
+
+[mise](https://mise.jdx.dev/getting-started.html) can install the development
+tools for you. The project's `mise.toml` pins Go 1.26.6, go-task 3.39.2, and
+golangci-lint 2.12.2 to match CI. From the repository root:
+
+```sh
+mise trust
+mise install
+mise run deps            # download Go modules
+mise tasks ls --local    # list project commands
+mise run build          # compile to bin/pgsavvy
+mise run run            # build and launch the interactive TUI
+```
+
+`mise run` supplies the project tools without requiring shell activation.
+For direct `go` or `task` commands, use `mise exec -- <command>` or follow
+mise's [shell setup](https://mise.jdx.dev/shell-setup.html). The project sets
+`GOTOOLCHAIN=local` so Go uses the mise-managed version instead of downloading
+another toolchain automatically.
+
+Useful daily commands:
+
+```sh
+mise run test                         # all unit tests
+mise run test -- ./... -run TestX      # filter tests; package path required
+mise run test:race                    # race detector; requires a C compiler
+mise run lint                        # static checks
+mise run fmt                         # modifies Go files to apply formatting
+mise run check                       # lint, unit tests, race tests, sequentially
+mise run vulncheck                   # install pinned govulncheck and scan
+mise run run -- --version            # forward application arguments
+```
+
+The mise commands reuse `Taskfile.yml`; existing `task` commands remain
+available. `check` neither formats files nor starts Docker fixtures.
+Personal tool or environment overrides can go in the gitignored
+`mise.local.toml`; do not put credentials in the shared configuration.
+
+For integration tests (Docker Compose required):
+
+```sh
+mise run pg:up
+export PGSAVVY_TEST_PG='postgres://pgsavvy:pgsavvy@localhost:5432/pgsavvy_test?sslmode=disable'
+mise run test:integration
+mise run test:all                     # unit, race, and integration tests
+mise run pg:down                      # deletes the fixture's data volume
+```
+
+`mise run sshtunnel:up` starts the separate SSH fixture and prints the
+environment variables to export for SSH tests. `mise run sshtunnel:down`
+removes its containers and data volumes. Fixtures start only when requested.
+
 ## Getting the source
 
 ```sh

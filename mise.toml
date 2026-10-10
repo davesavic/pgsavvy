@@ -1,0 +1,74 @@
+# Keep tool versions aligned with .github/workflows/ci.yml.
+[tools]
+go = "1.26.6"
+task = "3.39.2"
+golangci-lint = "2.12.2"
+
+[env]
+GOTOOLCHAIN = "local"
+
+[tasks.default]
+description = "List development commands"
+run = "mise tasks ls --local"
+
+[tasks.deps]
+description = "Download Go module dependencies"
+run = "go mod download"
+
+[tasks.build]
+description = "Build bin/pgsavvy with development version metadata"
+run = "task build"
+
+[tasks.run]
+description = "Build and launch pgsavvy in the current terminal"
+depends = ["build"]
+raw = true
+run = "./bin/pgsavvy"
+
+[tasks.test]
+description = "Run unit tests; forward Go test arguments after --"
+run = "task test --"
+
+[tasks."test:race"]
+description = "Run unit tests with the race detector (requires a C compiler)"
+run = "task test:race"
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "task lint"
+
+[tasks.fmt]
+description = "Format Go files with gofumpt and goimports"
+run = "task fmt"
+
+[tasks.check]
+description = "Run lint, unit tests, and race tests sequentially"
+run = ["task lint", "task test", "task test:race"]
+
+[tasks.vulncheck]
+description = "Install the Taskfile-pinned govulncheck and scan dependencies"
+run = "task vulncheck"
+
+[tasks."pg:up"]
+description = "Start the Docker PostgreSQL test fixture"
+run = "task pg:up"
+
+[tasks."pg:down"]
+description = "Stop the PostgreSQL fixture and DELETE its volume"
+run = "task pg:down"
+
+[tasks."sshtunnel:up"]
+description = "Start the SSH test fixture and generate its local keypair"
+run = "task sshtunnel:up"
+
+[tasks."sshtunnel:down"]
+description = "Stop the SSH fixture and DELETE its volumes"
+run = "task sshtunnel:down"
+
+[tasks."test:integration"]
+description = "Run live PostgreSQL tests (requires PGSAVVY_TEST_PG)"
+run = "task test:integration"
+
+[tasks."test:all"]
+description = "Run unit, race, and integration tests sequentially"
+run = "task test:all"
