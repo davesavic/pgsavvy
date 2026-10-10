@@ -160,14 +160,10 @@ func TestReview_target_live(t *testing.T) {
 	if dsn == "" {
 		t.Skip("PGSAVVY_TEST_PG not set")
 	}
-	// pgsavvy-70k8 separately tracks stale cached descriptions after search_path
-	// changes. This regression requires authoritative source relation metadata.
-	fixtureConfig, err := pgx.ParseConfig(dsn)
-	if err != nil {
+	// Stream must provide authoritative relation metadata even when the
+	// fixture uses pgx's normal cached execution mode.
+	if _, err := pgx.ParseConfig(dsn); err != nil {
 		t.Fatal("invalid isolated fixture configuration")
-	}
-	if fixtureConfig.DefaultQueryExecMode != pgx.QueryExecModeDescribeExec {
-		t.Fatal("target fixture requires default_query_exec_mode=describe_exec; default-cache switching tracked by pgsavvy-70k8")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

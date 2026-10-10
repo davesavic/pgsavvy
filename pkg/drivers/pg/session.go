@@ -616,7 +616,9 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 
 	// Resolve unqualified object names against q.DefaultSchema (then public)
 	// for this statement. No-op when empty.
-	if stmt := searchPathStmt(q.DefaultSchema); stmt != "" {
+	// SET itself is rejected in an aborted transaction. Let PostgreSQL handle
+	// recovery statements (and reject other SQL) without blocking them here.
+	if stmt := searchPathStmt(q.DefaultSchema); stmt != "" && s.conn.Conn().PgConn().TxStatus() != 'E' {
 		if _, err := s.conn.Exec(ctx, stmt); err != nil {
 			if cancel != nil {
 				cancel()
@@ -631,7 +633,14 @@ func (s *Session) Stream(ctx context.Context, q models.Query) (drivers.RowStream
 	}
 
 	started := time.Now()
-	rows, err := s.conn.Query(ctx, q.SQL, q.Args...)
+	args := q.Args
+	mode := s.conn.Conn().Config().DefaultQueryExecMode
+	if mode == pgx.QueryExecModeCacheStatement || mode == pgx.QueryExecModeCacheDescribe {
+		// Cached descriptions can retain a previous schema's relation OID after
+		// search_path changes. Mutation targets require a fresh description.
+		args = append([]any{pgx.QueryExecModeDescribeExec}, args...)
+	}
+	rows, err := s.conn.Query(ctx, q.SQL, args...)
 	if err != nil {
 		if cancel != nil {
 			cancel()
