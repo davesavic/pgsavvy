@@ -54,11 +54,13 @@ func TestReview_timers_wired_close(t *testing.T) {
 		t.Run(fmt.Sprint(closeBeforeDrain), func(t *testing.T) {
 			fs := afero.NewMemMapFs()
 			c := common.NewCommon(slog.New(slog.DiscardHandler), i18n.EnglishTranslationSet(), config.GetDefaultConfig(), &common.AppState{}, fs)
+			// Isolate timeout delivery: the hint redraw must not be the
+			// first queued update this test treats as matcher expiry.
 			g := orchestrator.NewGui(orchestrator.Deps{
 				Common: c, Store: common.NewAppStateStore(fs, "/state.yml", common.DefaultClock()),
 				ConnectionsProvider: func() []models.Connection { return nil },
 				HistoryProvider:     func() (*query.History, error) { return nil, nil },
-			})
+			}, orchestrator.WithKeyDelays(20*time.Millisecond, time.Millisecond, time.Second))
 			d := newQueueingDriver()
 			if err := g.UseDriverForTest(d); err != nil {
 				t.Fatal(err)

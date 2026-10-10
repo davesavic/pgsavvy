@@ -43,6 +43,37 @@ func TestWhichKey_TimerFireFlipsVisible(t *testing.T) {
 	waitForVisible(t, w, true, "timer should fire and flip Visible")
 }
 
+func TestWhichKey_TimerNotifiesOutsideLock(t *testing.T) {
+	w := NewWhichKey()
+	notified := make(chan bool, 1)
+	w.SetOnVisible(func() {
+		_, _, visible := w.Snapshot()
+		notified <- visible
+	})
+	w.ShowAfter(wkDelay, types.GLOBAL, []Key{{Code: 'g'}})
+	select {
+	case visible := <-notified:
+		if !visible {
+			t.Fatal("callback ran before visibility changed")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timer callback was missing or held the snapshot lock")
+	}
+}
+
+func TestWhichKey_HideCancelsNotification(t *testing.T) {
+	w := NewWhichKey()
+	notified := make(chan struct{}, 1)
+	w.SetOnVisible(func() { notified <- struct{}{} })
+	w.ShowAfter(wkDelay, types.GLOBAL, []Key{{Code: 'g'}})
+	w.Hide()
+	select {
+	case <-notified:
+		t.Fatal("cancelled hint requested a redraw")
+	case <-time.After(wkDelay + 30*time.Millisecond):
+	}
+}
+
 func TestWhichKey_HideCancelsBeforeFire(t *testing.T) {
 	w := NewWhichKey()
 	w.ShowAfter(wkDelay, types.GLOBAL, []Key{{Code: 'g'}})

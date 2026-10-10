@@ -27,9 +27,10 @@ import (
 // Concurrency: every public method takes mu. The AfterFunc closure
 // re-takes mu — never holds the Matcher mutex.
 type WhichKey struct {
-	mu    sync.Mutex
-	seq   uint64
-	state *whichKeyState
+	mu        sync.Mutex
+	seq       uint64
+	state     *whichKeyState
+	onVisible func()
 }
 
 type whichKeyState struct {
@@ -43,6 +44,14 @@ type whichKeyState struct {
 // NewWhichKey constructs a WhichKey with no pending schedule.
 func NewWhichKey() *WhichKey {
 	return &WhichKey{}
+}
+
+// SetOnVisible installs the redraw request for delayed visibility changes.
+// It runs on the timer goroutine, outside mu, and must not re-enter the Matcher.
+func (w *WhichKey) SetOnVisible(fn func()) {
+	w.mu.Lock()
+	w.onVisible = fn
+	w.mu.Unlock()
 }
 
 // Compile-time check: *WhichKey satisfies both the Matcher-facing
@@ -76,10 +85,15 @@ func (w *WhichKey) ShowAfter(delay time.Duration, scope types.ContextKey, prefix
 	}
 	st.timer = time.AfterFunc(delay, func() {
 		w.mu.Lock()
+		var onVisible func()
 		if w.state != nil && w.state.id == id {
 			w.state.visible = true
+			onVisible = w.onVisible
 		}
 		w.mu.Unlock()
+		if onVisible != nil {
+			onVisible()
+		}
 	})
 	w.state = st
 }

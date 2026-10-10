@@ -34,6 +34,11 @@ func (g *Gui) wireKeybindingSystem(cfg *config.UserConfig) error {
 	g.keybindingSystem.cmdRegistry = commands.NewRegistry()
 	g.keybindingSystem.modeStore = keys.NewModeStore()
 	g.keybindingSystem.whichkey = keys.NewWhichKey()
+	g.keybindingSystem.whichkey.SetOnVisible(func() {
+		// The timer fires without a key event; creating the overlay needs
+		// a full layout, not a content-only repaint of existing views.
+		g.OnUIThread(func() error { return nil })
+	})
 	g.keybindingSystem.exRegistry = keys.NewExRegistry()
 
 	// wire the per-session logger into the input-side
