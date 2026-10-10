@@ -108,13 +108,15 @@ type CommitDialogContext struct {
 	// SetRenderHook). Kept as a hook so the rendering code lives in
 	// pkg/gui/controllers (the existing home for visual styling) without
 	// pulling controllers into the context package's imports.
-	renderHook func(view CommitDialogView) string
+	renderHook    func(view CommitDialogView) string
+	redactSecrets func(string) string
 }
 
 // CommitDialogView is the read-only surface the render hook consumes.
 // Keeps the render code free of any pointer into the context's mutable
 // state, so the formatting logic is purely a function of its inputs.
 type CommitDialogView struct {
+	PreviewEdits []models.PendingEdit
 	Set          *models.PendingEditSet
 	Conn         *models.Connection
 	Mode         CommitDialogMode
@@ -128,7 +130,8 @@ type CommitDialogView struct {
 	// from the active tab's runner at Open() time. Used by the preview
 	// and dry-run render paths to inline literal values into SQL text.
 	// Stale on connection switch (documented with toast).
-	Encoder drivers.Encoder
+	Encoder       drivers.Encoder
+	RedactSecrets func(string) string
 }
 
 // NewCommitDialogContext builds a CommitDialogContext bound to
@@ -162,6 +165,7 @@ func (c *CommitDialogContext) Open(set *models.PendingEditSet, conn *models.Conn
 	c.mode = CommitDialogPreview
 	c.typedName = ""
 	c.dryRunResult = nil
+	c.redactSecrets = nil
 	if conn != nil && conn.ConfirmWrites && conn.Name == "" {
 		c.typedName = "\x00empty-name-sentinel"
 	}
@@ -179,7 +183,10 @@ func (c *CommitDialogContext) Close() {
 	c.dryRunResult = nil
 	c.pkCols = nil
 	c.encoder = nil
+	c.redactSecrets = nil
 }
+
+func (c *CommitDialogContext) SetSecretRedactor(redact func(string) string) { c.redactSecrets = redact }
 
 // Active reports whether the dialog is currently waiting for input.
 // HandleRender + the controller's handlers guard on Active() so a
@@ -281,13 +288,14 @@ func (c *CommitDialogContext) HandleRender() error {
 		return nil
 	}
 	view := CommitDialogView{
-		Set:          c.set,
-		Conn:         c.conn,
-		Mode:         c.mode,
-		TypedName:    c.typedName,
-		DryRunResult: c.dryRunResult,
-		PkCols:       c.pkCols,
-		Encoder:      c.encoder,
+		Set:           c.set,
+		Conn:          c.conn,
+		Mode:          c.mode,
+		TypedName:     c.typedName,
+		DryRunResult:  c.dryRunResult,
+		PkCols:        c.pkCols,
+		RedactSecrets: c.redactSecrets,
+		Encoder:       c.encoder,
 	}
 	body := c.renderHook(view)
 	viewName := c.GetViewName()

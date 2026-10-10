@@ -342,20 +342,15 @@ func TestTUISmokeWalkthrough(t *testing.T) {
 		if len(schemas) == 0 {
 			t.Fatal("LoadSchemas returned 0 schemas")
 		}
-		// Pick the first non-builtin schema for step05 + step06.
-		builtin := map[string]struct{}{}
-		for _, b := range pg.BuiltinHiddenSchemas {
-			builtin[b] = struct{}{}
-		}
+		// Other user schemas may be empty; use the populated fixture schema.
 		for _, sc := range schemas {
-			if _, ok := builtin[sc.Name]; ok {
-				continue
+			if sc.Name == "app" {
+				schemaPick = sc.Name
+				break
 			}
-			schemaPick = sc.Name
-			break
 		}
 		if schemaPick == "" {
-			t.Fatal("no non-builtin schema returned from LoadSchemas")
+			t.Fatal("fixture schema app missing from LoadSchemas")
 		}
 	})
 

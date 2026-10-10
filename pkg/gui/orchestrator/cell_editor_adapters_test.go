@@ -29,7 +29,12 @@ import (
 func TestReview_expr_focus_store(t *testing.T) {
 	original, other := &models.PendingEditSet{}, &models.PendingEditSet{}
 	active := original
-	store := cellEditorStore{resolve: func() *models.PendingEditSet { return active }}
+	tabs, _ := newConflictHookFixture(t, models.Row{Values: []any{int64(7), "old"}}, "id", "value")
+	sample := &cellEditorSample{}
+	picker := cellEditorPicker{tabs: tabs, sample: sample}
+	_, _, _, ok := picker.CellSnapshot()
+	require.True(t, ok)
+	store := cellEditorStore{resolve: func() *models.PendingEditSet { return active }, sample: sample}
 	captured := store.Capture()
 	active = other
 	edit := models.PendingEdit{PrimaryKey: []any{int64(7)}, Column: "value", NewExpr: "now()", Kind: models.Expression}
@@ -72,7 +77,7 @@ func TestReview_cell_editor_recovery_native_process(t *testing.T) {
 		}
 		tab := g.resultTabsH.Active()
 		grid := tab.Grid()
-		grid.SetColumns([]models.ColumnMeta{{Name: "id"}, {Name: "data", TypeName: "text"}})
+		grid.SetColumns([]models.ColumnMeta{{Name: "id", PhysicalName: "id", TableOID: 42, TableAttributeNumber: 1}, {Name: "data", PhysicalName: "data", TableOID: 42, TableAttributeNumber: 2, TypeName: "text"}})
 		grid.SetEditability(true, []int{0}, "", models.Ref{Schema: "app", Table: "t"})
 		grid.AppendRows([]models.Row{{Values: []any{int64(42), "loaded"}}})
 		grid.SetCursor(0, 1)
@@ -101,7 +106,7 @@ func TestReview_cell_editor_recovery_native_process(t *testing.T) {
 			}
 		}
 		typeDraft(view, "recoverable draft")
-		grid.SettleCommittedRows(grid.CommitGeneration(), grid.Columns(), []models.Row{{Values: []any{int64(42), "server"}}}, [][]any{{int64(42)}}, true)
+		grid.SettleCommittedRows(grid.CommitGeneration(), grid.EditIdentity(), grid.Columns(), []models.Row{{Values: []any{int64(42), "server"}}}, [][]any{{int64(42)}}, true)
 		dispatcher := g.MasterEditorForTest(guicontext.CellEditorKey()).(Dispatcher)
 		if result, err := dispatcher.Dispatch(view, gocui.NewKeyName(gocui.KeyEnter)); err != nil || result != keys.Dispatched || !strings.Contains(g.toastHelp.Current(), models.ErrCommitSnapshotStale.Error()) {
 			return errors.New("native Enter did not reject stale staging")
@@ -171,7 +176,7 @@ func TestReview_expr_focus_native_process(t *testing.T) {
 		}
 		tab := g.resultTabsH.Active()
 		grid := tab.Grid()
-		grid.SetColumns([]models.ColumnMeta{{Name: "value", TypeName: "text"}})
+		grid.SetColumns([]models.ColumnMeta{{Name: "value", PhysicalName: "value", TableOID: 42, TableAttributeNumber: 1, TypeName: "text"}})
 		grid.SetEditability(true, []int{0}, "", models.Ref{Schema: "app", Table: "original"})
 		grid.AppendRows([]models.Row{{Values: []any{"original"}}})
 		if err := g.tree.Push(tab.Context()); err != nil {
@@ -180,7 +185,9 @@ func TestReview_expr_focus_native_process(t *testing.T) {
 		original, other := &models.PendingEditSet{}, &models.PendingEditSet{}
 		active := original
 		controller := g.controllers.CellEditor
-		controller.SetStore(cellEditorStore{resolve: func() *models.PendingEditSet { return active }})
+		sample := &cellEditorSample{}
+		controller.SetPicker(cellEditorPicker{tabs: g.resultTabsH, sample: sample})
+		controller.SetStore(cellEditorStore{resolve: func() *models.PendingEditSet { return active }, sample: sample})
 		if err := controller.Enter(commands.ExecCtx{}); err != nil {
 			return err
 		}

@@ -264,6 +264,9 @@ func TestReview_target_live(t *testing.T) {
 		if set == nil {
 			t.Fatal("catalog-resolved edit target missing")
 		}
+		if err := set.BindIdentity(g.resultTabsH.Active().Grid().EditIdentity()); err != nil {
+			t.Fatal(err)
+		}
 		if err := set.Add(models.PendingEdit{PrimaryKey: []any{int32(1)}, Column: "value", OldValue: "old", NewValue: value, Kind: models.Literal}); err != nil {
 			t.Fatal(err)
 		}

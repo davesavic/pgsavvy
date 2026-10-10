@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -50,6 +51,8 @@ type Session struct {
 	inFlight   atomic.Int32
 	openedAt   time.Time // session_open timestamp; used for session_close ms field
 	activeTx   *pgTransaction
+	// Protect UI status polling without serializing it behind wire operations.
+	txMu sync.RWMutex
 
 	// cachedTxStatus holds the last sampled pgconn transaction status byte
 	// ('I' idle / 'T' in-tx / 'E' in-failed-tx). sampleTxStatus refreshes it
@@ -717,7 +720,7 @@ func (s *Session) Explain(ctx context.Context, q models.Query, analyze bool) (pl
 			slog.Int64("ms", time.Since(start).Milliseconds()),
 		}
 		if retErr != nil {
-			attrs = append(attrs, slog.Any("err", retErr.Error()))
+			attrs = append(attrs, slog.String("err", s.parent.RedactSecrets(retErr.Error())))
 		}
 		logs.Event(log, "db", "explain", attrs...)
 	}()
@@ -852,7 +855,8 @@ func (s *Session) Begin(ctx context.Context, opts models.TxOptions) (drivers.Tra
 	status, _ := s.LiveTxStatus()
 	// Raw COMMIT/ROLLBACK can leave an API handle unsettled. Replacing it
 	// would let that old handle terminate a later transaction on this connection.
-	owned := s.activeTx != nil && (s.activeTx.Status() == models.TxActive || s.activeTx.Status() == models.TxAbortedInTx)
+	active := s.activeTransaction()
+	owned := active != nil && (active.Status() == models.TxActive || active.Status() == models.TxAbortedInTx)
 	if owned || status == models.TxActive || status == models.TxAbortedInTx {
 		return nil, errors.New("session: transaction already in progress")
 	}
@@ -871,11 +875,18 @@ func (s *Session) Begin(ctx context.Context, opts models.TxOptions) (drivers.Tra
 	// commits/rolls back, so a terminal driver-API tx stops shadowing the live
 	// byte (Decision ①): after end, activeTx==nil and the byte (now 'I')
 	// governs, clearing the badge.
-	t := newPgTransaction(tx, func() {
-		s.activeTx = nil
+	var t *pgTransaction
+	t = newPgTransaction(tx, func() {
+		s.txMu.Lock()
+		if s.activeTx == t {
+			s.activeTx = nil
+		}
+		s.txMu.Unlock()
 		s.sampleTxStatus()
 	})
+	s.txMu.Lock()
 	s.activeTx = t
+	s.txMu.Unlock()
 	return t, nil
 }
 
@@ -889,16 +900,24 @@ func boolToDeferrable(d bool) string {
 
 // InTransaction reports whether this Session currently has an active transaction.
 func (s *Session) InTransaction() bool {
-	return s.activeTx != nil && s.activeTx.status == models.TxActive
+	active := s.activeTransaction()
+	return active != nil && active.Status() == models.TxActive
+}
+
+func (s *Session) activeTransaction() *pgTransaction {
+	s.txMu.RLock()
+	defer s.txMu.RUnlock()
+	return s.activeTx
 }
 
 // CurrentTransaction returns the in-progress Transaction, or nil if none.
 // Returns nil for terminal transactions (committed/rolled back).
 func (s *Session) CurrentTransaction() drivers.Transaction {
-	if !s.InTransaction() {
+	active := s.activeTransaction()
+	if active == nil || active.Status() != models.TxActive {
 		return nil
 	}
-	return s.activeTx
+	return active
 }
 
 // sampleTxStatus refreshes cachedTxStatus from the live pgconn transaction
@@ -921,19 +940,20 @@ func (s *Session) sampleTxStatus() {
 // state while a query is in flight. Raw-SQL transactions have no savepoint
 // metadata (D4).
 func (s *Session) LiveTxStatus() (models.TxStatus, []string) {
-	if s.pgConn == nil && s.activeTx != nil {
-		switch s.activeTx.Status() {
+	active := s.activeTransaction()
+	if s.pgConn == nil && active != nil {
+		switch active.Status() {
 		case models.TxActive:
-			return models.TxActive, s.activeTx.Savepoints()
+			return models.TxActive, active.Savepoints()
 		case models.TxAbortedInTx:
-			return models.TxAbortedInTx, s.activeTx.Savepoints()
+			return models.TxAbortedInTx, active.Savepoints()
 		}
 	}
 	var names []string
-	if s.activeTx != nil {
-		switch s.activeTx.Status() {
+	if active != nil {
+		switch active.Status() {
 		case models.TxActive, models.TxAbortedInTx:
-			names = s.activeTx.Savepoints()
+			names = active.Savepoints()
 		}
 	}
 	switch byte(s.cachedTxStatus.Load()) {

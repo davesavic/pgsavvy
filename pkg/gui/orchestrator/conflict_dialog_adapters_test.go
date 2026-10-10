@@ -1,11 +1,40 @@
 package orchestrator
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+func TestConflictRefreshRejectsAnotherSetAndRevisedEdit(t *testing.T) {
+	tabs, original := newConflictHookFixture(t, models.Row{Values: []any{1, "loaded"}}, "id", "data")
+	other := &models.PendingEditSet{}
+	if err := other.BindIdentity(tabs.Active().Grid().EditIdentity()); err != nil {
+		t.Fatal(err)
+	}
+	e := models.PendingEdit{PrimaryKey: []any{1}, Column: "data", OldValue: "loaded", NewValue: "staged"}
+	for _, set := range []*models.PendingEditSet{original, other} {
+		if err := set.Add(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	conflicts := []models.ConflictedEdit{{Edit: original.Edits()[0], ServerValue: "server"}}
+	active := other
+	hook := conflictRefreshHook{deps: conflictDialogDeps{tabs: tabs, activeSetFunc: func() *models.PendingEditSet { return active }}}
+	if err := hook.Refresh(conflicts, nil); !errors.Is(err, models.ErrCommitSnapshotStale) || other.Count() != 1 || original.Count() != 1 {
+		t.Fatal("stale conflict dialog removed another target's edits")
+	}
+	active = original
+	e.NewValue = "revised"
+	if err := original.Add(e); err != nil {
+		t.Fatal(err)
+	}
+	if err := hook.Refresh(conflicts, nil); !errors.Is(err, models.ErrCommitSnapshotStale) || original.Edits()[0].NewValue != "revised" || tabs.Active().Grid().AllRows()[0].Values[1] != "loaded" {
+		t.Fatal("stale conflict refresh dropped a newer revision or replaced its baseline")
+	}
+}
 
 // newConflictHookFixture builds a tabs helper whose active grid renders
 // an id+data projection with row identity on id, plus a staged-edit set
@@ -23,12 +52,16 @@ func newConflictHookFixture(t *testing.T, row models.Row, cols ...string) (*ui.R
 	}
 	meta := make([]models.ColumnMeta, len(cols))
 	for i, c := range cols {
-		meta[i] = models.ColumnMeta{Name: c}
+		meta[i] = models.ColumnMeta{Name: c, PhysicalName: c, TableOID: 42, TableAttributeNumber: uint16(i + 1)}
 	}
 	g.SetColumns(meta)
 	g.SetEditability(true, []int{0}, "", models.Ref{Schema: "app", Table: "t"})
 	g.AppendRows([]models.Row{row})
-	return tabs, &models.PendingEditSet{}
+	set := &models.PendingEditSet{}
+	if err := set.BindIdentity(g.EditIdentity()); err != nil {
+		t.Fatal(err)
+	}
+	return tabs, set
 }
 
 // TestConflictRefreshHookWritesServerValueToGrid is the regression guard:
@@ -53,7 +86,7 @@ func TestConflictRefreshHookWritesServerValueToGrid(t *testing.T) {
 		tabs:          tabs,
 		activeSetFunc: func() *models.PendingEditSet { return set },
 	}}
-	conflicts := []models.ConflictedEdit{{Edit: edit, ServerValue: "server-drift"}}
+	conflicts := []models.ConflictedEdit{{Edit: set.Edits()[0], ServerValue: "server-drift"}}
 	if err := hook.Refresh(conflicts, nil); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -87,8 +120,8 @@ func TestConflictRefreshHookComposesMultipleColumnsSameRow(t *testing.T) {
 		activeSetFunc: func() *models.PendingEditSet { return set },
 	}}
 	conflicts := []models.ConflictedEdit{
-		{Edit: editA, ServerValue: "a-server"},
-		{Edit: editB, ServerValue: "b-server"},
+		{Edit: set.Edits()[0], ServerValue: "a-server"},
+		{Edit: set.Edits()[1], ServerValue: "b-server"},
 	}
 	if err := hook.Refresh(conflicts, nil); err != nil {
 		t.Fatalf("Refresh: %v", err)

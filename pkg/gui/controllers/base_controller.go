@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
@@ -135,6 +136,7 @@ func NewUIDeps(confirm ConfirmHelper, toast ToastHelper) UIDeps {
 // tab; KbRuntime bundles the keybinding-system collaborators. All are
 // optional and nil-safe — the controller no-ops when any is unwired.
 type QueryDeps struct {
+	RunBoundSort func(string, time.Duration) bool
 	QueryRunner  *data.QueryRunner
 	ResultTabs   ResultTabsHelper
 	EditorBuffer EditorBufferReader
@@ -247,6 +249,8 @@ type EditDeps struct {
 	// needs the full profile (Color, ConfirmWrites, ReadOnly) to drive
 	// the dialog's gates + styling.
 	ActiveConnectionProfile func() *models.Connection
+	// CommitSecretRedactor captures only an opaque, connection-scoped scrubber.
+	CommitSecretRedactor func() func(string) string
 }
 
 // HelperBag is the dependency bundle every controller receives. It is the

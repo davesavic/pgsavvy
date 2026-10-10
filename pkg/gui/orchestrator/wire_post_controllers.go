@@ -73,6 +73,12 @@ func (g *Gui) wireEditDeps() controllers.EditDeps {
 		ActiveConnectionProfile: func() *models.Connection {
 			return g.connectionState.activeConnProfile
 		},
+		CommitSecretRedactor: func() func(string) string {
+			if g.queryState.activeSQLSession == nil {
+				return nil
+			}
+			return g.queryState.activeSQLSession.RedactSecrets
+		},
 	}
 }
 

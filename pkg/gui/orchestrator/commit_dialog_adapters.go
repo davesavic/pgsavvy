@@ -40,11 +40,16 @@ type commitDialogDeps struct {
 type commitApplyHook struct{ deps commitDialogDeps }
 
 func (h commitApplyHook) Apply(set *models.PendingEditSet, conn *models.Connection) error {
-	pkCols, err := pkColsFromActiveTab(h.deps.tabs)
+	pkCols, err := capturedPKColumns(h.deps.tabs, set)
 	if err != nil {
 		return err
 	}
-	res, conflicts, err := h.deps.apply.Apply(context.Background(), set, pkCols, false)
+	snapshot, err := set.BeginCommit(nil)
+	if err != nil {
+		return err
+	}
+	res, conflicts, err := h.deps.apply.Apply(context.Background(), snapshot, pkCols, false)
+	set.SettleCommit(snapshot, res.Committed, res.CommitUnknown, res.OriginalPKs, res.ResultPKs)
 	if err != nil && !res.Committed {
 		return err
 	}
@@ -103,7 +108,7 @@ func refreshCommittedGrid(tabs *ui.ResultTabsHelper, res helpers.ApplyResult) {
 	if tab == nil || tab.Grid() == nil {
 		return
 	}
-	tab.Grid().UpdateRowsFromOriginalPK(res.RefetchedColumns, res.RefetchedRows, res.RefetchedOriginalPKs)
+	tab.Grid().UpdateRowsFromOriginalPK(res.Identity, res.RefetchedColumns, res.RefetchedRows, res.RefetchedOriginalPKs)
 }
 
 // refreshGridRows writes refetched server rows back into the active
@@ -177,8 +182,12 @@ func (h conflictRefreshHook) Refresh(conflicts []models.ConflictedEdit, _ *model
 	if set == nil {
 		return errors.New("conflict dialog: no active pending edit set")
 	}
-	for _, c := range conflicts {
-		set.Remove(c.Edit.PrimaryKey, c.Edit.Column)
+	selected := make([]models.PendingEdit, len(conflicts))
+	for i, c := range conflicts {
+		selected[i] = c.Edit
+	}
+	if err := set.DiscardOwned(selected); err != nil {
+		return err
 	}
 	writeServerValuesToGrid(h.deps.tabs, conflicts)
 	if h.deps.toast != nil {
@@ -199,11 +208,15 @@ func (h conflictRefreshHook) Refresh(conflicts []models.ConflictedEdit, _ *model
 // "grid keeps its loaded values" — the edits are already dropped and the
 // server was never written, so there is nothing to fail.
 func writeServerValuesToGrid(tabs *ui.ResultTabsHelper, conflicts []models.ConflictedEdit) {
-	pkCols, err := pkColsFromActiveTab(tabs)
-	if err != nil {
+	if tabs == nil || tabs.Active() == nil || tabs.Active().Grid() == nil {
 		return
 	}
 	for _, c := range conflicts {
+		identity := c.Edit.Identity()
+		if !identity.Compatible(tabs.Active().Grid().EditIdentity()) {
+			continue
+		}
+		pkCols := identity.Names()
 		if len(c.Edit.PrimaryKey) != len(pkCols) {
 			continue
 		}
@@ -240,7 +253,7 @@ func (h conflictOverwriteHook) Overwrite(conflicts []models.ConflictedEdit, _ *m
 	if set.CommitOutcomeUnknown() {
 		return models.ErrCommitOutcomeUnknown
 	}
-	pkCols, err := pkColsFromActiveTab(h.deps.tabs)
+	pkCols, err := capturedPKColumns(h.deps.tabs, set)
 	if err != nil {
 		return err
 	}
@@ -249,18 +262,16 @@ func (h conflictOverwriteHook) Overwrite(conflicts []models.ConflictedEdit, _ *m
 	// are also un-applied; the conflict slice is the authoritative list
 	// of what the user has chosen to force through, and the user will
 	// re-run :w for the remaining non-conflicting edits.
-	owSet := &models.PendingEditSet{Table: set.Table}
 	attempt := make([]models.PendingEdit, 0, len(conflicts))
 	for _, c := range conflicts {
 		attempt = append(attempt, c.Edit)
-		if addErr := owSet.Add(c.Edit); addErr != nil {
-			return fmt.Errorf("conflict dialog: stage overwrite edit: %w", addErr)
-		}
+	}
+	owSet, err := set.BeginCommit(attempt)
+	if err != nil {
+		return err
 	}
 	res, applyErr := h.deps.apply.Overwrite(context.Background(), owSet, pkCols)
-	if res.CommitUnknown {
-		set.MarkCommitUnknown(attempt, res.OriginalPKs, res.ResultPKs)
-	}
+	set.SettleCommit(owSet, res.Committed, res.CommitUnknown, res.OriginalPKs, res.ResultPKs)
 	if applyErr != nil && !res.Committed {
 		return applyErr
 	}
@@ -288,11 +299,8 @@ func (h conflictOverwriteHook) Overwrite(conflicts []models.ConflictedEdit, _ *m
 	return nil
 }
 
-// pkColsFromActiveTab resolves the PK column names for the currently-
-// active result tab. Returns an error when no tab is active, the tab
-// has no grid, the grid has no row identity, or an identity index is
-// out of range for the column list.
-func pkColsFromActiveTab(tabs *ui.ResultTabsHelper) ([]string, error) {
+// capturedPKColumns checks the active view but never reinterprets staged values.
+func capturedPKColumns(tabs *ui.ResultTabsHelper, set *models.PendingEditSet) ([]string, error) {
 	if tabs == nil {
 		return nil, errors.New("commit dialog: result tabs not wired")
 	}
@@ -304,17 +312,8 @@ func pkColsFromActiveTab(tabs *ui.ResultTabsHelper) ([]string, error) {
 	if grid == nil {
 		return nil, errors.New("commit dialog: active tab has no grid")
 	}
-	ri := grid.RowIdentity()
-	if len(ri) == 0 {
-		return nil, errors.New("commit dialog: active tab has no row identity")
+	if set == nil || !set.Identity().Compatible(grid.EditIdentity()) {
+		return nil, models.ErrEditIdentityMismatch
 	}
-	cols := grid.Columns()
-	out := make([]string, len(ri))
-	for i, idx := range ri {
-		if idx < 0 || idx >= len(cols) {
-			return nil, fmt.Errorf("commit dialog: pk index %d out of range (%d cols)", idx, len(cols))
-		}
-		out[i] = cols[idx].Name
-	}
-	return out, nil
+	return set.Identity().Names(), nil
 }

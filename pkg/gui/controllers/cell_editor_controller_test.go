@@ -166,7 +166,9 @@ func (f *fakeGridPicker) CellSnapshot() (any, models.ColumnMeta, []any, bool) {
 	// copy in CellEditorContext.Open isn't accidentally relying on
 	// shared backing memory.
 	pk := append([]any(nil), f.pk...)
-	return f.cell, f.column, pk, f.cellOK
+	col := f.column
+	col.PhysicalName = col.Name
+	return f.cell, col, pk, f.cellOK
 }
 
 func (f *fakeGridPicker) FormatForEdit(v any, _ models.ColumnMeta) string {

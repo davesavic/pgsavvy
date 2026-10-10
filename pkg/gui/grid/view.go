@@ -394,6 +394,32 @@ func (v *View) SetColumns(cols []models.ColumnMeta) {
 func (v *View) SetEditability(editable bool, rowIdentity []int, disabledReason string, ref models.Ref) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	v.setEditabilityLocked(editable, rowIdentity, disabledReason, ref)
+}
+
+// SetResolvedEditability installs catalog names without resetting buffered rows,
+// cursor or widths. Metadata and editability become visible together.
+func (v *View) SetResolvedEditability(cols []models.ColumnMeta, editable bool, rowIdentity []int, disabledReason string, ref models.Ref) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if len(cols) != len(v.cols) {
+		return
+	}
+	for i, col := range cols {
+		current := v.cols[i]
+		if current.Name != col.Name || current.TableOID != col.TableOID || current.TableAttributeNumber != col.TableAttributeNumber {
+			return
+		}
+		if editable && col.PhysicalName == "" {
+			editable = false
+			disabledReason = "physical column names unavailable"
+		}
+	}
+	v.cols = append([]models.ColumnMeta(nil), cols...)
+	v.setEditabilityLocked(editable, rowIdentity, disabledReason, ref)
+}
+
+func (v *View) setEditabilityLocked(editable bool, rowIdentity []int, disabledReason string, ref models.Ref) {
 	v.commitGeneration++
 	v.editBaseline++
 	if v.baselineInvalid {
@@ -426,26 +452,28 @@ func (v *View) CommitGeneration() uint64 {
 // SettleCommittedRows reconciles the buffer before row reservations are released.
 // It performs no GUI I/O. Replaced results are fenced under the same lock as the
 // update; an unproven baseline stays uneditable until a fresh schema is installed.
-func (v *View) SettleCommittedRows(generation uint64, cols []models.ColumnMeta, rows []models.Row, originalPKs [][]any, complete bool) {
+func (v *View) SettleCommittedRows(generation uint64, identity models.EditIdentity, cols []models.ColumnMeta, rows []models.Row, originalPKs [][]any, complete bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if generation != v.commitGeneration {
 		return
 	}
 	v.editBaseline++
+	keys, compatible := v.normalizeOriginalKeysLocked(identity, originalPKs)
+	complete = complete && compatible
 	projection := make(map[string]bool, len(cols))
 	for _, col := range cols {
 		projection[col.Name] = true
 	}
 	for _, col := range v.cols {
-		complete = complete && projection[col.Name]
+		complete = complete && col.PhysicalName != "" && projection[col.PhysicalName]
 	}
 	for _, row := range rows {
 		complete = complete && len(row.Values) == len(cols)
 	}
 	if len(rows) == 0 || len(rows) != len(originalPKs) {
 		complete = false
-	} else if v.updateRowsByPKLocked(cols, rows, originalPKs) != len(rows) {
+	} else if !compatible || v.updateRowsByPKLocked(cols, rows, keys) != len(rows) {
 		complete = false
 	}
 	if !complete {
@@ -497,6 +525,29 @@ func (v *View) RowIdentity() []int {
 	out := make([]int, len(v.rowIdentity))
 	copy(out, v.rowIdentity)
 	return out
+}
+
+// EditIdentity returns only catalog-resolved physical key metadata.
+func (v *View) EditIdentity() models.EditIdentity {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.editIdentityLocked()
+}
+
+func (v *View) editIdentityLocked() models.EditIdentity {
+	id := models.EditIdentity{}
+	for _, idx := range v.rowIdentity {
+		if idx < 0 || idx >= len(v.cols) {
+			return models.EditIdentity{}
+		}
+		col := v.cols[idx]
+		if id.RelationOID != 0 && id.RelationOID != col.TableOID {
+			return models.EditIdentity{}
+		}
+		id.RelationOID = col.TableOID
+		id.Columns = append(id.Columns, models.IdentityColumn{Attnum: col.TableAttributeNumber, Name: col.PhysicalName})
+	}
+	return id
 }
 
 // IdentitySchema returns the catalog-resolved schema of the editable base
@@ -830,6 +881,7 @@ func (v *View) snapshotLocked() viewSnapshot {
 		estimatedRows:      v.loadEstimatedRowsLocked(),
 		expandedLineOffset: v.expandedLineOffset,
 		pendingEdits:       v.pendingEdits,
+		editIdentity:       v.editIdentityLocked(),
 		rowIdentity:        v.rowIdentity,
 		rowsAffected:       v.rowsAffected,
 		yankFlash:          copyYankFlash(v.yankFlash),
@@ -944,6 +996,7 @@ type viewSnapshot struct {
 	// rowIdentity holds the SELECT-order PK column indexes used to match a
 	// row against staged edits.
 	pendingEdits *models.PendingEditSet
+	editIdentity models.EditIdentity
 	rowIdentity  []int
 
 	// yankFlash is the transient post-yank highlight range (defensive copy).

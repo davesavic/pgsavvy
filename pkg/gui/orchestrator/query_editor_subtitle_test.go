@@ -51,6 +51,13 @@ func (d *subtitleDriver) UpdateContentOnly(fn func() error) {
 	d.statusRepaintDriver.UpdateContentOnly(fn)
 }
 
+func (d *subtitleDriver) switchTabAndRunLayout(g *orchestrator.Gui, tab, width, height int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	g.Registry().QueryRail.SetActiveTab(tab)
+	return g.RunLayout(width, height)
+}
+
 // subtitleOf reads the live view's Subtitle field under the closure
 // serialization mutex (mirrors the production MainLoop invariant that
 // the field is only touched on the UI thread).
@@ -479,10 +486,9 @@ func TestQueryEditorSubtitleReappearsOnLeafSwitchBack(t *testing.T) {
 	g.SetQueryRunStarted("r1")
 	waitForSubtitle(t, drv, "set-site paint", func(s string) bool { return s != "" })
 
-	g.Registry().QueryRail.SetActiveTab(2) // History
 	// Same geometry as the SetSize pass: no resize flag — this is the
 	// plain Tier-1.4 branch, not a resize-forced layout.
-	if err := g.RunLayout(80, 24); err != nil {
+	if err := drv.switchTabAndRunLayout(g, 2, 80, 24); err != nil {
 		t.Fatalf("RunLayout(history): %v", err)
 	}
 	if got := drv.subtitleOf(guicontext.QueryRailViewName); got != "" {
@@ -490,8 +496,7 @@ func TestQueryEditorSubtitleReappearsOnLeafSwitchBack(t *testing.T) {
 	}
 
 	clk.Advance(350 * time.Millisecond)
-	g.Registry().QueryRail.SetActiveTab(0) // back to the editor leaf
-	if err := g.RunLayout(80, 24); err != nil {
+	if err := drv.switchTabAndRunLayout(g, 0, 80, 24); err != nil {
 		t.Fatalf("RunLayout(editor): %v", err)
 	}
 

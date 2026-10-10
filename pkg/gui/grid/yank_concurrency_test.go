@@ -52,6 +52,8 @@ func TestFormattedYankWithPendingSettlement(t *testing.T) {
 func testFormattedYankWithPendingSettlement(t *testing.T, path string) {
 	t.Helper()
 	v := makeCanonical3x3(t)
+	v.SetColumns(catalogFixtureColumns(v.Columns()))
+	v.AppendRows([]models.Row{{Values: []any{"a", "b", "c"}}, {Values: []any{"d", "e", "f"}}, {Values: []any{"g", "h", "i"}}})
 	v.SetEditability(true, []int{0}, "", models.Ref{Schema: "test", Table: "rows"})
 	cols := append([]models.ColumnMeta(nil), v.cols...)
 	generation := v.CommitGeneration()
@@ -85,7 +87,7 @@ func testFormattedYankWithPendingSettlement(t *testing.T, path string) {
 	}
 	settled := make(chan struct{})
 	go func() {
-		v.SettleCommittedRows(generation, cols, []models.Row{{Values: []any{"a", "new-b", "new-c"}}}, [][]any{{"a"}}, true)
+		v.SettleCommittedRows(generation, v.EditIdentity(), cols, []models.Row{{Values: []any{"a", "new-b", "new-c"}}}, [][]any{{"a"}}, true)
 		close(settled)
 	}()
 	deadline := time.Now().Add(2 * time.Second)

@@ -32,7 +32,7 @@ func TestReview_row_outcome_live_keys(t *testing.T) {
 			qualified := pg.QuoteQualified(schema, "items")
 			adminExec(t, conn, "CREATE SCHEMA "+pg.QuoteIdent(schema), "CREATE TABLE "+qualified+" (tenant integer, id integer, payload text, PRIMARY KEY (tenant,id))", "INSERT INTO "+qualified+" VALUES (1,2,'old'),(1,3,'unrelated')", "CREATE FUNCTION "+pg.QuoteQualified(schema, "assign_key")+"() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN NEW.id := NEW.id + 100; RETURN NEW; END'", "CREATE TRIGGER assigned BEFORE UPDATE ON "+qualified+" FOR EACH ROW EXECUTE FUNCTION "+pg.QuoteQualified(schema, "assign_key")+"()")
 			t.Cleanup(func() { adminExec(t, conn, "DROP SCHEMA "+pg.QuoteIdent(schema)+" CASCADE") })
-			set := &models.PendingEditSet{Table: models.Ref{Schema: schema, Table: "items"}}
+			set := newCanonicalApplyFixture(models.Ref{Schema: schema, Table: "items"}, "tenant", "id")
 			for _, e := range []models.PendingEdit{
 				{PrimaryKey: []any{int32(1), int32(2)}, Column: "id", OldValue: int32(2), Kind: models.Expression, NewExpr: "id + 10"},
 				{PrimaryKey: []any{int32(1), int32(2)}, Column: "payload", OldValue: "old", NewValue: "new"},
@@ -97,7 +97,7 @@ func TestReview_row_outcome_live_NaN(t *testing.T) {
 	qualified := pg.QuoteQualified(schema, "items")
 	adminExec(t, conn, "CREATE SCHEMA "+pg.QuoteIdent(schema), "CREATE TABLE "+qualified+" (id double precision PRIMARY KEY,payload double precision,n integer)", "INSERT INTO "+qualified+" VALUES ('NaN','NaN',0),(1,1,0)")
 	t.Cleanup(func() { adminExec(t, conn, "DROP SCHEMA "+pg.QuoteIdent(schema)+" CASCADE") })
-	set := &models.PendingEditSet{Table: models.Ref{Schema: schema, Table: "items"}}
+	set := newCanonicalApplyFixture(models.Ref{Schema: schema, Table: "items"}, "id")
 	for _, e := range []models.PendingEdit{{PrimaryKey: []any{math.NaN()}, Column: "payload", OldValue: math.NaN(), NewValue: math.NaN()}, {PrimaryKey: []any{math.NaN()}, Column: "n", OldValue: int32(0), NewValue: int32(1)}} {
 		if err := set.Add(e); err != nil {
 			t.Fatal(err)
@@ -184,7 +184,7 @@ func TestReview_identity_safety_LiveRollback(t *testing.T) {
 				"CREATE UNIQUE INDEX partial_id ON "+qualified+" (id) WHERE active",
 				"INSERT INTO "+qualified+" VALUES (2, 'old', false), (1, 'old', false), (1, 'old', false)",
 			)
-			set := &models.PendingEditSet{Table: models.Ref{Schema: schema, Table: "t"}}
+			set := newCanonicalApplyFixture(models.Ref{Schema: schema, Table: "t"}, "id")
 			for _, id := range []int32{2, 1} {
 				mustAdd(t, set, models.PendingEdit{PrimaryKey: []any{id}, Column: "name", OldValue: "old", NewValue: "new", Kind: models.Literal})
 			}
@@ -230,7 +230,7 @@ func TestReview_overwrite_Live(t *testing.T) {
 					"CREATE TABLE "+qualified+` (id int NOT NULL, slot text NOT NULL, "v""alue" text)`,
 					"INSERT INTO "+qualified+" VALUES (1, 'x', 'server'), (1, 'y', 'unrelated'), (2, 'x', 'old'), (4, 'x', 'server'), (4, 'x', 'server')",
 				)
-				set := &models.PendingEditSet{Table: ref}
+				set := newCanonicalApplyFixture(ref, "id", "slot")
 				e := models.PendingEdit{PrimaryKey: []any{int32(1), "x"}, Column: `v"alue`, OldValue: "stale", NewValue: "new"}
 				wantValue := "server"
 				if scenario == "null" {
@@ -313,7 +313,7 @@ func TestCellApply_LiveHappyPath_LiteralEdit(t *testing.T) {
 	})
 
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: conn})
-	set := &models.PendingEditSet{Table: models.Ref{Schema: "cell_apply_test", Table: "t"}}
+	set := newCanonicalApplyFixture(models.Ref{Schema: "cell_apply_test", Table: "t"}, "id")
 	if err := set.Add(models.PendingEdit{
 		PrimaryKey: []any{int32(1)},
 		Column:     "name",
@@ -371,7 +371,7 @@ func TestCellApply_LiveConflict_StaleOldValue_RollsBack(t *testing.T) {
 	})
 
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: conn})
-	set := &models.PendingEditSet{Table: models.Ref{Schema: "cell_apply_test", Table: "t"}}
+	set := newCanonicalApplyFixture(models.Ref{Schema: "cell_apply_test", Table: "t"}, "id")
 	_ = set.Add(models.PendingEdit{
 		PrimaryKey: []any{int32(1)},
 		Column:     "name",
@@ -418,7 +418,7 @@ func TestCellApply_LiveCompositePK(t *testing.T) {
 	})
 
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: conn})
-	set := &models.PendingEditSet{Table: models.Ref{Schema: "cell_apply_test", Table: "cpk"}}
+	set := newCanonicalApplyFixture(models.Ref{Schema: "cell_apply_test", Table: "cpk"}, "a", "b")
 	_ = set.Add(models.PendingEdit{
 		PrimaryKey: []any{int32(1), "x"},
 		Column:     "v",
@@ -454,7 +454,7 @@ func TestCellApply_LiveExpressionEdit(t *testing.T) {
 	})
 
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: conn})
-	set := &models.PendingEditSet{Table: models.Ref{Schema: "cell_apply_test", Table: "t"}}
+	set := newCanonicalApplyFixture(models.Ref{Schema: "cell_apply_test", Table: "t"}, "id")
 	_ = set.Add(models.PendingEdit{
 		PrimaryKey: []any{int32(1)},
 		Column:     "n",
@@ -497,7 +497,7 @@ func TestCellApply_LiveDryRun(t *testing.T) {
 	})
 
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: conn})
-	set := &models.PendingEditSet{Table: models.Ref{Schema: "cell_apply_test", Table: "t"}}
+	set := newCanonicalApplyFixture(models.Ref{Schema: "cell_apply_test", Table: "t"}, "id")
 	_ = set.Add(models.PendingEdit{
 		PrimaryKey: []any{int32(1)},
 		Column:     "name",
@@ -540,7 +540,7 @@ func TestCellApply_LiveNullToValueTransition_IsNotDistinctFromHandlesNull(t *tes
 	})
 
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: conn})
-	set := &models.PendingEditSet{Table: models.Ref{Schema: "cell_apply_test", Table: "t"}}
+	set := newCanonicalApplyFixture(models.Ref{Schema: "cell_apply_test", Table: "t"}, "id")
 	_ = set.Add(models.PendingEdit{
 		PrimaryKey: []any{int32(1)},
 		Column:     "name",

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -22,6 +23,8 @@ const commitRollbackDeadline = 5 * time.Second
 // pgTransaction wraps a pgx.Tx with savepoint tracking and lifecycle state.
 // It implements drivers.Transaction.
 type pgTransaction struct {
+	// MainLoop polls metadata while workers wait on pgx; never hold across wire I/O.
+	metadataMu sync.RWMutex
 	tx         pgx.Tx
 	status     models.TxStatus
 	savepoints []string
@@ -42,15 +45,17 @@ func newPgTransaction(tx pgx.Tx, onTerminate func()) *pgTransaction {
 }
 
 func (t *pgTransaction) Commit(ctx context.Context) error {
-	if t.status != models.TxActive {
-		return fmt.Errorf("transaction: cannot commit in state %s", t.status)
+	if status := t.Status(); status != models.TxActive {
+		return fmt.Errorf("transaction: cannot commit in state %s", status)
 	}
 	ctx, cancel := context.WithTimeout(ctx, commitRollbackDeadline)
 	defer cancel()
 	if err := t.tx.Commit(ctx); err != nil {
 		return err
 	}
+	t.metadataMu.Lock()
 	t.status = models.TxCommitted
+	t.metadataMu.Unlock()
 	if t.onTerminate != nil {
 		t.onTerminate()
 	}
@@ -58,15 +63,17 @@ func (t *pgTransaction) Commit(ctx context.Context) error {
 }
 
 func (t *pgTransaction) Rollback(ctx context.Context) error {
-	if t.status != models.TxActive && t.status != models.TxAbortedInTx {
-		return fmt.Errorf("transaction: cannot rollback in state %s", t.status)
+	if status := t.Status(); status != models.TxActive && status != models.TxAbortedInTx {
+		return fmt.Errorf("transaction: cannot rollback in state %s", status)
 	}
 	ctx, cancel := context.WithTimeout(ctx, commitRollbackDeadline)
 	defer cancel()
 	if err := t.tx.Rollback(ctx); err != nil {
 		return err
 	}
+	t.metadataMu.Lock()
 	t.status = models.TxRolledBack
+	t.metadataMu.Unlock()
 	if t.onTerminate != nil {
 		t.onTerminate()
 	}
@@ -81,7 +88,9 @@ func (t *pgTransaction) Savepoint(ctx context.Context, name string) error {
 	if _, err := t.tx.Exec(ctx, "SAVEPOINT "+quoted); err != nil {
 		return err
 	}
+	t.metadataMu.Lock()
 	t.savepoints = append(t.savepoints, name)
+	t.metadataMu.Unlock()
 	t.stmtCount.Add(1)
 	return nil
 }
@@ -94,7 +103,9 @@ func (t *pgTransaction) Release(ctx context.Context, name string) error {
 	if _, err := t.tx.Exec(ctx, "RELEASE SAVEPOINT "+quoted); err != nil {
 		return err
 	}
+	t.metadataMu.Lock()
 	t.savepoints = slices.DeleteFunc(t.savepoints, func(s string) bool { return s == name })
+	t.metadataMu.Unlock()
 	t.stmtCount.Add(1)
 	return nil
 }
@@ -112,12 +123,16 @@ func (t *pgTransaction) RollbackTo(ctx context.Context, name string) error {
 }
 
 func (t *pgTransaction) Savepoints() []string {
+	t.metadataMu.RLock()
+	defer t.metadataMu.RUnlock()
 	out := make([]string, len(t.savepoints))
 	copy(out, t.savepoints)
 	return out
 }
 
 func (t *pgTransaction) Status() models.TxStatus {
+	t.metadataMu.RLock()
+	defer t.metadataMu.RUnlock()
 	return t.status
 }
 
@@ -130,7 +145,9 @@ func (t *pgTransaction) ObserveError(err error) {
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "25P02" {
+		t.metadataMu.Lock()
 		t.status = models.TxAbortedInTx
+		t.metadataMu.Unlock()
 	}
 }
 

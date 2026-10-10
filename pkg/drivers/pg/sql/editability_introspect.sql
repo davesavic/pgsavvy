@@ -50,7 +50,14 @@ SELECT
               AND i.indisready
         ) s
         WHERE per_index IS NOT NULL
-    )                                                  AS unique_attnums
+    )                                                  AS unique_attnums,
+    (
+        SELECT jsonb_object_agg(a.attnum, a.attname)
+        FROM pg_attribute a
+        WHERE a.attrelid = c.oid
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+    )                                                  AS column_names
 FROM unnest($1::oid[]) AS req(oid)
 JOIN pg_class c ON c.oid = req.oid
 JOIN pg_namespace n ON n.oid = c.relnamespace

@@ -225,6 +225,9 @@ func (e *CellEditorController) Enter(_ commands.ExecCtx) error {
 	if !ok {
 		return nil
 	}
+	if col.PhysicalName == "" {
+		return models.ErrEditIdentityUnresolved
+	}
 	e.captureStore()
 	// Boolean cells open a true/false/NULL chooser instead of the plain
 	// text buffer.
@@ -309,7 +312,7 @@ func (e *CellEditorController) Commit(_ commands.ExecCtx) error {
 		// for optimistic concurrency detection.
 		if err := store.Add(models.PendingEdit{
 			PrimaryKey: pk,
-			Column:     col.Name,
+			Column:     col.PhysicalName,
 			ColumnType: col.TypeName,
 			OldValue:   e.ctx.OriginalValue(),
 			NewValue:   buf,
@@ -344,7 +347,7 @@ func (e *CellEditorController) Discard(_ commands.ExecCtx) error {
 	dirty := false
 	store := e.pendingStore()
 	if store != nil && len(pk) > 0 {
-		dirty = store.HasEdit(pk, col.Name)
+		dirty = store.HasEdit(pk, col.PhysicalName)
 	}
 
 	// Reset the buffer so the next `i` on this cell starts fresh.
@@ -355,7 +358,7 @@ func (e *CellEditorController) Discard(_ commands.ExecCtx) error {
 	}
 
 	if dirty {
-		if err := store.Remove(pk, col.Name); err != nil {
+		if err := store.Remove(pk, col.PhysicalName); err != nil {
 			return e.wrapErr("cell.edit.discard", err)
 		}
 		if e.helpers.Toast != nil {

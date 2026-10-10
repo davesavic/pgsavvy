@@ -131,11 +131,15 @@ func TestReview_forward_fk_metadata(t *testing.T) {
 				tabs := &reviewAllocationTabs{ResultTabsHelper: ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{
 					MaxTabs: maxTabs, OnUIThread: pump.post,
 					StreamFactory: func() ui.StreamRunner { return &reviewForwardBuffer{} },
-					IntrospectEditability: func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool) {
+					IntrospectEditability: func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta), func() bool) {
 						introspections++
 						require.NotEmpty(t, cols)
-						return func(context.Context) (bool, []int, string, models.Ref) {
-							return scenario != "readonly", []int{len(cols) - 1}, "synthetic policy", models.Ref{Schema: "app", Table: "users"}
+						return func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta) {
+							resolved := append([]models.ColumnMeta(nil), cols...)
+							for i := range resolved {
+								resolved[i].PhysicalName = resolved[i].Name
+							}
+							return scenario != "readonly", []int{len(cols) - 1}, "synthetic policy", models.Ref{Schema: "app", Table: "users"}, resolved
 						}, func() bool { return true }
 					},
 				})}
@@ -145,6 +149,11 @@ func TestReview_forward_fk_metadata(t *testing.T) {
 				require.NoError(t, tabs.ResultTabsHelper.OpenResultTab("source", seed))
 				pump.pumpUntil(t, time.Second, "source drain", func() bool { return tabs.Active().Complete() })
 				source := tabs.Active()
+				sourceCols := source.Grid().Columns()
+				for i := range sourceCols {
+					sourceCols[i].PhysicalName = sourceCols[i].Name
+				}
+				source.Grid().SetResolvedEditability(sourceCols, true, []int{0}, "", models.Ref{Schema: "app", Table: "orders"})
 				const sourceSQL = "SELECT * FROM app.orders"
 				source.SetIdentity("origin_connection", query.DetectFromQuery(sourceSQL))
 				source.SetOrigin(sourceSQL, []any{int64(99)}, "source_hint_not_used")
@@ -219,7 +228,8 @@ func TestReview_forward_fk_metadata(t *testing.T) {
 				require.Empty(t, inner.queries[3].DefaultSchema)
 				pump.pumpUntil(t, time.Second, "sorted team drain", func() bool { return team.Complete() })
 				require.False(t, team.Grid().Editable(), "wrapped sort remains ineligible")
-				require.Equal(t, 2, introspections, "sorting must not introspect an ineligible wrapped result")
+				require.Equal(t, 3, introspections, "sorting resolves physical names without expanding edit authorization")
+				require.NotEmpty(t, team.Grid().Columns()[0].PhysicalName)
 				require.Same(t, edits, source.Grid().PendingEdits())
 			})
 		}

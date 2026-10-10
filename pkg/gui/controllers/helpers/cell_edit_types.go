@@ -218,7 +218,7 @@ func BuildSetNullEdit(pk []any, col models.ColumnMeta, old any) (models.PendingE
 	}
 	return models.PendingEdit{
 		PrimaryKey: append([]any(nil), pk...),
-		Column:     col.Name,
+		Column:     col.PhysicalName,
 		ColumnType: col.TypeName,
 		OldValue:   old,
 		NewValue:   nil,
@@ -233,7 +233,7 @@ func BuildSetNullEdit(pk []any, col models.ColumnMeta, old any) (models.PendingE
 func BuildBooleanEdit(choice BooleanChoice, pk []any, col models.ColumnMeta, old any) models.PendingEdit {
 	e := models.PendingEdit{
 		PrimaryKey: append([]any(nil), pk...),
-		Column:     col.Name,
+		Column:     col.PhysicalName,
 		ColumnType: col.TypeName,
 		OldValue:   old,
 		Kind:       models.Literal,
@@ -261,7 +261,7 @@ func BuildBooleanEdit(choice BooleanChoice, pk []any, col models.ColumnMeta, old
 func BuildExprEdit(pk []any, col models.ColumnMeta, old any, expr string) models.PendingEdit {
 	return models.PendingEdit{
 		PrimaryKey: append([]any(nil), pk...),
-		Column:     col.Name,
+		Column:     col.PhysicalName,
 		ColumnType: col.TypeName,
 		OldValue:   old,
 		NewExpr:    expr,

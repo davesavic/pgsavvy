@@ -192,7 +192,7 @@ func TestCellEditTypes_InitialBuffer_StringFallback(t *testing.T) {
 // TestCellEditTypes_SetNull_Nullable asserts the AC: `<leader>cn` on a
 // nullable column stages PendingEdit{Kind:Literal, NewValue=nil}.
 func TestCellEditTypes_SetNull_Nullable(t *testing.T) {
-	col := models.ColumnMeta{Name: "email", TypeName: "text", Nullable: true}
+	col := models.ColumnMeta{Name: "email", PhysicalName: "email", TypeName: "text", Nullable: true}
 	pk := []any{int64(7)}
 	e, err := helpers.BuildSetNullEdit(pk, col, "old@example.com")
 	if err != nil {
@@ -235,7 +235,7 @@ func TestCellEditTypes_SetNull_NotNullable(t *testing.T) {
 // edge-case "Boolean chooser <Esc> with current selection==NULL →
 // PendingEdit.NewValue=nil with Kind=Literal".
 func TestCellEditTypes_BooleanChoice_BuildEdit(t *testing.T) {
-	col := models.ColumnMeta{Name: "active", TypeName: "bool", Nullable: true}
+	col := models.ColumnMeta{Name: "active", PhysicalName: "active", TypeName: "bool", Nullable: true}
 	pk := []any{int64(1)}
 	cases := []struct {
 		name   string
@@ -296,7 +296,7 @@ func TestCellEditTypes_BooleanChoice_FromKey(t *testing.T) {
 // TestCellEditTypes_InjectNow asserts the AC: "<C-d> injects
 // PendingEdit{Kind:Expression, NewExpr:'now()'}".
 func TestCellEditTypes_InjectNow(t *testing.T) {
-	col := models.ColumnMeta{Name: "updated_at", TypeName: "timestamptz"}
+	col := models.ColumnMeta{Name: "updated_at", PhysicalName: "updated_at", TypeName: "timestamptz"}
 	pk := []any{int64(42)}
 	e := helpers.InjectNow(pk, col, time.Time{})
 	if e.Kind != models.Expression {

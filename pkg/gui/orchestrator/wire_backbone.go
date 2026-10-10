@@ -590,6 +590,7 @@ func (g *Gui) wireHelperDeps() (controllers.UIDeps, controllers.QueryDeps, contr
 
 	// QueryDeps — all optional; set directly.
 	query := controllers.QueryDeps{
+		RunBoundSort: g.runBoundSort,
 		QueryRunner:  g.queryState.queryRunner,
 		ResultTabs:   g.resultTabsH,
 		EditorBuffer: newEditorBufferAdapter(g.registry.QueryEditor),

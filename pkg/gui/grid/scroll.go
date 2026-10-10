@@ -595,8 +595,8 @@ func renderDataLine(snap viewSnapshot, r int, innerW int) string {
 		// before wrapping, so a digit in the SGR prefix can never collide
 		// with a padded value.
 		isDirty := false
-		if pk := rowPKValues(row, snap.rowIdentity); pk != nil {
-			if e, ok := cellPendingEdit(snap.pendingEdits, pk, snap.cols[c].Name); ok {
+		if pk := rowPKValues(row, snap.rowIdentity); pk != nil && snap.pendingEdits != nil {
+			if e, ok := snap.pendingEdits.FindWithIdentity(snap.editIdentity, pk, snap.cols[c].PhysicalName); ok {
 				value = e.NewValue
 				if e.Kind == models.Literal && IsJSONColumn(snap.cols[c]) {
 					if source, ok := value.(string); ok {

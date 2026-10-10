@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/logs"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
@@ -157,6 +158,7 @@ func New(conn drivers.Connection, inner drivers.Session, opts Options) *SQLSessi
 	if s.logger == nil {
 		s.logger = slog.New(slog.DiscardHandler)
 	}
+	s.logger = slog.New(logs.NewRedactingHandler(s.logger.Handler(), connectionLogRedactor{redact: s.RedactSecrets}))
 	// AD-87v: every event emitted by SQLSession is in the "db" category. Pre-
 	// bind cat=db on s.logger so the CategoryFilterHandler in the production
 	// handler chain (RedactingHandler → CategoryFilterHandler → TeeHandler)
@@ -264,7 +266,7 @@ func (s *SQLSession) Execute(ctx context.Context, q models.Query) (models.Result
 	defer s.streamMu.Unlock()
 
 	sid := s.SessionID()
-	preview := sqlPreview(q.SQL, s.connPwd)
+	preview := sqlPreview(s.RedactSecrets(q.SQL), s.connPwd)
 	s.logger.LogAttrs(ctx, slog.LevelDebug, "exec_start",
 		slog.String("evt", "exec_start"),
 		slog.Uint64("sid", uint64(sid)),
@@ -336,7 +338,7 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 
 	suppressLog := LoggingSuppressed(ctx)
 	sid := s.SessionID()
-	preview := sqlPreview(q.SQL, s.connPwd)
+	preview := sqlPreview(s.RedactSecrets(q.SQL), s.connPwd)
 
 	s.logger.LogAttrs(ctx, slog.LevelDebug, "stream_start",
 		slog.String("evt", "stream_start"),
@@ -359,7 +361,7 @@ func (s *SQLSession) Stream(ctx context.Context, q models.Query) (*RunHandle, er
 			slog.Uint64("sid", uint64(sid)),
 			slog.String("severity", n.Severity),
 			slog.String("code", n.Code),
-			slog.String("message_preview", noticePreview(n.Message, connPwd)),
+			slog.String("message_preview", noticePreview(s.RedactSecrets(n.Message), connPwd)),
 		)
 	}
 	s.runActive.Store(rh)
@@ -631,7 +633,7 @@ func (s *SQLSession) recordHistory(stmt string, durMs, rowsAffected int64, succe
 	s.logger.LogAttrs(context.Background(), slog.LevelDebug, "history_record",
 		slog.String("evt", "history_record"),
 		slog.Uint64("sid", uint64(s.inner.ID())),
-		slog.String("sql_preview", sqlPreview(stmt, s.connPwd)),
+		slog.String("sql_preview", sqlPreview(s.RedactSecrets(stmt), s.connPwd)),
 		slog.Int64("ms", durMs),
 		slog.Bool("success", succeeded),
 	)

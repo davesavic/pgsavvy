@@ -1805,6 +1805,7 @@ func (g *Gui) Close() error {
 	g.cancelTableInspect()
 	g.cancelSchemaActivation()
 	if g.resultTabsH != nil {
+		g.resultTabsH.CancelNavigation()
 		g.resultTabsH.CancelExport()
 	}
 	if g.keybindingSystem.matcher != nil {

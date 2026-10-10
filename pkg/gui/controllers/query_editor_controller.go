@@ -1043,6 +1043,9 @@ func (q *QueryEditorController) scheduleDMLCacheEvict(stmt string, done <-chan s
 // Contract entry point for the sort-cycle driver; reached via
 // sortActiveResult, which the constructor wires to the sort entry points.
 func (q *QueryEditorController) reRunActiveTab(runSQL string) bool {
+	if q.helpers.RunBoundSort != nil {
+		return q.helpers.RunBoundSort(runSQL, q.defaultStatementTimeout())
+	}
 	runner := q.helpers.QueryRunner
 	if runner == nil || !runner.HasSession() {
 		q.toast("no active connection")

@@ -289,6 +289,8 @@ func TestBusyHistoryLeafSubtitleNotClobbered(t *testing.T) {
 		t.Fatalf("ActiveLeafKey() = %q after history.open, want HISTORY", got)
 	}
 	if !eventuallyQE(t, 3*time.Second, func() bool {
+		s.drv.mu.Lock()
+		defer s.drv.mu.Unlock()
 		return len(s.g.Registry().History.Items()) >= 1
 	}) {
 		t.Fatal("HISTORY leaf did not reload the recorded row within 3s")

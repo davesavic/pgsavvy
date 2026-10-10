@@ -73,10 +73,10 @@ type gatedSiblingGrid struct {
 	entered, allowInvalidation, invalidated, allowReturn chan struct{}
 }
 
-func (g *gatedSiblingGrid) SettleCommittedRows(generation uint64, cols []models.ColumnMeta, rows []models.Row, originalPKs [][]any, complete bool) {
+func (g *gatedSiblingGrid) SettleCommittedRows(generation uint64, identity models.EditIdentity, cols []models.ColumnMeta, rows []models.Row, originalPKs [][]any, complete bool) {
 	close(g.entered)
 	<-g.allowInvalidation
-	g.View.SettleCommittedRows(generation, cols, rows, originalPKs, complete)
+	g.View.SettleCommittedRows(generation, identity, cols, rows, originalPKs, complete)
 	close(g.invalidated)
 	<-g.allowReturn
 }

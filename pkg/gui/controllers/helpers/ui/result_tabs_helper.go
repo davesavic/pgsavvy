@@ -323,7 +323,7 @@ type ResultTabsHelperDeps struct {
 	// IntrospectEditability captures connection ownership and policy before
 	// worker dispatch. Returns the bound I/O operation and a publication-time
 	// ownership check. nil keeps editability off.
-	IntrospectEditability func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool)
+	IntrospectEditability func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta), func() bool)
 
 	// EstimateRows runs a side-effect-free planner EXPLAIN for sql (resolved
 	// against defaultSchema) and returns the top-node estimated row count.
@@ -368,9 +368,11 @@ type ResultTabsHelper struct {
 	// no-ops on a nil logger, so unit tests that skip SetLogger emit nothing.
 	log *slog.Logger
 
-	mu       sync.Mutex
-	tabs     []*Tab // ordered by Slot (0..max-1)
-	activeID int64  // 0 when no tab is active
+	mu                   sync.Mutex
+	tabs                 []*Tab // ordered by Slot (0..max-1)
+	activeID             int64  // 0 when no tab is active
+	navigationGeneration uint64
+	navigationCancel     context.CancelFunc
 
 	// hideOverlay tracks the currently-open <leader>gH overlay, if any.
 	// nil when no overlay is active.
@@ -1047,6 +1049,7 @@ func (h *ResultTabsHelper) Close(t *Tab) error {
 		}
 		newActive = best.id
 	}
+	h.invalidateNavigationLocked()
 	h.activeID = newActive
 	cb := h.onTabRemoved
 	h.mu.Unlock()
@@ -1075,6 +1078,7 @@ func (h *ResultTabsHelper) CloseAll() {
 	h.mu.Lock()
 	tabs := h.tabs
 	h.tabs = nil
+	h.invalidateNavigationLocked()
 	h.activeID = 0
 	cb := h.onTabRemoved
 	driver := h.deps.Driver
@@ -1212,6 +1216,7 @@ func (h *ResultTabsHelper) SwitchToTabByID(tabID string) *Tab {
 	for _, t := range h.tabs {
 		if fmt.Sprintf("%d", t.id) == tabID {
 			changed = h.activeID != t.id
+			h.invalidateNavigationLocked()
 			h.activeID = t.id
 			found = t
 			break
@@ -1264,6 +1269,7 @@ func (h *ResultTabsHelper) Jump(i int) {
 		return
 	}
 	prev := h.activeID
+	h.invalidateNavigationLocked()
 	h.activeID = found.id
 	changed := h.activeID != prev
 	cb := h.onActiveChanged
@@ -1306,6 +1312,7 @@ func (h *ResultTabsHelper) Cycle(dir int) {
 	}
 	next := (currentIdx + step + len(ordered)) % len(ordered)
 	prev := h.activeID
+	h.invalidateNavigationLocked()
 	h.activeID = ordered[next].id
 	changed := h.activeID != prev
 	cb := h.onActiveChanged
@@ -2087,7 +2094,8 @@ func (h *ResultTabsHelper) scheduleEditabilityIntrospect(tab *Tab, cols []models
 	tab.mu.Lock()
 	gridView := tab.grid
 	gen := tab.editabilityGen
-	eligible := tab.connID != "" && tab.resultIdentity.HasRowIdentity && !tab.disposed.Load()
+	eligible := tab.connID != "" && !tab.disposed.Load()
+	allowEdit := tab.resultIdentity.HasRowIdentity
 	tab.mu.Unlock()
 	if gridView == nil || !eligible {
 		return
@@ -2097,14 +2105,20 @@ func (h *ResultTabsHelper) scheduleEditabilityIntrospect(tab *Tab, cols []models
 		return
 	}
 	run := func() {
-		editable, rowID, reason, ref := introspect(context.Background())
+		editable, rowID, reason, ref, resolved := introspect(context.Background())
+		if !allowEdit {
+			editable = false
+			if reason == "" {
+				reason = "query projection is read-only"
+			}
+		}
 		flip := func() error {
 			tab.mu.Lock()
 			defer tab.mu.Unlock()
 			if tab.disposed.Load() || tab.editabilityGen != gen || tab.grid != gridView || !current() {
 				return nil
 			}
-			gridView.SetEditability(editable, rowID, reason, ref)
+			gridView.SetResolvedEditability(resolved, editable, rowID, reason, ref)
 			return nil
 		}
 		if h.deps.OnUIThread != nil {
@@ -2176,6 +2190,7 @@ func (h *ResultTabsHelper) queueBehind(tab *Tab, prior *Tab) {
 func (h *ResultTabsHelper) setActive(id int64) {
 	h.mu.Lock()
 	changed := h.activeID != id
+	h.invalidateNavigationLocked()
 	h.activeID = id
 	h.mu.Unlock()
 	if changed {
@@ -3186,7 +3201,10 @@ func (h *ResultTabsHelper) reattachActiveTab(rh runHandle, runSQL, origSQL strin
 	if t == nil {
 		return
 	}
+	h.reattachTab(t, rh, runSQL, origSQL)
+}
 
+func (h *ResultTabsHelper) reattachTab(t *Tab, rh runHandle, runSQL, origSQL string) {
 	// Reset the TAB-level fields startStreaming/SetColumns do not touch and
 	// pre-arm the "sorting…" affordance, then swap in the new RunHandle. All
 	// under tab.mu; released before startStreaming.

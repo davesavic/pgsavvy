@@ -180,6 +180,31 @@ func TestEditabilityCatalogIndependentKeys(t *testing.T) {
 	}
 }
 
+func TestResolveEditabilityPhysicalColumnNames(t *testing.T) {
+	sess := openIntegrationSession(t)
+	ctx := context.Background()
+	schema := fmt.Sprintf("review_alias_%d", time.Now().UnixNano())
+	table := pg.QuoteQualified(schema, "quoted table")
+	spExec(t, sess, "BEGIN")
+	defer spExec(t, sess, "ROLLBACK")
+	spExec(t, sess, "CREATE SCHEMA "+pg.QuoteIdent(schema))
+	spExec(t, sess, "CREATE TABLE "+table+" (id integer PRIMARY KEY, a text, b text, \"quoted column\" text)")
+	spExec(t, sess, "INSERT INTO "+table+" VALUES (1,'old','old','quoted')")
+	cols := columnsFromSelect(t, sess, "SELECT id AS key_alias, a AS b, b AS a, \"quoted column\" AS \"display alias\" FROM "+table)
+	ref, identity, reason, resolved, err := pg.ResolveEditability(ctx, sess, cols)
+	if err != nil || reason != "" || ref != (models.Ref{Schema: schema, Table: "quoted table"}) || !slices.Equal(identity, []int{0}) {
+		t.Fatalf("alias resolution: ref=%v identity=%v reason=%q err=%v", ref, identity, reason, err)
+	}
+	for i, want := range []string{"id", "a", "b", "quoted column"} {
+		if resolved[i].PhysicalName != want || resolved[i].Name != cols[i].Name {
+			t.Fatalf("display column %q resolved physical name %q, want %q", cols[i].Name, resolved[i].PhysicalName, want)
+		}
+		if cols[i].PhysicalName != "" {
+			t.Fatal("resolution mutated the caller's wire metadata")
+		}
+	}
+}
+
 func TestEditabilityIntrospect_SingleBaseTable(t *testing.T) {
 	sess := openIntegrationSession(t)
 	cols := columnsFromSelect(t, sess, "SELECT id, email FROM app.users LIMIT 0")

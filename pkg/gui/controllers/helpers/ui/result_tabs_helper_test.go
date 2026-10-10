@@ -2577,9 +2577,9 @@ func TestEditabilityIntrospectedAtStreamStart(t *testing.T) {
 	factory := func() StreamRunner { return runner }
 	h, _ := newTestHelper(t, factory)
 
-	h.deps.IntrospectEditability = func([]models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool) {
-		return func(context.Context) (bool, []int, string, models.Ref) {
-			return true, []int{0}, "", models.Ref{Schema: "myschema", Table: "t"}
+	h.deps.IntrospectEditability = func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta), func() bool) {
+		return func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta) {
+			return true, []int{0}, "", models.Ref{Schema: "myschema", Table: "t"}, resolvedFixtureColumns(cols)
 		}, func() bool { return true }
 	}
 
@@ -2625,9 +2625,9 @@ func TestReview_target_stale_introspection(t *testing.T) {
 			current := true
 			h.deps.OnWorker = func(fn func(gocui.Task) error) { workers = append(workers, fn) }
 			h.deps.OnUIThread = func(fn func() error) { publications = append(publications, fn) }
-			h.deps.IntrospectEditability = func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool) {
-				return func(context.Context) (bool, []int, string, models.Ref) {
-					return true, []int{0}, "", models.Ref{Schema: cols[0].Name, Table: "t.u"}
+			h.deps.IntrospectEditability = func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta), func() bool) {
+				return func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta) {
+					return true, []int{0}, "", models.Ref{Schema: cols[0].Name, Table: "t.u"}, resolvedFixtureColumns(cols)
 				}, func() bool { return current }
 			}
 			_ = h.openTab("old", nil)
@@ -2691,10 +2691,10 @@ func TestReview_target_stale_introspection(t *testing.T) {
 func TestReview_target_wrapped_rerun(t *testing.T) {
 	h, _ := newTestHelper(t, func() StreamRunner { return &fakeStreamRunner{} })
 	calls := 0
-	h.deps.IntrospectEditability = func([]models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool) {
+	h.deps.IntrospectEditability = func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta), func() bool) {
 		calls++
-		return func(context.Context) (bool, []int, string, models.Ref) {
-			return true, []int{0}, "", models.Ref{Schema: "a.b", Table: "t.u"}
+		return func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta) {
+			return true, []int{0}, "", models.Ref{Schema: "a.b", Table: "t.u"}, resolvedFixtureColumns(cols)
 		}, func() bool { return true }
 	}
 	newHandle := func() *fakeRunHandle {
@@ -2708,11 +2708,11 @@ func TestReview_target_wrapped_rerun(t *testing.T) {
 		t.Fatal("first open did not resolve after identity attachment")
 	}
 	h.reattachActiveTab(newHandle(), `select * from (select id from "t.u") q order by 1`, `select id from "t.u"`)
-	if calls != 1 || h.Active().grid.Editable() {
+	if calls != 2 || h.Active().grid.Editable() || h.Active().grid.Columns()[0].PhysicalName != "id" {
 		t.Fatal("wrapped rerun expanded edit authorization")
 	}
 	h.reattachActiveTab(newHandle(), `select id from "t.u"`, `select id from "t.u"`)
-	if calls != 2 || h.Active().grid.IdentityRef() != (models.Ref{Schema: "a.b", Table: "t.u"}) {
+	if calls != 3 || h.Active().grid.IdentityRef() != (models.Ref{Schema: "a.b", Table: "t.u"}) {
 		t.Fatal("clearing sort did not resolve the original relation")
 	}
 }
@@ -2729,13 +2729,13 @@ func TestReview_target_queued_capture_on_ui(t *testing.T) {
 				}
 			}
 			var captured, inUI atomic.Bool
-			h.deps.IntrospectEditability = func([]models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool) {
+			h.deps.IntrospectEditability = func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta), func() bool) {
 				captured.Store(true)
 				if !inUI.Load() {
 					t.Error("queued factory read UI-owned connection policy off UI")
 				}
-				return func(context.Context) (bool, []int, string, models.Ref) {
-					return true, []int{0}, "", models.Ref{Schema: "a", Table: "t"}
+				return func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta) {
+					return true, []int{0}, "", models.Ref{Schema: "a", Table: "t"}, resolvedFixtureColumns(cols)
 				}, func() bool { return true }
 			}
 			prior := newFakeRunHandle()

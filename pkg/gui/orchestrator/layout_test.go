@@ -139,6 +139,8 @@ func TestRunLayoutDisablesCaretOnQueryRailListTab(t *testing.T) {
 	if err := g.ContextTree().Push(rail); err != nil {
 		t.Fatalf("Push(queryRail): %v", err)
 	}
+	// The recorder runs list publications on workers, unlike native MainLoop.
+	g.WaitForWorkersForTest()
 	// Pre-stain the caret so "layout never touched it" also fails.
 	rec.SetCaretEnabled(true)
 	if err := g.RunLayout(120, 40); err != nil {

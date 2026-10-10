@@ -529,10 +529,10 @@ func TestRenderDataLine_CurrentMatchNotInvertedBySelection(t *testing.T) {
 // reach the render snapshot and be looked up per cell by PK + column.
 func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
 	v := NewView()
-	v.SetColumns([]models.ColumnMeta{
+	v.SetColumns(catalogFixtureColumns([]models.ColumnMeta{
 		{Name: "id", TypeName: "int4"},
 		{Name: "name", TypeName: "text"},
-	})
+	}))
 	v.AppendRows([]models.Row{
 		{Values: []any{1, "alice"}},
 		{Values: []any{2, "carol"}},
@@ -541,6 +541,7 @@ func TestRenderDataLine_DirtyCellShowsStagedValue(t *testing.T) {
 	v.SetEditability(true, []int{0}, "", models.Ref{Schema: "public", Table: "t"})
 
 	set := &models.PendingEditSet{}
+	require.NoError(t, set.BindIdentity(v.EditIdentity()))
 	if err := set.Add(models.PendingEdit{
 		PrimaryKey: []any{1}, Column: "name",
 		OldValue: "alice", NewValue: "bob", Kind: models.Literal,
@@ -581,10 +582,11 @@ func TestReview_json_scalar_dirty_raw_input(t *testing.T) {
 	for _, raw := range []string{`{"a":2}`, `[1]`, `"true"`, `true`, `null`} {
 		t.Run(raw, func(t *testing.T) {
 			v := NewView()
-			v.SetColumns([]models.ColumnMeta{{Name: "id", TypeName: "int4"}, {Name: "payload", TypeName: "jsonb"}})
+			v.SetColumns(catalogFixtureColumns([]models.ColumnMeta{{Name: "id", TypeName: "int4"}, {Name: "payload", TypeName: "jsonb"}}))
 			v.AppendRows([]models.Row{{Values: []any{1, "true"}}, {Values: []any{2, "true"}}})
 			v.SetEditability(true, []int{0}, "", models.Ref{Schema: "public", Table: "t"})
 			set := &models.PendingEditSet{}
+			require.NoError(t, set.BindIdentity(v.EditIdentity()))
 			require.NoError(t, set.Add(models.PendingEdit{PrimaryKey: []any{1}, Column: "payload", ColumnType: "jsonb", OldValue: "true", NewValue: raw, Kind: models.Literal}))
 			v.SetPendingEdits(set)
 			snap := v.snapshot()

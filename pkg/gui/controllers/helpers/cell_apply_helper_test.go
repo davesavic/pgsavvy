@@ -143,11 +143,13 @@ func (f *fakeSession) LiveTxStatus() (models.TxStatus, []string) { return "", ni
 // fakeAcquirer hands out a pre-built fakeSession (or an error). Mirrors
 // drivers.Connection.AcquireSession's signature.
 type fakeAcquirer struct {
-	sess *fakeSession
-	err  error
+	sess  *fakeSession
+	err   error
+	calls int
 }
 
 func (a *fakeAcquirer) AcquireSession(_ context.Context) (drivers.Session, error) {
+	a.calls++
 	if a.err != nil {
 		return nil, a.err
 	}
@@ -318,7 +320,34 @@ func TestReview_row_outcome_NaN_identity(t *testing.T) {
 }
 
 func newApplySet() *models.PendingEditSet {
-	return &models.PendingEditSet{Table: models.Ref{Schema: "app", Table: "users"}}
+	return newCanonicalApplyFixture(models.Ref{Schema: "app", Table: "users"}, "id")
+}
+
+func TestApplyRejectsUnresolvedAndReinterpretedIdentityBeforeAcquire(t *testing.T) {
+	acquirer := &fakeAcquirer{err: errors.New("unexpected acquisition")}
+	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: acquirer})
+	unbound := &models.PendingEditSet{Table: models.Ref{Schema: "app", Table: "users"}}
+	mustAdd(t, unbound, models.PendingEdit{PrimaryKey: []any{1}, Column: "name", OldValue: "old", NewValue: "new"})
+	if _, _, err := helper.Apply(context.Background(), unbound, []string{"display_alias"}, false); !errors.Is(err, models.ErrEditIdentityUnresolved) || acquirer.calls != 0 {
+		t.Fatal("unresolved identity reached database acquisition")
+	}
+	bound := newApplySet()
+	mustAdd(t, bound, models.PendingEdit{PrimaryKey: []any{1}, Column: "name", OldValue: "old", NewValue: "new"})
+	if _, err := helper.Overwrite(context.Background(), bound, []string{"another_key"}); !errors.Is(err, models.ErrEditIdentityMismatch) || acquirer.calls != 0 {
+		t.Fatal("overwrite reinterpreted captured identity before acquisition")
+	}
+}
+
+func newCanonicalApplyFixture(ref models.Ref, names ...string) *models.PendingEditSet {
+	set := &models.PendingEditSet{Table: ref}
+	id := models.EditIdentity{RelationOID: 42}
+	for i, name := range names {
+		id.Columns = append(id.Columns, models.IdentityColumn{Attnum: uint16(i + 1), Name: name})
+	}
+	if err := set.BindIdentity(id); err != nil {
+		panic(err)
+	}
+	return set
 }
 
 // --- Tests ---------------------------------------------------------------
@@ -327,7 +356,7 @@ func TestReview_overwrite_SQL(t *testing.T) {
 	for _, kind := range []string{"literal", "null", "expression"} {
 		for _, mode := range []string{"overwrite", "apply", "dry_run"} {
 			t.Run(kind+"/"+mode, func(t *testing.T) {
-				set := &models.PendingEditSet{Table: models.Ref{Schema: `a"pp`, Table: `u"sers`}}
+				set := newCanonicalApplyFixture(models.Ref{Schema: `a"pp`, Table: `u"sers`}, `i"d`, "key")
 				e := models.PendingEdit{PrimaryKey: []any{7, "key'quoted"}, Column: `n"ame`, OldValue: "stale", NewValue: "new", Kind: models.Literal}
 				switch kind {
 				case "null":
@@ -542,8 +571,8 @@ func TestApply_PKLengthMismatch(t *testing.T) {
 		OldValue: "a", NewValue: "b", Kind: models.Literal,
 	})
 	_, _, err := helper.Apply(context.Background(), set, []string{"a", "b"}, false)
-	if !errors.Is(err, helpers.ErrPKLengthMismatch) {
-		t.Fatalf("err = %v, want ErrPKLengthMismatch", err)
+	if !errors.Is(err, models.ErrEditIdentityMismatch) {
+		t.Fatalf("err = %v, want ErrEditIdentityMismatch", err)
 	}
 }
 
@@ -795,7 +824,7 @@ func TestApply_CompositePK_WhereAndRefetchUseAllColumns(t *testing.T) {
 	}
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
 
-	set := &models.PendingEditSet{Table: models.Ref{Schema: "app", Table: "t"}}
+	set := newCanonicalApplyFixture(models.Ref{Schema: "app", Table: "t"}, "a", "b")
 	mustAdd(t, set, models.PendingEdit{
 		PrimaryKey: []any{int64(1), "x"}, Column: "v",
 		OldValue: "old", NewValue: "new", Kind: models.Literal,
@@ -932,7 +961,7 @@ func TestApply_IdentifiersQuotedViaQuoteIdent(t *testing.T) {
 	}
 	helper := helpers.NewCellApplyHelper(helpers.CellApplyDeps{Acquirer: &fakeAcquirer{sess: sess}})
 
-	set := &models.PendingEditSet{Table: models.Ref{Schema: "weird schema", Table: "User"}}
+	set := newCanonicalApplyFixture(models.Ref{Schema: "weird schema", Table: "User"}, "User")
 	mustAdd(t, set, models.PendingEdit{
 		PrimaryKey: []any{int64(1)}, Column: "Order",
 		OldValue: "a", NewValue: "b", Kind: models.Literal,

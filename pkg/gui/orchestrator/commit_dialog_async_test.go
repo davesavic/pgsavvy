@@ -59,6 +59,9 @@ func asyncCommitFixture(t *testing.T, conn drivers.Connection) (asyncCommitHooks
 	d := &asyncCommitDriver{queue: make(chan func() error, 32)}
 	g.driver = d
 	set := g.pendingEditReg.For("A", models.Ref{Schema: "app", Table: "t"})
+	if err := set.BindIdentity(tabs.Active().Grid().EditIdentity()); err != nil {
+		t.Fatal(err)
+	}
 	if err := set.Add(models.PendingEdit{PrimaryKey: []any{int64(42)}, Column: "data", OldValue: "loaded", Kind: models.Expression, NewExpr: "data || 'x'"}); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +223,7 @@ func TestReview_async_commit_readonly_viewer(t *testing.T) {
 			if mode == "readonly" {
 				g.SetEditability(false, []int{0}, "read-only connection", g.IdentityRef())
 			} else {
-				g.SettleCommittedRows(g.CommitGeneration(), nil, nil, nil, false)
+				g.SettleCommittedRows(g.CommitGeneration(), g.EditIdentity(), nil, nil, nil, false)
 			}
 			picker := cellEditorPicker{tabs: h.deps.tabs}
 			ctx := guicontext.NewCellViewerContext(guicontext.NewBaseContext(guicontext.BaseContextOpts{Key: guicontext.CellViewerKey(), ViewName: "viewer", Kind: types.PERSISTENT_POPUP}), guicontext.Deps{})
@@ -307,7 +310,7 @@ func TestReview_async_commit_stale_editor(t *testing.T) {
 			captured := store.Capture()
 			g := h.deps.tabs.Active().Grid()
 			// Equal values still constitute a new authoritative receipt baseline.
-			g.UpdateRowsFromOriginalPK(g.Columns(), []models.Row{{Values: []any{int64(42), "loaded"}}}, [][]any{pk})
+			g.UpdateRowsFromOriginalPK(g.EditIdentity(), g.Columns(), []models.Row{{Values: []any{int64(42), "loaded"}}}, [][]any{pk})
 			if mode == "before_capture" {
 				captured = store.Capture()
 			}
@@ -444,7 +447,7 @@ func TestReview_async_commit_delayed_baseline(t *testing.T) {
 				}
 			case "newer_values":
 				rows := op.grid.AllRows()
-				op.grid.UpdateRowsFromOriginalPK(op.grid.Columns(), []models.Row{{Values: []any{rows[0].Values[0], "newer"}}}, [][]any{{rows[0].Values[0]}})
+				op.grid.UpdateRowsFromOriginalPK(op.grid.EditIdentity(), op.grid.Columns(), []models.Row{{Values: []any{rows[0].Values[0], "newer"}}}, [][]any{{rows[0].Values[0]}})
 			case "refresh_failure":
 				if op.grid.Editable() {
 					t.Fatal("unproven committed baseline remains editable")
@@ -807,6 +810,13 @@ func TestReview_async_commit_live(t *testing.T) {
 				if _, err := admin.Execute(ctx, models.Query{SQL: "CREATE DATABASE " + pg.QuoteIdent(name)}); err != nil {
 					t.Fatal(err)
 				}
+				t.Cleanup(func() {
+					cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cleanupCancel()
+					if _, err := admin.Execute(cleanupCtx, models.Query{SQL: "DROP DATABASE " + pg.QuoteIdent(name)}); err != nil {
+						t.Errorf("owned test database cleanup failed: %v", err)
+					}
+				})
 				u, err := url.Parse(dsn)
 				if err != nil {
 					t.Fatal("fixture URL invalid")
@@ -855,12 +865,28 @@ func TestReview_async_commit_live(t *testing.T) {
 			}}
 			h, _, d := asyncCommitFixture(t, a)
 			set := h.g.pendingEditReg.For("A", models.Ref{Schema: "public", Table: "items"})
+			stream, err := sessions[0].Stream(ctx, models.Query{SQL: "SELECT id,data FROM public.items"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cols := stream.Columns()
+			if err := stream.Close(); err != nil {
+				t.Fatal(err)
+			}
+			ref, rowID, reason, resolved, err := pg.ResolveEditability(ctx, sessions[0].(*pg.Session), cols)
+			if err != nil || reason != "" || ref != set.Table {
+				t.Fatalf("live target metadata unresolved: %v %q", err, reason)
+			}
+			gv := h.deps.tabs.Active().Grid()
+			gv.SetColumns(resolved)
+			gv.SetEditability(true, rowID, "", ref)
+			if err := set.BindIdentity(gv.EditIdentity()); err != nil {
+				t.Fatal(err)
+			}
 			if err := set.Add(models.PendingEdit{PrimaryKey: []any{int32(42)}, Column: "data", OldValue: int32(10), Kind: models.Expression, NewExpr: "data + 1"}); err != nil {
 				t.Fatal(err)
 			}
-			h.deps.tabs.Active().Grid().SetColumns([]models.ColumnMeta{{Name: "id"}, {Name: "data"}})
 			h.deps.tabs.Active().Grid().AppendRows([]models.Row{{Values: []any{int32(42), int32(10)}}})
-			h.deps.tabs.Active().Grid().SetEditability(true, []int{0}, "", set.Table)
 			if mode == "lock_wait" {
 				for _, sql := range []string{"BEGIN", "UPDATE public.items SET data=data WHERE id=42"} {
 					if _, err := sessions[0].Execute(ctx, models.Query{SQL: sql}); err != nil {

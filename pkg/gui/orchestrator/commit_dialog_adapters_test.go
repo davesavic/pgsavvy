@@ -317,8 +317,8 @@ func TestReview_row_outcome_adapter_matching_snapshot(t *testing.T) {
 	}
 	sess := &rowOutcomeSession{onCommit: func() {
 		e.NewValue = "replacement"
-		if err := set.Add(e); err != nil {
-			t.Fatal(err)
+		if err := set.Add(e); !errors.Is(err, models.ErrCommitInFlight) {
+			t.Fatalf("reserved row accepted restaging: %v", err)
 		}
 		if err := set.Add(models.PendingEdit{PrimaryKey: []any{int64(7)}, Column: "data", NewValue: "unrelated"}); err != nil {
 			t.Fatal(err)
@@ -328,8 +328,8 @@ func TestReview_row_outcome_adapter_matching_snapshot(t *testing.T) {
 	if err := (commitApplyHook{deps: commitDialogDeps{apply: helper, tabs: tabs}}).Apply(set, nil); err != nil {
 		t.Fatal(err)
 	}
-	if set.Count() != 2 {
-		t.Fatalf("receipt erased replacement/unrelated edits: %d", set.Count())
+	if set.Count() != 1 || !set.HasEdit([]any{int64(7)}, "data") {
+		t.Fatalf("receipt erased unrelated edits: %d", set.Count())
 	}
 }
 

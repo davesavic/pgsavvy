@@ -99,7 +99,7 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 	resultTabsDeps.OnWorker = g.OnWorker
 	// Capture the connection and UI-owned policy before worker dispatch; OIDs
 	// from the old connection must never be resolved against its replacement.
-	resultTabsDeps.IntrospectEditability = func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref), func() bool) {
+	resultTabsDeps.IntrospectEditability = func(cols []models.ColumnMeta) (func(context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta), func() bool) {
 		if g.connectHelper == nil {
 			return nil, nil
 		}
@@ -115,25 +115,25 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 		current := func() bool {
 			return !g.closed.Load() && g.connectionState.connectGen.Load() == gen && g.connectHelper.Connection() == conn
 		}
-		return func(ctx context.Context) (bool, []int, string, models.Ref) {
+		return func(ctx context.Context) (bool, []int, string, models.Ref, []models.ColumnMeta) {
 			if !current() {
-				return false, nil, "", models.Ref{}
+				return false, nil, "", models.Ref{}, nil
 			}
 			sess, err := conn.AcquireSession(ctx)
 			if err != nil {
-				return false, nil, "", models.Ref{}
+				return false, nil, "", models.Ref{}, nil
 			}
 			defer func() { _ = sess.Close() }()
 			pgSess, ok := sess.(*pg.Session)
 			if !ok {
-				return false, nil, "", models.Ref{}
+				return false, nil, "", models.Ref{}, nil
 			}
-			baseRelation, rowID, reason, err := pg.EditabilityIntrospect(ctx, pgSess, cols)
+			baseRelation, rowID, reason, resolved, err := pg.ResolveEditability(ctx, pgSess, cols)
 			if err != nil {
-				return false, nil, reason, models.Ref{}
+				return false, nil, reason, models.Ref{}, nil
 			}
 			editable, reason := pg.ApplyConnectionGate(reason == "", reason, readOnly, true)
-			return editable, rowID, reason, baseRelation
+			return editable, rowID, reason, baseRelation, resolved
 		}, current
 	}
 	// Lazy OID->relname resolution for the hide-cols overlay. Mirrors the
@@ -293,12 +293,13 @@ func (g *Gui) wireResultTabs(tr *i18n.TranslationSet) {
 	// parked prior stream at the QueryRunner chokepoint rather than
 	// queueing, so the helper no longer branches on session busyness.
 	g.fkForwardH = helpers.NewFKForwardHelper(helpers.FKForwardDeps{
-		Cache:    &activeSessionFKCacheAdapter{g: g},
-		JumpList: g.jumpListH,
-		Runner:   g.queryState.queryRunner,
-		Tabs:     g.resultTabsH,
-		Toast:    g.toastHelp,
-		Busy:     nil,
-		Limit:    0,
+		AsyncJump: g.runBoundForwardFK,
+		Cache:     &activeSessionFKCacheAdapter{g: g},
+		JumpList:  g.jumpListH,
+		Runner:    g.queryState.queryRunner,
+		Tabs:      g.resultTabsH,
+		Toast:     g.toastHelp,
+		Busy:      nil,
+		Limit:     0,
 	})
 }

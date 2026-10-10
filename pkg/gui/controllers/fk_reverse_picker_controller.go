@@ -97,9 +97,10 @@ type ReverseEntry struct {
 	// Positive: ceil(Reltuples) → `~N rows`. Zero: `~0 rows`. Negative
 	// (typically -1, no ANALYZE): `~? rows`.
 	Reltuples float32
-	// PKValues are the origin-table primary-key values bound to the
-	// generated SELECT. Aligned with FK.RefColumns positionally.
-	PKValues []any
+	// PKValues are the current row's referenced-column values, which need
+	// not be its primary key. Aligned with FK.RefColumns positionally.
+	PKValues          []any
+	UnavailableReason string
 }
 
 // reverseBody renders the body string of one reverse-FK tab. Stateless —
@@ -133,6 +134,10 @@ func reverseBody(e ReverseEntry) string {
 	}
 	b.WriteString(")\n")
 	b.WriteString(renderReltuples(e.Reltuples))
+	if e.UnavailableReason != "" {
+		b.WriteString("\nunavailable: ")
+		b.WriteString(config.SafeText(e.UnavailableReason))
+	}
 	return b.String()
 }
 
@@ -317,7 +322,11 @@ func (f *FKReversePickerController) Select(_ commands.ExecCtx) error {
 	}
 	entry := f.entries[idx]
 
-	if len(entry.PKValues) != len(entry.FK.RefColumns) {
+	if entry.UnavailableReason != "" {
+		f.emitToast("fk reverse: " + entry.UnavailableReason)
+		return nil
+	}
+	if len(entry.FK.RefColumns) == 0 || len(entry.FK.Columns) != len(entry.FK.RefColumns) || len(entry.PKValues) != len(entry.FK.RefColumns) {
 		f.emitToast(fmt.Sprintf("fk reverse: pk value count mismatch (have %d, need %d)",
 			len(entry.PKValues), len(entry.FK.RefColumns)))
 		return nil

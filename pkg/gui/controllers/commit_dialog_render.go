@@ -41,6 +41,7 @@ const commitDialogFooterSqlNote = "expressions execute server-side at COMMIT"
 // controller. Exposed (not lowercase) so unit tests can call it
 // directly with a synthetic CommitDialogView.
 func DefaultCommitDialogRender(v guicontext.CommitDialogView) string {
+	v = redactedCommitView(v)
 	var b strings.Builder
 	writeCommitDialogHeader(&b, v)
 	b.WriteByte('\n')
@@ -58,7 +59,97 @@ func DefaultCommitDialogRender(v guicontext.CommitDialogView) string {
 	writeCommitDialogGate(&b, v)
 	b.WriteByte('\n')
 	b.WriteString(commitDialogFooterSqlNote)
-	return b.String()
+	return commitTextRedactor(v)(b.String())
+}
+
+func commitTextRedactor(v guicontext.CommitDialogView) func(string) string {
+	return func(text string) string {
+		if v.RedactSecrets != nil {
+			text = v.RedactSecrets(text)
+		}
+		if password := connectionPassword(v.Conn); password != "" {
+			encoded := strings.NewReplacer("'", "''", "\\", "\\\\").Replace(password)
+			text = strings.ReplaceAll(text, encoded, "***")
+			text = strings.ReplaceAll(text, strings.ReplaceAll(password, "'", "''"), "***")
+			text = strings.ReplaceAll(text, password, "***")
+		}
+		return text
+	}
+}
+
+func redactedCommitView(v guicontext.CommitDialogView) guicontext.CommitDialogView {
+	redact := commitTextRedactor(v)
+	if v.Set != nil {
+		v.PreviewEdits = v.Set.Edits()
+		for i, edit := range v.PreviewEdits {
+			edit.OldValue = redactPreviewValue(edit.OldValue, redact)
+			edit.NewValue = redactPreviewEditValue(edit.NewValue, edit, redact)
+			edit.NewExpr = redact(edit.NewExpr)
+			v.PreviewEdits[i] = edit
+		}
+	}
+	v.DryRunResult = append([]guicontext.DryRunStmtResult(nil), v.DryRunResult...)
+	for i := range v.DryRunResult {
+		v.DryRunResult[i].SQL = redact(v.DryRunResult[i].SQL)
+	}
+	return v
+}
+
+func redactPreviewEditValue(value any, edit models.PendingEdit, redact func(string) string) any {
+	if source, ok := value.(string); ok && grid.IsJSONColumn(models.ColumnMeta{TypeName: edit.ColumnType, TypeOID: edit.TypeOID}) && json.Valid([]byte(source)) {
+		return redactPreviewValue(json.RawMessage(source), redact)
+	}
+	return redactPreviewValue(value, redact)
+}
+
+func redactPreviewValue(value any, redact func(string) string) any {
+	switch source := value.(type) {
+	case string:
+		return redact(source)
+	case json.RawMessage:
+		var decoded any
+		decoder := json.NewDecoder(strings.NewReader(string(source)))
+		decoder.UseNumber()
+		if decoder.Decode(&decoded) == nil {
+			if encoded, err := json.Marshal(redactPreviewValue(decoded, redact)); err == nil {
+				return json.RawMessage(encoded)
+			}
+		}
+		return json.RawMessage(redact(string(source)))
+	case []byte:
+		if json.Valid(source) {
+			return []byte(redactPreviewValue(json.RawMessage(source), redact).(json.RawMessage))
+		}
+		return []byte(redact(string(source)))
+	case map[string]any:
+		out := make(map[string]any, len(source))
+		for key, item := range source {
+			out[redact(key)] = redactPreviewValue(item, redact)
+		}
+		return out
+	case []any:
+		out := make([]any, len(source))
+		for i, item := range source {
+			out[i] = redactPreviewValue(item, redact)
+		}
+		return out
+	default:
+		rv := reflect.ValueOf(value)
+		if rv.IsValid() && (rv.Kind() == reflect.Array || rv.Kind() == reflect.Slice) {
+			out := reflect.New(rv.Type()).Elem()
+			if rv.Kind() == reflect.Slice {
+				out = reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
+			}
+			for i := range rv.Len() {
+				item := redactPreviewValue(rv.Index(i).Interface(), redact)
+				if item != nil {
+					out.Index(i).Set(reflect.ValueOf(item))
+				}
+			}
+			return out.Interface()
+		}
+		return value
+	}
 }
 
 // writeCommitDialogHeader emits `<icon> <label> · Commit N changes to
@@ -117,12 +208,12 @@ func writeCommitDialogPreview(b *strings.Builder, v guicontext.CommitDialogView)
 		b.WriteString("(no staged edits)")
 		return
 	}
-	groups := groupEditsByPK(v.Set.Edits())
+	groups := groupEditsByPK(v.PreviewEdits)
 	total := len(groups)
 	shown := min(total, commitDialogMaxRows)
 	for i := range shown {
 		g := groups[i]
-		fmt.Fprintf(b, "row %s:\n", formatPK(g.pk))
+		fmt.Fprintf(b, "row %s:\n", formatPK(redactPreviewValue(g.pk, commitTextRedactor(v)).([]any)))
 		for _, e := range g.edits {
 			fmt.Fprintf(b, "  %s: %s → %s\n",
 				e.Column,
@@ -265,26 +356,23 @@ func writeCommitDialogSQL(b *strings.Builder, v guicontext.CommitDialogView) {
 		b.WriteString("(no staged edits)")
 		return
 	}
-	pw := connectionPassword(v.Conn)
-	edits := v.Set.Edits()
+	edits := v.PreviewEdits
 	b.WriteString("BEGIN;\n")
-	for i := range edits {
-		if pw != "" {
-			scrubEditPassword(&edits[i], pw)
-		}
-	}
 	pkCols := v.PkCols
+	if id := v.Set.Identity(); id.RelationOID != 0 {
+		pkCols = id.Names()
+	}
 	if len(pkCols) == 0 {
 		pkCols = pkColumnPlaceholder(len(edits[0].PrimaryKey))
 	}
-	batch, err := helpers.BuildUpdateBatch(v.Set.Table, pkCols, edits, helpers.SQLModeLiteral, true)
+	batch, err := BuildCommitPreviewBatch(v.Set.Table, pkCols, edits, commitTextRedactor(v))
 	if err != nil {
 		b.WriteString("(cannot build safe SQL preview)")
 		return
 	}
 	shown := min(len(batch), commitDialogMaxStmts)
 	for i := range shown {
-		b.WriteString(highlight.Highlight(batch[i].SQL))
+		b.WriteString(highlight.Highlight(commitTextRedactor(v)(batch[i].SQL)))
 		b.WriteByte('\n')
 	}
 	if len(batch) > shown {
@@ -293,31 +381,40 @@ func writeCommitDialogSQL(b *strings.Builder, v guicontext.CommitDialogView) {
 	b.WriteString("COMMIT;")
 }
 
-// scrubEditPassword replaces the connection password with "***" in a
-// PendingEdit's value fields. Applied before literal SQL embedding so
-// the password never appears in rendered output.
-func scrubEditPassword(e *models.PendingEdit, pw string) {
-	if pw == "" {
-		return
+// BuildCommitPreviewBatch produces display-only SQL. Original identity groups
+// and edit indexes survive redaction; callers must never execute this SQL.
+func BuildCommitPreviewBatch(table models.Ref, pkCols []string, edits []models.PendingEdit, redact func(string) string) ([]helpers.RowUpdateStatement, error) {
+	if redact == nil {
+		redact = func(text string) string { return text }
 	}
-	scrub := func(value any) any {
-		switch source := value.(type) {
-		case string:
-			return strings.ReplaceAll(source, pw, "***")
-		case json.RawMessage:
-			// Decode string scalars so JSON escaping cannot hide the password.
-			var scalar *string
-			if err := json.Unmarshal(source, &scalar); err == nil && scalar != nil {
-				encoded, _ := json.Marshal(strings.ReplaceAll(*scalar, pw, "***"))
-				return json.RawMessage(encoded)
+	var batch []helpers.RowUpdateStatement
+	for _, group := range groupEditsByPK(edits) {
+		indices := make([]int, len(group.edits))
+		for i, edit := range group.edits {
+			for j, original := range edits {
+				if edit.Column == original.Column && models.RowIdentityEqual(edit.PrimaryKey, original.PrimaryKey) {
+					indices[i] = j
+					break
+				}
 			}
-			return json.RawMessage(strings.ReplaceAll(string(source), pw, "***"))
-		default:
-			return value
+			edit.PrimaryKey = redactPreviewValue(edit.PrimaryKey, redact).([]any)
+			edit.OldValue = redactPreviewValue(edit.OldValue, redact)
+			edit.NewValue = redactPreviewEditValue(edit.NewValue, edit, redact)
+			edit.NewExpr = redact(edit.NewExpr)
+			group.edits[i] = edit
 		}
+		statements, err := helpers.BuildUpdateBatch(table, pkCols, group.edits, helpers.SQLModeLiteral, true)
+		if err != nil {
+			return nil, err
+		}
+		for i := range statements {
+			for j, index := range statements[i].EditIndexes {
+				statements[i].EditIndexes[j] = indices[index]
+			}
+		}
+		batch = append(batch, statements...)
 	}
-	e.NewValue = scrub(e.NewValue)
-	e.OldValue = scrub(e.OldValue)
+	return batch, nil
 }
 
 // pkColumnPlaceholder returns per-PK-column identifier names for use by

@@ -422,6 +422,9 @@ func (e *CommitDialogController) Open(_ commands.ExecCtx) error {
 	}
 	e.cancelAsync()
 	e.ctx.Open(set, conn)
+	if e.helpers.CommitSecretRedactor != nil {
+		e.ctx.SetSecretRedactor(e.helpers.CommitSecretRedactor())
+	}
 	return e.wrapErr("commit.dialog.open", e.tree.Push(e.ctx))
 }
 

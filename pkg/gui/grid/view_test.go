@@ -12,7 +12,7 @@ import (
 )
 
 func TestReview_commit_baseline(t *testing.T) {
-	cols := []models.ColumnMeta{{Name: "id"}, {Name: "data"}}
+	cols := catalogFixtureColumns([]models.ColumnMeta{{Name: "id"}, {Name: "data"}})
 	ref := models.Ref{Schema: "app", Table: "t"}
 	for _, mode := range []string{"equal_value", "key_change", "schema_reuse", "refresh_failure", "incomplete_projection"} {
 		t.Run(mode, func(t *testing.T) {
@@ -37,7 +37,7 @@ func TestReview_commit_baseline(t *testing.T) {
 				refreshCols = cols[:1]
 				rows[0].Values = rows[0].Values[:1]
 			}
-			v.SettleCommittedRows(generation, refreshCols, rows, [][]any{{int64(42)}}, mode != "refresh_failure")
+			v.SettleCommittedRows(generation, v.EditIdentity(), refreshCols, rows, [][]any{{int64(42)}}, mode != "refresh_failure")
 			called := false
 			require.ErrorIs(t, v.WithEditBaseline(baseline, func() error { called = true; return nil }), models.ErrCommitSnapshotStale)
 			require.False(t, called)

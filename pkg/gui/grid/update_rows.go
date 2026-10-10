@@ -22,11 +22,31 @@ func (v *View) UpdateRowsByPK(refCols []models.ColumnMeta, refRows []models.Row)
 
 // UpdateRowsFromOriginalPK maps each refreshed row to its pre-commit identity.
 // This keeps key changes from replacing a different buffered row.
-func (v *View) UpdateRowsFromOriginalPK(refCols []models.ColumnMeta, refRows []models.Row, originalPKs [][]any) int {
+func (v *View) UpdateRowsFromOriginalPK(identity models.EditIdentity, refCols []models.ColumnMeta, refRows []models.Row, originalPKs [][]any) int {
 	if len(originalPKs) != len(refRows) {
 		return 0
 	}
-	return v.updateRowsByPK(refCols, refRows, originalPKs)
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	keys, ok := v.normalizeOriginalKeysLocked(identity, originalPKs)
+	if !ok {
+		return 0
+	}
+	v.editBaseline++
+	return v.updateRowsByPKLocked(refCols, refRows, keys)
+}
+
+func (v *View) normalizeOriginalKeysLocked(identity models.EditIdentity, originalPKs [][]any) ([][]any, bool) {
+	target := v.editIdentityLocked()
+	keys := make([][]any, len(originalPKs))
+	for i, pk := range originalPKs {
+		var err error
+		keys[i], err = target.Normalize(identity, pk)
+		if err != nil {
+			return nil, false
+		}
+	}
+	return keys, target.Compatible(identity)
 }
 
 func (v *View) updateRowsByPK(refCols []models.ColumnMeta, refRows []models.Row, originalPKs [][]any) int {
@@ -59,7 +79,7 @@ func (v *View) updateRowsByPKLocked(refCols []models.ColumnMeta, refRows []model
 		if idx < 0 || idx >= len(v.cols) {
 			return 0
 		}
-		ri, ok := refIdx[v.cols[idx].Name]
+		ri, ok := refIdx[v.cols[idx].PhysicalName]
 		if !ok && originalPKs == nil {
 			return 0
 		}
@@ -95,7 +115,7 @@ func (v *View) updateRowsByPKLocked(refCols []models.ColumnMeta, refRows []model
 			vals := make([]any, len(row.Values))
 			copy(vals, row.Values)
 			for ci, col := range v.cols {
-				ri, ok := refIdx[col.Name]
+				ri, ok := refIdx[col.PhysicalName]
 				if !ok || ci >= len(vals) || ri >= len(ref.Values) {
 					continue
 				}

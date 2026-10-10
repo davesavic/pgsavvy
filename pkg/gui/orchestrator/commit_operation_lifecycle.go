@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	guicontext "github.com/davesavic/pgsavvy/pkg/gui/context"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/grid"
@@ -68,11 +69,12 @@ type commitOperation struct {
 	gridGeneration uint64
 	siblingGrids   []commitGridBaseline
 	helper         *helpers.CellApplyHelper
+	redactSecrets  func(string) string
 }
 
 type commitGridBaseline struct {
 	grid interface {
-		SettleCommittedRows(uint64, []models.ColumnMeta, []models.Row, [][]any, bool)
+		SettleCommittedRows(uint64, models.EditIdentity, []models.ColumnMeta, []models.Row, [][]any, bool)
 	}
 	generation uint64
 }
@@ -110,9 +112,8 @@ func (h asyncCommitHooks) capture(set *models.PendingEditSet, conn *models.Conne
 	if tab == nil || tab.Grid() == nil || !tab.Grid().Editable() || tab.Grid().IdentityRef() != set.Table {
 		return nil, errors.New("commit dialog: result changed; reopen the dialog")
 	}
-	pkCols, err := pkColsFromActiveTab(h.deps.tabs)
-	if err != nil {
-		return nil, err
+	if !set.Identity().Compatible(tab.Grid().EditIdentity()) {
+		return nil, models.ErrEditIdentityMismatch
 	}
 	snapshot, err := set.BeginCommit(selected)
 	if err != nil {
@@ -121,7 +122,7 @@ func (h asyncCommitHooks) capture(set *models.PendingEditSet, conn *models.Conne
 	ctx, cancel := context.WithCancel(context.Background())
 	op := &commitOperation{
 		ctx: ctx, cancel: cancel, done: make(chan struct{}), live: set, snapshot: snapshot,
-		pkCols: pkCols, tab: tab, grid: tab.Grid(), tabGeneration: tab.EditabilityGeneration(),
+		pkCols: snapshot.Identity().Names(), tab: tab, grid: tab.Grid(), tabGeneration: tab.EditabilityGeneration(),
 		gridGeneration: tab.Grid().CommitGeneration(),
 		// No credential-bearing profile fields are needed by execution/publication.
 		profile: models.Connection{Name: conn.Name, ReadOnly: conn.ReadOnly, ConfirmWrites: conn.ConfirmWrites, Color: conn.Color, Icon: conn.Icon, Label: conn.Label},
@@ -147,6 +148,9 @@ func (h asyncCommitHooks) capture(set *models.PendingEditSet, conn *models.Conne
 		return nil, errors.New("commit dialog: connection changed; reopen the dialog")
 	}
 	owner.commits.mu.Lock()
+	if redactor, ok := owner.connection.(interface{ RedactSecrets(string) string }); ok {
+		op.redactSecrets = redactor.RedactSecrets
+	}
 	if owner.commits.retired || !g.HoldBusy() {
 		owner.commits.mu.Unlock()
 		g.connectionLife.mu.Unlock()
@@ -173,7 +177,7 @@ func (op *commitOperation) execute(dryRun, overwrite bool) (receipt commitReceip
 		receipt.result, receipt.conflicts, receipt.err = op.helper.Apply(op.ctx, op.snapshot, op.pkCols, dryRun)
 	}
 	if dryRun && receipt.err == nil {
-		batch, err := helpers.BuildUpdateBatch(op.snapshot.Table, op.pkCols, receipt.result.Edits, helpers.SQLModeLiteral, true)
+		batch, err := controllers.BuildCommitPreviewBatch(op.snapshot.Table, op.pkCols, receipt.result.Edits, op.redactSecrets)
 		receipt.err = err
 		for _, stmt := range batch {
 			receipt.report = append(receipt.report, guicontext.DryRunStmtResult{SQL: stmt.SQL, RowsAffected: int64(receipt.result.RowsAffected[stmt.EditIndexes[0]])})
@@ -198,12 +202,12 @@ func (h asyncCommitHooks) launch(op *commitOperation, dryRun, overwrite bool, pu
 		}()
 		if receipt.result.Committed {
 			complete := receipt.err == nil && len(receipt.result.RefetchedRows) == len(receipt.result.ResultPKs)
-			op.grid.SettleCommittedRows(op.gridGeneration, receipt.result.RefetchedColumns, receipt.result.RefetchedRows, receipt.result.RefetchedOriginalPKs, complete)
+			op.grid.SettleCommittedRows(op.gridGeneration, op.snapshot.Identity(), receipt.result.RefetchedColumns, receipt.result.RefetchedRows, receipt.result.RefetchedOriginalPKs, complete)
 			// Siblings share reservations, not necessarily projections or row
 			// identities. Invalidate their captured baselines before releasing
 			// reservations; generation fencing leaves replacement results alone.
 			for _, sibling := range op.siblingGrids {
-				sibling.grid.SettleCommittedRows(sibling.generation, nil, nil, nil, false)
+				sibling.grid.SettleCommittedRows(sibling.generation, op.snapshot.Identity(), nil, nil, nil, false)
 			}
 		}
 		op.live.SettleCommit(op.snapshot, receipt.result.Committed, receipt.result.CommitUnknown, receipt.result.OriginalPKs, receipt.result.ResultPKs)

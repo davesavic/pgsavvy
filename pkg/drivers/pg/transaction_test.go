@@ -3,7 +3,10 @@ package pg
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -38,6 +41,77 @@ func TestTransactionCommit(t *testing.T) {
 	err := tx.Commit(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, models.TxCommitted, tx.Status())
+}
+
+func TestTransactionMetadataConcurrentStatusPolling(t *testing.T) {
+	tx := newPgTransaction(&fakeTx{}, nil)
+	sess := &Session{activeTx: tx}
+	started, stop := make(chan struct{}), make(chan struct{})
+	var readers sync.WaitGroup
+	readers.Add(1)
+	go func() {
+		defer readers.Done()
+		close(started)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				sess.LiveTxStatus()
+				sess.CurrentTransaction()
+				tx.Status()
+				tx.Savepoints()
+			}
+		}
+	}()
+	<-started
+	for i := range 1000 {
+		name := fmt.Sprint(i)
+		require.NoError(t, tx.Savepoint(context.Background(), name))
+		tx.ObserveError(&pgconn.PgError{Code: "25P02"})
+		require.NoError(t, tx.Release(context.Background(), name))
+	}
+	require.NoError(t, tx.Rollback(context.Background()))
+	close(stop)
+	readers.Wait()
+	require.Equal(t, models.TxRolledBack, tx.Status())
+}
+
+type statusBarrierTx struct {
+	*fakeTx
+	entered, release chan struct{}
+}
+
+func (tx *statusBarrierTx) Rollback(context.Context) error {
+	close(tx.entered)
+	<-tx.release
+	return nil
+}
+
+func TestTransactionStatusPollingDoesNotWaitForWire(t *testing.T) {
+	barrier := &statusBarrierTx{fakeTx: &fakeTx{}, entered: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(func() {
+		select {
+		case <-barrier.release:
+		default:
+			close(barrier.release)
+		}
+	})
+	tx := newPgTransaction(barrier, nil)
+	sess := &Session{activeTx: tx}
+	done := make(chan error, 1)
+	go func() { done <- tx.Rollback(context.Background()) }()
+	<-barrier.entered
+	polled := make(chan models.TxStatus, 1)
+	go func() { state, _ := sess.LiveTxStatus(); polled <- state }()
+	select {
+	case state := <-polled:
+		require.Equal(t, models.TxActive, state)
+	case <-time.After(time.Second):
+		t.Fatal("status polling blocked on rollback wire wait")
+	}
+	close(barrier.release)
+	require.NoError(t, <-done)
 }
 
 func TestTransactionCommitRejectsNonActive(t *testing.T) {

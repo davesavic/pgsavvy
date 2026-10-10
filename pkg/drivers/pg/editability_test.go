@@ -107,6 +107,17 @@ func TestDecideEditability_CompositePK_BothColumnsInSelectOrder(t *testing.T) {
 	}
 }
 
+func TestRowIdentityPreservesCatalogKeyOrder(t *testing.T) {
+	cols := []models.ColumnMeta{
+		{Name: "b", TableOID: 42, TableAttributeNumber: 2},
+		{Name: "a", TableOID: 42, TableAttributeNumber: 1},
+	}
+	identity, ok := computeRowIdentity(cols, []int32{1, 2}, nil)
+	if !ok || !reflect.DeepEqual(identity, []int{1, 0}) {
+		t.Fatalf("reordered projection changed the key tuple: %v", identity)
+	}
+}
+
 func TestDecideEditability_CompositePK_DuplicatedColumnUsesLowestIndex(t *testing.T) {
 	// SELECT user_id, role_id, user_id FROM app.user_roles
 	// First occurrence of user_id is index 0; role_id is index 1.

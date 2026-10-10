@@ -25,6 +25,7 @@ import (
 type cellEditorSample struct {
 	grid     *grid.View
 	baseline uint64
+	identity models.EditIdentity
 }
 
 type cellEditorPicker struct {
@@ -88,7 +89,7 @@ func (p cellEditorPicker) CellSnapshot() (any, models.ColumnMeta, []any, bool) {
 	g := tab.Grid()
 	value, col, pk, baseline, ok := g.CellEditSnapshot()
 	if ok && p.sample != nil {
-		*p.sample = cellEditorSample{grid: g, baseline: baseline}
+		*p.sample = cellEditorSample{grid: g, baseline: baseline, identity: g.EditIdentity()}
 	}
 	return value, col, pk, ok
 }
@@ -172,7 +173,12 @@ func (s cellEditorStore) Add(e models.PendingEdit) error {
 	if set == nil {
 		return fmt.Errorf("cell editor: no active pending edit set")
 	}
-	return s.withBaseline(func() error { return set.Add(e) })
+	return s.withBaseline(func() error {
+		if s.sample == nil {
+			return models.ErrEditIdentityUnresolved
+		}
+		return set.AddWithIdentity(s.sample.identity, e)
+	})
 }
 
 func (s cellEditorStore) Remove(pk []any, col string) error {
@@ -180,7 +186,12 @@ func (s cellEditorStore) Remove(pk []any, col string) error {
 	if set == nil {
 		return fmt.Errorf("cell editor: no active pending edit set")
 	}
-	return s.withBaseline(func() error { set.Remove(pk, col); return nil })
+	return s.withBaseline(func() error {
+		if s.sample == nil {
+			return models.ErrEditIdentityUnresolved
+		}
+		return set.RemoveWithIdentity(s.sample.identity, pk, col)
+	})
 }
 
 func (s cellEditorStore) HasEdit(pk []any, col string) bool {
@@ -190,7 +201,11 @@ func (s cellEditorStore) HasEdit(pk []any, col string) bool {
 	}
 	// Existence is only a read hint; Remove authorizes mutation against the
 	// sampled baseline so stale pending intent cannot be mistaken for clean.
-	return set.HasEdit(pk, col)
+	if s.sample == nil {
+		return false
+	}
+	_, found := set.FindWithIdentity(s.sample.identity, pk, col)
+	return found
 }
 
 func (s cellEditorStore) withBaseline(fn func() error) error {

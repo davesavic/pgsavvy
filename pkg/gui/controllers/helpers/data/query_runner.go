@@ -41,8 +41,7 @@ type sessionCancelCurrenter interface {
 // in-flight query instead of letting it run to completion server-side. No-op
 // when the driver lacks live-cancel, the session lacks the capability (unit-test
 // fakes), or nothing is in flight.
-func (r *QueryRunner) cancelCurrentWire(ctx context.Context) {
-	b := r.load()
+func (r *QueryRunner) cancelBindingWire(ctx context.Context, b *runnerBinding) {
 	if b == nil || b.sess == nil {
 		return
 	}
@@ -146,7 +145,10 @@ type runnerBinding struct {
 // atomic pointer: the launcher goroutine reads it while the UI thread
 // may still be wiring it.
 type QueryRunner struct {
-	binding atomic.Pointer[runnerBinding]
+	binding          atomic.Pointer[runnerBinding]
+	boundMu          sync.Mutex
+	actionGeneration atomic.Uint64
+	unadopted        map[*BoundQueryResult]struct{}
 
 	// last holds the most recent run: a PENDING launch sentinel (cancel
 	// non-nil, rh nil) published on the enqueueing goroutine before the
@@ -224,13 +226,15 @@ type QueryRunner struct {
 // RunHandle has terminated (watcher goroutine), so a quit-during-gap
 // CancelAndWait cannot let a Commit overtake the drain.
 type runSlot struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-	rh     *session.RunHandle
-	owner  *runSlot
-	more   bool
-	batch  bool
+	wireCancelDone <-chan struct{}
+	binding        *runnerBinding
+	ctx            context.Context
+	cancel         context.CancelFunc
+	done           chan struct{}
+	rh             *session.RunHandle
+	owner          *runSlot
+	more           bool
+	batch          bool
 
 	// abandoned is set on the root sentinel after cancellation removes its
 	// current slot. A losing publisher must close its result and ack cancellation.
@@ -251,6 +255,8 @@ type runSlot struct {
 // action — a fan-out's own statements never cancel each other, and the
 // whole batch is atomic with respect to any later launch.
 type launchRequest struct {
+	current      func() bool
+	preempt      func() bool
 	slot         *runSlot
 	preemptFirst bool
 	stmts        []launchStmt
@@ -316,6 +322,9 @@ func (r *QueryRunner) Bind(sess *session.SQLSession, caps drivers.Capabilities) 
 	if r == nil {
 		return
 	}
+	r.boundMu.Lock()
+	defer r.boundMu.Unlock()
+	r.discardUnadoptedLocked()
 	if sess == nil {
 		r.binding.Store(&runnerBinding{caps: caps})
 		return
@@ -337,8 +346,11 @@ func (r *QueryRunner) Unbind() {
 	if r == nil {
 		return
 	}
-	r.cancelPendingLaunch()
+	r.boundMu.Lock()
 	r.binding.Store(&runnerBinding{})
+	r.discardUnadoptedLocked()
+	r.boundMu.Unlock()
+	r.cancelPendingLaunch()
 	r.last.Store(nil)
 }
 
@@ -516,7 +528,7 @@ func (r *QueryRunner) cancelPendingSlot(s *runSlot) *runSlot {
 		// statement is blocked in Stream. Cancel that current operation, not
 		// the stale handle; do not issue duplicate handle and wire cancels.
 		ctx, ctxCancel := context.WithTimeout(context.Background(), wireCancelBound)
-		r.cancelCurrentWire(ctx)
+		r.cancelBindingWire(ctx, root.binding)
 		ctxCancel()
 		return nil
 	}
@@ -824,17 +836,39 @@ func (r *QueryRunner) RunStatementsAsync(ctx context.Context, stmts []StatementL
 // launcher goroutine — starting one lazily if none is live. isExplain marks
 // the slot as an ExplainAsync op (no RunHandle, non-drainable; see C6).
 func (r *QueryRunner) enqueueLaunch(isExplain bool, stmts []launchStmt, ack func(index int, res launchResult, err error)) {
+	r.enqueueBoundLaunch(isExplain, stmts, ack, r.load(), nil, nil, nil)
+}
+
+func (r *QueryRunner) enqueueBoundLaunch(isExplain bool, stmts []launchStmt, ack func(int, launchResult, error), binding *runnerBinding, current func() bool, preempt func() bool, owner *QueryBinding) {
+	r.boundMu.Lock()
+	if owner != nil && !owner.Current() {
+		r.boundMu.Unlock()
+		ack(0, launchResult{}, context.Canceled)
+		return
+	}
+	if owner == nil || owner.action.Load() == 0 {
+		generation := r.actionGeneration.Add(1)
+		if owner != nil {
+			owner.action.Store(generation)
+		}
+	}
+	r.discardUnadoptedLocked()
 	lctx, cancel := context.WithCancel(context.Background())
-	slot := &runSlot{ctx: lctx, cancel: cancel, done: make(chan struct{}), explain: isExplain, batch: len(stmts) > 1}
+	wireDone := make(chan struct{})
+	slot := &runSlot{ctx: lctx, cancel: cancel, done: make(chan struct{}), explain: isExplain, batch: len(stmts) > 1, binding: binding, wireCancelDone: wireDone}
 
 	// Synchronous (cheap, non-blocking) last-wins: cancel the prior
 	// tab-less launch BEFORE this one is queued, so a rapid second Enter
 	// kills the first launch before op #2 begins. The expensive preempt
 	// (bounded Stop-wait) runs later, on the launcher, before this op.
-	r.cancelPendingLaunch()
-	r.last.Store(slot)
+	prior := r.last.Swap(slot)
+	root := prior.pendingRoot()
+	if root != nil {
+		root.abandoned.Store(true)
+		root.cancel()
+	}
 
-	req := &launchRequest{slot: slot, preemptFirst: true, stmts: stmts, ack: ack}
+	req := &launchRequest{slot: slot, preemptFirst: true, stmts: stmts, ack: ack, current: current, preempt: preempt}
 	r.launchMu.Lock()
 	r.launchQ = append(r.launchQ, req)
 	start := !r.launching
@@ -842,8 +876,22 @@ func (r *QueryRunner) enqueueLaunch(isExplain bool, stmts []launchStmt, ack func
 		r.launching = true
 	}
 	r.launchMu.Unlock()
+	r.boundMu.Unlock()
+	if root == nil {
+		close(wireDone)
+	} else {
+		go func() {
+			defer close(wireDone)
+			ctx, cancel := context.WithTimeout(context.Background(), wireCancelBound)
+			defer cancel()
+			r.cancelBindingWire(ctx, root.binding)
+		}()
+	}
 	if start {
 		go r.launchLoop()
+	}
+	if owner == nil {
+		<-wireDone
 	}
 }
 
@@ -886,9 +934,22 @@ func (r *QueryRunner) execLaunch(req *launchRequest) {
 		acquired = (*acq)()
 	}
 	var watchers sync.WaitGroup
+	if req.slot.wireCancelDone != nil {
+		<-req.slot.wireCancelDone
+	}
 	for i, stmt := range req.stmts {
 		if req.preemptFirst {
-			r.preemptBeforeLaunch()
+			if req.current != nil && (req.slot.ctx.Err() != nil || !req.current()) {
+				req.ack(i, launchResult{}, context.Canceled)
+				break
+			}
+			if req.preempt != nil {
+				if req.preempt() && req.slot.binding != nil && req.slot.binding.sess != nil {
+					req.slot.binding.sess.MarkPreemptPending()
+				}
+			} else {
+				r.preemptBeforeLaunch()
+			}
 		}
 		res, err := stmt.op(req.slot.ctx)
 
@@ -953,7 +1014,10 @@ func (r *QueryRunner) execLaunch(req *launchRequest) {
 // owner keeps intermediate results cancellable and preserves the whole-batch
 // drain even if the final statement returns no handle.
 func (r *QueryRunner) publishResolved(slot *runSlot, rh *session.RunHandle, more bool) bool {
-	resolved := &runSlot{rh: rh, owner: slot, more: more}
+	resolved := &runSlot{rh: rh, owner: slot, more: more, binding: r.load()}
+	if slot != nil {
+		resolved.binding = slot.binding
+	}
 	for {
 		cur := r.last.Load()
 		if slot != nil {
@@ -1116,6 +1180,9 @@ func (r *QueryRunner) Cancel() error {
 		return nil
 	}
 	if rh := s.rh; rh != nil {
+		if s.binding != nil && s.binding.sess != nil {
+			return s.binding.sess.Cancel(rh.QueryID())
+		}
 		return b.sess.Cancel(rh.QueryID())
 	}
 	return nil
@@ -1148,7 +1215,7 @@ func (r *QueryRunner) CancelAndWaitActiveRun() bool {
 		// Cancel — without this, done would only close after the query ran to
 		// completion (up to the statement timeout), stalling the quit path.
 		ctx, ctxCancel := context.WithTimeout(context.Background(), wireCancelBound)
-		r.cancelCurrentWire(ctx)
+		r.cancelBindingWire(ctx, root.binding)
 		ctxCancel()
 		done = root.done
 	} else if rh := s.rh; rh != nil {

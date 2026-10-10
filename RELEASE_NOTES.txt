@@ -1,6 +1,26 @@
 pgsavvy v0.10.1
 
-  Hardened connection password command handling and ci/cd pipeline.
+  Hardened connection password commands, SQL/notice logging, commit previews,
+  updater locking, and release validation. Build with Go 1.26.9 and updated
+  cryptography, Unicode, and terminal dependencies.
+
+  Improved streaming cancellation and responsive sort/foreign-key navigation.
+  Results remain bound to their original connection and tab; stale results are
+  disposed instead of replacing a different grid.
+
+  Fixed inline editing with column aliases, reordered composite keys, and
+  independent UNIQUE indexes. Staged edits retain their physical row identity;
+  incompatible identities and unknown commit outcomes fail closed. Expression
+  indexes and INCLUDE payloads cannot become unsafe row identifiers.
+
+  Fixed streamed metadata after schema changes, recovery from aborted
+  transactions, reverse foreign-key value binding, commit refresh/conflict
+  handling, editor draft recovery, JSON values, export, and Unicode rendering.
+
+  Session settings use a versioned state format. Before downgrading, retain a
+  new-format backup and run the old binary with separate XDG state/config
+  directories. Shared-state downgrades can erase settings and are unsupported.
+  See docs/INSTALL.md for backup, rollback, and updater-lock precautions.
 
 pgsavvy v0.10.0
 

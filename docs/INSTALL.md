@@ -88,6 +88,48 @@ Re-run `pgsavvy` afterwards to use the new version.
 - On Windows the previous executable is left beside the new one as a hidden
   `.old` file (a running `.exe` cannot be deleted).
 
+### Backups and downgrades
+
+Close all pgsavvy instances before backing up or replacing a binary. Retain
+your previous binary and private copies of the configuration and state
+directories. On Linux, their defaults are `~/.config/pgsavvy` and
+`~/.local/state/pgsavvy`; respect `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when set.
+For existing directories:
+
+```sh
+backup="$HOME/pgsavvy-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$backup"
+cp -a "${XDG_CONFIG_HOME:-$HOME/.config}/pgsavvy" "$backup/config"
+cp -a "${XDG_STATE_HOME:-$HOME/.local/state}/pgsavvy" "$backup/state"
+```
+
+Keep backups private: connection profiles and query history can contain
+sensitive data. After using the new version, make another backup before
+rolling back. The versioned `canonical_session_settings` envelope in
+`state.yml` is not understood by older binaries. Letting an old binary load
+and save that same file can erase the envelope; shared-state downgrades are
+unsupported.
+
+Run the old binary with fresh, isolated directories instead:
+
+```sh
+rollback_root=$(mktemp -d)
+XDG_CONFIG_HOME="$rollback_root/config" \
+XDG_STATE_HOME="$rollback_root/state" \
+  /path/to/retained-old-pgsavvy
+```
+
+Configure connections again, or copy a **pre-upgrade** configuration backup
+into `$rollback_root/config/pgsavvy`. Do not copy new-format state into the
+old binary's state directory. Keep the new-format backup intact so you can
+return to the new version without losing its settings.
+
+The updater now uses a persistent, OS-locked `update.lock` file. Do not delete
+a new-format lock and do not run old and new updaters against the same state
+directory. If an upgrade reports a legacy or unrecognized lock, first verify
+that no updater is running; remove only the legacy marker identified by that
+error, then retry. File existence alone does not mean a new updater is running.
+
 ## First run
 
 Launch the binary:

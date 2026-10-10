@@ -107,13 +107,14 @@ type CurrentTab interface {
 // stream at the QueryRunner chokepoint, so a later gd press preempts an
 // earlier one rather than queueing behind it.
 type FKForwardHelper struct {
-	cache    FKCache
-	jumpList JumpList
-	runner   QueryRunner
-	tabs     ResultTabsManager
-	toast    Toaster
-	busy     BusyChecker
-	limit    int
+	asyncJump func(context.Context, CurrentTab, int, int) error
+	cache     FKCache
+	jumpList  JumpList
+	runner    QueryRunner
+	tabs      ResultTabsManager
+	toast     Toaster
+	busy      BusyChecker
+	limit     int
 }
 
 // FKForwardDeps bundles FKForwardHelper's collaborators. cache, runner,
@@ -121,12 +122,13 @@ type FKForwardHelper struct {
 // OpenResultTab so a missing list would lose history). toast and busy
 // are optional.
 type FKForwardDeps struct {
-	Cache    FKCache
-	JumpList JumpList
-	Runner   QueryRunner
-	Tabs     ResultTabsManager
-	Toast    Toaster
-	Busy     BusyChecker
+	AsyncJump func(context.Context, CurrentTab, int, int) error
+	Cache     FKCache
+	JumpList  JumpList
+	Runner    QueryRunner
+	Tabs      ResultTabsManager
+	Toast     Toaster
+	Busy      BusyChecker
 	// Limit caps the parent SELECT's row count. Non-positive falls back
 	// to DefaultFKForwardLimit. Wire from UserConfig.Editor.FKForwardLimit.
 	Limit int
@@ -142,13 +144,14 @@ func NewFKForwardHelper(deps FKForwardDeps) *FKForwardHelper {
 		limit = DefaultFKForwardLimit
 	}
 	return &FKForwardHelper{
-		cache:    deps.Cache,
-		jumpList: deps.JumpList,
-		runner:   deps.Runner,
-		tabs:     deps.Tabs,
-		toast:    deps.Toast,
-		busy:     deps.Busy,
-		limit:    limit,
+		asyncJump: deps.AsyncJump,
+		cache:     deps.Cache,
+		jumpList:  deps.JumpList,
+		runner:    deps.Runner,
+		tabs:      deps.Tabs,
+		toast:     deps.Toast,
+		busy:      deps.Busy,
+		limit:     limit,
 	}
 }
 
@@ -180,6 +183,9 @@ var (
 // columns → cursor row → cursor cell. We do the cheapest checks first
 // so a guard miss does not hit the FK cache loader unnecessarily.
 func (h *FKForwardHelper) Jump(ctx context.Context, tab CurrentTab, cursorRow, cursorCol int) error {
+	if h != nil && h.asyncJump != nil {
+		return h.asyncJump(ctx, tab, cursorRow, cursorCol)
+	}
 	if h == nil {
 		return errors.New("fk forward: helper is nil")
 	}

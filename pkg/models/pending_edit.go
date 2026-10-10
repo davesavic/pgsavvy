@@ -40,6 +40,7 @@ var ErrCommitSnapshotStale = errors.New("pending edit: selected commit snapshot 
 type PendingEdit struct {
 	revision uint64
 	owner    *PendingEditSet
+	identity EditIdentity
 	// PrimaryKey holds the row's PK values, in PK column order.
 	PrimaryKey []any
 	// Column is the name of the column being edited.
@@ -98,6 +99,7 @@ type PendingEditSet struct {
 	unknownResultPKs   [][]any
 	commitAttempt      *PendingEditSet
 	commitEdits        []PendingEdit
+	identity           EditIdentity
 }
 
 // BeginCommit atomically captures owned versions and reserves their rows until
@@ -117,7 +119,7 @@ func (s *PendingEditSet) BeginCommit(selected []PendingEdit) (*PendingEditSet, e
 	if len(selected) == 0 {
 		return nil, ErrCommitSnapshotStale
 	}
-	snapshot := &PendingEditSet{Table: s.Table}
+	snapshot := &PendingEditSet{Table: s.Table, identity: s.identity.Clone()}
 	for _, attempt := range selected {
 		found := false
 		for _, current := range s.edits {
@@ -171,6 +173,74 @@ func (s *PendingEditSet) Add(e PendingEdit) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.addLocked(e)
+}
+
+func (s *PendingEditSet) Identity() EditIdentity {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.identity.Clone()
+}
+
+// BindIdentity supports explicit non-editor callers before any edits exist.
+func (s *PendingEditSet) BindIdentity(id EditIdentity) error {
+	if err := id.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.edits) != 0 || s.commitAttempt != nil || len(s.commitEdits) != 0 || len(s.unknown) != 0 {
+		return ErrEditIdentityMismatch
+	}
+	s.identity = id.Clone()
+	return nil
+}
+
+// AddWithIdentity binds the first successful stage and checks all subsequent
+// tuples under the same lock as edit replacement and commit reservations.
+func (s *PendingEditSet) AddWithIdentity(id EditIdentity, e PendingEdit) error {
+	if err := id.Validate(); err != nil {
+		return err
+	}
+	if len(e.PrimaryKey) != len(id.Columns) {
+		return ErrEditIdentityMismatch
+	}
+	if e.Column == "" {
+		return ErrEditIdentityUnresolved
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	quiescent := len(s.edits) == 0 && s.commitAttempt == nil && len(s.commitEdits) == 0 && len(s.unknown) == 0
+	if !s.identity.Compatible(id) {
+		if !quiescent {
+			return ErrEditIdentityMismatch
+		}
+		previous := s.identity
+		s.identity = id.Clone()
+		if err := s.addLocked(e); err != nil {
+			s.identity = previous
+			return err
+		}
+		return nil
+	}
+	pk, err := s.identity.Normalize(id, e.PrimaryKey)
+	if err != nil {
+		return err
+	}
+	e.PrimaryKey = pk
+	e.identity = s.identity.Clone()
+	return s.addLocked(e)
+}
+
+func (e PendingEdit) Identity() EditIdentity { return e.identity.Clone() }
+
+func (s *PendingEditSet) addLocked(e PendingEdit) error {
+	if s.identity.RelationOID != 0 {
+		if len(e.PrimaryKey) != len(s.identity.Columns) {
+			return ErrEditIdentityMismatch
+		}
+		e.identity = s.identity.Clone()
+	}
 	for _, attempt := range s.commitEdits {
 		if pkEqual(attempt.PrimaryKey, e.PrimaryKey) {
 			return ErrCommitInFlight
@@ -204,12 +274,70 @@ func (s *PendingEditSet) Add(e PendingEdit) error {
 func (s *PendingEditSet) Remove(pk []any, col string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.removeLocked(pk, col)
+}
+
+func (s *PendingEditSet) RemoveWithIdentity(id EditIdentity, pk []any, col string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pk, err := s.identity.Normalize(id, pk)
+	if err != nil {
+		return err
+	}
+	s.removeLocked(pk, col)
+	return nil
+}
+
+func (s *PendingEditSet) FindWithIdentity(id EditIdentity, pk []any, col string) (PendingEdit, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	pk, err := s.identity.Normalize(id, pk)
+	if err != nil {
+		return PendingEdit{}, false
+	}
+	for _, e := range s.edits {
+		if e.Column == col && pkEqual(e.PrimaryKey, pk) {
+			return clonePendingEdit(e), true
+		}
+	}
+	return PendingEdit{}, false
+}
+
+func (s *PendingEditSet) removeLocked(pk []any, col string) {
 	for i := range s.edits {
 		if s.edits[i].Column == col && pkEqual(s.edits[i].PrimaryKey, pk) {
 			s.edits = append(s.edits[:i], s.edits[i+1:]...)
 			return
 		}
 	}
+}
+
+// DiscardOwned checks all captured versions before changing any pending edits.
+func (s *PendingEditSet) DiscardOwned(selected []PendingEdit) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.commitAttempt != nil {
+		return ErrCommitInFlight
+	}
+	if len(s.unknown) != 0 {
+		return ErrCommitOutcomeUnknown
+	}
+	for _, e := range selected {
+		found := false
+		for _, current := range s.edits {
+			if e.owner == s && e.revision != 0 && e.revision == current.revision {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return ErrCommitSnapshotStale
+		}
+	}
+	for _, e := range selected {
+		s.removeLocked(e.PrimaryKey, e.Column)
+	}
+	return nil
 }
 
 // Clear removes all staged edits.
@@ -410,6 +538,7 @@ func validCommitIdentities(edits []PendingEdit, originalPKs, resultPKs [][]any) 
 }
 
 func clonePendingEdit(e PendingEdit) PendingEdit {
+	e.identity = e.identity.Clone()
 	e.PrimaryKey = clonePendingValue(reflect.ValueOf(e.PrimaryKey)).Interface().([]any)
 	if e.OldValue != nil {
 		e.OldValue = clonePendingValue(reflect.ValueOf(e.OldValue)).Interface()

@@ -97,7 +97,7 @@ func newTabWithRow(t *testing.T, baseTable string, cols []string, row []any) *ui
 	}
 	meta := make([]models.ColumnMeta, len(cols))
 	for i, c := range cols {
-		meta[i] = models.ColumnMeta{Name: c}
+		meta[i] = models.ColumnMeta{Name: c, PhysicalName: c}
 	}
 	g.SetColumns(meta)
 	g.AppendRows([]models.Row{{Values: row}})

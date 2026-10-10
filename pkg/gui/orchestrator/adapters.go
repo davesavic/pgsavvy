@@ -1458,7 +1458,7 @@ func (c *connectInvoker) wireQueryRuntimeIO(ctx context.Context, conn drivers.Co
 	if err != nil {
 		return queryRuntime{}, fmt.Errorf("orchestrator: acquire query session: %w", err)
 	}
-	opts := session.Options{}
+	opts := session.Options{ConnectionPassword: profile.Password}
 	if c.g != nil {
 		opts.Logger = c.g.deps.Common.Logger()
 	}

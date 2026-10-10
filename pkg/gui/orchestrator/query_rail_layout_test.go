@@ -63,12 +63,10 @@ func TestQueryRailScopedMasterEditorSwap(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			g, rec := buildTestGui(t)
-			if err := g.ContextTree().Push(g.Registry().QueryRail); err != nil {
-				t.Fatalf("Push(QueryRail): %v", err)
-			}
-			g.Registry().QueryRail.SetActiveTab(tc.tab)
-			if err := g.RunLayout(120, 40); err != nil {
+			g, drv, _ := newSubtitleGui(t)
+			t.Cleanup(func() { _ = g.Close() })
+			rec := drv.RecorderGuiDriver
+			if err := drv.switchTabAndRunLayout(g, tc.tab, 120, 40); err != nil {
 				t.Fatalf("RunLayout: %v", err)
 			}
 
@@ -106,12 +104,10 @@ func TestQueryRailTabStripReflectsActiveTab(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			g, rec := buildTestGui(t)
-			if err := g.ContextTree().Push(g.Registry().QueryRail); err != nil {
-				t.Fatalf("Push(QueryRail): %v", err)
-			}
-			g.Registry().QueryRail.SetActiveTab(tc.tab)
-			if err := g.RunLayout(120, 40); err != nil {
+			g, drv, _ := newSubtitleGui(t)
+			t.Cleanup(func() { _ = g.Close() })
+			rec := drv.RecorderGuiDriver
+			if err := drv.switchTabAndRunLayout(g, tc.tab, 120, 40); err != nil {
 				t.Fatalf("RunLayout: %v", err)
 			}
 			last := lastSetViewTabsFor(rec, context.QueryRailViewName)

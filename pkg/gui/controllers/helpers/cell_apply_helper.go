@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -101,6 +102,7 @@ var (
 // distinct-PK list (Apply collapses by PK). RefetchedColumns names the
 // projection used for the refetch SELECT. Empty in dry-run mode.
 type ApplyResult struct {
+	Identity models.EditIdentity
 	// Committed distinguishes a durable write from a later display-refresh error.
 	Committed     bool
 	CommitUnknown bool
@@ -162,6 +164,13 @@ func (h *CellApplyHelper) apply(ctx context.Context, set *models.PendingEditSet,
 	if len(pkCols) == 0 {
 		return ApplyResult{}, nil, ErrMissingPKColumns
 	}
+	identity := set.Identity()
+	if err := identity.Validate(); err != nil {
+		return ApplyResult{}, nil, err
+	}
+	if !slices.Equal(pkCols, identity.Names()) {
+		return ApplyResult{}, nil, models.ErrEditIdentityMismatch
+	}
 
 	edits := set.Edits()
 	batch, batchErr := BuildUpdateBatch(set.Table, pkCols, edits, SQLModeParameterized, !overwrite)
@@ -204,7 +213,7 @@ func (h *CellApplyHelper) apply(ctx context.Context, set *models.PendingEditSet,
 	rowsAffected := make([]int, len(edits))
 	conflicts := make([]models.ConflictedEdit, 0)
 	sqlTexts := make([]string, len(batch))
-	out := ApplyResult{Edits: edits, RowsAffected: rowsAffected, SQL: sqlTexts}
+	out := ApplyResult{Identity: identity, Edits: edits, RowsAffected: rowsAffected, SQL: sqlTexts}
 	for bi, stmt := range batch {
 		e := edits[stmt.EditIndexes[0]]
 		sqlTexts[bi] = stmt.SQL

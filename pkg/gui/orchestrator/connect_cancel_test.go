@@ -172,7 +172,7 @@ func TestReview_async_commit_shutdown_wiring(t *testing.T) {
 	}
 	tabs.Active().SetIdentity("async-close", query.ResultIdentity{HasRowIdentity: true})
 	grid := tabs.Active().Grid()
-	grid.SetColumns([]models.ColumnMeta{{Name: "id"}, {Name: "data"}})
+	grid.SetColumns([]models.ColumnMeta{{Name: "id", PhysicalName: "id", TableOID: 42, TableAttributeNumber: 1}, {Name: "data", PhysicalName: "data", TableOID: 42, TableAttributeNumber: 2}})
 	grid.SetEditability(true, []int{0}, "", models.Ref{Schema: "app", Table: "items"})
 	grid.AppendRows([]models.Row{{Values: []any{int64(1), "old"}}})
 	grid.SetCursor(0, 1)
@@ -180,7 +180,7 @@ func TestReview_async_commit_shutdown_wiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	cell := g.Registry().CellEditor
-	cell.Open("old", models.ColumnMeta{Name: "data", TypeName: "text"}, []any{int64(1)}, "new")
+	cell.Open("old", models.ColumnMeta{Name: "data", PhysicalName: "data", TypeName: "text"}, []any{int64(1)}, "new")
 	if err := g.Controllers().CellEditor.Commit(commands.ExecCtx{}); err != nil {
 		t.Fatal(err)
 	}

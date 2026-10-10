@@ -596,6 +596,11 @@ func (a *fkCurrentTabAdapter) Identity() (string, query.ResultIdentity) { return
 // BaseTable splits the tab's ResultIdentity.BaseTable on the first dot
 // into (schema, table). A bare identifier (no dot) returns ("", id).
 func (a *fkCurrentTabAdapter) BaseTable() (string, string) {
+	if g := a.tab.Grid(); g != nil {
+		if ref := g.IdentityRef(); ref.Table != "" {
+			return ref.Schema, ref.Table
+		}
+	}
 	_, ri := a.tab.Identity()
 	bt := ri.BaseTable
 	if before, after, ok := strings.Cut(bt, "."); ok {
@@ -612,7 +617,7 @@ func (a *fkCurrentTabAdapter) ColumnNames() []string {
 	cols := g.Columns()
 	out := make([]string, len(cols))
 	for i := range cols {
-		out[i] = cols[i].Name
+		out[i] = cols[i].PhysicalName
 	}
 	return out
 }
@@ -672,13 +677,11 @@ func (r *ResultTabsController) fkReverseHandler(_ commands.ExecCtx) error {
 		r.toast("fk reverse: row not yet loaded")
 		return nil
 	}
-	pkValues := make([]any, 0, len(rowIdent))
 	for _, idx := range rowIdent {
 		if idx < 0 || idx >= len(values) {
 			r.toast("fk reverse: row identity column out of range")
 			return nil
 		}
-		pkValues = append(pkValues, values[idx])
 	}
 
 	if r.helpers.ReverseFKLookup == nil {
@@ -697,10 +700,12 @@ func (r *ResultTabsController) fkReverseHandler(_ commands.ExecCtx) error {
 
 	entries := make([]ReverseEntry, 0, len(fks))
 	for _, fk := range fks {
+		refValues, unavailable := reverseReferencedValues(fk, grid.Columns(), values, grid.EditIdentity().RelationOID)
 		entries = append(entries, ReverseEntry{
-			FK:        fk,
-			Reltuples: -1,
-			PKValues:  append([]any(nil), pkValues...),
+			FK:                fk,
+			Reltuples:         -1,
+			PKValues:          refValues,
+			UnavailableReason: unavailable,
 		})
 	}
 
@@ -804,7 +809,7 @@ func (r *ResultTabsController) pendingDiscardAtCursorHandler(_ commands.ExecCtx)
 		r.toast("pending discard: cursor column out of range")
 		return nil
 	}
-	colName := cols[col].Name
+	colName := cols[col].PhysicalName
 	rowIdent := grid.RowIdentity()
 	if len(rowIdent) == 0 {
 		r.toast("pending discard: no row identity on result")
@@ -824,10 +829,14 @@ func (r *ResultTabsController) pendingDiscardAtCursorHandler(_ commands.ExecCtx)
 		}
 		pk = append(pk, values[idx])
 	}
-	if !set.HasEdit(pk, colName) {
+	identity := grid.EditIdentity()
+	if _, found := set.FindWithIdentity(identity, pk, colName); !found {
 		return nil
 	}
-	set.Remove(pk, colName)
+	if err := set.RemoveWithIdentity(identity, pk, colName); err != nil {
+		r.toast(err.Error())
+		return nil
+	}
 	r.toast(fmt.Sprintf("discarded pending edit on %s", colName))
 	return nil
 }

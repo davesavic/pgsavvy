@@ -47,6 +47,7 @@ type relRow struct {
 	IsTempSchema  bool
 	PKAttnums     []int32   // primary-key attnums, nil if none
 	UniqueAttnums [][]int32 // per-UNIQUE-index attnum sets, nil if none
+	ColumnNames   map[int32]string
 }
 
 // relIntrospector is the SQL-bound dependency factored out so unit tests can
@@ -63,10 +64,37 @@ func EditabilityIntrospect(
 	sess *Session,
 	cols []models.ColumnMeta,
 ) (baseRelation models.Ref, rowIdentity []int, disabledReason string, err error) {
+	baseRelation, rowIdentity, disabledReason, _, err = ResolveEditability(ctx, sess, cols)
+	return
+}
+
+// ResolveEditability returns a private column snapshot with canonical physical
+// names, keeping the original wire labels unchanged.
+func ResolveEditability(ctx context.Context, sess *Session, cols []models.ColumnMeta) (models.Ref, []int, string, []models.ColumnMeta, error) {
 	defer sess.guard()()
-	return decideEditability(ctx, cols, func(ctx context.Context, oids []uint32) ([]relRow, error) {
-		return runEditabilityIntrospect(ctx, sess, oids)
+	resolved := append([]models.ColumnMeta(nil), cols...)
+	for i := range resolved {
+		resolved[i].PhysicalName = ""
+	}
+	var rows []relRow
+	ref, identity, reason, err := decideEditability(ctx, resolved, func(ctx context.Context, oids []uint32) ([]relRow, error) {
+		var err error
+		rows, err = runEditabilityIntrospect(ctx, sess, oids)
+		return rows, err
 	})
+	if err == nil && len(rows) == 1 {
+		r := rows[0]
+		for i := range resolved {
+			if resolved[i].TableOID == r.OID {
+				resolved[i].PhysicalName = r.ColumnNames[int32(resolved[i].TableAttributeNumber)]
+			}
+			if reason == "" && resolved[i].PhysicalName == "" {
+				identity = nil
+				reason = "physical column names unavailable"
+			}
+		}
+	}
+	return ref, identity, reason, resolved, err
 }
 
 // decideEditability is the pure-logic core. It assumes the inFlight guard is
@@ -149,8 +177,8 @@ func decideEditability(
 }
 
 // computeRowIdentity picks the smallest PK/UNIQUE index whose attnums are
-// ALL present in the SELECT list, and returns the SELECT-order indexes of
-// those columns. PK is preferred over UNIQUE when both are equally small.
+// ALL present in the SELECT list, and returns their SELECT positions in
+// catalog key order. PK is preferred over UNIQUE when both are equally small.
 // When a column appears more than once in the SELECT list, the lowest index
 // occurrence is used.
 func computeRowIdentity(
@@ -206,7 +234,6 @@ func computeRowIdentity(
 		if !ok {
 			continue
 		}
-		sort.Ints(idxs)
 		return idxs, true
 	}
 	return nil, false
@@ -240,6 +267,7 @@ func runEditabilityIntrospect(ctx context.Context, sess *Session, oids []uint32)
 			&r.IsTempSchema,
 			&pkAttnums,
 			&uniqueSets,
+			&r.ColumnNames,
 		); scanErr != nil {
 			return nil, wrapPgError(scanErr)
 		}
