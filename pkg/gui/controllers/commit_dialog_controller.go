@@ -594,7 +594,7 @@ func (e *CommitDialogController) RegisterActions(reg *commands.Registry) {
 	}
 	_ = reg.Register(&commands.Command{
 		ID:          CommitDialogOpen,
-		Description: "Open commit dialog (A5/Z1 wires the real handler)",
+		Description: "Open commit dialog",
 		Tag:         "Commit",
 		Handler:     e.Open,
 	})

@@ -723,8 +723,8 @@ func TestCellViewer_GetDisabledEditWhenEditorNotWired(t *testing.T) {
 	if !disabled {
 		t.Fatal("Edit enabled when editor not wired")
 	}
-	if reason != "editor not wired" {
-		t.Errorf("reason = %q, want %q", reason, "editor not wired")
+	if reason != "Cell editing is unavailable." {
+		t.Errorf("reason = %q, want %q", reason, "Cell editing is unavailable.")
 	}
 }
 

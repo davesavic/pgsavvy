@@ -667,8 +667,10 @@ func TestCommitDialogController_OpenActionRegistered(t *testing.T) {
 	if !ok || cmd == nil {
 		t.Fatal("CommitDialogOpen not registered")
 	}
-	// Handler is a no-op until Z1 wires the real open path; just
-	// assert calling it doesn't error.
+	if cmd.Description != "Open commit dialog" {
+		t.Errorf("CommitDialogOpen description = %q, want %q", cmd.Description, "Open commit dialog")
+	}
+	// Missing production collaborators must not make the handler error.
 	if err := cmd.Handler(commands.ExecCtx{}); err != nil {
 		t.Errorf("CommitDialogOpen handler: %v", err)
 	}

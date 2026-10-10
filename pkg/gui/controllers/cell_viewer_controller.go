@@ -537,7 +537,7 @@ func (v *CellViewerController) RegisterActions(reg *commands.Registry) {
 				return "no active viewer", true
 			}
 			if v.cellEditor == nil {
-				return "editor not wired", true
+				return "Cell editing is unavailable.", true
 			}
 			return v.cellEditor.enterDisabled()
 		},

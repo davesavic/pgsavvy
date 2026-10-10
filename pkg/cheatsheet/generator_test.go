@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
+	"github.com/davesavic/pgsavvy/pkg/gui/controllers"
 	"github.com/davesavic/pgsavvy/pkg/gui/keys"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 )
@@ -42,6 +43,27 @@ func buildTrie(t *testing.T, entries []entry) *keys.ChordTrie {
 	}
 	trie, _ := b.Build()
 	return trie
+}
+
+func TestGenerate_CommitDialogDescription(t *testing.T) {
+	ctrl := controllers.NewCommitDialogController(nil, controllers.CoreDeps{}, controllers.UIDeps{}, controllers.EditDeps{}, nil, nil)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	cmd, ok := reg.Get(commands.CommitDialogOpen)
+	if !ok || cmd == nil {
+		t.Fatal("commit dialog command not registered")
+	}
+	trie := buildTrie(t, []entry{{seq: "<space>cw", cmd: cmd, source: types.ShippedDefault}})
+	ts := keys.NewTrieSet()
+	ts.Set(types.ModeNormal, types.RESULT_GRID, trie)
+	out := Generate(GenerateInput{Trie: ts, Scope: types.RESULT_GRID})
+	if len(out.CurrentScope) != 1 || len(out.CurrentScope[0].Sections) != 1 || len(out.CurrentScope[0].Sections[0].Rows) != 1 {
+		t.Fatalf("expected one commit dialog help row, got %+v", out.CurrentScope)
+	}
+	row := out.CurrentScope[0].Sections[0].Rows[0]
+	if row.Description != "Open commit dialog" {
+		t.Errorf("commit dialog help = %q, want %q", row.Description, "Open commit dialog")
+	}
 }
 
 func TestGenerate_NilTrieReturnsZeroOutput(t *testing.T) {
