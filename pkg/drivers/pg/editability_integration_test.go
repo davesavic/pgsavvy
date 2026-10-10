@@ -11,6 +11,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,6 +120,61 @@ func TestReview_identity_safety_LiveCatalog(t *testing.T) {
 				}
 			} else if reason != "" || len(id) != 1 || id[0] != 0 {
 				t.Fatalf("global key disabled: identity=%v reason=%q", id, reason)
+			}
+		})
+	}
+}
+
+func TestEditabilityCatalogIndependentKeys(t *testing.T) {
+	for _, tc := range []struct {
+		name, indexes, projection string
+		want                      []int
+	}{
+		{"no_keys", "", "id, email, tenant, external_id, code", nil},
+		{"mixed_expression", "CREATE UNIQUE INDEX mixed ON %s (tenant, lower(code))", "id, email, tenant, external_id, code", nil},
+		{"pure_expression", "CREATE UNIQUE INDEX pure ON %s (lower(code))", "id, email, tenant, external_id, code", nil},
+		{"expression_and_primary", "CREATE UNIQUE INDEX mixed ON %s (tenant, lower(code)); ALTER TABLE %s ADD PRIMARY KEY (id)", "id, email, tenant, external_id, code", []int{0}},
+		{"single_unique", "CREATE UNIQUE INDEX one_key ON %s (email)", "id, email, tenant, external_id, code", []int{1}},
+		{"unequal_unique", "CREATE UNIQUE INDEX one_key ON %s (email); CREATE UNIQUE INDEX two_keys ON %s (tenant, external_id)", "id, email, tenant, external_id, code", []int{1}},
+		{"unequal_with_primary", "CREATE UNIQUE INDEX one_key ON %s (email); CREATE UNIQUE INDEX two_keys ON %s (tenant, external_id); ALTER TABLE %s ADD PRIMARY KEY (id)", "id, email, tenant, external_id, code", []int{0}},
+		{"include_payload_not_identity", "CREATE UNIQUE INDEX included ON %s (id) INCLUDE (code)", "id, email", []int{0}},
+		{"composite_include", "CREATE UNIQUE INDEX included ON %s (tenant, external_id) INCLUDE (code)", "tenant, external_id, email", []int{0, 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sess := openIntegrationSession(t)
+			ctx := context.Background()
+			schema := fmt.Sprintf("review_keys_%d", time.Now().UnixNano())
+			table := pg.QuoteQualified(schema, "items")
+			exec := func(sql string) {
+				t.Helper()
+				if _, err := sess.Execute(ctx, models.Query{SQL: sql}); err != nil {
+					t.Fatalf("fixture SQL: %v", err)
+				}
+			}
+			exec("BEGIN")
+			defer exec("ROLLBACK")
+			exec("CREATE SCHEMA " + pg.QuoteIdent(schema))
+			exec("CREATE TABLE " + table + " (id int NOT NULL, email text NOT NULL, tenant int NOT NULL, external_id int NOT NULL, code text NOT NULL)")
+			if tc.indexes != "" {
+				for _, statement := range strings.Split(tc.indexes, ";") {
+					exec(strings.ReplaceAll(statement, "%s", table))
+				}
+			}
+			exec("INSERT INTO " + table + " VALUES (1,'first',7,11,'A'), (2,'second',7,12,'B')")
+			cols := columnsFromSelect(t, sess, "SELECT "+tc.projection+" FROM "+table)
+			ref, identity, reason, err := pg.EditabilityIntrospect(ctx, sess, cols)
+			if err != nil {
+				t.Fatalf("independent key introspection: %v", err)
+			}
+			if ref != (models.Ref{Schema: schema, Table: "items"}) || !slices.Equal(identity, tc.want) {
+				t.Fatalf("relation=%v identity=%v, want identity=%v", ref, identity, tc.want)
+			}
+			if tc.want == nil {
+				if reason != "no row identity" {
+					t.Fatalf("expression/non-key rows must be read-only, got %q", reason)
+				}
+			} else if reason != "" {
+				t.Fatalf("complete ordinary key disabled: %q", reason)
 			}
 		})
 	}

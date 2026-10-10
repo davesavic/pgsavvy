@@ -1037,36 +1037,7 @@ func (c *connectInvoker) setActiveConn(profile *models.Connection) {
 	c.g.connectionState.activeConnProfile = profile
 }
 
-// populateSchemasRail loads the schema list via ConnectHelper.LoadSchemas
-// and pushes the visible subset (built-in / profile-hidden patterns
-// filtered out) onto the SchemasContext so the SCHEMAS rail draws rows
-// on the next layout frame. Without this hook the rail stays empty
-// after a successful connect even though the driver is ready.
-//
-// Best-effort: a LoadSchemas error is logged and swallowed — the user
-// still has the open connection and can retry by re-pressing <cr>.
-// Empty registry / context (test wiring) collapses to a silent no-op.
-//
-// This runs on a WORKER goroutine, so the publishSchemaItems
-// call (a mutex-free SetItems write the MainLoop reads every frame) is
-// marshaled onto the UI thread via runOnUIThread, mirroring the
-// load-on-worker / publish-on-UI-thread split. The other
-// publishSchemaItems caller (the connect path) is already on the UI thread
-// and stays raw, so the marshal lives here at the worker call site rather
-// than inside publishSchemaItems.
-func (c *connectInvoker) populateSchemasRail(ctx context.Context) {
-	items, ok := c.loadSchemaItems(ctx)
-	if !ok {
-		return
-	}
-	c.runOnUIThread(func() error {
-		c.publishSchemaItems(items, ok)
-		return nil
-	})
-}
-
-// loadSchemaItems is the I/O+compute phase of populateSchemasRail: it
-// loads the schema list via ConnectHelper.LoadSchemas, applies the
+// loadSchemaItems loads the schema list via ConnectHelper.LoadSchemas, applies the
 // builtin+profile hide-pattern filter, and builds the []any rail slice.
 // It performs NO context write (SetItems) so it is safe to run on the
 // worker goroutine; publishSchemaItems does the write on the UI thread.
@@ -1198,46 +1169,6 @@ func (c *connectInvoker) warmEagerSchema() {
 		if sessionCurrent() {
 			warmer.LoadEagerContext(ctx, schema)
 		}
-		return nil
-	})
-}
-
-// populateTablesRail loads the table list for schema via
-// ConnectHelper.LoadTables and pushes the result onto TablesContext so
-// the TABLES rail draws rows on the next layout frame. Wired to the
-// SCHEMAS-rail <CR> handler via HelperBag.OnSchemaActivate.
-//
-// Best-effort: a LoadTables error is logged and swallowed; the existing
-// TablesContext.items are left intact so a transient failure does not
-// blank a previously-loaded list. An empty schema name is a silent
-// no-op (matches the picker's empty-list contract).
-//
-// This runs on a WORKER goroutine, so the SetItems publish (a
-// mutex-free items+cursor write the MainLoop reads every frame) is marshaled
-// onto the UI thread via runOnUIThread to serialise with render-frame reads,
-// mirroring the load-on-worker / publish-on-UI-thread split.
-func (c *connectInvoker) populateTablesRail(ctx context.Context, schema string) {
-	if c == nil || c.g == nil || c.helper == nil {
-		return
-	}
-	if schema == "" {
-		return
-	}
-	if c.g.registry == nil || c.g.registry.Tables == nil {
-		return
-	}
-	tables, err := c.helper.LoadTables(ctx, schema)
-	if err != nil {
-		c.g.deps.Common.Logger().Warn(fmt.Sprintf("gui: load tables for schema %q: %v", schema, err))
-		return
-	}
-	items := make([]any, len(tables))
-	for i := range tables {
-		items[i] = tables[i]
-	}
-	tablesCtx := c.g.registry.Tables
-	c.runOnUIThread(func() error {
-		tablesCtx.SetItems(items)
 		return nil
 	})
 }

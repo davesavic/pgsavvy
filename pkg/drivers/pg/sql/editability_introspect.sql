@@ -7,8 +7,7 @@
 --   relname       — pg_class.relname
 --   is_temp_schema— pg_namespace.nspname starts with 'pg_temp'
 --   pk_attnums    — attnums covered by the relation's primary key (NULL when none)
---   unique_attnums-- 2-D array of attnum-sets covered by UNIQUE indexes (one row per
---                   unique index, NULL when none)
+--   unique_attnums-- JSON array of independent UNIQUE key arrays, NULL when none
 --
 -- $2 is the SELECT-order TableAttributeNumber array (smallint[]). It is
 -- currently unused server-side — the Go layer correlates it against the
@@ -27,22 +26,25 @@ SELECT
         CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS u(k, ord)
         WHERE i.indrelid = c.oid
           AND i.indisprimary
+          AND ord <= i.indnkeyatts
           AND k > 0
     )                                                  AS pk_attnums,
     (
-        SELECT array_agg(per_index ORDER BY indexrelid)
+        SELECT jsonb_agg(to_jsonb(per_index) ORDER BY indexrelid)
         FROM (
             SELECT
                 i.indexrelid,
                 (
                     SELECT array_agg(k::int ORDER BY ord)
                     FROM unnest(i.indkey) WITH ORDINALITY AS u(k, ord)
-                    WHERE k > 0
+                    WHERE ord <= i.indnkeyatts
+                      AND k > 0
                 ) AS per_index
             FROM pg_index i
             WHERE i.indrelid = c.oid
               AND i.indisunique
               AND i.indpred IS NULL
+              AND i.indexprs IS NULL
               AND NOT i.indisprimary
               AND i.indisvalid
               AND i.indisready

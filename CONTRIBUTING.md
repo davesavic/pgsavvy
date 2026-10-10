@@ -14,7 +14,7 @@ running, the test and lint workflow, and how to propose changes.
 ## Mise development setup
 
 [mise](https://mise.jdx.dev/getting-started.html) can install the development
-tools for you. The project's `mise.toml` pins Go 1.26.6, go-task 3.39.2, and
+tools for you. The project's `mise.toml` pins Go 1.26.9, go-task 3.39.2, and
 golangci-lint 2.12.2 to match CI. From the repository root:
 
 ```sh

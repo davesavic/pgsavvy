@@ -42,13 +42,5 @@ func execPasswordCommand(ctx context.Context, cmd string) (string, error) {
 }
 
 func scrubbedEnv(env []string) []string {
-	prefix := keyringPassphraseEnv + "="
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		if strings.HasPrefix(kv, prefix) {
-			continue
-		}
-		out = append(out, kv)
-	}
-	return out
+	return scrubCredentialEnv(env, true)
 }
