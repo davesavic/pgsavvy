@@ -914,7 +914,7 @@ const historyRecentLimit = 500
 // switches the QUERY_RAIL container to the History tab (no popup push), and
 // the leaf's reload hook lazily loads Recent(N). The reload runs only when the
 // leaf is stale (first activation + after a query run); it loads on a worker
-// goroutine and publishes back on the UI thread via OnUIThreadContentOnly
+// goroutine and publishes back via OnUIThread so Layout repaints the active tab
 // (RefreshRows preserves the cursor; SetRows/RefreshRows are NEVER called from
 // the worker — data race under -race). On load error it surfaces a toast and
 // leaves the prior rows intact.
@@ -938,7 +938,7 @@ func (g *Gui) registerHistoryOpen() {
 				}
 				return nil
 			}
-			g.OnUIThreadContentOnly(func() error {
+			g.OnUIThread(func() error {
 				historyCtx.RefreshRows(rows)
 				return nil
 			})
@@ -964,8 +964,8 @@ func (g *Gui) registerHistoryOpen() {
 // push), and the leaf's reload hook lazily loads queries.yml. The reload runs
 // only when the leaf is stale (first activation + after a save/delete); it
 // loads on a worker goroutine and publishes back on the UI thread via
-// OnUIThreadContentOnly (RefreshRows preserves the cursor). On load error it
-// surfaces a toast and leaves the prior rows intact.
+// OnUIThread so Layout repaints the active tab (RefreshRows preserves the cursor).
+// On load error it surfaces a toast and leaves the prior rows intact.
 func (g *Gui) registerSavedQueryOpen() {
 	savedCtx := g.registry.SavedQuery
 	fs := fsFromCommon(g.deps.Common)
@@ -984,7 +984,7 @@ func (g *Gui) registerSavedQueryOpen() {
 				}
 				return nil
 			}
-			g.OnUIThreadContentOnly(func() error {
+			g.OnUIThread(func() error {
 				savedCtx.RefreshRows(rows)
 				return nil
 			})

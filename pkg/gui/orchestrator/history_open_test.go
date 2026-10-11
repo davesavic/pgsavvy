@@ -178,7 +178,7 @@ func waitForHistoryRecent(t *testing.T, h *query.History, wantRows int) {
 // hook (fires on tab activation via HandleFocus when stale). This test records
 // through the REAL *query.History write path, then activates the History tab
 // and asserts the leaf reload surfaces the recorded rows newest-first via
-// OnWorker -> Recent -> OnUIThreadContentOnly -> RefreshRows. It does NOT seed
+// OnWorker -> Recent -> OnUIThread -> RefreshRows. It does NOT seed
 // via direct SetRows — it proves the populated worker path. (Closes the
 // T5-review coverage-gap note.)
 func TestHistoryOpen_ActivatingTabReloadsRecordedRows(t *testing.T) {
@@ -197,7 +197,7 @@ func TestHistoryOpen_ActivatingTabReloadsRecordedRows(t *testing.T) {
 
 	// Activate the History tab: SetActiveTab fires the leaf's HandleFocus,
 	// which (stale on first activation) runs the reload hook — Recent on a
-	// worker, rows published via OnUIThreadContentOnly. Drain via the harness
+	// worker, rows published via OnUIThread. Drain via the harness
 	// worker-wait — no time.Sleep synchronization.
 	fireHistoryOpen(t, g)
 	g.WaitForWorkersForTest()
@@ -260,7 +260,7 @@ func TestHistoryOpen_ConfirmInsertsSQLAndSwitchesToEditor(t *testing.T) {
 
 	// Seed a selected row directly (the async writer makes store-seeding racy
 	// in a unit test; SetRows is the deterministic path and mirrors what the
-	// reload's OnUIThreadContentOnly does).
+	// reload's OnUIThread does).
 	const wantSQL = "SELECT 1 FROM users"
 	g.Registry().History.SetRows([]query.HistoryRow{
 		{ID: 1, SQL: wantSQL, Succeeded: true},
