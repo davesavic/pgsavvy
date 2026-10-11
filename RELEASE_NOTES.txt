@@ -1,3 +1,10 @@
+pgsavvy v0.10.2
+
+  Saved queries now open with <leader>H; <leader>h still opens query history.
+  Fixed false missing-help warnings and made ? an explicit default binding.
+  Saved Queries and History now display loaded rows on first open, without
+  another keypress or tab switch.
+
 pgsavvy v0.10.1
 
   Fixed editing, commits, streaming, navigation, query saving, exports, and
