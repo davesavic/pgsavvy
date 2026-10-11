@@ -137,14 +137,8 @@ func TestReloadCommand_HappyPath(t *testing.T) {
 		t.Errorf("SwapTrieSet got wrong trie")
 	}
 	msgs := toaster.snapshot()
-	if len(msgs) != 2 {
-		t.Fatalf("toaster messages = %v, want 2 messages", msgs)
-	}
-	if !strings.Contains(msgs[0], "config warning") || !strings.Contains(msgs[0], "help.cheatsheet") {
-		t.Errorf("first message %q, want config warning about help.cheatsheet", msgs[0])
-	}
-	if !strings.Contains(msgs[1], "config reloaded") || !strings.Contains(msgs[1], "1") {
-		t.Errorf("second message %q, want config reloaded (1 warning(s))", msgs[1])
+	if len(msgs) != 1 || msgs[0] != "config reloaded" {
+		t.Fatalf("toaster messages = %v, want one clean reload message", msgs)
 	}
 }
 
@@ -198,11 +192,11 @@ func TestReloadCommand_BuildError(t *testing.T) {
 		t.Errorf("SwapTrieSet called after Build error, want not called")
 	}
 	msgs := toaster.snapshot()
-	if len(msgs) != 2 {
-		t.Fatalf("toaster messages = %v, want 2 messages", msgs)
+	if len(msgs) != 1 {
+		t.Fatalf("toaster messages = %v, want 1 message", msgs)
 	}
-	if !strings.Contains(msgs[1], "reload failed") || !strings.Contains(msgs[1], "nil registry") {
-		t.Errorf("final message %q, want 'reload failed: nil registry'", msgs[1])
+	if !strings.Contains(msgs[0], "reload failed") || !strings.Contains(msgs[0], "nil registry") {
+		t.Errorf("final message %q, want 'reload failed: nil registry'", msgs[0])
 	}
 }
 
@@ -228,11 +222,11 @@ func TestReloadCommand_BuildPanicRecovered(t *testing.T) {
 		t.Errorf("SwapTrieSet called after Build panic, want not called (old trie must remain)")
 	}
 	msgs := toaster.snapshot()
-	if len(msgs) != 2 {
-		t.Fatalf("toaster messages = %v, want 2 messages", msgs)
+	if len(msgs) != 1 {
+		t.Fatalf("toaster messages = %v, want 1 message", msgs)
 	}
-	if !strings.Contains(msgs[1], "reload failed") || !strings.Contains(msgs[1], "build panic") {
-		t.Errorf("final message %q, want 'reload failed: build panic: …'", msgs[1])
+	if !strings.Contains(msgs[0], "reload failed") || !strings.Contains(msgs[0], "build panic") {
+		t.Errorf("final message %q, want 'reload failed: build panic: …'", msgs[0])
 	}
 }
 
@@ -241,6 +235,7 @@ func TestReloadCommand_WarningCountInToast(t *testing.T) {
 	svc := &stubService{
 		trie: trie,
 		warnings: []Warning{
+			{Level: WarnLevel, Code: "missing_cheatsheet_binding", Message: "no binding for help.cheatsheet"},
 			{Level: WarnLevel, Code: "orphan_action", Message: "no such action", Origin: "user.yml:7"},
 		},
 	}
@@ -267,8 +262,8 @@ func TestReloadCommand_WarningCountInToast(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("toaster messages = %v, want 3 messages", msgs)
 	}
-	if msgs[0] != "config warning: no binding for help.cheatsheet" {
-		t.Errorf("first message %q, want chessheet warning", msgs[0])
+	if !strings.Contains(msgs[0], "config warning") || !strings.Contains(msgs[0], "missing_cheatsheet_binding") {
+		t.Errorf("first message %q, want missing cheatsheet build warning", msgs[0])
 	}
 	if !strings.Contains(msgs[1], "config warning") || !strings.Contains(msgs[1], "orphan_action") {
 		t.Errorf("second message %q, want build warning", msgs[1])
@@ -424,12 +419,11 @@ func TestReloadCommand_SerialSuccessions(t *testing.T) {
 		t.Errorf("SwapTrieSet count = %d, want %d", mat.swapCount(), len(cfgs))
 	}
 	msgs := toaster.snapshot()
-	// 3 reloads * 2 messages each = 6 messages (warning + reloaded per iteration)
-	if len(msgs) != len(cfgs)*2 {
-		t.Errorf("toast count = %d, want %d; messages=%v", len(msgs), len(cfgs)*2, msgs)
+	if len(msgs) != len(cfgs) {
+		t.Errorf("toast count = %d, want %d; messages=%v", len(msgs), len(cfgs), msgs)
 	}
 	for _, m := range msgs {
-		if !strings.Contains(m, "config warning") && !strings.Contains(m, "config reloaded") {
+		if m != "config reloaded" {
 			t.Errorf("unexpected toast in serial run: %q", m)
 		}
 	}

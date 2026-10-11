@@ -61,9 +61,10 @@ var allowedYankFormats = map[string]struct{}{
 
 // ValidateUserConfig validates cfg against the configured rules.
 //
-// It returns two slices: warnings are non-fatal advisories (e.g. missing
-// help.cheatsheet binding); errors are hard failures the caller should
-// surface. Both slices are nil for a clean validation.
+// It returns two slices: warnings are non-fatal advisories; errors are hard
+// failures the caller should surface. Effective binding checks belong after
+// controller defaults and user overrides have been combined in the trie.
+// Both slices are nil for a clean validation.
 func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string, errors []error) {
 	if cfg == nil {
 		return nil, []error{fmt.Errorf("config: nil UserConfig")}
@@ -82,12 +83,10 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 	}
 
 	var errs []error
-	var warns []string
 
 	type dupKey struct{ mode, scope, key string }
 	dupSeen := map[dupKey]int{} // count of non-<nop> bindings at this key
 	dupReported := map[dupKey]bool{}
-	hasCheatsheet := false
 	hasQuit := false
 
 	for i, kb := range cfg.Keybindings {
@@ -133,9 +132,6 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 		}
 
 		// Cross-binding bookkeeping.
-		if kb.Action == "help.cheatsheet" {
-			hasCheatsheet = true
-		}
 		if kb.Action == QuitAction {
 			hasQuit = true
 		}
@@ -154,9 +150,6 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 		}
 	}
 
-	if !hasCheatsheet {
-		warns = append(warns, "no binding for help.cheatsheet")
-	}
 	// A config with no app.quit binding leaves the app with no key-driven
 	// exit. Promote this from a warning to a hard
 	// error so startup aborts instead of entering a potentially
@@ -221,7 +214,7 @@ func ValidateUserConfig(cfg *UserConfig, deps ValidationDeps) (warnings []string
 		errs = append(errs, fmt.Errorf("config: ui.result_grid.yank_format must be one of [json, tsv, csv, ndjson], got %q", cfg.UI.ResultGrid.YankFormat))
 	}
 
-	return warns, errs
+	return nil, errs
 }
 
 func splitTrim(s, sep string) []string {

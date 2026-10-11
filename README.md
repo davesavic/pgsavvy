@@ -108,7 +108,7 @@ Query history persists in a local SQLite database (`$XDG_STATE_HOME/history.sqli
 
   ![pgsavvy query history](docs/feat-history.gif)
 
-Save queries for later use: capture the statement under cursor or a visual selection with `<leader>s`, give it a name, and it persists to `queries.yml` in the config directory. Open the saved queries tab (`<leader>o`) to browse, insert, and delete saved queries with standard vim navigation. Both history and saved queries share the query-rail container tab bar, cycled with `]` and `[` inside the query pane.
+Save queries for later use: capture the statement under cursor or a visual selection with `<leader>s`, give it a name, and it persists to `queries.yml` in the config directory. Open the saved queries tab (`<leader>H`, uppercase H) to browse, insert, and delete saved queries with standard vim navigation. Both history and saved queries share the query-rail container tab bar, cycled with `]` and `[` inside the query pane.
 
   ![pgsavvy saved queries](docs/feat-saved-queries.gif)
 

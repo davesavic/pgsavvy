@@ -270,7 +270,7 @@ const queryRailTabCount = 3
 // QUERY_RAIL tab indices. The order is declared in pkg/gui/context/setup.go
 // where the container is built (QueryEditor / SavedQuery / History). The
 // leaf controllers' <cr>/<esc> switch back to QueryRailEditorTab; <leader>h /
-// <leader>o switch to the History / Saved tabs respectively.
+// <leader>H switch to the History / Saved tabs respectively.
 const (
 	QueryRailEditorTab  = 0
 	QueryRailSavedTab   = 1

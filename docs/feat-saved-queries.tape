@@ -1,7 +1,7 @@
 # VHS tape for the pgsavvy saved-queries feature GIF. -> docs/feat-saved-queries.gif
 # Recorded by `task demo:features`. Types a query in the editor, saves it with
 # a name (<leader>s — prompts for name, persists to queries.yml), then opens
-# the saved-queries tab (<leader>o) to browse, navigate, and confirm the
+# the saved-queries tab (<leader>H) to browse, navigate, and confirm the
 # saved query is listed. Cancels without re-inserting so re-recording is
 # idempotent.
 # Use only test fixture data — never record real databases.
@@ -41,9 +41,9 @@ Sleep 600ms
 Enter
 Sleep 2s
 
-# Open the saved-queries tab (<leader>o) to browse the saved list.
+# Open the saved-queries tab (<leader>H) to browse the saved list.
 Space
-Type "o"
+Type "H"
 Sleep 2.2s
 
 # Navigate the saved-query list. The saved query appears with its name.

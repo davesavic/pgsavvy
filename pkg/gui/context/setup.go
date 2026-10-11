@@ -116,7 +116,7 @@ type ContextTree struct {
 	// container calls it, never pushed onto the focus stack.
 	History *HistoryContext
 
-	// SavedQuery is the <leader>o saved-query picker tab of the QUERY_RAIL
+	// SavedQuery is the <leader>H saved-query picker tab of the QUERY_RAIL
 	// container. MAIN_CONTEXT leaf (inFlatten=false): rendered only when the
 	// container calls it, never pushed onto the focus stack.
 	SavedQuery *SavedQueryContext

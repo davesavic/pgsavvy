@@ -130,6 +130,12 @@ early.
 
 ### The in-app cheatsheet (`?`)
 
+The default config explicitly binds `?` to `help.cheatsheet` globally in Normal
+and Command modes (`mode: n,c`). The same built-in controller binding remains
+available when an older config lists only quit bindings. Missing-help warnings
+check the final bindings after controller defaults and user overrides are
+combined, not merely whether your YAML mentions `help.cheatsheet`.
+
 The cheatsheet is a **context-aware tabbed popup**: its tabs are the
 **functional categories** of the bindings active in the pane you opened it
 from — **Editing, Query, Results, Cells, Session, General**. Only categories
@@ -421,8 +427,10 @@ keybindings:
 
 The query pane is a tabbed container with three tabs: **Query Editor**, **Saved
 Queries**, and **History**. Switching tabs is in-place — no popups. From the
-editor, `<leader>h` switches to the History tab (`history.open`) and `<leader>o`
-switches to the Saved Queries tab (`query.saved.open`):
+editor, `<leader>h` switches to the History tab (`history.open`) and `<leader>H`
+(uppercase H) switches to the Saved Queries tab (`query.saved.open`). Both
+shortcuts dispatch immediately; `<leader>o` is reserved as a prefix for opening
+SQL files (`<leader>of`) and settings (`<leader>os`):
 
 ```yaml
 keybindings:
@@ -432,7 +440,7 @@ keybindings:
     action: history.open
   - mode: n
     scope: query_editor
-    key: <leader>o
+    key: <leader>H
     action: query.saved.open
 ```
 

@@ -771,7 +771,7 @@ func (g *Gui) wireActionRegistrations(connectInv *connectInvoker) {
 		g.registerHistoryOpen()
 	}
 
-	// QuerySavedOpen — `<leader>o` in the QUERY_EDITOR switches the QUERY_RAIL
+	// QuerySavedOpen — `<leader>H` in the QUERY_EDITOR switches the QUERY_RAIL
 	// container to the Saved Queries tab. The leaf lazily loads queries.yml
 	// off-thread on its first activation (and after a save/delete), refreshing
 	// on the UI thread.

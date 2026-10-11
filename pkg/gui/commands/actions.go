@@ -390,7 +390,7 @@ const (
 	HistoryOpen = "history.open"
 
 	// QuerySavedOpen switches the QUERY_RAIL container to the Saved Queries
-	// tab from the QUERY_EDITOR (`<leader>o` in Normal mode). The Saved Queries
+	// tab from the QUERY_EDITOR (`<leader>H` in Normal mode). The Saved Queries
 	// leaf loads queries.yml lazily on its first activation (and after a
 	// save/delete).
 	QuerySavedOpen = "query.saved.open"

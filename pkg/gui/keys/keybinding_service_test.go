@@ -39,6 +39,61 @@ func staticKind(m map[types.ContextKey]types.ContextKind) ContextKindLookup {
 	}
 }
 
+func TestBuild_CheatsheetWarningUsesEffectiveBindings(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		defaults bool
+		override []config.KeybindingConfig
+		wantWarn bool
+	}{
+		{name: "existing quit-only config", defaults: true, override: []config.KeybindingConfig{
+			{Mode: "n", Scope: "global", Key: "<c-c>", Action: commands.AppQuit},
+			{Mode: "n", Scope: "global", Key: "<leader>q", Action: commands.AppQuit},
+		}},
+		{name: "missing", wantWarn: true},
+		{name: "all modes disabled", defaults: true, override: []config.KeybindingConfig{
+			{Mode: "n,c", Scope: "global", Key: "?", Action: "<nop>"},
+		}, wantWarn: true},
+		{name: "declared then disabled", defaults: true, override: []config.KeybindingConfig{
+			{Mode: "n,c", Scope: "global", Key: "?", Action: commands.HelpCheatsheet},
+			{Mode: "n,c", Scope: "global", Key: "?", Action: "<nop>"},
+		}, wantWarn: true},
+		{name: "command mode still bound", defaults: true, override: []config.KeybindingConfig{
+			{Mode: "n", Scope: "global", Key: "?", Action: "<nop>"},
+		}},
+		{name: "remapped", defaults: true, override: []config.KeybindingConfig{
+			{Mode: "n,c", Scope: "global", Key: "?", Action: "<nop>"},
+			{Mode: "n", Scope: "global", Key: "<f1>", Action: commands.HelpCheatsheet},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := testRegistry(t, commands.HelpCheatsheet, commands.AppQuit)
+			cfg := minimalCfg()
+			cfg.Keybindings = tc.override
+			var defaults []*ChordBinding
+			if tc.defaults {
+				defaults = []*ChordBinding{{
+					Sequence: []Key{{Code: '?'}}, Mode: types.ModeNormal | types.ModeCommand,
+					Scope: types.GLOBAL, ActionID: commands.HelpCheatsheet,
+				}}
+			}
+			_, warns, err := NewKeybindingService().Build(defaults, cfg, reg, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, w := range warns {
+				if w.Code == "missing_cheatsheet_binding" {
+					found = true
+				}
+			}
+			if found != tc.wantWarn {
+				t.Fatalf("missing cheatsheet warning = %v, want %v; warnings: %v", found, tc.wantWarn, warns)
+			}
+		})
+	}
+}
+
 func TestBuild_EmptyConfig_EmptyTrieSet(t *testing.T) {
 	svc := NewKeybindingService()
 	ts, warns, err := svc.Build(nil, minimalCfg(), commands.NewRegistry(), nil)

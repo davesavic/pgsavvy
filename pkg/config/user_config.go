@@ -235,6 +235,7 @@ func GetDefaultConfig() *UserConfig {
 		Keybindings: []KeybindingConfig{
 			{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit", Description: "Quit"},
 			{Mode: "n", Scope: "global", Key: "<leader>q", Action: "app.quit", Description: "Quit via leader"},
+			{Mode: "n,c", Scope: "global", Key: "?", Action: "help.cheatsheet", Description: "Show keybindings"},
 		},
 		UI: UIConfig{
 			Mouse:                  MouseConfig{Enabled: true, DoubleClickMs: 400},

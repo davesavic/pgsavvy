@@ -412,6 +412,23 @@ func (s *KeybindingService) Build(
 		out.tries[key] = t
 		warnings = append(warnings, ws...)
 	}
+	if registry.Has(commands.HelpCheatsheet) {
+		hasCheatsheet := false
+		out.Walk(func(_ TrieSetKey, trie *ChordTrie) {
+			trie.Walk(func(_ []Key, leaf LookupResult) {
+				if leaf.Action != nil && leaf.Action.ID == commands.HelpCheatsheet {
+					hasCheatsheet = true
+				}
+			})
+		})
+		if !hasCheatsheet {
+			warnings = append(warnings, Warning{
+				Level:   WarnLevel,
+				Code:    "missing_cheatsheet_binding",
+				Message: "no binding for help.cheatsheet; bind ? to help.cheatsheet to discover keybindings",
+			})
+		}
+	}
 
 	return out, warnings, nil
 }

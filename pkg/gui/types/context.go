@@ -140,7 +140,7 @@ const (
 	// editor cursor and returns to the editor tab.
 	HISTORY ContextKey = "history"
 	// SAVED_QUERY is the saved-query picker tab of the QUERY_RAIL container
-	// (reached via <leader>o or the `[`/`]` tab cycle). MAIN_CONTEXT leaf
+	// (reached via <leader>H or the `[`/`]` tab cycle). MAIN_CONTEXT leaf
 	// sharing the "query_editor" view; lists named queries from queries.yml,
 	// <cr> inserts the selected SQL at the editor cursor and returns to the
 	// editor tab, dd deletes.

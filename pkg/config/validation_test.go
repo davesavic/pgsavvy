@@ -26,17 +26,25 @@ func fullDeps() ValidationDeps {
 
 func TestValidateUserConfig_DefaultsValid(t *testing.T) {
 	deps := ValidationDeps{
-		ActionExists: allowSet("app.quit"),
+		ActionExists: allowSet("app.quit", "help.cheatsheet"),
 		ScopeExists:  allowSet("global"),
 	}
 	warns, errs := ValidateUserConfig(GetDefaultConfig(), deps)
 	if len(errs) != 0 {
 		t.Errorf("defaults should validate; got errors %v", errs)
 	}
-	// Default config has app.quit bound but not help.cheatsheet → one warning.
-	if !containsSubstr(warns, "help.cheatsheet") {
-		t.Errorf("expected help.cheatsheet warning, got %v", warns)
+	if len(warns) != 0 {
+		t.Errorf("defaults should validate without warnings; got %v", warns)
 	}
+}
+
+func TestDefaultConfig_CheatsheetBinding(t *testing.T) {
+	for _, kb := range GetDefaultConfig().Keybindings {
+		if kb.Action == "help.cheatsheet" && kb.Key == "?" && kb.Scope == "global" && kb.Mode == "n,c" {
+			return
+		}
+	}
+	t.Fatal("default config must bind ? to help.cheatsheet in Normal and Command modes")
 }
 
 func TestValidateUserConfig_InvalidLabel(t *testing.T) {
@@ -249,7 +257,7 @@ func TestValidateUserConfig_NopAllowsOverlap(t *testing.T) {
 	}
 }
 
-func TestValidateUserConfig_MissingCheatsheetWarning(t *testing.T) {
+func TestValidateUserConfig_CheatsheetCheckDeferredToEffectiveBindings(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Keybindings = []KeybindingConfig{
 		{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit"},
@@ -262,15 +270,15 @@ func TestValidateUserConfig_MissingCheatsheetWarning(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
-	if !containsSubstr(warns, "help.cheatsheet") {
-		t.Errorf("expected help.cheatsheet warning, got %v", warns)
+	if len(warns) != 0 {
+		t.Errorf("config-only validation cannot know effective help bindings; got warnings %v", warns)
 	}
 }
 
 // TestQuitBindingRequired covers that a merged config with
 // no app.quit binding is a hard ERROR (not a warning), while a config that
-// does bind app.quit validates cleanly. help.cheatsheet must remain a
-// warning either way (the asymmetry is intentional).
+// does bind app.quit validates cleanly. Effective help binding checks are
+// performed by the keybinding service, not config-only validation.
 func TestQuitBindingRequired(t *testing.T) {
 	deps := ValidationDeps{
 		ActionExists: allowSet("app.quit", "help.cheatsheet"),
@@ -289,17 +297,12 @@ func TestQuitBindingRequired(t *testing.T) {
 		if containsSubstr(warns, "app.quit") {
 			t.Errorf("app.quit must be an error, not a warning; warns=%v", warns)
 		}
-		// help.cheatsheet stays a warning here only when it is itself
-		// missing; it is bound in this config, so assert it is NOT promoted
-		// to an error.
 		if containsErrSubstr(errs, "help.cheatsheet") {
 			t.Errorf("help.cheatsheet must never be promoted to an error; errs=%v", errs)
 		}
 	})
 
-	t.Run("help.cheatsheet remains a warning, never an error", func(t *testing.T) {
-		// Bind app.quit but not help.cheatsheet: the only advisory should be
-		// the help.cheatsheet warning, and there must be no errors.
+	t.Run("missing help declaration does not prevent startup", func(t *testing.T) {
 		cfg := GetDefaultConfig()
 		cfg.Keybindings = []KeybindingConfig{
 			{Mode: "n", Scope: "global", Key: "<c-c>", Action: "app.quit"},
@@ -308,8 +311,8 @@ func TestQuitBindingRequired(t *testing.T) {
 		if len(errs) != 0 {
 			t.Errorf("expected no errors when app.quit is bound, got %v", errs)
 		}
-		if !containsSubstr(warns, "help.cheatsheet") {
-			t.Errorf("expected help.cheatsheet warning, got %v", warns)
+		if len(warns) != 0 {
+			t.Errorf("effective binding validation must check help; got warnings %v", warns)
 		}
 	})
 
