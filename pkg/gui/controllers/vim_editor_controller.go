@@ -280,6 +280,13 @@ func (c *VimEditorController) AutoTrigger(buf *editor.Buffer, pos editor.Positio
 	if c.suggestions == nil {
 		return
 	}
+	// Context discovery lexes the full document. Keep it off the per-key UI
+	// path for large buffers; explicit completion remains available.
+	if buf != nil && buf.IsLargeDocument() {
+		c.suppressNextAutoTrigger = false
+		c.suggestions.Hide()
+		return
+	}
 	if c.suppressNextAutoTrigger {
 		c.suppressNextAutoTrigger = false
 		// An explicit `<ident>.` column trigger overrides the post-accept

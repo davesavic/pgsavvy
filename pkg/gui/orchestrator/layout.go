@@ -11,7 +11,6 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
 	"github.com/davesavic/pgsavvy/pkg/gui/editor"
-	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -129,14 +128,7 @@ func (g *Gui) paintQueryEditorLeaf(v *gocui.View) {
 	qec := g.registry.QueryEditor
 	v.Title = qec.GetTitle()
 	if buf := qec.Buffer(); buf != nil {
-		content := highlight.Highlight(buf.String())
-		if sel := buf.SelectionSnapshot(); sel != nil {
-			content = editor.ApplySelectionOverlay(content, *sel)
-		}
-		if flash := buf.YankFlashSnapshot(); flash != nil {
-			content = editor.ApplyYankFlashOverlay(content, *flash)
-		}
-		v.SetContent(content)
+		editor.PaintBuffer(v, buf)
 		cur := buf.CursorPos()
 		v.FocusPoint(cur.Col, cur.Line, true)
 		// FocusPoint pins only the vertical origin; without this the

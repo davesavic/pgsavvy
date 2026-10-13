@@ -7,7 +7,6 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
-	"github.com/davesavic/pgsavvy/pkg/gui/editor/highlight"
 	"github.com/davesavic/pgsavvy/pkg/gui/keys"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/logs"
@@ -389,9 +388,8 @@ func backspacePos(b *Buffer, p Position) (Position, bool) {
 
 // syncViewToBuffer mirrors the canonical *Buffer state into v.
 // Architecture Decision 2: Buffer is the source of truth, View is a
-// mirror — we rewrite the view content on every buffer-mutating
-// Passthrough so external readers (highlighter / statement splitter)
-// can keep reading v.Buffer() if they prefer.
+// mirror. Large documents mirror only their viewport; SQL consumers must
+// read the canonical buffer, not v.Buffer().
 //
 // SetContent in this lazygit fork clears v.lines + read/write
 // positions but does NOT touch v.cx / v.cy (the cursor), so the
@@ -401,17 +399,5 @@ func backspacePos(b *Buffer, p Position) (Position, bool) {
 // v may be nil — the testfake recorder driver does not own real
 // *gocui.View handles and tests use Buffer() directly to assert state.
 func syncViewToBuffer(v *gocui.View, buf *Buffer) {
-	if v == nil {
-		return
-	}
-	content := highlight.Highlight(buf.String())
-	if sel := buf.SelectionSnapshot(); sel != nil {
-		content = ApplySelectionOverlay(content, *sel)
-	}
-	if flash := buf.YankFlashSnapshot(); flash != nil {
-		content = ApplyYankFlashOverlay(content, *flash)
-	}
-	v.SetContent(content)
-	cur := buf.CursorPos()
-	v.SetCursor(cur.Col, cur.Line)
+	PaintBuffer(v, buf)
 }

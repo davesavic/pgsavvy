@@ -431,6 +431,31 @@ func TestAutoTriggerOpensInFromContext(t *testing.T) {
 	}
 }
 
+func TestAutoTriggerLargeDocumentSkipsContextAndDismissesPopup(t *testing.T) {
+	ctrl, _, buf, sugg, _ := newCompletionRig(t, "SELECT * FROM us", 16, []string{"users"})
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if !sugg.IsVisible() {
+		t.Fatal("small-document completion did not open")
+	}
+	buf.Lines = append(buf.Lines, editor.Line{Runes: []rune(strings.Repeat(" ", editor.InteractiveRuneLimit))})
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if sugg.IsVisible() {
+		t.Fatal("large-document auto-trigger left the popup visible")
+	}
+	if err := ctrl.TriggerCompletion(); err != nil {
+		t.Fatal(err)
+	}
+	if !sugg.IsVisible() {
+		t.Fatal("large-document manual completion must remain available")
+	}
+	buf.Lines = buf.Lines[:1]
+	sugg.Hide()
+	ctrl.AutoTrigger(buf, buf.CursorPos())
+	if !sugg.IsVisible() {
+		t.Fatal("automatic completion did not resume after shrinking the document")
+	}
+}
+
 // TestAutoTriggerOpensOnBareTwoRunePrefix pins the bare-prefix
 // broadening: a bare >=2-rune identifier prefix with NO governing clause
 // keyword, operator, or `<ident>.` context now auto-opens the popup
