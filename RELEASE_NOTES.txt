@@ -1,3 +1,9 @@
+pgsavvy v0.11.2
+
+  Fixed startup warnings corrupting the terminal display. Diagnostics remain in
+  session logs and are replayed after the TUI closes and restores the terminal.
+  Keybindings are unchanged.
+
 pgsavvy v0.11.1
 
   Refresh the screen when closing the connection manager or settings, even
