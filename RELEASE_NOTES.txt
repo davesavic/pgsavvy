@@ -1,3 +1,9 @@
+pgsavvy v0.11.1
+
+  Refresh the screen when closing the connection manager or settings, even
+  when replacement panels increase the window count. Modal transitions avoid
+  duplicate refreshes, while ordinary editing keeps incremental rendering.
+
 pgsavvy v0.11.0
 
   Copy complete query-error panels with y or yy after manually entering Results.
