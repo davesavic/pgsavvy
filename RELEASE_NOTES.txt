@@ -1,3 +1,10 @@
+pgsavvy v0.10.3
+
+  Improved typing responsiveness in large SQL documents by rendering only
+  visible text without syntax highlighting and disabling automatic completion
+  scans. Manual completion and full-document editing, saving, and execution
+  remain available.
+
 pgsavvy v0.10.2
 
   Saved queries now open with <leader>H; <leader>h still opens query history.
