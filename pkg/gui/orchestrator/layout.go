@@ -247,18 +247,23 @@ func (g *Gui) RunLayout(w, h int) error {
 	// syncViewToBuffer will refresh the view if the swap happens after
 	// the first paint). The view is added to the `rails` map so it
 	// participates in the focus-frame swap below.
+	modalRemoved := false
 	if modalTop {
 		if g.isContextOnStack(types.SETTINGS) && g.registry.Settings != nil {
 			if g.registry.ConnectionManager != nil {
 				if name := g.registry.ConnectionManager.GetViewName(); name != "" {
-					_ = g.driver.DeleteView(name)
+					if g.driver.DeleteView(name) == nil {
+						modalRemoved = true
+					}
 				}
 			}
 			g.layoutSettingsMain(dims, rails)
 		} else {
 			if g.registry.Settings != nil {
 				if name := g.registry.Settings.GetViewName(); name != "" {
-					_ = g.driver.DeleteView(name)
+					if g.driver.DeleteView(name) == nil {
+						modalRemoved = true
+					}
 				}
 			}
 			g.layoutConnectionManagerMain(dims, rails)
@@ -274,12 +279,16 @@ func (g *Gui) RunLayout(w, h int) error {
 		// the expected steady-state and is ignored.
 		if g.registry.ConnectionManager != nil {
 			if name := g.registry.ConnectionManager.GetViewName(); name != "" {
-				_ = g.driver.DeleteView(name)
+				if g.driver.DeleteView(name) == nil {
+					modalRemoved = true
+				}
 			}
 		}
 		if g.registry.Settings != nil {
 			if name := g.registry.Settings.GetViewName(); name != "" {
-				_ = g.driver.DeleteView(name)
+				if g.driver.DeleteView(name) == nil {
+					modalRemoved = true
+				}
 			}
 		}
 		// The QUERY_RAIL container multiplexes the editor leaf and the
@@ -952,8 +961,8 @@ func (g *Gui) RunLayout(w, h int) error {
 				} else if activeTabView != "" {
 					_, _ = g.driver.SetCurrentView(activeTabView)
 				}
-				g.resyncOnViewTeardown()
-				g.resyncOnModalContentChange()
+				teardownSynced := g.resyncOnViewTeardown(modalRemoved)
+				g.resyncOnModalContentChange(teardownSynced)
 				return nil
 			}
 			if vn := top.GetViewName(); vn != "" {
@@ -1007,31 +1016,27 @@ func (g *Gui) RunLayout(w, h int) error {
 		}
 	}
 
-	g.resyncOnViewTeardown()
-	g.resyncOnModalContentChange()
+	teardownSynced := g.resyncOnViewTeardown(modalRemoved)
+	g.resyncOnModalContentChange(teardownSynced)
 	return nil
 }
 
-// resyncOnViewTeardown forces a one-shot full Screen.Sync() on frames where
-// the live gocui view set shrank since the previous frame. A view leaving the
-// set (a closed CONNECTION_MANAGER modal, a dismissed popup/overlay) vacates
-// the cells it occupied, but tcell's incremental Show() only re-emits cells
-// whose content changed against its own model and does not repaint the
-// orphaned region; the per-frame Screen.Clear() at the top of RunLayout blanks
-// the back buffer but cannot force those physical cells to be re-emitted. A
-// Sync() (clear-screen flag + full invalidate) evicts the ghosts. Restricted
-// to teardown frames so steady-state rendering keeps the cheap diff path and
-// the user never sees a full-screen repaint mid-edit.
-func (g *Gui) resyncOnViewTeardown() {
-	vc, ok := g.driver.(interface{ LiveViewCount() int })
-	if !ok {
-		return
+// resyncOnViewTeardown forces a one-shot physical repaint on modal removal
+// or a net view-count decrease. Closing the startup modal creates tiled panes,
+// so the count can grow despite teardown. Missing-modal deletions must not
+// trigger Sync, keeping steady-state editing on the incremental redraw path.
+func (g *Gui) resyncOnViewTeardown(modalRemoved bool) bool {
+	needsSync := modalRemoved
+	if vc, ok := g.driver.(interface{ LiveViewCount() int }); ok {
+		n := vc.LiveViewCount()
+		needsSync = needsSync || n < g.prevLiveViews
+		g.prevLiveViews = n
 	}
-	n := vc.LiveViewCount()
-	if n < g.prevLiveViews && gocui.Screen != nil {
+	if needsSync && gocui.Screen != nil {
 		gocui.Screen.Sync()
+		return true
 	}
-	g.prevLiveViews = n
+	return false
 }
 
 // resyncOnModalContentChange forces a one-shot full Screen.Sync() on frames
@@ -1039,8 +1044,8 @@ func (g *Gui) resyncOnViewTeardown() {
 // incremental Show() never re-emits the cells a row-shifted frame vacated, so
 // the prior body otherwise stacks as a ghost; the view buffer is always
 // correct, so a Sync() (full re-emit from the correct back buffer) evicts it.
-// Sibling of resyncOnViewTeardown, which covers only the view-count-shrink
-// (modal close) case.
+// Sibling of resyncOnViewTeardown, which covers modal removal and view-count
+// decreases.
 //
 // Two in-place-shift sources are covered:
 //   - ModeConnecting: the connect lifecycle churns the body (list row ->
@@ -1051,7 +1056,7 @@ func (g *Gui) resyncOnViewTeardown() {
 //     keypress), shifting every row below it. Only a LINE-COUNT change orphans
 //     cells, so Sync on that alone — in-place edits and focus/marker moves keep
 //     the cheap diff path so steady-state form navigation never full-repaints.
-func (g *Gui) resyncOnModalContentChange() {
+func (g *Gui) resyncOnModalContentChange(alreadySynced bool) {
 	mode := guicontext.ModeList
 	if g.modalIsTopMain() && g.registry.ConnectionManager != nil {
 		mode = g.registry.ConnectionManager.Mode()
@@ -1072,10 +1077,11 @@ func (g *Gui) resyncOnModalContentChange() {
 	if body == prev {
 		return
 	}
+	// Advance the snapshot even when teardown already repainted this frame.
 	g.prevModalBody = body
 	rowShift := mode == guicontext.ModeConnecting ||
 		strings.Count(body, "\n") != strings.Count(prev, "\n")
-	if rowShift && gocui.Screen != nil {
+	if rowShift && !alreadySynced && gocui.Screen != nil {
 		gocui.Screen.Sync()
 	}
 }
