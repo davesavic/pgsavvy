@@ -636,6 +636,23 @@ func (t *Tab) Err() error {
 	return t.err
 }
 
+// ErrorPanelText returns the complete sanitized body, independent of viewport
+// size. Grids retained after stream errors and plan tabs are not error panels.
+func (t *Tab) ErrorPanelText() (string, bool) {
+	t.mu.Lock()
+	err, sql := t.err, t.origSQL
+	eligible := err != nil && t.grid == nil && t.state != StatePlan
+	t.mu.Unlock()
+	if !eligible {
+		return "", false
+	}
+	var qe *drivers.QueryError
+	if errors.As(err, &qe) {
+		return renderQueryErrorPanel(qe, sql), true
+	}
+	return grid.SanitizeCellEscapes(err.Error()), true
+}
+
 // Grid returns the embedded grid view for the tab; nil for plan / error tabs.
 func (t *Tab) Grid() *grid.View {
 	t.mu.Lock()
@@ -2317,13 +2334,8 @@ func (h *ResultTabsHelper) LayoutPaint(driver types.GuiDriver, x0, y0, x1, y1 in
 				} else {
 					_ = driver.SetContent(name, t.planRawSnapshot())
 				}
-			} else if errTab := t.Err(); errTab != nil {
-				var qe *drivers.QueryError
-				if errors.As(errTab, &qe) {
-					_ = driver.SetContent(name, renderQueryErrorPanel(qe, t.errSQLSnapshot()))
-				} else {
-					_ = driver.SetContent(name, grid.SanitizeCellEscapes(errTab.Error()))
-				}
+			} else if body, ok := t.ErrorPanelText(); ok {
+				_ = driver.SetContent(name, body)
 			}
 		}
 		if t.id == activeID {

@@ -14,6 +14,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers"
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
 	"github.com/davesavic/pgsavvy/pkg/gui/internal/testfake"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -1169,6 +1170,102 @@ func TestShowErrorHasNilGrid(t *testing.T) {
 // TestRenderQueryErrorPanelWithCaret asserts the full panel for a
 // Position>0 syntax error: severity+code+message header, the offending
 // SQL line, and a `^` caret under the offending token.
+func TestErrorPanelTextParity(t *testing.T) {
+	qe := &drivers.QueryError{
+		Raw: errors.New("bad\x07 aggregate\x1b[31m!\x1b[0m"), Code: "42803",
+		Severity: "\x1b[31mERROR\x1b[0m", Position: 10,
+		Detail: strings.Repeat("é diagnostic\x07\n", 30), Hint: "fix\x1b[31m it",
+		Constraint: "constraint\x07", Where: "function\x1b[0m",
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+		sql  string
+		want string
+	}{
+		{"structured", qe, "SELECT 1\né bad\nundisplayed SQL", renderQueryErrorPanel(qe, "SELECT 1\né bad\nundisplayed SQL")},
+		{"wrapped", fmt.Errorf("wrapper: %w", qe), "SELECT 1\né bad\nundisplayed SQL", renderQueryErrorPanel(qe, "SELECT 1\né bad\nundisplayed SQL")},
+		{"generic", errors.New("generic\x07\x1b[31m error\x1b[0m"), "undisplayed SQL", "generic error"},
+		{"empty", errors.New(""), "", ""},
+		{"empty SQL", &drivers.QueryError{Position: 1}, "", "ERROR: query error"},
+		{"missing position", &drivers.QueryError{Raw: errors.New("boom")}, "SELECT 1", "ERROR: boom"},
+		{"negative position", &drivers.QueryError{Raw: errors.New("boom"), Position: -1}, "SELECT 1", "ERROR: boom"},
+		{"invalid position", &drivers.QueryError{Raw: errors.New("boom"), Position: 999}, "SELECT 1", "ERROR: boom"},
+		{"multibyte", &drivers.QueryError{Raw: errors.New("boom"), Position: 4}, "é bad", "ERROR: boom\n\né bad\n  ^"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := newTestHelper(t, nil)
+			h.ShowError("not part of body", tc.err)
+			tab := h.Active()
+			tab.SetErrorSQL(tc.sql)
+			body, ok := tab.ErrorPanelText()
+			if !ok || body != tc.want {
+				t.Fatalf("body = %q, %v; want %q, true", body, ok, tc.want)
+			}
+			rec := testfake.NewRecorderGuiDriver()
+			rec.EnableRealView(tab.ViewName())
+			h.LayoutPaint(rec, 0, 0, 20, 4)
+			if got := rec.GetViewBuffer(tab.ViewName()); got != body {
+				t.Fatalf("render = %q; body = %q", got, body)
+			}
+			if strings.ContainsAny(body, "\x1b\x07") || strings.Contains(body, "undisplayed SQL") || strings.Contains(body, "not part of body") {
+				t.Fatalf("body contains controls or undisplayed metadata: %q", body)
+			}
+			if tc.err == qe || tc.name == "wrapped" {
+				for _, field := range []string{"Detail:", "Hint:", "Constraint:", "Where:", "é bad\n^"} {
+					if !strings.Contains(body, field) {
+						t.Fatalf("body missing %q", field)
+					}
+				}
+				if strings.Count(body, "diagnostic") != 30 {
+					t.Fatal("overflow diagnostics truncated")
+				}
+			}
+		})
+	}
+}
+
+func TestErrorPanelTextEligibility(t *testing.T) {
+	for _, tab := range []*Tab{
+		{},
+		{state: StateError},
+		{state: StatePlan, err: errors.New("plan error")},
+		{state: StateError, err: errors.New("stream error"), grid: grid.NewView()},
+	} {
+		if body, ok := tab.ErrorPanelText(); ok || body != "" {
+			t.Fatalf("non-panel body = %q, %v", body, ok)
+		}
+	}
+}
+
+func TestErrorPanelTextConcurrentSQLAttachment(t *testing.T) {
+	tab := &Tab{state: StateError, err: &drivers.QueryError{Raw: errors.New("boom"), Position: 1}}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 1000 {
+			tab.SetErrorSQL("SELECT é")
+			tab.SetErrorSQL("SELECT b")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 1000 {
+			body, ok := tab.ErrorPanelText()
+			if !ok || (body != "ERROR: boom" && body != "ERROR: boom\n\nSELECT é\n^" && body != "ERROR: boom\n\nSELECT b\n^") {
+				t.Errorf("incoherent snapshot: %q, %v", body, ok)
+				return
+			}
+		}
+	}()
+	close(start)
+	wg.Wait()
+}
+
 func TestRenderQueryErrorPanelWithCaret(t *testing.T) {
 	qe := &drivers.QueryError{
 		Raw:      errors.New(`syntax error at or near "SELET"`),

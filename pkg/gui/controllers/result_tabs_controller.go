@@ -112,7 +112,8 @@ type ResultTabsManager interface {
 //     from either side of the pair)
 type ResultTabsController struct {
 	baseController
-	mgr ResultTabsManager
+	mgr       ResultTabsManager
+	clipboard grid.ClipboardWriter
 }
 
 // NewResultTabsController constructs the controller. mgr may be nil
@@ -120,6 +121,9 @@ type ResultTabsController struct {
 func NewResultTabsController(c *common.Common, core CoreDeps, ui UIDeps, edit EditDeps, mgr ResultTabsManager) *ResultTabsController {
 	return &ResultTabsController{baseController: newBase(c, HelperBag{CoreDeps: core, UIDeps: ui, EditDeps: edit}), mgr: mgr}
 }
+
+// SetClipboard wires the error-panel writer; grids keep their own clipboard.
+func (r *ResultTabsController) SetClipboard(cb grid.ClipboardWriter) { r.clipboard = cb }
 
 // GetKeybindings returns the 14 result-tab bindings.
 func (r *ResultTabsController) GetKeybindings(_ types.KeybindingsOpts) []*types.ChordBinding {
@@ -858,6 +862,7 @@ func (r *ResultTabsController) pendingDiscardAllHandler(_ commands.ExecCtx) erro
 // With an active selection `yy` calls YankSelection and flashes the
 // selection range; without a selection `yy` calls YankRowWithHeaders.
 // `y` is unchanged (YankCell).
+// On an error panel both commands copy the complete shared body.
 func (r *ResultTabsController) yankHandler(row bool) commands.Handler {
 	return func(_ commands.ExecCtx) error {
 		if r.mgr == nil {
@@ -869,6 +874,26 @@ func (r *ResultTabsController) yankHandler(row bool) commands.Handler {
 		}
 		g := tab.Grid()
 		if g == nil {
+			body, ok := tab.ErrorPanelText()
+			if !ok {
+				return nil
+			}
+			var err error
+			if r.clipboard == nil {
+				err = grid.ErrClipboardUnavailable
+			} else {
+				err = r.clipboard.Write(body)
+			}
+			switch {
+			case errors.Is(err, grid.ErrClipboardTooLarge):
+				r.toast("clipboard: value too large")
+			case errors.Is(err, grid.ErrClipboardUnavailable):
+				r.toast("clipboard unavailable")
+			case err != nil:
+				r.toast("clipboard: " + err.Error())
+			default:
+				r.toast(fmt.Sprintf("yanked error panel (%d bytes)", len(body)))
+			}
 			return nil
 		}
 		var (

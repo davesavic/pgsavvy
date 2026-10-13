@@ -182,6 +182,7 @@ func AttachControllers(
 		}
 	}
 	resultTabs := NewResultTabsController(c, helpers.CoreDeps, helpers.UIDeps, helpers.EditDeps, tabsMgr)
+	resultTabs.SetClipboard(clipboard.NewSystemClipboard())
 
 	// HideOverlayController publishes HIDE_OVERLAY-scope bindings for the
 	// <leader>gH column-visibility overlay. The manager

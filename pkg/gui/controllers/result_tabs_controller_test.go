@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/data"
 	"github.com/davesavic/pgsavvy/pkg/gui/controllers/helpers/ui"
+	"github.com/davesavic/pgsavvy/pkg/gui/grid"
 	"github.com/davesavic/pgsavvy/pkg/gui/types"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/query"
@@ -231,6 +233,170 @@ func TestReview_forward_fk_metadata(t *testing.T) {
 				require.Equal(t, 3, introspections, "sorting resolves physical names without expanding edit authorization")
 				require.NotEmpty(t, team.Grid().Columns()[0].PhysicalName)
 				require.Same(t, edits, source.Grid().PendingEdits())
+			})
+		}
+	}
+}
+
+func TestResultErrorYankBody(t *testing.T) {
+	qe := &drivers.QueryError{
+		Raw: errors.New("bad\x07 aggregate é"), Code: "42803", Position: 1,
+		Detail: strings.Repeat("diagnostic\x1b[31m\n", 30), Hint: "group by", Constraint: "constraint", Where: "function",
+	}
+	for _, action := range []string{commands.ResultYankCell, commands.ResultYankRow} {
+		for _, err := range []error{qe, fmt.Errorf("wrapped: %w", qe), errors.New("generic\x07 error"), errors.New("")} {
+			t.Run(action+"/"+err.Error(), func(t *testing.T) {
+				b := newBag()
+				mgr := ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{YankFormat: "json"})
+				t.Cleanup(mgr.CloseAll)
+				mgr.ShowError("error", err)
+				mgr.Active().SetErrorSQL("é bad\nnot displayed")
+				body, ok := mgr.Active().ErrorPanelText()
+				require.True(t, ok)
+				cb := &fakeClipboard{}
+				ctrl := controllers.NewResultTabsController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps, b.HelperBag.EditDeps, mgr)
+				ctrl.SetClipboard(cb)
+				reg := commands.NewRegistry()
+				ctrl.RegisterActions(reg)
+				runHandler(t, reg, action, commands.ExecCtx{})
+				require.Equal(t, []string{body}, cb.writes)
+				require.Len(t, b.Toast.msgs, 1)
+				require.Equal(t, fmt.Sprintf("yanked error panel (%d bytes)", len(body)), b.Toast.msgs[0].Msg)
+			})
+		}
+	}
+}
+
+func TestResultErrorYankFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		missing bool
+		want    string
+	}{
+		{"missing writer", nil, true, "clipboard unavailable"},
+		{"unavailable", fmt.Errorf("wrapped: %w", grid.ErrClipboardUnavailable), false, "clipboard unavailable"},
+		{"too large", fmt.Errorf("wrapped: %w", grid.ErrClipboardTooLarge), false, "clipboard: value too large"},
+		{"backend", errors.New("backend failed"), false, "clipboard: backend failed"},
+	} {
+		for _, action := range []string{commands.ResultYankCell, commands.ResultYankRow} {
+			t.Run(tc.name+"/"+action, func(t *testing.T) {
+				b := newBag()
+				mgr := ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{})
+				t.Cleanup(mgr.CloseAll)
+				mgr.ShowError("error", errors.New("boom"))
+				cb := &fakeClipboard{writeErr: tc.err}
+				ctrl := controllers.NewResultTabsController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps, b.HelperBag.EditDeps, mgr)
+				if !tc.missing {
+					ctrl.SetClipboard(cb)
+				}
+				reg := commands.NewRegistry()
+				ctrl.RegisterActions(reg)
+				runHandler(t, reg, action, commands.ExecCtx{})
+				if tc.missing {
+					require.Empty(t, cb.writes)
+				} else {
+					require.Equal(t, []string{"boom"}, cb.writes)
+				}
+				require.Len(t, b.Toast.msgs, 1)
+				require.Equal(t, tc.want, b.Toast.msgs[0].Msg)
+			})
+		}
+	}
+}
+
+func TestResultErrorYankActiveAndNoOp(t *testing.T) {
+	b := newBag()
+	mgr := ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{})
+	t.Cleanup(mgr.CloseAll)
+	cb := &fakeClipboard{}
+	ctrl := controllers.NewResultTabsController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps, b.HelperBag.EditDeps, mgr)
+	ctrl.SetClipboard(cb)
+	reg := commands.NewRegistry()
+	ctrl.RegisterActions(reg)
+	yank := func() {
+		for _, action := range []string{commands.ResultYankCell, commands.ResultYankRow} {
+			runHandler(t, reg, action, commands.ExecCtx{})
+		}
+	}
+	yank()
+	require.Empty(t, cb.writes)
+	require.NoError(t, mgr.OpenPlanTab("plan", models.Plan{}))
+	yank()
+	require.Empty(t, cb.writes)
+	require.Empty(t, b.Toast.msgs)
+	mgr.ShowError("A", errors.New("error A"))
+	mgr.ShowError("B", errors.New("error B"))
+	yank()
+	mgr.Cycle(-1)
+	yank()
+	require.Equal(t, []string{"error B", "error B", "error A", "error A"}, cb.writes)
+}
+
+type errorYankStreamRunner struct{ reviewForwardBuffer }
+
+func (*errorYankStreamRunner) NewQueryTask(_ string, streamFn func(context.Context) (drivers.RowStream, error), appendRows func([]models.Row), _ int, done func(error)) error {
+	stream, err := streamFn(context.Background())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stream.Close() }()
+	appendRows([]models.Row{{Values: []any{"é", "other"}}, {Values: []any{"last", "row"}}})
+	done(errors.New("mid-stream error"))
+	return nil
+}
+
+func TestResultErrorYankPreservesGrid(t *testing.T) {
+	for _, retained := range []bool{false, true} {
+		for _, kind := range []string{"cell", "row", "selection"} {
+			t.Run(fmt.Sprintf("retained=%v/%s", retained, kind), func(t *testing.T) {
+				b := newBag()
+				mgr := ui.NewResultTabsHelper(ui.ResultTabsHelperDeps{StreamFactory: func() ui.StreamRunner { return &errorYankStreamRunner{} }})
+				t.Cleanup(mgr.CloseAll)
+				var stream *session.RunHandle
+				if retained {
+					sqlSession := session.New(&launchConn{}, &reviewForwardSession{composite: true}, session.Options{})
+					t.Cleanup(func() { require.NoError(t, sqlSession.Close()) })
+					var err error
+					stream, err = sqlSession.Stream(context.Background(), models.Query{SQL: "seed"})
+					require.NoError(t, err)
+				}
+				require.NoError(t, mgr.OpenResultTab("grid", stream))
+				tab := mgr.Active()
+				g := tab.Grid()
+				if retained {
+					require.Error(t, tab.Err())
+				} else {
+					g.SetColumns([]models.ColumnMeta{{Name: "a"}, {Name: "b"}})
+					g.AppendRows([]models.Row{{Values: []any{"é", "other"}}, {Values: []any{"last", "row"}}})
+				}
+				_, panel := tab.ErrorPanelText()
+				require.False(t, panel)
+				gridCB, errorCB := &fakeClipboard{}, &fakeClipboard{}
+				g.SetClipboard(gridCB)
+				g.SetYankFormat("tsv")
+				ctrl := controllers.NewResultTabsController(nil, b.HelperBag.CoreDeps, b.HelperBag.UIDeps, b.HelperBag.EditDeps, mgr)
+				ctrl.SetClipboard(errorCB)
+				reg := commands.NewRegistry()
+				ctrl.RegisterActions(reg)
+				header := "a\tb\n"
+				if retained {
+					header = "user_tenant\tuser_id\n"
+				}
+				action, want := commands.ResultYankRow, header+"é\tother"
+				switch kind {
+				case "cell":
+					action, want = commands.ResultYankCell, "é"
+				case "selection":
+					mgr.SelectRow()
+					mgr.CursorDown()
+					want = header + "é\tother\nlast\trow"
+				}
+				runHandler(t, reg, action, commands.ExecCtx{})
+				require.Equal(t, []string{want}, gridCB.writes)
+				require.Empty(t, errorCB.writes)
+				require.Len(t, b.Toast.msgs, 1)
+				require.Contains(t, b.Toast.msgs[0].Msg, "yanked")
 			})
 		}
 	}
