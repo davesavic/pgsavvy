@@ -1,3 +1,10 @@
+pgsavvy v0.11.0
+
+  Copy complete query-error panels with y or yy after manually entering Results.
+  Both commands copy the same sanitized text, including diagnostics beyond the
+  visible viewport and the displayed SQL/caret excerpt. Existing grid yanks and
+  query focus behavior remain unchanged.
+
 pgsavvy v0.10.3
 
   Improved typing responsiveness in large SQL documents by rendering only
