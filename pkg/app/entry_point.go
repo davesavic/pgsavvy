@@ -110,7 +110,11 @@ func Start(build *BuildInfo, releaseNotes string, args []string) error {
 	store := common.NewAppStateStore(fs, statePath, common.DefaultClock())
 	_ = store.Load() // missing state file → defaults; not an error.
 
-	log, logCloser, err := wireSessionLogger(logDir, logDirOverridden, fs, build)
+	stderr := &deferredStderr{output: os.Stderr}
+	// Registered before g.Close below: diagnostics are replayed only after
+	// gocui restores the terminal, including startup failure and panic paths.
+	defer stderr.release()
+	log, logCloser, err := wireSessionLogger(logDir, logDirOverridden, fs, build, stderr)
 	if err != nil {
 		return err
 	}
@@ -242,9 +246,9 @@ func applyUserTheme(cfg *config.UserConfig, w io.Writer) {
 //   - logs.Open failure with override (flag or env) → return error so the
 //     caller surfaces it. Operators who chose an explicit path want to know
 //     it failed, not to silently get a stderr fallback.
-func wireSessionLogger(logDir string, overridden bool, fs afero.Fs, build *BuildInfo) (*slog.Logger, io.Closer, error) {
+func wireSessionLogger(logDir string, overridden bool, fs afero.Fs, build *BuildInfo, stderr io.Writer) (*slog.Logger, io.Closer, error) {
 	if os.Getenv(disableSessionLogEnv) == "1" {
-		return newKillSwitchLogger(), nil, nil
+		return newKillSwitchLogger(stderr), nil, nil
 	}
 
 	logger, closer, err := logs.Open(logs.Options{
@@ -252,6 +256,7 @@ func wireSessionLogger(logDir string, overridden bool, fs afero.Fs, build *Build
 		FS:             fs,
 		RetentionCount: 20,
 		Redactor:       logs.DefaultRedactor(),
+		Stderr:         stderr,
 		BuildInfo: logs.BuildInfo{
 			Version: build.Version,
 			Commit:  build.Commit,
@@ -262,7 +267,7 @@ func wireSessionLogger(logDir string, overridden bool, fs afero.Fs, build *Build
 		if overridden {
 			return nil, nil, fmt.Errorf("app: open session log at %q: %w", logDir, err)
 		}
-		fb := newFallbackLogger()
+		fb := newFallbackLogger(stderr)
 		fb.Warn("logs: session logger open failed; using stderr fallback", "err", err)
 		return fb, nil, nil
 	}
@@ -271,15 +276,15 @@ func wireSessionLogger(logDir string, overridden bool, fs afero.Fs, build *Build
 
 // newFallbackLogger builds a stderr Warn+ slog wrapped in
 // RedactingHandler (AD-13d / AMD-F2-6). Used when logs.Open fails.
-func newFallbackLogger() *slog.Logger {
-	base := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})
+func newFallbackLogger(stderr io.Writer) *slog.Logger {
+	base := slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn})
 	return slog.New(logs.NewRedactingHandler(base, logs.DefaultRedactor()))
 }
 
 // newKillSwitchLogger builds the PGSAVVY_DISABLE_SESSION_LOG=1 logger:
 // stderr text output at WarnLevel, RedactingHandler retained so that the
 // emergency-rollback path does not leak credentials (AMD-F2-6).
-func newKillSwitchLogger() *slog.Logger {
-	base := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})
+func newKillSwitchLogger(stderr io.Writer) *slog.Logger {
+	base := slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn})
 	return slog.New(logs.NewRedactingHandler(base, logs.DefaultRedactor()))
 }

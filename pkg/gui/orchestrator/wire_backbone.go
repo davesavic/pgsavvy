@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 
@@ -972,11 +971,11 @@ func (g *Gui) wireTrie(cfg *config.UserConfig) (*keys.TrieSet, []*types.ChordBin
 		}
 		cfgWarns, cfgErrs := config.ValidateUserConfig(cfg, deps)
 		for _, w := range cfgWarns {
-			fmt.Fprintf(os.Stderr, "config: warning: %s\n", w)
+			g.deps.Common.Logger().Warn("config: warning: "+w, "cat", "app")
 		}
 		if len(cfgErrs) > 0 {
 			for _, e := range cfgErrs {
-				fmt.Fprintf(os.Stderr, "config: %s\n", e)
+				g.deps.Common.Logger().Error("config: "+e.Error(), "cat", "app")
 			}
 			return nil, nil, nil, fmt.Errorf("config: %d validation error(s)", len(cfgErrs))
 		}

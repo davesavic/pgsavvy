@@ -203,7 +203,7 @@ func TestWireSessionLogger_CreatesSessionFile(t *testing.T) {
 	stateDir := "/state/pgsavvy"
 	t.Setenv(disableSessionLogEnv, "")
 
-	log, closer, err := wireSessionLogger(stateDir, false, fs, newBuildInfo())
+	log, closer, err := wireSessionLogger(stateDir, false, fs, newBuildInfo(), os.Stderr)
 	require.NoError(t, err)
 	require.NotNil(t, log)
 	require.NotNil(t, closer, "expected file-backed closer on primary path")
@@ -224,7 +224,7 @@ func TestWireSessionLogger_PrimaryPath_WritesJSONWithFourKeys(t *testing.T) {
 	stateDir := "/state/pgsavvy"
 	t.Setenv(disableSessionLogEnv, "")
 
-	log, closer, err := wireSessionLogger(stateDir, false, fs, newBuildInfo())
+	log, closer, err := wireSessionLogger(stateDir, false, fs, newBuildInfo(), os.Stderr)
 	require.NoError(t, err)
 	require.NotNil(t, log)
 	require.NotNil(t, closer)
@@ -260,7 +260,7 @@ func TestWireSessionLogger_FallbackPath_RedactsDSN(t *testing.T) {
 
 	got := withStderrCaptured(t, func() {
 		// Empty stateDir → logs.Open returns an error → fallback path runs.
-		log, closer, err := wireSessionLogger("", false, afero.NewMemMapFs(), newBuildInfo())
+		log, closer, err := wireSessionLogger("", false, afero.NewMemMapFs(), newBuildInfo(), os.Stderr)
 		require.NoError(t, err)
 		require.NotNil(t, log)
 		require.Nil(t, closer, "fallback path must return nil closer")
@@ -283,7 +283,7 @@ func TestWireSessionLogger_DisableEnvVar(t *testing.T) {
 	var closer io.Closer
 	got := withStderrCaptured(t, func() {
 		var err error
-		log, closer, err = wireSessionLogger(stateDir, false, fs, newBuildInfo())
+		log, closer, err = wireSessionLogger(stateDir, false, fs, newBuildInfo(), os.Stderr)
 		require.NoError(t, err)
 		require.NotNil(t, log)
 		require.Nil(t, closer, "kill-switch must return nil closer (no file opened)")
@@ -336,7 +336,7 @@ func TestWireSessionLogger_OverrideMkdirFailureSurfacesError(t *testing.T) {
 	t.Setenv(disableSessionLogEnv, "")
 	// Empty Dir triggers logs.Open's "Options.Dir is empty" error path; we
 	// don't actually need a real filesystem failure to exercise the branch.
-	log, closer, err := wireSessionLogger("", true, afero.NewMemMapFs(), newBuildInfo())
+	log, closer, err := wireSessionLogger("", true, afero.NewMemMapFs(), newBuildInfo(), os.Stderr)
 	require.Error(t, err, "override path must surface logs.Open errors")
 	require.Nil(t, log)
 	require.Nil(t, closer)
@@ -351,7 +351,7 @@ func TestWireSessionLogger_OverrideDirIsHonored(t *testing.T) {
 	logDir := "/custom/logs"
 	t.Setenv(disableSessionLogEnv, "")
 
-	log, closer, err := wireSessionLogger(logDir, true, fs, newBuildInfo())
+	log, closer, err := wireSessionLogger(logDir, true, fs, newBuildInfo(), os.Stderr)
 	require.NoError(t, err)
 	require.NotNil(t, log)
 	require.NotNil(t, closer)
@@ -370,7 +370,7 @@ func TestWireSessionLogger_DisableEnvWinsOverOverride(t *testing.T) {
 	t.Setenv(disableSessionLogEnv, "1")
 	fs := afero.NewMemMapFs()
 
-	log, closer, err := wireSessionLogger("/custom/logs", true, fs, newBuildInfo())
+	log, closer, err := wireSessionLogger("/custom/logs", true, fs, newBuildInfo(), os.Stderr)
 	require.NoError(t, err)
 	require.NotNil(t, log)
 	require.Nil(t, closer, "kill switch must return nil closer even with override set")
