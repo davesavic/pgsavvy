@@ -20,6 +20,9 @@ jobs:
           go-version: '1.26.9'
           cache: true
 
+      - name: Validate release notes
+        run: go run ./internal/releasenotes "$GITHUB_REF_NAME"
+
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           install-only: true
