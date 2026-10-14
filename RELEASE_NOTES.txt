@@ -1,3 +1,13 @@
+pgsavvy v0.11.3
+
+  Clarified keybinding-prefix diagnostics with affected keys, actions, mode,
+  scope, and binding origins. Shipped-default overlaps are informational;
+  user-binding overlaps remain warnings. Informational diagnostics no longer
+  trigger reload warnings. Custom-command shell text is omitted from diagnostics.
+  Keybindings and timeout behavior are unchanged.
+
+  Fixed the release-asset golden test to use GoReleaser's metadata tag.
+
 pgsavvy v0.11.2
 
   Fixed startup warnings corrupting the terminal display. Diagnostics remain in
