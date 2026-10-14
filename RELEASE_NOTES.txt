@@ -1,3 +1,9 @@
+pgsavvy v0.11.4
+
+  Release publication now requires a non-empty release-notes entry matching
+  the pushed tag. Added validation tests and restored missing v0.11.3 notes.
+  Application behavior is unchanged.
+
 pgsavvy v0.11.3
 
   Clarified keybinding-prefix diagnostics with affected keys, actions, mode,
