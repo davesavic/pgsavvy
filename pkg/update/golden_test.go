@@ -12,8 +12,8 @@ import (
 
 // TestGolden_AssetNameMatchesGoreleaser asserts that the asset name this package
 // computes byte-equals a name goreleaser actually produced, catching contract
-// drift the hand-authored httptest fixtures cannot. goreleaser --snapshot forces
-// tag v0.0.0, so the expected name is built from that same tag.
+// drift the hand-authored httptest fixtures cannot. Snapshot asset names retain
+// the release tag recorded in dist/metadata.json, not necessarily v0.0.0.
 func TestGolden_AssetNameMatchesGoreleaser(t *testing.T) {
 	// dist/ lives at the repo root; this file is pkg/update.
 	path := filepath.Join("..", "..", "dist", "artifacts.json")
@@ -30,7 +30,14 @@ func TestGolden_AssetNameMatchesGoreleaser(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &artifacts))
 
-	const snapshotTag = "v0.0.0"
+	metadataRaw, err := os.ReadFile(filepath.Join("..", "..", "dist", "metadata.json"))
+	require.NoError(t, err, "read GoReleaser metadata for dist/artifacts.json")
+	var metadata struct {
+		Tag string `json:"tag"`
+	}
+	require.NoError(t, json.Unmarshal(metadataRaw, &metadata))
+	require.NotEmpty(t, metadata.Tag, "no release tag found in dist/metadata.json")
+
 	names := map[string]bool{}
 	for _, a := range artifacts {
 		if a.Extra.Format == "binary" {
@@ -42,14 +49,14 @@ func TestGolden_AssetNameMatchesGoreleaser(t *testing.T) {
 	// Every supported platform's computed name must appear in goreleaser output.
 	for goos, arches := range supportedPlatforms {
 		for goarch := range arches {
-			want := assetName(snapshotTag, goos, goarch)
+			want := assetName(metadata.Tag, goos, goarch)
 			require.Truef(t, names[want], "computed asset %q not found in goreleaser artifacts; contract drift", want)
 		}
 	}
 
 	// And the host's own computed name must match (uses real runtime values).
 	if supportedPlatforms[runtime.GOOS][runtime.GOARCH] {
-		host := assetName(snapshotTag, runtime.GOOS, runtime.GOARCH)
+		host := assetName(metadata.Tag, runtime.GOOS, runtime.GOARCH)
 		require.Truef(t, names[host], "host asset %q missing from goreleaser artifacts", host)
 	}
 }
