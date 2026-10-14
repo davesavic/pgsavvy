@@ -410,6 +410,11 @@ func (s *KeybindingService) Build(
 	for key, b := range builders {
 		t, ws := b.Build()
 		out.tries[key] = t
+		for i := range ws {
+			if ws[i].Code == "ambiguous_prefix" {
+				ws[i].Message = fmt.Sprintf("%s (mode=%s, scope=%s)", ws[i].Message, key.Mode, key.Scope)
+			}
+		}
 		warnings = append(warnings, ws...)
 	}
 	if registry.Has(commands.HelpCheatsheet) {

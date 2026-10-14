@@ -2,6 +2,7 @@ package keys
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/davesavic/pgsavvy/pkg/gui/commands"
 )
@@ -409,17 +410,23 @@ func (b *TrieBuilder) insertUser(cb *ChordBinding, cmd *commands.Command) {
 
 func (b *TrieBuilder) detectAmbiguousPrefixes(node *trieNode, prefix []Key) {
 	if node.action != nil && len(node.children) > 0 && node.action != commands.NopCommand {
-		// Collect descendant leaf origins for an actionable warning.
-		var descOrigins []string
-		collectLeafOrigins(node, &descOrigins, 4)
+		var descendants []string
+		total, hasUser := collectLeafDiagnostics(node, prefix, &descendants, 4)
+		if total > len(descendants) {
+			descendants = append(descendants, "...")
+		}
+		level, overlap := InfoLevel, "shipped-default overlap"
+		if node.source != ShippedDefault || hasUser {
+			level, overlap = WarnLevel, "user-binding overlap; review configuration"
+		}
 		b.warnings = append(b.warnings, Warning{
-			Level: WarnLevel,
+			Level: level,
 			Code:  "ambiguous_prefix",
 			Message: fmt.Sprintf(
-				"sequence %q is a leaf AND a prefix of longer sequences (descendants: %v); vim timeoutlen rule applies",
-				SequenceString(prefix), descOrigins,
+				"sequence %q (action=%s) is a leaf AND a prefix of longer sequences (descendants: [%s]); %s; vim timeoutlen rule applies",
+				SequenceString(prefix), diagnosticAction(node), strings.Join(descendants, ", "), overlap,
 			),
-			Origin: node.origin,
+			Origin: diagnosticOrigin(node),
 		})
 	}
 	keys := sortedKeys(node.children)
@@ -429,19 +436,44 @@ func (b *TrieBuilder) detectAmbiguousPrefixes(node *trieNode, prefix []Key) {
 	}
 }
 
-func collectLeafOrigins(node *trieNode, out *[]string, cap int) {
-	if len(*out) >= cap {
-		return
-	}
+func collectLeafDiagnostics(node *trieNode, prefix []Key, out *[]string, limit int) (total int, hasUser bool) {
 	keys := sortedKeys(node.children)
 	for _, k := range keys {
 		child := node.children[k]
+		sequence := append(prefix, k)
 		if child.action != nil {
-			if len(*out) >= cap {
-				return
+			total++
+			hasUser = hasUser || child.source != ShippedDefault
+			if len(*out) < limit {
+				*out = append(*out, fmt.Sprintf("%q -> %s (%s)", SequenceString(sequence), diagnosticAction(child), diagnosticOrigin(child)))
 			}
-			*out = append(*out, child.origin)
 		}
-		collectLeafOrigins(child, out, cap)
+		// Display is bounded, but provenance must include undisplayed bindings.
+		childTotal, childHasUser := collectLeafDiagnostics(child, sequence, out, limit)
+		total += childTotal
+		hasUser = hasUser || childHasUser
 	}
+	return total, hasUser
+}
+
+func diagnosticOrigin(node *trieNode) string {
+	if node.origin != "" {
+		return node.origin
+	}
+	switch node.source {
+	case ShippedDefault:
+		return "shipped default"
+	case CustomCmd:
+		return "user custom command"
+	default:
+		return "user override"
+	}
+}
+
+func diagnosticAction(node *trieNode) string {
+	if node.source == CustomCmd {
+		// Custom action IDs contain the shell text, which may include secrets.
+		return "custom command"
+	}
+	return node.action.ID
 }

@@ -998,7 +998,12 @@ func (g *Gui) wireTrie(cfg *config.UserConfig) (*keys.TrieSet, []*types.ChordBin
 		return nil, nil, nil, fmt.Errorf("gui: Build: %w", buildErr)
 	}
 	for _, w := range warnings {
-		g.deps.Common.Logger().Warn(fmt.Sprintf("keybindings: [%s] %s (%s)", w.Code, w.Message, w.Origin))
+		message := fmt.Sprintf("keybindings: [%s] %s (%s)", w.Code, w.Message, w.Origin)
+		if w.Level == keys.InfoLevel {
+			g.deps.Common.Logger().Info(message)
+		} else {
+			g.deps.Common.Logger().Warn(message)
+		}
 	}
 	g.keybindingSystem.lastWarnings = warnings
 	g.keybindingSystem.matcher.SwapTrieSet(trieSet)

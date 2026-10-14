@@ -182,19 +182,23 @@ func ReloadCommand(deps ReloadDeps) ExCommand {
 		if deps.Log != nil {
 			for _, w := range warnings {
 				deps.Log.Debug(fmt.Sprintf(
-					"reload: %s warning [%s] %s (origin=%s)",
+					"reload: %s diagnostic [%s] %s (origin=%s)",
 					w.Level, w.Code, w.Message, w.Origin,
 				))
 			}
 		}
-		if deps.Toaster != nil {
-			for _, w := range warnings {
+		totalWarns := len(warns)
+		for _, w := range warnings {
+			if w.Level == InfoLevel {
+				continue
+			}
+			totalWarns++
+			if deps.Toaster != nil {
 				deps.Toaster(fmt.Sprintf("config warning: [%s] %s (%s)", w.Code, w.Message, w.Origin))
 			}
 		}
 		deps.Matcher.SwapTrieSet(newTrie)
 		if deps.Toaster != nil {
-			totalWarns := len(warns) + len(warnings)
 			if totalWarns > 0 {
 				deps.Toaster(fmt.Sprintf("config reloaded (%d warning(s))", totalWarns))
 			} else {

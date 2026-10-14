@@ -2,7 +2,9 @@ package orchestrator_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -17,15 +19,21 @@ import (
 )
 
 func TestStartupDiagnostics_UseConfiguredLogger(t *testing.T) {
-	for _, invalid := range []bool{false, true} {
-		name := "keybinding warning"
-		if invalid {
-			name = "config validation error"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		invalid, userBinding bool
+	}{
+		{"shipped keybinding information", false, false},
+		{"user keybinding warning", false, true},
+		{"config validation error", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			cfg := config.GetDefaultConfig()
-			if invalid {
+			if tc.invalid {
 				cfg.UI.ResultPageSize = -1
+			}
+			if tc.userBinding {
+				cfg.Keybindings = append(cfg.Keybindings, config.KeybindingConfig{Mode: "n", Scope: "result_grid", Key: "y", Action: "result.yank.cell"})
 			}
 			var output bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&output, nil))
@@ -40,14 +48,32 @@ func TestStartupDiagnostics_UseConfiguredLogger(t *testing.T) {
 			})
 			t.Cleanup(func() { _ = g.Close() })
 			err := g.UseDriverForTest(testfake.NewRecorderGuiDriver())
-			if invalid {
+			if tc.invalid {
 				require.ErrorContains(t, err, "validation error")
 				require.Contains(t, output.String(), "ui.result_page_size must be > 0")
 				require.Contains(t, output.String(), `"level":"ERROR"`)
 			} else {
 				require.NoError(t, err)
 				require.Contains(t, output.String(), "ambiguous_prefix")
-				require.Contains(t, output.String(), `"level":"WARN"`)
+				found := 0
+				for _, line := range strings.Split(strings.TrimSpace(output.String()), "\n") {
+					var record struct{ Level, Msg string }
+					require.NoError(t, json.Unmarshal([]byte(line), &record))
+					if !strings.Contains(record.Msg, "ambiguous_prefix") {
+						continue
+					}
+					found++
+					expectedLevel := "INFO"
+					if tc.userBinding && strings.Contains(record.Msg, "scope=result_grid") {
+						expectedLevel = "WARN"
+					}
+					require.Equal(t, expectedLevel, record.Level, record.Msg)
+					require.Contains(t, record.Msg, "mode=normal")
+					require.Contains(t, record.Msg, "action=")
+					require.NotContains(t, record.Msg, "descendants: []")
+					require.NotContains(t, record.Msg, "()")
+				}
+				require.Equal(t, 2, found)
 			}
 		})
 	}

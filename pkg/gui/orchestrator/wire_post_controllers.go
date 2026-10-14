@@ -424,7 +424,12 @@ func (g *Gui) wirePopupStates(helperBag controllers.HelperBag, connectInv *conne
 				}
 				if len(warnings) > 0 && g.deps.Common != nil {
 					for _, w := range warnings {
-						g.deps.Common.Logger().Warn(fmt.Sprintf("keybindings: [%s] %s (%s)", w.Code, w.Message, w.Origin))
+						message := fmt.Sprintf("keybindings: [%s] %s (%s)", w.Code, w.Message, w.Origin)
+						if w.Level == keys.InfoLevel {
+							g.deps.Common.Logger().Info(message)
+						} else {
+							g.deps.Common.Logger().Warn(message)
+						}
 					}
 				}
 				return nil

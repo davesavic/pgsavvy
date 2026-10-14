@@ -237,6 +237,7 @@ func TestReloadCommand_WarningCountInToast(t *testing.T) {
 		warnings: []Warning{
 			{Level: WarnLevel, Code: "missing_cheatsheet_binding", Message: "no binding for help.cheatsheet"},
 			{Level: WarnLevel, Code: "orphan_action", Message: "no such action", Origin: "user.yml:7"},
+			{Level: InfoLevel, Code: "ambiguous_prefix", Message: "shipped-default overlap", Origin: "shipped default"},
 		},
 	}
 	mat := &recordingMatcher{}
@@ -270,6 +271,30 @@ func TestReloadCommand_WarningCountInToast(t *testing.T) {
 	}
 	if !strings.Contains(msgs[2], "config reloaded") || !strings.Contains(msgs[2], "2") {
 		t.Errorf("third message %q, want config reloaded (2 warning(s))", msgs[2])
+	}
+}
+
+func TestReloadCommand_InformationalDiagnosticsAreNotWarnings(t *testing.T) {
+	mat := &recordingMatcher{}
+	toaster := &recordingToaster{}
+	cmd := ReloadCommand(ReloadDeps{
+		LoadUserConfig: func() (*config.UserConfig, error) { return config.GetDefaultConfig(), nil },
+		ValidateDeps: config.ValidationDeps{
+			ActionExists: func(string) bool { return true },
+			ScopeExists:  func(string) bool { return true },
+		},
+		Service: &stubService{trie: NewTrieSet(), warnings: []Warning{{Level: InfoLevel, Code: "ambiguous_prefix", Message: "shipped-default overlap"}}},
+		Matcher: mat,
+		Toaster: toaster.toast,
+	})
+	if err := cmd.Handler(nil, commands.ExecCtx{}); err != nil {
+		t.Fatal(err)
+	}
+	if messages := toaster.snapshot(); len(messages) != 1 || messages[0] != "config reloaded" {
+		t.Fatalf("informational diagnostics should not warn: %v", messages)
+	}
+	if mat.swapCount() != 1 {
+		t.Fatal("informational diagnostics prevented reload")
 	}
 }
 
