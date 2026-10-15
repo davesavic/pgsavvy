@@ -39,6 +39,10 @@ func xdgDataHome() string {
 // and fetches the item identified by ref. The passphrase is supplied via
 // passphraseFunc (env first, then prompter). See epic D1, D2, D20.
 func resolveKeyring(ctx context.Context, ref string, prompter Prompter) (string, error) {
+	return resolveKeyringWithPassword(ref, passphraseFunc(ctx, prompter), os.Stderr)
+}
+
+func resolveKeyringWithPassword(ref string, password keyring.PromptFunc, diagnostics io.Writer) (string, error) {
 	dir := keyringDir()
 	if err := ensureKeyringDirMode(dir); err != nil {
 		return "", err
@@ -48,7 +52,7 @@ func resolveKeyring(ctx context.Context, ref string, prompter Prompter) (string,
 		AllowedBackends:  []keyring.BackendType{keyring.FileBackend},
 		ServiceName:      "pgsavvy",
 		FileDir:          dir,
-		FilePasswordFunc: passphraseFunc(ctx, prompter),
+		FilePasswordFunc: password,
 	}
 
 	kr, err := keyring.Open(cfg)
@@ -63,7 +67,7 @@ func resolveKeyring(ctx context.Context, ref string, prompter Prompter) (string,
 
 	// Re-check file modes after open: 99designs/keyring creates the per-item
 	// files on first Set; warn (without failing) if anything looks loose.
-	warnIfLooseKeyringMode(dir)
+	warnIfLooseKeyringMode(dir, diagnostics)
 
 	return string(item.Data), nil
 }
@@ -147,7 +151,7 @@ func ensureKeyringDirMode(dir string) error {
 // warnIfLooseKeyringMode scans dir and emits a stderr warning for any file
 // whose perm bits include group/other access. Best-effort; errors are
 // swallowed (we don't want a chmod hiccup to break credential resolution).
-func warnIfLooseKeyringMode(dir string) {
+func warnIfLooseKeyringMode(dir string, diagnostics io.Writer) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -162,7 +166,7 @@ func warnIfLooseKeyringMode(dir string) {
 		}
 		if info.Mode().Perm()&0o077 != 0 {
 			path := filepath.Join(dir, e.Name())
-			fmt.Fprintf(os.Stderr, "pgsavvy: WARN keyring item %s has loose mode %04o; tightening to 0600\n",
+			_, _ = fmt.Fprintf(diagnostics, "pgsavvy: WARN keyring item %s has loose mode %04o; tightening to 0600\n",
 				path, info.Mode().Perm())
 			_ = os.Chmod(path, 0o600)
 		}
