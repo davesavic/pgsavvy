@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/spf13/afero"
 
@@ -19,6 +21,9 @@ var ErrDuplicateConnectionName = errors.New("config: duplicate connection name")
 // ErrConnectionNotFound is returned by UpdateConnection and DeleteConnection
 // when no existing profile matches the supplied name.
 var ErrConnectionNotFound = errors.New("config: connection not found")
+
+// ErrConnectionsChanged means an edit cannot safely replace the loaded snapshot.
+var ErrConnectionsChanged = errors.New("config: connections changed during edit; reload and retry")
 
 // SaveConnections atomically writes conns to the YAML file at path using the
 // wrapper form {connections: [...]} that LoadConnections (with KnownFields)
@@ -37,6 +42,11 @@ var ErrConnectionNotFound = errors.New("config: connection not found")
 // defense-in-depth scrub for credentials that may have leaked into wrapped
 // error strings.
 func SaveConnections(fs afero.Fs, path string, conns []models.Connection) error {
+	for _, conn := range conns {
+		if err := conn.CLIAccess.Validate(); err != nil {
+			return err
+		}
+	}
 	if IsInlinePasswordPresent(conns) {
 		_, _ = fmt.Fprintf(warnWriter,
 			"config: dropping inline plaintext password from %d profile(s) on write to %s — migrate to password_command\n",
@@ -45,6 +55,9 @@ func SaveConnections(fs afero.Fs, path string, conns []models.Connection) error 
 	}
 	wrapper := connectionsFile{Connections: normalizeForWrite(conns)}
 	if err := utils.AtomicWriteYAML(fs, path, wrapper, 0o600); err != nil {
+		if errors.Is(err, ErrConnectionsChanged) {
+			return ErrConnectionsChanged
+		}
 		return errors.New(session.RedactDSN(err.Error()))
 	}
 	return nil
@@ -113,14 +126,30 @@ func AppendConnection(fs afero.Fs, path string, c models.Connection) error {
 // is not found, ErrConnectionNotFound is returned.
 //
 // On LoadConnections failure the error is returned unwrapped (per M10f).
+// CLIAccess is always preserved from disk, ignoring the form's captured policy.
+// Detected changes before publication return ErrConnectionsChanged without writing.
 func UpdateConnection(fs afero.Fs, path, oldName string, newConn models.Connection) error {
-	existing, err := LoadConnections(fs, path)
+	data, err := afero.ReadFile(fs, path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrConnectionNotFound
+		}
+		return err
+	}
+	info, err := fs.Stat(path)
+	if err != nil {
+		return err
+	}
+	existing, err := decodeConnections(data, info, path)
 	if err != nil {
 		return err
 	}
 	idx := -1
 	for i := range existing {
 		if existing[i].Name == oldName {
+			if idx != -1 {
+				return ErrDuplicateConnectionName
+			}
 			idx = i
 			continue
 		}
@@ -131,8 +160,27 @@ func UpdateConnection(fs afero.Fs, path, oldName string, newConn models.Connecti
 	if idx == -1 {
 		return ErrConnectionNotFound
 	}
+	// Policy edits are explicit on-disk operations, never stale form edits.
+	newConn.CLIAccess = existing[idx].CLIAccess
 	existing[idx] = newConn
-	return SaveConnections(fs, path, existing)
+	return SaveConnections(&connectionSnapshotFs{Fs: fs, path: path, data: data}, path, existing)
+}
+
+type connectionSnapshotFs struct {
+	afero.Fs
+	path string
+	data []byte
+}
+
+func (fs *connectionSnapshotFs) Rename(oldname, newname string) error {
+	if newname == fs.path {
+		current, err := afero.ReadFile(fs.Fs, fs.path)
+		if err != nil || !bytes.Equal(current, fs.data) {
+			return ErrConnectionsChanged
+		}
+	}
+	// An uncooperative external writer can still race this final check.
+	return fs.Fs.Rename(oldname, newname)
 }
 
 // DeleteConnection loads the existing connections.yml at path and removes the

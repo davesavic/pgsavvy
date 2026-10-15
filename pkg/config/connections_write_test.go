@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -299,5 +300,127 @@ func TestIsInlinePasswordPresent(t *testing.T) {
 				t.Errorf("got %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+func TestMachineAccess_RoundTrip(t *testing.T) {
+	for _, policy := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead} {
+		t.Run(string(policy), func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			conns := []models.Connection{{Name: "dev", CLIAccess: policy}}
+			if err := SaveConnections(fs, "/private/c.yml", conns); err != nil {
+				t.Fatal(err)
+			}
+			got, err := LoadConnections(fs, "/private/c.yml")
+			if err != nil || len(got) != 1 || got[0].CLIAccess != policy || conns[0].CLIAccess != policy {
+				t.Fatalf("round trip: %v, %v", got, err)
+			}
+			for path, mode := range map[string]uint32{"/private": 0o700, "/private/c.yml": 0o600} {
+				info, err := fs.Stat(path)
+				if err != nil || uint32(info.Mode().Perm()) != mode {
+					t.Fatalf("mode %s: %v, %v", path, info, err)
+				}
+			}
+		})
+	}
+	fs := afero.NewMemMapFs()
+	before := []byte("connections: []\n")
+	if err := afero.WriteFile(fs, "/c.yml", before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveConnections(fs, "/c.yml", []models.Connection{{CLIAccess: "invalid"}}); err == nil {
+		t.Fatal("invalid policy saved")
+	}
+	after, _ := afero.ReadFile(fs, "/c.yml")
+	if !bytes.Equal(before, after) {
+		t.Fatal("invalid save changed file")
+	}
+}
+
+func TestMachineAccess_FormPreservation(t *testing.T) {
+	for _, renamed := range []bool{false, true} {
+		for _, policy := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead} {
+			fs := afero.NewMemMapFs()
+			stale := models.Connection{Name: "dev", CLIAccess: models.CLIAccessRowRead}
+			if renamed {
+				stale.Name = "renamed"
+			}
+			stale.Label = "edited"
+			if err := SaveConnections(fs, "/c.yml", []models.Connection{{Name: "dev", CLIAccess: policy}, {Name: "other", CLIAccess: models.CLIAccessMetadata}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := UpdateConnection(fs, "/c.yml", "dev", stale); err != nil {
+				t.Fatal(err)
+			}
+			got, err := LoadConnections(fs, "/c.yml")
+			if err != nil || len(got) != 2 || got[0].CLIAccess != policy || got[0].Label != "edited" || got[0].Name != stale.Name || got[1].CLIAccess != models.CLIAccessMetadata {
+				t.Fatalf("disk policy %q, rename %v: %v, %v", policy, renamed, got, err)
+			}
+			if stale.CLIAccess != models.CLIAccessRowRead {
+				t.Fatal("caller copy mutated")
+			}
+		}
+	}
+}
+
+type changingConnectionFs struct {
+	afero.Fs
+	change func()
+}
+
+func (fs *changingConnectionFs) OpenFile(name string, flag int, mode os.FileMode) (afero.File, error) {
+	if flag&os.O_CREATE != 0 && fs.change != nil {
+		change := fs.change
+		fs.change = nil
+		change()
+	}
+	return fs.Fs.OpenFile(name, flag, mode)
+}
+
+func TestMachineAccess_FormPreservation_Conflicts(t *testing.T) {
+	for _, name := range []string{"dev", "renamed"} {
+		t.Run(name, func(t *testing.T) {
+			base := afero.NewMemMapFs()
+			if err := SaveConnections(base, "/private/c.yml", []models.Connection{{Name: "dev", CLIAccess: models.CLIAccessRowRead}}); err != nil {
+				t.Fatal(err)
+			}
+			revoked := []byte("connections:\n  - name: dev\n    cli_access: disabled\n")
+			fs := &changingConnectionFs{Fs: base, change: func() {
+				if err := afero.WriteFile(base, "/private/c.yml", revoked, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}}
+			err := UpdateConnection(fs, "/private/c.yml", "dev", models.Connection{Name: name, Label: "stale", CLIAccess: models.CLIAccessRowRead})
+			if !errors.Is(err, ErrConnectionsChanged) {
+				t.Fatalf("conflict: %v", err)
+			}
+			data, _ := afero.ReadFile(base, "/private/c.yml")
+			if !bytes.Equal(data, revoked) {
+				t.Fatal("intervening revocation overwritten")
+			}
+			entries, err := afero.ReadDir(base, "/private")
+			if err != nil || len(entries) != 1 || entries[0].Name() != "c.yml" {
+				t.Fatalf("temporary file leaked: %v, %v", entries, err)
+			}
+		})
+	}
+}
+
+func TestMachineAccess_FormPreservation_DuplicateAndDenied(t *testing.T) {
+	base := afero.NewMemMapFs()
+	conns := []models.Connection{{Name: "dev", CLIAccess: models.CLIAccessRowRead}, {Name: "dev", CLIAccess: models.CLIAccessDisabled}}
+	if err := SaveConnections(base, "/private/c.yml", conns); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := afero.ReadFile(base, "/private/c.yml")
+	if err := UpdateConnection(base, "/private/c.yml", "dev", models.Connection{Name: "dev"}); !errors.Is(err, ErrDuplicateConnectionName) {
+		t.Fatalf("ambiguous profile: %v", err)
+	}
+	if err := SaveConnections(afero.NewReadOnlyFs(base), "/private/c.yml", nil); err == nil {
+		t.Fatal("read-only filesystem accepted write")
+	}
+	after, _ := afero.ReadFile(base, "/private/c.yml")
+	if !bytes.Equal(before, after) {
+		t.Fatal("rejected write changed profiles")
 	}
 }

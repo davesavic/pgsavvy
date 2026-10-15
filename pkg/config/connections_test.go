@@ -9,7 +9,37 @@ import (
 	"testing"
 
 	"github.com/spf13/afero"
+
+	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+func TestMachineAccess_Validation(t *testing.T) {
+	for _, suffix := range []string{"", "    cli_access: null\n", "    cli_access: \"\"\n", "    cli_access: disabled\n"} {
+		fs := afero.NewMemMapFs()
+		body := "connections:\n  - name: dev\n" + suffix
+		if err := afero.WriteFile(fs, "/c.yml", []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := LoadConnections(fs, "/c.yml")
+		if err != nil || len(got) != 1 || got[0].EffectiveCLIAccess() != models.CLIAccessDisabled {
+			t.Fatalf("default %q: %v, %v", suffix, got, err)
+		}
+	}
+	for _, suffix := range []string{"    cli_access: true\n", "    cli_access: 1\n", "    cli_access: []\n", "    cli_access: {}\n", "    cli_access: invalid\n", "    cli_access: metadata\n    cli_access: row-read\n"} {
+		fs := afero.NewMemMapFs()
+		body := []byte("connections:\n  - name: dev\n" + suffix)
+		if err := afero.WriteFile(fs, "/c.yml", body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadConnections(fs, "/c.yml"); err == nil {
+			t.Errorf("invalid policy accepted: %s", suffix)
+		}
+		after, _ := afero.ReadFile(fs, "/c.yml")
+		if !bytes.Equal(body, after) {
+			t.Fatal("load rewrote file")
+		}
+	}
+}
 
 func TestLoadConnections_MissingFileReturnsEmpty(t *testing.T) {
 	fs := afero.NewMemMapFs()
