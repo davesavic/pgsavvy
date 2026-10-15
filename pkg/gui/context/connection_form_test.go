@@ -10,6 +10,28 @@ import (
 
 func testDrivers() []string { return []string{"postgres", "mysql"} }
 
+func TestMachineAccess_FormPreservation(t *testing.T) {
+	for _, policy := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead} {
+		source := models.Connection{Name: "dev", CLIAccess: policy, SSHTunnel: &models.SSHTunnelConfig{Host: "bastion", User: "user"}}
+		c := newTestConnectionManager(&captureDriver{}, nil, nil)
+		c.OpenEditForm(source, []string{"dev"}, testDrivers)
+		c.form.conn.Label = "edited"
+		result, editing, original, valid := c.FormValidateAll(i18n.EnglishTranslationSet())
+		if !valid || !editing || original != source.Name {
+			t.Fatal("valid edit form did not produce a save snapshot")
+		}
+		if result.CLIAccess != policy || source.Label != "" || result.SSHTunnel == source.SSHTunnel {
+			t.Fatalf("form lost policy or shared copy: %q", policy)
+		}
+		if err := c.HandleRender(); err != nil {
+			t.Fatal(err)
+		}
+		if len(c.form.focusableSpecs()) != 24 {
+			t.Fatalf("unexpected form controls: %d", len(c.form.focusableSpecs()))
+		}
+	}
+}
+
 // TestForm_RendersAllFunctionalRows asserts the form body shows every
 // functional field, including the now-editable icon/keyring/password_command
 // credential rows (AC1).

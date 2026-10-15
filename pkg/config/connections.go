@@ -70,7 +70,10 @@ func LoadConnections(fs afero.Fs, path string) ([]models.Connection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %q: %w", path, err)
 	}
+	return decodeConnections(data, info, path)
+}
 
+func decodeConnections(data []byte, info os.FileInfo, path string) ([]models.Connection, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("config: parse %q: %w", path, err)
@@ -93,6 +96,11 @@ func LoadConnections(fs afero.Fs, path string) ([]models.Connection, error) {
 	}
 	if wrapper.Connections == nil {
 		return []models.Connection{}, nil
+	}
+	for _, conn := range wrapper.Connections {
+		if err := conn.CLIAccess.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	if hasExecutableCredentialCommand(wrapper.Connections) {
 		if info.Mode().Perm()&0o022 != 0 {
