@@ -7,15 +7,19 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 type metadataLiveFixture struct {
@@ -32,13 +36,17 @@ func metadataLive(t *testing.T) *metadataLiveFixture {
 		t.Fatal("metadata integration requires designated PGSAVVY_TEST_PG; missing fixtures do not skip")
 	}
 	machineTestEnvironment(t)
-	admin, err := pgx.Connect(context.Background(), dsn)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	admin, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		t.Fatal("metadata fixture unreachable")
 	}
 	var version int
-	if admin.QueryRow(context.Background(), "SELECT version FROM app._fixture_meta").Scan(&version) != nil || version != 2 {
-		_ = admin.Close(context.Background())
+	if admin.QueryRow(ctx, "SELECT version FROM app._fixture_meta").Scan(&version) != nil || version != 2 {
+		cleanup, stop := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = admin.Close(cleanup)
+		stop()
 		t.Fatal("metadata requires designated seeded fixture")
 	}
 	name := "first_meta_" + strings.ToLower(rand.Text())
@@ -72,7 +80,9 @@ func metadataLive(t *testing.T) *metadataLiveFixture {
 
 func (f *metadataLiveFixture) exec(t *testing.T, sql string) {
 	t.Helper()
-	if _, err := f.admin.Exec(context.Background(), sql); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := f.admin.Exec(ctx, sql); err != nil {
 		t.Fatalf("test-owned metadata DDL failed (%T)", err)
 	}
 }
@@ -97,6 +107,202 @@ func (f *metadataLiveFixture) inspect(t *testing.T, request MachineMetadataReque
 		err = closeErr
 	}
 	return result, err
+}
+
+func TestMachineMetadata_TargetSelection_Live(t *testing.T) {
+	f := metadataLive(t)
+	base, err := url.Parse(f.profile.DSN)
+	if err != nil {
+		t.Fatal("fixture URL invalid")
+	}
+	q := base.Query()
+	q.Set("sslmode", "disable")
+	q.Del("target_session_attrs")
+	base.RawQuery = q.Encode()
+	baseline, err := pgx.ParseConfig(base.String())
+	if err != nil {
+		t.Fatal("fixture configuration invalid")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	direct, err := pgx.ConnectConfig(ctx, baseline)
+	if err != nil {
+		t.Fatal("fixture role baseline connection failed")
+	}
+	t.Cleanup(func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 2*time.Second)
+		defer stop()
+		if err := direct.Close(cleanup); err != nil {
+			t.Error("fixture baseline cleanup failed")
+		}
+	})
+	var readOnly string
+	var recovery bool
+	if err := direct.QueryRow(ctx, "SELECT current_setting('transaction_read_only'), pg_is_in_recovery()").Scan(&readOnly, &recovery); err != nil || readOnly != "off" || recovery {
+		t.Fatal("fixture role must start writable on a primary")
+	}
+	quote := func(s string) string {
+		return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+	}
+	keyword := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable target_session_attrs=read-write", quote(baseline.Host), baseline.Port, quote(baseline.User), quote(baseline.Password), quote(baseline.Database))
+	for _, tc := range []struct {
+		name, selector, startup, env, options, envOptions string
+		keyword, reject, fallback, prefer                 bool
+	}{
+		{name: "url_read_write", selector: "read-write"},
+		{name: "keyword_read_write", keyword: true},
+		{name: "environment_read_write", env: "read-write"},
+		{name: "explicit_read_write_over_environment", selector: "read-write", env: "read-only"},
+		{name: "explicit_any_over_environment", selector: "any", env: "read-write", startup: "on"},
+		{name: "read_only_rejects_primary", selector: "read-only", reject: true},
+		{name: "startup_on_rejects_read_write", selector: "read-write", startup: "on", reject: true},
+		{name: "startup_on_accepts_read_only", selector: "read-only", startup: "on"},
+		{name: "startup_off_accepts_read_write", selector: "read-write", startup: "off"},
+		{name: "pgoptions_on_rejects_read_write", selector: "read-write", envOptions: "-c default_transaction_read_only=on", reject: true},
+		{name: "explicit_options_override_environment", selector: "read-write", envOptions: "-c default_transaction_read_only=on", options: "-c default_transaction_read_only=off"},
+		{name: "ordered_endpoint_fallback", selector: "read-write", fallback: true},
+		{name: "prefer_standby_reconnect", selector: "prefer-standby", prefer: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PGTARGETSESSIONATTRS", tc.env)
+			t.Setenv("PGOPTIONS", tc.envOptions)
+			u := *base
+			params := u.Query()
+			if tc.selector != "" {
+				params.Set("target_session_attrs", tc.selector)
+			}
+			if tc.startup != "" {
+				params.Set("default_transaction_read_only", tc.startup)
+			}
+			if tc.options != "" {
+				params.Set("options", tc.options)
+			}
+			if tc.fallback {
+				u.Host = "127.0.0.2:5432,127.0.0.3:5432"
+			}
+			u.RawQuery = params.Encode()
+			profile := f.profile
+			profile.DSN = u.String()
+			if tc.keyword {
+				profile.DSN = keyword
+			}
+			var validated []*pgconn.PgConn
+			var validationErrors []error
+			var startupStates []string
+			options := MachineOptions{ParseConfig: func(ctx context.Context, p models.Connection) (*pgx.ConnConfig, error) {
+				cfg, err := session.BuildMachineConfig(ctx, p)
+				if err != nil {
+					return nil, err
+				}
+				validate := cfg.ValidateConnect
+				if tc.selector != "any" && validate == nil {
+					t.Fatal("original target validator missing")
+				}
+				if validate != nil {
+					cfg.ValidateConnect = func(ctx context.Context, conn *pgconn.PgConn) error {
+						validated = append(validated, conn)
+						results, err := conn.Exec(ctx, "SHOW transaction_read_only").ReadAll()
+						if err != nil || len(results) != 1 || len(results[0].Rows) != 1 {
+							t.Fatal("startup state lookup failed")
+						}
+						startupStates = append(startupStates, string(results[0].Rows[0][0]))
+						err = validate(ctx, conn)
+						validationErrors = append(validationErrors, err)
+						return err
+					}
+				}
+				return cfg, nil
+			}}
+			var dials []string
+			if tc.fallback {
+				options.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+					dials = append(dials, network+" "+addr)
+					switch network + " " + addr {
+					case "tcp 127.0.0.2:5432":
+						return nil, errors.New("test-owned endpoint refusal")
+					case "tcp 127.0.0.3:5432":
+						return (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(baseline.Host, fmt.Sprint(baseline.Port)))
+					default:
+						t.Errorf("unexpected endpoint: %s %s", network, addr)
+						return nil, errors.New("unexpected endpoint")
+					}
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			t.Cleanup(cancel)
+			client, err := OpenMachine(ctx, profile, options)
+			if client != nil {
+				t.Cleanup(func() {
+					cleanup, stop := context.WithTimeout(context.Background(), 2*time.Second)
+					defer stop()
+					if err := client.Close(cleanup); err != nil {
+						t.Error("selected client cleanup failed")
+					}
+				})
+			}
+			if tc.reject {
+				var safe *MachineError
+				if client != nil || !errors.As(err, &safe) || safe.Code != "CONNECTION_UNAVAILABLE" || len(validationErrors) != 1 || validationErrors[0] == nil {
+					t.Fatalf("original selector rejection lost: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("target selection failed: %v", err)
+			}
+			if tc.selector != "any" {
+				wantStartup := "off"
+				if tc.startup == "on" {
+					wantStartup = "on"
+				}
+				if len(startupStates) == 0 || startupStates[0] != wantStartup {
+					t.Fatalf("startup state before original validation: %v want %s", startupStates, wantStartup)
+				}
+			}
+			if tc.fallback && !reflect.DeepEqual(dials, []string{"tcp 127.0.0.2:5432", "tcp 127.0.0.3:5432"}) {
+				t.Fatalf("endpoint fallback order: %v", dials)
+			}
+			if tc.prefer {
+				if len(validated) != 2 || validated[0] == validated[1] || validated[0].PID() == validated[1].PID() || client.conn.PgConn() != validated[1] {
+					t.Fatal("prefer-standby did not validate two distinct real connections")
+				}
+				for _, err := range validationErrors {
+					if _, ok := err.(*pgconn.NotPreferredError); !ok {
+						t.Fatal("original nonpreferred result lost")
+					}
+				}
+				select {
+				case <-validated[0].CleanupDone():
+				default:
+					t.Fatal("rejected connection cleanup not joined")
+				}
+				if !validated[0].IsClosed() {
+					t.Fatal("rejected connection remains open")
+				}
+			}
+			var sessionReadOnly string
+			if err := client.conn.QueryRow(ctx, "SHOW default_transaction_read_only").Scan(&sessionReadOnly); err != nil || sessionReadOnly != "on" {
+				t.Fatal("post-selection session is not read-only")
+			}
+			for _, repeatable := range []bool{false, true} {
+				if err := client.withReadOnly(ctx, repeatable, "", func(ctx context.Context) error {
+					var operationReadOnly string
+					if err := client.conn.QueryRow(ctx, "SHOW transaction_read_only").Scan(&operationReadOnly); err != nil {
+						return err
+					}
+					if operationReadOnly != "on" {
+						return errors.New("operation is not read-only")
+					}
+					return nil
+				}); err != nil {
+					t.Fatalf("read-only operation: %v", err)
+				}
+				if client.conn.PgConn().TxStatus() != 'I' {
+					t.Fatal("operation did not roll back")
+				}
+			}
+		})
+	}
 }
 
 func TestMachineMetadata_Paging_Live(t *testing.T) {

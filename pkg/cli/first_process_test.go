@@ -331,6 +331,109 @@ func TestMachineCLIProcess_Test(t *testing.T) {
 	f.run(t, 3, "connections", "test", wrong.Name)
 }
 
+func TestMachineCLIProcess_TargetSelection(t *testing.T) {
+	f := firstProcess(t, true)
+	base, err := url.Parse(f.profile.DSN)
+	if err != nil {
+		t.Fatal("process fixture URL required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	direct, err := pgx.Connect(ctx, base.String())
+	if err != nil {
+		t.Fatal("process fixture role baseline connection failed")
+	}
+	t.Cleanup(func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 2*time.Second)
+		defer stop()
+		if err := direct.Close(cleanup); err != nil {
+			t.Error("process fixture baseline cleanup failed")
+		}
+	})
+	var readOnly string
+	var recovery bool
+	if err := direct.QueryRow(ctx, "SELECT current_setting('transaction_read_only'), pg_is_in_recovery()").Scan(&readOnly, &recovery); err != nil || readOnly != "off" || recovery {
+		t.Fatal("process fixture role must start writable on a primary")
+	}
+	sql := f.sql(t, "SELECT id,value,current_setting('transaction_read_only'),current_setting('default_transaction_read_only') FROM "+pgx.Identifier{f.schema, "parent"}.Sanitize())
+	for _, tc := range []struct {
+		name, selector, env, startup string
+		reject                       bool
+	}{
+		{name: "explicit_read_write", selector: "read-write"},
+		{name: "environment_read_write", env: "read-write"},
+		{name: "explicit_read_write_over_environment", selector: "read-write", env: "read-only"},
+		{name: "explicit_any_over_environment", selector: "any", env: "read-write", startup: "on"},
+		{name: "any_control", selector: "any"},
+		{name: "primary_control", selector: "primary"},
+		{name: "startup_off", selector: "read-write", startup: "off"},
+		{name: "read_only_rejection", selector: "read-only", reject: true},
+		{name: "startup_on_read_write_rejection", selector: "read-write", startup: "on", reject: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u := *base
+			params := u.Query()
+			params.Del("target_session_attrs")
+			if tc.selector != "" {
+				params.Set("target_session_attrs", tc.selector)
+			}
+			if tc.startup != "" {
+				params.Set("default_transaction_read_only", tc.startup)
+			}
+			u.RawQuery = params.Encode()
+			profile := f.profile
+			profile.DSN = u.String()
+			f.save(t, profile)
+			originalEnv := f.env
+			f.env = append(append([]string{}, originalEnv...), "PGTARGETSESSIONATTRS="+tc.env)
+			defer func() { f.env = originalEnv }()
+			want := 0
+			if tc.reject {
+				want = 3
+			}
+			for _, args := range [][]string{
+				{"connections", "test", profile.Name},
+				{"schema", "list", "--connection", profile.Name, "--limit", "1000"},
+				{"query", "--connection", profile.Name, "--file", sql},
+			} {
+				doc := f.run(t, want, args...)
+				if tc.reject {
+					if doc["error"].(map[string]any)["code"] != "CONNECTION_UNAVAILABLE" {
+						t.Fatal("process selector rejection misclassified")
+					}
+					continue
+				}
+				switch args[0] {
+				case "connections":
+					data := doc["data"].(map[string]any)
+					if data["connected"] != true || data["read_only"] != true {
+						t.Fatal("process connection result lost")
+					}
+				case "schema":
+					found := false
+					for _, item := range doc["data"].(map[string]any)["items"].([]any) {
+						if item.(map[string]any)["name"] == f.schema {
+							found = true
+						}
+					}
+					if !found {
+						t.Fatal("process schema list omitted fixture")
+					}
+				case "query":
+					rows := doc["data"].(map[string]any)["rows"].([]any)
+					if len(rows) != 1 {
+						t.Fatal("process query fixture row missing")
+					}
+					row := rows[0].([]any)
+					if len(row) != 4 || row[0] != "1" || row[1] != "unchanged" || row[2] != "on" || row[3] != "on" {
+						t.Fatalf("process fixture/read-only values changed: %v", row)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestMachineCLIProcess_Schema(t *testing.T) {
 	f := firstProcess(t, true)
 	f.profile.CLIAccess = models.CLIAccessMetadata
