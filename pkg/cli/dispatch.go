@@ -25,6 +25,8 @@ const (
 type IO struct {
 	In       io.ReadCloser
 	Out, Err io.WriteCloser
+	// Cancel interrupts operation/input work without prematurely closing output.
+	Cancel <-chan struct{}
 }
 
 // Command returns only after its backend operation and cleanup have completed.
@@ -40,20 +42,38 @@ func CleanupBudget(ctx context.Context) time.Duration {
 	return CleanupTimeout
 }
 
-func legacy(args []string) bool {
+// IsLegacyRoute recognizes valid legacy route words without admitting ignored
+// positional command words into the TUI. The legacy app still validates values.
+func IsLegacyRoute(args []string) bool {
 	if len(args) == 0 {
 		return true
 	}
-	switch strings.SplitN(args[0], "=", 2)[0] {
-	case "--version", "-version", "--log-dir", "-log-dir", "update":
+	if args[0] == "update" {
 		return true
 	}
-	return false
+	for i := 0; i < len(args); i++ {
+		parts := strings.SplitN(args[i], "=", 2)
+		switch parts[0] {
+		case "--version", "-version":
+		case "--log-dir", "-log-dir":
+			if len(parts) == 1 {
+				i++
+				if i >= len(args) {
+					return true
+				}
+			}
+		case "--":
+			return i == len(args)-1
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Dispatch never enters the legacy application. The caller composes its registry.
 func Dispatch(parent context.Context, args []string, streams IO, registry map[string]Command) (bool, int) {
-	if legacy(args) {
+	if IsLegacyRoute(args) {
 		return false, ExitSuccess
 	}
 	rest, timeout, flagErr := invocationFlags(args[1:])
@@ -85,13 +105,16 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	go func() {
 		defer close(joined)
 		select {
+		case <-streams.Cancel:
+			cancelWork()
 		case <-workCtx.Done():
-			closeInput()
-			select {
-			case <-ctx.Done():
-				closeIO()
-			case <-stop:
-			}
+		case <-stop:
+			return
+		}
+		closeInput()
+		select {
+		case <-ctx.Done():
+			closeIO()
 		case <-stop:
 		}
 	}()
@@ -145,16 +168,38 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	}
 	data, encodingErr := encodeContext(ctx, envelope)
 	if encodingErr != nil {
-		envelope = Envelope{Command: label, Error: safeError(encodingErr)}
+		public := safeError(encodingErr)
+		envelope = Envelope{Command: label, Error: public}
+		exit = public.description().exit
 		data, encodingErr = encodeContext(ctx, envelope)
 		if encodingErr != nil {
 			return true, safeError(encodingErr).description().exit
 		}
-		exit = safeError(encodingErr).description().exit
 	}
-	if err := publish(ctx, streams.Out, data); err != nil {
+	// Publication is the result's commitment point. Signals received before it
+	// publish timeout instead; a signal after it cannot replace a partial write.
+	select {
+	case <-streams.Cancel:
+		if exit != ExitTimeout {
+			envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: &PublicError{Code: Timeout}}
+			data, encodingErr = encodeContext(ctx, envelope)
+			if encodingErr != nil {
+				return true, ExitTimeout
+			}
+			exit = ExitTimeout
+		}
+	default:
+	}
+	publicationCtx, cancelPublication := context.WithTimeout(ctx, reserve/2)
+	if err := publish(publicationCtx, streams.Out, data); err != nil {
 		exit = ExitResource
+		select {
+		case <-streams.Cancel:
+			exit = ExitTimeout
+		default:
+		}
 	}
+	cancelPublication()
 	if streams.Err != nil {
 		diagnosticCtx, cancelDiagnostic := context.WithTimeout(ctx, 50*time.Millisecond)
 		_ = publish(diagnosticCtx, streams.Err, []byte(fmt.Sprintf("{\"command\":%q,\"exit\":%d}\n", envelope.Command, exit)))
@@ -176,6 +221,10 @@ func ParseFlags(args []string, values, switches []string) (map[string]string, []
 	positional := []string{}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
 		if !strings.HasPrefix(arg, "-") {
 			positional = append(positional, arg)
 			continue
@@ -217,6 +266,10 @@ func invocationFlags(args []string) ([]string, time.Duration, error) {
 	timeout := InvocationTimeout
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" {
+			rest = append(rest, args[i:]...)
+			break
+		}
 		if !strings.HasPrefix(arg, "--") {
 			rest = append(rest, arg)
 			continue

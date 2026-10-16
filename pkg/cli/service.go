@@ -23,7 +23,7 @@ type InvocationService struct {
 }
 
 func LoadProfiles(fs afero.Fs, path string) ([]models.Connection, error) {
-	profiles, err := config.LoadConnectionsWithWarnings(fs, path, io.Discard)
+	profiles, err := config.LoadConnectionsWithWarnings(machineProfileFS{fs}, path, io.Discard)
 	if err != nil {
 		return nil, &PublicError{Code: ConnectionUnavailable}
 	}

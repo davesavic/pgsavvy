@@ -1,7 +1,7 @@
 # Machine CLI contract
 
-The machine CLI is Linux-only. This protocol package is a library milestone:
-production commands are registered only after their complete implementations.
+The machine CLI is Linux-only. Production dispatch composes the implemented
+connection, catalog, query and capability handlers before legacy startup.
 It never initializes TUI configuration, history, persistent logs or themes.
 
 Commands return one version-1 JSON object followed by a newline. The envelope
@@ -37,7 +37,8 @@ statement 10 seconds; lock 1 second; fresh cleanup at most 2 seconds.
 Duplicate/conflicting/unknown flags are errors. Command-specific help is JSON.
 
 The invocation reserves up to four seconds, or 40% of a shorter budget, inside
-its deadline: half for cleanup and half for publication. Backend work receives
+its deadline: half for cleanup and half for publication (publication at most two
+seconds). Backend work receives
 the earlier deadline, calculated from the effective deadline including its parent.
 Work cancellation interrupts owned input without prematurely closing output.
 A parent cancellation can prevent error delivery; no
@@ -48,3 +49,23 @@ filesystems and non-cooperating injected streams are excluded.
 Bare startup, version, log-directory selection and `update` remain legacy routes.
 Unknown command words never fall back to the TUI. Commands and dependencies are
 injected into `Dispatch`, without package-init registration or GUI construction.
+
+Production SIGINT/SIGTERM cancel operation/input work, join owned cleanup, and
+attempt one timeout-error document while stdout remains available. A blocked or
+broken output handle can prevent delivery; no second document is appended.
+Publication is the commitment point: a signal after publication starts cannot
+replace a partially written result. Use `connections show -- -NAME` to select a
+profile whose literal name starts with a dash (similarly for connection test).
+Offline profiles expose only name, driver, tags, label, effective cli_access,
+saved read_only and credential_status="not_checked". Saved read_only is a TUI
+preference: machine queries are always read-only regardless of that field.
+
+## Binary rollback
+
+Stop new-version TUI/profile writers and automation; finish or terminate active
+invocations. Back up the configuration, manually remove every cli_access key,
+and verify that the predecessor's strict loader accepts the edited synthetic
+configuration before replacing the binary. Then resume writers/automation.
+Keep the backup for restoring the new binary/configuration together. Do not
+leave live writers running while editing a rollback copy, or restore a new-only
+policy key while the predecessor is active. No automatic profile rewrite occurs.

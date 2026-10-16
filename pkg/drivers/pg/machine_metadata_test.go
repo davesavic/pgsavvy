@@ -86,6 +86,15 @@ func TestMachineMetadata_Paging(t *testing.T) {
 	script.mu.Unlock()
 }
 
+func TestMachineMetadata_EmbeddedSQL(t *testing.T) {
+	for name, query := range map[string]string{"machine_schemas.sql": machineSchemasSQL, "machine_tables.sql": machineTablesSQL, "machine_describe.sql": machineDescribeSQL, "machine_relationships.sql": machineRelationshipsSQL} {
+		data, err := sqlFS.ReadFile("sql/" + name)
+		if err != nil || len(data) == 0 || string(data) != query {
+			t.Fatalf("machine catalog executor is not using its exact embedded asset %s", name)
+		}
+	}
+}
+
 func TestMachineMetadata_Describe(t *testing.T) {
 	nullable := false
 	rows := [][][]byte{metadataWireRow(t, "relation", metadataRelationFixture()), metadataWireRow(t, "columns", MachineCatalogColumn{Name: "Value.With.Dot", Position: 3, DataType: "numeric(30,10)", Nullable: &nullable})}

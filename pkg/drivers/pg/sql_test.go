@@ -177,7 +177,7 @@ func TestEmbeddedSQL_ContainsExpectedIdentifiers(t *testing.T) {
 	}
 }
 
-func TestEmbeddedSQL_FilesystemHasExactlyThirteenSQLFiles(t *testing.T) {
+func TestEmbeddedSQL_FilesystemHasExactInventory(t *testing.T) {
 	entries, err := sqlFS.ReadDir("sql")
 	require.NoError(t, err)
 
@@ -191,12 +191,18 @@ func TestEmbeddedSQL_FilesystemHasExactlyThirteenSQLFiles(t *testing.T) {
 		}
 	}
 
-	require.Len(
+	require.Equal(
 		t,
+		[]string{
+			"describe_function.sql", "editability_introspect.sql", "list_columns.sql",
+			"list_constraints.sql", "list_databases.sql", "list_foreign_keys.sql",
+			"list_functions.sql", "list_inbound_foreign_keys.sql", "list_indexes.sql",
+			"list_schemas.sql", "list_tables.sql", "machine_describe.sql",
+			"machine_relationships.sql", "machine_schemas.sql", "machine_tables.sql",
+			"table_names_by_oid.sql", "table_stats.sql",
+		},
 		sqlFiles,
-		13,
-		"expected exactly 13 embedded .sql files (got %v); add the new file's //go:embed directive in embed.go",
-		sqlFiles,
+		"update the explicit SQL inventory and verify each new embedded query is wired to an executor",
 	)
 }
 
