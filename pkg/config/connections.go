@@ -53,6 +53,14 @@ const legacyMigrationSnippet = `connections:
 // executable credential command, because another local user could otherwise
 // replace that command before it runs.
 func LoadConnections(fs afero.Fs, path string) ([]models.Connection, error) {
+	return LoadConnectionsWithWarnings(fs, path, warnWriter)
+}
+
+// LoadConnectionsWithWarnings preserves strict loading with an invocation-local sink.
+func LoadConnectionsWithWarnings(fs afero.Fs, path string, warnings io.Writer) ([]models.Connection, error) {
+	if warnings == nil {
+		warnings = io.Discard
+	}
 	file, err := fs.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -70,10 +78,14 @@ func LoadConnections(fs afero.Fs, path string) ([]models.Connection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %q: %w", path, err)
 	}
-	return decodeConnections(data, info, path)
+	return decodeConnectionsWithWarnings(data, info, path, warnings)
 }
 
 func decodeConnections(data []byte, info os.FileInfo, path string) ([]models.Connection, error) {
+	return decodeConnectionsWithWarnings(data, info, path, warnWriter)
+}
+
+func decodeConnectionsWithWarnings(data []byte, info os.FileInfo, path string, warnings io.Writer) ([]models.Connection, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("config: parse %q: %w", path, err)
@@ -117,7 +129,7 @@ func decodeConnections(data []byte, info os.FileInfo, path string) ([]models.Con
 	}
 	if hasInlinePassword {
 		if info.Mode().Perm()&0o077 != 0 {
-			_, _ = fmt.Fprintf(warnWriter,
+			_, _ = fmt.Fprintf(warnings,
 				"config: %s contains plaintext password and is group/world readable (mode %04o); chmod 600 %s\n",
 				path, info.Mode().Perm(), path,
 			)
