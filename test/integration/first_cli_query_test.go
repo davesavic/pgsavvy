@@ -110,8 +110,13 @@ func firstQuery(t *testing.T, service cli.InvocationService, sql string, params 
 		args = append(args, "--params-file", path)
 	}
 	args = append(args, extra...)
+	return firstDispatch(t, map[string]cli.Command{"query": cli.QueryCommand(service)}, args)
+}
+
+func firstDispatch(t *testing.T, registry map[string]cli.Command, args []string) (map[string]any, int) {
+	t.Helper()
 	out, diagnostic := &firstOutput{}, &firstOutput{}
-	handled, exit := cli.Dispatch(context.Background(), args, cli.IO{In: io.NopCloser(strings.NewReader("")), Out: out, Err: diagnostic}, map[string]cli.Command{"query": cli.QueryCommand(service)})
+	handled, exit := cli.Dispatch(context.Background(), args, cli.IO{In: io.NopCloser(strings.NewReader("")), Out: out, Err: diagnostic}, registry)
 	if !handled || out.Len() == 0 || out.Len() > cli.MaxOutputBytes || out.Bytes()[out.Len()-1] != '\n' {
 		t.Fatalf("invalid result publication exit%d bytes%d", exit, out.Len())
 	}
@@ -187,7 +192,7 @@ func TestMachineQuery_Policy_Live(t *testing.T) {
 			t.Fatalf("modifying/control syntax exit%d", exit)
 		}
 	}
-	if document, exit := firstQuery(t, service, "SELECT "+pgx.Identifier{schema, "attempt_write"}.Sanitize()+"()", nil); exit != cli.ExitDatabase || document["error"].(map[string]any)["sqlstate"]!="25006" {
+	if document, exit := firstQuery(t, service, "SELECT "+pgx.Identifier{schema, "attempt_write"}.Sanitize()+"()", nil); exit != cli.ExitDatabase || document["error"].(map[string]any)["sqlstate"] != "25006" {
 		t.Fatalf("server read-only enforcement exit%d", exit)
 	}
 	var count int
