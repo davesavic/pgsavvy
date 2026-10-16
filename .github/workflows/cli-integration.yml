@@ -1,0 +1,51 @@
+name: machine-cli-integration
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: [17, 18]
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_USER: pgsavvy
+          POSTGRES_PASSWORD: pgsavvy
+          POSTGRES_DB: pgsavvy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U pgsavvy -d pgsavvy_test"
+          --health-interval=2s --health-timeout=5s --health-retries=20
+    env:
+      PGSAVVY_TEST_PG: postgres://pgsavvy:pgsavvy@127.0.0.1:5432/pgsavvy_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.9'
+          cache: true
+      - name: Apply disposable fixture
+        run: docker exec -i '${{ job.services.postgres.id }}' psql -v ON_ERROR_STOP=1 -U pgsavvy -d pgsavvy_test < docker/postgres/init/01_fixture.sql
+      - name: Require reachable fixture
+        run: go run ./internal/pgprobe "$PGSAVVY_TEST_PG"
+      - name: Build
+        run: go build ./...
+      - name: Verify bounded query and catalog paths
+        run: go test -race -count=1 -timeout 5m -tags=integration ./pkg/drivers/pg ./test/integration -run '^TestMachine(Metadata|Query)'

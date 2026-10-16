@@ -74,6 +74,7 @@ type machineQueryScript struct {
 	sql                                     string
 	parameters                              [][]byte
 	queries                                 int
+	queryMatch, terminalCode                string
 }
 
 func machineQueryWire(t *testing.T, script *machineQueryScript) *MachineClient {
@@ -81,6 +82,14 @@ func machineQueryWire(t *testing.T, script *machineQueryScript) *MachineClient {
 	machineTestEnvironment(t)
 	if script.fields == nil {
 		script.fields = []pgproto3.FieldDescription{{Name: []byte("payload"), DataTypeOID: 25}}
+	}
+	match := script.queryMatch
+	if match == "" {
+		match = "payload"
+	}
+	terminalCode := script.terminalCode
+	if terminalCode == "" {
+		terminalCode = "22012"
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -120,7 +129,7 @@ func machineQueryWire(t *testing.T, script *machineQueryScript) *MachineClient {
 			switch message := message.(type) {
 			case *pgproto3.Parse:
 				query = message.Query
-				if strings.Contains(query, "payload") {
+				if strings.Contains(query, match) {
 					script.mu.Lock()
 					script.sql = query
 					script.queries++
@@ -128,7 +137,7 @@ func machineQueryWire(t *testing.T, script *machineQueryScript) *MachineClient {
 				}
 				backend.Send(&pgproto3.ParseComplete{})
 			case *pgproto3.Bind:
-				if strings.Contains(query, "payload") {
+				if strings.Contains(query, match) {
 					script.mu.Lock()
 					script.parameters = make([][]byte, len(message.Parameters))
 					for i, value := range message.Parameters {
@@ -146,7 +155,7 @@ func machineQueryWire(t *testing.T, script *machineQueryScript) *MachineClient {
 				}
 				backend.Send(&pgproto3.BindComplete{})
 			case *pgproto3.Describe:
-				if strings.Contains(query, "payload") {
+				if strings.Contains(query, match) {
 					backend.Send(&pgproto3.RowDescription{Fields: script.fields})
 				} else {
 					backend.Send(&pgproto3.NoData{})
@@ -155,7 +164,7 @@ func machineQueryWire(t *testing.T, script *machineQueryScript) *MachineClient {
 				if strings.HasPrefix(query, "BEGIN") {
 					status = 'T'
 				}
-				if strings.Contains(query, "payload") {
+				if strings.Contains(query, match) {
 					for _, row := range script.rows {
 						backend.Send(&pgproto3.DataRow{Values: row})
 						if backend.Flush() != nil {
@@ -169,7 +178,7 @@ func machineQueryWire(t *testing.T, script *machineQueryScript) *MachineClient {
 					backend.Send(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})
 					if script.terminalError {
 						status = 'E'
-						backend.Send(&pgproto3.ErrorResponse{Severity: "ERROR", Code: "22012", Message: "SECRET SQL terminal error"})
+						backend.Send(&pgproto3.ErrorResponse{Severity: "ERROR", Code: terminalCode, Message: "SECRET SQL terminal error"})
 					}
 				} else if query == "ROLLBACK" && script.rollbackError {
 					backend.Send(&pgproto3.ErrorResponse{Severity: "ERROR", Code: "XX000", Message: "SECRET rollback"})
