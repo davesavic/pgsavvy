@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -356,6 +357,9 @@ func TestMachineIO_Cancellation(t *testing.T) {
 }
 
 func TestMachineIO_Sockets(t *testing.T) {
+	t.Run("flags", testSocketFlags)
+	t.Run("serialization", testSocketSerialization)
+	t.Run("resources", testSocketResources)
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -426,6 +430,264 @@ func TestMachineIO_Sockets(t *testing.T) {
 	}
 }
 
+func testSocketPair(t *testing.T, kind int, nonblocking bool) (*os.File, *os.File) {
+	t.Helper()
+	fds, err := unix.Socketpair(unix.AF_UNIX, kind, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fd := range fds {
+		unix.CloseOnExec(fd)
+		if err := unix.SetNonblock(fd, nonblocking); err != nil {
+			t.Fatal(err)
+		}
+	}
+	left, right := os.NewFile(uintptr(fds[0]), "socket-left"), os.NewFile(uintptr(fds[1]), "socket-right")
+	t.Cleanup(func() { _ = left.Close(); _ = right.Close() })
+	return left, right
+}
+
+func testSocketFlags(t *testing.T) {
+	for _, nonblocking := range []bool{false, true} {
+		name := "blocking"
+		if nonblocking {
+			name = "nonblocking"
+		}
+		t.Run(name, func(t *testing.T) {
+			left, right := testSocketPair(t, unix.SOCK_STREAM, nonblocking)
+			before := testFlags(t, left)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			input, err := OpenInput(ctx, left)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { testCleanupOwned(t, input, right) })
+			output, err := OpenOutput(ctx, left)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { testCleanupOwned(t, output, right) })
+			for _, stream := range []io.Closer{input, output} {
+				testOwnedDescriptor(t, stream)
+			}
+			if got := testFlags(t, left); got != before {
+				t.Fatalf("acquisition changed caller flags: %#x -> %#x", before, got)
+			}
+			cancel()
+			if n, err := input.Read(nil); n != 0 || err != nil {
+				t.Fatal("empty socket read changed")
+			}
+			if n, err := output.Write(nil); n != 0 || err != nil {
+				t.Fatal("empty socket write changed")
+			}
+			if _, err := right.Write([]byte("in")); err != nil {
+				t.Fatal(err)
+			}
+			var b [2]byte
+			if _, err := io.ReadFull(input, b[:]); err != nil || string(b[:]) != "in" {
+				t.Fatal("acquisition context or input bytes changed")
+			}
+			if _, err := output.Write([]byte("ok")); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := io.ReadFull(right, b[:]); err != nil || string(b[:]) != "ok" {
+				t.Fatal("socket write returned without destination delivery")
+			}
+			_ = input.Close()
+			_ = input.Close()
+			if testFlags(t, left) != before {
+				t.Fatal("I/O or Close changed caller flags")
+			}
+			// The remaining wrapper must outlive both the other wrapper and source.
+			_ = left.Close()
+			if _, err := output.Write([]byte("ok")); err != nil {
+				t.Fatal("closing borrowed handle disabled owned output")
+			}
+			if _, err := io.ReadFull(right, b[:]); err != nil {
+				t.Fatal(err)
+			}
+			_ = right.Close()
+			if _, err := output.Write([]byte("broken")); err == nil {
+				t.Fatal("broken peer accepted")
+			}
+		})
+	}
+	t.Run("datagram", func(t *testing.T) {
+		left, _ := testSocketPair(t, unix.SOCK_DGRAM, false)
+		before := testFlags(t, left)
+		for _, mode := range []int{os.O_RDONLY, os.O_WRONLY} {
+			stream, err := acquire(context.Background(), left, mode)
+			if stream != nil {
+				_ = stream.Close()
+			}
+			if err == nil || testFlags(t, left) != before {
+				t.Fatal("datagram accepted or mutated")
+			}
+		}
+	})
+	t.Run("EOF", func(t *testing.T) {
+		left, right := testSocketPair(t, unix.SOCK_STREAM, false)
+		input, err := OpenInput(context.Background(), left)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { testCleanupOwned(t, input, right) })
+		_ = right.Close()
+		if n, err := input.Read(make([]byte, 1)); n != 0 || !errors.Is(err, io.EOF) {
+			t.Fatalf("socket EOF: %d %v", n, err)
+		}
+	})
+}
+
+func testSocketSerialization(t *testing.T) {
+	for _, cancel := range []bool{false, true} {
+		name := "drain"
+		if cancel {
+			name = "queued-close"
+		}
+		t.Run(name, func(t *testing.T) {
+			left, right := testSocketPair(t, unix.SOCK_STREAM, false)
+			testControl(t, left, func(fd int) {
+				if err := unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_SNDBUF, 4096); err != nil {
+					t.Fatal(err)
+				}
+			})
+			before := testFlags(t, left)
+			output, err := OpenOutput(context.Background(), left)
+			if err != nil {
+				t.Fatal(err)
+			}
+			type result struct {
+				n   int
+				err error
+			}
+			results := make(chan result, 2)
+			a, b := bytes.Repeat([]byte{'a'}, 256<<10), bytes.Repeat([]byte{'b'}, 256<<10)
+			var writers sync.WaitGroup
+			for _, data := range [][]byte{a, b} {
+				writers.Go(func() { n, err := output.Write(data); results <- result{n, err} })
+			}
+			done := make(chan struct{})
+			go func() { writers.Wait(); close(done) }()
+			t.Cleanup(func() { testCleanupOwned(t, output, right, left); testJoin(t, done, 2*time.Second) })
+			select {
+			case <-done:
+				t.Fatal("fixture did not establish backpressure")
+			case <-time.After(20 * time.Millisecond):
+			}
+			if testFlags(t, left) != before {
+				t.Fatal("blocked socket write changed caller flags")
+			}
+			if cancel {
+				closed := make(chan struct{})
+				go func() {
+					var closers sync.WaitGroup
+					for range 3 {
+						closers.Go(func() { _ = output.Close() })
+					}
+					closers.Wait()
+					close(closed)
+				}()
+				testJoin(t, closed, 2*time.Second)
+				testJoin(t, done, 2*time.Second)
+				x, y := <-results, <-results
+				if x.err == nil || y.err == nil || x.n+y.n == 0 || x.n+y.n >= len(a)+len(b) {
+					t.Fatalf("lost partial write/cancellation: %+v %+v", x, y)
+				}
+				if testFlags(t, left) != before {
+					t.Fatal("Close mutated socket flags")
+				}
+				return
+			}
+			data := make([]byte, len(a)+len(b))
+			readDone := make(chan struct{})
+			var readErr error
+			go func() { _, readErr = io.ReadFull(right, data); close(readDone) }()
+			t.Cleanup(func() { _ = right.Close(); testJoin(t, readDone, time.Second) })
+			testJoin(t, done, 2*time.Second)
+			testJoin(t, readDone, 2*time.Second)
+			for range 2 {
+				if r := <-results; r.err != nil || r.n != len(a) {
+					t.Fatalf("write: %+v", r)
+				}
+			}
+			if readErr != nil || !bytes.Equal(data, append(append([]byte{}, a...), b...)) && !bytes.Equal(data, append(append([]byte{}, b...), a...)) {
+				t.Fatal("concurrent writes interleaved or lost bytes")
+			}
+		})
+	}
+}
+
+func testSocketResources(t *testing.T) {
+	if os.Getenv("PGSAVVY_MACHINEIO_SOCKET_RESOURCES") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestMachineIO_Sockets$/^resources$", "-test.timeout=20s")
+		cmd.Env = append(os.Environ(), "PGSAVVY_MACHINEIO_SOCKET_RESOURCES=1")
+		if data, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("isolated resource checks: %v\n%s", err, data)
+		}
+		return
+	}
+	cycle := func() {
+		fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		left, right := os.NewFile(uintptr(fds[0]), "resource-left"), os.NewFile(uintptr(fds[1]), "resource-right")
+		defer func() { _ = left.Close() }()
+		defer func() { _ = right.Close() }()
+		input, err := OpenInput(context.Background(), left)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = input.Close() }()
+		output, err := OpenOutput(context.Background(), left)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = output.Close() }()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if stream, err := OpenInput(ctx, left); stream != nil || !errors.Is(err, context.Canceled) {
+			t.Fatal("canceled acquisition")
+		}
+		expired, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer stop()
+		if stream, err := OpenOutput(expired, left); stream != nil || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal("expired acquisition")
+		}
+		if _, err := output.Write([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+		var b [1]byte
+		if _, err := io.ReadFull(right, b[:]); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() { _, _ = input.Read(b[:]); close(done) }()
+		_ = input.Close()
+		testJoin(t, done, time.Second)
+	}
+	cycle()
+	inventory := func() int {
+		entries, err := os.ReadDir("/dev/fd")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(entries)
+	}
+	fds, goroutines := inventory(), runtime.NumGoroutine()
+	for range 20 {
+		cycle()
+	}
+	if got := inventory(); got != fds {
+		t.Fatalf("descriptor leak: %d -> %d", fds, got)
+	}
+	if got := runtime.NumGoroutine(); got != goroutines {
+		t.Fatalf("operation goroutine leak: %d -> %d", goroutines, got)
+	}
+}
+
 func TestMachineIO_DarwinFIFOEOF(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fifo")
 	if err := unix.Mkfifo(path, 0o600); err != nil {
@@ -436,11 +698,15 @@ func TestMachineIO_DarwinFIFOEOF(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = read.Close() })
+	before := testFlags(t, read)
 	input, err := OpenInput(context.Background(), read)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { testCleanupOwned(t, input) })
+	if testFlags(t, read) != before {
+		t.Fatal("nonblocking FIFO acquisition changed flags")
+	}
 	writer, err := os.OpenFile(path, os.O_WRONLY|unix.O_NONBLOCK, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -469,6 +735,78 @@ func TestMachineIO_DarwinFIFOEOF(t *testing.T) {
 	testJoin(t, eof, time.Second)
 	if !errors.Is(eofErr, io.EOF) {
 		t.Fatal("final-writer close did not produce EOF")
+	}
+}
+
+func TestMachineIO_FIFOResources(t *testing.T) {
+	if os.Getenv("PGSAVVY_MACHINEIO_FIFO_RESOURCES") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestMachineIO_FIFOResources$", "-test.timeout=20s")
+		cmd.Env = append(os.Environ(), "PGSAVVY_MACHINEIO_FIFO_RESOURCES=1")
+		if data, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("isolated FIFO resources: %v\n%s", err, data)
+		}
+		return
+	}
+	cycle := func() {
+		read, write, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = read.Close() }()
+		defer func() { _ = write.Close() }()
+		input, err := OpenInput(context.Background(), read)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = input.Close() }()
+		output, err := OpenOutput(context.Background(), write)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = output.Close() }()
+		before := testFlags(t, read)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if stream, err := OpenInput(ctx, read); stream != nil || !errors.Is(err, context.Canceled) {
+			t.Fatal("canceled FIFO acquisition")
+		}
+		expired, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer stop()
+		if stream, err := OpenOutput(expired, write); stream != nil || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal("expired FIFO acquisition")
+		}
+		if testFlags(t, read) != before {
+			t.Fatal("failed acquisition mutated FIFO")
+		}
+		if _, err := output.Write([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+		var b [1]byte
+		if _, err := io.ReadFull(input, b[:]); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() { _, _ = input.Read(b[:]); close(done) }()
+		_ = input.Close()
+		testJoin(t, done, time.Second)
+	}
+	cycle()
+	inventory := func() int {
+		entries, err := os.ReadDir("/dev/fd")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(entries)
+	}
+	fds, goroutines := inventory(), runtime.NumGoroutine()
+	for range 20 {
+		cycle()
+	}
+	if got := inventory(); got != fds {
+		t.Fatalf("FIFO descriptor leak %d -> %d", fds, got)
+	}
+	if got := runtime.NumGoroutine(); got != goroutines {
+		t.Fatalf("FIFO operation leak %d -> %d", goroutines, got)
 	}
 }
 

@@ -12,6 +12,38 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestMachineIO_BlockingFIFORejected(t *testing.T) {
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = read.Close() }()
+	defer func() { _ = write.Close() }()
+	for _, file := range []*os.File{read, write} {
+		testControl(t, file, func(fd int) {
+			if err := unix.SetNonblock(fd, false); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, pair := range []struct {
+		file *os.File
+		mode int
+	}{{read, os.O_RDONLY}, {write, os.O_WRONLY}} {
+		before := testFlags(t, pair.file)
+		stream, err := acquire(context.Background(), pair.file, pair.mode)
+		if stream != nil {
+			_ = stream.Close()
+		}
+		if err == nil || testFlags(t, pair.file) != before {
+			t.Fatal("blocking FIFO accepted or mutated")
+		}
+		if _, err := pair.file.Stat(); err != nil {
+			t.Fatal("rejection closed borrowed FIFO")
+		}
+	}
+}
+
 func TestMachineIO_MetadataDescriptorRejected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "metadata-only")
 	if err := os.WriteFile(path, []byte("retained"), 0o600); err != nil {
