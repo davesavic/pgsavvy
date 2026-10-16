@@ -114,8 +114,15 @@ tool/server versions, fixture version, wrong-password rejection and executed
 test inventory. The temporary binary is removed after the run. Only synthetic
 fixture evidence is emitted; raw database errors, credentials and build/server
 logs are not published. Missing tests fail even when `go test` exits zero.
-Windows failures report only a fixed provisioning stage and script line number;
-stdout evidence and private stderr logs remain separate. Run
+Windows failures report a fixed provisioning stage and script line number.
+Before cleanup, initdb failures additionally report one allowlisted diagnostic
+class: `windows-admin`, `windows-token`, `child-exec`, `file-io`, `input-config`,
+`child-io`, or `unknown`. Classification reads at most 64 KiB from each private
+stdout/stderr log; missing, unreadable, oversized or unrecognized/localized logs
+produce `unknown`. These codes identify observed message types, not proven root
+causes. Raw messages, paths, passwords and captured values are never published;
+private logs are still deleted by owned cleanup. stdout evidence and private
+stderr logs remain separate. Run
 `pwsh -NoProfile -File .github/scripts/cli-postgres.test.ps1` to check parsing,
 native-command stream separation, failure status and secret-safe diagnostics
 without provisioning a database.
