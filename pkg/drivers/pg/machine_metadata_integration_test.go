@@ -147,9 +147,14 @@ func TestMachineMetadata_TargetSelection_Live(t *testing.T) {
 		return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
 	}
 	keyword := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable target_session_attrs=read-write", quote(baseline.Host), baseline.Port, quote(baseline.User), quote(baseline.Password), quote(baseline.Database))
+	fixtureIP, _, err := net.SplitHostPort(direct.PgConn().Conn().RemoteAddr().String())
+	if err != nil {
+		t.Fatal("fixture must use TCP")
+	}
 	for _, tc := range []struct {
 		name, selector, startup, env, options, envOptions string
 		keyword, reject, fallback, prefer                 bool
+		multipleAddresses                                 bool
 	}{
 		{name: "url_read_write", selector: "read-write"},
 		{name: "keyword_read_write", keyword: true},
@@ -157,6 +162,7 @@ func TestMachineMetadata_TargetSelection_Live(t *testing.T) {
 		{name: "explicit_read_write_over_environment", selector: "read-write", env: "read-only"},
 		{name: "explicit_any_over_environment", selector: "any", env: "read-write", startup: "on"},
 		{name: "read_only_rejects_primary", selector: "read-only", reject: true},
+		{name: "read_only_rejects_all_addresses", selector: "read-only", reject: true, multipleAddresses: true},
 		{name: "startup_on_rejects_read_write", selector: "read-write", startup: "on", reject: true},
 		{name: "startup_on_accepts_read_only", selector: "read-only", startup: "on"},
 		{name: "startup_off_accepts_read_write", selector: "read-write", startup: "off"},
@@ -164,6 +170,7 @@ func TestMachineMetadata_TargetSelection_Live(t *testing.T) {
 		{name: "explicit_options_override_environment", selector: "read-write", envOptions: "-c default_transaction_read_only=on", options: "-c default_transaction_read_only=off"},
 		{name: "ordered_endpoint_fallback", selector: "read-write", fallback: true},
 		{name: "prefer_standby_reconnect", selector: "prefer-standby", prefer: true},
+		{name: "prefer_standby_all_addresses", selector: "prefer-standby", prefer: true, multipleAddresses: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("PGTARGETSESSIONATTRS", tc.env)
@@ -195,6 +202,13 @@ func TestMachineMetadata_TargetSelection_Live(t *testing.T) {
 				cfg, err := session.BuildMachineConfig(ctx, p)
 				if err != nil {
 					return nil, err
+				}
+				if tc.multipleAddresses {
+					// Two reachable candidates make address fallback deterministic,
+					// including on hosts without both IPv4 and IPv6 loopback.
+					cfg.LookupFunc = func(context.Context, string) ([]string, error) {
+						return []string{fixtureIP, fixtureIP}, nil
+					}
 				}
 				validate := cfg.ValidateConnect
 				if tc.selector != "any" && validate == nil {
@@ -244,8 +258,16 @@ func TestMachineMetadata_TargetSelection_Live(t *testing.T) {
 			}
 			if tc.reject {
 				var safe *MachineError
-				if client != nil || !errors.As(err, &safe) || safe.Code != "CONNECTION_UNAVAILABLE" || len(validationErrors) != 1 || validationErrors[0] == nil {
+				if client != nil || !errors.As(err, &safe) || safe.Code != "CONNECTION_UNAVAILABLE" || len(validationErrors) == 0 {
 					t.Fatalf("original selector rejection lost: %v", err)
+				}
+				if tc.multipleAddresses && len(validationErrors) != 2 {
+					t.Fatalf("expected both resolved candidates to be rejected, got %d", len(validationErrors))
+				}
+				for _, validationErr := range validationErrors {
+					if validationErr == nil {
+						t.Fatal("original selector accepted a rejected candidate")
+					}
 				}
 				return
 			}
@@ -265,21 +287,33 @@ func TestMachineMetadata_TargetSelection_Live(t *testing.T) {
 				t.Fatalf("endpoint fallback order: %v", dials)
 			}
 			if tc.prefer {
-				if len(validated) != 2 || validated[0] == validated[1] || validated[0].PID() == validated[1].PID() || client.conn.PgConn() != validated[1] {
-					t.Fatal("prefer-standby did not validate two distinct real connections")
+				if len(validated) < 2 || client.conn.PgConn() != validated[len(validated)-1] {
+					t.Fatal("prefer-standby did not reconnect after validating all candidates")
+				}
+				if tc.multipleAddresses && len(validated) != 3 {
+					t.Fatalf("expected two candidates and one reconnect, got %d", len(validated))
+				}
+				pids := make(map[uint32]bool)
+				for _, conn := range validated {
+					if pids[conn.PID()] {
+						t.Fatal("prefer-standby reused a rejected connection")
+					}
+					pids[conn.PID()] = true
 				}
 				for _, err := range validationErrors {
 					if _, ok := err.(*pgconn.NotPreferredError); !ok {
 						t.Fatal("original nonpreferred result lost")
 					}
 				}
-				select {
-				case <-validated[0].CleanupDone():
-				default:
-					t.Fatal("rejected connection cleanup not joined")
-				}
-				if !validated[0].IsClosed() {
-					t.Fatal("rejected connection remains open")
+				for _, conn := range validated[:len(validated)-1] {
+					select {
+					case <-conn.CleanupDone():
+					default:
+						t.Fatal("rejected connection cleanup not joined")
+					}
+					if !conn.IsClosed() {
+						t.Fatal("rejected connection remains open")
+					}
 				}
 			}
 			var sessionReadOnly string

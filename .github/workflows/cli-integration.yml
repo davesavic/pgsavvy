@@ -61,7 +61,9 @@ jobs:
         shell: pwsh
         env:
           POSTGRES_MAJOR: ${{ matrix.postgres }}
-        run: ./.github/scripts/cli-postgres.ps1 -Major $env:POSTGRES_MAJOR
+        run: |
+          ./.github/scripts/cli-postgres.test.ps1
+          ./.github/scripts/cli-postgres.ps1 -Major $env:POSTGRES_MAJOR
 
   # Retain the existing Ubuntu Docker/race coverage separately from shipping checks.
   postgres:
