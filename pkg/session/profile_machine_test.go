@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin || windows
 
 package session
 
@@ -12,7 +12,7 @@ import (
 )
 
 func TestMachineOpen_TargetSnapshot(t *testing.T) {
-	_, dir := machineCredentialFixture(t)
+	dir := machineProfileFixture(t)
 	service := filepath.Join(dir, "services")
 	if err := os.WriteFile(service, []byte("[fixture]\nhost=service-host\nport=6543\nuser=service-user\ndbname=service-db\nsslmode=disable\n"), 0o600); err != nil {
 		t.Fatal(err)
