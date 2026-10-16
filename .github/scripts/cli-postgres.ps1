@@ -1,0 +1,156 @@
+# Native baseline only. Full machine acceptance is owned by pgsavvy-y2rh.14.
+[CmdletBinding()]
+param([Parameter(Mandatory)][ValidateSet('17', '18')][string]$Major)
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
+$repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+$root = $null
+$owned = $false
+$pg = $null
+$failed = $false
+
+function Invoke-Checked([string]$File, [string[]]$Arguments, [string]$Log) {
+    & $File @Arguments > $Log 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'native fixture command failed' }
+}
+
+try {
+    if (-not $IsWindows) { throw 'native Windows required' }
+    $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+    if ($arch -eq 'x64') { $arch = 'amd64' }
+    if ($arch -notin @('amd64', 'arm64')) { throw 'unsupported host architecture' }
+    foreach ($key in @('GOOS', 'GOHOSTOS')) {
+        $value = & go env $key
+        if ($LASTEXITCODE -ne 0 -or $value -ne 'windows') { throw 'non-native Go toolchain' }
+    }
+    foreach ($key in @('GOARCH', 'GOHOSTARCH')) {
+        $value = & go env $key
+        if ($LASTEXITCODE -ne 0 -or $value -ne $arch) { throw 'non-native Go toolchain' }
+    }
+    $goVersion = & go env GOVERSION
+    if ($LASTEXITCODE -ne 0 -or $goVersion -ne 'go1.26.9') { throw 'Go 1.26.9 required' }
+    if ($env:PGSAVVY_EXPECT_GOOS -and $env:PGSAVVY_EXPECT_GOOS -ne 'windows') { throw 'wrong runner OS' }
+    if ($env:PGSAVVY_EXPECT_GOARCH -and $env:PGSAVVY_EXPECT_GOARCH -ne $arch) { throw 'wrong runner architecture' }
+
+    $temp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
+    $root = Join-Path $temp ('pgsavvy-native.' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $root
+    $owned = $true
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetOwner($user)
+    $acl.SetAccessRuleProtection($true, $false)
+    $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $rule = [Security.AccessControl.FileSystemAccessRule]::new($user, 'FullControl', $inherit, 'None', 'Allow')
+    $acl.AddAccessRule($rule)
+    Set-Acl -LiteralPath $root -AclObject $acl
+    $manifest = Get-Content -Raw (Join-Path $PSScriptRoot 'cli-postgres-versions.json') | ConvertFrom-Json
+    if ($manifest.schema_version -ne 1) { throw 'invalid artifact manifest' }
+    $entry = $manifest.postgres.$Major
+    $pin = $entry.windows
+    if ($entry.version -notmatch ('^' + $Major + '\.\d+$') -or $pin.sha256 -cnotmatch '^[0-9a-f]{64}$' -or $pin.architecture -ne 'x64') {
+        throw 'invalid artifact pin'
+    }
+    $expectedUrl = 'https://get.enterprisedb.com/postgresql/postgresql-' + $entry.version + '-' + $pin.revision + '-windows-x64-binaries.zip'
+    if ($pin.url -cne $expectedUrl) { throw 'unapproved artifact URL' }
+    $archive = Join-Path $root 'postgres.zip'
+    Invoke-WebRequest -Uri $pin.url -OutFile $archive -TimeoutSec 600 -MaximumRedirection 0
+    if ((Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() -cne $pin.sha256) { throw 'PostgreSQL artifact digest mismatch' }
+    Expand-Archive -LiteralPath $archive -DestinationPath $root
+    $pg = Join-Path $root 'pgsql/bin'
+    $toolsVersion = & (Join-Path $pg 'psql.exe') --version
+    if ($LASTEXITCODE -ne 0 -or $toolsVersion -cne ('psql (PostgreSQL) ' + $entry.version)) { throw 'unexpected PostgreSQL tools' }
+
+    foreach ($name in @('PGHOST', 'PGHOSTADDR', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD', 'PGSERVICE', 'PGOPTIONS')) {
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+    }
+    $env:PGSERVICEFILE = Join-Path $root 'no-services'
+    $env:PGPASSFILE = Join-Path $root 'no-pgpass'
+    $env:PGCONNECT_TIMEOUT = '5'
+    $env:PGSSLMODE = 'disable'
+    $env:XDG_CONFIG_HOME = Join-Path $root 'config'
+    $env:XDG_DATA_HOME = Join-Path $root 'share'
+    $env:XDG_STATE_HOME = Join-Path $root 'state'
+    $env:XDG_CACHE_HOME = Join-Path $root 'cache'
+    $password = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant()
+    $passwordFile = Join-Path $root 'password'
+    [IO.File]::WriteAllText($passwordFile, "$password`n", [Text.UTF8Encoding]::new($false))
+    $data = Join-Path $root 'data'
+    Invoke-Checked (Join-Path $pg 'initdb.exe') @('-D', $data, '-U', 'pgsavvy', '--encoding=UTF8', '--no-locale', '--auth-local=scram-sha-256', '--auth-host=scram-sha-256', "--pwfile=$passwordFile") (Join-Path $root 'init.log')
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $port = $listener.LocalEndpoint.Port
+    $listener.Stop()
+    Add-Content (Join-Path $data 'postgresql.conf') "`nlisten_addresses = '127.0.0.1'`nport = $port`nunix_socket_directories = ''"
+    Invoke-Checked (Join-Path $pg 'pg_ctl.exe') @('-D', $data, '-l', (Join-Path $root 'server.log'), '-w', '-t', '30', 'start') (Join-Path $root 'start.log')
+    $env:PGPASSWORD = $password
+    Invoke-Checked (Join-Path $pg 'createdb.exe') @('-h', '127.0.0.1', '-p', "$port", '-U', 'pgsavvy', 'pgsavvy_test') (Join-Path $root 'createdb.log')
+    $psql = Join-Path $pg 'psql.exe'
+    $connection = @('-X', '-w', '-h', '127.0.0.1', '-p', "$port", '-U', 'pgsavvy', '-d', 'pgsavvy_test', '-v', 'ON_ERROR_STOP=1')
+    Invoke-Checked $psql ($connection + @('-f', (Join-Path $repo 'docker/postgres/init/01_fixture.sql'))) (Join-Path $root 'fixture.log')
+    Invoke-Checked $psql ($connection + @('-Atc', 'SELECT 1')) (Join-Path $root 'ready')
+    if ((Get-Content -Raw (Join-Path $root 'ready')).Trim() -ne '1') { throw 'fixture not ready' }
+    $env:PGPASSWORD = 'deliberately-wrong'
+    & $psql @connection -Atc 'SELECT 1' > (Join-Path $root 'wrong.out') 2> (Join-Path $root 'wrong.err')
+    $wrongExit = $LASTEXITCODE
+    $env:PGPASSWORD = $password
+    if ($wrongExit -eq 0 -or -not (Select-String -Quiet -SimpleMatch 'password authentication failed' (Join-Path $root 'wrong.err'))) {
+        throw 'wrong-password rejection not proven'
+    }
+    $sql = "SELECT current_setting('server_version_num'), current_setting('server_encoding'), (SELECT version FROM app._fixture_meta), rolsuper FROM pg_roles WHERE rolname = current_user"
+    Invoke-Checked $psql ($connection + @('-Atc', $sql)) (Join-Path $root 'facts')
+    $facts = (Get-Content -Raw (Join-Path $root 'facts')).Trim().Split('|')
+    if ($facts.Count -ne 4 -or [math]::Floor([int]$facts[0] / 10000) -ne [int]$Major -or $facts[1] -ne 'UTF8' -or $facts[2] -ne '2' -or $facts[3] -ne 't') {
+        throw 'fixture version/auth/encoding mismatch'
+    }
+    $env:PGSAVVY_TEST_PG = "postgres://pgsavvy:${password}@127.0.0.1:$port/pgsavvy_test?sslmode=disable"
+    $env:CGO_ENABLED = '0'
+    Push-Location $repo
+    try {
+        Invoke-Checked 'go' @('run', './internal/pgprobe') (Join-Path $root 'probe.log')
+        $binary = Join-Path $root 'pgsavvy.exe'
+        Invoke-Checked 'go' @('build', '-ldflags', '-X main.version=native-preflight -X main.buildSource=fixture', '-o', $binary, '.') (Join-Path $root 'go-build.log')
+        $env:PGSAVVY_TEST_BINARY = $binary
+        Invoke-Checked $binary @('--version') (Join-Path $root 'version')
+        if (-not (Select-String -Quiet -SimpleMatch 'native-preflight' (Join-Path $root 'version'))) { throw 'legacy version route failed' }
+        $selector = '^TestMachineCLI_(Dispatch|ExitCodes|Envelope|Envelope_ParentDeadlineAndInput|OutputLimit|BrokenWriter)$'
+        Invoke-Checked 'go' @('test', '-json', '-count=1', '-timeout', '5m', './pkg/cli', '-run', $selector) (Join-Path $root 'tests.jsonl')
+    } finally { Pop-Location }
+    $events = @(Get-Content (Join-Path $root 'tests.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
+    if (@($events | Where-Object { $_.Action -in @('skip', 'fail') }).Count -ne 0) { throw 'baseline contains skipped/failed tests' }
+    $passed = @($events | Where-Object { $_.Action -eq 'pass' -and $_.Test } | ForEach-Object { $_.Test })
+    foreach ($name in @('Dispatch', 'ExitCodes', 'Envelope', 'Envelope_ParentDeadlineAndInput', 'OutputLimit', 'BrokenWriter')) {
+        if ('TestMachineCLI_' + $name -cnotin $passed) { throw 'required baseline tests missing' }
+    }
+    [ordered]@{
+        scope = 'baseline-not-native-support'; goos = 'windows'; goarch = $arch
+        go_version = $goVersion; cgo_enabled = '0'; binary = $binary
+        binary_sha256 = (Get-FileHash -Algorithm SHA256 $binary).Hash.ToLowerInvariant()
+        postgres_tools = $entry.version; postgres_tools_arch = 'x64'; server_version_num = $facts[0]
+        fixture_version = 2; wrong_password_rejected = $true; tests_passed = @($passed | Sort-Object)
+    } | ConvertTo-Json -Compress
+} catch {
+    $failed = $true
+    # Do not publish raw tool errors; they can include environment/connection text.
+    [Console]::Error.WriteLine('native fixture preflight failed; no native support evidence established')
+} finally {
+    if ($owned) {
+        try {
+            $stopped = $true
+            if (Test-Path (Join-Path $root 'data/postmaster.pid')) {
+                & (Join-Path $pg 'pg_ctl.exe') -D (Join-Path $root 'data') -m immediate -w -t 30 stop > (Join-Path $root 'stop.log') 2>&1
+                $stopped = $LASTEXITCODE -eq 0
+            }
+            if (-not $stopped) { throw 'owned cluster stop failed' }
+            $item = Get-Item -LiteralPath $root
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $item.Name.StartsWith('pgsavvy-native.')) {
+                throw 'refusing unexpected cleanup target'
+            }
+            Remove-Item -LiteralPath $root -Recurse -Force
+        } catch {
+            $failed = $true
+            [Console]::Error.WriteLine('owned fixture cleanup failed; retained fixture: ' + $root)
+        }
+    }
+}
+if ($failed) { exit 1 }

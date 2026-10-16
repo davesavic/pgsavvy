@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "postgres": {
+    "17": {
+      "version": "17.6",
+      "unix": {
+        "url": "https://ftp.postgresql.org/pub/source/v17.6/postgresql-17.6.tar.bz2",
+        "sha256": "e0630a3600aea27511715563259ec2111cd5f4353a4b040e0be827f94cd7a8b0"
+      },
+      "windows": {
+        "revision": 1,
+        "architecture": "x64",
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-17.6-1-windows-x64-binaries.zip",
+        "sha256": "d378882abd001a186735acd6f6ba716bca6ccd192e800412d4fd15ed25376b3e"
+      }
+    },
+    "18": {
+      "version": "18.0",
+      "unix": {
+        "url": "https://ftp.postgresql.org/pub/source/v18.0/postgresql-18.0.tar.bz2",
+        "sha256": "0d5b903b1e5fe361bca7aa9507519933773eb34266b1357c4e7780fdee6d6078"
+      },
+      "windows": {
+        "revision": 1,
+        "architecture": "x64",
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-18.0-1-windows-x64-binaries.zip",
+        "sha256": "4a1ea6e6ecbde1747103c7b5bc0674cc415b9aa8ef7b7bad3a4ee38c37c051b1"
+      }
+    }
+  }
+}
