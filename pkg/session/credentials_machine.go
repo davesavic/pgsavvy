@@ -9,35 +9,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
-)
-
-type MachineCredentialFailure string
-
-const (
-	MachineCredentialUnavailable MachineCredentialFailure = "CREDENTIALS_UNAVAILABLE"
-	MachineCredentialTimeout     MachineCredentialFailure = "TIMEOUT"
-	MachineCredentialOutputLimit MachineCredentialFailure = "RESOURCE_FAILURE"
-	MachinePgpassFailover        MachineCredentialFailure = "UNSUPPORTED_PGPASS_FAILOVER"
-)
-
-type MachineCredentialError struct{ Kind MachineCredentialFailure }
-
-func (e *MachineCredentialError) Error() string { return string(e.Kind) }
-
-type (
-	MachineCredentialLimits struct {
-		Timeout   time.Duration
-		MaxStdout int
-	}
-	MachineCredentialOptions struct {
-		Exec    func(context.Context, string) (string, error)
-		Keyring func(context.Context, string) (string, error)
-	}
 )
 
 // ResolveMachinePassword uses the single already-parsed target, never a second
@@ -119,11 +94,7 @@ func resolveMachineKeyring(ctx context.Context, ref string) (string, error) {
 }
 
 func machinePgpass(path string, target *pgconn.Config) (string, error) {
-	file, err := os.Stat(path)
-	if err != nil || !file.Mode().IsRegular() || file.Mode().Perm()&0o077 != 0 {
-		return "", &MachineCredentialError{Kind: MachineCredentialUnavailable}
-	}
-	data, err := os.ReadFile(path)
+	data, err := readMachinePgpassFile(path)
 	if err != nil {
 		return "", &MachineCredentialError{Kind: MachineCredentialUnavailable}
 	}
