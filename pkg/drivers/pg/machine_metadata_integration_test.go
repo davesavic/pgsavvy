@@ -86,11 +86,13 @@ func (f *metadataLiveFixture) exec(t *testing.T, sql string) {
 		t.Fatalf("test-owned metadata DDL failed (%T)", err)
 	}
 }
+
 func (f *metadataLiveFixture) newSchema(t *testing.T, name string) {
 	t.Helper()
 	f.exec(t, "CREATE SCHEMA "+pgx.Identifier{name}.Sanitize())
 	f.schemas = append(f.schemas, name)
 }
+
 func (f *metadataLiveFixture) inspect(t *testing.T, request MachineMetadataRequest) (MachineMetadata, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -553,7 +555,7 @@ func TestMachineMetadata_Failures_ConcurrentDDL_Live(t *testing.T) {
 		}
 		success++
 		columns := result.Description.Columns
-		if len(columns) != 2 || !((columns[0].Name == "before_a" && columns[1].Name == "before_b") || (columns[0].Name == "after_a" && columns[1].Name == "after_b")) {
+		if len(columns) != 2 || (columns[0].Name != "before_a" || columns[1].Name != "before_b") && (columns[0].Name != "after_a" || columns[1].Name != "after_b") {
 			t.Fatal("composed catalog snapshot mixed DDL states")
 		}
 	}
