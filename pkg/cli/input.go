@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin || windows
 
 package cli
 
@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"unicode/utf8"
 )
 
@@ -23,6 +22,9 @@ func readMachineInput(ctx context.Context, path string, stdin io.ReadCloser) ([]
 	if path == "-" {
 		reader = stdin
 	} else {
+		if err := validateMachineFilePath(path); err != nil {
+			return nil, &PublicError{Code: InvalidInput}
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			return nil, &PublicError{Code: ResourceFailure}
@@ -30,7 +32,7 @@ func readMachineInput(ctx context.Context, path string, stdin io.ReadCloser) ([]
 		if !info.Mode().IsRegular() {
 			return nil, &PublicError{Code: InvalidInput}
 		}
-		file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+		file, err := os.OpenFile(path, machineFileOpenFlags(), 0)
 		if err != nil {
 			return nil, &PublicError{Code: ResourceFailure}
 		}

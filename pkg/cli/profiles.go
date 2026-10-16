@@ -1,10 +1,9 @@
-//go:build linux
+//go:build linux || darwin || windows
 
 package cli
 
 import (
 	"os"
-	"syscall"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/spf13/afero"
@@ -14,6 +13,9 @@ import (
 type machineProfileFS struct{ afero.Fs }
 
 func (fs machineProfileFS) Open(name string) (afero.File, error) {
+	if err := validateMachineFilePath(name); err != nil {
+		return nil, err
+	}
 	info, err := fs.Stat(name)
 	if err != nil {
 		return nil, err
@@ -21,7 +23,7 @@ func (fs machineProfileFS) Open(name string) (afero.File, error) {
 	if !info.Mode().IsRegular() {
 		return nil, os.ErrInvalid
 	}
-	file, err := fs.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	file, err := fs.OpenFile(name, machineFileOpenFlags(), 0)
 	if err != nil {
 		return nil, err
 	}

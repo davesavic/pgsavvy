@@ -39,6 +39,22 @@ func TestMachineConnections_Grammar(t *testing.T) {
 	}
 }
 
+func TestMachineConnections_OfflineProfiles(t *testing.T) {
+	profile := models.Connection{Name: "dev", Driver: "postgres", Tags: []string{"tag"}, Label: "label", DSN: "SECRET", Host: "SECRET", User: "SECRET", Password: "SECRET", PasswordCommand: "SECRET", KeyringRef: "SECRET", PgpassPath: "SECRET", SSHTunnel: &models.SSHTunnelConfig{Host: "SECRET"}}
+	service := InvocationService{Load: func() ([]models.Connection, error) { return []models.Connection{profile}, nil }}
+	for _, args := range [][]string{{"list"}, {"show", "dev"}} {
+		envelope, err := ConnectionsCommand(service)(context.Background(), args, IO{})
+		if err != nil || !envelope.ResultComplete {
+			t.Fatal("offline discovery attempted credentials")
+		}
+	}
+	service.Load = func() ([]models.Connection, error) { return nil, nil }
+	envelope, err := ConnectionsCommand(service)(context.Background(), []string{"list"}, IO{})
+	if err != nil || envelope.Data.([]PublicProfile) == nil {
+		t.Fatal("offline empty list lost array")
+	}
+}
+
 func TestMachineConnections_Capabilities(t *testing.T) {
 	envelope, err := CapabilitiesCommand()(context.Background(), nil, IO{})
 	if err != nil {
