@@ -15,6 +15,7 @@ Active development
 
 - [Features](#features)
 - [Configuration](#configuration)
+- [Machine CLI](#machine-cli-linux)
 - [Install](#install)
 - [Updating](#updating)
 - [Quick Start](#quick-start)
@@ -134,6 +135,34 @@ Press `?` anywhere to open the auto-generated, tabbed keybinding cheatsheet — 
 - **Self-update** — Release binaries update themselves in place with `pgsavvy update`, verifying the SHA-256 checksum from the GitHub Release. Non-release builds (go install, source) refuse to self-update safely.
 - **Mouse support** — Optional mouse interaction toggleable via `ui.mouse.enabled` in the user config. Mouse mode registers click bindings on interactive views so you can select cells, scroll results, and activate popups without the keyboard.
 - **Customisable keybindings** — Every action in the TUI is bound through an action ID registry. Users can remap any chord or add new chords in `config.yml` under the `keybindings` key, with `:reload` picking up changes without restarting.
+
+## Machine CLI (Linux)
+
+Use versioned JSON commands without starting the TUI, prompts, history or
+persistent logs. Database operations are **disabled by default** per saved
+profile. Set `cli_access: metadata` manually in `connections.yml` for connection
+testing/catalog inspection, or `cli_access: row-read` for bounded read-only
+queries. Offline discovery never checks credentials or contacts the database.
+
+```sh
+pgsavvy capabilities
+pgsavvy connections list
+pgsavvy connections show reporting
+pgsavvy connections test reporting
+pgsavvy schema describe --connection reporting --schema public --table orders
+pgsavvy query --connection reporting --file query.sql --params-file params.json
+```
+
+Names are exact; no last-used connection or endpoint override is accepted.
+Queries return PostgreSQL text strings and SQL NULL, not GUI-clipped values.
+Returned-row limits do not limit server work or tail transfer; use SQL LIMIT
+when needed. Dedicated restricted database roles remain recommended: read-only
+transactions and syntax checks are not a function/extension sandbox.
+
+See the [JSON/exit-code contract](docs/cli-contract.md),
+[query/input limits](docs/cli-query.md), and
+[catalog paging/visibility rules](docs/cli-schema.md).
+Bare startup, version, log-directory selection and update retain their TUI paths.
 
 ## Configuration
 

@@ -26,6 +26,9 @@ func init() {
 }
 
 func main() {
+	if handled, exit := runMachine(os.Args[1:]); handled {
+		os.Exit(exit)
+	}
 	buildInfo := &app.BuildInfo{
 		Commit:      commit,
 		Date:        date,

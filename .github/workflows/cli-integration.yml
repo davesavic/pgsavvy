@@ -46,6 +46,6 @@ jobs:
       - name: Require reachable fixture
         run: go run ./internal/pgprobe "$PGSAVVY_TEST_PG"
       - name: Build
-        run: go build ./...
-      - name: Verify bounded query and catalog paths
-        run: go test -race -count=1 -timeout 5m -tags=integration ./pkg/drivers/pg ./test/integration -run '^TestMachine(Metadata|Query)'
+        run: go build -o bin/pgsavvy .
+      - name: Verify machine API and built-binary paths
+        run: go test -race -count=1 -timeout 5m -tags=integration ./pkg/cli ./pkg/drivers/pg ./test/integration -run '^TestMachine(Metadata|Query|Schema|CLIProcess)'
