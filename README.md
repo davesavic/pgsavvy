@@ -5,6 +5,8 @@
 
 A vim-style TUI PostgreSQL client built like [lazygit](https://github.com/jesseduffield/lazygit) — fast keyboard navigation, modal panes, and a focused workflow for browsing and querying your database from the terminal.
 
+On Linux, a [JSON CLI](#machine-cli-linux) also supports scripts and LLM tools with connection discovery, schema inspection, and bounded read-only queries.
+
 ![pgsavvy demo](docs/demo.gif)
 
 ## Status
@@ -14,8 +16,8 @@ Active development
 ## Table of Contents
 
 - [Features](#features)
-- [Configuration](#configuration)
 - [Machine CLI](#machine-cli-linux)
+- [Configuration](#configuration)
 - [Install](#install)
 - [Updating](#updating)
 - [Quick Start](#quick-start)
@@ -138,33 +140,154 @@ Press `?` anywhere to open the auto-generated, tabbed keybinding cheatsheet — 
 
 ## Machine CLI (Linux)
 
-Use versioned JSON commands without starting the TUI, prompts, history or
-persistent logs. Database operations are **disabled by default** per saved
-profile. In the connection add/edit form, select `cli_access` and press `i` or
-Space to cycle between `disabled`, `metadata` (connection testing/catalog
-inspection), and `row-read` (also bounded read-only queries), then Enter to save.
-You can also set `cli_access` directly in `connections.yml`. Offline discovery
-never checks credentials or contacts the database.
+The machine CLI returns versioned JSON without starting the TUI, interactive
+prompts, history or persistent logs. It is currently **Linux-only**; bare
+`pgsavvy` still opens the TUI. Examples below assume `pgsavvy` is on your PATH;
+for a source build, use `./bin/pgsavvy` after `task build`.
+
+### Discover commands without source code
 
 ```sh
+pgsavvy --help
 pgsavvy capabilities
+pgsavvy connections --help
+pgsavvy schema --help
+pgsavvy query --help
+```
+
+Help is JSON too. `capabilities` is the machine-readable command catalogue:
+it lists command usage, required profile access, global flags, platform, limits
+and exit codes. Scripts and LLMs can inspect this output instead of guessing
+commands or needing repository access. Re-check the installed binary rather
+than assuming another version supports the same commands.
+
+### Enable access on a saved profile
+
+Database operations are **disabled by default** per profile. In the TUI's
+connection add/edit form, select `cli_access` and press `i` or Space to cycle
+the policy, then Enter to save:
+
+| `cli_access` | Allowed operations |
+|--------------|--------------------|
+| `disabled` (also missing/empty) | Offline connection list/show only |
+| `metadata` | Also connection testing and schema inspection |
+| `row-read` | Also bounded read-only queries |
+
+Alternatively, edit the existing profile in
+`$XDG_CONFIG_HOME/pgsavvy/connections.yml` (default
+`~/.config/pgsavvy/connections.yml`), **not** `config.yml`. Example profile
+shape; replace the connection details and do not duplicate an existing name:
+
+```yaml
+connections:
+  - name: reporting
+    driver: postgres
+    dsn: postgres://report_reader@db.example.com:5432/app?sslmode=require
+    cli_access: row-read
+```
+
+The separate `read_only` setting is a TUI preference, not CLI permission:
+machine queries always use read-only transactions. Credentials must already
+work without prompts; SSH connections require pre-existing trusted host keys.
+Keep credentials out of SQL examples and use a restricted database role.
+
+### Inspect connections and schemas
+
+Replace `reporting`, `public` and `orders` with exact saved profile/object names.
+Quote names containing spaces. There is no implicit last-used connection or
+endpoint override.
+
+```sh
+# Offline: no credential checks or database connection
 pgsavvy connections list
 pgsavvy connections show reporting
+
+# Online: requires metadata or row-read access
 pgsavvy connections test reporting
+pgsavvy schema list --connection reporting
+pgsavvy schema tables --connection reporting --schema public
 pgsavvy schema describe --connection reporting --schema public --table orders
+pgsavvy schema relationships --connection reporting --schema public --table orders
+```
+
+Schema/table lists support `--limit` and `--after` paging. Follow `next_after`
+until `raw_complete` is true; schema visibility filters can produce an empty
+visible page with a continuation. `schema list --include-system` includes system
+schemas, but profile-hidden schemas remain hidden. Visibility is not a database
+authorization boundary.
+
+### Run SQL and bind parameters
+
+SQL comes from a regular file (`--file query.sql`) or stdin (`--file -`):
+
+```sh
+printf '%s\n' 'SELECT current_database();' |
+  pgsavvy query --connection reporting --file - --max-rows 10 --timeout 5s
+```
+
+For parameters, save this as `query.sql`:
+
+```sql
+SELECT $1::text AS label, $2::integer AS quantity,
+       $3::boolean AS enabled, $4::text AS optional_value;
+```
+
+Save this as `params.json`:
+
+```json
+["example", 2, true, null]
+```
+
+Then run:
+
+```sh
 pgsavvy query --connection reporting --file query.sql --params-file params.json
 ```
 
-Names are exact; no last-used connection or endpoint override is accepted.
-Queries return PostgreSQL text strings and SQL NULL, not GUI-clipped values.
-Returned-row limits do not limit server work or tail transfer; use SQL LIMIT
-when needed. Dedicated restricted database roles remain recommended: read-only
-transactions and syntax checks are not a function/extension sandbox.
+The parameter file contains **one JSON array** of strings, numbers, booleans or
+null, bound in order to `$1`, `$2`, etc. It is not a named-parameter object;
+nested objects/arrays must be supplied as strings with explicit SQL casts
+(for example, a JSON string bound to `$1::jsonb`). Parameter stdin
+(`--params-file -`) is not supported. Bind values instead of interpolating them
+into SQL text.
+
+### Read results and handle limits
+
+Each machine command writes one JSON document to stdout. Check `ok`, `error`,
+`warnings`, `result_complete` and `truncated`; stderr may contain separate safe
+diagnostics. Query `data.columns` describes each position in `data.rows`.
+Database values are PostgreSQL-text **strings**, including numbers and booleans;
+SQL NULL becomes JSON `null`. Preserve numeric precision when processing them.
+
+- Queries accept one supported SELECT-family statement, including read-only
+  `WITH`. Writes, multiple statements, locking reads and transaction/session
+  commands are rejected.
+- Returned rows default to **100**, maximum **1000** via `--max-rows`.
+  A capped preview can exit successfully with `truncated: true`; exit 0 alone
+  does not prove completeness. The cap does not bound server work or tail
+  transfer: use selective queries and SQL `LIMIT` where appropriate.
+- SQL and parameter inputs are limited to **1 MiB each**, **256 parameters**,
+  **64 KiB per cell**, and **1 MiB total JSON output**. Oversized data fails
+  rather than silently clipping values.
+- Default invocation/connection/statement limits are **30s / 10s / 10s**.
+  Global `--timeout 5s`, for example, lowers the invocation budget;
+  `--format json` is the only supported output format.
+- Exit codes: **0** success, **2** invalid input, **3** unavailable connection,
+  credentials or SSH trust, **4** policy denied, **5** database error,
+  **6** timeout/cancellation, **7** I/O or resource failure.
+
+For an LLM workflow: discover commands, inspect the selected profile's policy,
+inspect schema columns/relationships, then query only the required fields and
+verify completeness. Do not infer column names, units or business meaning.
+Audit records are not necessarily individual user actions, and current rows
+are not historical snapshots. Read-only transactions and syntax checks are
+**not a function/extension sandbox**: use restricted roles and approved views,
+especially for production access.
 
 See the [JSON/exit-code contract](docs/cli-contract.md),
 [query/input limits](docs/cli-query.md), and
 [catalog paging/visibility rules](docs/cli-schema.md).
-Bare startup, version, log-directory selection and update retain their TUI paths.
+Version, log-directory selection and update retain their legacy routes.
 
 ## Configuration
 
@@ -277,6 +400,9 @@ pgsavvy          # starts the TUI and opens the connection manager
 
 On first run, create a connection profile in the connection manager (or edit `~/.config/pgsavvy/connections.yml` directly), then connect. Press `?` for the keybinding cheatsheet; see [docs/keybindings.md](docs/keybindings.md) for the full reference.
 
+For scripts or LLM tools on Linux, start with `pgsavvy capabilities` and follow
+the [CLI setup and examples](#machine-cli-linux).
+
 ## Development Requirements
 
 - [Go 1.26](https://go.dev/dl/)
@@ -317,6 +443,9 @@ task pg:down && task pg:up
 
 - [docs/INSTALL.md](docs/INSTALL.md) — install & usage guide
 - [docs/keybindings.md](docs/keybindings.md) — full keybinding reference
+- [docs/cli-contract.md](docs/cli-contract.md) — machine CLI JSON, exit codes and deadlines
+- [docs/cli-query.md](docs/cli-query.md) — read-only SQL, parameter inputs and result limits
+- [docs/cli-schema.md](docs/cli-schema.md) — catalog inspection, paging and visibility
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow for contributors
 - [SECURITY.md](SECURITY.md) — vulnerability disclosure
 
