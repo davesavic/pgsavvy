@@ -121,11 +121,11 @@ func TestMachineCLI_BrokenWriter(t *testing.T) {
 		t.Fatal("broken pipe succeeded")
 	}
 	_ = write.Close()
-	read, write, err = os.Pipe()
+	read, write, err = machineOutputPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = read.Close(); _ = write.Close() }()
+	defer func(read, write *os.File) { _ = read.Close(); _ = write.Close() }(read, write)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	start := time.Now()
@@ -133,11 +133,11 @@ func TestMachineCLI_BrokenWriter(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > time.Second {
 		t.Fatalf("open unread pipe did not cancel: %v elapsed=%s", err, time.Since(start))
 	}
-	read, write, err = os.Pipe()
+	read, write, err = machineOutputPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = read.Close(); _ = write.Close() }()
+	defer func(read, write *os.File) { _ = read.Close(); _ = write.Close() }(read, write)
 	streams, _, _ = testStreams()
 	streams.Out = write
 	start = time.Now()

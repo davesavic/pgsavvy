@@ -158,7 +158,7 @@ func TestMachineInput_ConcurrentCancellation(t *testing.T) {
 	var workers sync.WaitGroup
 	for range 20 {
 		workers.Go(func() {
-			read, write, err := os.Pipe()
+			read, write, err := machineInputPipe()
 			if err != nil {
 				t.Error(err)
 				return
@@ -233,7 +233,7 @@ func TestMachineInput_CancellationJoinsWatcher(t *testing.T) {
 }
 
 func TestMachineQuery_Cancel_Input(t *testing.T) {
-	read, write, err := os.Pipe()
+	read, write, err := machineInputPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
