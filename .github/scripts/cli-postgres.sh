@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# Native baseline only. Full machine acceptance is owned by pgsavvy-y2rh.14.
+set -euo pipefail
+
+major=${1:?usage: cli-postgres.sh 17|18}
+case "$major" in 17|18) ;; *) echo 'unsupported PostgreSQL major' >&2; exit 1 ;; esac
+repo=$(cd "$(dirname "$0")/../.." && pwd -P)
+case "$(uname -s)" in Linux) host_os=linux ;; Darwin) host_os=darwin ;; *) exit 1 ;; esac
+case "$(uname -m)" in x86_64) host_arch=amd64 ;; aarch64|arm64) host_arch=arm64 ;; *) exit 1 ;; esac
+if [ "$host_os" = darwin ] && [ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
+  echo 'translated execution is not native evidence' >&2; exit 1
+fi
+for tool in go python3 curl tar make cc bison flex; do command -v "$tool" >/dev/null; done
+for pair in "GOOS:$host_os" "GOARCH:$host_arch" "GOHOSTOS:$host_os" "GOHOSTARCH:$host_arch"; do
+  [ "$(go env "${pair%%:*}")" = "${pair#*:}" ] || { echo 'non-native Go toolchain' >&2; exit 1; }
+done
+[ "${PGSAVVY_EXPECT_GOOS:-$host_os}" = "$host_os" ]
+[ "${PGSAVVY_EXPECT_GOARCH:-$host_arch}" = "$host_arch" ]
+[ "$(go env GOVERSION)" = go1.26.9 ] || { echo 'Go 1.26.9 required' >&2; exit 1; }
+
+root=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/pgsavvy-native.XXXXXXXX")
+pg="$root/install/bin"
+cleanup() {
+  result=$?
+  trap - EXIT INT TERM
+  if [ "$result" -ne 0 ]; then echo 'native fixture preflight failed' >&2; fi
+  if [ -f "$root/data/postmaster.pid" ]; then
+    if ! "$pg/pg_ctl" -D "$root/data" -m immediate -w -t 30 stop >"$root/stop.log" 2>&1; then
+      echo "owned cluster stop failed; retained fixture: $root" >&2
+      exit 1
+    fi
+  fi
+  # root comes only from this invocation's mktemp, never caller-supplied input.
+  python3 - "$root" <<'PY'
+import pathlib, shutil, sys
+root = pathlib.Path(sys.argv[1])
+if root.is_symlink() or not root.name.startswith("pgsavvy-native."):
+    raise SystemExit("refusing unexpected cleanup target")
+shutil.rmtree(root)
+PY
+  exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+python3 - "$repo/.github/scripts/cli-postgres-versions.json" "$major" >"$root/pin" <<'PY'
+import json, re, sys
+with open(sys.argv[1], encoding="utf-8") as f:
+    manifest = json.load(f)
+assert manifest["schema_version"] == 1
+entry = manifest["postgres"][sys.argv[2]]
+pin = entry["unix"]
+assert re.fullmatch(r"[0-9a-f]{64}", pin["sha256"])
+version = entry["version"]
+assert re.fullmatch(re.escape(sys.argv[2]) + r"\.\d+", version)
+assert pin["url"] == f"https://ftp.postgresql.org/pub/source/v{version}/postgresql-{version}.tar.bz2"
+print(version)
+print(pin["url"])
+print(pin["sha256"])
+PY
+{ IFS= read -r version; IFS= read -r url; IFS= read -r digest; } <"$root/pin"
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+  --connect-timeout 30 --max-time 600 "$url" -o "$root/postgres.tar.bz2"
+python3 - "$root/postgres.tar.bz2" "$digest" <<'PY'
+import hashlib, sys
+with open(sys.argv[1], "rb") as f:
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: f.read(1024 * 1024), b""):
+        digest.update(chunk)
+    actual = digest.hexdigest()
+if actual != sys.argv[2]:
+    raise SystemExit("PostgreSQL artifact digest mismatch")
+PY
+tar -xjf "$root/postgres.tar.bz2" -C "$root"
+(
+  cd "$root/postgresql-$version"
+  ./configure --prefix="$root/install" --without-icu --without-readline --without-zlib
+  make -j2
+  make install
+) >"$root/build.log" 2>&1 || { echo 'owned PostgreSQL build failed' >&2; exit 1; }
+python3 - "$pg" "$host_arch" <<'PY'
+import pathlib, struct, sys
+for name in ("psql", "postgres"):
+    with (pathlib.Path(sys.argv[1]) / name).open("rb") as f:
+        header = f.read(20)
+    if header[:4] == b"\x7fELF":
+        endian = "<" if header[5] == 1 else ">"
+        arch = {62: "amd64", 183: "arm64"}.get(struct.unpack(endian + "H", header[18:20])[0])
+    elif header[:4] == b"\xcf\xfa\xed\xfe":
+        arch = {0x1000007: "amd64", 0x100000c: "arm64"}.get(struct.unpack("<I", header[4:8])[0])
+    else:
+        raise SystemExit("unsupported PostgreSQL executable format")
+    if arch != sys.argv[2]:
+        raise SystemExit("non-native PostgreSQL executable")
+PY
+[ "$("$pg/psql" --version)" = "psql (PostgreSQL) $version" ]
+
+# Ignore ambient libpq configuration, including user-owned service/password files.
+unset PGHOST PGHOSTADDR PGPORT PGDATABASE PGUSER PGPASSWORD PGSERVICE PGOPTIONS
+export PGSERVICEFILE="$root/no-services" PGPASSFILE="$root/no-pgpass" PGCONNECT_TIMEOUT=5
+export PGSSLMODE=disable
+export XDG_CONFIG_HOME="$root/config" XDG_DATA_HOME="$root/share" XDG_STATE_HOME="$root/state"
+export XDG_CACHE_HOME="$root/cache"
+password=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+printf '%s\n' "$password" >"$root/password"
+chmod 600 "$root/password"
+"$pg/initdb" -D "$root/data" -U pgsavvy --encoding=UTF8 --no-locale \
+  --auth-local=scram-sha-256 --auth-host=scram-sha-256 --pwfile="$root/password" >"$root/init.log" 2>&1
+port=$(python3 - <<'PY'
+import socket
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    print(s.getsockname()[1])
+PY
+)
+cat >>"$root/data/postgresql.conf" <<EOF
+listen_addresses = '127.0.0.1'
+port = $port
+unix_socket_directories = ''
+EOF
+"$pg/pg_ctl" -D "$root/data" -l "$root/server.log" -w -t 30 start >"$root/start.log" 2>&1
+export PGPASSWORD="$password"
+"$pg/createdb" -h 127.0.0.1 -p "$port" -U pgsavvy pgsavvy_test >"$root/createdb.log" 2>&1
+psql=("$pg/psql" -X -w -h 127.0.0.1 -p "$port" -U pgsavvy -d pgsavvy_test -v ON_ERROR_STOP=1)
+"${psql[@]}" -f "$repo/docker/postgres/init/01_fixture.sql" >"$root/fixture.log" 2>&1
+"${psql[@]}" -Atc 'SELECT 1' >"$root/ready" 2>"$root/ready.err"
+[ "$(cat "$root/ready")" = 1 ]
+if PGPASSWORD=deliberately-wrong "${psql[@]}" -Atc 'SELECT 1' >"$root/wrong.out" 2>"$root/wrong.err"; then
+  echo 'wrong password accepted' >&2; exit 1
+fi
+grep -q 'password authentication failed' "$root/wrong.err" || { echo 'wrong-password check did not reach authentication' >&2; exit 1; }
+facts=$("${psql[@]}" -Atc "SELECT current_setting('server_version_num'), current_setting('server_encoding'), (SELECT version FROM app._fixture_meta), rolsuper FROM pg_roles WHERE rolname = current_user" 2>"$root/facts.err")
+IFS='|' read -r server encoding fixture superuser <<<"$facts"
+if [ "$((server / 10000))" != "$major" ] || [ "$encoding" != UTF8 ] || [ "$fixture" != 2 ] || [ "$superuser" != t ]; then
+  echo 'fixture version/auth/encoding mismatch' >&2; exit 1
+fi
+export PGSAVVY_TEST_PG="postgres://pgsavvy:$password@127.0.0.1:$port/pgsavvy_test?sslmode=disable"
+export CGO_ENABLED=0
+cd "$repo"
+go run ./internal/pgprobe >"$root/probe.log" 2>&1
+binary="$root/pgsavvy"
+go build -ldflags '-X main.version=native-preflight -X main.buildSource=fixture' -o "$binary" . >"$root/go-build.log" 2>&1
+export PGSAVVY_TEST_BINARY="$binary"
+"$binary" --version >"$root/version" 2>"$root/version.err"
+grep -q 'native-preflight' "$root/version"
+selector='^TestMachineCLI_(Dispatch|ExitCodes|Envelope|Envelope_ParentDeadlineAndInput|OutputLimit|BrokenWriter)$'
+go test -json -count=1 -timeout 5m ./pkg/cli -run "$selector" >"$root/tests.jsonl" 2>"$root/tests.err"
+python3 - "$root" "$host_os" "$host_arch" "$version" "$server" <<'PY'
+import hashlib, json, pathlib, subprocess, sys
+root = pathlib.Path(sys.argv[1])
+required = {"TestMachineCLI_" + n for n in ("Dispatch", "ExitCodes", "Envelope", "Envelope_ParentDeadlineAndInput", "OutputLimit", "BrokenWriter")}
+passed = set()
+for line in (root / "tests.jsonl").read_text().splitlines():
+    event = json.loads(line)
+    if event["Action"] in ("skip", "fail"):
+        raise SystemExit("baseline contains skipped/failed tests")
+    if event["Action"] == "pass" and "Test" in event:
+        passed.add(event["Test"])
+if not required <= passed:
+    raise SystemExit("required baseline tests missing")
+binary = root / "pgsavvy"
+print(json.dumps({"scope": "baseline-not-native-support", "goos": sys.argv[2], "goarch": sys.argv[3],
+    "go_version": subprocess.check_output(["go", "version"], text=True).strip(), "cgo_enabled": "0",
+    "binary": str(binary), "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+    "postgres_tools": sys.argv[4], "postgres_tools_arch": sys.argv[3], "server_version_num": sys.argv[5], "fixture_version": 2,
+    "wrong_password_rejected": True, "tests_passed": sorted(passed)}))
+PY

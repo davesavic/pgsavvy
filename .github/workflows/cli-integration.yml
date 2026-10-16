@@ -1,6 +1,7 @@
 name: machine-cli-integration
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [master]
   push:
@@ -14,6 +15,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native-baseline:
+    name: baseline-${{ matrix.target.goos }}-${{ matrix.target.goarch }}-pg${{ matrix.postgres }}
+    runs-on: ${{ matrix.target.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: [17, 18]
+        target:
+          - {runner: ubuntu-24.04, goos: linux, goarch: amd64}
+          - {runner: ubuntu-24.04-arm, goos: linux, goarch: arm64}
+          - {runner: macos-15-intel, goos: darwin, goarch: amd64}
+          - {runner: macos-15, goos: darwin, goarch: arm64}
+          - {runner: windows-2025, goos: windows, goarch: amd64}
+          - {runner: windows-11-arm, goos: windows, goarch: arm64}
+    env:
+      PGSAVVY_EXPECT_GOOS: ${{ matrix.target.goos }}
+      PGSAVVY_EXPECT_GOARCH: ${{ matrix.target.goarch }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.9'
+          architecture: ${{ matrix.target.goarch }}
+          cache: true
+      # These execute only the portable baseline, not native machine support.
+      # pgsavvy-y2rh.14 must add all adapter/auth/process selectors before activation.
+      - name: Unix owned fixture and CGO-disabled baseline
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          POSTGRES_MAJOR: ${{ matrix.postgres }}
+        run: bash .github/scripts/cli-postgres.sh "$POSTGRES_MAJOR"
+      - name: Windows owned fixture and CGO-disabled baseline
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          POSTGRES_MAJOR: ${{ matrix.postgres }}
+        run: ./.github/scripts/cli-postgres.ps1 -Major $env:POSTGRES_MAJOR
+
+  # Retain the existing Ubuntu Docker/race coverage separately from shipping checks.
   postgres:
     runs-on: ubuntu-latest
     timeout-minutes: 20
