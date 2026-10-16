@@ -53,12 +53,50 @@ func passwordProbeStop(dir string) {
 
 func passwordProbeAwaitStopped(t *testing.T, pid int, deadline time.Time) {
 	t.Helper()
-	for passwordProbeRunning(pid) && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if passwordProbeRunning(pid) {
+	if !passwordProbePollStopped(func() bool { return passwordProbeRunning(pid) }, deadline) {
 		t.Error("owned process remains running at the cancellation deadline")
 	}
+}
+
+func passwordProbePollStopped(running func() bool, deadline time.Time) bool {
+	for {
+		// A terminal observation ends polling; probing again can observe a
+		// changing /proc entry and report failure before the deadline.
+		if !running() {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestPasswordProbePollStopped(t *testing.T) {
+	t.Run("terminal_observation", func(t *testing.T) {
+		calls := 0
+		stopped := passwordProbePollStopped(func() bool {
+			calls++
+			return calls > 1
+		}, time.Now().Add(time.Second))
+		if !stopped || calls != 1 {
+			t.Fatal("terminal observation was probed again instead of accepting process exit")
+		}
+	})
+	t.Run("deadline", func(t *testing.T) {
+		if passwordProbePollStopped(func() bool { return true }, time.Now()) {
+			t.Fatal("running process accepted at deadline")
+		}
+	})
+	t.Run("wait_for_exit", func(t *testing.T) {
+		calls := 0
+		if !passwordProbePollStopped(func() bool {
+			calls++
+			return calls == 1
+		}, time.Now().Add(time.Second)) {
+			t.Fatal("process exit before deadline was not accepted")
+		}
+	})
 }
 
 func TestReview_password_descendant_process(t *testing.T) {

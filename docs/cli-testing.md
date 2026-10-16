@@ -114,6 +114,11 @@ tool/server versions, fixture version, wrong-password rejection and executed
 test inventory. The temporary binary is removed after the run. Only synthetic
 fixture evidence is emitted; raw database errors, credentials and build/server
 logs are not published. Missing tests fail even when `go test` exits zero.
+Windows failures report only a fixed provisioning stage and script line number;
+stdout evidence and private stderr logs remain separate. Run
+`pwsh -NoProfile -File .github/scripts/cli-postgres.test.ps1` to check parsing,
+native-command stream separation, failure status and secret-safe diagnostics
+without provisioning a database.
 
 The original Ubuntu PostgreSQL 17/18 Docker integration/race lanes remain.
 Race tests require a supported native C toolchain and remain **separate** from
@@ -121,6 +126,12 @@ CGO-disabled shipping evidence; a race binary cannot replace the shipping binary
 Linux still requires `go test -count=1 ./...`, `task lint`, `task build`, and
 `task test:integration` against an explicitly designated disposable fixture.
 No integration `TestMain` should run against an undesignated database.
+
+The Darwin stream adapter rejects blocking output sockets rather than risking
+an uncancellable kernel send. Output sockets and FIFOs must already have
+`O_NONBLOCK` set; other owners must not clear it while the adapter is in use.
+Acquisition never changes caller-owned flags or socket options. Blocking stream
+socket input remains supported. Linux socket behavior is unchanged.
 
 ## Full acceptance handoff to pgsavvy-y2rh.14
 

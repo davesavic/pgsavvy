@@ -44,6 +44,12 @@ func openStream(ctx context.Context, file *os.File, mode int) (io.ReadWriteClose
 			if setupErr = checkStreamSocket(source); setupErr != nil {
 				return
 			}
+			// MSG_DONTWAIT does not prevent Darwin sends waiting for buffer
+			// space. A duplicate cannot change O_NONBLOCK independently.
+			if mode == os.O_WRONLY && flags&unix.O_NONBLOCK == 0 {
+				setupErr = errUnavailable
+				return
+			}
 		}
 		if info.Mode&unix.S_IFMT == unix.S_IFCHR {
 			source, setupErr = reopenCharacter(ctx, &info, mode)

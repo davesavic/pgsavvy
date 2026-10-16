@@ -92,6 +92,22 @@ func TestMachineIO_CleanupPeerFirst(t *testing.T) {
 	testJoin(t, returned, time.Second)
 }
 
+func TestMachineIO_PollTimeoutRetry(t *testing.T) {
+	left, right := testSocketPair(t, unix.SOCK_STREAM, false)
+	input, err := OpenInput(context.Background(), left)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	var waitErr error
+	go func() { waitErr = input.(*pollStream).wait(unix.POLLIN); close(done) }()
+	t.Cleanup(func() { testCleanupOwned(t, input, right, left); testJoin(t, done, time.Second) })
+	testJoin(t, done, time.Second)
+	if waitErr != nil {
+		t.Fatal("quiet descriptor did not return control for an I/O retry")
+	}
+}
+
 func testReadAll(t *testing.T, reader io.ReadCloser) []byte {
 	t.Helper()
 	done := make(chan struct{})
@@ -397,6 +413,13 @@ func TestMachineIO_Sockets(t *testing.T) {
 	if time.Since(start) > time.Second {
 		t.Fatal("socket input did not join promptly")
 	}
+	if runtime.GOOS == "darwin" {
+		testControl(t, left, func(fd int) {
+			if err := unix.SetNonblock(fd, true); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 	output, err := OpenOutput(context.Background(), left)
 	if err != nil {
 		t.Fatal(err)
@@ -464,6 +487,15 @@ func testSocketFlags(t *testing.T) {
 			}
 			t.Cleanup(func() { testCleanupOwned(t, input, right) })
 			output, err := OpenOutput(ctx, left)
+			if runtime.GOOS == "darwin" && !nonblocking {
+				if output != nil {
+					_ = output.Close()
+				}
+				if err == nil || testFlags(t, left) != before {
+					t.Fatal("blocking Darwin output socket accepted or mutated")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -547,7 +579,7 @@ func testSocketSerialization(t *testing.T) {
 			name = "queued-close"
 		}
 		t.Run(name, func(t *testing.T) {
-			left, right := testSocketPair(t, unix.SOCK_STREAM, false)
+			left, right := testSocketPair(t, unix.SOCK_STREAM, runtime.GOOS == "darwin")
 			testControl(t, left, func(fd int) {
 				if err := unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_SNDBUF, 4096); err != nil {
 					t.Fatal(err)
@@ -633,6 +665,11 @@ func testSocketResources(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if runtime.GOOS == "darwin" {
+			if err := unix.SetNonblock(fds[0], true); err != nil {
+				t.Fatal(err)
+			}
+		}
 		left, right := os.NewFile(uintptr(fds[0]), "resource-left"), os.NewFile(uintptr(fds[1]), "resource-right")
 		defer func() { _ = left.Close() }()
 		defer func() { _ = right.Close() }()
@@ -669,18 +706,11 @@ func testSocketResources(t *testing.T) {
 		testJoin(t, done, time.Second)
 	}
 	cycle()
-	inventory := func() int {
-		entries, err := os.ReadDir("/dev/fd")
-		if err != nil {
-			t.Fatal(err)
-		}
-		return len(entries)
-	}
-	fds, goroutines := inventory(), runtime.NumGoroutine()
+	fds, goroutines := testDescriptorCount(t), runtime.NumGoroutine()
 	for range 20 {
 		cycle()
 	}
-	if got := inventory(); got != fds {
+	if got := testDescriptorCount(t); got != fds {
 		t.Fatalf("descriptor leak: %d -> %d", fds, got)
 	}
 	if got := runtime.NumGoroutine(); got != goroutines {
@@ -791,23 +821,31 @@ func TestMachineIO_FIFOResources(t *testing.T) {
 		testJoin(t, done, time.Second)
 	}
 	cycle()
-	inventory := func() int {
-		entries, err := os.ReadDir("/dev/fd")
-		if err != nil {
-			t.Fatal(err)
-		}
-		return len(entries)
-	}
-	fds, goroutines := inventory(), runtime.NumGoroutine()
+	fds, goroutines := testDescriptorCount(t), runtime.NumGoroutine()
 	for range 20 {
 		cycle()
 	}
-	if got := inventory(); got != fds {
+	if got := testDescriptorCount(t); got != fds {
 		t.Fatalf("FIFO descriptor leak %d -> %d", fds, got)
 	}
 	if got := runtime.NumGoroutine(); got != goroutines {
 		t.Fatalf("FIFO operation leak %d -> %d", goroutines, got)
 	}
+}
+
+func testDescriptorCount(t *testing.T) int {
+	t.Helper()
+	dir, err := os.Open("/dev/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Names suffice; statting Darwin kqueue descriptors can fail with EBADF.
+	names, readErr := dir.Readdirnames(-1)
+	closeErr := dir.Close()
+	if readErr != nil || closeErr != nil {
+		t.Fatalf("descriptor inventory: %v", errors.Join(readErr, closeErr))
+	}
+	return len(names)
 }
 
 func TestMachineIO_TerminalFlags(t *testing.T) {

@@ -50,16 +50,16 @@ func (f *pollStream) wait(events int16) error {
 			return os.ErrClosed
 		}
 		fds := []unix.PollFd{{Fd: int32(f.fd), Events: events}}
-		n, err := unix.Poll(fds, 10)
+		_, err := unix.Poll(fds, 10)
 		if err == unix.EINTR {
 			continue
 		}
 		if err != nil || fds[0].Revents&unix.POLLNVAL != 0 {
 			return errUnavailable
 		}
-		if n != 0 {
-			return nil
-		}
+		// Darwin FIFO writer closure need not produce readiness. Retry the
+		// nonblocking syscall after a timeout so it can observe EOF.
+		return nil
 	}
 }
 

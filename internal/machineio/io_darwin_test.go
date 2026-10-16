@@ -2,15 +2,61 @@ package machineio
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
+
+func TestMachineIO_BlockingSocketOutputRejected(t *testing.T) {
+	left, right := testSocketPair(t, unix.SOCK_STREAM, false)
+	before := testFlags(t, left)
+	output, err := OpenOutput(context.Background(), left)
+	if output != nil {
+		_ = output.Close()
+	}
+	if output != nil || !errors.Is(err, errUnavailable) || testFlags(t, left) != before {
+		t.Fatal("blocking output socket accepted or mutated")
+	}
+	if _, err := left.Write([]byte("ok")); err != nil {
+		t.Fatal("rejection disabled borrowed socket")
+	}
+	var got [2]byte
+	if _, err := io.ReadFull(right, got[:]); err != nil || string(got[:]) != "ok" {
+		t.Fatal("rejection changed borrowed socket delivery")
+	}
+	input, err := OpenInput(context.Background(), left)
+	if err != nil {
+		t.Fatal("blocking socket input must remain supported")
+	}
+	done := make(chan struct{})
+	go func() { _, _ = input.Read(got[:]); close(done) }()
+	t.Cleanup(func() { testCleanupOwned(t, input, right, left); testJoin(t, done, time.Second) })
+	_ = input.Close()
+	testJoin(t, done, time.Second)
+	if testFlags(t, left) != before {
+		t.Fatal("input close changed borrowed socket flags")
+	}
+}
+
+func TestMachineIO_KqueueDescriptorInventory(t *testing.T) {
+	// Warm the inventory before comparing counts.
+	before := testDescriptorCount(t)
+	fd, err := unix.Kqueue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unix.Close(fd) })
+	if got := testDescriptorCount(t); got != before+1 {
+		t.Fatalf("kqueue descriptor was not counted: %d -> %d", before, got)
+	}
+}
 
 func TestMachineIO_BlockingFIFORejected(t *testing.T) {
 	read, write, err := os.Pipe()

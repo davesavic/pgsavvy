@@ -8,9 +8,11 @@ $root = $null
 $owned = $false
 $pg = $null
 $failed = $false
+$stage = 'toolchain'
 
 function Invoke-Checked([string]$File, [string[]]$Arguments, [string]$Log) {
-    & $File @Arguments > $Log 2>&1
+    # Keep machine-readable stdout separate from native tool diagnostics.
+    & $File @Arguments > $Log 2> "$Log.err"
     if ($LASTEXITCODE -ne 0) { throw 'native fixture command failed' }
 }
 
@@ -20,22 +22,24 @@ try {
     if ($arch -eq 'x64') { $arch = 'amd64' }
     if ($arch -notin @('amd64', 'arm64')) { throw 'unsupported host architecture' }
     foreach ($key in @('GOOS', 'GOHOSTOS')) {
-        $value = & go env $key
+        $value = & go env $key 2> $null
         if ($LASTEXITCODE -ne 0 -or $value -ne 'windows') { throw 'non-native Go toolchain' }
     }
     foreach ($key in @('GOARCH', 'GOHOSTARCH')) {
-        $value = & go env $key
+        $value = & go env $key 2> $null
         if ($LASTEXITCODE -ne 0 -or $value -ne $arch) { throw 'non-native Go toolchain' }
     }
-    $goVersion = & go env GOVERSION
+    $goVersion = & go env GOVERSION 2> $null
     if ($LASTEXITCODE -ne 0 -or $goVersion -ne 'go1.26.9') { throw 'Go 1.26.9 required' }
     if ($env:PGSAVVY_EXPECT_GOOS -and $env:PGSAVVY_EXPECT_GOOS -ne 'windows') { throw 'wrong runner OS' }
     if ($env:PGSAVVY_EXPECT_GOARCH -and $env:PGSAVVY_EXPECT_GOARCH -ne $arch) { throw 'wrong runner architecture' }
 
+    $stage = 'directory'
     $temp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
     $root = Join-Path $temp ('pgsavvy-native.' + [guid]::NewGuid().ToString('N'))
     $null = New-Item -ItemType Directory -Path $root
     $owned = $true
+    $stage = 'acl'
     $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
     $acl = [Security.AccessControl.DirectorySecurity]::new()
     $acl.SetOwner($user)
@@ -44,6 +48,7 @@ try {
     $rule = [Security.AccessControl.FileSystemAccessRule]::new($user, 'FullControl', $inherit, 'None', 'Allow')
     $acl.AddAccessRule($rule)
     Set-Acl -LiteralPath $root -AclObject $acl
+    $stage = 'manifest'
     $manifest = Get-Content -Raw (Join-Path $PSScriptRoot 'cli-postgres-versions.json') | ConvertFrom-Json
     if ($manifest.schema_version -ne 1) { throw 'invalid artifact manifest' }
     $entry = $manifest.postgres.$Major
@@ -54,13 +59,18 @@ try {
     $expectedUrl = 'https://get.enterprisedb.com/postgresql/postgresql-' + $entry.version + '-' + $pin.revision + '-windows-x64-binaries.zip'
     if ($pin.url -cne $expectedUrl) { throw 'unapproved artifact URL' }
     $archive = Join-Path $root 'postgres.zip'
+    $stage = 'download'
     Invoke-WebRequest -Uri $pin.url -OutFile $archive -TimeoutSec 600 -MaximumRedirection 0
+    $stage = 'digest'
     if ((Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() -cne $pin.sha256) { throw 'PostgreSQL artifact digest mismatch' }
+    $stage = 'extraction'
     Expand-Archive -LiteralPath $archive -DestinationPath $root
+    $stage = 'tools-version'
     $pg = Join-Path $root 'pgsql/bin'
-    $toolsVersion = & (Join-Path $pg 'psql.exe') --version
+    $toolsVersion = & (Join-Path $pg 'psql.exe') --version 2> (Join-Path $root 'tools-version.err')
     if ($LASTEXITCODE -ne 0 -or $toolsVersion -cne ('psql (PostgreSQL) ' + $entry.version)) { throw 'unexpected PostgreSQL tools' }
 
+    $stage = 'environment'
     foreach ($name in @('PGHOST', 'PGHOSTADDR', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD', 'PGSERVICE', 'PGOPTIONS')) {
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
@@ -76,7 +86,9 @@ try {
     $passwordFile = Join-Path $root 'password'
     [IO.File]::WriteAllText($passwordFile, "$password`n", [Text.UTF8Encoding]::new($false))
     $data = Join-Path $root 'data'
+    $stage = 'initdb'
     Invoke-Checked (Join-Path $pg 'initdb.exe') @('-D', $data, '-U', 'pgsavvy', '--encoding=UTF8', '--no-locale', '--auth-local=scram-sha-256', '--auth-host=scram-sha-256', "--pwfile=$passwordFile") (Join-Path $root 'init.log')
+    $stage = 'startup'
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start()
     $port = $listener.LocalEndpoint.Port
@@ -84,12 +96,15 @@ try {
     Add-Content (Join-Path $data 'postgresql.conf') "`nlisten_addresses = '127.0.0.1'`nport = $port`nunix_socket_directories = ''"
     Invoke-Checked (Join-Path $pg 'pg_ctl.exe') @('-D', $data, '-l', (Join-Path $root 'server.log'), '-w', '-t', '30', 'start') (Join-Path $root 'start.log')
     $env:PGPASSWORD = $password
+    $stage = 'createdb'
     Invoke-Checked (Join-Path $pg 'createdb.exe') @('-h', '127.0.0.1', '-p', "$port", '-U', 'pgsavvy', 'pgsavvy_test') (Join-Path $root 'createdb.log')
     $psql = Join-Path $pg 'psql.exe'
     $connection = @('-X', '-w', '-h', '127.0.0.1', '-p', "$port", '-U', 'pgsavvy', '-d', 'pgsavvy_test', '-v', 'ON_ERROR_STOP=1')
+    $stage = 'fixture'
     Invoke-Checked $psql ($connection + @('-f', (Join-Path $repo 'docker/postgres/init/01_fixture.sql'))) (Join-Path $root 'fixture.log')
     Invoke-Checked $psql ($connection + @('-Atc', 'SELECT 1')) (Join-Path $root 'ready')
     if ((Get-Content -Raw (Join-Path $root 'ready')).Trim() -ne '1') { throw 'fixture not ready' }
+    $stage = 'authentication'
     $env:PGPASSWORD = 'deliberately-wrong'
     & $psql @connection -Atc 'SELECT 1' > (Join-Path $root 'wrong.out') 2> (Join-Path $root 'wrong.err')
     $wrongExit = $LASTEXITCODE
@@ -97,6 +112,7 @@ try {
     if ($wrongExit -eq 0 -or -not (Select-String -Quiet -SimpleMatch 'password authentication failed' (Join-Path $root 'wrong.err'))) {
         throw 'wrong-password rejection not proven'
     }
+    $stage = 'facts'
     $sql = "SELECT current_setting('server_version_num'), current_setting('server_encoding'), (SELECT version FROM app._fixture_meta), rolsuper FROM pg_roles WHERE rolname = current_user"
     Invoke-Checked $psql ($connection + @('-Atc', $sql)) (Join-Path $root 'facts')
     $facts = (Get-Content -Raw (Join-Path $root 'facts')).Trim().Split('|')
@@ -107,15 +123,20 @@ try {
     $env:CGO_ENABLED = '0'
     Push-Location $repo
     try {
+        $stage = 'probe'
         Invoke-Checked 'go' @('run', './internal/pgprobe') (Join-Path $root 'probe.log')
+        $stage = 'build'
         $binary = Join-Path $root 'pgsavvy.exe'
         Invoke-Checked 'go' @('build', '-ldflags', '-X main.version=native-preflight -X main.buildSource=fixture', '-o', $binary, '.') (Join-Path $root 'go-build.log')
         $env:PGSAVVY_TEST_BINARY = $binary
+        $stage = 'binary-version'
         Invoke-Checked $binary @('--version') (Join-Path $root 'version')
         if (-not (Select-String -Quiet -SimpleMatch 'native-preflight' (Join-Path $root 'version'))) { throw 'legacy version route failed' }
         $selector = '^TestMachineCLI_(Dispatch|ExitCodes|Envelope|Envelope_ParentDeadlineAndInput|OutputLimit|BrokenWriter)$'
+        $stage = 'tests'
         Invoke-Checked 'go' @('test', '-json', '-count=1', '-timeout', '5m', './pkg/cli', '-run', $selector) (Join-Path $root 'tests.jsonl')
     } finally { Pop-Location }
+    $stage = 'evidence'
     $events = @(Get-Content (Join-Path $root 'tests.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
     if (@($events | Where-Object { $_.Action -in @('skip', 'fail') }).Count -ne 0) { throw 'baseline contains skipped/failed tests' }
     $passed = @($events | Where-Object { $_.Action -eq 'pass' -and $_.Test } | ForEach-Object { $_.Test })
@@ -132,7 +153,7 @@ try {
 } catch {
     $failed = $true
     # Do not publish raw tool errors; they can include environment/connection text.
-    [Console]::Error.WriteLine('native fixture preflight failed; no native support evidence established')
+    [Console]::Error.WriteLine('native fixture preflight failed (stage=' + $stage + '; line=' + [int]$_.InvocationInfo.ScriptLineNumber + '); no native support evidence established')
 } finally {
     if ($owned) {
         try {
@@ -149,7 +170,7 @@ try {
             Remove-Item -LiteralPath $root -Recurse -Force
         } catch {
             $failed = $true
-            [Console]::Error.WriteLine('owned fixture cleanup failed; retained fixture: ' + $root)
+            [Console]::Error.WriteLine('owned fixture cleanup failed; retained owned fixture')
         }
     }
 }
