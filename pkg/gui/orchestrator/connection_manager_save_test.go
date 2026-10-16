@@ -203,18 +203,18 @@ func TestConnectionManagerSaveSSHTunnelRoundTrip(t *testing.T) {
 	if err := g.Controllers().ConnectionManager.Add(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	// SSH is gated behind use_ssh_tunnel @ 15. Toggling it on reveals the SSH
-	// detail rows: ssh_auth(16) ssh_host(17) ssh_user(18) ssh_port(19) ...
+	// SSH is gated behind use_ssh_tunnel @ 16. Toggling it on reveals the SSH
+	// detail rows: ssh_auth(17) ssh_host(18) ssh_user(19) ssh_port(20) ...
 	// (identity_file is hidden under the default agent auth method).
 	modal.FormSetFocusedValue("ssh-conn") // name @ 0
-	modal.FormMoveFocus(15)               // use_ssh_tunnel @ 15
+	modal.FormMoveFocus(16)               // use_ssh_tunnel @ 16
 	modal.FormToggleFocused()             // enable tunnel; auth defaults to agent
-	modal.FormMoveFocus(2)                // ssh_host @ 17 (past ssh_auth @ 16)
+	modal.FormMoveFocus(2)                // ssh_host @ 18 (past ssh_auth @ 17)
 	modal.FormSetFocusedValue("bastion.prod")
 	modal.FormMoveFocus(1)
-	modal.FormSetFocusedValue("deploy") // ssh_user @ 18
+	modal.FormSetFocusedValue("deploy") // ssh_user @ 19
 	modal.FormMoveFocus(1)
-	modal.FormSetFocusedValue("2222") // ssh_port @ 19
+	modal.FormSetFocusedValue("2222") // ssh_port @ 20
 	// IdentityFromAgent is set from the agent auth method at save (applySSHAuth).
 
 	if err := g.Controllers().ConnectionManager.Confirm(commands.ExecCtx{}); err != nil {
@@ -321,5 +321,112 @@ func TestConnectionManagerSaveErrorStampsFormError(t *testing.T) {
 	if !strings.Contains(body, i18n.EnglishTranslationSet().SaveConnectionFailed) {
 		t.Fatalf("form body missing stamped error %q; body=%q",
 			i18n.EnglishTranslationSet().SaveConnectionFailed, body)
+	}
+}
+
+func TestConnectionManagerCLIAccessSave(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		add      bool
+		initial  models.CLIAccess
+		cycles   int
+		want     models.CLIAccess
+		stale    bool
+		conflict bool
+		cancel   bool
+		rename   bool
+	}{
+		{name: "add-default", add: true},
+		{name: "add-metadata", add: true, cycles: 1, want: models.CLIAccessMetadata},
+		{name: "add-row-read", add: true, cycles: 2, want: models.CLIAccessRowRead},
+		{name: "enable", cycles: 1, want: models.CLIAccessMetadata},
+		{name: "upgrade-and-rename", initial: models.CLIAccessMetadata, cycles: 1, want: models.CLIAccessRowRead, rename: true},
+		{name: "revoke", initial: models.CLIAccessRowRead, cycles: 1, want: models.CLIAccessDisabled},
+		{name: "untouched-legacy"},
+		{name: "untouched-revoked", initial: models.CLIAccessRowRead, stale: true, want: models.CLIAccessDisabled},
+		{name: "cycled-back-revoked", initial: models.CLIAccessRowRead, cycles: 3, stale: true, want: models.CLIAccessDisabled},
+		{name: "stale-explicit-change", initial: models.CLIAccessRowRead, cycles: 2, stale: true, conflict: true, want: models.CLIAccessDisabled},
+		{name: "cancel", initial: models.CLIAccessMetadata, cycles: 1, cancel: true, want: models.CLIAccessMetadata},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			const path = "/cfg/connections.yml"
+			if !tc.add {
+				if err := config.SaveConnections(fs, path, []models.Connection{{Name: "dev", Driver: "postgres", CLIAccess: tc.initial}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			g, rec := bootstrapSaveGui(t, fs, path)
+			modal := pushModal(t, g)
+			ctrl := g.Controllers().ConnectionManager
+			if tc.add {
+				if err := ctrl.Add(commands.ExecCtx{}); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := ctrl.Edit(commands.ExecCtx{}); err != nil {
+				t.Fatal(err)
+			}
+			name := "dev"
+			if tc.rename {
+				name = "renamed"
+			}
+			modal.FormSetFocusedValue(name)
+			for range 40 {
+				if modal.FormFocusedLabel() == "cli_access" {
+					break
+				}
+				modal.FormMoveFocus(1)
+			}
+			if modal.FormFocusedLabel() != "cli_access" {
+				t.Fatal("CLI access selector unavailable")
+			}
+			for range tc.cycles {
+				if err := ctrl.Edit(commands.ExecCtx{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.stale {
+				if err := config.SaveConnections(fs, path, []models.Connection{{Name: "dev", Driver: "postgres", CLIAccess: models.CLIAccessDisabled}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, _ := afero.ReadFile(fs, path)
+			if tc.cancel {
+				if err := ctrl.Close(commands.ExecCtx{}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				err := ctrl.Confirm(commands.ExecCtx{})
+				if tc.conflict {
+					if !errors.Is(err, config.ErrConnectionsChanged) || modal.Mode() != guicontext.ModeForm {
+						t.Fatalf("stale edit error = %v, mode = %v", err, modal.Mode())
+					}
+					if err := g.RunLayout(180, 42); err != nil {
+						t.Fatal(err)
+					}
+					if body := rec.GetViewBuffer(string(types.CONNECTION_MANAGER)); !strings.Contains(body, "close and reopen") {
+						t.Fatalf("missing conflict recovery message: %q", body)
+					}
+				} else if err != nil || modal.Mode() != guicontext.ModeList {
+					t.Fatalf("save error = %v, mode = %v", err, modal.Mode())
+				}
+			}
+			after, err := afero.ReadFile(fs, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (tc.cancel || tc.conflict) && string(before) != string(after) {
+				t.Fatal("cancelled or stale edit wrote to disk")
+			}
+			got, err := config.LoadConnections(fs, path)
+			if err != nil || len(got) != 1 || got[0].CLIAccess != tc.want || got[0].Name != name {
+				t.Fatalf("saved profiles = %v, error = %v; want policy %q, name %q", got, err, tc.want, name)
+			}
+			if !tc.cancel && !tc.conflict {
+				if row, ok := modal.SelectedItem().(*models.Connection); !ok || row.CLIAccess != tc.want {
+					t.Fatal("saved policy not reflected in refreshed connection list")
+				}
+			}
+		})
 	}
 }

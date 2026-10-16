@@ -248,6 +248,14 @@ func (c *ConnectionManagerContext) FormConnection() models.Connection {
 	return c.form.materializedConnection()
 }
 
+// FormCLIAccessChange distinguishes an intentional policy change from an
+// unrelated edit, which must preserve the latest policy on disk.
+func (c *ConnectionManagerContext) FormCLIAccessChange() (original models.CLIAccess, changed bool) {
+	original = c.form.originalCLIAccess
+	initial := models.Connection{CLIAccess: original}
+	return original, c.form.isEdit && c.form.conn.EffectiveCLIAccess() != initial.EffectiveCLIAccess()
+}
+
 // SetLabelWrapWidth records the modal's inner column count so the form clips
 // its inline err/status line to a single physical row. The layout pass
 // (layoutConnectionManagerMain) calls this each frame with the live view's
@@ -324,13 +332,14 @@ func (c *ConnectionManagerContext) OpenEditForm(conn models.Connection, existing
 	conn = migrateLegacyDSN(copyFormConnection(conn))
 	sshEnabled, sshAuth := deriveSSHAuth(conn)
 	c.form = connForm{
-		conn:          conn,
-		sshEnabled:    sshEnabled,
-		sshAuth:       sshAuth,
-		isEdit:        true,
-		originalName:  conn.Name,
-		existingNames: existingNames,
-		driversFn:     driversFn,
+		conn:              conn,
+		sshEnabled:        sshEnabled,
+		sshAuth:           sshAuth,
+		isEdit:            true,
+		originalName:      conn.Name,
+		originalCLIAccess: conn.CLIAccess,
+		existingNames:     existingNames,
+		driversFn:         driversFn,
 	}
 	c.mode = ModeForm
 }

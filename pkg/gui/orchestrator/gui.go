@@ -10,6 +10,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -1261,11 +1262,18 @@ func (g *Gui) saveConnectionForm(conn models.Connection, isEdit bool, originalNa
 	write := func() error { return config.AppendConnection(fs, g.deps.ConnectionsPath, conn) }
 	if isEdit {
 		write = func() error {
+			if original, changed := g.registry.ConnectionManager.FormCLIAccessChange(); changed {
+				return config.UpdateConnectionWithCLIAccess(fs, g.deps.ConnectionsPath, originalName, conn, original)
+			}
 			return config.UpdateConnection(fs, g.deps.ConnectionsPath, originalName, conn)
 		}
 	}
 	if err := write(); err != nil {
-		g.registry.ConnectionManager.FormSetError(g.deps.Common.Tr.SaveConnectionFailed)
+		msg := g.deps.Common.Tr.SaveConnectionFailed
+		if errors.Is(err, config.ErrConnectionsChanged) {
+			msg += ": connections changed; close and reopen the edit form"
+		}
+		g.registry.ConnectionManager.FormSetError(msg)
 		return err
 	}
 	g.refreshConnectionManagerRail()

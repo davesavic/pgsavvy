@@ -218,6 +218,29 @@ func TestController_FieldEditRejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestController_CLIAccessIsSelector(t *testing.T) {
+	ctx := newFormCtx()
+	prompt := &capturePrompt{}
+	ctrl := newFormController(ctx, prompt, nil)
+	ctx.OpenEditForm(models.Connection{Name: "dev"}, nil, driverNames)
+	for range 40 {
+		if ctx.FormFocusedLabel() == "cli_access" {
+			break
+		}
+		ctx.FormMoveFocus(1)
+	}
+	if ctx.FormFocusedLabel() != "cli_access" {
+		t.Fatal("CLI access selector unavailable")
+	}
+	for i, action := range []string{commands.ConnectionManagerEdit, commands.ConnectionManagerToggle, commands.ConnectionManagerEdit} {
+		dispatchCM(t, ctrl, action)
+		want := []models.CLIAccess{models.CLIAccessMetadata, models.CLIAccessRowRead, models.CLIAccessDisabled}[i]
+		if got := ctx.FormConnection().CLIAccess; got != want || prompt.active {
+			t.Fatalf("policy = %q, want %q; text prompt active = %v", got, want, prompt.active)
+		}
+	}
+}
+
 // TestController_ToggleFlipsBool asserts space on a toggle field flips it; the
 // flip survives into the saved connection.
 func TestController_ToggleFlipsBool(t *testing.T) {
