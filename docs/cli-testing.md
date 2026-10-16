@@ -114,18 +114,37 @@ tool/server versions, fixture version, wrong-password rejection and executed
 test inventory. The temporary binary is removed after the run. Only synthetic
 fixture evidence is emitted; raw database errors, credentials and build/server
 logs are not published. Missing tests fail even when `go test` exits zero.
-Windows failures report a fixed provisioning stage and script line number.
-Before cleanup, initdb failures additionally report one allowlisted diagnostic
-class: `windows-admin`, `windows-token`, `child-exec`, `file-io`, `input-config`,
-`child-io`, or `unknown`. Classification reads at most 64 KiB from each private
-stdout/stderr log; missing, unreadable, oversized or unrecognized/localized logs
-produce `unknown`. These codes identify observed message types, not proven root
-causes. Raw messages, paths, passwords and captured values are never published;
-private logs are still deleted by owned cleanup. stdout evidence and private
-stderr logs remain separate. Run
+Windows failures report a fixed provisioning stage and script line number;
+the real initdb command also reports its numeric exit code. Its logs remain
+private and are deleted by owned cleanup.
+
+An explicitly approved exception publishes bounded, scrubbed **secret-free
+probe** diagnostics before the real fixture password is generated. The probe
+runs `initdb --version`, `postgres --version`, and initialization with the same
+SCRAM/pwfile arguments but a public synthetic password. It uses a fresh owned
+directory and a child-only environment allowlist, with owned profile/temp paths
+and no inherited credentials, PostgreSQL overrides or restriction bypass. Stdin
+is closed, so the probe cannot consume caller input. It
+never starts a listening server; initdb's bootstrap/single-user child processes
+are still exercised. Probe success is not a replacement for the unchanged
+random-password fixture, wrong-password rejection or CLI tests.
+
+Probe JSON records preserve previously unrecognized error text, launch errors,
+decimal/hex exit codes and timeout/capture status. Each stdout/stderr capture
+retains at most 65,536 characters and drains excess without retaining it.
+Incomplete trailing lines are dropped at the capture boundary; known owned,
+repository, profile and temporary paths plus OS account/domain/host names are
+scrubbed before publication is limited to 4,096 characters per stream. Case and
+slash variants are scrubbed, and JSON encoding escapes control characters.
+Legacy runner-command markers are JSON-escaped too. Invalid UTF-8 fails capture
+without publishing undecodable text.
+Each command has a 120-second timeout; failed process/pipe cleanup retains the
+owned fixture and fails the lane rather than deleting potentially active data.
+No secret-bearing fixture logs or diagnostic artifacts are published. Run
 `pwsh -NoProfile -File .github/scripts/cli-postgres.test.ps1` to check parsing,
-native-command stream separation, failure status and secret-safe diagnostics
-without provisioning a database.
+native-command stream separation, failure status, argument/environment isolation,
+bounded capture, sanitization and cleanup using synthetic native helpers without
+provisioning a database.
 
 The original Ubuntu PostgreSQL 17/18 Docker integration/race lanes remain.
 Race tests require a supported native C toolchain and remain **separate** from

@@ -9,77 +9,14 @@ $owned = $false
 $pg = $null
 $failed = $false
 $stage = 'toolchain'
+$probeCleanupFailed = $false
 
 function Invoke-Checked([string]$File, [string[]]$Arguments, [string]$Log) {
     # Keep machine-readable stdout separate from native tool diagnostics.
+    $script:lastNativeExit = $null
     & $File @Arguments > $Log 2> "$Log.err"
-    if ($LASTEXITCODE -ne 0) { throw 'native fixture command failed' }
-}
-
-function Get-InitdbFailureCode([string]$Log) {
-    try {
-        $texts = @()
-        foreach ($path in @($Log, "$Log.err")) {
-            $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-            try {
-                if ($stream.Length -gt 65536) { return 'unknown' }
-                $buffer = [byte[]]::new(65536)
-                $count = 0
-                while ($count -lt $buffer.Length) {
-                    $read = $stream.Read($buffer, $count, $buffer.Length - $count)
-                    if ($read -eq 0) { break }
-                    $count += $read
-                }
-                if ($stream.Length -gt 65536) { return 'unknown' }
-                $texts += [Text.Encoding]::UTF8.GetString($buffer, 0, $count)
-            } finally { $stream.Dispose() }
-        }
-        $timeout = [TimeSpan]::FromMilliseconds(100)
-        $options = [Text.RegularExpressions.RegexOptions]::CultureInvariant
-        if ([regex]::IsMatch($texts[1], '(?m)^Execution of PostgreSQL by a user with administrative permissions is not\r?\npermitted\.\r?$', $options, $timeout)) {
-            return 'windows-admin'
-        }
-        # PostgreSQL 17/18 message templates only; captures and raw diagnostics
-        # never leave the owned directory. Priority is fixed by this table.
-        $patterns = [ordered]@{
-            'windows-token' = @(
-                'could not (?:open process token|allocate SIDs|create restricted token|re-execute with restricted token|get exit code from subprocess): error code [0-9]+',
-                'could not start process for command "[^\r\n]*": error code [0-9]+'
-            )
-            'child-exec' = @(
-                'could not execute command "[^\r\n]*": [^\r\n]+',
-                'program "[^"\r\n]*" is needed by [^\r\n]+ but was not found in the same directory as "[^"\r\n]*"',
-                'program "[^"\r\n]*" was found by "[^"\r\n]*" but was not the same version as [^\r\n]+'
-            )
-            'file-io' = @(
-                'could not (?:create|access) directory "[^"\r\n]*": [^\r\n]+',
-                'could not change permissions of (?:directory )?"[^"\r\n]*": [^\r\n]+',
-                'could not open file "[^"\r\n]*" for (?:reading|writing): [^\r\n]+',
-                'could not (?:access|write|close) file "[^"\r\n]*": [^\r\n]+',
-                'could not read password from file "[^"\r\n]*": [^\r\n]+',
-                'password file "[^"\r\n]*" is empty',
-                'directory "[^"\r\n]*" exists but is not empty',
-                'could not create symbolic link "[^"\r\n]*": [^\r\n]+'
-            )
-            'input-config' = @(
-                'file "[^"\r\n]*" (?:does not exist|is not a regular file)',
-                'input file "[^"\r\n]*" does not belong to PostgreSQL [^\r\n]+',
-                'invalid locale settings; check LANG and LC_\* environment variables',
-                'invalid locale name "[^"\r\n]*"(?: for builtin provider)?',
-                'encoding mismatch',
-                'invalid authentication method "[^"\r\n]*" for "[^"\r\n]*" connections',
-                '"[^"\r\n]*" is not a valid server encoding name'
-            )
-        }
-        foreach ($entry in $patterns.GetEnumerator()) {
-            $pattern = '(?m)^initdb(?:\.exe)?: error: (?:' + ($entry.Value -join '|') + ')\r?$'
-            if ([regex]::IsMatch($texts[1], $pattern, $options, $timeout)) { return $entry.Key }
-        }
-        if ([regex]::IsMatch($texts[0], '(?m)^(?:running bootstrap script \.\.\. )?could not write to child process: [^\r\n]+\r?$', $options, $timeout)) {
-            return 'child-io'
-        }
-    } catch { return 'unknown' }
-    return 'unknown'
+    $script:lastNativeExit = $LASTEXITCODE
+    if ($script:lastNativeExit -ne 0) { throw 'native fixture command failed' }
 }
 
 try {
@@ -148,6 +85,10 @@ try {
     $env:XDG_DATA_HOME = Join-Path $root 'share'
     $env:XDG_STATE_HOME = Join-Path $root 'state'
     $env:XDG_CACHE_HOME = Join-Path $root 'cache'
+    $stage = 'initdb-probe'
+    . (Join-Path $PSScriptRoot 'cli-initdb-probe.ps1')
+    $windowsDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::Windows)
+    if (-not (Invoke-InitdbProbe $pg $root $repo $windowsDirectory ([ref]$probeCleanupFailed))) { throw 'secret-free initdb probe failed' }
     $password = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant()
     $passwordFile = Join-Path $root 'password'
     [IO.File]::WriteAllText($passwordFile, "$password`n", [Text.UTF8Encoding]::new($false))
@@ -221,12 +162,13 @@ try {
     # Do not publish raw tool errors; they can include environment/connection text.
     $diagnostic = 'stage=' + $stage + '; line=' + [int]$_.InvocationInfo.ScriptLineNumber
     if ($stage -ceq 'initdb') {
-        $diagnostic += '; initdb=' + (Get-InitdbFailureCode (Join-Path $root 'init.log'))
+        $diagnostic += '; native_exit=' + $script:lastNativeExit
     }
     [Console]::Error.WriteLine('native fixture preflight failed (' + $diagnostic + '); no native support evidence established')
 } finally {
     if ($owned) {
         try {
+            if ($probeCleanupFailed) { throw 'probe process cleanup incomplete' }
             $stopped = $true
             if (Test-Path (Join-Path $root 'data/postmaster.pid')) {
                 & (Join-Path $pg 'pg_ctl.exe') -D (Join-Path $root 'data') -m immediate -w -t 30 stop > (Join-Path $root 'stop.log') 2>&1
