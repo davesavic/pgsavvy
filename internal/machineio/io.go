@@ -1,6 +1,14 @@
 //go:build linux || darwin
 
 // Package machineio owns cancellable copies of inherited machine CLI streams.
+// Stream sockets use per-call nonblocking I/O without changing borrowed flags
+// or socket options. Unsupported socket kinds fail acquisition. Borrowed handles
+// may be closed after acquisition; Close affects only the owned stream.
+// Linux FIFOs reopen independently (O_DIRECT-marked descriptors are rejected).
+// Darwin FIFOs must already be nonblocking, and other owners must not clear
+// O_NONBLOCK during use. Reopen/identity failures reject without a dup fallback.
+// Regular files retain shared offsets/append semantics and cannot promise hard
+// cancellation of arbitrary kernel I/O. Terminals reopen without changing termios.
 package machineio
 
 import (
