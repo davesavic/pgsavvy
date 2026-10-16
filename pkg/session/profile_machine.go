@@ -25,7 +25,7 @@ func BuildMachineConfig(ctx context.Context, profile models.Connection) (*pgx.Co
 	cfg.OnNotice = nil
 	cfg.OnNotification = nil
 	cfg.DefaultQueryExecMode = pgx.QueryExecModeExec
-	for name, value := range map[string]string{"application_name": "pgsavvy-machine", "default_transaction_read_only": "on", "client_encoding": "UTF8", "DateStyle": "ISO", "TimeZone": "UTC", "IntervalStyle": "postgres", "bytea_output": "hex", "extra_float_digits": "3", "statement_timeout": strconv.Itoa(MachineStatementMilliseconds(profile.StatementTimeout)), "lock_timeout": "1000"} {
+	for name, value := range map[string]string{"application_name": "pgsavvy-machine", "client_encoding": "UTF8", "DateStyle": "ISO", "TimeZone": "UTC", "IntervalStyle": "postgres", "bytea_output": "hex", "extra_float_digits": "3", "statement_timeout": strconv.Itoa(MachineStatementMilliseconds(profile.StatementTimeout)), "lock_timeout": "1000"} {
 		cfg.RuntimeParams[name] = value
 	}
 	return cfg, nil

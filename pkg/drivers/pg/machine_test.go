@@ -251,7 +251,10 @@ func TestMachineOpen_Initialization(t *testing.T) {
 			t.Errorf("initialization missing %s", sql)
 		}
 	}
-	if fixture.startup["default_transaction_read_only"] != "on" || fixture.startup["client_encoding"] != "UTF8" || fixture.connections.Load() != 1 {
+	if _, present := fixture.startup["default_transaction_read_only"]; present {
+		t.Fatal("read-only startup default precedes target selection")
+	}
+	if fixture.startup["client_encoding"] != "UTF8" || fixture.connections.Load() != 1 {
 		t.Fatal("startup defaults/single ownership lost")
 	}
 }
