@@ -26,7 +26,7 @@ func TestMachineAccess_FormPreservation(t *testing.T) {
 		if err := c.HandleRender(); err != nil {
 			t.Fatal(err)
 		}
-		if len(c.form.focusableSpecs()) != 24 {
+		if len(c.form.focusableSpecs()) != 25 {
 			t.Fatalf("unexpected form controls: %d", len(c.form.focusableSpecs()))
 		}
 	}
@@ -48,7 +48,7 @@ func TestForm_RendersAllFunctionalRows(t *testing.T) {
 	for _, want := range []string{
 		"name:", "driver:", "host:", "port:", "user:", "database:", "sslmode:",
 		"read_only:", "confirm_writes:",
-		"confirm_ddl:", "statement_timeout:", "color:", "label:", "icon:", "tags:",
+		"confirm_ddl:", "cli_access:", "statement_timeout:", "color:", "label:", "icon:", "tags:",
 		"use_ssh_tunnel:",
 		"keyring:", "pgpass:", "password_command:",
 	} {
@@ -76,9 +76,7 @@ func TestForm_RendersAllFunctionalRows(t *testing.T) {
 	}
 
 	// Toggle the tunnel on and re-render: the SSH detail rows now appear.
-	for range 15 {
-		c.FormMoveFocus(1)
-	}
+	c.FormMoveFocus(c.form.focusIndexOf(fieldUseSSHTunnel))
 	if c.form.focusedSpec().id != fieldUseSSHTunnel {
 		t.Fatalf("expected focus on use_ssh_tunnel, got %v", c.form.focusedSpec().id)
 	}
@@ -109,13 +107,13 @@ func TestForm_AddSeedsFirstDriver(t *testing.T) {
 func TestForm_FieldNavMovesFocus(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
-	// 15 base functional rows (name, driver, host, port, user, database,
-	// sslmode, read_only, confirm_writes, confirm_ddl, statement_timeout,
+	// 16 base functional rows (name, driver, host, port, user, database,
+	// sslmode, read_only, confirm_writes, confirm_ddl, cli_access, statement_timeout,
 	// color, label, icon, tags) + use_ssh_tunnel + keyring + pgpass +
-	// password_command → focusable count is 19 with the SSH tunnel OFF (the 6
+	// password_command → focusable count is 20 with the SSH tunnel OFF (the 6
 	// SSH detail rows are hidden until the tunnel is enabled).
-	if got := len(c.form.focusableSpecs()); got != 19 {
-		t.Fatalf("focusable rows = %d, want 19", got)
+	if got := len(c.form.focusableSpecs()); got != 20 {
+		t.Fatalf("focusable rows = %d, want 20", got)
 	}
 	// Move far past the end; clamps to the last functional row (password_command).
 	for range 50 {
@@ -235,10 +233,7 @@ func TestForm_ValidateAllSucceedsReturnsConn(t *testing.T) {
 func TestForm_TagsRoundTrip(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
-	// Focus tags row (index 14, after the 5 discrete fields replaced dsn).
-	for range 14 {
-		c.FormMoveFocus(1)
-	}
+	c.FormMoveFocus(c.form.focusIndexOf(fieldTags))
 	if c.form.focusedSpec().id != fieldTags {
 		t.Fatalf("focus = %v, want fieldTags", c.form.focusedSpec().id)
 	}

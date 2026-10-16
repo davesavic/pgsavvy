@@ -129,6 +129,16 @@ func AppendConnection(fs afero.Fs, path string, c models.Connection) error {
 // CLIAccess is always preserved from disk, ignoring the form's captured policy.
 // Detected changes before publication return ErrConnectionsChanged without writing.
 func UpdateConnection(fs afero.Fs, path, oldName string, newConn models.Connection) error {
+	return updateConnection(fs, path, oldName, newConn, nil)
+}
+
+// UpdateConnectionWithCLIAccess explicitly changes the CLI policy along with
+// the other profile fields. A stale expected policy is rejected, not overwritten.
+func UpdateConnectionWithCLIAccess(fs afero.Fs, path, oldName string, newConn models.Connection, expected models.CLIAccess) error {
+	return updateConnection(fs, path, oldName, newConn, &expected)
+}
+
+func updateConnection(fs afero.Fs, path, oldName string, newConn models.Connection, expectedPolicy *models.CLIAccess) error {
 	data, err := afero.ReadFile(fs, path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -160,8 +170,12 @@ func UpdateConnection(fs afero.Fs, path, oldName string, newConn models.Connecti
 	if idx == -1 {
 		return ErrConnectionNotFound
 	}
-	// Policy edits are explicit on-disk operations, never stale form edits.
-	newConn.CLIAccess = existing[idx].CLIAccess
+	if expectedPolicy == nil {
+		// Ordinary edits must not restore a revoked policy from a stale form.
+		newConn.CLIAccess = existing[idx].CLIAccess
+	} else if existing[idx].CLIAccess != *expectedPolicy {
+		return ErrConnectionsChanged
+	}
 	existing[idx] = newConn
 	return SaveConnections(&connectionSnapshotFs{Fs: fs, path: path, data: data}, path, existing)
 }

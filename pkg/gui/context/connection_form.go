@@ -44,6 +44,7 @@ const (
 	fieldReadOnly
 	fieldConfirmWrites
 	fieldConfirmDDL
+	fieldCLIAccess
 	fieldStatementTimeout
 	fieldColor
 	fieldLabel
@@ -75,8 +76,7 @@ type connFieldSpec struct {
 	kind  connFieldKind
 }
 
-// connFormSpecs is the ordered row layout. The first ten rows plus the six SSH
-// rows are functional; the trailing three are greyed "(soon)" placeholders.
+// connFormSpecs is the ordered row layout; SSH detail rows are conditional.
 var connFormSpecs = []connFieldSpec{
 	{fieldName, "name", fieldText},
 	{fieldDriverSel, "driver", fieldDriver},
@@ -88,6 +88,7 @@ var connFormSpecs = []connFieldSpec{
 	{fieldReadOnly, "read_only", fieldToggle},
 	{fieldConfirmWrites, "confirm_writes", fieldToggle},
 	{fieldConfirmDDL, "confirm_ddl", fieldToggle},
+	{fieldCLIAccess, "cli_access", fieldSelector},
 	{fieldStatementTimeout, "statement_timeout", fieldText},
 	{fieldColor, "color", fieldText},
 	{fieldLabel, "label", fieldText},
@@ -136,8 +137,9 @@ type connForm struct {
 	sshEnabled bool
 	sshAuth    string
 
-	isEdit       bool
-	originalName string
+	isEdit            bool
+	originalName      string
+	originalCLIAccess models.CLIAccess
 
 	// existingNames is the snapshot of all profile names at open time, used
 	// for the uniqueness check. For an edit, originalName is excluded so a
@@ -252,6 +254,21 @@ func (f *connForm) cycleSSLMode() {
 		}
 	}
 	f.conn.SSLMode = sslModeOptions[idx%len(sslModeOptions)]
+}
+
+var cliAccessOptions = []models.CLIAccess{
+	models.CLIAccessDisabled,
+	models.CLIAccessMetadata,
+	models.CLIAccessRowRead,
+}
+
+func (f *connForm) cycleCLIAccess() {
+	for i, policy := range cliAccessOptions {
+		if policy == f.conn.EffectiveCLIAccess() {
+			f.conn.CLIAccess = cliAccessOptions[(i+1)%len(cliAccessOptions)]
+			return
+		}
+	}
 }
 
 // SSH auth methods. These are TRANSIENT selector values (connForm.sshAuth),
@@ -375,6 +392,8 @@ func (f *connForm) toggle(id connFieldID) {
 		f.cycleDriver()
 	case fieldSSLMode:
 		f.cycleSSLMode()
+	case fieldCLIAccess:
+		f.cycleCLIAccess()
 	}
 }
 
@@ -656,6 +675,9 @@ func (f *connForm) validateAll(tr *i18n.TranslationSet) (msg string, fieldIdx in
 	if err := f.validateName(f.conn.Name, tr); err != nil {
 		return err.Error(), f.focusIndexOf(fieldName), false
 	}
+	if err := f.conn.CLIAccess.Validate(); err != nil {
+		return err.Error(), f.focusIndexOf(fieldCLIAccess), false
+	}
 	// Discrete connection fields are not required at save time (drafts are
 	// allowed); an empty Host is handled at connect time. Only name uniqueness
 	// and SSH-tunnel completeness are enforced here.
@@ -764,6 +786,9 @@ func (f *connForm) displayValue(s connFieldSpec) string {
 	case fieldSelector:
 		if s.id == fieldSSHAuthMethod {
 			return f.sshAuth
+		}
+		if s.id == fieldCLIAccess {
+			return string(f.conn.EffectiveCLIAccess())
 		}
 		if f.conn.SSLMode == "" {
 			return "(default)"

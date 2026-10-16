@@ -140,9 +140,11 @@ Press `?` anywhere to open the auto-generated, tabbed keybinding cheatsheet — 
 
 Use versioned JSON commands without starting the TUI, prompts, history or
 persistent logs. Database operations are **disabled by default** per saved
-profile. Set `cli_access: metadata` manually in `connections.yml` for connection
-testing/catalog inspection, or `cli_access: row-read` for bounded read-only
-queries. Offline discovery never checks credentials or contacts the database.
+profile. In the connection add/edit form, select `cli_access` and press `i` or
+Space to cycle between `disabled`, `metadata` (connection testing/catalog
+inspection), and `row-read` (also bounded read-only queries), then Enter to save.
+You can also set `cli_access` directly in `connections.yml`. Offline discovery
+never checks credentials or contacts the database.
 
 ```sh
 pgsavvy capabilities
