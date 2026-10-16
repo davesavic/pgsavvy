@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,56 @@ import (
 	"github.com/spf13/afero"
 	"golang.org/x/sys/windows"
 )
+
+func machineInputPipe() (*os.File, *os.File, error)  { return machineTestPipe(true) }
+func machineOutputPipe() (*os.File, *os.File, error) { return machineTestPipe(false) }
+
+func machineTestPipe(input bool) (*os.File, *os.File, error) {
+	name, err := windows.UTF16PtrFromString(fmt.Sprintf(`\\.\pipe\pgsavvy-cli-test-%d-%s`, os.Getpid(), rand.Text()))
+	if err != nil {
+		return nil, nil, err
+	}
+	access, peerAccess := uint32(windows.PIPE_ACCESS_INBOUND), uint32(windows.GENERIC_WRITE)
+	if !input {
+		access, peerAccess = windows.PIPE_ACCESS_OUTBOUND, windows.GENERIC_READ
+	}
+	serverHandle, err := windows.CreateNamedPipe(name, access|windows.FILE_FLAG_OVERLAPPED|windows.FILE_FLAG_FIRST_PIPE_INSTANCE,
+		windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, 4096, 4096, 0, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Connect the fresh synchronous peer before wrapping the overlapped server;
+	// this one-shot fixture has no pending native accept to cancel or join.
+	peerHandle, err := windows.CreateFile(name, peerAccess, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		_ = windows.CloseHandle(serverHandle)
+		return nil, nil, err
+	}
+	server := os.NewFile(uintptr(serverHandle), "owned-cli-test-overlapped")
+	peer := os.NewFile(uintptr(peerHandle), "owned-cli-test-peer")
+	if server == nil || peer == nil {
+		if server == nil {
+			_ = windows.CloseHandle(serverHandle)
+		} else {
+			_ = server.Close()
+		}
+		if peer == nil {
+			_ = windows.CloseHandle(peerHandle)
+		} else {
+			_ = peer.Close()
+		}
+		return nil, nil, os.ErrInvalid
+	}
+	if err := server.SetDeadline(time.Time{}); err != nil {
+		_ = peer.Close()
+		_ = server.Close()
+		return nil, nil, err
+	}
+	if input {
+		return server, peer, nil
+	}
+	return peer, server, nil
+}
 
 func TestMachineInput_WindowsPaths(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "SQL λ with spaces.sql")

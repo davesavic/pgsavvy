@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -140,7 +139,7 @@ func TestMachineCLI_Envelope(t *testing.T) {
 }
 
 func TestMachineCLI_Envelope_ParentDeadlineAndInput(t *testing.T) {
-	read, write, err := os.Pipe()
+	read, write, err := machineInputPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
