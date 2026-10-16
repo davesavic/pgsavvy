@@ -21,27 +21,35 @@ func TestMachineIO_BlockingSocketOutputRejected(t *testing.T) {
 	if output != nil {
 		_ = output.Close()
 	}
-	if output != nil || !errors.Is(err, errUnavailable) || testFlags(t, left) != before {
-		t.Fatal("blocking output socket accepted or mutated")
+	if output != nil || !errors.Is(err, errUnavailable) {
+		t.Fatal("blocking output socket accepted")
 	}
-	if _, err := left.Write([]byte("ok")); err != nil {
-		t.Fatal("rejection disabled borrowed socket")
-	}
-	var got [2]byte
-	if _, err := io.ReadFull(right, got[:]); err != nil || string(got[:]) != "ok" {
-		t.Fatal("rejection changed borrowed socket delivery")
+	if after := testFlags(t, left); after != before {
+		t.Fatalf("output rejection changed borrowed socket flags: %#x -> %#x", before, after)
 	}
 	input, err := OpenInput(context.Background(), left)
 	if err != nil {
 		t.Fatal("blocking socket input must remain supported")
 	}
+	var got [2]byte
 	done := make(chan struct{})
 	go func() { _, _ = input.Read(got[:]); close(done) }()
 	t.Cleanup(func() { testCleanupOwned(t, input, right, left); testJoin(t, done, time.Second) })
+	if after := testFlags(t, left); after != before {
+		t.Fatalf("input acquisition changed borrowed socket flags: %#x -> %#x", before, after)
+	}
 	_ = input.Close()
 	testJoin(t, done, time.Second)
-	if testFlags(t, left) != before {
-		t.Fatal("input close changed borrowed socket flags")
+	if after := testFlags(t, left); after != before {
+		t.Fatalf("input close changed borrowed socket flags: %#x -> %#x", before, after)
+	}
+	// A direct write sets Darwin's FWASWRITTEN bit. Exercise the borrowed
+	// socket only after comparing flags against the untouched baseline.
+	if _, err := left.Write([]byte("ok")); err != nil {
+		t.Fatal("rejection or input close disabled borrowed socket")
+	}
+	if _, err := io.ReadFull(right, got[:]); err != nil || string(got[:]) != "ok" {
+		t.Fatal("rejection or input close changed borrowed socket delivery")
 	}
 }
 
