@@ -6,9 +6,12 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -83,6 +86,27 @@ func TestMachineOpen_Privacy(t *testing.T) {
 	var safe *PublicError
 	if !errors.As(err, &safe) || safe.Code != ConnectionUnavailable || strings.Contains(err.Error(), "SECRET") {
 		t.Fatalf("network privacy: %v", err)
+	}
+}
+
+func TestMachineProfiles_LoadRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "connections.yml")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadProfiles(afero.NewOsFs(), fifo); err == nil || safeError(err).Code != ConnectionUnavailable {
+		t.Fatal("profile FIFO accepted or classification changed")
+	}
+	if _, err := LoadProfiles(afero.NewOsFs(), dir); err == nil || safeError(err).Code != ConnectionUnavailable {
+		t.Fatal("profile directory accepted or classification changed")
+	}
+	if profiles, err := LoadProfiles(afero.NewOsFs(), filepath.Join(dir, "missing")); err != nil || profiles == nil || len(profiles) != 0 {
+		t.Fatal("offline missing config did not stay empty")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatal("profile loading created files")
 	}
 }
 
