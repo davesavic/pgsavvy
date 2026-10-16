@@ -87,7 +87,11 @@ var ErrNoConnectionTarget = errors.New("session: connection has no dsn and no ho
 // epics. See §11.3.
 //
 // The ctx argument is reserved for future hooks; v1 performs no I/O.
-func BuildPgxConfig(_ context.Context, profile models.Connection, password string) (*pgxpool.Config, error) {
+func BuildPgxConfig(ctx context.Context, profile models.Connection, password string) (*pgxpool.Config, error) {
+	return buildPgxConfig(ctx, profile, password, os.Stderr)
+}
+
+func buildPgxConfig(_ context.Context, profile models.Connection, password string, warnings io.Writer) (*pgxpool.Config, error) {
 	connString, err := connectionStringFor(profile)
 	if err != nil {
 		return nil, err
@@ -140,7 +144,7 @@ func BuildPgxConfig(_ context.Context, profile models.Connection, password strin
 	cfg.ConnConfig.RuntimeParams["application_name"] = "pgsavvy"
 
 	if shouldWarnInsecureSSL(connString, cfg) {
-		warnInsecureSSL(os.Stderr, profile.Name, cfg.ConnConfig.Host, sslModeForLog(connString))
+		warnInsecureSSL(warnings, profile.Name, cfg.ConnConfig.Host, sslModeForLog(connString))
 	}
 
 	return cfg, nil
