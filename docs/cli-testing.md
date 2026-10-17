@@ -118,6 +118,13 @@ Windows failures report a fixed provisioning stage and script line number;
 the real initdb command also reports its numeric exit code. Its logs remain
 private and are deleted by owned cleanup.
 
+If the six baseline Go tests fail, the failure path may publish only their
+fixed top-level names and `passed`/`failed`/`not_completed` status. The reporter
+reads at most 1 MiB of UTF-8 JSON; missing, oversized or invalid logs report
+incomplete status. Assertion output, subtest names, package names, credentials,
+environment values and raw test/native logs remain private. This diagnostic
+does not change any test, acceptance gate or failure exit status.
+
 An explicitly approved exception publishes bounded, scrubbed **secret-free
 probe** diagnostics before the real fixture password is generated. The probe
 runs `initdb --version`, `postgres --version`, and initialization with the same
