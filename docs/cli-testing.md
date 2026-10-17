@@ -129,6 +129,13 @@ never starts a listening server; initdb's bootstrap/single-user child processes
 are still exercised. Probe success is not a replacement for the unchanged
 random-password fixture, wrong-password rejection or CLI tests.
 
+The real random-password initialization uses the same child-only environment,
+owned working directory, argument-list launcher and closed stdin as the probe.
+Its bounded output is never published. Startup, wrong-password rejection and
+the CLI baseline still run against the real fixture; a probe-only success is
+not accepted. Unjoined initialization work retains the owned fixture and fails
+the lane.
+
 Probe JSON records preserve previously unrecognized error text, launch errors,
 decimal/hex exit codes and timeout/capture status. Each stdout/stderr capture
 retains at most 65,536 characters and drains excess without retaining it.
@@ -136,6 +143,8 @@ Incomplete trailing lines are dropped at the capture boundary; known owned,
 repository, profile and temporary paths plus OS account/domain/host names are
 scrubbed before publication is limited to 4,096 characters per stream. Case and
 slash variants are scrubbed, and JSON encoding escapes control characters.
+The probe suppresses shell-escaped server startup instructions so they cannot
+bypass owned-path redaction.
 Legacy runner-command markers are JSON-escaped too. Invalid UTF-8 fails capture
 without publishing undecodable text.
 Each command has a 120-second timeout; failed process/pipe cleanup retains the

@@ -115,7 +115,9 @@ function Invoke-InitdbProbe([string]$Pg, [string]$Root, [string]$Repo, [string]$
         $commands = @(
             @{ name = 'initdb-version'; file = (Join-Path $Pg 'initdb.exe'); arguments = @('--version') },
             @{ name = 'postgres-version'; file = (Join-Path $Pg 'postgres.exe'); arguments = @('--version') },
-            @{ name = 'initialize'; file = (Join-Path $Pg 'initdb.exe'); arguments = @('-D', (Join-Path $probe 'data'), '-U', 'pgsavvy', '--encoding=UTF8', '--no-locale', '--auth-local=scram-sha-256', '--auth-host=scram-sha-256', "--pwfile=$passwordFile") }
+            # Shell-escaped startup instructions can disguise private paths from
+            # redaction; the diagnostic probe never starts that server anyway.
+            @{ name = 'initialize'; file = (Join-Path $Pg 'initdb.exe'); arguments = @('-D', (Join-Path $probe 'data'), '-U', 'pgsavvy', '--encoding=UTF8', '--no-locale', '--auth-local=scram-sha-256', '--auth-host=scram-sha-256', '--no-instructions', "--pwfile=$passwordFile") }
         )
         $success = $true
         foreach ($command in $commands) {

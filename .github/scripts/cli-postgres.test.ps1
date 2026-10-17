@@ -86,6 +86,7 @@ try {
         throw 'probe retention disclosed private diagnostics'
     }
     & (Join-Path $PSScriptRoot 'cli-initdb-probe.test.ps1') -CleanupUncertain ([ref]$helperCleanupUncertain)
+    & (Join-Path $PSScriptRoot 'cli-initdb-fixture.test.ps1') -CleanupUncertain ([ref]$helperCleanupUncertain)
     Write-Output 'native fixture script regressions passed'
 } finally {
     if (-not $helperCleanupUncertain) { Remove-Item -LiteralPath $root -Recurse -Force }
