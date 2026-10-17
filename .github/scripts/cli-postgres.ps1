@@ -210,7 +210,7 @@ try {
         $stage = 'binary-version'
         Invoke-Checked $binary @('--version') (Join-Path $root 'version')
         if (-not (Select-String -Quiet -SimpleMatch 'native-preflight' (Join-Path $root 'version'))) { throw 'legacy version route failed' }
-        $selector = '^TestMachineCLI_(Dispatch|ExitCodes|Envelope|Envelope_ParentDeadlineAndInput|OutputLimit|BrokenWriter)$'
+        $selector = '^TestMachineCLI_(Dispatch|ExitCodes|Envelope|Envelope_ParentDeadlineAndInput|OutputLimit|BrokenWriter|WindowsPipeDeadlineCapability)$'
         $stage = 'tests'
         Invoke-Checked 'go' @('test', '-json', '-count=1', '-timeout', '5m', './pkg/cli', '-run', $selector) (Join-Path $root 'tests.jsonl')
     } finally { Pop-Location }
@@ -218,7 +218,7 @@ try {
     $events = @(Get-Content (Join-Path $root 'tests.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
     if (@($events | Where-Object { $_.Action -in @('skip', 'fail') }).Count -ne 0) { throw 'baseline contains skipped/failed tests' }
     $passed = @($events | Where-Object { $_.Action -eq 'pass' -and $_.Test } | ForEach-Object { $_.Test })
-    foreach ($name in @('Dispatch', 'ExitCodes', 'Envelope', 'Envelope_ParentDeadlineAndInput', 'OutputLimit', 'BrokenWriter')) {
+    foreach ($name in @('Dispatch', 'ExitCodes', 'Envelope', 'Envelope_ParentDeadlineAndInput', 'OutputLimit', 'BrokenWriter', 'WindowsPipeDeadlineCapability')) {
         if ('TestMachineCLI_' + $name -cnotin $passed) { throw 'required baseline tests missing' }
     }
     [ordered]@{

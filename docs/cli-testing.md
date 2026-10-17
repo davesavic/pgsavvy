@@ -108,6 +108,12 @@ TestMachineCLI_OutputLimit
 TestMachineCLI_BrokenWriter
 ```
 
+Windows additionally requires `TestMachineCLI_WindowsPipeDeadlineCapability`,
+which checks deadline support on both directions of the owned test pipe. The
+output fixture uses a duplex server handle so Go 1.26.9 can query completion
+notification modes; its peer remains read-only, and the existing unread-output
+cancellation assertions and time limits are unchanged.
+
 The final JSON evidence line records `scope=baseline-not-native-support`, actual
 GOOS/GOARCH, Go version, CGO setting, exact binary path and SHA-256, PostgreSQL
 tool/server versions, fixture version, wrong-password rejection and executed
