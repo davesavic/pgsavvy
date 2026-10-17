@@ -94,7 +94,17 @@ try {
     [IO.File]::WriteAllText($passwordFile, "$password`n", [Text.UTF8Encoding]::new($false))
     $data = Join-Path $root 'data'
     $stage = 'initdb'
-    Invoke-Checked (Join-Path $pg 'initdb.exe') @('-D', $data, '-U', 'pgsavvy', '--encoding=UTF8', '--no-locale', '--auth-local=scram-sha-256', '--auth-host=scram-sha-256', "--pwfile=$passwordFile") (Join-Path $root 'init.log')
+    # Use the launch context verified by the probe, but never publish the real
+    # initialization's captured output or substitute its random credential.
+    $initdbContext = Join-Path $root 'initdb-context'
+    $null = New-Item -ItemType Directory -Path $initdbContext
+    $initdbEnvironment = Get-ProbeEnvironment $pg $initdbContext $windowsDirectory
+    $initdbResult = Invoke-ProbeCommand (Join-Path $pg 'initdb.exe') @('-D', $data, '-U', 'pgsavvy', '--encoding=UTF8', '--no-locale', '--auth-local=scram-sha-256', '--auth-host=scram-sha-256', "--pwfile=$passwordFile") $initdbEnvironment $initdbContext
+    $script:lastNativeExit = $initdbResult.exit_code
+    if ($initdbResult.cleanup_failed) { $probeCleanupFailed = $true }
+    if (-not $initdbResult.started -or $initdbResult.exit_code -ne 0 -or $initdbResult.timed_out -or $initdbResult.capture_failed -or $initdbResult.cleanup_failed) {
+        throw 'native fixture initialization failed'
+    }
     $stage = 'startup'
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start()

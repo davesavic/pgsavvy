@@ -48,8 +48,8 @@ func main() {
    os.Exit(7)
   }
  }
- if len(os.Args) != 10 || os.Args[1] != "-D" || os.Args[3] != "-U" || os.Args[4] != "pgsavvy" || os.Args[5] != "--encoding=UTF8" || os.Args[6] != "--no-locale" || os.Args[7] != "--auth-local=scram-sha-256" || os.Args[8] != "--auth-host=scram-sha-256" || !strings.HasPrefix(os.Args[9], "--pwfile=") { os.Exit(71) }
- password, err := os.ReadFile(strings.TrimPrefix(os.Args[9], "--pwfile="))
+  if len(os.Args) != 11 || os.Args[1] != "-D" || os.Args[3] != "-U" || os.Args[4] != "pgsavvy" || os.Args[5] != "--encoding=UTF8" || os.Args[6] != "--no-locale" || os.Args[7] != "--auth-local=scram-sha-256" || os.Args[8] != "--auth-host=scram-sha-256" || os.Args[9] != "--no-instructions" || !strings.HasPrefix(os.Args[10], "--pwfile=") { os.Exit(71) }
+  password, err := os.ReadFile(strings.TrimPrefix(os.Args[10], "--pwfile="))
  if err != nil || string(password) != "pgsavvy-public-diagnostic-only\n" { os.Exit(72) }
  if os.Getenv("PGPASSWORD") != "" || os.Getenv("PROBE_SECRET") != "" { os.Exit(73) }
  if err := os.WriteFile(filepath.Join(filepath.Dir(os.Args[0]), "probe-invoked"), []byte("no listening server"), 0600); err != nil { os.Exit(74) }
