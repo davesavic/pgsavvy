@@ -24,7 +24,9 @@ func machineTestPipe(input bool) (*os.File, *os.File, error) {
 	}
 	access, peerAccess := uint32(windows.PIPE_ACCESS_INBOUND), uint32(windows.GENERIC_WRITE)
 	if !input {
-		access, peerAccess = windows.PIPE_ACCESS_OUTBOUND, windows.GENERIC_READ
+		// Go's NewFile queries completion modes before enabling deadlines. That
+		// query needs read attributes, which an outbound-only handle lacks.
+		access, peerAccess = windows.PIPE_ACCESS_DUPLEX, windows.GENERIC_READ
 	}
 	serverHandle, err := windows.CreateNamedPipe(name, access|windows.FILE_FLAG_OVERLAPPED|windows.FILE_FLAG_FIRST_PIPE_INSTANCE,
 		windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, 4096, 4096, 0, nil)
@@ -62,6 +64,26 @@ func machineTestPipe(input bool) (*os.File, *os.File, error) {
 		return server, peer, nil
 	}
 	return peer, server, nil
+}
+
+func TestMachineCLI_WindowsPipeDeadlineCapability(t *testing.T) {
+	for _, input := range []bool{true, false} {
+		read, write, err := machineTestPipe(input)
+		if err != nil {
+			t.Fatalf("pipe construction (input=%t): %v", input, err)
+		}
+		t.Cleanup(func() { _ = read.Close(); _ = write.Close() })
+		server := write
+		if input {
+			server = read
+		}
+		if err := server.SetDeadline(time.Now().Add(time.Second)); err != nil {
+			t.Fatalf("pipe deadline (input=%t): %v", input, err)
+		}
+		if err := server.SetDeadline(time.Time{}); err != nil {
+			t.Fatalf("reset pipe deadline (input=%t): %v", input, err)
+		}
+	}
 }
 
 func TestMachineInput_WindowsPaths(t *testing.T) {
