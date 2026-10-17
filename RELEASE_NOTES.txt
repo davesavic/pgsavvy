@@ -1,3 +1,31 @@
+pgsavvy v0.12.0
+
+  Added a Linux-only machine CLI for scripts and agent tools, without starting
+  the TUI, interactive prompts, history or persistent logs. Discover commands,
+  limits and exit codes through JSON help and the capabilities command.
+
+  List and inspect saved connections offline; opt profiles into connection
+  testing, paged schema/table listings, column/index details and foreign-key
+  relationships with cli_access=metadata. Enable cli_access=row-read for bounded,
+  parameterized, read-only queries from SQL files or stdin. Database access is
+  disabled by default; the connection form now includes a CLI access selector.
+
+  Machine commands return version-1 JSON with explicit completion/truncation
+  flags and stable exit codes. Query values preserve PostgreSQL text and NULLs.
+  Input, rows, cells, output and execution time are bounded, with cancellation
+  and owned-resource cleanup. Credentials must resolve without prompts; SSH
+  requires existing trusted host keys. Public errors omit raw backend details.
+
+  Added CLI usage, contract, query, schema and testing documentation, plus
+  PostgreSQL 17/18 integration coverage and native-platform fixture lanes.
+  Windows/macOS adapters are preparatory only: their machine CLI entrypoints
+  remain disabled pending full native verification. Existing TUI and legacy
+  version/update commands remain available on their supported platforms.
+
+  Before downgrading, stop profile writers and automation, back up connections,
+  remove cli_access keys and validate the old loader against a rollback copy.
+  See docs/cli-contract.md for the complete rollback procedure.
+
 pgsavvy v0.11.4
 
   Release publication now requires a non-empty release-notes entry matching
