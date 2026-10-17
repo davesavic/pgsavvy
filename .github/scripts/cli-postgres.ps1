@@ -20,11 +20,11 @@ function Invoke-Checked([string]$File, [string[]]$Arguments, [string]$Log) {
     if ($script:lastNativeExit -ne 0) { throw 'native fixture command failed' }
 }
 
-function Invoke-IsolatedChecked([string]$File, [string[]]$Arguments, [hashtable]$Environment, [string]$Directory, [ref]$CleanupFailed) {
+function Invoke-IsolatedChecked([string]$File, [string[]]$Arguments, [hashtable]$Environment, [string]$Directory, [ref]$CleanupFailed, [switch]$AllowNonZeroExit) {
     $result = Invoke-ProbeCommand $File $Arguments $Environment $Directory
     $script:lastNativeExit = $result.exit_code
     if ($result.cleanup_failed) { $CleanupFailed.Value = $true }
-    if (-not $result.started -or $result.exit_code -ne 0 -or $result.timed_out -or $result.capture_failed -or $result.cleanup_failed) {
+    if (-not $result.started -or $result.exit_code -eq 125 -or (-not $AllowNonZeroExit -and $result.exit_code -ne 0) -or $result.timed_out -or $result.capture_failed -or $result.cleanup_failed) {
         throw 'isolated native fixture command failed'
     }
 }
@@ -123,26 +123,29 @@ try {
     $listener.Stop()
     Add-Content (Join-Path $data 'postgresql.conf') "`nlisten_addresses = '127.0.0.1'`nport = $port`nunix_socket_directories = ''"
     Invoke-IsolatedChecked $controller (@((Join-Path $pg 'pg_ctl.exe'), (Join-Path $root 'start.log')) + @('-D', $data, '-l', (Join-Path $root 'server.log'), '-w', '-t', '30', 'start')) $initdbEnvironment $initdbContext ([ref]$controllerCleanupFailed)
-    $env:PGPASSWORD = $password
+    $clientEnvironment = $initdbEnvironment.Clone()
+    $clientEnvironment.PGPASSWORD = $password
+    $clientEnvironment.PGCONNECT_TIMEOUT = '5'
+    $clientEnvironment.PGSSLMODE = 'disable'
     $stage = 'createdb'
-    Invoke-Checked (Join-Path $pg 'createdb.exe') @('-h', '127.0.0.1', '-p', "$port", '-U', 'pgsavvy', 'pgsavvy_test') (Join-Path $root 'createdb.log')
+    Invoke-IsolatedChecked $controller (@((Join-Path $pg 'createdb.exe'), (Join-Path $root 'createdb.log')) + @('-h', '127.0.0.1', '-p', "$port", '-U', 'pgsavvy', 'pgsavvy_test')) $clientEnvironment $initdbContext ([ref]$controllerCleanupFailed)
     $psql = Join-Path $pg 'psql.exe'
     $connection = @('-X', '-w', '-h', '127.0.0.1', '-p', "$port", '-U', 'pgsavvy', '-d', 'pgsavvy_test', '-v', 'ON_ERROR_STOP=1')
     $stage = 'fixture'
-    Invoke-Checked $psql ($connection + @('-f', (Join-Path $repo 'docker/postgres/init/01_fixture.sql'))) (Join-Path $root 'fixture.log')
-    Invoke-Checked $psql ($connection + @('-Atc', 'SELECT 1')) (Join-Path $root 'ready')
+    Invoke-IsolatedChecked $controller (@($psql, (Join-Path $root 'fixture.log')) + $connection + @('-f', (Join-Path $repo 'docker/postgres/init/01_fixture.sql'))) $clientEnvironment $initdbContext ([ref]$controllerCleanupFailed)
+    Invoke-IsolatedChecked $controller (@($psql, (Join-Path $root 'ready')) + $connection + @('-Atc', 'SELECT 1')) $clientEnvironment $initdbContext ([ref]$controllerCleanupFailed)
     if ((Get-Content -Raw (Join-Path $root 'ready')).Trim() -ne '1') { throw 'fixture not ready' }
     $stage = 'authentication'
-    $env:PGPASSWORD = 'deliberately-wrong'
-    & $psql @connection -Atc 'SELECT 1' > (Join-Path $root 'wrong.out') 2> (Join-Path $root 'wrong.err')
-    $wrongExit = $LASTEXITCODE
-    $env:PGPASSWORD = $password
-    if ($wrongExit -eq 0 -or -not (Select-String -Quiet -SimpleMatch 'password authentication failed' (Join-Path $root 'wrong.err'))) {
+    $wrongEnvironment = $clientEnvironment.Clone()
+    $wrongEnvironment.PGPASSWORD = 'deliberately-wrong'
+    Invoke-IsolatedChecked $controller (@($psql, (Join-Path $root 'wrong.out')) + $connection + @('-Atc', 'SELECT 1')) $wrongEnvironment $initdbContext ([ref]$controllerCleanupFailed) -AllowNonZeroExit
+    $wrongExit = $script:lastNativeExit
+    if ($wrongExit -ne 2 -or -not (Select-String -Quiet -SimpleMatch 'password authentication failed' (Join-Path $root 'wrong.out.err'))) {
         throw 'wrong-password rejection not proven'
     }
     $stage = 'facts'
     $sql = "SELECT current_setting('server_version_num'), current_setting('server_encoding'), (SELECT version FROM app._fixture_meta), rolsuper FROM pg_roles WHERE rolname = current_user"
-    Invoke-Checked $psql ($connection + @('-Atc', $sql)) (Join-Path $root 'facts')
+    Invoke-IsolatedChecked $controller (@($psql, (Join-Path $root 'facts')) + $connection + @('-Atc', $sql)) $clientEnvironment $initdbContext ([ref]$controllerCleanupFailed)
     $facts = (Get-Content -Raw (Join-Path $root 'facts')).Trim().Split('|')
     if ($facts.Count -ne 4 -or [math]::Floor([int]$facts[0] / 10000) -ne [int]$Major -or $facts[1] -ne 'UTF8' -or $facts[2] -ne '2' -or $facts[3] -ne 't') {
         throw 'fixture version/auth/encoding mismatch'
