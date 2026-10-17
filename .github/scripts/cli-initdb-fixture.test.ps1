@@ -8,17 +8,27 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'cli-postgres.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors.Count -ne 0) { throw 'fixture script does not parse' }
-$helper = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-Checked' }, $true)
-. ([scriptblock]::Create($helper.Extent.Text))
-$body = @($ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] })[0].Body.Statements
+foreach ($helper in $ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+    . ([scriptblock]::Create($helper.Extent.Text))
+}
+$fixtureTry = @($ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] })[0]
+$body = $fixtureTry.Body.Statements
 $start = -1
 $end = -1
+$initializationEnd = -1
+$startupEnd = -1
 for ($i = 0; $i -lt $body.Count; $i++) {
     if ($body[$i].Extent.Text -ceq '$stage = ''initdb''') { $start = $i }
+    if ($body[$i].Extent.Text -ceq '$stage = ''controller-build''') { $initializationEnd = $i }
     if ($body[$i].Extent.Text -ceq '$stage = ''startup''') { $end = $i }
+    if ($startupEnd -lt 0 -and $body[$i].Extent.Text -ceq '$env:PGPASSWORD = $password') { $startupEnd = $i }
 }
 if ($start -lt 0 -or $end -le $start + 1) { throw 'production initialization block missing' }
-$initialize = [scriptblock]::Create(($body[($start + 1)..($end - 1)] | ForEach-Object { $_.Extent.Text }) -join "`n")
+if ($initializationEnd -lt 0) { $initializationEnd = $end }
+$initialize = [scriptblock]::Create(($body[($start + 1)..($initializationEnd - 1)] | ForEach-Object { $_.Extent.Text }) -join "`n")
+if ($startupEnd -le $end + 1) { throw 'production startup block missing' }
+$startup = [scriptblock]::Create(($body[($end + 1)..($startupEnd - 1)] | ForEach-Object { $_.Extent.Text }) -join "`n")
+$cleanup = [scriptblock]::Create(($fixtureTry.Finally.Statements | ForEach-Object { $_.Extent.Text }) -join "`n")
 $temp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $testRoot = Join-Path $temp ('pgsavvy-fixture-test.' + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $testRoot
@@ -37,18 +47,43 @@ import (
  "regexp"
  "strings"
 )
-func main() {
- if len(os.Args) != 10 || os.Args[1] != "-D" || os.Args[3] != "-U" || os.Args[4] != "pgsavvy" || os.Args[5] != "--encoding=UTF8" || os.Args[6] != "--no-locale" || os.Args[7] != "--auth-local=scram-sha-256" || os.Args[8] != "--auth-host=scram-sha-256" || !strings.HasPrefix(os.Args[9], "--pwfile=") { os.Exit(71) }
- password, err := os.ReadFile(strings.TrimPrefix(os.Args[9], "--pwfile="))
- if err != nil || !regexp.MustCompile(`^[0-9a-f]{64}\n$`).Match(password) { os.Exit(72) }
+func checkContext(data string) {
  if os.Getenv("PGSAVVY_FIXTURE_AMBIENT_SENTINEL") != "" || os.Getenv("PG_RESTRICT_EXEC") != "" { os.Exit(73) }
  cwd, err := os.Getwd()
- if err != nil || cwd != filepath.Join(filepath.Dir(os.Args[2]), "initdb-context") { os.Exit(74) }
+ if err != nil || cwd != filepath.Join(filepath.Dir(data), "initdb-context") { os.Exit(74) }
  for _, key := range []string{"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP"} {
   if !strings.HasPrefix(os.Getenv(key), cwd+string(os.PathSeparator)) { os.Exit(75) }
  }
  input, err := io.ReadAll(os.Stdin)
  if err != nil || len(input) != 0 { os.Exit(76) }
+}
+func main() {
+ if len(os.Args) < 3 || os.Args[1] != "-D" { os.Exit(71) }
+ checkContext(os.Args[2])
+ if filepath.Base(os.Args[0]) == "pg_ctl.exe" {
+  if len(os.Args) != 9 || os.Args[5] != "-w" || os.Args[6] != "-t" || os.Args[7] != "30" { os.Exit(78) }
+  pid := filepath.Join(os.Args[2], "postmaster.pid")
+  switch os.Args[8] {
+  case "start":
+   if os.Args[3] != "-l" || os.Args[4] != filepath.Join(filepath.Dir(os.Args[2]), "server.log") { os.Exit(79) }
+   if err := os.WriteFile(pid, []byte("synthetic server only"), 0600); err != nil { os.Exit(80) }
+   mode, _ := os.ReadFile(filepath.Join(filepath.Dir(os.Args[0]), "mode"))
+   if string(mode) == "start-fail" { os.Exit(7) }
+  case "stop":
+   if os.Args[3] != "-m" || os.Args[4] != "immediate" { os.Exit(81) }
+   mode, _ := os.ReadFile(filepath.Join(filepath.Dir(os.Args[0]), "mode"))
+   if string(mode) == "stop-fail" { os.Exit(7) }
+   if err := os.Remove(pid); err != nil { os.Exit(82) }
+  default: os.Exit(83)
+  }
+  fmt.Println("private server control stdout")
+  fmt.Fprintln(os.Stderr, "private server control stderr")
+  return
+ }
+ if len(os.Args) != 10 || os.Args[3] != "-U" || os.Args[4] != "pgsavvy" || os.Args[5] != "--encoding=UTF8" || os.Args[6] != "--no-locale" || os.Args[7] != "--auth-local=scram-sha-256" || os.Args[8] != "--auth-host=scram-sha-256" || !strings.HasPrefix(os.Args[9], "--pwfile=") { os.Exit(71) }
+ password, err := os.ReadFile(strings.TrimPrefix(os.Args[9], "--pwfile="))
+ if err != nil || !regexp.MustCompile(`^[0-9a-f]{64}\n$`).Match(password) { os.Exit(72) }
+ if err := os.Mkdir(os.Args[2], 0700); err != nil { os.Exit(84) }
  fmt.Printf("private initialization stdout %s", password)
  fmt.Fprintf(os.Stderr, "private initialization stderr %s", password)
  if err := os.WriteFile(filepath.Join(filepath.Dir(os.Args[0]), "fixture-invoked"), []byte("isolated initialization"), 0600); err != nil { os.Exit(77) }
@@ -60,6 +95,12 @@ func main() {
     [IO.File]::WriteAllText($goFile, $source, [Text.UTF8Encoding]::new($false))
     & go build -o (Join-Path $pg 'initdb.exe') $goFile > (Join-Path $testRoot 'build.out') 2> (Join-Path $testRoot 'build.err')
     if ($LASTEXITCODE -ne 0) { throw 'fixture test helper build failed' }
+    Copy-Item -LiteralPath (Join-Path $pg 'initdb.exe') -Destination (Join-Path $pg 'pg_ctl.exe')
+    $controller = Join-Path $testRoot 'pgctl-runner.exe'
+    & go build -o $controller (Join-Path $PSScriptRoot '../../internal/pgfixture') > (Join-Path $testRoot 'controller-build.out') 2> (Join-Path $testRoot 'controller-build.err')
+    if ($LASTEXITCODE -ne 0) { throw 'fixture controller build failed' }
+    & go test -count=1 -timeout 30s (Join-Path $PSScriptRoot '../../internal/pgfixture') > (Join-Path $testRoot 'controller-test.out') 2> (Join-Path $testRoot 'controller-test.err')
+    if ($LASTEXITCODE -ne 0) { throw 'native file-backed controller regressions failed' }
     $windowsDirectory = if ($IsWindows) { [Environment]::GetFolderPath([Environment+SpecialFolder]::Windows) } else { Join-Path $testRoot 'windows' }
     $env:PGSAVVY_FIXTURE_AMBIENT_SENTINEL = 'synthetic-private-environment'
     $env:PG_RESTRICT_EXEC = '1'
@@ -72,6 +113,7 @@ func main() {
         [IO.File]::WriteAllText($passwordFile, "$password`n", [Text.UTF8Encoding]::new($false))
         [IO.File]::WriteAllText((Join-Path $pg 'mode'), $mode)
         $probeCleanupFailed = $false
+        $controllerCleanupFailed = $false
         $script:lastNativeExit = $null
         $out = [IO.StringWriter]::new()
         $err = [IO.StringWriter]::new()
@@ -98,6 +140,40 @@ func main() {
         if ($rejected -ne ($mode -eq 'fail') -or $script:lastNativeExit -ne $(if ($mode -eq 'fail') { 7 } else { 0 })) { throw 'initialization exit status lost' }
         if ($probeCleanupFailed -or -not (Test-Path (Join-Path $pg 'fixture-invoked'))) { throw 'fixture invocation/cleanup evidence missing' }
         if ($env:PGSAVVY_FIXTURE_AMBIENT_SENTINEL -cne 'synthetic-private-environment' -or $env:PG_RESTRICT_EXEC -cne '1') { throw 'initialization changed parent environment' }
+    }
+    foreach ($mode in @('startup', 'start-fail', 'stop-fail', 'controller-uncertain')) {
+        $root = Join-Path $testRoot ('pgsavvy-native.' + $mode)
+        $null = New-Item -ItemType Directory -Path $root
+        $data = Join-Path $root 'data'
+        $passwordFile = Join-Path $root 'password'
+        [IO.File]::WriteAllText($passwordFile, "$password`n", [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText((Join-Path $pg 'mode'), $mode)
+        $probeCleanupFailed = $false
+        $controllerCleanupFailed = $false
+        . $initialize
+        $rejected = $false
+        try { . $startup } catch { $rejected = $true }
+        if ($rejected -ne ($mode -eq 'start-fail')) { throw 'production server startup did not use the isolated launch context' }
+        if (-not (Test-Path (Join-Path $data 'postmaster.pid'))) { throw 'startup helper was not invoked' }
+        if ($mode -eq 'controller-uncertain') { $controllerCleanupFailed = $true }
+        $owned = $true
+        $failed = $false
+        $writer = [IO.StringWriter]::new()
+        $savedErr = [Console]::Error
+        try {
+            [Console]::SetError($writer)
+            $emitted = @(. $cleanup)
+        } finally { [Console]::SetError($savedErr) }
+        if ($emitted.Count -ne 0 -or $writer.ToString().Contains('private server control')) { throw 'server control output was published' }
+        if ($mode -in @('startup', 'start-fail')) {
+            if ($failed -or (Test-Path -LiteralPath $root) -or $writer.ToString()) { throw 'isolated stop did not clean owned fixture' }
+        } else {
+            if (-not $failed -or -not (Test-Path -LiteralPath $root) -or $writer.ToString().Trim() -cne 'owned fixture cleanup failed; retained owned fixture') { throw 'failed stop did not retain owned fixture privately' }
+            if ($mode -eq 'controller-uncertain' -and (Test-Path (Join-Path $data 'postmaster.pid'))) { throw 'controller uncertainty suppressed the stop attempt' }
+            # The synthetic helper never starts a server, so retained data is safe to remove.
+            Remove-Item -LiteralPath $root -Recurse -Force
+        }
+        $writer.Dispose()
     }
     $originalCommand = (Get-Item Function:Invoke-ProbeCommand).ScriptBlock
     try {

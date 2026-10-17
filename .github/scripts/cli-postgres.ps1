@@ -10,6 +10,7 @@ $pg = $null
 $failed = $false
 $stage = 'toolchain'
 $probeCleanupFailed = $false
+$controllerCleanupFailed = $false
 
 function Invoke-Checked([string]$File, [string[]]$Arguments, [string]$Log) {
     # Keep machine-readable stdout separate from native tool diagnostics.
@@ -17,6 +18,15 @@ function Invoke-Checked([string]$File, [string[]]$Arguments, [string]$Log) {
     & $File @Arguments > $Log 2> "$Log.err"
     $script:lastNativeExit = $LASTEXITCODE
     if ($script:lastNativeExit -ne 0) { throw 'native fixture command failed' }
+}
+
+function Invoke-IsolatedChecked([string]$File, [string[]]$Arguments, [hashtable]$Environment, [string]$Directory, [ref]$CleanupFailed) {
+    $result = Invoke-ProbeCommand $File $Arguments $Environment $Directory
+    $script:lastNativeExit = $result.exit_code
+    if ($result.cleanup_failed) { $CleanupFailed.Value = $true }
+    if (-not $result.started -or $result.exit_code -ne 0 -or $result.timed_out -or $result.capture_failed -or $result.cleanup_failed) {
+        throw 'isolated native fixture command failed'
+    }
 }
 
 try {
@@ -99,19 +109,20 @@ try {
     $initdbContext = Join-Path $root 'initdb-context'
     $null = New-Item -ItemType Directory -Path $initdbContext
     $initdbEnvironment = Get-ProbeEnvironment $pg $initdbContext $windowsDirectory
-    $initdbResult = Invoke-ProbeCommand (Join-Path $pg 'initdb.exe') @('-D', $data, '-U', 'pgsavvy', '--encoding=UTF8', '--no-locale', '--auth-local=scram-sha-256', '--auth-host=scram-sha-256', "--pwfile=$passwordFile") $initdbEnvironment $initdbContext
-    $script:lastNativeExit = $initdbResult.exit_code
-    if ($initdbResult.cleanup_failed) { $probeCleanupFailed = $true }
-    if (-not $initdbResult.started -or $initdbResult.exit_code -ne 0 -or $initdbResult.timed_out -or $initdbResult.capture_failed -or $initdbResult.cleanup_failed) {
-        throw 'native fixture initialization failed'
-    }
+    Invoke-IsolatedChecked (Join-Path $pg 'initdb.exe') @('-D', $data, '-U', 'pgsavvy', '--encoding=UTF8', '--no-locale', '--auth-local=scram-sha-256', '--auth-host=scram-sha-256', "--pwfile=$passwordFile") $initdbEnvironment $initdbContext ([ref]$probeCleanupFailed)
+    $stage = 'controller-build'
+    $controller = Join-Path $root 'pgctl-runner.exe'
+    Push-Location $repo
+    try {
+        Invoke-Checked 'go' @('build', '-o', $controller, './internal/pgfixture') (Join-Path $root 'controller-build.log')
+    } finally { Pop-Location }
     $stage = 'startup'
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start()
     $port = $listener.LocalEndpoint.Port
     $listener.Stop()
     Add-Content (Join-Path $data 'postgresql.conf') "`nlisten_addresses = '127.0.0.1'`nport = $port`nunix_socket_directories = ''"
-    Invoke-Checked (Join-Path $pg 'pg_ctl.exe') @('-D', $data, '-l', (Join-Path $root 'server.log'), '-w', '-t', '30', 'start') (Join-Path $root 'start.log')
+    Invoke-IsolatedChecked $controller (@((Join-Path $pg 'pg_ctl.exe'), (Join-Path $root 'start.log')) + @('-D', $data, '-l', (Join-Path $root 'server.log'), '-w', '-t', '30', 'start')) $initdbEnvironment $initdbContext ([ref]$controllerCleanupFailed)
     $env:PGPASSWORD = $password
     $stage = 'createdb'
     Invoke-Checked (Join-Path $pg 'createdb.exe') @('-h', '127.0.0.1', '-p', "$port", '-U', 'pgsavvy', 'pgsavvy_test') (Join-Path $root 'createdb.log')
@@ -179,12 +190,10 @@ try {
     if ($owned) {
         try {
             if ($probeCleanupFailed) { throw 'probe process cleanup incomplete' }
-            $stopped = $true
             if (Test-Path (Join-Path $root 'data/postmaster.pid')) {
-                & (Join-Path $pg 'pg_ctl.exe') -D (Join-Path $root 'data') -m immediate -w -t 30 stop > (Join-Path $root 'stop.log') 2>&1
-                $stopped = $LASTEXITCODE -eq 0
+                Invoke-IsolatedChecked $controller (@((Join-Path $pg 'pg_ctl.exe'), (Join-Path $root 'stop.log')) + @('-D', (Join-Path $root 'data'), '-m', 'immediate', '-w', '-t', '30', 'stop')) $initdbEnvironment $initdbContext ([ref]$controllerCleanupFailed)
             }
-            if (-not $stopped) { throw 'owned cluster stop failed' }
+            if ($controllerCleanupFailed -or (Test-Path (Join-Path $root 'data/postmaster.pid'))) { throw 'owned controller cleanup incomplete' }
             $item = Get-Item -LiteralPath $root
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $item.Name.StartsWith('pgsavvy-native.')) {
                 throw 'refusing unexpected cleanup target'

@@ -129,12 +129,20 @@ never starts a listening server; initdb's bootstrap/single-user child processes
 are still exercised. Probe success is not a replacement for the unchanged
 random-password fixture, wrong-password rejection or CLI tests.
 
-The real random-password initialization uses the same child-only environment,
-owned working directory, argument-list launcher and closed stdin as the probe.
-Its bounded output is never published. Startup, wrong-password rejection and
+The real random-password initialization and server start/stop use the same
+child-only environment, owned working directory, argument-list launcher and
+closed stdin as the probe. Their output is never published: initialization
+capture is bounded, while server/control logs stay in private owned files.
+Startup, wrong-password rejection and
 the CLI baseline still run against the real fixture; a probe-only success is
 not accepted. Unjoined initialization work retains the owned fixture and fails
 the lane.
+
+Server control runs through a small native Go helper with file-backed standard
+handles. PostgreSQL's Windows command shell can outlive `pg_ctl start`; it must
+not keep the launcher's capture pipes open. An unsuccessful controller still
+triggers an owned-cluster stop when a PID file exists. Controller cleanup
+uncertainty retains the directory even after that stop succeeds.
 
 Probe JSON records preserve previously unrecognized error text, launch errors,
 decimal/hex exit codes and timeout/capture status. Each stdout/stderr capture
