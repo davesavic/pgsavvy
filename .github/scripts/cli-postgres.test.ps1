@@ -87,6 +87,7 @@ try {
     }
     & (Join-Path $PSScriptRoot 'cli-initdb-probe.test.ps1') -CleanupUncertain ([ref]$helperCleanupUncertain)
     & (Join-Path $PSScriptRoot 'cli-initdb-fixture.test.ps1') -CleanupUncertain ([ref]$helperCleanupUncertain)
+    & (Join-Path $PSScriptRoot 'cli-test-status.test.ps1')
     Write-Output 'native fixture script regressions passed'
 } finally {
     if (-not $helperCleanupUncertain) { Remove-Item -LiteralPath $root -Recurse -Force }

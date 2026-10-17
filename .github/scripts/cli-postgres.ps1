@@ -29,6 +29,53 @@ function Invoke-IsolatedChecked([string]$File, [string[]]$Arguments, [hashtable]
     }
 }
 
+function Write-BaselineTestStatus([string]$Path) {
+    $names = @('TestMachineCLI_Dispatch', 'TestMachineCLI_ExitCodes', 'TestMachineCLI_Envelope', 'TestMachineCLI_Envelope_ParentDeadlineAndInput', 'TestMachineCLI_OutputLimit', 'TestMachineCLI_BrokenWriter')
+    $statuses = @{}
+    foreach ($name in $names) { $statuses[$name] = 'not_completed' }
+    $logStatus = 'unavailable'
+    $stream = $null
+    try {
+        $stream = [IO.File]::Open($Path, 'Open', 'Read', 'Read')
+        $logStatus = 'invalid'
+        $limit = 1048576
+        if ($stream.Length -gt $limit) {
+            $logStatus = 'oversized'
+        } else {
+            $buffer = [byte[]]::new($limit + 1)
+            $count = 0
+            while ($count -lt $buffer.Length) {
+                $read = $stream.Read($buffer, $count, $buffer.Length - $count)
+                if ($read -eq 0) { break }
+                $count += $read
+            }
+            if ($count -gt $limit) {
+                $logStatus = 'oversized'
+            } else {
+                $text = [Text.UTF8Encoding]::new($false, $true).GetString($buffer, 0, $count)
+                foreach ($line in $text.Split("`n")) {
+                    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                    $event = $line | ConvertFrom-Json -Depth 8
+                    if ($event.Test -isnot [string] -or $event.Action -isnot [string] -or $names -cnotcontains $event.Test) { continue }
+                    if ($event.Action -ceq 'fail') { $statuses[$event.Test] = 'failed' }
+                    elseif ($event.Action -ceq 'pass' -and $statuses[$event.Test] -cne 'failed') { $statuses[$event.Test] = 'passed' }
+                }
+                $logStatus = 'parsed'
+            }
+        }
+    } catch {
+        # Never publish parse errors or any fields sourced from private output.
+    } finally {
+        if ($stream) { $stream.Dispose() }
+    }
+    if ($logStatus -cne 'parsed') {
+        foreach ($name in $names) { $statuses[$name] = 'not_completed' }
+    }
+    $tests = @($names | ForEach-Object { [ordered]@{ test = $_; status = $statuses[$_] } })
+    $report = [ordered]@{ scope = 'native-baseline-test-status'; log_status = $logStatus; tests = $tests }
+    [Console]::Out.WriteLine(($report | ConvertTo-Json -Depth 4 -Compress))
+}
+
 try {
     if (-not $IsWindows) { throw 'native Windows required' }
     $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
@@ -183,6 +230,7 @@ try {
     } | ConvertTo-Json -Compress
 } catch {
     $failed = $true
+    if ($stage -ceq 'tests' -and $root) { Write-BaselineTestStatus (Join-Path $root 'tests.jsonl') }
     # Do not publish raw tool errors; they can include environment/connection text.
     $diagnostic = 'stage=' + $stage + '; line=' + [int]$_.InvocationInfo.ScriptLineNumber
     if ($stage -ceq 'initdb') {
