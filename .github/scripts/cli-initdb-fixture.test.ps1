@@ -1,12 +1,12 @@
 [CmdletBinding()]
-param([ref]$CleanupUncertain)
+param([ref]$CleanupUncertain, [string]$FixtureScript = (Join-Path $PSScriptRoot 'cli-postgres.ps1'))
 if ($null -eq $CleanupUncertain) { $localCleanupUncertain = $false; $CleanupUncertain = [ref]$localCleanupUncertain }
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 . (Join-Path $PSScriptRoot 'cli-initdb-probe.ps1')
 $tokens = $null
 $errors = $null
-$ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'cli-postgres.ps1'), [ref]$tokens, [ref]$errors)
+$ast = [Management.Automation.Language.Parser]::ParseFile($FixtureScript, [ref]$tokens, [ref]$errors)
 if ($errors.Count -ne 0) { throw 'fixture script does not parse' }
 foreach ($helper in $ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
     . ([scriptblock]::Create($helper.Extent.Text))
@@ -17,23 +17,29 @@ $start = -1
 $end = -1
 $initializationEnd = -1
 $startupEnd = -1
+$clientEnd = -1
 for ($i = 0; $i -lt $body.Count; $i++) {
     if ($body[$i].Extent.Text -ceq '$stage = ''initdb''') { $start = $i }
     if ($body[$i].Extent.Text -ceq '$stage = ''controller-build''') { $initializationEnd = $i }
     if ($body[$i].Extent.Text -ceq '$stage = ''startup''') { $end = $i }
+    if ($startupEnd -lt 0 -and $body[$i] -is [Management.Automation.Language.AssignmentStatementAst] -and $body[$i].Left.Extent.Text -ceq '$clientEnvironment') { $startupEnd = $i }
     if ($startupEnd -lt 0 -and $body[$i].Extent.Text -ceq '$env:PGPASSWORD = $password') { $startupEnd = $i }
+    if ($body[$i] -is [Management.Automation.Language.AssignmentStatementAst] -and $body[$i].Left.Extent.Text -ceq '$env:PGSAVVY_TEST_PG') { $clientEnd = $i }
 }
 if ($start -lt 0 -or $end -le $start + 1) { throw 'production initialization block missing' }
 if ($initializationEnd -lt 0) { $initializationEnd = $end }
 $initialize = [scriptblock]::Create(($body[($start + 1)..($initializationEnd - 1)] | ForEach-Object { $_.Extent.Text }) -join "`n")
 if ($startupEnd -le $end + 1) { throw 'production startup block missing' }
 $startup = [scriptblock]::Create(($body[($end + 1)..($startupEnd - 1)] | ForEach-Object { $_.Extent.Text }) -join "`n")
+if ($clientEnd -le $startupEnd) { throw 'production client block missing' }
+$clients = [scriptblock]::Create(($body[$startupEnd..($clientEnd - 1)] | ForEach-Object { $_.Extent.Text }) -join "`n")
 $cleanup = [scriptblock]::Create(($fixtureTry.Finally.Statements | ForEach-Object { $_.Extent.Text }) -join "`n")
 $temp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $testRoot = Join-Path $temp ('pgsavvy-fixture-test.' + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $testRoot
 $oldSentinel = $env:PGSAVVY_FIXTURE_AMBIENT_SENTINEL
 $oldRestriction = $env:PG_RESTRICT_EXEC
+$oldPassword = $env:PGPASSWORD
 try {
     $pg = Join-Path $testRoot 'fake postgres'
     $null = New-Item -ItemType Directory -Path $pg
@@ -58,6 +64,34 @@ func checkContext(data string) {
  if err != nil || len(input) != 0 { os.Exit(76) }
 }
 func main() {
+ name := filepath.Base(os.Args[0])
+ if name == "createdb.exe" || name == "psql.exe" {
+  data := filepath.Join(filepath.Dir(filepath.Dir(os.Getenv("HOME"))), "data")
+  checkContext(data)
+  password, err := os.ReadFile(filepath.Join(filepath.Dir(data), "password"))
+  if err != nil { os.Exit(85) }
+  mode, _ := os.ReadFile(filepath.Join(filepath.Dir(os.Args[0]), "mode"))
+  if os.Getenv("PGPASSWORD") != strings.TrimSpace(string(password)) {
+   if string(mode) == "wrong-accepted" { fmt.Println("1"); return }
+   if string(mode) == "wrong-unrelated" { fmt.Fprintln(os.Stderr, "unrelated private failure"); os.Exit(2) }
+   fmt.Fprintln(os.Stderr, "password authentication failed [synthetic]")
+   if string(mode) == "wrong-helper" { os.Exit(125) }
+   os.Exit(2)
+  }
+  if os.Getenv("PGCONNECT_TIMEOUT") != "5" || os.Getenv("PGSSLMODE") != "disable" { os.Exit(86) }
+  if name == "createdb.exe" {
+   if len(os.Args) != 8 || os.Args[1] != "-h" || os.Args[2] != "127.0.0.1" || os.Args[3] != "-p" || os.Args[5] != "-U" || os.Args[6] != "pgsavvy" || os.Args[7] != "pgsavvy_test" { os.Exit(87) }
+   if string(mode) == "client-fail" { os.Exit(7) }
+   fmt.Println("private database creation output"); return
+  }
+  if len(os.Args) != 15 || os.Args[1] != "-X" || os.Args[2] != "-w" || os.Args[3] != "-h" || os.Args[4] != "127.0.0.1" || os.Args[5] != "-p" || os.Args[7] != "-U" || os.Args[8] != "pgsavvy" || os.Args[9] != "-d" || os.Args[10] != "pgsavvy_test" || os.Args[11] != "-v" || os.Args[12] != "ON_ERROR_STOP=1" { os.Exit(88) }
+  fmt.Fprintln(os.Stderr, "private client diagnostic")
+  if os.Args[13] == "-f" { fmt.Println("private fixture output"); return }
+  if os.Args[13] != "-Atc" { os.Exit(89) }
+  if os.Args[14] == "SELECT 1" { fmt.Println("1"); return }
+  if strings.Contains(os.Args[14], "server_version_num") { fmt.Println("170006|UTF8|2|t"); return }
+  os.Exit(90)
+ }
  if len(os.Args) < 3 || os.Args[1] != "-D" { os.Exit(71) }
  checkContext(os.Args[2])
  if filepath.Base(os.Args[0]) == "pg_ctl.exe" {
@@ -96,6 +130,8 @@ func main() {
     & go build -o (Join-Path $pg 'initdb.exe') $goFile > (Join-Path $testRoot 'build.out') 2> (Join-Path $testRoot 'build.err')
     if ($LASTEXITCODE -ne 0) { throw 'fixture test helper build failed' }
     Copy-Item -LiteralPath (Join-Path $pg 'initdb.exe') -Destination (Join-Path $pg 'pg_ctl.exe')
+    Copy-Item -LiteralPath (Join-Path $pg 'initdb.exe') -Destination (Join-Path $pg 'createdb.exe')
+    Copy-Item -LiteralPath (Join-Path $pg 'initdb.exe') -Destination (Join-Path $pg 'psql.exe')
     $controller = Join-Path $testRoot 'pgctl-runner.exe'
     & go build -o $controller (Join-Path $PSScriptRoot '../../internal/pgfixture') > (Join-Path $testRoot 'controller-build.out') 2> (Join-Path $testRoot 'controller-build.err')
     if ($LASTEXITCODE -ne 0) { throw 'fixture controller build failed' }
@@ -104,6 +140,7 @@ func main() {
     $windowsDirectory = if ($IsWindows) { [Environment]::GetFolderPath([Environment+SpecialFolder]::Windows) } else { Join-Path $testRoot 'windows' }
     $env:PGSAVVY_FIXTURE_AMBIENT_SENTINEL = 'synthetic-private-environment'
     $env:PG_RESTRICT_EXEC = '1'
+    $env:PGPASSWORD = 'synthetic-parent-password'
     foreach ($mode in @('success', 'fail')) {
         $root = Join-Path $testRoot $mode
         $null = New-Item -ItemType Directory -Path $root
@@ -175,6 +212,47 @@ func main() {
         }
         $writer.Dispose()
     }
+    $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+    $Major = '17'
+    foreach ($mode in @('clients', 'client-fail', 'wrong-accepted', 'wrong-unrelated', 'wrong-helper')) {
+        $root = Join-Path $testRoot ('pgsavvy-native.' + $mode)
+        $null = New-Item -ItemType Directory -Path $root
+        $data = Join-Path $root 'data'
+        $passwordFile = Join-Path $root 'password'
+        [IO.File]::WriteAllText($passwordFile, "$password`n", [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText((Join-Path $pg 'mode'), $mode)
+        $probeCleanupFailed = $false
+        $controllerCleanupFailed = $false
+        . $initialize
+        . $startup
+        $out = [IO.StringWriter]::new()
+        $err = [IO.StringWriter]::new()
+        $savedOut = [Console]::Out
+        $savedErr = [Console]::Error
+        $rejected = $false
+        $emitted = @()
+        try {
+            [Console]::SetOut($out)
+            [Console]::SetError($err)
+            $emitted = @(. $clients)
+        } catch {
+            $rejected = $true
+            if ($_.Exception.Message.Contains($password)) { throw 'client exception disclosed password' }
+        } finally {
+            [Console]::SetOut($savedOut)
+            [Console]::SetError($savedErr)
+        }
+        if ($out.ToString() -or $err.ToString() -or $emitted.Count -ne 0) { throw 'private client output was published' }
+        $out.Dispose()
+        $err.Dispose()
+        if ($rejected -ne ($mode -ne 'clients')) { throw 'client isolation or wrong-password rejection failed' }
+        if ($mode -eq 'clients' -and ($wrongExit -eq 0 -or $facts[2] -cne '2')) { throw 'real client acceptance checks were bypassed' }
+        if ($env:PGPASSWORD -cne 'synthetic-parent-password') { throw 'client commands changed parent credentials' }
+        $owned = $true
+        $failed = $false
+        . $cleanup
+        if ($failed -or (Test-Path -LiteralPath $root)) { throw 'client failure prevented owned cleanup' }
+    }
     $originalCommand = (Get-Item Function:Invoke-ProbeCommand).ScriptBlock
     try {
         foreach ($failure in @('launch', 'timeout', 'capture', 'cleanup')) {
@@ -202,5 +280,6 @@ func main() {
 } finally {
     $env:PGSAVVY_FIXTURE_AMBIENT_SENTINEL = $oldSentinel
     $env:PG_RESTRICT_EXEC = $oldRestriction
+    $env:PGPASSWORD = $oldPassword
     if (-not $CleanupUncertain.Value) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
 }

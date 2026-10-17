@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,15 +31,39 @@ func TestRun(t *testing.T) {
 			t.Fatalf("exit = %d, want %d", got, code)
 		}
 		contents, err := os.ReadFile(log)
-		if err != nil || string(contents) != "private stdout\nprivate stderr\n" {
-			t.Fatalf("private capture failed: %v", err)
+		if err != nil || string(contents) != "private stdout\n" {
+			t.Fatalf("private stdout capture failed: %v", err)
+		}
+		contents, err = os.ReadFile(log + ".err")
+		if err != nil || string(contents) != "private stderr\n" {
+			t.Fatalf("private stderr capture failed: %v", err)
 		}
 	}
-	if run(nil) != 2 || run([]string{executable, root}) != 1 || run([]string{filepath.Join(root, "missing"), log}) != 1 {
+	if run(nil) != helperFailure || run([]string{executable, root}) != helperFailure || run([]string{filepath.Join(root, "missing"), log}) != helperFailure {
 		t.Fatal("invalid input, file failure or launch failure accepted")
 	}
 	if got := run(append([]string{executable, log}, helperArgs("stdin")...)); got != 0 {
 		t.Fatalf("stdin was not EOF: %d", got)
+	}
+}
+
+func TestCloseFailureOverridesExpectedChildFailure(t *testing.T) {
+	t.Setenv("GO_WANT_PGFIXTURE_HELPER", "1")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(executable, helperArgs("exit", "2")...)
+	command.Stdout, command.Stderr = io.Discard, io.Discard
+	childErr := command.Run()
+	if commandStatus(childErr, nil, nil) != 2 {
+		t.Fatal("expected child exit not preserved")
+	}
+	closeErr := errors.New("synthetic close failure")
+	for _, errs := range [][2]error{{closeErr, nil}, {nil, closeErr}, {closeErr, closeErr}} {
+		if commandStatus(childErr, errs[0], errs[1]) != helperFailure {
+			t.Fatal("child exit hid failed logging")
+		}
 	}
 }
 
