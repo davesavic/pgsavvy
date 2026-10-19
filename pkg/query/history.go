@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -100,24 +98,8 @@ func (h *History) RecordEntry(event HistoryEvent) error {
 // New opens (creating if needed) the SQLite history database at path, runs
 // migrations, and starts the background writer goroutine.
 func New(path string) (*History, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("query: mkdir history dir: %w", err)
-	}
-
-	db, err := sql.Open("sqlite", path)
+	db, err := openHistoryStore(context.Background(), path, false)
 	if err != nil {
-		return nil, fmt.Errorf("query: open sqlite: %w", err)
-	}
-
-	db.SetMaxOpenConns(1)
-
-	if _, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("query: pragma: %w", err)
-	}
-
-	if err := migrate(db); err != nil {
-		_ = db.Close()
 		return nil, err
 	}
 

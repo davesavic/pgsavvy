@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"errors"
@@ -19,14 +20,31 @@ var historySQLFS embed.FS
 // that the binary is older than the database and refuses to touch it.
 var ErrIncompatible = errors.New("query: history database has a newer schema than this binary supports")
 
-// migrate applies any unapplied history_NNN.sql files to db inside per-file
-// transactions and is idempotent across calls.
+// migrate serializes schema decisions with other processes, including readers
+// of the version table. A startup snapshot taken before BEGIN IMMEDIATE is stale.
 func migrate(db *sql.DB) error {
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY)`); err != nil {
+	return migrateContext(context.Background(), db)
+}
+
+func migrateContext(ctx context.Context, db *sql.DB) (result error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	if err := historyExec(ctx, conn, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	defer func() {
+		// With busy_timeout=0, rollback never adds a lock-wait budget. It must
+		// run even after ctx cancellation, before this connection is returned.
+		_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+	}()
+	if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY)`); err != nil {
 		return fmt.Errorf("create _migrations: %w", err)
 	}
 
-	applied, err := loadAppliedVersions(db)
+	applied, err := loadAppliedVersionsContext(ctx, conn)
 	if err != nil {
 		return err
 	}
@@ -52,12 +70,20 @@ func migrate(db *sql.DB) error {
 		if applied[e.version] {
 			continue
 		}
-		if err := applyMigration(db, e); err != nil {
+		defer func() {
+			if result != nil && ctx.Err() != nil {
+				result = errors.Join(ErrHistoryUpgradeRequired, ctx.Err())
+			}
+		}()
+		if _, err := conn.ExecContext(ctx, e.sql); err != nil {
 			return fmt.Errorf("apply migration %d: %w", e.version, err)
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO _migrations(version) VALUES (?)`, e.version); err != nil {
+			return err
 		}
 	}
 
-	return nil
+	return historyExec(ctx, conn, `COMMIT`)
 }
 
 type migrationEntry struct {
@@ -66,8 +92,12 @@ type migrationEntry struct {
 	sql     string
 }
 
-func loadAppliedVersions(db *sql.DB) (map[int]bool, error) {
-	rows, err := db.Query(`SELECT version FROM _migrations`)
+type historyVersionReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func loadAppliedVersionsContext(ctx context.Context, db historyVersionReader) (map[int]bool, error) {
+	rows, err := db.QueryContext(ctx, `SELECT version FROM _migrations`)
 	if err != nil {
 		return nil, fmt.Errorf("select _migrations: %w", err)
 	}
