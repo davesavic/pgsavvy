@@ -2,7 +2,10 @@
 
 The machine CLI is Linux-only. Production dispatch composes the implemented
 connection, catalog, query and capability handlers before legacy startup.
-It never initializes TUI configuration, history, persistent logs or themes.
+It never initializes TUI configuration, persistent logs or themes. History is
+the sole explicit state exception: a query may append to the shared history
+store only when its exact trusted saved profile has `cli_history: true`.
+Absent/false/unresolved consent preserves the default no-history-artifacts rule.
 
 Commands return one version-1 JSON object followed by a newline. The envelope
 has `schema_version`, `ok`, `command`, optional `connection`, `data` or `error`,
@@ -62,10 +65,24 @@ preference: machine queries are always read-only regardless of that field.
 
 ## Binary rollback
 
-Stop new-version TUI/profile writers and automation; finish or terminate active
-invocations. Back up the configuration, manually remove every cli_access key,
-and verify that the predecessor's strict loader accepts the edited synthetic
-configuration before replacing the binary. Then resume writers/automation.
-Keep the backup for restoring the new binary/configuration together. Do not
-leave live writers running while editing a rollback copy, or restore a new-only
-policy key while the predecessor is active. No automatic profile rewrite occurs.
+Stop all CLI/TUI/history/profile writers and automation; finish active
+invocations before downgrading. Back up configuration and make a **WAL-consistent
+history backup** with SQLite backup/VACUUM INTO, not a copy of only a live main
+database. Preserve the backup and inspect its exact schema version.
+
+For a v2 history store and a v1 predecessor, run the guarded offline
+[`rollback_002.sql`](../pkg/query/sql/rollback_002.sql) on the stopped-writer
+copy. With the SQLite shell, enable `.bail on` before `.read`; on any error,
+rollback/close and investigate, never continue to commit. Never auto-downgrade
+or run this script on an unknown/future schema. IDs, SQL, completion timestamps,
+durations, existing metrics and FTS searches remain. **Source labels are lost;
+blocked becomes the legacy unsuccessful/failed value.** Re-upgrading cannot
+reconstruct that metadata without the preserved v2 backup.
+
+Remove every `cli_history` key from the offline configuration copy. Remove other
+keys only if the exact target predecessor does not know them—for example,
+`cli_access` when rolling back before machine-CLI support. Verify predecessor
+strict parsing plus history read/search/append before replacing the binary and
+resuming writers. Roll back cooperating configuration-lock writers together;
+do not delete a live shared lock sidecar. Never restore new-only keys while the
+predecessor is active. No automatic profile rewrite occurs.

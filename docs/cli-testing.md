@@ -1,5 +1,62 @@
 # Machine CLI native verification
 
+## Opt-in query-history verification
+
+Fixture-independent Linux subprocess coverage runs without the integration tag:
+
+```sh
+go test -count=1 ./pkg/cli -run '^TestCLIHistory(Process_|_RollbackRehearsal)'
+go test -race -count=1 ./pkg/cli -run '^TestCLIHistory(Process_|_RollbackRehearsal)'
+go test -count=1 ./pkg/query ./pkg/config ./pkg/gui/context ./pkg/gui/controllers ./pkg/gui/orchestrator
+task test
+task lint
+task build
+```
+
+Subprocess tests reuse the Go test executable with production command composition,
+normal saved-profile consent and real machine I/O adapters. They do not replace
+verification of the shipping entry point. HOME/XDG, profiles, SQLite stores and
+protocol peers are test-owned; inherited PostgreSQL/helper/SSH settings are not
+used. No real PostgreSQL fixture is needed. Immediate post-exit read-only opens
+prove commitment without a history-flush sleep. Default fixtures keep their
+zero-state assertions; separate opted-in fixtures allow only private SQLite
+artifacts and unchanged profile bytes.
+
+Coverage includes original SQL versus distinct parameter/result/password/error
+sentinels (including FTS and live WAL/SHM), fresh/v1/current concurrent starts,
+held locks, corrupt/read-only/insecure stores and manual stopped-writer
+remediation, inclusive 1 MiB SQL input, SIGINT/SIGTERM, cleanup failure and broken
+or unread output. Test-owned protocol peers are not live PostgreSQL evidence.
+Race-process shutdown overhead is separate from the history-work allowance.
+Configuration parser tests exercise cancellation during large comments/dense
+nodes and prevent wide/complex mapping keys entering non-cancellable conversion.
+The rollback rehearsal takes a WAL-consistent backup, applies the exact-v2 down
+script, tests predecessor strict-key rejection/removal and old reads/search/writes,
+then verifies retained fields and intentionally lost source/blocked metadata.
+
+Only with a designated disposable fixture configured and preflighted:
+
+```sh
+go test -tags=integration -count=1 ./test/integration -run '^TestCLIHistory_Live$'
+```
+
+This uses a separate opted-in state root while retaining existing default
+fixtures' no-state cleanup checks. With saved `ReadOnly=false`, direct/nested
+writes must be rejected, a SECURITY DEFINER write function must fail with
+SQLSTATE 25006, and protected data must remain unchanged. Missing live fixtures,
+skips and compilation-only checks are **not a live pass**. Native configuration
+locking must also be exercised on each supported TUI platform; cross-compilation
+does not replace native Windows/macOS runtime evidence.
+
+For the real terminal smoke, use `testing-with-tmux` with disposable HOME/XDG
+roots. Verify consent off/on/save and complete disclosure at 80x24, including
+upward navigation from the bottom of the form. Open History, append externally,
+reactivate, inspect source/profile/outcomes and recall without executing. Check
+resolved-action logs, not the screen alone. A temporary test-only binding of
+`rail.switch.query_editor` in the startup connection manager can expose the
+editor without a database; such a smoke does not certify connected/live behavior
+or alter production bindings. Do not use real user profiles/history for a smoke.
+
 ## Status and scope
 
 Native Windows/macOS support is **pending**. The `native-baseline` job in
