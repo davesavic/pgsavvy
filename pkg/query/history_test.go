@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -51,6 +52,118 @@ func TestHistory_RoundTrip(t *testing.T) {
 	require.Equal(t, 1, ok)
 	require.Equal(t, "conn-a", connID)
 	require.NotZero(t, ts)
+}
+
+func TestHistory_MetadataRoundTrip(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	path := filepath.Join(t.TempDir(), "history.sqlite")
+	h, err := New(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = h.Close() })
+	h.pauseWriter()
+	events := make(map[string]HistoryEvent)
+	for _, source := range []string{"tui", "cli"} {
+		for _, outcome := range []string{"succeeded", "failed", "blocked"} {
+			event := HistoryEvent{
+				ExecutedAt: 123456789, SQL: "SELECT 'literal'\n-- " + source + " " + outcome,
+				DurationMS: 987, ConnectionID: "profile-name", Source: source, Outcome: outcome,
+			}
+			require.NoError(t, h.RecordEntry(event))
+			events[event.SQL] = event
+		}
+	}
+	for _, succeeded := range []bool{false, true} {
+		h.Record(fmt.Sprintf("SELECT direct_%t", succeeded), 17, 23, succeeded, "direct")
+		h.AsSessionRecorder("adapter").Record(fmt.Sprintf("SELECT adapter_%t", succeeded), 19, 29, succeeded)
+	}
+	for _, event := range []HistoryEvent{
+		{Source: "", Outcome: "succeeded"},
+		{Source: "llm", Outcome: "succeeded"},
+		{Source: "CLI", Outcome: "succeeded"},
+		{Source: "cli ", Outcome: "succeeded"},
+		{Source: "cli", Outcome: ""},
+		{Source: "cli", Outcome: "success"},
+		{Source: "tui", Outcome: "FAILED"},
+		{Source: "tui", Outcome: "blocked "},
+	} {
+		before := len(h.ch)
+		require.Error(t, h.RecordEntry(event))
+		require.Len(t, h.ch, before, "invalid event entered the queue")
+	}
+	// The event boundary intentionally has no booleans that could contradict
+	// Outcome, and no result, parameter, credential or raw-error containers.
+	typ := reflect.TypeOf(HistoryEvent{})
+	var fields []string
+	for i := range typ.NumField() {
+		fields = append(fields, typ.Field(i).Name)
+	}
+	require.ElementsMatch(t, []string{"ExecutedAt", "SQL", "DurationMS", "ConnectionID", "Source", "Outcome"}, fields)
+	require.NoError(t, h.Close())
+	read, err := New(path)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, read.Close()) }()
+	rows, err := read.Recent(context.Background(), 20)
+	require.NoError(t, err)
+	require.Len(t, rows, 10)
+	for _, row := range rows {
+		var affected, blocked, succeeded int64
+		require.NoError(t, read.db.QueryRow(`SELECT rows_affected, blocked, succeeded FROM history WHERE id=?`, row.ID).Scan(&affected, &blocked, &succeeded))
+		if event, ok := events[row.SQL]; ok {
+			require.Equal(t, event.ExecutedAt, row.ExecutedAt)
+			require.Equal(t, event.DurationMS, row.DurationMS)
+			require.Equal(t, event.ConnectionID, row.ConnectionID)
+			require.Equal(t, event.Source, row.Source)
+			require.Equal(t, event.Outcome, row.Outcome)
+			require.Equal(t, event.Outcome == "succeeded", succeeded != 0)
+			require.Equal(t, event.Outcome == "blocked", blocked != 0)
+			require.Zero(t, affected)
+		} else {
+			require.Equal(t, "tui", row.Source)
+			require.Zero(t, blocked)
+			require.NotZero(t, row.ExecutedAt)
+			if row.ConnectionID == "adapter" {
+				require.EqualValues(t, 29, affected)
+				require.EqualValues(t, 19, row.DurationMS)
+			} else {
+				require.Equal(t, "direct", row.ConnectionID)
+				require.EqualValues(t, 23, affected)
+				require.EqualValues(t, 17, row.DurationMS)
+			}
+			want := "failed"
+			if strings.HasSuffix(row.SQL, "true") {
+				want = "succeeded"
+			}
+			require.Equal(t, want, row.Outcome)
+		}
+		require.Equal(t, row.Outcome == "succeeded", row.Succeeded)
+	}
+}
+
+func TestHistory_BlockedCompletionExclusion(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	h, err := New(filepath.Join(t.TempDir(), "history.sqlite"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, h.Close()) }()
+	h.pauseWriter()
+	h.Record("SELECT eligible_old", 1, 1, true, "legacy")
+	h.Record("SELECT eligible_new", 1, 1, true, "legacy")
+	h.Record("SELECT eligible_new", 1, 1, true, "legacy")
+	require.NoError(t, h.RecordEntry(HistoryEvent{SQL: "SELECT eligible_failed", Source: "cli", Outcome: "failed"}))
+	// More than the candidate cap (64 at limit 3) must not starve older rows.
+	for i := range 90 {
+		require.NoError(t, h.RecordEntry(HistoryEvent{SQL: fmt.Sprintf("SELECT forbidden_%d", i), Source: "cli", Outcome: "blocked"}))
+	}
+	h.resumeWriter()
+	waitForHistoryFlush(t, h, 94)
+	got, err := h.SearchByPrefix(context.Background(), "SEL", 3)
+	require.NoError(t, err)
+	require.Equal(t, []string{"SELECT eligible_failed", "SELECT eligible_new", "SELECT eligible_old"}, got)
+	rows, err := h.Recent(context.Background(), 500)
+	require.NoError(t, err)
+	require.Len(t, rows, 94)
+	require.Equal(t, "SELECT forbidden_89", rows[0].SQL)
+	require.Equal(t, "blocked", rows[0].Outcome)
+	require.Zero(t, h.Dropped())
 }
 
 func TestHistory_FTSSearch(t *testing.T) {

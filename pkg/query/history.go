@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -51,6 +52,49 @@ type historyEntry struct {
 	rowsAffected int64
 	succeeded    bool
 	connID       string
+	source       string
+	blocked      bool
+}
+
+// HistoryEvent records an attempt, not result data or output delivery. ExecutedAt
+// is its completion time in Unix milliseconds; DurationMS includes DB cleanup.
+// SQL literals and comments are retained. Parameters and result/error objects
+// deliberately have no representation here.
+type HistoryEvent struct {
+	ExecutedAt   int64
+	SQL          string
+	DurationMS   int64
+	ConnectionID string
+	Source       string
+	Outcome      string
+}
+
+func historyEntryForEvent(event HistoryEvent) (historyEntry, error) {
+	if event.Source != "tui" && event.Source != "cli" {
+		return historyEntry{}, errors.New("query: invalid history event source")
+	}
+	switch event.Outcome {
+	case "succeeded", "failed", "blocked":
+	default:
+		return historyEntry{}, errors.New("query: invalid history event outcome")
+	}
+	return historyEntry{
+		executedAt: event.ExecutedAt, sql: event.SQL, durMs: event.DurationMS,
+		connID: event.ConnectionID, source: event.Source,
+		succeeded: event.Outcome == "succeeded", blocked: event.Outcome == "blocked",
+	}, nil
+}
+
+// RecordEntry validates and enqueues an attempt using Record's best-effort,
+// nonblocking queue. A nil error means admission, not committed persistence.
+// Source must be tui or cli; Outcome must be succeeded, failed or blocked.
+func (h *History) RecordEntry(event HistoryEvent) error {
+	entry, err := historyEntryForEvent(event)
+	if err != nil {
+		return err
+	}
+	h.enqueue(entry)
+	return nil
 }
 
 // New opens (creating if needed) the SQLite history database at path, runs
@@ -100,8 +144,12 @@ func (h *History) Record(stmt string, durMs int64, rowsAffected int64, succeeded
 		rowsAffected: rowsAffected,
 		succeeded:    succeeded,
 		connID:       connID,
+		source:       "tui",
 	}
+	h.enqueue(entry)
+}
 
+func (h *History) enqueue(entry historyEntry) {
 	select {
 	case h.ch <- entry:
 		return
@@ -227,18 +275,22 @@ func (h *History) flushBatch(batch []historyEntry) error {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(`INSERT INTO history(executed_at, sql, duration_ms, rows_affected, succeeded, connection_id) VALUES `)
-	args := make([]any, 0, len(batch)*6)
+	sb.WriteString(`INSERT INTO history(executed_at, sql, duration_ms, rows_affected, succeeded, connection_id, source, blocked) VALUES `)
+	args := make([]any, 0, len(batch)*8)
 	for i, e := range batch {
 		if i > 0 {
 			sb.WriteString(",")
 		}
-		sb.WriteString("(?,?,?,?,?,?)")
+		sb.WriteString("(?,?,?,?,?,?,?,?)")
 		succ := int64(0)
 		if e.succeeded {
 			succ = 1
 		}
-		args = append(args, e.executedAt, e.sql, e.durMs, e.rowsAffected, succ, e.connID)
+		blocked := int64(0)
+		if e.blocked {
+			blocked = 1
+		}
+		args = append(args, e.executedAt, e.sql, e.durMs, e.rowsAffected, succ, e.connID, e.source, blocked)
 	}
 
 	if _, err := tx.Exec(sb.String(), args...); err != nil {
@@ -316,6 +368,8 @@ type HistoryRow struct {
 	DurationMS   int64
 	Succeeded    bool
 	ConnectionID string
+	Source       string
+	Outcome      string
 }
 
 // Recent returns up to limit rows from history, newest first (id DESC).
@@ -325,7 +379,7 @@ func (h *History) Recent(ctx context.Context, limit int) ([]HistoryRow, error) {
 		return []HistoryRow{}, nil
 	}
 
-	const q = `SELECT id, executed_at, sql, duration_ms, succeeded, connection_id
+	const q = `SELECT id, executed_at, sql, duration_ms, succeeded, connection_id, source, blocked
 FROM history
 ORDER BY id DESC
 LIMIT ?`
@@ -339,13 +393,19 @@ LIMIT ?`
 	out := make([]HistoryRow, 0, limit)
 	for rows.Next() {
 		var (
-			r    HistoryRow
-			succ int64
+			r             HistoryRow
+			succ, blocked int64
 		)
-		if err := rows.Scan(&r.ID, &r.ExecutedAt, &r.SQL, &r.DurationMS, &succ, &r.ConnectionID); err != nil {
+		if err := rows.Scan(&r.ID, &r.ExecutedAt, &r.SQL, &r.DurationMS, &succ, &r.ConnectionID, &r.Source, &blocked); err != nil {
 			return nil, fmt.Errorf("query: history recent scan: %w", err)
 		}
 		r.Succeeded = succ != 0
+		r.Outcome = "failed"
+		if blocked != 0 {
+			r.Outcome = "blocked"
+		} else if r.Succeeded {
+			r.Outcome = "succeeded"
+		}
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -363,10 +423,8 @@ LIMIT ?`
 // Quoting makes operator words such as AND literal; the star stays outside
 // the quotes to match longer tokens. Empty sanitization returns ([]string{}, nil).
 //
-// De-duplication is performed in Go after streaming rows newest-first; the
-// query itself avoids GROUP BY so the FTS5 + index path can short-circuit
-// once `limit` distinct rows have been seen, keeping p99 under 50ms over
-// 100k-row tables.
+// Blocked attempts remain manually recallable through Recent, but never supply
+// completion candidates. De-duplication streams newest-first without GROUP BY.
 func (h *History) SearchByPrefix(ctx context.Context, prefix string, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil
@@ -389,6 +447,8 @@ func (h *History) SearchByPrefix(ctx context.Context, prefix string, limit int) 
 WHERE id IN (
     SELECT rowid FROM history_fts
     WHERE history_fts MATCH ?
+      AND EXISTS (SELECT 1 FROM history AS candidate
+                  WHERE candidate.id = history_fts.rowid AND candidate.blocked = 0)
     ORDER BY rowid DESC
     LIMIT ?
 )
