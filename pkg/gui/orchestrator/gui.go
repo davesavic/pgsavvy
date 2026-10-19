@@ -330,6 +330,7 @@ type keybindingSystem struct {
 type queryState struct {
 	queryRunner      *data.QueryRunner
 	history          *query.History
+	historyReload    *historyReload
 	activeSQLSession *session.SQLSession
 }
 
@@ -914,38 +915,31 @@ const historyRecentLimit = 500
 // registerHistoryOpen wires the HISTORY tab: the HistoryOpen action handler
 // switches the QUERY_RAIL container to the History tab (no popup push), and
 // the leaf's reload hook lazily loads Recent(N). The reload runs only when the
-// leaf is stale (first activation + after a query run); it loads on a worker
-// goroutine and publishes back via OnUIThread so Layout repaints the active tab
+// leaf is activated; one coalescing read pump publishes back via OnUIThread so Layout repaints the active tab
 // (RefreshRows preserves the cursor; SetRows/RefreshRows are NEVER called from
 // the worker — data race under -race). On load error it surfaces a toast and
 // leaves the prior rows intact.
 func (g *Gui) registerHistoryOpen() {
 	historyCtx := g.registry.History
-
-	historyCtx.SetReload(func() {
-		store := g.queryState.history
-		if store == nil {
-			return
-		}
-		g.OnWorker(func(_ gocui.Task) error {
-			rows, err := store.Recent(context.Background(), historyRecentLimit)
-			if err != nil {
-				g.deps.Common.Logger().Warn("gui: history recent", "err", err)
-				if g.toastHelp != nil {
-					g.OnUIThreadContentOnly(func() error {
+	if g.queryState.historyReload != nil {
+		g.queryState.historyReload.close()
+	}
+	if store := g.queryState.history; store != nil {
+		reload := &historyReload{
+			read: store.Recent, onUI: g.OnUIThread,
+			publish: func(rows []query.HistoryRow, err error) {
+				if err != nil {
+					if g.toastHelp != nil {
 						g.toastHelp.Show("could not load query history", 3*time.Second)
-						return nil
-					})
+					}
+					return
 				}
-				return nil
-			}
-			g.OnUIThread(func() error {
 				historyCtx.RefreshRows(rows)
-				return nil
-			})
-			return nil
-		})
-	})
+			},
+		}
+		g.queryState.historyReload = reload
+		historyCtx.SetReload(reload.request)
+	}
 
 	_ = g.keybindingSystem.cmdRegistry.Register(&commands.Command{
 		ID:          commands.HistoryOpen,
@@ -1809,6 +1803,9 @@ func (g *Gui) Close() error {
 		return nil
 	}
 	var firstErr error
+	if g.queryState.historyReload != nil {
+		g.queryState.historyReload.close()
+	}
 	g.cancelCommitOperations()
 	g.cancelTableInspect()
 	g.cancelSchemaActivation()
@@ -2167,6 +2164,9 @@ func (g *Gui) WaitForWorkersForTest() {
 		return
 	}
 	g.spinnerState.workersWG.Wait()
+	if g.queryState.historyReload != nil {
+		g.queryState.historyReload.wait()
+	}
 }
 
 // ChoiceHelperForTest returns the ChoiceHelper wired by wireWithDriver,

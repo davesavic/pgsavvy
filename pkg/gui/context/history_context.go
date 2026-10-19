@@ -42,11 +42,8 @@ const historyEmptyLine = "no query history yet"
 // controllers.SideListCursor surface (Cursor / SetCursor / Items) so the list
 // trait can drive j/k/G.
 //
-// Freshness is load-once + invalidate-on-write: the leaf starts stale, so the
-// FIRST tab activation (HandleFocus) fires the injected reload hook; thereafter
-// it reloads ONLY after MarkStale (set when a query is run). It never reloads
-// on every focus — that would arm the busy spinner on every tab switch and
-// stack goroutines.
+// Each activation requests a refresh so external CLI inserts become visible.
+// The orchestrator coalesces requests and owns the read lifecycle.
 type HistoryContext struct {
 	BaseContext
 
@@ -55,11 +52,6 @@ type HistoryContext struct {
 	rows   []query.HistoryRow
 	cursor int
 
-	// stale gates the reload-on-focus. Initialized true so the first
-	// activation loads. Set true again on a write (MarkStale); cleared after a
-	// reload fires.
-	stale bool
-
 	// reload is the async load hook injected by the orchestrator (it owns the
 	// history store + threading). Nil-safe: an unwired leaf simply never
 	// reloads.
@@ -67,30 +59,20 @@ type HistoryContext struct {
 }
 
 // NewHistoryContext builds a context bound to the supplied BaseContext (the
-// caller sets Key / ViewName / Kind via BaseContextOpts). The leaf starts
-// stale so the first activation loads.
+// caller sets Key / ViewName / Kind via BaseContextOpts).
 func NewHistoryContext(base BaseContext, deps Deps) *HistoryContext {
-	return &HistoryContext{BaseContext: base, deps: deps, stale: true}
+	return &HistoryContext{BaseContext: base, deps: deps}
 }
 
 // SetReload injects the async reload hook (orchestrator-owned: it closes over
 // the history store + threading). Nil-safe everywhere it is read.
 func (c *HistoryContext) SetReload(fn func()) { c.reload = fn }
 
-// MarkStale flags the list for a reload on the next activation. Called when a
-// query is run (a new history row was appended), so switching to the History
-// tab afterwards reflects the new row.
-func (c *HistoryContext) MarkStale() { c.stale = true }
+// MarkStale preserves the write-notification API; every activation now reloads.
+func (c *HistoryContext) MarkStale() {}
 
-// HandleFocus reloads the list ONLY when stale (load-once + invalidate-on-write),
-// clearing the flag first so a reload error does not re-arm an endless reload.
-// The reload hook is async (worker load → UI-thread refresh); the actual rows
-// land later via RefreshRows.
+// HandleFocus requests an asynchronous, single-flight refresh on every entry.
 func (c *HistoryContext) HandleFocus(_ types.OnFocusOpts) error {
-	if !c.stale {
-		return nil
-	}
-	c.stale = false
 	if c.reload != nil {
 		c.reload()
 	}
@@ -195,16 +177,28 @@ func formatHistoryBody(rows []query.HistoryRow, cursor int, now time.Time) strin
 	return b.String()
 }
 
-// formatHistoryRow renders a single row's cell: a syntax-highlighted SQL
-// preview + glyph + relative time + duration. The SQL is truncated BEFORE
-// highlighting so the rune cap never slices an ANSI escape mid-sequence, and
-// highlight.Highlight emits a trailing reset so the metadata after it renders
-// in the default style.
+// Labels precede SQL so narrow layouts retain textual source/outcome. Sanitize
+// before highlighting/truncation; original rows remain unchanged for recall.
 func formatHistoryRow(r query.HistoryRow, now time.Time) string {
+	source, outcome := r.Source, r.Outcome
+	if source == "" {
+		source = "tui"
+	}
+	if outcome == "" {
+		outcome = "failed"
+		if r.Succeeded {
+			outcome = "succeeded"
+		}
+	}
+	profile := truncateHistorySQL(r.ConnectionID, 24)
+	if profile == "" {
+		profile = "-"
+	}
 	return fmt.Sprintf(
-		"%s %s %s  %s",
+		"[%s %s] %s | %s %s %s  %s",
+		truncateHistorySQL(source, 12), truncateHistorySQL(outcome, 12), profile,
 		highlight.Highlight(truncateHistorySQL(r.SQL, historyDisplayWidth)),
-		historyGlyph(r.Succeeded),
+		historyGlyph(outcome == "succeeded"),
 		formatRelativeTime(now, time.UnixMilli(r.ExecutedAt)),
 		formatHistoryDuration(r.DurationMS),
 	)
@@ -219,9 +213,7 @@ func truncateHistorySQL(s string, width int) string {
 	if width <= 0 {
 		width = historyDisplayWidth
 	}
-	collapsed := strings.ReplaceAll(s, "\r\n", historyReturnGlyph)
-	collapsed = strings.ReplaceAll(collapsed, "\n", historyReturnGlyph)
-	collapsed = strings.ReplaceAll(collapsed, "\r", historyReturnGlyph)
+	collapsed := sanitizeHistoryText(s)
 	runes := []rune(collapsed)
 	if len(runes) <= width {
 		return collapsed
@@ -230,6 +222,56 @@ func truncateHistorySQL(s string, width int) string {
 		return "…"
 	}
 	return string(runes[:width-1]) + "…"
+}
+
+func sanitizeHistoryText(s string) string {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	runes := []rune(s)
+	var out strings.Builder
+	controlString, csi := false, false
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if controlString {
+			if r == '\a' || r == '\u009c' {
+				controlString = false
+			} else if r == '\x1b' && i+1 < len(runes) && runes[i+1] == '\\' {
+				controlString = false
+				i++
+			}
+			continue
+		}
+		if csi {
+			if r >= 0x40 && r <= 0x7e {
+				csi = false
+			}
+			continue
+		}
+		if r == '\x1b' && i+1 < len(runes) {
+			switch runes[i+1] {
+			case ']', 'P', 'X', '^', '_':
+				controlString = true
+				i++
+			case '[':
+				csi = true
+				i++
+			}
+			continue
+		}
+		switch {
+		case r == '\u009d' || r == '\u0090' || r == '\u0098' || r == '\u009e' || r == '\u009f':
+			controlString = true
+		case r == '\u009b':
+			csi = true
+		case r == '\n' || r == '\u2028' || r == '\u2029':
+			out.WriteString(historyReturnGlyph)
+		case r == '\t':
+			out.WriteByte(' ')
+		case r < 0x20 || (r >= 0x7f && r <= 0x9f):
+		default:
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
 }
 
 // historyGlyph maps row success to a check/cross glyph.

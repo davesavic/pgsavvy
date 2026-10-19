@@ -219,9 +219,9 @@ func TestHistoryRegisterActions_ResolveThroughRegistry(t *testing.T) {
 	}
 }
 
-// TestHistoryHandleFocus_LoadsOnceWhenStale verifies the leaf reloads on its
-// first activation (stale by construction) and not again until MarkStale.
-func TestHistoryHandleFocus_LoadsOnceWhenStale(t *testing.T) {
+// External CLI inserts require refreshing on every activation, not merely
+// after local writes. The orchestrator bounds/coalesces the actual reads.
+func TestHistoryHandleFocus_ReloadsEveryActivation(t *testing.T) {
 	base := guicontext.NewBaseContext(guicontext.BaseContextOpts{
 		Key:      guicontext.HistoryContextKey,
 		ViewName: string(guicontext.HistoryContextKey),
@@ -231,20 +231,35 @@ func TestHistoryHandleFocus_LoadsOnceWhenStale(t *testing.T) {
 	reloads := 0
 	ctx.SetReload(func() { reloads++ })
 
-	// First focus: stale → reloads.
+	// First activation reloads.
 	_ = ctx.HandleFocus(types.OnFocusOpts{})
 	if reloads != 1 {
 		t.Fatalf("reloads after first focus = %d, want 1", reloads)
 	}
-	// Second focus: not stale → no reload.
+	// Second activation reloads even without a local write notification.
 	_ = ctx.HandleFocus(types.OnFocusOpts{})
-	if reloads != 1 {
-		t.Fatalf("reloads after second focus = %d, want 1 (not stale)", reloads)
+	if reloads != 2 {
+		t.Fatalf("reloads after second focus = %d, want 2", reloads)
 	}
 	// After MarkStale: reloads again.
 	ctx.MarkStale()
 	_ = ctx.HandleFocus(types.OnFocusOpts{})
-	if reloads != 2 {
-		t.Fatalf("reloads after MarkStale+focus = %d, want 2", reloads)
+	if reloads != 3 {
+		t.Fatalf("reloads after MarkStale+focus = %d, want 3", reloads)
+	}
+}
+
+func TestHistoryConfirm_BlockedOriginalSQLOnly(t *testing.T) {
+	const original = "DELETE\tFROM users; -- 'literal'\n\x1b]52;c;original\a"
+	ctx := newHistoryContext([]query.HistoryRow{{SQL: original, Source: "cli", Outcome: "blocked"}})
+	buf := &historyEditorBuffer{}
+	switches := 0
+	// No query executor is supplied: confirm requires only editor insertion.
+	c := NewHistoryController(nil, CoreDeps{}, ctx, buf, func() { switches++ })
+	if err := c.Confirm(commands.ExecCtx{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(buf.Inserted) != 1 || buf.Inserted[0] != original || switches != 1 {
+		t.Fatalf("blocked recall modified/executed SQL: inserts=%q switches=%d", buf.Inserted, switches)
 	}
 }
