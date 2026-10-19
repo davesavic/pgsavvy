@@ -3,9 +3,11 @@ package data
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 
@@ -14,6 +16,26 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
+
+type connectionsTestFs struct {
+	afero.Fs
+	lock chan struct{}
+}
+
+func newConnectionsTestFs() *connectionsTestFs {
+	return &connectionsTestFs{Fs: afero.NewMemMapFs(), lock: make(chan struct{}, 1)}
+}
+
+func (fs *connectionsTestFs) LockConnections(path string, deadline time.Time) (string, func(), error) {
+	timer := time.NewTimer(max(0, time.Until(deadline)))
+	defer timer.Stop()
+	select {
+	case fs.lock <- struct{}{}:
+		return path, func() { <-fs.lock }, nil
+	case <-timer.C:
+		return "", nil, os.ErrDeadlineExceeded
+	}
+}
 
 // stringAttempt scripts one call to PromptString: a sequence of raw inputs
 // the fake will try in order, each passed to the validate callback. If
@@ -92,7 +114,7 @@ func newHelperForTest(t *testing.T, fs afero.Fs, drivers []string) *ConnectionFo
 }
 
 func TestWalkAddConnection_HappyPath(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	h := newHelperForTest(t, fs, []string{"postgres", "mysql"})
 	prompter := &fakePrompter{
 		t:       t,
@@ -185,7 +207,7 @@ func TestWalkAddConnection_EscAtEachStep(t *testing.T) {
 }
 
 func TestWalkAddConnection_UnregisteredDriverReprompts(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	h := newHelperForTest(t, fs, []string{"postgres"})
 	prompter := &fakePrompter{
 		t: t,
@@ -246,7 +268,7 @@ func TestWalkAddConnection_NoDrivers(t *testing.T) {
 }
 
 func TestWalkAddConnection_DuplicateNameReprompts(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	if err := config.AppendConnection(fs, "/connections.yml", models.Connection{Name: "local", Driver: "postgres", DSN: "postgres://x"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -276,7 +298,7 @@ func TestWalkAddConnection_DuplicateNameReprompts(t *testing.T) {
 }
 
 func TestWalkAddConnection_DuplicateNameError_HasTrText(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	if err := config.AppendConnection(fs, "/connections.yml", models.Connection{Name: "local", Driver: "postgres", DSN: "postgres://x"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -310,7 +332,7 @@ func TestWalkAddConnection_DuplicateNameError_HasTrText(t *testing.T) {
 }
 
 func TestWalkAddConnection_DSNInlinePasswordRejected(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	h := newHelperForTest(t, fs, []string{"postgres"})
 	tr := i18n.EnglishTranslationSet()
 	var dsnErr error
@@ -336,7 +358,7 @@ func TestWalkAddConnection_DSNInlinePasswordRejected(t *testing.T) {
 }
 
 func TestWalkAddConnection_EmptyDSNRejected(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	h := newHelperForTest(t, fs, []string{"postgres"})
 	tr := i18n.EnglishTranslationSet()
 	var emptyErr error

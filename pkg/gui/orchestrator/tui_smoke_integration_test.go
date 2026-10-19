@@ -208,7 +208,7 @@ func setupSmoke(t *testing.T) *smoke {
 	dsn := requireSmokePG(t)
 	registerSmokeDriver()
 
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	log := slog.New(slog.DiscardHandler)
 	cfg := config.GetDefaultConfig()
 	tr := i18n.EnglishTranslationSet()

@@ -33,7 +33,7 @@ func withWarnWriter(t *testing.T) *bytes.Buffer {
 }
 
 func TestSaveConnections_RoundTrip(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	conns := []models.Connection{
 		{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"},
 		{Name: "prod", Driver: "postgres", DSN: "postgres://localhost/prod"},
@@ -54,7 +54,7 @@ func TestSaveConnections_RoundTrip(t *testing.T) {
 }
 
 func TestSaveConnections_SSHTunnelAllFieldsRoundTrip(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	conns := []models.Connection{{
 		Name:   "dev",
 		Driver: "postgres",
@@ -85,7 +85,7 @@ func TestSaveConnections_SSHTunnelAllFieldsRoundTrip(t *testing.T) {
 }
 
 func TestSaveConnections_SSHOmitemptyKeysAbsent(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	// Nil tunnel and zero-value new fields must not emit keys.
 	conns := []models.Connection{{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}}
 	if err := SaveConnections(fs, "/c.yml", conns); err != nil {
@@ -121,7 +121,7 @@ func TestSaveConnections_SSHOmitemptyKeysAbsent(t *testing.T) {
 }
 
 func TestSaveConnections_DropsDSNWhenDiscreteSet(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	conns := []models.Connection{{
 		Name: "dev", Driver: "postgres",
 		DSN:  "postgres://legacy@old/db",
@@ -153,7 +153,7 @@ func TestSaveConnections_DropsDSNWhenDiscreteSet(t *testing.T) {
 }
 
 func TestSaveConnections_KeepsDSNWhenNoDiscrete(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	conns := []models.Connection{{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}}
 	if err := SaveConnections(fs, "/c.yml", conns); err != nil {
 		t.Fatalf("SaveConnections: %v", err)
@@ -166,7 +166,7 @@ func TestSaveConnections_KeepsDSNWhenNoDiscrete(t *testing.T) {
 
 func TestSaveConnections_StripsInlinePassword(t *testing.T) {
 	withWarnWriter(t) // silence WARN
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	conns := []models.Connection{{
 		Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev",
 		Password: "hunter2supersecret",
@@ -192,7 +192,7 @@ func TestSaveConnections_StripsInlinePassword(t *testing.T) {
 }
 
 func TestSaveConnections_RenameFailureRemovesTmp(t *testing.T) {
-	base := afero.NewMemMapFs()
+	base := newConnectionsTestFs()
 	fs := &renameFailFs{Fs: base}
 	conns := []models.Connection{{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}}
 	err := SaveConnections(fs, "/c.yml", conns)
@@ -209,7 +209,7 @@ func TestSaveConnections_RenameFailureRemovesTmp(t *testing.T) {
 
 func TestSaveConnections_WarnOnInlinePassword(t *testing.T) {
 	buf := withWarnWriter(t)
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	conns := []models.Connection{
 		{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev", Password: "hunter2"},
 	}
@@ -224,7 +224,7 @@ func TestSaveConnections_WarnOnInlinePassword(t *testing.T) {
 
 func TestSaveConnections_NoWarnWhenClean(t *testing.T) {
 	buf := withWarnWriter(t)
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	conns := []models.Connection{{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}}
 	if err := SaveConnections(fs, "/c.yml", conns); err != nil {
 		t.Fatalf("SaveConnections: %v", err)
@@ -235,7 +235,7 @@ func TestSaveConnections_NoWarnWhenClean(t *testing.T) {
 }
 
 func TestAppendConnection_MissingFileCreates(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	c := models.Connection{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}
 	if err := AppendConnection(fs, "/c.yml", c); err != nil {
 		t.Fatalf("AppendConnection: %v", err)
@@ -250,7 +250,7 @@ func TestAppendConnection_MissingFileCreates(t *testing.T) {
 }
 
 func TestAppendConnection_DuplicateName(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	c := models.Connection{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"}
 	if err := AppendConnection(fs, "/c.yml", c); err != nil {
 		t.Fatalf("first AppendConnection: %v", err)
@@ -268,7 +268,7 @@ func TestAppendConnection_DuplicateName(t *testing.T) {
 }
 
 func TestAppendConnection_PropagatesLoadError(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	// Legacy flat form — LoadConnections rejects it loudly (M10f).
 	body := "- name: dev\n  driver: postgres\n  dsn: postgres://localhost/dev\n"
 	if err := afero.WriteFile(fs, "/c.yml", []byte(body), 0o600); err != nil {
@@ -306,7 +306,7 @@ func TestIsInlinePasswordPresent(t *testing.T) {
 func TestMachineAccess_RoundTrip(t *testing.T) {
 	for _, policy := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead} {
 		t.Run(string(policy), func(t *testing.T) {
-			fs := afero.NewMemMapFs()
+			fs := newConnectionsTestFs()
 			conns := []models.Connection{{Name: "dev", CLIAccess: policy}}
 			if err := SaveConnections(fs, "/private/c.yml", conns); err != nil {
 				t.Fatal(err)
@@ -323,7 +323,7 @@ func TestMachineAccess_RoundTrip(t *testing.T) {
 			}
 		})
 	}
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	before := []byte("connections: []\n")
 	if err := afero.WriteFile(fs, "/c.yml", before, 0o600); err != nil {
 		t.Fatal(err)
@@ -340,7 +340,7 @@ func TestMachineAccess_RoundTrip(t *testing.T) {
 func TestMachineAccess_FormPreservation(t *testing.T) {
 	for _, renamed := range []bool{false, true} {
 		for _, policy := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead} {
-			fs := afero.NewMemMapFs()
+			fs := newConnectionsTestFs()
 			stale := models.Connection{Name: "dev", CLIAccess: models.CLIAccessRowRead}
 			if renamed {
 				stale.Name = "renamed"
@@ -380,7 +380,7 @@ func (fs *changingConnectionFs) OpenFile(name string, flag int, mode os.FileMode
 func TestMachineAccess_FormPreservation_Conflicts(t *testing.T) {
 	for _, name := range []string{"dev", "renamed"} {
 		t.Run(name, func(t *testing.T) {
-			base := afero.NewMemMapFs()
+			base := newConnectionsTestFs()
 			if err := SaveConnections(base, "/private/c.yml", []models.Connection{{Name: "dev", CLIAccess: models.CLIAccessRowRead}}); err != nil {
 				t.Fatal(err)
 			}
@@ -407,7 +407,7 @@ func TestMachineAccess_FormPreservation_Conflicts(t *testing.T) {
 }
 
 func TestMachineAccess_FormPreservation_DuplicateAndDenied(t *testing.T) {
-	base := afero.NewMemMapFs()
+	base := newConnectionsTestFs()
 	conns := []models.Connection{{Name: "dev", CLIAccess: models.CLIAccessRowRead}, {Name: "dev", CLIAccess: models.CLIAccessDisabled}}
 	if err := SaveConnections(base, "/private/c.yml", conns); err != nil {
 		t.Fatal(err)
@@ -416,8 +416,9 @@ func TestMachineAccess_FormPreservation_DuplicateAndDenied(t *testing.T) {
 	if err := UpdateConnection(base, "/private/c.yml", "dev", models.Connection{Name: "dev"}); !errors.Is(err, ErrDuplicateConnectionName) {
 		t.Fatalf("ambiguous profile: %v", err)
 	}
-	if err := SaveConnections(afero.NewReadOnlyFs(base), "/private/c.yml", nil); err == nil {
-		t.Fatal("read-only filesystem accepted write")
+	readOnly := &connectionsTestFs{Fs: afero.NewReadOnlyFs(base), lock: base.lock}
+	if err := SaveConnections(readOnly, "/private/c.yml", nil); err == nil || !strings.Contains(err.Error(), "atomic_yaml: mkdir") {
+		t.Fatalf("read-only publication failure not exercised: %v", err)
 	}
 	after, _ := afero.ReadFile(base, "/private/c.yml")
 	if !bytes.Equal(before, after) {

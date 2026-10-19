@@ -7,8 +7,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/spf13/afero"
-
 	"github.com/davesavic/pgsavvy/pkg/common"
 	"github.com/davesavic/pgsavvy/pkg/config"
 	"github.com/davesavic/pgsavvy/pkg/drivers"
@@ -299,7 +297,7 @@ func itoaInt64(n int64) string {
 // state dir is never touched during tests.
 func buildTestGuiWithHistory(t *testing.T) (*orchestrator.Gui, *testfake.RecorderGuiDriver) {
 	t.Helper()
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	log := slog.New(slog.DiscardHandler)
 	cfg := config.GetDefaultConfig()
 	c := common.NewCommon(log, i18n.EnglishTranslationSet(), cfg, &common.AppState{}, fs)

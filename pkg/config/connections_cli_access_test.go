@@ -14,7 +14,7 @@ func TestUpdateConnectionWithCLIAccess(t *testing.T) {
 	for _, original := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead} {
 		for _, selected := range []models.CLIAccess{models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead} {
 			t.Run(string(original)+"_to_"+string(selected), func(t *testing.T) {
-				fs := afero.NewMemMapFs()
+				fs := newConnectionsTestFs()
 				const path = "/private/connections.yml"
 				if err := SaveConnections(fs, path, []models.Connection{{Name: "dev", CLIAccess: original}, {Name: "other", CLIAccess: models.CLIAccessMetadata}}); err != nil {
 					t.Fatal(err)
@@ -47,7 +47,7 @@ func TestUpdateConnectionWithCLIAccessRejectsUnsafeEdits(t *testing.T) {
 		{"missing-profile", "missing", "renamed", models.CLIAccessDisabled, models.CLIAccessRowRead, ErrConnectionNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fs := afero.NewMemMapFs()
+			fs := newConnectionsTestFs()
 			const path = "/private/connections.yml"
 			if err := SaveConnections(fs, path, []models.Connection{{Name: "dev", CLIAccess: models.CLIAccessDisabled}, {Name: "other"}}); err != nil {
 				t.Fatal(err)
@@ -69,7 +69,7 @@ func TestUpdateConnectionWithCLIAccessRejectsUnsafeEdits(t *testing.T) {
 }
 
 func TestUpdateConnectionWithCLIAccessRejectsInterveningRevocation(t *testing.T) {
-	base := afero.NewMemMapFs()
+	base := newConnectionsTestFs()
 	const path = "/private/connections.yml"
 	if err := SaveConnections(base, path, []models.Connection{{Name: "dev", CLIAccess: models.CLIAccessMetadata}}); err != nil {
 		t.Fatal(err)

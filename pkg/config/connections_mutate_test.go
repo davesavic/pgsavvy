@@ -32,7 +32,7 @@ func assertMode0600(t *testing.T, fs afero.Fs, path string) {
 }
 
 func TestUpdateConnection_RenameCollisionRejected(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	seedConns(t, fs, "/c.yml", []models.Connection{
 		{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"},
 		{Name: "prod", Driver: "postgres", DSN: "postgres://localhost/prod"},
@@ -51,7 +51,7 @@ func TestUpdateConnection_RenameCollisionRejected(t *testing.T) {
 }
 
 func TestUpdateConnection_RenameToSelf(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	seedConns(t, fs, "/c.yml", []models.Connection{
 		{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"},
 		{Name: "prod", Driver: "postgres", DSN: "postgres://localhost/prod"},
@@ -70,7 +70,7 @@ func TestUpdateConnection_RenameToSelf(t *testing.T) {
 }
 
 func TestUpdateConnection_OldNameMissing(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	seedConns(t, fs, "/c.yml", []models.Connection{
 		{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"},
 	})
@@ -82,7 +82,7 @@ func TestUpdateConnection_OldNameMissing(t *testing.T) {
 }
 
 func TestUpdateConnection_NeighborRoundTripsAll18Fields(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	neighbor := models.Connection{
 		Name:            "fullyloaded",
 		Driver:          "postgres",
@@ -141,7 +141,7 @@ func TestUpdateConnection_NeighborRoundTripsAll18Fields(t *testing.T) {
 }
 
 func TestDeleteConnection_Existing(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	seedConns(t, fs, "/c.yml", []models.Connection{
 		{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"},
 		{Name: "prod", Driver: "postgres", DSN: "postgres://localhost/prod"},
@@ -157,7 +157,7 @@ func TestDeleteConnection_Existing(t *testing.T) {
 }
 
 func TestDeleteConnection_Missing(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	seedConns(t, fs, "/c.yml", []models.Connection{
 		{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"},
 	})
@@ -172,7 +172,7 @@ func TestDeleteConnection_Missing(t *testing.T) {
 }
 
 func TestDeleteConnection_LastEntryYieldsEmptyList(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	seedConns(t, fs, "/c.yml", []models.Connection{
 		{Name: "dev", Driver: "postgres", DSN: "postgres://localhost/dev"},
 	})

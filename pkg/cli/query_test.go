@@ -41,18 +41,19 @@ func TestMachineQuery_Policy(t *testing.T) {
 }
 
 func TestMachineQuery_Policy_StaleFormRevocation(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := afero.NewOsFs()
+	profilesPath := filepath.Join(t.TempDir(), "connections.yml")
 	profile := models.Connection{Name: "dev", Driver: "postgres", CLIAccess: models.CLIAccessRowRead, PasswordCommand: "must-not-run"}
 	stale := profile
-	if err := config.SaveConnections(fs, "/c.yml", []models.Connection{profile}); err != nil {
+	if err := config.SaveConnections(fs, profilesPath, []models.Connection{profile}); err != nil {
 		t.Fatal(err)
 	}
 	profile.CLIAccess = ""
-	if err := config.SaveConnections(fs, "/c.yml", []models.Connection{profile}); err != nil {
+	if err := config.SaveConnections(fs, profilesPath, []models.Connection{profile}); err != nil {
 		t.Fatal(err)
 	}
 	stale.Label = "edited"
-	if err := config.UpdateConnection(fs, "/c.yml", "dev", stale); err != nil {
+	if err := config.UpdateConnection(fs, profilesPath, "dev", stale); err != nil {
 		t.Fatal(err)
 	}
 	file := filepath.Join(t.TempDir(), "sql")
@@ -60,7 +61,7 @@ func TestMachineQuery_Policy_StaleFormRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed := false
-	service := InvocationService{Load: func() ([]models.Connection, error) { return LoadProfiles(fs, "/c.yml") }, Options: pg.MachineOptions{ParseConfig: func(context.Context, models.Connection) (*pgx.ConnConfig, error) { parsed = true; return nil, nil }}}
+	service := InvocationService{Load: func() ([]models.Connection, error) { return LoadProfiles(fs, profilesPath) }, Options: pg.MachineOptions{ParseConfig: func(context.Context, models.Connection) (*pgx.ConnConfig, error) { parsed = true; return nil, nil }}}
 	streams, out, _ := testStreams()
 	_, exit := Dispatch(context.Background(), []string{"query", "--connection", "dev", "--file", file}, streams, map[string]Command{"query": QueryCommand(service)})
 	if exit != ExitPolicy || parsed || out.Len() == 0 {

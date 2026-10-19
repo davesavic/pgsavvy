@@ -14,7 +14,7 @@ import (
 // TestConnectionManagerDeleteInactive deletes a connection that is NOT the
 // active session. The config file is updated and the modal list refreshes.
 func TestConnectionManagerDeleteInactive(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	path := "/cfg/connections.yml"
 
 	seed := []models.Connection{
@@ -80,7 +80,7 @@ func TestConnectionManagerDeleteInactive(t *testing.T) {
 // TestConnectionManagerDeleteCancel presses n at the confirmation prompt. No
 // change to the config file or modal list.
 func TestConnectionManagerDeleteCancel(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	path := "/cfg/connections.yml"
 
 	seed := []models.Connection{
@@ -124,7 +124,7 @@ func TestConnectionManagerDeleteCancel(t *testing.T) {
 // TestConnectionManagerDeleteEmptyListNoOp verifies that pressing d on an
 // empty list is a no-op (no confirmation popup, no panic).
 func TestConnectionManagerDeleteEmptyListNoOp(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	path := "/cfg/connections.yml"
 
 	g, _ := bootstrapSaveGui(t, fs, path)
@@ -139,7 +139,7 @@ func TestConnectionManagerDeleteEmptyListNoOp(t *testing.T) {
 // TestConnectionManagerDeleteRefreshesList seeds two connections, deletes one,
 // and verifies the modal list reflects the remaining connection.
 func TestConnectionManagerDeleteRefreshesList(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	path := "/cfg/connections.yml"
 
 	seed := []models.Connection{

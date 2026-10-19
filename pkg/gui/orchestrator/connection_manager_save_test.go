@@ -3,8 +3,10 @@ package orchestrator_test
 import (
 	"errors"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 
@@ -19,6 +21,26 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/query"
 )
+
+type connectionsTestFs struct {
+	afero.Fs
+	lock chan struct{}
+}
+
+func newConnectionsTestFs() *connectionsTestFs {
+	return &connectionsTestFs{Fs: afero.NewMemMapFs(), lock: make(chan struct{}, 1)}
+}
+
+func (fs *connectionsTestFs) LockConnections(path string, deadline time.Time) (string, func(), error) {
+	timer := time.NewTimer(max(0, time.Until(deadline)))
+	defer timer.Stop()
+	select {
+	case fs.lock <- struct{}{}:
+		return path, func() { <-fs.lock }, nil
+	case <-timer.C:
+		return "", nil, os.ErrDeadlineExceeded
+	}
+}
 
 // bootstrapSaveGui wires a real *orchestrator.Gui whose ConnectionsProvider
 // reads the live afero memfs at connsPath. The
@@ -68,7 +90,7 @@ func pushModal(t *testing.T, g *orchestrator.Gui) *guicontext.ConnectionManagerC
 // edited (name changed) via the modal form, and after the rewrite BOTH fields
 // survive on the renamed row.
 func TestConnectionManagerEditPreservesHiddenFields(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	path := "/cfg/connections.yml"
 
 	orig := []models.Connection{{
@@ -138,7 +160,7 @@ func TestConnectionManagerEditPreservesHiddenFields(t *testing.T) {
 // TestConnectionManagerAddAppendsRow covers AC1-add: an add form, filled and
 // saved, gains exactly one row via AppendConnection.
 func TestConnectionManagerAddAppendsRow(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	path := "/cfg/connections.yml"
 
 	g, _ := bootstrapSaveGui(t, fs, path)
@@ -194,7 +216,7 @@ func TestConnectionManagerAddAppendsRow(t *testing.T) {
 // host/user/port set and identity_from_agent toggled on persists those values
 // to connections.yml and reloads them intact.
 func TestConnectionManagerSaveSSHTunnelRoundTrip(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	path := "/cfg/connections.yml"
 
 	g, _ := bootstrapSaveGui(t, fs, path)
@@ -244,7 +266,7 @@ func TestConnectionManagerSaveSSHTunnelRoundTrip(t *testing.T) {
 // pressing Esc (cancel) before save leaves connections.yml byte-for-byte
 // unchanged.
 func TestConnectionManagerEscBeforeSaveNoWrite(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	path := "/cfg/connections.yml"
 
 	orig := []models.Connection{{Name: "prod", Driver: "postgres", DSN: "postgres://localhost:5432/prod"}}
@@ -283,7 +305,7 @@ func TestConnectionManagerEscBeforeSaveNoWrite(t *testing.T) {
 // edit whose originalName is absent triggers ErrConnectionNotFound; the
 // callback stamps the inline form error and the controller stays in ModeForm.
 func TestConnectionManagerSaveErrorStampsFormError(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := newConnectionsTestFs()
 	path := "/cfg/connections.yml"
 
 	// Seed a DIFFERENT profile so the on-disk file exists but the edited
@@ -349,7 +371,7 @@ func TestConnectionManagerCLIAccessSave(t *testing.T) {
 		{name: "cancel", initial: models.CLIAccessMetadata, cycles: 1, cancel: true, want: models.CLIAccessMetadata},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fs := afero.NewMemMapFs()
+			fs := newConnectionsTestFs()
 			const path = "/cfg/connections.yml"
 			if !tc.add {
 				if err := config.SaveConnections(fs, path, []models.Connection{{Name: "dev", Driver: "postgres", CLIAccess: tc.initial}}); err != nil {

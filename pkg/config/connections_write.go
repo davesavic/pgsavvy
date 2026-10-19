@@ -27,8 +27,8 @@ var ErrConnectionsChanged = errors.New("config: connections changed during edit;
 
 // SaveConnections atomically writes conns to the YAML file at path using the
 // wrapper form {connections: [...]} that LoadConnections (with KnownFields)
-// expects. The file is written via pkg/utils.AtomicWriteYAML — temp file at
-// path+".tmp", rename onto path, mode 0600, parent dir 0700.
+// expects. Publication uses an exclusive sibling temporary, mode 0600,
+// and parent dir 0700. This is intentional whole-file replacement, not a merge.
 //
 // Pre-write safety: if any profile in conns has a non-empty inline Password
 // field, a single WARN line is emitted to warnWriter mirroring the LOAD-time
@@ -42,6 +42,12 @@ var ErrConnectionsChanged = errors.New("config: connections changed during edit;
 // defense-in-depth scrub for credentials that may have leaked into wrapped
 // error strings.
 func SaveConnections(fs afero.Fs, path string, conns []models.Connection) error {
+	return withConnectionsWriteLock(fs, path, func(path string) error {
+		return saveConnectionsLocked(fs, path, conns)
+	})
+}
+
+func saveConnectionsLocked(fs afero.Fs, path string, conns []models.Connection) error {
 	for _, conn := range conns {
 		if err := conn.CLIAccess.Validate(); err != nil {
 			return err
@@ -102,6 +108,12 @@ func hasDiscreteFields(c models.Connection) bool {
 // caller is expected to surface it without silently overwriting a broken
 // file.
 func AppendConnection(fs afero.Fs, path string, c models.Connection) error {
+	return withConnectionsWriteLock(fs, path, func(path string) error {
+		return appendConnectionLocked(fs, path, c)
+	})
+}
+
+func appendConnectionLocked(fs afero.Fs, path string, c models.Connection) error {
 	existing, err := LoadConnections(fs, path)
 	if err != nil {
 		return err
@@ -112,7 +124,7 @@ func AppendConnection(fs afero.Fs, path string, c models.Connection) error {
 		}
 	}
 	existing = append(existing, c)
-	return SaveConnections(fs, path, existing)
+	return saveConnectionsLocked(fs, path, existing)
 }
 
 // UpdateConnection loads the existing connections.yml at path, replaces the
@@ -139,6 +151,12 @@ func UpdateConnectionWithCLIAccess(fs afero.Fs, path, oldName string, newConn mo
 }
 
 func updateConnection(fs afero.Fs, path, oldName string, newConn models.Connection, expectedPolicy *models.CLIAccess) error {
+	return withConnectionsWriteLock(fs, path, func(path string) error {
+		return updateConnectionLocked(fs, path, oldName, newConn, expectedPolicy)
+	})
+}
+
+func updateConnectionLocked(fs afero.Fs, path, oldName string, newConn models.Connection, expectedPolicy *models.CLIAccess) error {
 	data, err := afero.ReadFile(fs, path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -177,7 +195,7 @@ func updateConnection(fs afero.Fs, path, oldName string, newConn models.Connecti
 		return ErrConnectionsChanged
 	}
 	existing[idx] = newConn
-	return SaveConnections(&connectionSnapshotFs{Fs: fs, path: path, data: data}, path, existing)
+	return saveConnectionsLocked(&connectionSnapshotFs{Fs: fs, path: path, data: data}, path, existing)
 }
 
 type connectionSnapshotFs struct {
@@ -204,6 +222,12 @@ func (fs *connectionSnapshotFs) Rename(oldname, newname string) error {
 //
 // On LoadConnections failure the error is returned unwrapped (per M10f).
 func DeleteConnection(fs afero.Fs, path, name string) error {
+	return withConnectionsWriteLock(fs, path, func(path string) error {
+		return deleteConnectionLocked(fs, path, name)
+	})
+}
+
+func deleteConnectionLocked(fs afero.Fs, path, name string) error {
 	existing, err := LoadConnections(fs, path)
 	if err != nil {
 		return err
@@ -213,7 +237,7 @@ func DeleteConnection(fs afero.Fs, path, name string) error {
 			continue
 		}
 		existing = append(existing[:i], existing[i+1:]...)
-		return SaveConnections(fs, path, existing)
+		return saveConnectionsLocked(fs, path, existing)
 	}
 	return ErrConnectionNotFound
 }
