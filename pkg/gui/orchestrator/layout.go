@@ -1899,6 +1899,19 @@ func applyConnectionManagerScroll(view *gocui.View) {
 	} else if sel >= oy+height {
 		oy = sel - height + 1
 	}
+	if strings.HasPrefix(lines[sel], "> cli_history:") {
+		for i := sel - 1; i >= 0; i-- {
+			if strings.HasPrefix(lines[i], "  cli_access:") {
+				// Unlike a transient status, consent disclosure must remain
+				// visible when navigating back upward to its toggle.
+				start := i + 1
+				if sel-start < height && oy > start {
+					oy = start
+				}
+				break
+			}
+		}
+	}
 	if maxOY := max(len(lines)-height, 0); oy > maxOY {
 		oy = maxOY
 	}

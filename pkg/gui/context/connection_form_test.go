@@ -26,7 +26,7 @@ func TestMachineAccess_FormPreservation(t *testing.T) {
 		if err := c.HandleRender(); err != nil {
 			t.Fatal(err)
 		}
-		if len(c.form.focusableSpecs()) != 25 {
+		if len(c.form.focusableSpecs()) != 26 {
 			t.Fatalf("unexpected form controls: %d", len(c.form.focusableSpecs()))
 		}
 	}
@@ -107,13 +107,13 @@ func TestForm_AddSeedsFirstDriver(t *testing.T) {
 func TestForm_FieldNavMovesFocus(t *testing.T) {
 	c := newTestConnectionManager(&captureDriver{}, nil, nil)
 	c.OpenAddForm(nil, testDrivers)
-	// 16 base functional rows (name, driver, host, port, user, database,
-	// sslmode, read_only, confirm_writes, confirm_ddl, cli_access, statement_timeout,
+	// 17 base functional rows (name, driver, host, port, user, database,
+	// sslmode, read_only, confirm_writes, confirm_ddl, cli_access, cli_history, statement_timeout,
 	// color, label, icon, tags) + use_ssh_tunnel + keyring + pgpass +
-	// password_command → focusable count is 20 with the SSH tunnel OFF (the 6
+	// password_command → focusable count is 21 with the SSH tunnel OFF (the 6
 	// SSH detail rows are hidden until the tunnel is enabled).
-	if got := len(c.form.focusableSpecs()); got != 20 {
-		t.Fatalf("focusable rows = %d, want 20", got)
+	if got := len(c.form.focusableSpecs()); got != 21 {
+		t.Fatalf("focusable rows = %d, want 21", got)
 	}
 	// Move far past the end; clamps to the last functional row (password_command).
 	for range 50 {

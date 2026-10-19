@@ -1256,10 +1256,15 @@ func (g *Gui) saveConnectionForm(conn models.Connection, isEdit bool, originalNa
 	write := func() error { return config.AppendConnection(fs, g.deps.ConnectionsPath, conn) }
 	if isEdit {
 		write = func() error {
+			var expectedAccess *models.CLIAccess
+			var expectedHistory *bool
 			if original, changed := g.registry.ConnectionManager.FormCLIAccessChange(); changed {
-				return config.UpdateConnectionWithCLIAccess(fs, g.deps.ConnectionsPath, originalName, conn, original)
+				expectedAccess = &original
 			}
-			return config.UpdateConnection(fs, g.deps.ConnectionsPath, originalName, conn)
+			if original, changed := g.registry.ConnectionManager.FormCLIHistoryChange(); changed {
+				expectedHistory = &original
+			}
+			return config.UpdateConnectionWithCLISettings(fs, g.deps.ConnectionsPath, originalName, conn, expectedAccess, expectedHistory)
 		}
 	}
 	if err := write(); err != nil {

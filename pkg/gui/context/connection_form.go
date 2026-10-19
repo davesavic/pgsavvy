@@ -45,6 +45,7 @@ const (
 	fieldConfirmWrites
 	fieldConfirmDDL
 	fieldCLIAccess
+	fieldCLIHistory
 	fieldStatementTimeout
 	fieldColor
 	fieldLabel
@@ -89,6 +90,7 @@ var connFormSpecs = []connFieldSpec{
 	{fieldConfirmWrites, "confirm_writes", fieldToggle},
 	{fieldConfirmDDL, "confirm_ddl", fieldToggle},
 	{fieldCLIAccess, "cli_access", fieldSelector},
+	{fieldCLIHistory, "cli_history", fieldToggle},
 	{fieldStatementTimeout, "statement_timeout", fieldText},
 	{fieldColor, "color", fieldText},
 	{fieldLabel, "label", fieldText},
@@ -137,9 +139,10 @@ type connForm struct {
 	sshEnabled bool
 	sshAuth    string
 
-	isEdit            bool
-	originalName      string
-	originalCLIAccess models.CLIAccess
+	isEdit             bool
+	originalName       string
+	originalCLIAccess  models.CLIAccess
+	originalCLIHistory bool
 
 	// existingNames is the snapshot of all profile names at open time, used
 	// for the uniqueness check. For an edit, originalName is excluded so a
@@ -394,6 +397,8 @@ func (f *connForm) toggle(id connFieldID) {
 		f.cycleSSLMode()
 	case fieldCLIAccess:
 		f.cycleCLIAccess()
+	case fieldCLIHistory:
+		f.conn.CLIHistory = !f.conn.CLIHistory
 	}
 }
 
@@ -716,6 +721,11 @@ func (f *connForm) render() string {
 		if s.id == focused.id {
 			marker = "> "
 		}
+		if s.id == fieldCLIHistory && (f.conn.CLIHistory || focused.id == fieldCLIHistory) {
+			// Keep disclosure complete and before the marker, not clipped like
+			// transient messages. Terminal visibility is checked by the UI smoke.
+			b.WriteString(cliHistoryDisclosure)
+		}
 		fmt.Fprintf(&b, "%s%-18s %s\n", marker, s.label+":", f.displayValue(s))
 		// Inline err/status sit under the focused field with more rows below,
 		// so they MUST stay one physical row: the modal has Wrap=true, and a
@@ -733,6 +743,13 @@ func (f *connForm) render() string {
 	}
 	return b.String()
 }
+
+const cliHistoryDisclosure = "    Raw SQL (literals/comments) is saved.\n" +
+	"    No bound parameters/results. Not an audit log.\n" +
+	"    Permission remediation: stop history writers;\n" +
+	"    inspect $XDG_STATE_HOME/pgsavvy/history.sqlite,\n" +
+	"    its directory and WAL/SHM/journal sidecars.\n" +
+	"    Restrict access to owner; no automatic repair.\n"
 
 // inlineMsgReserve is the width of the leading indent the inline err/status row
 // carries ("    "), subtracted from the inner width so the message text fits on
@@ -816,6 +833,8 @@ func (f *connForm) toggleValue(id connFieldID) bool {
 		return f.conn.ConfirmWrites
 	case fieldConfirmDDL:
 		return f.conn.ConfirmDDL
+	case fieldCLIHistory:
+		return f.conn.CLIHistory
 	case fieldUseSSHTunnel:
 		return f.sshEnabled
 	}

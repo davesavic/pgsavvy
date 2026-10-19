@@ -2,9 +2,11 @@ package orchestrator_test
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/i18n"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/query"
+	"github.com/stretchr/testify/require"
 )
 
 type connectionsTestFs struct {
@@ -52,6 +55,7 @@ func bootstrapSaveGui(t *testing.T, fs afero.Fs, connsPath string) (*orchestrato
 	cfg := config.GetDefaultConfig()
 	c := common.NewCommon(log, i18n.EnglishTranslationSet(), cfg, &common.AppState{}, fs)
 	store := common.NewAppStateStore(fs, "/state/state.yml", common.DefaultClock())
+	var historyOpens atomic.Int32
 
 	g := orchestrator.NewGui(orchestrator.Deps{
 		Common:          c,
@@ -62,13 +66,18 @@ func bootstrapSaveGui(t *testing.T, fs afero.Fs, connsPath string) (*orchestrato
 			return conns
 		},
 		DriverNamesFn:   func() []string { return []string{"postgres"} },
-		HistoryProvider: func() (*query.History, error) { return nil, nil },
+		HistoryProvider: func() (*query.History, error) { historyOpens.Add(1); return nil, nil },
 	})
 	rec := testfake.NewRecorderGuiDriver()
 	if err := g.UseDriverForTest(rec); err != nil {
 		t.Fatalf("UseDriverForTest: %v", err)
 	}
-	t.Cleanup(func() { _ = g.Close() })
+	t.Cleanup(func() {
+		_ = g.Close()
+		if got := historyOpens.Load(); got != 1 {
+			t.Errorf("history provider called %d times, want only the bootstrap call", got)
+		}
+	})
 	return g, rec
 }
 
@@ -225,13 +234,10 @@ func TestConnectionManagerSaveSSHTunnelRoundTrip(t *testing.T) {
 	if err := g.Controllers().ConnectionManager.Add(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	// SSH is gated behind use_ssh_tunnel @ 16. Toggling it on reveals the SSH
-	// detail rows: ssh_auth(17) ssh_host(18) ssh_user(19) ssh_port(20) ...
-	// (identity_file is hidden under the default agent auth method).
 	modal.FormSetFocusedValue("ssh-conn") // name @ 0
-	modal.FormMoveFocus(16)               // use_ssh_tunnel @ 16
-	modal.FormToggleFocused()             // enable tunnel; auth defaults to agent
-	modal.FormMoveFocus(2)                // ssh_host @ 18 (past ssh_auth @ 17)
+	focusConnectionFormField(t, modal, "use_ssh_tunnel")
+	modal.FormToggleFocused() // enable tunnel; auth defaults to agent
+	modal.FormMoveFocus(2)    // ssh_host, past ssh_auth
 	modal.FormSetFocusedValue("bastion.prod")
 	modal.FormMoveFocus(1)
 	modal.FormSetFocusedValue("deploy") // ssh_user @ 19
@@ -259,6 +265,193 @@ func TestConnectionManagerSaveSSHTunnelRoundTrip(t *testing.T) {
 	}
 	if tun.Host != "bastion.prod" || tun.User != "deploy" || tun.Port != 2222 || !tun.IdentityFromAgent {
 		t.Fatalf("SSHTunnel = %+v, want host=bastion.prod user=deploy port=2222 agent=true", tun)
+	}
+}
+
+func focusConnectionFormField(t *testing.T, modal *guicontext.ConnectionManagerContext, label string) {
+	t.Helper()
+	modal.FormMoveFocus(-100)
+	for range 50 {
+		if modal.FormFocusedLabel() == label {
+			return
+		}
+		modal.FormMoveFocus(1)
+	}
+	t.Fatalf("form field %q missing", label)
+}
+
+func TestCLIHistoryForm_AtomicConsentSave(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		add, initial, rename  bool
+		toggles, accessCycles int
+	}{
+		{name: "add-default", add: true},
+		{name: "add-enabled", add: true, toggles: 1},
+		{name: "enable", toggles: 1},
+		{name: "disable", initial: true, toggles: 1},
+		{name: "toggle-back", initial: true, toggles: 2},
+		{name: "atomic-both-and-rename", rename: true, toggles: 1, accessCycles: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := newConnectionsTestFs()
+			const path = "/cfg/connections.yml"
+			source := models.Connection{Name: "dev", Driver: "postgres", CLIAccess: models.CLIAccessMetadata, CLIHistory: tc.initial, ReadOnly: true, PasswordCommand: "must-not-run", Label: "preserved"}
+			neighbor := models.Connection{Name: "neighbor", Driver: "postgres", CLIHistory: true, CLIAccess: models.CLIAccessRowRead}
+			profiles := []models.Connection{source, neighbor}
+			if tc.add {
+				profiles = []models.Connection{neighbor}
+			}
+			require.NoError(t, config.SaveConnections(fs, path, profiles))
+			g, _ := bootstrapSaveGui(t, fs, path)
+			modal := pushModal(t, g)
+			ctrl := g.Controllers().ConnectionManager
+			if tc.add {
+				require.NoError(t, ctrl.Add(commands.ExecCtx{}))
+			} else {
+				require.NoError(t, ctrl.Edit(commands.ExecCtx{}))
+			}
+			name := "dev"
+			if tc.rename {
+				name = "renamed"
+			}
+			modal.FormSetFocusedValue(name)
+			focusConnectionFormField(t, modal, "cli_history")
+			for range tc.toggles {
+				require.NoError(t, ctrl.Edit(commands.ExecCtx{}))
+			}
+			focusConnectionFormField(t, modal, "cli_access")
+			for range tc.accessCycles {
+				require.NoError(t, ctrl.Edit(commands.ExecCtx{}))
+			}
+			require.NoError(t, ctrl.Confirm(commands.ExecCtx{}))
+			require.Equal(t, guicontext.ModeList, modal.Mode())
+			loaded, err := config.LoadConnections(fs, path)
+			require.NoError(t, err)
+			require.Len(t, loaded, 2)
+			var got, other models.Connection
+			for _, profile := range loaded {
+				if profile.Name == name {
+					got = profile
+				} else {
+					other = profile
+				}
+			}
+			require.Equal(t, neighbor, other)
+			require.Equal(t, tc.initial != (tc.toggles%2 == 1), got.CLIHistory)
+			if !tc.add {
+				require.Equal(t, source.PasswordCommand, got.PasswordCommand)
+				require.Equal(t, source.Label, got.Label)
+				require.Equal(t, source.ReadOnly, got.ReadOnly)
+				wantAccess := source.CLIAccess
+				if tc.accessCycles > 0 {
+					wantAccess = models.CLIAccessRowRead
+				}
+				require.Equal(t, wantAccess, got.CLIAccess)
+			}
+			require.Nil(t, g.HistoryStoreForTest(), "saving consent must not open history")
+		})
+	}
+}
+
+func TestCLIHistoryForm_StaleRevocation(t *testing.T) {
+	for _, toggles := range []int{0, 1, 2} {
+		t.Run(fmt.Sprintf("toggles_%d", toggles), func(t *testing.T) {
+			fs := newConnectionsTestFs()
+			const path = "/cfg/connections.yml"
+			source := models.Connection{Name: "dev", Driver: "postgres", CLIHistory: true, CLIAccess: models.CLIAccessRowRead}
+			require.NoError(t, config.SaveConnections(fs, path, []models.Connection{source}))
+			g, _ := bootstrapSaveGui(t, fs, path)
+			modal := pushModal(t, g)
+			ctrl := g.Controllers().ConnectionManager
+			require.NoError(t, ctrl.Edit(commands.ExecCtx{}))
+			modal.FormSetFocusedValue("renamed")
+			focusConnectionFormField(t, modal, "cli_history")
+			for range toggles {
+				require.NoError(t, ctrl.Edit(commands.ExecCtx{}))
+			}
+			source.CLIHistory, source.CLIAccess = false, models.CLIAccessDisabled
+			require.NoError(t, config.SaveConnections(fs, path, []models.Connection{source}))
+			before, err := afero.ReadFile(fs, path)
+			require.NoError(t, err)
+			err = ctrl.Confirm(commands.ExecCtx{})
+			if toggles == 1 {
+				require.ErrorIs(t, err, config.ErrConnectionsChanged)
+				require.Equal(t, guicontext.ModeForm, modal.Mode())
+				after, readErr := afero.ReadFile(fs, path)
+				require.NoError(t, readErr)
+				require.Equal(t, before, after)
+			} else {
+				require.NoError(t, err)
+				loaded, loadErr := config.LoadConnections(fs, path)
+				require.NoError(t, loadErr)
+				require.Len(t, loaded, 1)
+				require.False(t, loaded[0].CLIHistory)
+				require.Equal(t, models.CLIAccessDisabled, loaded[0].CLIAccess)
+				require.Equal(t, "renamed", loaded[0].Name)
+			}
+		})
+	}
+}
+
+func TestCLIHistoryForm_SaveFailures(t *testing.T) {
+	for _, fixture := range []string{"missing", "renamed", "duplicate", "collision", "contention", "denied", "access_conflict"} {
+		t.Run(fixture, func(t *testing.T) {
+			base := newConnectionsTestFs()
+			const path = "/cfg/connections.yml"
+			source := models.Connection{Name: "dev", Driver: "postgres", CLIAccess: models.CLIAccessMetadata, Password: "never-emit"}
+			neighbor := models.Connection{Name: "neighbor", Driver: "postgres"}
+			require.NoError(t, config.SaveConnections(base, path, []models.Connection{source, neighbor}))
+			// Save intentionally drops inline passwords; a loaded legacy secret
+			// must still not enter validation/error rendering on failed saves.
+			require.NoError(t, afero.WriteFile(base, path, []byte("connections:\n - name: dev\n   driver: postgres\n   cli_access: metadata\n   password: never-emit\n - name: neighbor\n   driver: postgres\n"), 0o600))
+			fs := base
+			if fixture == "denied" {
+				fs = &connectionsTestFs{Fs: afero.NewReadOnlyFs(base.Fs), lock: base.lock}
+			}
+			g, rec := bootstrapSaveGui(t, fs, path)
+			modal := pushModal(t, g)
+			ctrl := g.Controllers().ConnectionManager
+			require.NoError(t, ctrl.Edit(commands.ExecCtx{}))
+			if fixture == "collision" {
+				modal.FormSetFocusedValue("neighbor")
+			}
+			focusConnectionFormField(t, modal, "cli_history")
+			require.NoError(t, ctrl.Edit(commands.ExecCtx{}))
+			switch fixture {
+			case "missing":
+				require.NoError(t, config.SaveConnections(base, path, []models.Connection{neighbor}))
+			case "renamed":
+				source.Name = "externally-renamed"
+				require.NoError(t, config.SaveConnections(base, path, []models.Connection{source, neighbor}))
+			case "duplicate":
+				require.NoError(t, afero.WriteFile(base, path, []byte("connections:\n - name: dev\n - name: dev\n"), 0o600))
+			case "contention":
+				base.lock <- struct{}{}
+				defer func() { <-base.lock }()
+			case "access_conflict":
+				focusConnectionFormField(t, modal, "cli_access")
+				require.NoError(t, ctrl.Edit(commands.ExecCtx{}))
+				source.CLIAccess = models.CLIAccessDisabled
+				require.NoError(t, config.SaveConnections(base, path, []models.Connection{source, neighbor}))
+			}
+			before, err := afero.ReadFile(base, path)
+			require.NoError(t, err)
+			err = ctrl.Confirm(commands.ExecCtx{})
+			if fixture == "collision" {
+				require.NoError(t, err, "local validation returns nil while keeping inline error/form")
+			} else {
+				require.Error(t, err)
+				require.NotContains(t, err.Error(), "never-emit")
+			}
+			require.Equal(t, guicontext.ModeForm, modal.Mode())
+			after, err := afero.ReadFile(base, path)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			require.NoError(t, g.RunLayout(130, 42))
+			require.NotContains(t, rec.GetViewBuffer(string(types.CONNECTION_MANAGER)), "never-emit")
+			require.Nil(t, g.HistoryStoreForTest())
+		})
 	}
 }
 
