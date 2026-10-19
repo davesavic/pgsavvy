@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -22,18 +23,32 @@ func TestMachineQuery_Policy(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{}, {"--connection", "x"}, {"--connection", "x", "--file", path, "--max-rows", "0"}, {"--connection", "x", "--file", path, "--max-rows", "1001"}, {"--connection", "x", "--file", path, "--bad"}, {"--connection", "x", "--file", path, "--params-file", "-"}, {"--connection", "x", "--file", path, "--file", path}} {
-		loaded := false
-		service := InvocationService{Load: func() ([]models.Connection, error) { loaded = true; return nil, nil }}
-		if _, err := QueryCommand(service)(context.Background(), args, IO{}); err == nil || loaded {
+		loaded, metadata := false, false
+		service := InvocationService{
+			Load: func() ([]models.Connection, error) { loaded = true; return nil, nil },
+			historyLookup: func(context.Context, string) (models.Connection, error) {
+				metadata = true
+				return models.Connection{Name: "x"}, nil
+			},
+		}
+		if _, err := QueryCommand(service)(context.Background(), args, IO{}); err == nil || loaded || metadata != slices.Contains(args, "--params-file") {
 			t.Fatalf("invalid grammar opened profiles: %v", args)
 		}
 	}
 	if err := os.WriteFile(path, []byte("DELETE FROM secret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	loaded := false
-	if _, err := QueryCommand(InvocationService{Load: func() ([]models.Connection, error) { loaded = true; return nil, nil }})(context.Background(), []string{"--connection", "x", "--file", path}, IO{}); err == nil || loaded {
-		t.Fatal("modifying AST reached loader")
+	loaded, metadata, parsed := false, false, false
+	service := InvocationService{
+		Load: func() ([]models.Connection, error) { loaded = true; return nil, nil },
+		historyLookup: func(context.Context, string) (models.Connection, error) {
+			metadata = true
+			return models.Connection{Name: "x"}, nil
+		},
+		Options: pg.MachineOptions{ParseConfig: func(context.Context, models.Connection) (*pgx.ConnConfig, error) { parsed = true; return nil, nil }},
+	}
+	if _, err := QueryCommand(service)(context.Background(), []string{"--connection", "x", "--file", path}, IO{}); err == nil || loaded || parsed || !metadata || safeError(err).Code != UnsupportedSQL {
+		t.Fatal("rejected SQL must allow metadata only, never execution/credential loading")
 	}
 	if _, err := QueryCommand(InvocationService{})(context.Background(), []string{"--help"}, IO{}); err != nil {
 		t.Fatal("query JSON help required a connection")

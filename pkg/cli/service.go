@@ -15,11 +15,18 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
 	"github.com/davesavic/pgsavvy/pkg/env"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/query"
 )
 
 type InvocationService struct {
 	Load    func() ([]models.Connection, error)
 	Options pg.MachineOptions
+
+	// Private seams carry verified consent provenance, never arbitrary Load
+	// output. Production reads trusted saved metadata; tests inject fixtures.
+	historyLookup func(context.Context, string) (models.Connection, error)
+	historyAppend func(context.Context, string, query.HistoryEvent) error
+	historyPath   string
 }
 
 func LoadProfiles(fs afero.Fs, path string) ([]models.Connection, error) {
@@ -81,6 +88,13 @@ func (s InvocationService) Open(ctx context.Context, name string, required model
 	profile, err := ResolveExactProfile(profiles, name)
 	if err != nil {
 		return nil, models.Connection{}, err
+	}
+	return s.openProfile(ctx, profile, required)
+}
+
+func (s InvocationService) openProfile(ctx context.Context, profile models.Connection, required models.CLIAccess) (*pg.MachineClient, models.Connection, error) {
+	if ctx.Err() != nil {
+		return nil, models.Connection{}, &PublicError{Code: Timeout}
 	}
 	access := profile.EffectiveCLIAccess()
 	if access == models.CLIAccessDisabled || (required == models.CLIAccessRowRead && access != models.CLIAccessRowRead) {

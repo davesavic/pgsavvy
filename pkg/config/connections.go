@@ -2,10 +2,12 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 
 	"github.com/spf13/afero"
 	"gopkg.in/yaml.v3"
@@ -58,6 +60,16 @@ func LoadConnections(fs afero.Fs, path string) ([]models.Connection, error) {
 
 // LoadConnectionsWithWarnings preserves strict loading with an invocation-local sink.
 func LoadConnectionsWithWarnings(fs afero.Fs, path string, warnings io.Writer) ([]models.Connection, error) {
+	return LoadConnectionsContext(context.Background(), fs, path, warnings)
+}
+
+// LoadConnectionsContext preserves strict loading while allowing cancellation
+// during input/parsing/validation. The filesystem must provide interruptible
+// reads for blocked I/O; the CLI supplies an already bounded memory snapshot.
+func LoadConnectionsContext(ctx context.Context, fs afero.Fs, path string, warnings io.Writer) ([]models.Connection, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if warnings == nil {
 		warnings = io.Discard
 	}
@@ -74,11 +86,11 @@ func LoadConnectionsWithWarnings(fs afero.Fs, path string, warnings io.Writer) (
 	if err != nil {
 		return nil, fmt.Errorf("config: stat %q: %w", path, err)
 	}
-	data, err := io.ReadAll(file)
+	data, err := io.ReadAll(connectionsContextReader{ctx, file})
 	if err != nil {
 		return nil, fmt.Errorf("config: read %q: %w", path, err)
 	}
-	return decodeConnectionsWithWarnings(data, info, path, warnings)
+	return decodeConnectionsContext(ctx, data, info, path, warnings)
 }
 
 func decodeConnections(data []byte, info os.FileInfo, path string) ([]models.Connection, error) {
@@ -86,8 +98,31 @@ func decodeConnections(data []byte, info os.FileInfo, path string) ([]models.Con
 }
 
 func decodeConnectionsWithWarnings(data []byte, info os.FileInfo, path string, warnings io.Writer) ([]models.Connection, error) {
+	return decodeConnectionsContext(context.Background(), data, info, path, warnings)
+}
+
+type connectionsContextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r connectionsContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.r.Read(p)
+	if canceled := r.ctx.Err(); canceled != nil {
+		return 0, canceled
+	}
+	return n, err
+}
+
+func decodeConnectionsContext(ctx context.Context, data []byte, info os.FileInfo, path string, warnings io.Writer) ([]models.Connection, error) {
 	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	if err := yaml.NewDecoder(connectionsContextReader{ctx, bytes.NewReader(data)}).Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("config: parse %q: %w", path, err)
 	}
 	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 && doc.Content[0].Kind == yaml.SequenceNode {
@@ -97,13 +132,16 @@ func decodeConnectionsWithWarnings(data []byte, info os.FileInfo, path string, w
 		)
 	}
 
-	if err := validateCLIHistoryNodes(&doc); err != nil {
+	if err := validateCLIHistoryNodes(ctx, &doc); err != nil {
 		return nil, err
 	}
-	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec := yaml.NewDecoder(connectionsContextReader{ctx, bytes.NewReader(data)})
 	dec.KnownFields(true)
 	var wrapper connectionsFile
 	if err := dec.Decode(&wrapper); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if errors.Is(err, io.EOF) {
 			return []models.Connection{}, nil
 		}
@@ -113,6 +151,9 @@ func decodeConnectionsWithWarnings(data []byte, info os.FileInfo, path string, w
 		return []models.Connection{}, nil
 	}
 	for _, conn := range wrapper.Connections {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if err := conn.CLIAccess.Validate(); err != nil {
 			return nil, err
 		}
@@ -143,14 +184,26 @@ func decodeConnectionsWithWarnings(data []byte, info os.FileInfo, path string, w
 }
 
 // yaml.v3 accepts null and yes/on strings for bool fields. Inspect tags before
-// decoding consent, while retaining the existing KnownFields decoder unchanged.
-func validateCLIHistoryNodes(node *yaml.Node) error {
+// decoding consent, while retaining KnownFields. Wide mappings would enter
+// yaml.v3's quadratic, non-cancellable duplicate-key conversion; every valid
+// mapping fits a known struct's fields plus the YAML merge key.
+func validateCLIHistoryNodes(ctx context.Context, node *yaml.Node) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if node.Kind == yaml.MappingNode {
+		maxFields := max(reflect.TypeFor[connectionsFile]().NumField(), reflect.TypeFor[models.Connection]().NumField(), reflect.TypeFor[models.SSHTunnelConfig]().NumField()) + 1
+		if len(node.Content)/2 > maxFields {
+			return errors.New("config: too many connection mapping fields")
+		}
 		for i := 0; i+1 < len(node.Content); i += 2 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			key := yamlAliasTarget(node.Content[i])
 			// Match the decoder's semantic keys, including !!binary spellings.
 			var name string
-			if key == nil || key.Decode(&name) != nil || name != "cli_history" {
+			if key == nil || key.Kind != yaml.ScalarNode || key.Decode(&name) != nil || name != "cli_history" {
 				continue
 			}
 			value := yamlAliasTarget(node.Content[i+1])
@@ -161,7 +214,7 @@ func validateCLIHistoryNodes(node *yaml.Node) error {
 		}
 	}
 	for _, child := range node.Content {
-		if err := validateCLIHistoryNodes(child); err != nil {
+		if err := validateCLIHistoryNodes(ctx, child); err != nil {
 			return err
 		}
 	}

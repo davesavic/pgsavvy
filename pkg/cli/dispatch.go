@@ -34,6 +34,13 @@ type Command func(context.Context, []string, IO) (Envelope, error)
 
 type cleanupBudgetKey struct{}
 
+type commandFinalizationKey struct{}
+
+// One slot belongs to one Dispatch invocation, never a reusable Command.
+type commandFinalization struct {
+	run func(time.Time) []ErrorCode
+}
+
 // CleanupBudget is fresh time reserved inside the invocation's outer deadline.
 func CleanupBudget(ctx context.Context) time.Duration {
 	if budget, ok := ctx.Value(cleanupBudgetKey{}).(time.Duration); ok {
@@ -85,7 +92,9 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	deadline, _ := ctx.Deadline()
 	remaining := max(time.Duration(0), time.Until(deadline))
 	reserve := min(2*CleanupTimeout, remaining*2/5)
-	workCtx, cancelWork := context.WithDeadline(context.WithValue(ctx, cleanupBudgetKey{}, reserve/2), deadline.Add(-reserve))
+	finalization := &commandFinalization{}
+	workBase := context.WithValue(context.WithValue(ctx, cleanupBudgetKey{}, reserve/2), commandFinalizationKey{}, finalization)
+	workCtx, cancelWork := context.WithDeadline(workBase, deadline.Add(-reserve))
 	defer cancelWork()
 	closeInput := sync.OnceFunc(func() {
 		if streams.In != nil {
@@ -152,6 +161,11 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	if workCtx.Err() != nil {
 		err = workCtx.Err()
 	}
+	// Capture the query/cancellation outcome before best-effort history. Its
+	// elapsed time must not turn a previously successful query into a timeout.
+	if finalization.run != nil {
+		envelope.Warnings = append(envelope.Warnings, finalization.run(deadline.Add(-reserve/2))...)
+	}
 	if ctx.Err() != nil {
 		return true, ExitTimeout
 	}
@@ -161,17 +175,17 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	exit := ExitSuccess
 	if err != nil {
 		public := safeError(err)
-		envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: public}
+		envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: public, Warnings: envelope.Warnings}
 		exit = public.description().exit
 	} else {
 		envelope.OK = true
 	}
-	data, encodingErr := encodeContext(ctx, envelope)
+	data, encodingErr := encodeWithOptionalHistoryWarnings(ctx, envelope)
 	if encodingErr != nil {
 		public := safeError(encodingErr)
-		envelope = Envelope{Command: label, Error: public}
+		envelope = Envelope{Command: label, Error: public, Warnings: envelope.Warnings}
 		exit = public.description().exit
-		data, encodingErr = encodeContext(ctx, envelope)
+		data, encodingErr = encodeWithOptionalHistoryWarnings(ctx, envelope)
 		if encodingErr != nil {
 			return true, safeError(encodingErr).description().exit
 		}
@@ -181,8 +195,8 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	select {
 	case <-streams.Cancel:
 		if exit != ExitTimeout {
-			envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: &PublicError{Code: Timeout}}
-			data, encodingErr = encodeContext(ctx, envelope)
+			envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: &PublicError{Code: Timeout}, Warnings: envelope.Warnings}
+			data, encodingErr = encodeWithOptionalHistoryWarnings(ctx, envelope)
 			if encodingErr != nil {
 				return true, ExitTimeout
 			}

@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"strconv"
+	"time"
 	"unicode/utf8"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
@@ -12,7 +13,7 @@ import (
 )
 
 func QueryCommand(service InvocationService) Command {
-	return func(ctx context.Context, args []string, streams IO) (Envelope, error) {
+	return func(ctx context.Context, args []string, streams IO) (envelope Envelope, resultErr error) {
 		flags, positional, err := ParseFlags(args, []string{"connection", "file", "params-file", "max-rows", "schema"}, []string{"help"})
 		if err != nil || len(positional) != 0 {
 			return Envelope{}, &PublicError{Code: InvalidInput}
@@ -41,8 +42,22 @@ func QueryCommand(service InvocationService) Command {
 		if err != nil {
 			return Envelope{}, err
 		}
-		if err := pg.ValidateMachineQuery(ctx, sql); err != nil {
-			return Envelope{}, PublicMachineError(err)
+		started := time.Now()
+		validationErr := pg.ValidateMachineQuery(ctx, sql)
+		attempt, selected := service.beginQueryHistory(ctx, name, sql, started)
+		if attempt != nil {
+			defer func() {
+				attempt.complete(ctx, resultErr)
+				if slot, ok := ctx.Value(commandFinalizationKey{}).(*commandFinalization); ok {
+					slot.run = attempt.finalize
+				} else {
+					cutoff, _ := ctx.Deadline()
+					envelope.Warnings = append(envelope.Warnings, attempt.finalize(cutoff)...)
+				}
+			}()
+		}
+		if validationErr != nil {
+			return Envelope{}, PublicMachineError(validationErr)
 		}
 		parameters := [][]byte{}
 		if path, ok := flags["params-file"]; ok {
@@ -51,7 +66,13 @@ func QueryCommand(service InvocationService) Command {
 				return Envelope{}, err
 			}
 		}
-		client, profile, err := service.Open(ctx, name, models.CLIAccessRowRead)
+		var client *pg.MachineClient
+		var profile models.Connection
+		if selected != nil {
+			client, profile, err = service.openProfile(ctx, *selected, models.CLIAccessRowRead)
+		} else {
+			client, profile, err = service.Open(ctx, name, models.CLIAccessRowRead)
+		}
 		if err != nil {
 			return Envelope{}, err
 		}
@@ -63,7 +84,7 @@ func QueryCommand(service InvocationService) Command {
 		if closeErr != nil {
 			return Envelope{}, closeErr
 		}
-		envelope := Envelope{Command: "query", Connection: profile.Name, Data: result, ResultComplete: !result.Truncated, Truncated: result.Truncated}
+		envelope = Envelope{Command: "query", Connection: profile.Name, Data: result, ResultComplete: !result.Truncated, Truncated: result.Truncated}
 		if result.Truncated {
 			envelope.TruncationReason = "row_limit"
 		}

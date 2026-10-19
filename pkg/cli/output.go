@@ -82,7 +82,7 @@ func encodeContext(ctx context.Context, envelope Envelope) ([]byte, error) {
 		return nil, &PublicError{Code: ResourceFailure}
 	}
 	for _, warning := range envelope.Warnings {
-		if _, ok := publicErrors[warning]; !ok {
+		if _, ok := publicErrors[warning]; !ok && warning != HistoryUnavailable && warning != HistoryUpgradeRequired {
 			return nil, &PublicError{Code: ResourceFailure}
 		}
 	}
@@ -110,6 +110,26 @@ func encodeContext(ctx context.Context, envelope Envelope) ([]byte, error) {
 		return nil, &PublicError{Code: ResourceFailure}
 	}
 	return buffer.Bytes(), nil
+}
+
+func encodeWithOptionalHistoryWarnings(ctx context.Context, envelope Envelope) ([]byte, error) {
+	data, err := encodeContext(ctx, envelope)
+	if err == nil {
+		return data, nil
+	}
+	warnings := make([]ErrorCode, 0, len(envelope.Warnings))
+	for _, warning := range envelope.Warnings {
+		if warning != HistoryUnavailable && warning != HistoryUpgradeRequired {
+			warnings = append(warnings, warning)
+		}
+	}
+	if len(warnings) == len(envelope.Warnings) {
+		return nil, err
+	}
+	// An optional history warning alone cannot invalidate an otherwise fitting
+	// query result at the output limit. Other warnings retain their contract.
+	envelope.Warnings = warnings
+	return encodeContext(ctx, envelope)
 }
 
 func normalizeData(ctx context.Context, v reflect.Value, budget *int, depth int) (any, error) {

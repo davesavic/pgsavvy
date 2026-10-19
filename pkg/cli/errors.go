@@ -30,6 +30,8 @@ const (
 	ObjectNotFound            ErrorCode = "OBJECT_NOT_FOUND"
 	Timeout                   ErrorCode = "TIMEOUT"
 	ResourceFailure           ErrorCode = "RESOURCE_FAILURE"
+	HistoryUnavailable        ErrorCode = "HISTORY_UNAVAILABLE"
+	HistoryUpgradeRequired    ErrorCode = "HISTORY_UPGRADE_REQUIRED"
 )
 
 type errorDescription struct {
