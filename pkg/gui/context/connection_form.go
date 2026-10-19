@@ -132,6 +132,11 @@ type connForm struct {
 	// (recorder/test path without injection) ⇒ no clipping (back-compat).
 	msgWidth int
 
+	// Keyboard navigation visits every disclosure row, including when the
+	// disclosure and toggle cannot fit together in a short modal.
+	historyDisclosureReading bool
+	historyDisclosureRow     int
+
 	// sshEnabled and sshAuth are TRANSIENT (never persisted): they gate the
 	// SSH section's visibility and drive how the auth picker maps onto
 	// Connection.SSHTunnel at save time. Derived from the loaded tunnel on
@@ -208,6 +213,7 @@ func (f *connForm) focusedSpec() connFieldSpec {
 
 // moveFocus shifts the field cursor by delta, clamping into range.
 func (f *connForm) moveFocus(delta int) {
+	f.historyDisclosureReading = false
 	n := len(f.focusableSpecs())
 	f.focus += delta
 	if f.focus < 0 {
@@ -216,6 +222,49 @@ func (f *connForm) moveFocus(delta int) {
 	if f.focus >= n {
 		f.focus = n - 1
 	}
+}
+
+func (f *connForm) navigate(delta int) {
+	if f.focusedSpec().id == fieldCLIHistory {
+		rows := len(f.historyDisclosureLines())
+		if f.historyDisclosureReading {
+			f.historyDisclosureRow = min(f.historyDisclosureRow, rows-1) + delta
+			if f.historyDisclosureRow < 0 {
+				f.moveFocus(-1)
+			} else if f.historyDisclosureRow >= rows {
+				f.historyDisclosureReading = false
+			}
+			return
+		}
+		if delta < 0 {
+			f.historyDisclosureReading = true
+			f.historyDisclosureRow = rows - 1
+			return
+		}
+	}
+	f.moveFocus(delta)
+	if delta > 0 && f.focusedSpec().id == fieldCLIHistory {
+		f.historyDisclosureReading = true
+		f.historyDisclosureRow = 0
+	}
+}
+
+func (f *connForm) historyDisclosureLines() []string {
+	var lines []string
+	// Disclosure is ASCII. Reserve the two-cell focus gutter and hard-wrap
+	// long words too, so even the narrowest supported modal is navigable.
+	width := max(1, f.msgWidth-2)
+	if f.msgWidth <= 0 {
+		width = 80
+	}
+	for _, line := range wrapLabel(strings.TrimSpace(cliHistoryDisclosure), width) {
+		for len(line) > width {
+			lines = append(lines, line[:width])
+			line = line[width:]
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 // names returns the driver-name list for the selector.
@@ -718,13 +767,23 @@ func (f *connForm) render() string {
 			continue
 		}
 		marker := "  "
-		if s.id == focused.id {
+		if s.id == focused.id && !f.historyDisclosureReading {
 			marker = "> "
 		}
 		if s.id == fieldCLIHistory && (f.conn.CLIHistory || focused.id == fieldCLIHistory) {
-			// Keep disclosure complete and before the marker, not clipped like
-			// transient messages. Terminal visibility is checked by the UI smoke.
-			b.WriteString(cliHistoryDisclosure)
+			if f.historyDisclosureReading {
+				lines := f.historyDisclosureLines()
+				f.historyDisclosureRow = min(f.historyDisclosureRow, len(lines)-1)
+				for i, line := range lines {
+					prefix := "  "
+					if i == f.historyDisclosureRow {
+						prefix = "> "
+					}
+					fmt.Fprintf(&b, "%s%s\n", prefix, line)
+				}
+			} else {
+				b.WriteString(cliHistoryDisclosure)
+			}
 		}
 		fmt.Fprintf(&b, "%s%-18s %s\n", marker, s.label+":", f.displayValue(s))
 		// Inline err/status sit under the focused field with more rows below,

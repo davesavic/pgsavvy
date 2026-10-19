@@ -96,9 +96,12 @@ func (h *History) RecordEntry(event HistoryEvent) error {
 }
 
 // New opens (creating if needed) the SQLite history database at path, runs
-// migrations, and starts the background writer goroutine.
+// migrations, and starts the background writer goroutine. Startup is best-effort:
+// lock contention must not prevent the TUI from opening without history.
 func New(path string) (*History, error) {
-	db, err := openHistoryStore(context.Background(), path, false)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	db, err := openHistoryStore(ctx, path, false)
 	if err != nil {
 		return nil, err
 	}

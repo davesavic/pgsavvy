@@ -197,7 +197,7 @@ func (cm *ConnectionManagerController) Down(_ commands.ExecCtx) error {
 		return nil
 	}
 	if cm.inFormMode() {
-		cm.deps.Ctx.FormMoveFocus(1)
+		cm.deps.Ctx.FormNavigate(1)
 		return nil
 	}
 	cm.deps.Ctx.SetCursor(cm.deps.Ctx.Cursor() + 1)
@@ -211,7 +211,7 @@ func (cm *ConnectionManagerController) Up(_ commands.ExecCtx) error {
 		return nil
 	}
 	if cm.inFormMode() {
-		cm.deps.Ctx.FormMoveFocus(-1)
+		cm.deps.Ctx.FormNavigate(-1)
 		return nil
 	}
 	cm.deps.Ctx.SetCursor(cm.deps.Ctx.Cursor() - 1)
@@ -344,7 +344,7 @@ func (cm *ConnectionManagerController) FieldNext(_ commands.ExecCtx) error {
 	if !cm.inFormMode() {
 		return nil
 	}
-	cm.deps.Ctx.FormMoveFocus(1)
+	cm.deps.Ctx.FormNavigate(1)
 	return nil
 }
 
@@ -353,7 +353,7 @@ func (cm *ConnectionManagerController) FieldPrev(_ commands.ExecCtx) error {
 	if !cm.inFormMode() {
 		return nil
 	}
-	cm.deps.Ctx.FormMoveFocus(-1)
+	cm.deps.Ctx.FormNavigate(-1)
 	return nil
 }
 

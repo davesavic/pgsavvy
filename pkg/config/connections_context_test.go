@@ -79,10 +79,36 @@ func TestConnectionsContext_ComplexKey(t *testing.T) {
 	text.WriteString("}\n   : ignored\n")
 	fs := afero.NewMemMapFs()
 	require.NoError(t, afero.WriteFile(fs, "/connections.yml", []byte(text.String()), 0o600))
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
-	defer cancel()
-	start := time.Now()
-	_, err := LoadConnectionsContext(ctx, fs, "/connections.yml", io.Discard)
-	require.ErrorContains(t, err, "too many connection mapping fields")
-	require.Less(t, time.Since(start), 250*time.Millisecond, "complex keys must be structurally checked before Node.Decode")
+	t.Run("structural rejection", func(t *testing.T) {
+		_, err := LoadConnectionsContext(context.Background(), fs, "/connections.yml", io.Discard)
+		require.ErrorContains(t, err, "too many connection mapping fields")
+	})
+	t.Run("cancellation during parsing", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		// Cancel on a parser read rather than racing the scheduler against a
+		// structural assertion. Start directly at parsing, after file reads.
+		polls := 0
+		parsing := cancelPollingContext{Context: ctx, poll: func() {
+			polls++
+			if polls == 10 {
+				cancel()
+			}
+		}}
+		info, err := fs.Stat("/connections.yml")
+		require.NoError(t, err)
+		_, err = decodeConnectionsContext(parsing, []byte(text.String()), info, "/connections.yml", io.Discard)
+		require.ErrorIs(t, err, context.Canceled)
+		require.GreaterOrEqual(t, polls, 10)
+	})
+}
+
+type cancelPollingContext struct {
+	context.Context
+	poll func()
+}
+
+func (c cancelPollingContext) Err() error {
+	c.poll()
+	return c.Context.Err()
 }

@@ -1881,7 +1881,7 @@ func applyConnectionManagerScroll(view *gocui.View) {
 	lines := view.ViewBufferLines()
 	sel := -1
 	for i, ln := range lines {
-		if strings.HasPrefix(ln, "> ") {
+		if strings.HasPrefix(ln, "> ") || ln == ">" {
 			sel = i
 			break
 		}

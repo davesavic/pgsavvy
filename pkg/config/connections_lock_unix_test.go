@@ -12,8 +12,42 @@ import (
 	"time"
 
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 )
+
+func TestConnectionsWriteLock_SymlinkDotDot(t *testing.T) {
+	root := t.TempDir()
+	a, b := filepath.Join(root, "a"), filepath.Join(root, "b")
+	require.NoError(t, os.MkdirAll(a, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(b, "subdir"), 0o700))
+	require.NoError(t, os.Symlink(filepath.Join(b, "subdir"), filepath.Join(a, "link")))
+	before := []byte("connections:\n - name: dev\n   cli_history: true\n")
+	intended, other := filepath.Join(b, "connections.yml"), filepath.Join(a, "connections.yml")
+	for _, path := range []string{intended, other} {
+		require.NoError(t, os.WriteFile(path, before, 0o600))
+	}
+	// Do not use Join: the literal .. must reach the filesystem after the symlink.
+	raw := a + "/link/../connections.yml"
+	fs := afero.NewOsFs()
+	conns, err := LoadConnections(fs, raw)
+	require.NoError(t, err)
+	require.True(t, conns[0].CLIHistory)
+	conns[0].CLIHistory = false
+	expected := true
+	require.NoError(t, UpdateConnectionWithCLISettings(fs, raw, "dev", conns[0], nil, &expected))
+	conns, err = LoadConnections(fs, intended)
+	require.NoError(t, err)
+	require.False(t, conns[0].CLIHistory, "revoke the profile that was actually read")
+	unchanged, err := os.ReadFile(other)
+	require.NoError(t, err)
+	require.Equal(t, before, unchanged)
+	canonical, release, err := nativeConnectionsWriteLock(raw, time.Now().Add(time.Second))
+	require.NoError(t, err)
+	defer release()
+	require.Equal(t, intended, canonical)
+	require.ErrorIs(t, SaveConnections(fs, intended, nil), os.ErrDeadlineExceeded, "physical alias must share the lock")
+}
 
 func TestConnectionsWriteLock_PermissionDenial(t *testing.T) {
 	if os.Geteuid() == 0 {

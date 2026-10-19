@@ -103,22 +103,30 @@ func nativeConnectionsWriteLock(path string, deadline time.Time) (string, func()
 }
 
 func canonicalConnectionsPath(path string) (string, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
+	// Abs/Dir clean .. lexically, changing its meaning after a symlink.
+	// Resolve the raw parent first so reads, writes and locks share a target.
+	parent, base := filepath.Split(path)
+	if base == "" || base == "." || base == ".." {
+		return "", errors.New("invalid connections basename")
+	}
+	if err := validateConnectionsBasename(base); err != nil {
 		return "", err
 	}
-	if err := validateConnectionsBasename(filepath.Base(abs)); err != nil {
-		return "", err
+	if parent == "" {
+		parent = "."
 	}
-	parent := filepath.Dir(abs)
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return "", err
 	}
-	parent, err = filepath.EvalSymlinks(parent)
+	parent, err := filepath.EvalSymlinks(parent)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(parent, filepath.Base(abs)), nil
+	parent, err = filepath.Abs(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, base), nil
 }
 
 func validateConnectionsTarget(path string) error {

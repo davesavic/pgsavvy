@@ -41,6 +41,22 @@ func PaintBuffer(v *gocui.View, buf *Buffer) {
 	}
 	_, origin := v.Origin()
 	content, start, count, cur, large, sel, flash := buf.viewSnapshot(origin, max(1, v.InnerHeight()))
+	// Render controls as single-cell glyphs before adding trusted ANSI styling.
+	// Preserve rune columns for the cursor/overlays and leave canonical SQL intact.
+	content = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\t':
+			return r
+		case r < 0x20:
+			return '\u2400' + r
+		case r == 0x7f:
+			return '\u2421'
+		case r >= 0x80 && r <= 0x9f:
+			return '\ufffd'
+		default:
+			return r
+		}
+	}, content)
 	if !large {
 		content = highlight.Highlight(content)
 	}
