@@ -138,25 +138,19 @@ func appendConnectionLocked(fs afero.Fs, path string, c models.Connection) error
 // is not found, ErrConnectionNotFound is returned.
 //
 // On LoadConnections failure the error is returned unwrapped (per M10f).
-// CLIAccess is always preserved from disk, ignoring the form's captured policy.
+// Both CLI policies are preserved from disk, ignoring captured form values.
 // Detected changes before publication return ErrConnectionsChanged without writing.
 func UpdateConnection(fs afero.Fs, path, oldName string, newConn models.Connection) error {
-	return updateConnection(fs, path, oldName, newConn, nil)
+	return UpdateConnectionWithCLISettings(fs, path, oldName, newConn, nil, nil)
 }
 
 // UpdateConnectionWithCLIAccess explicitly changes the CLI policy along with
 // the other profile fields. A stale expected policy is rejected, not overwritten.
 func UpdateConnectionWithCLIAccess(fs afero.Fs, path, oldName string, newConn models.Connection, expected models.CLIAccess) error {
-	return updateConnection(fs, path, oldName, newConn, &expected)
+	return UpdateConnectionWithCLISettings(fs, path, oldName, newConn, &expected, nil)
 }
 
-func updateConnection(fs afero.Fs, path, oldName string, newConn models.Connection, expectedPolicy *models.CLIAccess) error {
-	return withConnectionsWriteLock(fs, path, func(path string) error {
-		return updateConnectionLocked(fs, path, oldName, newConn, expectedPolicy)
-	})
-}
-
-func updateConnectionLocked(fs afero.Fs, path, oldName string, newConn models.Connection, expectedPolicy *models.CLIAccess) error {
+func updateConnectionLocked(fs afero.Fs, path, oldName string, newConn models.Connection, expectedPolicy *models.CLIAccess, expectedHistory *bool) error {
 	data, err := afero.ReadFile(fs, path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -192,6 +186,11 @@ func updateConnectionLocked(fs afero.Fs, path, oldName string, newConn models.Co
 		// Ordinary edits must not restore a revoked policy from a stale form.
 		newConn.CLIAccess = existing[idx].CLIAccess
 	} else if existing[idx].CLIAccess != *expectedPolicy {
+		return ErrConnectionsChanged
+	}
+	if expectedHistory == nil {
+		newConn.CLIHistory = existing[idx].CLIHistory
+	} else if existing[idx].CLIHistory != *expectedHistory {
 		return ErrConnectionsChanged
 	}
 	existing[idx] = newConn

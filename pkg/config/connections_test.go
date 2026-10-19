@@ -41,6 +41,67 @@ func TestMachineAccess_Validation(t *testing.T) {
 	}
 }
 
+func TestCLIHistoryConsent_StrictYAML(t *testing.T) {
+	for _, value := range []string{"null", "~", "", "yes", "on", "\"yes\"", "\"on\"", "\"true\"", "!!str true", "!!bool SECRET_HISTORY_VALUE", "1", "[]", "{}", "SECRET_HISTORY_VALUE"} {
+		t.Run(value, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			body := []byte("connections:\n  - name: dev\n    cli_history: " + value + "\n")
+			if err := afero.WriteFile(fs, "/c.yml", body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadConnections(fs, "/c.yml")
+			if err == nil || !strings.Contains(err.Error(), "cli_history must be a YAML boolean") {
+				t.Fatalf("non-boolean consent accepted or unsafe parse path: %v", err)
+			}
+			if strings.Contains(err.Error(), "SECRET_HISTORY_VALUE") {
+				t.Fatal("consent error exposed raw value")
+			}
+			after, _ := afero.ReadFile(fs, "/c.yml")
+			if !bytes.Equal(body, after) {
+				t.Fatal("invalid load rewrote configuration")
+			}
+		})
+	}
+	for _, body := range []string{
+		"connections:\n  - name: dev\n    cli_access: null\n",
+		"connections:\n  - name: dev\n    cli_history: false\n",
+		"connections:\n  - name: dev\n    cli_history: true\n",
+		"connections:\n  - name: dev\n    cli_history: !!bool 'true'\n",
+		"connections:\n  - &base\n    name: dev\n    cli_history: &enabled true\n  - name: second\n    cli_history: *enabled\n  - <<: *base\n    name: third\n",
+	} {
+		fs := afero.NewMemMapFs()
+		if err := afero.WriteFile(fs, "/c.yml", []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadConnections(fs, "/c.yml"); err != nil {
+			t.Fatalf("valid consent/legacy null rejected: %v", err)
+		}
+	}
+	for _, body := range []string{
+		"connections:\n  - name: first\n    label: &flag yes\n  - name: second\n    cli_history: *flag\n",
+		"connections:\n  - name: first\n    &key cli_history: true\n  - name: second\n    *key : yes\n",
+		"connections:\n  - name: dev\n    !!binary Y2xpX2hpc3Rvcnk=: yes\n",
+		"connections:\n  - &profile\n    name: dev\n    cli_history: *profile\n",
+		"connections:\n  - &base\n    name: base\n    cli_history: null\n  - <<: *base\n    name: merged\n",
+	} {
+		fs := afero.NewMemMapFs()
+		if err := afero.WriteFile(fs, "/c.yml", []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadConnections(fs, "/c.yml"); err == nil || !strings.Contains(err.Error(), "YAML boolean") {
+			t.Fatalf("alias bypassed consent type validation: %v", err)
+		}
+	}
+	fs := afero.NewMemMapFs()
+	body := "connections:\n  - name: dev\n    cli_history: true\n    ssh_tunnel:\n      host: bastion\n      bogus_ssh_key: yes\n"
+	if err := afero.WriteFile(fs, "/c.yml", []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConnections(fs, "/c.yml"); err == nil || !strings.Contains(err.Error(), "bogus_ssh_key") {
+		t.Fatalf("nested unknown-key rejection lost: %v", err)
+	}
+}
+
 func TestLoadConnections_MissingFileReturnsEmpty(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	got, err := LoadConnections(fs, "/missing.yml")

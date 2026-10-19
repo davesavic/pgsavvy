@@ -26,6 +26,7 @@ type Connection struct {
 	Icon             string           `yaml:"icon,omitempty"`
 	ReadOnly         bool             `yaml:"read_only,omitempty"`
 	CLIAccess        CLIAccess        `yaml:"cli_access,omitempty"`
+	CLIHistory       bool             `yaml:"cli_history,omitempty"`
 	ConfirmWrites    bool             `yaml:"confirm_writes,omitempty"`
 	ConfirmDDL       bool             `yaml:"confirm_ddl,omitempty"`
 	StatementTimeout string           `yaml:"statement_timeout,omitempty"`

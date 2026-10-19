@@ -97,6 +97,9 @@ func decodeConnectionsWithWarnings(data []byte, info os.FileInfo, path string, w
 		)
 	}
 
+	if err := validateCLIHistoryNodes(&doc); err != nil {
+		return nil, err
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var wrapper connectionsFile
@@ -137,6 +140,44 @@ func decodeConnectionsWithWarnings(data []byte, info os.FileInfo, path string, w
 	}
 
 	return wrapper.Connections, nil
+}
+
+// yaml.v3 accepts null and yes/on strings for bool fields. Inspect tags before
+// decoding consent, while retaining the existing KnownFields decoder unchanged.
+func validateCLIHistoryNodes(node *yaml.Node) error {
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := yamlAliasTarget(node.Content[i])
+			// Match the decoder's semantic keys, including !!binary spellings.
+			var name string
+			if key == nil || key.Decode(&name) != nil || name != "cli_history" {
+				continue
+			}
+			value := yamlAliasTarget(node.Content[i+1])
+			var consent bool
+			if value == nil || value.Kind != yaml.ScalarNode || value.Tag != "!!bool" || value.Decode(&consent) != nil {
+				return errors.New("config: cli_history must be a YAML boolean")
+			}
+		}
+	}
+	for _, child := range node.Content {
+		if err := validateCLIHistoryNodes(child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func yamlAliasTarget(node *yaml.Node) *yaml.Node {
+	seen := make(map[*yaml.Node]bool)
+	for node != nil && node.Kind == yaml.AliasNode {
+		if seen[node] {
+			return nil
+		}
+		seen[node] = true
+		node = node.Alias
+	}
+	return node
 }
 
 func hasExecutableCredentialCommand(conns []models.Connection) bool {
