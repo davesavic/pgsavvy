@@ -1,3 +1,31 @@
+pgsavvy v0.13.0
+
+  Added opt-in shared query history for the Linux machine CLI. Enable
+  cli_history independently for each saved connection in YAML or the connection
+  form. Recording is off by default and never grants database access or changes
+  the CLI's read-only query policy.
+
+  Opted-in attempts record original SQL, profile, completion time, duration and
+  succeeded/failed/blocked outcome. History shows CLI/TUI sources and refreshes
+  when activated. Display controls are sanitized; recalling SQL copies it into
+  the editor without executing it. Blocked queries do not supply completions.
+
+  History is bounded best effort, not an audit log; recording failures do not
+  change query results or exit codes. Raw SQL literals and comments are retained,
+  but bound parameter values and returned rows are not recorded. Disabling
+  history stops future recording without deleting existing entries.
+
+  New Unix history stores use owner-only permissions. CLI recording refuses
+  unsafe existing stores rather than changing their permissions automatically.
+  HISTORY_UPGRADE_REQUIRED can be resolved by opening the current TUI once.
+  Cooperating connection writers now serialize changes and preserve concurrent
+  CLI policy edits. See docs/cli-query.md for privacy and upgrade guidance.
+
+  Before downgrading, stop all writers, back up configuration and make a
+  WAL-consistent history backup. Remove cli_history keys and, for a v1 history
+  predecessor, use the guarded offline rollback procedure in docs/cli-contract.md.
+  History rollback loses source labels and maps blocked attempts to failed.
+
 pgsavvy v0.12.0
 
   Added a Linux-only machine CLI for scripts and agent tools, without starting
