@@ -36,6 +36,10 @@ import (
 var firstProcessBinary, firstProcessDSN string
 
 func TestMain(m *testing.M) {
+	if os.Getenv("PGSAVVY_HISTORY_PROCESS_HELPER") == "1" {
+		os.Exit(m.Run())
+	}
+
 	firstProcessDSN = os.Getenv("PGSAVVY_TEST_PG")
 	if firstProcessDSN == "" {
 		fmt.Fprintln(os.Stderr, "machine process tests require designated PGSAVVY_TEST_PG")
