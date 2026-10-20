@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"unicode"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -15,7 +14,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
-func TestCLIHistoryDisclosure_RealWrappedFormNavigation(t *testing.T) {
+func TestCLIHistoryForm_RealWrappedFieldNavigation(t *testing.T) {
 	for _, size := range [][2]int{{80, 10}, {80, 12}, {80, 24}, {40, 10}, {20, 12}, {10, 10}} {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
 			fs := newConnectionsTestFs()
@@ -41,32 +40,21 @@ func TestCLIHistoryDisclosure_RealWrappedFormNavigation(t *testing.T) {
 				start := v.OriginY()
 				for _, line := range lines[start:min(len(lines), start+v.InnerHeight())] {
 					if strings.HasPrefix(line, "> ") || line == ">" {
-						return strings.TrimPrefix(line, "> ")
+						return strings.TrimSpace(strings.TrimPrefix(line, ">"))
 					}
 				}
 				t.Fatalf("focused form row %q is not visible: origin=%d height=%d lines=%q", modal.FormFocusedLabel(), start, v.InnerHeight(), lines[start:min(len(lines), start+v.InnerHeight())])
 				return ""
 			}
-			checkDisclosure := func(text string) {
-				t.Helper()
-				text = strings.Map(func(r rune) rune {
-					if unicode.IsSpace(r) {
-						return -1
-					}
-					return r
-				}, text)
-				for _, warning := range []string{"RawSQL(literals/comments)issaved.", "Noboundparameters/results.Notanauditlog.", "Permissionremediation:stophistorywriters;", "inspect$XDG_STATE_HOME/pgsavvy/history.sqlite,", "itsdirectoryandWAL/SHM/journalsidecars.", "Restrictaccesstoowner;noautomaticrepair."} {
-					require.Contains(t, text, warning)
-				}
-			}
-			var downDisclosure, upDisclosure []string
+			var downHistory, upHistory int
 			fields := map[string]bool{}
 			for i := 0; i < 2000; i++ {
 				label := modal.FormFocusedLabel()
 				fields[label] = true
 				marker := renderMarker()
+				require.True(t, strings.HasPrefix(label, strings.TrimSpace(strings.SplitN(marker, ":", 2)[0])), "focus must stay on field %q, not description %q", label, marker)
 				if label == "cli_history" {
-					downDisclosure = append(downDisclosure, marker)
+					downHistory++
 				}
 				if label == "password_command" {
 					break
@@ -78,8 +66,9 @@ func TestCLIHistoryDisclosure_RealWrappedFormNavigation(t *testing.T) {
 				label := modal.FormFocusedLabel()
 				delete(fields, label)
 				marker := renderMarker()
+				require.True(t, strings.HasPrefix(label, strings.TrimSpace(strings.SplitN(marker, ":", 2)[0])), "focus must stay on field %q, not description %q", label, marker)
 				if label == "cli_history" {
-					upDisclosure = append([]string{marker}, upDisclosure...)
+					upHistory++
 				}
 				if label == "name" {
 					break
@@ -88,8 +77,8 @@ func TestCLIHistoryDisclosure_RealWrappedFormNavigation(t *testing.T) {
 			}
 			require.Equal(t, "name", modal.FormFocusedLabel())
 			require.Empty(t, fields, "every field remains accessible in both directions")
-			checkDisclosure(strings.Join(downDisclosure, ""))
-			checkDisclosure(strings.Join(upDisclosure, ""))
+			require.Equal(t, 1, downHistory, "cli_history must take only one navigation step")
+			require.Equal(t, 1, upHistory, "cli_history must take only one navigation step")
 			after, err := afero.ReadFile(fs, path)
 			require.NoError(t, err)
 			require.Equal(t, before, after, "navigation must not save consent")

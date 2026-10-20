@@ -182,12 +182,11 @@ func (c *ConnectionManagerContext) activeStageGlyph() rune {
 // The controller drives the in-place form through these exported methods
 // rather than the unexported connForm type. All run on the UI thread.
 
-// FormMoveFocus selects a field programmatically, skipping disclosure rows.
+// FormMoveFocus selects a field programmatically.
 func (c *ConnectionManagerContext) FormMoveFocus(delta int) { c.form.moveFocus(delta) }
 
-// FormNavigate includes disclosure rows in keyboard navigation. Programmatic
-// field selection continues to use FormMoveFocus.
-func (c *ConnectionManagerContext) FormNavigate(delta int) { c.form.navigate(delta) }
+// FormNavigate moves keyboard focus between fields.
+func (c *ConnectionManagerContext) FormNavigate(delta int) { c.form.moveFocus(delta) }
 
 // FormFocusedIsText reports whether the focused field is a text field (edited
 // via the PROMPT popup).
@@ -303,7 +302,6 @@ func (c *ConnectionManagerContext) FormValidateAll(tr *i18n.TranslationSet) (con
 	if !valid {
 		c.form.err = msg
 		c.form.focus = idx
-		c.form.historyDisclosureReading = false
 		return models.Connection{}, false, "", false
 	}
 	c.form.err = ""

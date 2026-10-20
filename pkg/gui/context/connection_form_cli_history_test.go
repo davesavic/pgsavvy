@@ -38,10 +38,8 @@ func TestCLIHistoryForm_DefaultAndEdit(t *testing.T) {
 			require.False(t, changed)
 			c.form.msgWidth = 24
 			body := c.form.render()
-			for _, disclosure := range []string{"Raw SQL (literals/comments)", "No bound parameters/results", "Not an audit log", "Permission remediation", "$XDG_STATE_HOME/pgsavvy/history.sqlite", "WAL/SHM/journal", "no automatic repair"} {
-				require.Contains(t, body, disclosure, "mandatory disclosure must not be clipped")
-			}
-			require.Less(t, strings.Index(body, "Raw SQL"), strings.Index(body, "> cli_history:"))
+			require.Len(t, strings.Split(strings.TrimSuffix(body, "\n"), "\n"), len(c.form.focusableSpecs()), "only field rows belong in the form")
+			require.Contains(t, body, "> cli_history:")
 			c.FormToggleFocused()
 			after := c.FormConnection()
 			require.Equal(t, !enabled, after.CLIHistory)
@@ -55,6 +53,41 @@ func TestCLIHistoryForm_DefaultAndEdit(t *testing.T) {
 			require.False(t, changed, "toggle back must preserve latest disk consent")
 			require.Equal(t, before.CLIHistory, c.FormConnection().CLIHistory)
 			require.Equal(t, sourceSnapshot, source, "form mutated the caller's profile")
+		}
+	}
+}
+
+func TestCLIHistoryForm_NavigationOnlyVisitsFields(t *testing.T) {
+	for _, edit := range []bool{false, true} {
+		for _, enabled := range []bool{false, true} {
+			c := newTestConnectionManager(&captureDriver{}, nil, nil)
+			if edit {
+				c.OpenEditForm(models.Connection{Name: "dev", CLIHistory: enabled}, []string{"dev"}, testDrivers)
+			} else {
+				c.OpenAddForm(nil, testDrivers)
+				c.form.conn.CLIHistory = enabled
+			}
+			before := c.FormConnection()
+			specs := c.form.focusableSpecs()
+			for _, width := range []int{8, 24, 80} {
+				c.SetLabelWrapWidth(width)
+				for _, delta := range []int{1, -1} {
+					for step := range specs {
+						i := step
+						if delta < 0 {
+							i = len(specs) - 1 - step
+						}
+						require.Equal(t, specs[i].label, c.FormFocusedLabel())
+						body := c.form.render()
+						require.Len(t, strings.Split(strings.TrimSuffix(body, "\n"), "\n"), len(specs))
+						require.Contains(t, body, "> "+specs[i].label+":")
+						if step < len(specs)-1 {
+							c.FormNavigate(delta)
+						}
+					}
+				}
+			}
+			require.Equal(t, before, c.FormConnection(), "navigation must not change connection settings")
 		}
 	}
 }

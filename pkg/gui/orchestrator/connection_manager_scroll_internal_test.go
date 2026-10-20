@@ -76,22 +76,19 @@ func TestApplyConnectionManagerScrollBringsSelectedRowIntoView(t *testing.T) {
 	}
 }
 
-func TestCLIHistoryForm_DisclosureScroll(t *testing.T) {
+func TestCLIHistoryForm_FocusedToggleScroll(t *testing.T) {
 	for _, origin := range []int{0, 14, 21} {
-		lines := make([]string, 32)
+		lines := make([]string, 26)
 		for i := range lines {
 			lines[i] = "  field:"
 		}
 		lines[10] = "  cli_access: row-read"
-		for i := 11; i <= 16; i++ {
-			lines[i] = "    full disclosure"
-		}
-		lines[17] = "> cli_history: [x]"
+		lines[11] = "> cli_history: [x]"
 		v := buildPanelView(t, 10, true, lines)
 		v.SetOriginY(origin)
 		applyConnectionManagerScroll(v)
-		if v.OriginY() > 11 || v.OriginY()+v.InnerHeight() <= 17 {
-			t.Fatalf("origin %d -> %d hides disclosure or toggle", origin, v.OriginY())
+		if v.OriginY() > 11 || v.OriginY()+v.InnerHeight() <= 11 {
+			t.Fatalf("origin %d -> %d hides focused toggle", origin, v.OriginY())
 		}
 	}
 }
