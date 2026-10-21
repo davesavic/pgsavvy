@@ -194,6 +194,11 @@ reads at most 1 MiB of UTF-8 JSON; missing, oversized or invalid logs report
 incomplete status. Assertion output, subtest names, package names, credentials,
 environment values and raw test/native logs remain private. This diagnostic
 does not change any test, acceptance gate or failure exit status.
+Unix baseline/native suite failures use the same bounded, fail-closed policy,
+with a fixed allowlist of source-declared top-level machine test names in
+`.github/scripts/cli_test_status.py`. Subtest failures report only their
+allowlisted parent name. Package failures and unlisted failures expose only
+boolean flags, never their names. The allowlist does not add acceptance tests.
 
 An explicitly approved exception publishes bounded, scrubbed **secret-free
 probe** diagnostics before the real fixture password is generated. The probe

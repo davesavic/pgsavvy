@@ -28,6 +28,13 @@ cleanup() {
   if [ "$result" -ne 0 ]; then
     # Command text and captured logs can contain the private fixture password.
     printf 'native fixture failed: stage=%s line=%s exit=%s\n' "$stage" "$failure_line" "$result" >&2
+    case "$stage" in
+      baseline-tests|native-tests|evidence)
+        for log in tests.jsonl native-tests.jsonl; do
+          python3 "$repo/.github/scripts/cli_test_status.py" "$root/$log" 2>/dev/null || echo 'test status reporter unavailable' >&2
+        done
+        ;;
+    esac
   fi
   if [ -f "$root/data/postmaster.pid" ]; then
     if ! "$pg/pg_ctl" -D "$root/data" -m immediate -w -t 30 stop >"$root/stop.log" 2>&1; then

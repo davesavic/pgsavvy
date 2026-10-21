@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../.." && pwd -P)
+PYTHONDONTWRITEBYTECODE=1 python3 "$repo/.github/scripts/cli-test-status.test.py"
 temp=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/pgsavvy-fixture-test.XXXXXXXX")
 trap 'rm -rf "$temp"' EXIT
 
@@ -32,10 +33,10 @@ SH
       rm -f "$STOP_MARKER"
       set +e
       bash -euo pipefail -c '
-        root=$1; pg="$root/install/bin"; stage=$2
+        root=$1; pg="$root/install/bin"; stage=$2; repo=$5
         source "$3"
-        bash -c '\''echo private-test-sentinel; exit "$1"'\'' _ "$4" >"$root/tests.jsonl" 2>"$root/tests.err"
-      ' _ "$root" "$stage" "$temp/cleanup.sh" "$result" >"$temp/public" 2>&1
+        bash -c '\''echo "{\"Action\":\"fail\",\"Test\":\"TestMachineCLIProcess_Query\",\"Output\":\"private-test-sentinel\"}"; echo private-stderr-sentinel >&2; exit "$1"'\'' _ "$4" >"$root/tests.jsonl" 2>"$root/tests.err"
+      ' _ "$root" "$stage" "$temp/cleanup.sh" "$result" "$repo" >"$temp/public" 2>&1
       actual=$?
       set -e
       expected=$result
@@ -44,6 +45,9 @@ SH
       [ "$actual" -eq "$expected" ]
       if [ "$result" -ne 0 ]; then
         grep -Eq "^native fixture failed: stage=$stage line=[0-9]+ exit=37$" "$temp/public"
+        if [ "$stage" != initdb ]; then
+          grep -q '"test": "TestMachineCLIProcess_Query", "status": "failed"' "$temp/public"
+        fi
       fi
       if grep -q 'private-.*-sentinel' "$temp/public"; then
         echo 'private fixture output escaped' >&2; exit 1
@@ -57,4 +61,17 @@ SH
     done
   done
 done
+root="$temp/pgsavvy-native.reporter-failure"
+mkdir -p "$root"
+set +e
+bash -euo pipefail -c '
+  root=$1; pg="$root/no-server"; stage=native-tests; repo="$root/missing-reporter"
+  source "$2"
+  exit 19
+' _ "$root" "$temp/cleanup.sh" >"$temp/public" 2>&1
+actual=$?
+set -e
+[ "$actual" -eq 19 ]
+[ ! -e "$root" ]
+grep -q '^test status reporter unavailable$' "$temp/public"
 echo 'Unix fixture failure diagnostics and cleanup passed'
