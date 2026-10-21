@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/../.." && pwd -P)
+temp=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/pgsavvy-fixture-test.XXXXXXXX")
+trap 'rm -rf "$temp"' EXIT
+
+# Exercise the production EXIT trap without downloading or starting PostgreSQL.
+python3 - "$repo/.github/scripts/cli-postgres.sh" "$temp/cleanup.sh" <<'PY'
+import pathlib, sys
+source = pathlib.Path(sys.argv[1]).read_text()
+start = source.index("cleanup() {")
+end_marker = "trap 'exit 143' TERM"
+end = source.index(end_marker, start) + len(end_marker)
+pathlib.Path(sys.argv[2]).write_text(source[start:end] + "\n")
+PY
+
+for stage in initdb baseline-tests native-tests evidence; do
+  for stop_result in 0 1; do
+    for result in 0 37; do
+      root="$temp/pgsavvy-native.$stage-$stop_result-$result"
+      mkdir -p "$root/data" "$root/install/bin"
+      touch "$root/data/postmaster.pid"
+      cat >"$root/install/bin/pg_ctl" <<'SH'
+#!/usr/bin/env bash
+printf 'stopped\n' >"$STOP_MARKER"
+echo 'private-stop-sentinel'
+exit "$STOP_RESULT"
+SH
+      chmod +x "$root/install/bin/pg_ctl"
+      export STOP_RESULT="$stop_result" STOP_MARKER="$temp/stopped"
+      rm -f "$STOP_MARKER"
+      set +e
+      bash -euo pipefail -c '
+        root=$1; pg="$root/install/bin"; stage=$2
+        source "$3"
+        bash -c '\''echo private-test-sentinel; exit "$1"'\'' _ "$4" >"$root/tests.jsonl" 2>"$root/tests.err"
+      ' _ "$root" "$stage" "$temp/cleanup.sh" "$result" >"$temp/public" 2>&1
+      actual=$?
+      set -e
+      expected=$result
+      [ -f "$STOP_MARKER" ]
+      if [ "$stop_result" -ne 0 ]; then expected=1; fi
+      [ "$actual" -eq "$expected" ]
+      if [ "$result" -ne 0 ]; then
+        grep -Eq "^native fixture failed: stage=$stage line=[0-9]+ exit=37$" "$temp/public"
+      fi
+      if grep -q 'private-.*-sentinel' "$temp/public"; then
+        echo 'private fixture output escaped' >&2; exit 1
+      fi
+      if [ "$stop_result" -eq 0 ]; then
+        [ ! -e "$root" ]
+      else
+        [ -d "$root/data" ]
+        grep -q '^owned cluster stop failed; retained fixture:' "$temp/public"
+      fi
+    done
+  done
+done
+echo 'Unix fixture failure diagnostics and cleanup passed'

@@ -185,6 +185,8 @@ logs are not published. Missing tests fail even when `go test` exits zero.
 Windows failures report a fixed provisioning stage and script line number;
 the real initdb command also reports its numeric exit code. Its logs remain
 private and are deleted by owned cleanup.
+Unix failures likewise report the fixed provisioning/test stage, script line and
+original exit code before owned cleanup, without exposing captured private logs.
 
 If the six baseline Go tests fail, the failure path may publish only their
 fixed top-level names and `passed`/`failed`/`not_completed` status. The reporter

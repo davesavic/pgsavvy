@@ -34,7 +34,9 @@ func TestHistoryAppend_FileURI(t *testing.T) {
 
 func appendWithin(t *testing.T, path string) error {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	// Persistence fixtures test correctness under CI load; deadline tests below
+	// exercise cancellation separately from the CLI's best-effort 250 ms budget.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return AppendHistory(ctx, path, appendTestEvent())
 }

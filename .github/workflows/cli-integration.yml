@@ -53,7 +53,9 @@ jobs:
         shell: bash
         env:
           POSTGRES_MAJOR: ${{ matrix.postgres }}
-        run: bash .github/scripts/cli-postgres.sh "$POSTGRES_MAJOR"
+        run: |
+          bash .github/scripts/cli-postgres.test.sh
+          bash .github/scripts/cli-postgres.sh "$POSTGRES_MAJOR"
       - name: Windows owned fixture and CGO-disabled baseline
         if: runner.os == 'Windows'
         shell: pwsh

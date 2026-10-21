@@ -20,10 +20,15 @@ done
 
 root=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/pgsavvy-native.XXXXXXXX")
 pg="$root/install/bin"
+stage=manifest
 cleanup() {
-  result=$?
+  result=$1
+  failure_line=$2
   trap - EXIT INT TERM
-  if [ "$result" -ne 0 ]; then echo 'native fixture preflight failed' >&2; fi
+  if [ "$result" -ne 0 ]; then
+    # Command text and captured logs can contain the private fixture password.
+    printf 'native fixture failed: stage=%s line=%s exit=%s\n' "$stage" "$failure_line" "$result" >&2
+  fi
   if [ -f "$root/data/postmaster.pid" ]; then
     if ! "$pg/pg_ctl" -D "$root/data" -m immediate -w -t 30 stop >"$root/stop.log" 2>&1; then
       echo "owned cluster stop failed; retained fixture: $root" >&2
@@ -40,7 +45,7 @@ shutil.rmtree(root)
 PY
   exit "$result"
 }
-trap cleanup EXIT
+trap 'cleanup "$?" "$LINENO"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -60,8 +65,10 @@ print(pin["url"])
 print(pin["sha256"])
 PY
 { IFS= read -r version; IFS= read -r url; IFS= read -r digest; } <"$root/pin"
+stage=download
 curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
   --connect-timeout 30 --max-time 600 "$url" -o "$root/postgres.tar.bz2"
+stage=digest
 python3 - "$root/postgres.tar.bz2" "$digest" <<'PY'
 import hashlib, sys
 with open(sys.argv[1], "rb") as f:
@@ -72,13 +79,16 @@ with open(sys.argv[1], "rb") as f:
 if actual != sys.argv[2]:
     raise SystemExit("PostgreSQL artifact digest mismatch")
 PY
+stage=extraction
 tar -xjf "$root/postgres.tar.bz2" -C "$root"
+stage=postgres-build
 (
   cd "$root/postgresql-$version"
   ./configure --prefix="$root/install" --without-icu --without-readline --without-zlib
   make -j2
   make install
-) >"$root/build.log" 2>&1 || { echo 'owned PostgreSQL build failed' >&2; exit 1; }
+) >"$root/build.log" 2>&1 || { result=$?; echo 'owned PostgreSQL build failed' >&2; exit "$result"; }
+stage=postgres-tools
 python3 - "$pg" "$host_arch" <<'PY'
 import pathlib, struct, sys
 for name in ("psql", "postgres"):
@@ -97,6 +107,7 @@ PY
 [ "$("$pg/psql" --version)" = "psql (PostgreSQL) $version" ]
 
 # Ignore ambient libpq configuration, including user-owned service/password files.
+stage=environment
 unset PGHOST PGHOSTADDR PGPORT PGDATABASE PGUSER PGPASSWORD PGSERVICE PGOPTIONS
 export PGSERVICEFILE="$root/no-services" PGPASSFILE="$root/no-pgpass" PGCONNECT_TIMEOUT=5
 export PGSSLMODE=disable
@@ -105,6 +116,7 @@ export XDG_CACHE_HOME="$root/cache"
 password=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 printf '%s\n' "$password" >"$root/password"
 chmod 600 "$root/password"
+stage=initdb
 "$pg/initdb" -D "$root/data" -U pgsavvy --encoding=UTF8 --no-locale \
   --auth-local=scram-sha-256 --auth-host=scram-sha-256 --pwfile="$root/password" >"$root/init.log" 2>&1
 port=$(python3 - <<'PY'
@@ -119,17 +131,23 @@ listen_addresses = '127.0.0.1'
 port = $port
 unix_socket_directories = ''
 EOF
+stage=server-start
 "$pg/pg_ctl" -D "$root/data" -l "$root/server.log" -w -t 30 start >"$root/start.log" 2>&1
 export PGPASSWORD="$password"
+stage=createdb
 "$pg/createdb" -h 127.0.0.1 -p "$port" -U pgsavvy pgsavvy_test >"$root/createdb.log" 2>&1
 psql=("$pg/psql" -X -w -h 127.0.0.1 -p "$port" -U pgsavvy -d pgsavvy_test -v ON_ERROR_STOP=1)
+stage=fixture
 "${psql[@]}" -f "$repo/docker/postgres/init/01_fixture.sql" >"$root/fixture.log" 2>&1
+stage=readiness
 "${psql[@]}" -Atc 'SELECT 1' >"$root/ready" 2>"$root/ready.err"
 [ "$(cat "$root/ready")" = 1 ]
+stage=authentication
 if PGPASSWORD=deliberately-wrong "${psql[@]}" -Atc 'SELECT 1' >"$root/wrong.out" 2>"$root/wrong.err"; then
   echo 'wrong password accepted' >&2; exit 1
 fi
 grep -q 'password authentication failed' "$root/wrong.err" || { echo 'wrong-password check did not reach authentication' >&2; exit 1; }
+stage=fixture-facts
 facts=$("${psql[@]}" -Atc "SELECT current_setting('server_version_num'), current_setting('server_encoding'), (SELECT version FROM app._fixture_meta), rolsuper FROM pg_roles WHERE rolname = current_user" 2>"$root/facts.err")
 IFS='|' read -r server encoding fixture superuser <<<"$facts"
 if [ "$((server / 10000))" != "$major" ] || [ "$encoding" != UTF8 ] || [ "$fixture" != 2 ] || [ "$superuser" != t ]; then
@@ -138,17 +156,23 @@ fi
 export PGSAVVY_TEST_PG="postgres://pgsavvy:$password@127.0.0.1:$port/pgsavvy_test?sslmode=disable"
 export CGO_ENABLED=0
 cd "$repo"
+stage=probe
 go run ./internal/pgprobe >"$root/probe.log" 2>&1
 binary="$root/pgsavvy"
+stage=cli-build
 go build -ldflags '-X main.version=native-preflight -X main.buildSource=fixture' -o "$binary" . >"$root/go-build.log" 2>&1
 export PGSAVVY_TEST_BINARY="$binary"
+stage=cli-version
 "$binary" --version >"$root/version" 2>"$root/version.err"
 grep -q 'native-preflight' "$root/version"
 selector='^TestMachineCLI_(Dispatch|ExitCodes|Envelope|Envelope_ParentDeadlineAndInput|OutputLimit|BrokenWriter)$'
+stage=baseline-tests
 go test -json -count=1 -timeout 5m ./pkg/cli -run "$selector" >"$root/tests.jsonl" 2>"$root/tests.err"
+stage=native-tests
 go test -json -count=1 -timeout 10m -tags=integration \
   . ./internal/machineio ./pkg/cli ./pkg/drivers/pg ./pkg/session ./pkg/session/sshtunnel ./test/integration \
   -run '^TestMachine' >"$root/native-tests.jsonl" 2>"$root/native-tests.err"
+stage=evidence
 python3 - "$root" "$host_os" "$host_arch" "$version" "$server" <<'PY'
 import hashlib, json, pathlib, subprocess, sys
 root = pathlib.Path(sys.argv[1])
