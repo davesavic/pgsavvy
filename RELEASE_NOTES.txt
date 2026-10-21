@@ -1,3 +1,27 @@
+pgsavvy v0.14.0
+
+  Added the macOS machine CLI for JSON help, capabilities, saved-connection
+  discovery/testing, schema inspection and bounded read-only queries. Bare
+  startup, version and update commands retain their existing interactive/legacy
+  routes. Windows machine commands remain unavailable.
+
+  macOS blocking pipes and output sockets use private workers in the same
+  executable, with acknowledged destination writes and joined cancellation.
+  Foreground interrupts preserve usable output workers for timeout reporting;
+  inherited stream flags and socket options are not changed.
+
+  Profile cli_access permissions and strict SSH host trust remain enforced;
+  cli_history remains an independent opt-in. Machine keyring lookups reject
+  items whose identity does not exactly match the requested credential reference.
+  Existing macOS configuration and state paths are preserved; no migration is needed.
+
+  Removed the inline CLI-history description from connection forms. Expanded
+  Unix shipping-binary and PostgreSQL 17/18 machine-command test coverage.
+
+  Native macOS acceptance is pending at release preparation. Linux tests and
+  Intel/Apple Silicon cross-builds do not establish native runtime verification;
+  see docs/cli-testing.md for the required Mac checks.
+
 pgsavvy v0.13.0
 
   Added opt-in shared query history for the Linux machine CLI. Enable

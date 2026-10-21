@@ -143,8 +143,8 @@ Press `?` anywhere to open the auto-generated, tabbed keybinding cheatsheet — 
 The machine CLI returns versioned JSON without starting the TUI, interactive
 prompts or persistent logs. History is opt-in per saved profile. Linux and macOS
 use the machine command path; Windows still uses legacy startup. The macOS port
-is new in this source tree and awaits native acceptance; existing release
-binaries do not gain it automatically. Bare `pgsavvy` still opens the TUI.
+is introduced in v0.14.0 and awaits native acceptance. Mac binaries from earlier
+versions still use legacy startup. Bare `pgsavvy` still opens the TUI.
 Examples below assume `pgsavvy` is on your PATH;
 for a source build, use `./bin/pgsavvy` after `task build`.
 

@@ -32,9 +32,9 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full development toolchain.
 
 ### macOS machine CLI
 
-The new macOS machine-command path is available in this source tree; previously
-published binaries still use legacy help/startup. Native acceptance is pending.
-Build the current checkout with Go 1.26.9, then use that exact binary:
+The macOS machine-command path is introduced in v0.14.0; binaries from earlier
+versions still use legacy help/startup. Native acceptance is pending.
+To build from source, use Go 1.26.9 and run that exact binary:
 
 ```sh
 CGO_ENABLED=0 go build -o bin/pgsavvy .
