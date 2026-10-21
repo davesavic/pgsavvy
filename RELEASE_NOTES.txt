@@ -1,3 +1,13 @@
+pgsavvy v0.14.1
+
+  Improved native Unix CI failure diagnostics with provisioning/test stage,
+  script line and original exit code, plus bounded allowlisted test statuses
+  before fixture cleanup. Captured private logs remain unpublished.
+
+  Added diagnostic privacy and cleanup regression tests and increased the
+  history-persistence test timeout for CI load. Application behavior and the
+  CLI history recording budget are unchanged.
+
 pgsavvy v0.14.0
 
   Added the macOS machine CLI for JSON help, capabilities, saved-connection
