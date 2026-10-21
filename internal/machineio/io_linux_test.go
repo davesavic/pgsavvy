@@ -13,6 +13,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func testConfiguredFlags(flags int) int { return flags }
+
 func TestMachineIO_PipeFlags(t *testing.T) {
 	for _, named := range []bool{false, true} {
 		for _, nonblocking := range []bool{false, true} {

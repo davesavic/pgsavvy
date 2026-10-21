@@ -1,6 +1,6 @@
-//go:build !linux
+//go:build !linux && !darwin
 
 package main
 
-// Machine commands are Linux-only. Other platforms retain the legacy entry path.
+// Other platforms retain the legacy entry path.
 func runMachine([]string) (bool, int) { return false, 0 }

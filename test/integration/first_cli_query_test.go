@@ -1,4 +1,4 @@
-//go:build integration && linux
+//go:build integration && (linux || darwin)
 
 package integration_test
 

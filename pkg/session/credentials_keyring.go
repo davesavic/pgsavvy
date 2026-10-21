@@ -43,9 +43,14 @@ func resolveKeyring(ctx context.Context, ref string, prompter Prompter) (string,
 }
 
 func resolveKeyringWithPassword(ref string, password keyring.PromptFunc, diagnostics io.Writer) (string, error) {
+	item, err := loadKeyringItem(ref, password, diagnostics)
+	return string(item.Data), err
+}
+
+func loadKeyringItem(ref string, password keyring.PromptFunc, diagnostics io.Writer) (keyring.Item, error) {
 	dir := keyringDir()
 	if err := ensureKeyringDirMode(dir); err != nil {
-		return "", err
+		return keyring.Item{}, err
 	}
 
 	cfg := keyring.Config{
@@ -57,19 +62,19 @@ func resolveKeyringWithPassword(ref string, password keyring.PromptFunc, diagnos
 
 	kr, err := keyring.Open(cfg)
 	if err != nil {
-		return "", fmt.Errorf("open keyring: %w", err)
+		return keyring.Item{}, fmt.Errorf("open keyring: %w", err)
 	}
 
 	item, err := kr.Get(ref)
 	if err != nil {
-		return "", fmt.Errorf("get %q: %w", ref, err)
+		return keyring.Item{}, fmt.Errorf("get %q: %w", ref, err)
 	}
 
 	// Re-check file modes after open: 99designs/keyring creates the per-item
 	// files on first Set; warn (without failing) if anything looks loose.
 	warnIfLooseKeyringMode(dir, diagnostics)
 
-	return string(item.Data), nil
+	return item, nil
 }
 
 // errKeyringPassphraseRequiredInTUI is returned by passphraseFunc when

@@ -1,9 +1,10 @@
-//go:build linux
+//go:build linux || darwin
 
 package cli
 
 import (
 	"context"
+	"runtime"
 	"testing"
 
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
@@ -62,7 +63,7 @@ func TestMachineConnections_Capabilities(t *testing.T) {
 	}
 	data := envelope.Data.(map[string]any)
 	commands := data["commands"].([]capabilityCommand)
-	if len(commands) != 9 || data["platform"] != "linux" || data["catalog_visibility_implies_row_access"] != false {
+	if len(commands) != 9 || data["platform"] != runtime.GOOS || data["catalog_visibility_implies_row_access"] != false {
 		t.Fatal("capabilities do not describe production scope")
 	}
 	seen := map[string]bool{}

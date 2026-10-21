@@ -31,7 +31,7 @@ tasks:
       - go test -race ./...
 
   test:cli:native:
-    desc: Run owned native PG17/18 fixture and portable CLI baseline (PG_MAJOR=17 or 18; not full native support).
+    desc: Run owned native PG17/18 fixture (Linux/macOS machine suite; Windows baseline; PG_MAJOR=17 or 18).
     env:
       PGSAVVY_NATIVE_PG_MAJOR: '{{.PG_MAJOR | default "17"}}'
     cmds:

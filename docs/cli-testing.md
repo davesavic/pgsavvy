@@ -59,12 +59,17 @@ or alter production bindings. Do not use real user profiles/history for a smoke.
 
 ## Status and scope
 
-Native Windows/macOS support is **pending**. The `native-baseline` job in
+Native macOS acceptance and Windows machine CLI activation are **pending**.
+Linux/macOS now share production commands; Windows remains on legacy dispatch.
+The `native-baseline` job in
 [`cli-integration.yml`](../.github/workflows/cli-integration.yml) prepares six
-native targets against PostgreSQL 17 and 18. Baseline success, compilation,
+native targets against PostgreSQL 17 and 18. Unix fixture lanes now additionally
+run machine suites and shipping-binary tests; Windows retains baseline coverage.
+Baseline success, compilation,
 emulation of PostgreSQL tools, or skipped tests do **not** certify machine CLI
 support. Beads `pgsavvy-y2rh.14` owns full-suite activation and final evidence
-reconciliation. Task `.9` remains open until all twelve baseline lanes run.
+reconciliation for the full three-platform plan. `pgsavvy-xzdq` tracks Mac-first
+integration separately; this does not close Windows or full-matrix tasks.
 
 | Runner | Native Go/pgsavvy target | PostgreSQL tools |
 | --- | --- | --- |
@@ -246,19 +251,45 @@ Linux still requires `go test -count=1 ./...`, `task lint`, `task build`, and
 `task test:integration` against an explicitly designated disposable fixture.
 No integration `TestMain` should run against an undesignated database.
 
-The Darwin stream adapter rejects blocking output sockets rather than risking
-an uncancellable kernel send. Output sockets and FIFOs must already have
-`O_NONBLOCK` set; other owners must not clear it while the adapter is in use.
-Acquisition never changes caller-owned flags or socket options. Blocking stream
-socket input remains supported. Linux socket behavior is unchanged.
+The Darwin stream adapter uses isolated same-executable workers for blocking
+FIFOs and output sockets. Writes acknowledge actual destination acceptance,
+not IPC enqueueing. Cancellation closes private IPC, kills/waits for the worker
+and joins active operations without changing borrowed flags or socket options.
+Already-nonblocking endpoints retain polling; other owners must not clear their
+`O_NONBLOCK` flag during use. Linux socket behavior is unchanged.
+
+## Mac-first verification
+
+On an actual Intel or Apple Silicon Mac with Go 1.26.9:
+
+```sh
+CGO_ENABLED=0 go build -o bin/pgsavvy .
+PGSAVVY_TEST_BINARY="$PWD/bin/pgsavvy" go test -count=1 -timeout 5m \
+  . ./internal/machineio ./pkg/cli ./pkg/drivers/pg ./pkg/session ./pkg/session/sshtunnel \
+  -run '^TestMachine'
+```
+
+The root tests exercise JSON help, capabilities, offline discovery, enabled and
+disabled profile policies, piped SQL input, a shell pipeline, and the private
+worker in the shipping executable. Adapter tests include worker startup
+cancellation, destination acknowledgements, malformed protocol, closed standard
+slots, borrowed-handle survival, terminal identity and joined cancellation.
+Linux execution of these tests does not establish Darwin kernel behavior.
+
+For live PostgreSQL 17 and 18 acceptance, run `task test:cli:native PG_MAJOR=17`
+and `task test:cli:native PG_MAJOR=18`. Each Unix fixture run now executes the
+full machine selector against its exact CGO-disabled binary. It rejects skipped
+or failed tests and missing required test names, and prints a package-qualified
+executed inventory alongside the binary hash and native architecture. Neither
+native workflow execution nor a release is implied by local source changes.
 
 ## Full acceptance handoff to pgsavvy-y2rh.14
 
-After the adapters and shared commands land, extend the owned-fixture scripts
-and workflow to run the full selector against the **same** shipping artifact:
+Unix owned-fixture scripts now run the following against the **same** shipping
+artifact. Windows activation and the remaining full-plan proofs are separate:
 
 ```sh
-go test -count=1 -timeout 10m -tags=integration ./internal/machineio ./pkg/cli ./pkg/drivers/pg ./pkg/session ./pkg/session/sshtunnel -run '^TestMachine'
+go test -count=1 -timeout 10m -tags=integration . ./internal/machineio ./pkg/cli ./pkg/drivers/pg ./pkg/session ./pkg/session/sshtunnel ./test/integration -run '^TestMachine'
 ```
 
 The Windows command is the same Go command, executed in native PowerShell with

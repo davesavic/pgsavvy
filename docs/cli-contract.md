@@ -1,6 +1,9 @@
 # Machine CLI contract
 
-The machine CLI is Linux-only. Production dispatch composes the implemented
+Linux and macOS share machine CLI dispatch; Windows retains legacy startup.
+The macOS implementation in this source tree awaits native acceptance; a
+cross-build is not evidence that its runtime contract has passed.
+Production dispatch composes the implemented
 connection, catalog, query and capability handlers before legacy startup.
 It never initializes TUI configuration, persistent logs or themes. History is
 the sole explicit state exception: a query may append to the shared history
@@ -48,6 +51,18 @@ A parent cancellation can prevent error delivery; no
 publication continues past the outer invocation deadline. Cancellable handles
 must interrupt and join blocked I/O when closed. Arbitrarily stalled remote
 filesystems and non-cooperating injected streams are excluded.
+
+On macOS, blocking inherited pipes and output sockets use private workers in
+the same executable. No extra program is installed and no public command is
+added. Workers receive only their stream and private protocol channels, not the
+caller's environment. Destination writes are acknowledged before publication
+completes; enqueueing bytes into a worker does not count as delivery. If a worker
+dies before acknowledging, remaining delivery is unknown and never replayed.
+Closing a wrapper kills and waits for its worker and joins active operations;
+borrowed stream flags and socket options are not changed. Replacing/removing
+the executable during an invocation can prevent worker startup and fails with
+the existing resource error. Forced process termination remains outside the
+graceful-cleanup guarantee.
 
 Bare startup, version, log-directory selection and `update` remain legacy routes.
 Unknown command words never fall back to the TUI. Commands and dependencies are

@@ -138,11 +138,14 @@ Press `?` anywhere to open the auto-generated, tabbed keybinding cheatsheet — 
 - **Mouse support** — Optional mouse interaction toggleable via `ui.mouse.enabled` in the user config. Mouse mode registers click bindings on interactive views so you can select cells, scroll results, and activate popups without the keyboard.
 - **Customisable keybindings** — Every action in the TUI is bound through an action ID registry. Users can remap any chord or add new chords in `config.yml` under the `keybindings` key, with `:reload` picking up changes without restarting.
 
-## Machine CLI (Linux)
+## Machine CLI (Linux and macOS)
 
 The machine CLI returns versioned JSON without starting the TUI, interactive
-prompts, history or persistent logs. It is currently **Linux-only**; bare
-`pgsavvy` still opens the TUI. Examples below assume `pgsavvy` is on your PATH;
+prompts or persistent logs. History is opt-in per saved profile. Linux and macOS
+use the machine command path; Windows still uses legacy startup. The macOS port
+is new in this source tree and awaits native acceptance; existing release
+binaries do not gain it automatically. Bare `pgsavvy` still opens the TUI.
+Examples below assume `pgsavvy` is on your PATH;
 for a source build, use `./bin/pgsavvy` after `task build`.
 
 ### Discover commands without source code
@@ -175,7 +178,9 @@ the policy, then Enter to save:
 
 Alternatively, edit the existing profile in
 `$XDG_CONFIG_HOME/pgsavvy/connections.yml` (default
-`~/.config/pgsavvy/connections.yml`), **not** `config.yml`. Example profile
+`~/.config/pgsavvy/connections.yml` on Linux, or
+`~/Library/Application Support/pgsavvy/connections.yml` on macOS), **not**
+`config.yml`. Existing XDG overrides remain unchanged. Example profile
 shape; replace the connection details and do not duplicate an existing name:
 
 ```yaml

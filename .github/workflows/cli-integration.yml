@@ -48,9 +48,7 @@ jobs:
           uname -sm
           go env GOOS GOARCH
           CGO_ENABLED=0 go test -count=1 -timeout 60s ./internal/machineio -run '^TestMachineIO_'
-      # Fixture scripts retain the portable baseline; native CLI activation
-      # still requires the remaining pgsavvy-y2rh.14 auth/process selectors.
-      - name: Unix owned fixture and CGO-disabled baseline
+      - name: Unix owned fixture and shipping machine CLI tests
         if: runner.os != 'Windows'
         shell: bash
         env:

@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 package session
 
@@ -82,7 +82,7 @@ func resolveMachineKeyring(ctx context.Context, ref string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	return resolveKeyringWithPassword(ref, func(string) (string, error) {
+	item, err := loadKeyringItem(ref, func(string) (string, error) {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
@@ -91,6 +91,14 @@ func resolveMachineKeyring(ctx context.Context, ref string) (string, error) {
 		}
 		return "", &MachineCredentialError{Kind: MachineCredentialUnavailable}
 	}, io.Discard)
+	if err != nil {
+		return "", machineCredentialError(err)
+	}
+	// Native filename aliases must not resolve a different profile's secret.
+	if item.Key != ref {
+		return "", &MachineCredentialError{Kind: MachineCredentialUnavailable}
+	}
+	return string(item.Data), nil
 }
 
 func machinePgpass(path string, target *pgconn.Config) (string, error) {

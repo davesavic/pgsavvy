@@ -47,6 +47,17 @@ func testFlags(t *testing.T, file *os.File) int {
 
 func testOwnedDescriptor(t *testing.T, stream io.Closer) {
 	t.Helper()
+	if stream, ok := stream.(*processStream); ok {
+		for _, file := range []*os.File{stream.requests, stream.responses} {
+			testControl(t, file, func(fd int) {
+				flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+				if fd < 3 || err != nil || flags&unix.FD_CLOEXEC == 0 {
+					t.Fatal("worker IPC descriptor used a standard slot or was inheritable")
+				}
+			})
+		}
+		return
+	}
 	fd := testOwnedFD(t, stream)
 	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
 	if fd < 3 || err != nil || flags&unix.FD_CLOEXEC == 0 {
@@ -487,15 +498,6 @@ func testSocketFlags(t *testing.T) {
 			}
 			t.Cleanup(func() { testCleanupOwned(t, input, right) })
 			output, err := OpenOutput(ctx, left)
-			if runtime.GOOS == "darwin" && !nonblocking {
-				if output != nil {
-					_ = output.Close()
-				}
-				if err == nil || testFlags(t, left) != before {
-					t.Fatal("blocking Darwin output socket accepted or mutated")
-				}
-				return
-			}
 			if err != nil {
 				t.Fatal(err)
 			}

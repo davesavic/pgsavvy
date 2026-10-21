@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Native baseline only. Full machine acceptance is owned by pgsavvy-y2rh.14.
+# Owned native Linux/macOS fixture; Windows retains its separate baseline.
 set -euo pipefail
 
 major=${1:?usage: cli-postgres.sh 17|18}
@@ -146,6 +146,9 @@ export PGSAVVY_TEST_BINARY="$binary"
 grep -q 'native-preflight' "$root/version"
 selector='^TestMachineCLI_(Dispatch|ExitCodes|Envelope|Envelope_ParentDeadlineAndInput|OutputLimit|BrokenWriter)$'
 go test -json -count=1 -timeout 5m ./pkg/cli -run "$selector" >"$root/tests.jsonl" 2>"$root/tests.err"
+go test -json -count=1 -timeout 10m -tags=integration \
+  . ./internal/machineio ./pkg/cli ./pkg/drivers/pg ./pkg/session ./pkg/session/sshtunnel ./test/integration \
+  -run '^TestMachine' >"$root/native-tests.jsonl" 2>"$root/native-tests.err"
 python3 - "$root" "$host_os" "$host_arch" "$version" "$server" <<'PY'
 import hashlib, json, pathlib, subprocess, sys
 root = pathlib.Path(sys.argv[1])
@@ -159,10 +162,36 @@ for line in (root / "tests.jsonl").read_text().splitlines():
         passed.add(event["Test"])
 if not required <= passed:
     raise SystemExit("required baseline tests missing")
+required_native = {
+    "TestMachineCLINative_Discovery", "TestMachineCLINative_ProfilePolicyAndInput",
+    "TestMachineCLINative_ShellPipe", "TestMachineCLINative_HelperExecutable",
+    "TestMachineCLINative_GroupSignal",
+    "TestMachineCLINative_InvalidInputHandle",
+    "TestMachineIO_Ownership", "TestMachineIO_Cancellation", "TestMachineIO_Sockets",
+    "TestMachineIO_TerminalFlags", "TestMachineIO_DarwinFIFOEOF",
+    "TestMachineIO_ProcessCancellation", "TestMachineIO_ProcessStartupCancellation",
+    "TestMachineIO_ProcessSocketCancellation",
+    "TestMachineIO_ProcessOutputAcknowledged", "TestMachineIO_ProcessProtocolFailure",
+    "TestMachineIO_ProcessClosedStandardSlots", "TestMachineCredentials_Precedence",
+    "TestMachineCredentials_NoPrompt", "TestMachineCredentials_KeyringExactIdentity",
+    "TestMachineSSH_Trust", "TestMachineSSH_Auth", "TestMachineSSH_AgentCancellation",
+    "TestMachineSSH_OwnedAbort", "TestMachineCLIProcess_Discovery", "TestMachineCLIProcess_Test",
+    "TestMachineCLIProcess_Query", "TestMachineCLIProcess_Schema", "TestMachineCLIProcess_Signals",
+}
+native_passed, native_names = set(), set()
+for line in (root / "native-tests.jsonl").read_text().splitlines():
+    event = json.loads(line)
+    if event["Action"] in ("skip", "fail"):
+        raise SystemExit("native machine suite contains skipped/failed tests")
+    if event["Action"] == "pass" and "Test" in event:
+        native_names.add(event["Test"])
+        native_passed.add(event["Package"] + "::" + event["Test"])
+if not required_native <= native_names:
+    raise SystemExit("required native machine tests missing")
 binary = root / "pgsavvy"
-print(json.dumps({"scope": "baseline-not-native-support", "goos": sys.argv[2], "goarch": sys.argv[3],
+print(json.dumps({"scope": "machine-cli-linux-darwin", "goos": sys.argv[2], "goarch": sys.argv[3],
     "go_version": subprocess.check_output(["go", "version"], text=True).strip(), "cgo_enabled": "0",
     "binary": str(binary), "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
     "postgres_tools": sys.argv[4], "postgres_tools_arch": sys.argv[3], "server_version_num": sys.argv[5], "fixture_version": 2,
-    "wrong_password_rejected": True, "tests_passed": sorted(passed)}))
+    "wrong_password_rejected": True, "tests_passed": sorted(passed), "native_tests_passed": sorted(native_passed)}))
 PY

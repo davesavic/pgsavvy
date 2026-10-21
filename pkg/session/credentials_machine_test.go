@@ -1,16 +1,18 @@
-//go:build linux
+//go:build linux || darwin
 
 package session
 
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/99designs/keyring"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -109,6 +111,62 @@ func TestMachineCredentials_NoPrompt(t *testing.T) {
 	cancel()
 	if _, err := ResolveMachinePassword(ctx, models.Connection{Password: "inline"}, target, MachineCredentialOptions{}); err == nil {
 		t.Fatal("precancelled invocation succeeded")
+	}
+}
+
+func TestMachineCredentials_KeyringExactIdentity(t *testing.T) {
+	for _, tc := range []struct{ name, stored, requested string }{
+		{"exact", "reporting", "reporting"},
+		{"mismatch", "other-profile", "reporting"},
+		{"case", "Reporting", "reporting"},
+		{"normalization", "caf\u00e9", "cafe\u0301"},
+	} {
+		for _, value := range []string{"synthetic-secret", ""} {
+			name := "nonempty"
+			if value == "" {
+				name = "empty"
+			}
+			t.Run(tc.name+"/"+name, func(t *testing.T) {
+				target, dir := machineCredentialFixture(t)
+				withXDGDataHome(t, dir)
+				t.Setenv(keyringPassphraseEnv, "passphrase")
+				seedKeyring(t, keyringDir(), "passphrase", tc.stored, value)
+				if tc.stored != tc.requested {
+					// Exercise native aliases where present, and the same decrypted
+					// identity mismatch on case-sensitive filesystems otherwise.
+					if _, err := os.Stat(filepath.Join(keyringDir(), tc.requested)); errors.Is(err, os.ErrNotExist) {
+						data, err := os.ReadFile(filepath.Join(keyringDir(), tc.stored))
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := os.WriteFile(filepath.Join(keyringDir(), tc.requested), data, 0o600); err != nil {
+							t.Fatal(err)
+						}
+					} else if err != nil {
+						t.Fatal(err)
+					}
+				}
+				password, err := ResolveMachinePassword(context.Background(), models.Connection{KeyringRef: tc.requested}, target, MachineCredentialOptions{})
+				if tc.stored != tc.requested {
+					var safe *MachineCredentialError
+					if password != "" || !errors.As(err, &safe) || safe.Kind != MachineCredentialUnavailable {
+						t.Fatalf("mismatched identity disclosed data or fell through: password present=%t, err=%v", password != "", err)
+					}
+				} else {
+					want := value
+					if want == "" {
+						want = target.Password
+					}
+					if err != nil || password != want {
+						t.Fatalf("exact identity: password match=%t, err=%v", password == want, err)
+					}
+				}
+				legacy, err := resolveKeyringWithPassword(tc.requested, keyring.FixedStringPrompt("passphrase"), io.Discard)
+				if err != nil || legacy != value {
+					t.Fatalf("legacy resolution changed: password match=%t, err=%v", legacy == value, err)
+				}
+			})
+		}
 	}
 }
 

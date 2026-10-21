@@ -18,6 +18,7 @@ func openStream(ctx context.Context, file *os.File, mode int) (io.ReadWriteClose
 	owned := -1
 	regular := false
 	socket := false
+	isolated := false
 	var setupErr error
 	err = raw.Control(func(fd uintptr) {
 		if setupErr = ctx.Err(); setupErr != nil {
@@ -35,8 +36,7 @@ func openStream(ctx context.Context, file *os.File, mode int) (io.ReadWriteClose
 		}
 		regular = info.Mode&unix.S_IFMT == unix.S_IFREG
 		if info.Mode&unix.S_IFMT == unix.S_IFIFO && flags&unix.O_NONBLOCK == 0 {
-			setupErr = errUnavailable
-			return
+			isolated = true
 		}
 		source := int(fd)
 		socket = info.Mode&unix.S_IFMT == unix.S_IFSOCK
@@ -47,8 +47,7 @@ func openStream(ctx context.Context, file *os.File, mode int) (io.ReadWriteClose
 			// MSG_DONTWAIT does not prevent Darwin sends waiting for buffer
 			// space. A duplicate cannot change O_NONBLOCK independently.
 			if mode == os.O_WRONLY && flags&unix.O_NONBLOCK == 0 {
-				setupErr = errUnavailable
-				return
+				isolated = true
 			}
 		}
 		if info.Mode&unix.S_IFMT == unix.S_IFCHR {
@@ -68,6 +67,9 @@ func openStream(ctx context.Context, file *os.File, mode int) (io.ReadWriteClose
 			_ = unix.Close(owned)
 		}
 		return nil, errUnavailable
+	}
+	if isolated {
+		return openProcessStream(ctx, owned, mode)
 	}
 	if regular {
 		return os.NewFile(uintptr(owned), "pgsavvy-machine-stdio"), nil

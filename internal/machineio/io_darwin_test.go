@@ -2,7 +2,6 @@ package machineio
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,18 +13,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TestMachineIO_BlockingSocketOutputRejected(t *testing.T) {
+// XNU's write(2) records FWASWRITTEN (sys/fcntl.h) in F_GETFL after delivery.
+// Ignore only this kernel activity bit, never any caller-configured flag.
+func testConfiguredFlags(flags int) int { return flags &^ 0x00010000 }
+
+func TestMachineIO_BlockingSocketOutput(t *testing.T) {
 	left, right := testSocketPair(t, unix.SOCK_STREAM, false)
 	before := testFlags(t, left)
 	output, err := OpenOutput(context.Background(), left)
-	if output != nil {
-		_ = output.Close()
+	if err != nil {
+		t.Fatal("blocking output socket unavailable")
 	}
-	if output != nil || !errors.Is(err, errUnavailable) {
-		t.Fatal("blocking output socket accepted")
-	}
+	t.Cleanup(func() { testCleanupOwned(t, output, right, left) })
 	if after := testFlags(t, left); after != before {
-		t.Fatalf("output rejection changed borrowed socket flags: %#x -> %#x", before, after)
+		t.Fatalf("output acquisition changed borrowed socket flags: %#x -> %#x", before, after)
 	}
 	input, err := OpenInput(context.Background(), left)
 	if err != nil {
@@ -43,6 +44,13 @@ func TestMachineIO_BlockingSocketOutputRejected(t *testing.T) {
 	if after := testFlags(t, left); after != before {
 		t.Fatalf("input close changed borrowed socket flags: %#x -> %#x", before, after)
 	}
+	if n, err := output.Write([]byte("ok")); err != nil || n != 2 {
+		t.Fatal("blocking socket worker write failed")
+	}
+	if _, err := io.ReadFull(right, got[:]); err != nil || string(got[:]) != "ok" {
+		t.Fatal("blocking socket worker changed bytes")
+	}
+	_ = output.Close()
 	// A direct write sets Darwin's FWASWRITTEN bit. Exercise the borrowed
 	// socket only after comparing flags against the untouched baseline.
 	if _, err := left.Write([]byte("ok")); err != nil {
@@ -66,7 +74,7 @@ func TestMachineIO_KqueueDescriptorInventory(t *testing.T) {
 	}
 }
 
-func TestMachineIO_BlockingFIFORejected(t *testing.T) {
+func TestMachineIO_BlockingFIFO(t *testing.T) {
 	read, write, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -86,14 +94,12 @@ func TestMachineIO_BlockingFIFORejected(t *testing.T) {
 	}{{read, os.O_RDONLY}, {write, os.O_WRONLY}} {
 		before := testFlags(t, pair.file)
 		stream, err := acquire(context.Background(), pair.file, pair.mode)
-		if stream != nil {
-			_ = stream.Close()
+		if err != nil || testFlags(t, pair.file) != before {
+			t.Fatal("blocking FIFO unavailable or mutated")
 		}
-		if err == nil || testFlags(t, pair.file) != before {
-			t.Fatal("blocking FIFO accepted or mutated")
-		}
+		testCleanupOwned(t, stream)
 		if _, err := pair.file.Stat(); err != nil {
-			t.Fatal("rejection closed borrowed FIFO")
+			t.Fatal("worker close closed borrowed FIFO")
 		}
 	}
 }

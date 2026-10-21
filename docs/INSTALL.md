@@ -30,6 +30,28 @@ task build       # produces bin/pgsavvy
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full development toolchain.
 
+### macOS machine CLI
+
+The new macOS machine-command path is available in this source tree; previously
+published binaries still use legacy help/startup. Native acceptance is pending.
+Build the current checkout with Go 1.26.9, then use that exact binary:
+
+```sh
+CGO_ENABLED=0 go build -o bin/pgsavvy .
+./bin/pgsavvy --help
+./bin/pgsavvy capabilities
+./bin/pgsavvy connections list
+```
+
+Help must be JSON, and capabilities must report `"platform":"darwin"`.
+An existing `pgsavvy` elsewhere on PATH will not use this build. The saved
+connection's `cli_access` remains an independent permission requirement.
+Default profiles live in
+`~/Library/Application Support/pgsavvy/connections.yml`, unless
+`XDG_CONFIG_HOME` overrides that location. No configuration migration is needed.
+See [native verification](cli-testing.md#mac-first-verification) before claiming
+the port is runtime-verified.
+
 ### Release binaries
 
 Prebuilt binaries are published on the

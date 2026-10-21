@@ -1,11 +1,10 @@
-//go:build linux
+//go:build linux || darwin
 
 package sshtunnel
 
 import (
 	"context"
 	"errors"
-	"net"
 	"os"
 	"time"
 
@@ -37,15 +36,15 @@ func machineAuth(ctx context.Context, cfg models.SSHTunnelConfig, options Machin
 	var signers []ssh.Signer
 	var release func()
 	if cfg.IdentityFromAgent {
-		sock := os.Getenv("SSH_AUTH_SOCK")
-		if sock == "" {
+		network, address, err := machineAgentEndpoint()
+		if err != nil {
 			return nil, nil, machineError(ctx, "CREDENTIALS_UNAVAILABLE")
 		}
 		dial := options.DialAgent
 		if dial == nil {
-			dial = (&net.Dialer{}).DialContext
+			dial = dialMachineAgent
 		}
-		conn, err := dial(ctx, "unix", sock)
+		conn, err := dial(ctx, network, address)
 		if err != nil {
 			return nil, nil, machineError(ctx, "CREDENTIALS_UNAVAILABLE")
 		}

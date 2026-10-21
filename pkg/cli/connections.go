@@ -1,9 +1,10 @@
-//go:build linux
+//go:build linux || darwin
 
 package cli
 
 import (
 	"context"
+	"runtime"
 	"unicode/utf8"
 
 	"github.com/davesavic/pgsavvy/pkg/models"
@@ -109,7 +110,7 @@ func CapabilitiesCommand() Command {
 		}
 		commands = append(commands, capabilityCommand{"query", "query --connection NAME --file PATH|- [--params-file PATH] [--max-rows 1..1000] [--schema NAME]", "row-read"}, capabilityCommand{"capabilities", "capabilities", "none"})
 		return Envelope{Command: "capabilities", ResultComplete: true, Data: map[string]any{
-			"platform": "linux", "format": "json", "commands": commands, "query_read_only": true, "catalog_visibility_implies_row_access": false,
+			"platform": runtime.GOOS, "format": "json", "commands": commands, "query_read_only": true, "catalog_visibility_implies_row_access": false,
 			"global_flags": []string{"--format json", "--timeout DURATION"},
 			"limits":       map[string]any{"sql_bytes": MaxInputBytes, "parameter_bytes": MaxInputBytes, "parameters": MaxParameters, "profile_selector_bytes": MaxProfileBytes, "row_default": DefaultRows, "row_max": MaxRows, "cell_bytes": MaxCellBytes, "encoded_output_bytes": MaxOutputBytes, "metadata_list_default": 100, "metadata_section_max": 1000, "invocation_seconds": 30, "connection_seconds": 10, "helper_seconds": 5, "helper_stdout_bytes": MaxHelperBytes, "statement_seconds": 10, "lock_seconds": 1, "cleanup_seconds": 2, "publication_seconds": 2},
 			"exit_codes":   map[string]int{"success": ExitSuccess, "input": ExitInput, "unavailable": ExitUnavailable, "policy": ExitPolicy, "database": ExitDatabase, "timeout": ExitTimeout, "resource": ExitResource},

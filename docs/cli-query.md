@@ -116,9 +116,12 @@ manual run. Blocked rows do not supply prefix completions.
 ## History permissions and upgrades
 
 The shared store is `$XDG_STATE_HOME/pgsavvy/history.sqlite`, normally
-`$HOME/.local/state/pgsavvy/history.sqlite` when XDG state is unset. New CLI-first
+`$HOME/.local/state/pgsavvy/history.sqlite` on Linux or
+`$HOME/Library/Application Support/pgsavvy/history.sqlite` on macOS when XDG
+state is unset. New CLI-first
 and TUI-first Unix stores use 0700 directories and 0600 DB/WAL/SHM/journal files.
-This is not a Windows ACL privacy claim; machine CLI support remains Linux-only.
+This is not a Windows ACL privacy claim; Windows machine CLI activation remains
+pending. The new macOS port still requires native acceptance.
 
 Existing broadly accessible stores are **not automatically chmodded**. The TUI
 can retain access to an existing store while CLI appends refuse it. For manual
