@@ -23,6 +23,7 @@ type MachineClient struct {
 	conn            *pgx.Conn
 	tunnel          *sshtunnel.MachineTunnel
 	access          models.CLIAccess
+	readOnly        bool
 	statementMS     int
 	cleanup         time.Duration
 	operation       sync.Mutex
@@ -142,7 +143,7 @@ func OpenMachine(ctx context.Context, profile models.Connection, options Machine
 		return nil, machineFailure(connectCtx, err, "CREDENTIALS_UNAVAILABLE")
 	}
 	cfg.Password = password
-	client := &MachineClient{access: access, statementMS: session.MachineStatementMilliseconds(profile.StatementTimeout), cleanup: options.CleanupTimeout, dialAllowed: true}
+	client := &MachineClient{access: access, readOnly: profile.ReadOnly, statementMS: session.MachineStatementMilliseconds(profile.StatementTimeout), cleanup: options.CleanupTimeout, dialAllowed: true}
 	client.stop = watchMachine(ctx, client.Abort)
 	failed := true
 	defer func() {
@@ -324,7 +325,12 @@ func (c *MachineClient) initialize(ctx context.Context, profile models.Connectio
 			return err
 		}
 	}
-	for _, sql := range []string{"SET default_transaction_read_only=on", "SET client_encoding='UTF8'", "SET DateStyle='ISO'", "SET TimeZone='UTC'", "SET IntervalStyle='postgres'", "SET bytea_output='hex'", "SET extra_float_digits=3", "SET statement_timeout=" + strconv.Itoa(c.statementMS), "SET lock_timeout=1000"} {
+	if c.access != models.CLIAccessFull || c.readOnly {
+		if err := c.exec(ctx, "SET default_transaction_read_only=on"); err != nil {
+			return err
+		}
+	}
+	for _, sql := range []string{"SET client_encoding='UTF8'", "SET DateStyle='ISO'", "SET TimeZone='UTC'", "SET IntervalStyle='postgres'", "SET bytea_output='hex'", "SET extra_float_digits=3", "SET statement_timeout=" + strconv.Itoa(c.statementMS), "SET lock_timeout=1000"} {
 		if err := c.exec(ctx, sql); err != nil {
 			return err
 		}

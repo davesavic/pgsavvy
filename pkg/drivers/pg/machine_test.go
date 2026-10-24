@@ -284,6 +284,9 @@ func TestMachineFullAccessPolicy(t *testing.T) {
 					profile.ConfirmWrites, profile.ConfirmDDL = flags&2 != 0, flags&4 != 0
 					profile.Password, profile.PasswordCommand = "", "SECRET helper"
 					parses, helpers, dials := 0, 0, 0
+					fixture.mu.Lock()
+					initializationStart := len(fixture.queries)
+					fixture.mu.Unlock()
 					client, err := OpenMachine(context.Background(), profile, MachineOptions{
 						RequiredAccess: required,
 						ParseConfig: func(ctx context.Context, got models.Connection) (*pgx.ConnConfig, error) {
@@ -316,6 +319,21 @@ func TestMachineFullAccessPolicy(t *testing.T) {
 					}()
 					if parses != 1 || helpers != 1 || dials != 1 || client.access != tc.access {
 						t.Fatalf("allowed open: parses=%d helpers=%d dials=%d access=%q", parses, helpers, dials, client.access)
+					}
+					fixture.mu.Lock()
+					readOnlyDefaults := 0
+					for _, sql := range fixture.queries[initializationStart:] {
+						if sql == "SET default_transaction_read_only=on" {
+							readOnlyDefaults++
+						}
+					}
+					fixture.mu.Unlock()
+					wantReadOnlyDefaults := 1
+					if tc.access == models.CLIAccessFull && !profile.ReadOnly {
+						wantReadOnlyDefaults = 0
+					}
+					if readOnlyDefaults != wantReadOnlyDefaults {
+						t.Fatalf("readonly initialization: access=%q readOnly=%v defaults=%d want=%d", tc.access, profile.ReadOnly, readOnlyDefaults, wantReadOnlyDefaults)
 					}
 					if _, err := client.Inspect(context.Background(), MachineMetadataRequest{Operation: MachineSchemas}); err != nil {
 						t.Fatalf("metadata implied: %v", err)
@@ -353,7 +371,7 @@ func TestMachineFullAccessPolicy(t *testing.T) {
 			t.Errorf("unguarded execution: %s", sql)
 		}
 	}
-	if counts["SET default_transaction_read_only=on"] != 72 || counts["BEGIN READ ONLY"] != 56 || counts["BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"] != 72 || counts["ROLLBACK"] != 128 {
+	if counts["SET default_transaction_read_only=on"] != 56 || counts["BEGIN READ ONLY"] != 56 || counts["BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"] != 72 || counts["ROLLBACK"] != 128 {
 		t.Fatalf("read-only transaction invariants changed: %v", counts)
 	}
 }
