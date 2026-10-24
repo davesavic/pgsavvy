@@ -21,17 +21,26 @@ const (
 	MaxCellBytes    = 64 << 10
 )
 
+// executionMetadata is supplied explicitly by full callers, never inferred from
+// success or delivery: neither proves that database effects were durable.
+type executionMetadata struct {
+	Status                        string `json:"status"`
+	EffectsMayHaveOccurred        bool   `json:"effects_may_have_occurred"`
+	PreparedTransactionsMayRemain bool   `json:"prepared_transactions_may_remain,omitempty"`
+}
+
 type Envelope struct {
-	SchemaVersion    int          `json:"schema_version"`
-	OK               bool         `json:"ok"`
-	Command          string       `json:"command"`
-	Connection       string       `json:"connection,omitempty"`
-	Data             any          `json:"data,omitempty"`
-	Error            *PublicError `json:"error,omitempty"`
-	Warnings         []ErrorCode  `json:"warnings"`
-	ResultComplete   bool         `json:"result_complete"`
-	Truncated        bool         `json:"truncated"`
-	TruncationReason string       `json:"truncation_reason,omitempty"`
+	SchemaVersion    int                `json:"schema_version"`
+	OK               bool               `json:"ok"`
+	Command          string             `json:"command"`
+	Connection       string             `json:"connection,omitempty"`
+	Data             any                `json:"data,omitempty"`
+	Error            *PublicError       `json:"error,omitempty"`
+	Warnings         []ErrorCode        `json:"warnings"`
+	ResultComplete   bool               `json:"result_complete"`
+	Truncated        bool               `json:"truncated"`
+	TruncationReason string             `json:"truncation_reason,omitempty"`
+	Execution        *executionMetadata `json:"execution,omitempty"`
 }
 
 type limitedBuffer struct {
@@ -56,6 +65,15 @@ func encode(envelope Envelope) ([]byte, error) {
 
 func encodeContext(ctx context.Context, envelope Envelope) ([]byte, error) {
 	envelope.SchemaVersion = 1
+	if envelope.Execution != nil {
+		metadata := *envelope.Execution
+		switch metadata.Status {
+		case "not_started", "completed", "failed", "unknown":
+		default:
+			metadata.Status = "unknown"
+		}
+		envelope.Execution = &metadata
+	}
 	if envelope.OK {
 		if envelope.Error != nil {
 			return nil, &PublicError{Code: ResourceFailure}
@@ -72,7 +90,7 @@ func encodeContext(ctx context.Context, envelope Envelope) ([]byte, error) {
 		envelope.Truncated = false
 		envelope.TruncationReason = ""
 	}
-	if envelope.TruncationReason != "" && envelope.TruncationReason != "row_limit" && envelope.TruncationReason != "page_limit" {
+	if envelope.TruncationReason != "" && envelope.TruncationReason != "row_limit" && envelope.TruncationReason != "page_limit" && !(envelope.Execution != nil && envelope.TruncationReason == "result_limit") {
 		return nil, &PublicError{Code: ResourceFailure}
 	}
 	if envelope.Warnings == nil {
@@ -104,6 +122,9 @@ func encodeContext(ctx context.Context, envelope Envelope) ([]byte, error) {
 		wire.Data = &envelope.Data
 	}
 	if err := json.NewEncoder(&buffer).Encode(wire); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, &PublicError{Code: ResourceFailure}
 	}
 	if !utf8.Valid(buffer.Bytes()) {

@@ -26,6 +26,11 @@ const (
 	TrustRequired             ErrorCode = "TRUST_REQUIRED"
 	UnsupportedPgpassFailover ErrorCode = "UNSUPPORTED_PGPASS_FAILOVER"
 	PolicyDenied              ErrorCode = "POLICY_DENIED"
+	ApprovalRequired          ErrorCode = "APPROVAL_REQUIRED"
+	ApprovalMismatch          ErrorCode = "APPROVAL_MISMATCH"
+	ApprovalUnavailable       ErrorCode = "APPROVAL_UNAVAILABLE"
+	ApprovalCancelled         ErrorCode = "APPROVAL_CANCELLED"
+	IncompleteTransaction     ErrorCode = "INCOMPLETE_TRANSACTION"
 	DatabaseFailure           ErrorCode = "DATABASE_FAILURE"
 	ObjectNotFound            ErrorCode = "OBJECT_NOT_FOUND"
 	Timeout                   ErrorCode = "TIMEOUT"
@@ -47,6 +52,11 @@ var publicErrors = map[ErrorCode]errorDescription{
 	TrustRequired:             {ExitUnavailable, "SSH trust verification failed.", "Provision and verify the bastion key in the existing known_hosts file."},
 	UnsupportedPgpassFailover: {ExitUnavailable, "Explicit pgpass credentials differ across fallback endpoints.", "Use a single-endpoint profile or consistent credentials."},
 	PolicyDenied:              {ExitPolicy, "The selected profile does not permit this operation.", "Explicitly configure the required cli_access in trusted configuration."},
+	ApprovalRequired:          {ExitPolicy, "Invocation approval is required.", "Approve the current invocation using the connection confirmation ceremony or explicit approval flags."},
+	ApprovalMismatch:          {ExitPolicy, "Connection confirmation does not match.", "Confirm the exact selected connection name for this invocation."},
+	ApprovalUnavailable:       {ExitPolicy, "Invocation approval is unavailable.", "Use an available controlling terminal or explicit approval flags."},
+	ApprovalCancelled:         {ExitPolicy, "Invocation approval was declined or cancelled.", "Review the requested SQL before starting a new invocation."},
+	IncompleteTransaction:     {ExitDatabase, "SQL left an incomplete transaction.", "Finish local transactions explicitly; inspect possible effects before any replay."},
 	DatabaseFailure:           {ExitDatabase, "Database operation failed.", "Check database permissions and supported input."},
 	ObjectNotFound:            {ExitDatabase, "The requested database object does not exist.", "Check exact schema and table names."},
 	Timeout:                   {ExitTimeout, "Invocation cancelled or timed out.", "Reduce the requested work and check service availability."},

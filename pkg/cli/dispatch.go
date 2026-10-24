@@ -175,7 +175,7 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	exit := ExitSuccess
 	if err != nil {
 		public := safeError(err)
-		envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: public, Warnings: envelope.Warnings}
+		envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: public, Warnings: envelope.Warnings, Execution: envelope.Execution}
 		exit = public.description().exit
 	} else {
 		envelope.OK = true
@@ -183,7 +183,7 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	data, encodingErr := encodeWithOptionalHistoryWarnings(ctx, envelope)
 	if encodingErr != nil {
 		public := safeError(encodingErr)
-		envelope = Envelope{Command: label, Error: public, Warnings: envelope.Warnings}
+		envelope = Envelope{Command: label, Error: public, Warnings: envelope.Warnings, Execution: envelope.Execution}
 		exit = public.description().exit
 		data, encodingErr = encodeWithOptionalHistoryWarnings(ctx, envelope)
 		if encodingErr != nil {
@@ -195,7 +195,7 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	select {
 	case <-streams.Cancel:
 		if exit != ExitTimeout {
-			envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: &PublicError{Code: Timeout}, Warnings: envelope.Warnings}
+			envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: &PublicError{Code: Timeout}, Warnings: envelope.Warnings, Execution: envelope.Execution}
 			data, encodingErr = encodeWithOptionalHistoryWarnings(ctx, envelope)
 			if encodingErr != nil {
 				return true, ExitTimeout
@@ -207,6 +207,9 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	publicationCtx, cancelPublication := context.WithTimeout(ctx, reserve/2)
 	if err := publish(publicationCtx, streams.Out, data); err != nil {
 		exit = ExitResource
+		if ctx.Err() != nil {
+			exit = ExitTimeout
+		}
 		select {
 		case <-streams.Cancel:
 			exit = ExitTimeout

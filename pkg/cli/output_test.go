@@ -66,6 +66,21 @@ func TestMachineCLI_OutputLimit(t *testing.T) {
 	}
 }
 
+func TestMachineCLI_EnvelopeLegacyBytes(t *testing.T) {
+	for _, tc := range []struct {
+		envelope Envelope
+		want     string
+	}{
+		{Envelope{OK: true, Command: "query", Connection: "local", Data: map[string]any{"columns": []any{}, "rows": []any{}}, ResultComplete: true}, `{"schema_version":1,"ok":true,"command":"query","connection":"local","warnings":[],"result_complete":true,"truncated":false,"data":{"columns":[],"rows":[]}}` + "\n"},
+		{Envelope{Command: "query", Error: &PublicError{Code: InvalidInput}}, `{"schema_version":1,"ok":false,"command":"query","error":{"code":"INVALID_INPUT","message":"Invalid command or input.","remediation":"Consult command help."},"warnings":[],"result_complete":false,"truncated":false}` + "\n"},
+	} {
+		got, err := encode(tc.envelope)
+		if err != nil || string(got) != tc.want {
+			t.Fatalf("legacy bytes changed: %s error=%v want=%s", got, err, tc.want)
+		}
+	}
+}
+
 type encodingCancelContext struct {
 	context.Context
 	checks int
