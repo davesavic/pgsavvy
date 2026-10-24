@@ -1,7 +1,7 @@
 pgsavvy v0.15.0
 
   Added pgsavvy llm-help: a single offline JSON guide for LLMs and scripts,
-  with all machine commands, usage, workflow examples, permissions, approvals,
+  with all 10 machine operations, usage, 15 examples, permissions, approvals,
   output formats, limits, exit codes and recovery rules. The guide shares the
   existing capability catalogue and needs no profile or database access.
 
@@ -19,14 +19,14 @@ pgsavvy v0.15.0
   Writable full mode sends unparameterized SQL unchanged as one native batch,
   without an application transaction wrapper. Parameters support one statement;
   streaming COPY is rejected. JSON data.results retains command tags and
-  positional rows, bounded to 256 results and an aggregate 100 default / 1000
-  maximum rows. Guarded query output keeps its existing shape.
+  positional rows, retaining up to 256 results and 100 rows by default / 1000
+  maximum across results. Guarded query output keeps its existing shape.
 
-  Full-mode JSON adds execution status and possible-effects/prepared-transaction
-  indicators. Unfinished local transactions are rolled back and reported as
-  incomplete. Earlier commits or prepared transactions can survive a later
-  failure; missing output, timeouts and history outcomes do not prove rollback
-  or durability. Inspect database state before retrying SQL.
+  Writable-full-mode JSON adds execution status and indicators for possible
+  effects or prepared transactions. Unfinished local transactions are rolled
+  back and reported as incomplete. Earlier commits or prepared transactions can
+  survive a later failure; missing output, timeouts and history outcomes do not
+  prove rollback or durability. Inspect database state before retrying SQL.
 
   Updated connection forms, JSON help/capabilities and operational/downgrade
   guidance. Opted-in CLI history records approval denials as blocked attempts.
