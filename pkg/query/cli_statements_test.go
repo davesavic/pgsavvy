@@ -141,10 +141,12 @@ func TestMachineCLIBatchAnalysis(t *testing.T) {
 		params    int
 		want      error
 	}{
-		{"empty", "", 0, ErrInvalidCLIInput}, {"whitespace", " \r\n\t\v\f", 0, ErrInvalidCLIInput},
+		{"empty", "", 0, ErrInvalidCLIInput},
+		{"whitespace", " \r\n\t\v\f", 0, ErrInvalidCLIInput},
 		{"comments", ";-- end\r;/* outer /* nested */ end */;", 0, ErrInvalidCLIInput},
 		{"negative params", "SELECT 1", -1, ErrInvalidCLIInput},
-		{"UTF8", "SELECT '\xff'", 0, ErrInvalidCLIInput}, {"NUL", "SELECT '\x00'", 0, ErrInvalidCLIInput},
+		{"UTF8", "SELECT '\xff'", 0, ErrInvalidCLIInput},
+		{"NUL", "SELECT '\x00'", 0, ErrInvalidCLIInput},
 		{"single quote", "DELETE FROM t; SELECT 'secret", 0, ErrUnsupportedCLISQL},
 		{"double quote", `SELECT "secret`, 0, ErrUnsupportedCLISQL},
 		{"empty identifier", `SELECT ""`, 0, ErrUnsupportedCLISQL},

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -211,10 +212,8 @@ func processDocument(t *testing.T, output, diagnostics []byte, exit int) map[str
 	if doc["schema_version"] != json.Number("1") || doc["ok"] != (exit == 0) || doc["warnings"] == nil {
 		t.Fatalf("process envelope mismatch exit%d", exit)
 	}
-	for _, secret := range []string{"SECRET", "unavailable.invalid", "pgx", "SELECT ", "PasswordCommand"} {
-		if bytes.Contains(output, []byte(secret)) || bytes.Contains(diagnostics, []byte(secret)) {
-			t.Fatalf("process leaked sentinel %s", secret)
-		}
+	if secret := processLeakedSentinel(output, diagnostics, doc); secret != "" {
+		t.Fatalf("process leaked sentinel %s", secret)
 	}
 	if len(diagnostics) > 0 {
 		var diagnostic map[string]any
@@ -223,6 +222,85 @@ func processDocument(t *testing.T, output, diagnostics []byte, exit int) map[str
 		}
 	}
 	return doc
+}
+
+const processGuardedAccessText = "row-read or full with read_only=true: SELECT validation and a READ ONLY transaction; columns/rows payload"
+
+func processLeakedSentinel(output, diagnostics []byte, doc map[string]any) string {
+	selectOutput := output
+	data, _ := doc["data"].(map[string]any)
+	policyKey := ""
+	if doc["ok"] == true && doc["command"] == "capabilities" {
+		policyKey = "query_policy"
+	} else if doc["ok"] == true && doc["command"] == "query" && data["usage"] == queryUsage && data["read_only"] == false {
+		policyKey = "policy"
+	}
+	if policy, ok := data[policyKey].(map[string]any); policyKey != "" && ok && policy["guarded_access"] == processGuardedAccessText {
+		if !processUniqueJSONKeys(output) {
+			return "SELECT "
+		}
+		// Permit only this static documentation field, without changing the result
+		// or exempting SQL/credential sentinels elsewhere in output or diagnostics.
+		check := maps.Clone(doc)
+		checkData, checkPolicy := maps.Clone(data), maps.Clone(policy)
+		checkPolicy["guarded_access"] = ""
+		checkData[policyKey], check["data"] = checkPolicy, checkData
+		selectOutput, _ = json.Marshal(check)
+	}
+	for _, secret := range []string{"SECRET", "unavailable.invalid", "pgx", "SELECT ", "PasswordCommand"} {
+		candidate := output
+		if secret == "SELECT " {
+			candidate = selectOutput
+		}
+		if bytes.Contains(candidate, []byte(secret)) || bytes.Contains(diagnostics, []byte(secret)) {
+			return secret
+		}
+	}
+	return ""
+}
+
+// A decoded-map copy must not hide earlier values overwritten by duplicate keys.
+func processUniqueJSONKeys(output []byte) bool {
+	if len(output) > MaxOutputBytes {
+		return false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	decoder.UseNumber()
+	var value func() bool
+	value = func() bool {
+		token, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		delim, container := token.(json.Delim)
+		if !container {
+			return true
+		}
+		if delim != '{' && delim != '[' {
+			return false
+		}
+		keys := map[string]bool{}
+		for decoder.More() {
+			if delim == '{' {
+				token, err := decoder.Token()
+				key, ok := token.(string)
+				if err != nil || !ok || keys[key] {
+					return false
+				}
+				keys[key] = true
+			}
+			if !value() {
+				return false
+			}
+		}
+		closing, err := decoder.Token()
+		return err == nil && (delim == '{' && closing == json.Delim('}') || delim == '[' && closing == json.Delim(']'))
+	}
+	if !value() {
+		return false
+	}
+	_, err := decoder.Token()
+	return err == io.EOF
 }
 
 func (f *firstProcessFixture) run(t *testing.T, want int, args ...string) map[string]any {
@@ -242,6 +320,101 @@ func (f *firstProcessFixture) run(t *testing.T, want int, args ...string) map[st
 }
 
 func TestMachineCLIProcess_Discovery(t *testing.T) {
+	t.Run("privacy_policy_exception_is_schema_scoped", func(t *testing.T) {
+		makeDoc := func(command string) map[string]any {
+			data := map[string]any{"query_policy": map[string]any{"guarded_access": processGuardedAccessText}}
+			if command == "query" {
+				data = map[string]any{"usage": queryUsage, "read_only": false, "policy": data["query_policy"]}
+			}
+			return map[string]any{"schema_version": json.Number("1"), "ok": true, "command": command, "warnings": []any{}, "data": data}
+		}
+		for _, command := range []string{"capabilities", "query"} {
+			doc := makeDoc(command)
+			before, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := processDocument(t, append(append([]byte{}, before...), '\n'), nil, 0)
+			after, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			returned, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) || !bytes.Equal(before, returned) {
+				t.Fatal("privacy check changed original or returned document")
+			}
+		}
+		t.Run("escaped_policy_duplicate_key", func(t *testing.T) {
+			output, err := json.Marshal(makeDoc("capabilities"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			output = bytes.Replace(output, []byte("SELECT "), []byte(`\u0053ELECT `), 1)
+			output = append(output[:len(output)-1], []byte(`,"extra":"SELECT private","extra":"safe"}`)...)
+			var doc map[string]any
+			if err := json.Unmarshal(output, &doc); err != nil {
+				t.Fatal(err)
+			}
+			if processLeakedSentinel(output, nil, doc) != "SELECT " {
+				t.Fatal("duplicate key concealed a raw SQL sentinel behind escaped static documentation")
+			}
+		})
+		for _, test := range []struct {
+			name       string
+			mutate     func(map[string]any)
+			diagnostic []byte
+		}{
+			{"other_field", func(d map[string]any) { d["data"].(map[string]any)["extra"] = processGuardedAccessText }, nil},
+			{"modified_policy", func(d map[string]any) {
+				d["data"].(map[string]any)["query_policy"].(map[string]any)["guarded_access"] = processGuardedAccessText + " changed"
+			}, nil},
+			{"other_policy_field", func(d map[string]any) {
+				d["data"].(map[string]any)["query_policy"].(map[string]any)["extra"] = "SELECT private"
+			}, nil},
+			{"warnings", func(d map[string]any) { d["warnings"] = []any{"SELECT private"} }, nil},
+			{"wrong_command", func(d map[string]any) { d["command"] = "connections list" }, nil},
+			{"wrong_schema_field", func(d map[string]any) {
+				data := d["data"].(map[string]any)
+				data["policy"] = data["query_policy"]
+				delete(data, "query_policy")
+			}, nil},
+			{"diagnostic", func(map[string]any) {}, []byte("SELECT private")},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				doc := makeDoc("capabilities")
+				test.mutate(doc)
+				output, err := json.Marshal(doc)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if processLeakedSentinel(output, test.diagnostic, doc) != "SELECT " {
+					t.Fatal("SQL sentinel outside the exact documentation field was accepted")
+				}
+			})
+		}
+		for _, secret := range []string{"SECRET", "unavailable.invalid", "pgx", "PasswordCommand"} {
+			doc := makeDoc("capabilities")
+			doc["data"].(map[string]any)["extra"] = secret
+			output, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if processLeakedSentinel(output, nil, doc) != secret {
+				t.Fatal("credential sentinel was accepted")
+			}
+			clean := makeDoc("capabilities")
+			output, err = json.Marshal(clean)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if processLeakedSentinel(output, []byte(secret), clean) != secret {
+				t.Fatal("diagnostic credential sentinel was accepted")
+			}
+		}
+	})
 	f := firstProcess(t, false)
 	doc := f.run(t, 0, "connections", "list")
 	if len(doc["data"].([]any)) != 0 {

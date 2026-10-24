@@ -57,7 +57,7 @@ func machineExecuteWire(t *testing.T, sql string, respond func(*pgproto3.Backend
 		mu.Lock()
 		owned = conn
 		mu.Unlock()
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		b := pgproto3.NewBackend(conn, conn)
 		if _, err := b.ReceiveStartupMessage(); err != nil {
 			return
@@ -96,7 +96,7 @@ func machineExecuteWire(t *testing.T, sql string, respond func(*pgproto3.Backend
 				b.Send(&pgproto3.NoData{})
 			case *pgproto3.Execute:
 				if query == "ROLLBACK" && rollbackFail && strings.Contains(sql, "stall-rollback") {
-					io.Copy(io.Discard, conn)
+					_, _ = io.Copy(io.Discard, conn)
 					return
 				}
 				if query == "ROLLBACK" && rollbackFail {
@@ -117,10 +117,12 @@ func machineExecuteWire(t *testing.T, sql string, respond func(*pgproto3.Backend
 		}
 	}()
 	t.Cleanup(func() {
-		ln.Close()
+		if err := ln.Close(); err != nil {
+			t.Error(err)
+		}
 		mu.Lock()
 		if owned != nil {
-			owned.Close()
+			_ = owned.Close()
 		}
 		mu.Unlock()
 		select {
@@ -134,7 +136,7 @@ func machineExecuteWire(t *testing.T, sql string, respond func(*pgproto3.Backend
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { client.Close(context.Background()) })
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
 	return client, func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), queries...) }
 }
 
@@ -256,11 +258,16 @@ func TestMachineExecuteTerminalOutcomes(t *testing.T) {
 				if mode == "protocol_limit" || mode == "prepared_protocol_limit" {
 					if mode == "prepared_protocol_limit" {
 						b.Send(&pgproto3.CommandComplete{CommandTag: []byte("PREPARE TRANSACTION")})
-						b.Flush()
+						if err := b.Flush(); err != nil {
+							t.Errorf("flush prepared tag: %v", err)
+							return
+						}
 					}
 					header := []byte{'D', 0, 0, 0, 0}
 					binary.BigEndian.PutUint32(header[1:], machineExecuteMaxBody+5)
-					conn.Write(header)
+					if _, err := conn.Write(header); err != nil {
+						t.Errorf("write protocol limit: %v", err)
+					}
 					return
 				}
 				if mode == "retention_then_sql" {
@@ -278,13 +285,21 @@ func TestMachineExecuteTerminalOutcomes(t *testing.T) {
 				case "deferred", "retention_then_sql":
 					b.Send(&pgproto3.ErrorResponse{Severity: "ERROR", Code: "23503", Message: "private deferred"})
 				case "disconnect_commit":
-					b.Flush()
-					conn.Close()
+					if err := b.Flush(); err != nil {
+						t.Errorf("flush commit before disconnect: %v", err)
+						return
+					}
+					if err := conn.Close(); err != nil {
+						t.Errorf("disconnect after commit: %v", err)
+					}
 					return
 				case "cancel_commit":
-					b.Flush()
+					if err := b.Flush(); err != nil {
+						t.Errorf("flush commit before cancellation: %v", err)
+						return
+					}
 					cancel()
-					io.Copy(io.Discard, conn)
+					_, _ = io.Copy(io.Discard, conn)
 					return
 				}
 				status := byte('I')
@@ -438,15 +453,20 @@ func TestMachineExecuteParameters(t *testing.T) {
 
 func TestMachineExecuteValidation(t *testing.T) {
 	for _, request := range []MachineQuery{
-		{}, {SQL: "-- only comment"}, {SQL: "SELECT '\x00'"}, {SQL: "SELECT 1", MaxRows: -1},
-		{SQL: "SELECT 1", MaxRows: 1001}, {SQL: "SELECT 1", Schema: "x\x00y"},
+		{},
+		{SQL: "-- only comment"},
+		{SQL: "SELECT '\x00'"},
+		{SQL: "SELECT 1", MaxRows: -1},
+		{SQL: "SELECT 1", MaxRows: 1001},
+		{SQL: "SELECT 1", Schema: "x\x00y"},
 		{SQL: "SELECT 1", Schema: strings.Repeat("x", 1<<20+1)},
 		{SQL: "SELECT 1", Parameters: make([][]byte, 257)},
 		{SQL: "SELECT $1", Parameters: [][]byte{{0xff}}},
 		{SQL: "SELECT $1", Parameters: [][]byte{{0}}},
 		{SQL: "SELECT $1", Parameters: [][]byte{[]byte(strings.Repeat("x", 1<<20+1))}},
 		{SQL: "SELECT 1; SELECT $1", Parameters: [][]byte{[]byte("1")}},
-		{SQL: "SELECT 1; COPY x FROM STDIN"}, {SQL: "COPY (SELECT 1) TO STDOUT"},
+		{SQL: "SELECT 1; COPY x FROM STDIN"},
+		{SQL: "COPY (SELECT 1) TO STDOUT"},
 	} {
 		client := &MachineClient{access: models.CLIAccessFull}
 		result, err := client.Execute(context.Background(), request)
@@ -497,7 +517,11 @@ func TestMachineExecuteInitialization(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer client.Close(context.Background())
+			defer func() {
+				if err := client.Close(context.Background()); err != nil {
+					t.Error(err)
+				}
+			}()
 			fixture.mu.Lock()
 			queries := strings.Join(fixture.queries, "\n")
 			fixture.mu.Unlock()

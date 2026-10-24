@@ -137,6 +137,7 @@ cat >>"$root/data/postgresql.conf" <<EOF
 listen_addresses = '127.0.0.1'
 port = $port
 unix_socket_directories = ''
+max_prepared_transactions = 20
 EOF
 stage=server-start
 "$pg/pg_ctl" -D "$root/data" -l "$root/server.log" -w -t 30 start >"$root/start.log" 2>&1
@@ -149,6 +150,7 @@ stage=fixture
 stage=readiness
 "${psql[@]}" -Atc 'SELECT 1' >"$root/ready" 2>"$root/ready.err"
 [ "$(cat "$root/ready")" = 1 ]
+[ "$("${psql[@]}" -Atc 'SHOW max_prepared_transactions' 2>"$root/prepared.err")" = 20 ]
 stage=authentication
 if PGPASSWORD=deliberately-wrong "${psql[@]}" -Atc 'SELECT 1' >"$root/wrong.out" 2>"$root/wrong.err"; then
   echo 'wrong password accepted' >&2; exit 1
@@ -176,21 +178,37 @@ selector='^TestMachineCLI_(Dispatch|ExitCodes|Envelope|Envelope_ParentDeadlineAn
 stage=baseline-tests
 go test -json -count=1 -timeout 5m ./pkg/cli -run "$selector" >"$root/tests.jsonl" 2>"$root/tests.err"
 stage=native-tests
+# Inventory the platform's compiled tests, including every history/approval/
+# executor regression. Evidence must show each actually passed, never skipped.
+native_selector='^(TestMachine|TestCLIHistory)'
+go test -json -list "$native_selector" -tags=integration \
+  . ./internal/machineio ./pkg/cli ./pkg/drivers/pg ./pkg/session ./pkg/session/sshtunnel ./test/integration \
+  >"$root/native-inventory.jsonl" 2>"$root/native-inventory.err"
 go test -json -count=1 -timeout 10m -tags=integration \
   . ./internal/machineio ./pkg/cli ./pkg/drivers/pg ./pkg/session ./pkg/session/sshtunnel ./test/integration \
-  -run '^TestMachine' >"$root/native-tests.jsonl" 2>"$root/native-tests.err"
+  -run "$native_selector" >"$root/native-tests.jsonl" 2>"$root/native-tests.err"
 stage=evidence
-python3 - "$root" "$host_os" "$host_arch" "$version" "$server" <<'PY'
+PYTHONDONTWRITEBYTECODE=1 python3 - "$root" "$host_os" "$host_arch" "$version" "$server" "$repo" <<'PY'
 import hashlib, json, pathlib, subprocess, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[6]) / ".github/scripts"))
+from cli_test_status import TEST_NAMES
 root = pathlib.Path(sys.argv[1])
+public_packages = {"github.com/davesavic/pgsavvy" + suffix for suffix in (
+    "", "/internal/machineio", "/pkg/cli", "/pkg/drivers/pg", "/pkg/session",
+    "/pkg/session/sshtunnel", "/test/integration")}
+def public_names(values):
+    return sorted({value for value in values
+        if value.partition("::")[0] in public_packages
+        and value.partition("::")[2] in TEST_NAMES})
 required = {"TestMachineCLI_" + n for n in ("Dispatch", "ExitCodes", "Envelope", "Envelope_ParentDeadlineAndInput", "OutputLimit", "BrokenWriter")}
-passed = set()
+passed, baseline_passed = set(), set()
 for line in (root / "tests.jsonl").read_text().splitlines():
     event = json.loads(line)
     if event["Action"] in ("skip", "fail"):
         raise SystemExit("baseline contains skipped/failed tests")
     if event["Action"] == "pass" and "Test" in event:
         passed.add(event["Test"])
+        baseline_passed.add(event["Package"] + "::" + event["Test"])
 if not required <= passed:
     raise SystemExit("required baseline tests missing")
 required_native = {
@@ -208,7 +226,22 @@ required_native = {
     "TestMachineSSH_Trust", "TestMachineSSH_Auth", "TestMachineSSH_AgentCancellation",
     "TestMachineSSH_OwnedAbort", "TestMachineCLIProcess_Discovery", "TestMachineCLIProcess_Test",
     "TestMachineCLIProcess_Query", "TestMachineCLIProcess_Schema", "TestMachineCLIProcess_Signals",
+    "TestMachineCLIFullApprovalProcess", "TestMachineCLIFullPostgresTerminal",
+    "TestMachineFullQueryProcessTransactions", "TestMachineFullQueryProcessRestrictedPolicy",
+    "TestMachineFullQueryProcessDeliveryAndDeadline",
+    "TestMachineCLIBatchAnalysisPostgresDifferential",
+    "TestMachineExecutePostgresTransactions", "TestMachineExecutePostgresLimits",
+    "TestMachineExecutePostgresPolicyAndMaintenance", "TestMachineExecutePostgresCancelCommit",
 }
+inventory = set()
+for line in (root / "native-inventory.jsonl").read_text().splitlines():
+    event = json.loads(line)
+    name = event.get("Output", "").strip()
+    if event["Action"] == "output" and name.startswith(("TestMachine", "TestCLIHistory")) and "/" not in name:
+        inventory.add(event["Package"] + "::" + name)
+for prefix in ("TestMachineExecute", "TestMachineApproval", "TestCLIHistory"):
+    if not any(item.split("::", 1)[1].startswith(prefix) for item in inventory):
+        raise SystemExit("required test family missing: " + prefix)
 native_passed, native_names = set(), set()
 for line in (root / "native-tests.jsonl").read_text().splitlines():
     event = json.loads(line)
@@ -219,10 +252,14 @@ for line in (root / "native-tests.jsonl").read_text().splitlines():
         native_passed.add(event["Package"] + "::" + event["Test"])
 if not required_native <= native_names:
     raise SystemExit("required native machine tests missing")
+if not inventory <= native_passed:
+    raise SystemExit("compiled native/history inventory not fully passed")
 binary = root / "pgsavvy"
 print(json.dumps({"scope": "machine-cli-linux-darwin", "goos": sys.argv[2], "goarch": sys.argv[3],
     "go_version": subprocess.check_output(["go", "version"], text=True).strip(), "cgo_enabled": "0",
     "binary": str(binary), "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
     "postgres_tools": sys.argv[4], "postgres_tools_arch": sys.argv[3], "server_version_num": sys.argv[5], "fixture_version": 2,
-    "wrong_password_rejected": True, "tests_passed": sorted(passed), "native_tests_passed": sorted(native_passed)}))
+    "wrong_password_rejected": True, "max_prepared_transactions": 20,
+    "native_selector": "^(TestMachine|TestCLIHistory)", "required_inventory": public_names(inventory),
+    "tests_passed": public_names(baseline_passed), "native_tests_passed": public_names(native_passed)}))
 PY

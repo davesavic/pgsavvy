@@ -232,9 +232,9 @@ func TestController_CLIAccessIsSelector(t *testing.T) {
 	if ctx.FormFocusedLabel() != "cli_access" {
 		t.Fatal("CLI access selector unavailable")
 	}
-	for i, action := range []string{commands.ConnectionManagerEdit, commands.ConnectionManagerToggle, commands.ConnectionManagerEdit} {
+	for i, action := range []string{commands.ConnectionManagerEdit, commands.ConnectionManagerToggle, commands.ConnectionManagerEdit, commands.ConnectionManagerToggle} {
 		dispatchCM(t, ctrl, action)
-		want := []models.CLIAccess{models.CLIAccessMetadata, models.CLIAccessRowRead, models.CLIAccessDisabled}[i]
+		want := []models.CLIAccess{models.CLIAccessMetadata, models.CLIAccessRowRead, models.CLIAccessFull, models.CLIAccessDisabled}[i]
 		if got := ctx.FormConnection().CLIAccess; got != want || prompt.active {
 			t.Fatalf("policy = %q, want %q; text prompt active = %v", got, want, prompt.active)
 		}

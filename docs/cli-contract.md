@@ -5,15 +5,24 @@ The macOS implementation in this source tree awaits native acceptance; a
 cross-build is not evidence that its runtime contract has passed.
 Production dispatch composes the implemented
 connection, catalog, query and capability handlers before legacy startup.
-It never initializes TUI configuration, persistent logs or themes. History is
-the sole explicit state exception: a query may append to the shared history
+It never initializes TUI configuration, persistent logs or themes. Explicit state
+exceptions are the persistent approval lock described below and opted-in history:
+a query may append to the shared history
 store only when its exact trusted saved profile has `cli_history: true`.
 Absent/false/unresolved consent preserves the default no-history-artifacts rule.
 
-Commands return one version-1 JSON object followed by a newline. The envelope
+When publication succeeds, commands return one version-1 JSON object followed
+by a newline. Broken output or an exhausted outer deadline may prevent delivery;
+SQL may already have executed. Never automatically retry a failed invocation.
+The envelope
 has `schema_version`, `ok`, `command`, optional `connection`, `data` or `error`,
 `warnings` (always an array), `result_complete`, `truncated`, and an optional
-`truncation_reason` (`row_limit` or `page_limit`). A connection is a selected
+`truncation_reason` (`row_limit`, `page_limit`, or full-only `result_limit`).
+Writable-full queries can additionally expose `execution.status`
+(`not_started`, `completed`, `failed`, `unknown`), `effects_may_have_occurred`,
+and `prepared_transactions_may_remain`. Possible effects begins at SQL dispatch;
+these fields preserve available evidence, not commit/rollback guarantees.
+Error responses contain no partial result rows. A connection is a selected
 profile name, never an endpoint. Backend work and cleanup finish before encoding.
 Error messages and remediation are allowlisted; raw backend errors are private.
 Diagnostic stderr is best-effort and follows the stdout publication attempt;
@@ -25,7 +34,7 @@ suppress a healthy stdout document or change its exit status.
 | 0 | Success, including an explicitly capped preview |
 | 2 | Invalid input or unsupported SQL |
 | 3 | Unavailable connection, credentials or SSH trust |
-| 4 | Profile policy denied |
+| 4 | Profile policy or approval denied/unavailable |
 | 5 | Database failure or missing object |
 | 6 | Timeout or cancellation |
 | 7 | I/O, encoding or result-resource failure |
@@ -39,6 +48,9 @@ Limits: SQL and parameter input each 1 MiB; 256 parameters; profile name 256
 bytes; rows default 100, maximum 1000; PostgreSQL-text cell 64 KiB; invocation
 30 seconds; connection 10 seconds; helper 5 seconds and 32 KiB stdout;
 statement 10 seconds; lock 1 second; fresh cleanup at most 2 seconds.
+Writable full retains at most 256 results and 1000 aggregate rows. Retention
+overflow drains later SQL/COMMIT before returning a resource error; a protocol
+message exceeding 8 MiB or transport failure can abort with unknown outcome.
 `--timeout` may lower the invocation budget; `--format json` is the only format.
 Duplicate/conflicting/unknown flags are errors. Command-specific help is JSON.
 
@@ -75,13 +87,59 @@ Publication is the commitment point: a signal after publication starts cannot
 replace a partially written result. Use `connections show -- -NAME` to select a
 profile whose literal name starts with a dash (similarly for connection test).
 Offline profiles expose only name, driver, tags, label, effective cli_access,
-saved read_only and credential_status="not_checked". Saved read_only is a TUI
-preference: machine queries are always read-only regardless of that field.
+saved read_only and credential_status="not_checked". `row-read` always uses the
+guarded SELECT/READ ONLY transaction path. `full` plus `read_only=true` uses
+that same path; only explicit `full` plus `read_only=false` permits arbitrary
+SQL. Approval never bypasses profile policy, server read-only defaults or grants.
+
+Full confirmation is an OR over classified top-level DML/DDL with the matching
+`confirm_writes`/`confirm_ddl` enabled. This heuristic deliberately has gaps for
+opaque SQL and side-effectful functions; both flags false deliberately means no
+approval. It is not complete mutation detection. Configure full explicitly and
+use restricted logins; see [configuration and examples](cli-query.md#explicit-full-access).
+
+Approval either uses the controlling terminal (exact case-sensitive connection
+name, then lowercase `yes`), or query-only `--approve --confirm-connection NAME`
+with both flags and an exact name. Partial/mismatched flags never fall back to
+the terminal. Flags acknowledge caller intent, not human participation. Approval
+is immutable-invocation-only: no cache, sharing or persisted authorization.
+Terminal work never consumes SQL stdin or JSON stdout/stderr. Approval precedes
+credential/network setup, counts against the deadline, and cancellation closes
+and joins owned work. Cooperating ceremonies exclude one another via a persistent
+per-UID lock in Linux `/tmp` or Darwin `/private/tmp`, independent of XDG/TMPDIR;
+busy/unsafe acquisition fails before reading. Never unlink/replace that inode.
+
+`APPROVAL_REQUIRED`, `APPROVAL_MISMATCH`, `APPROVAL_UNAVAILABLE` and
+`APPROVAL_CANCELLED` return exit 4. Malformed/conflicting flags return
+`INVALID_INPUT`/2; SIGINT/SIGTERM/deadline return `TIMEOUT`/6. No raw approval
+response or backend error is public. Opted-in history records approval denials
+as blocked and deadline/signal failures as failed; history is effects-unverified,
+not durability evidence. No additional approval/parameter/credential logging is
+introduced.
+
+Full sends original unparameterized native SQL once without an application
+transaction wrapper; parameters support one statement only. Streaming
+COPY FROM STDIN/TO STDOUT is unsupported. PostgreSQL native batching, maintenance
+transaction restrictions and role grants remain authoritative. Unfinished local
+transactions roll back with an explicit error. Deliberate PREPARE TRANSACTION
+can leave durable prepared work despite idle state/connection close; inspect
+and resolve owned GIDs explicitly. Configured SET ROLE is not an immutable
+security boundary within the login's grants. See [execution details](cli-query.md#native-execution-and-results).
 
 ## Binary rollback
 
-Stop all CLI/TUI/history/profile writers and automation; finish active
-invocations before downgrading. Back up configuration and make a **WAL-consistent
+1. Stop new CLI invocations, TUI/history/profile writers and automation. Quiesce
+   approval waiters too; cancel and **join** local work before editing profiles.
+2. Independently inspect server backends and `pg_prepared_xacts`. Resolve only
+   owned residual transactions/backends/prepared GIDs with an explicit recovery
+   decision. Transport abort or local process exit does not prove server rollback.
+3. Replace **every** `cli_access: full` with a mode supported by the target older
+   binary while writers remain stopped. Old binaries reject unknown full values.
+4. Complete the configuration/history compatibility steps below, then replace
+   the binary and verify before resuming work. **Binary rollback does not reverse
+   executed SQL**, committed effects or durable prepared transactions.
+
+Back up configuration and make a **WAL-consistent
 history backup** with SQLite backup/VACUUM INTO, not a copy of only a live main
 database. Preserve the backup and inspect its exact schema version.
 
@@ -101,3 +159,7 @@ strict parsing plus history read/search/append before replacing the binary and
 resuming writers. Roll back cooperating configuration-lock writers together;
 do not delete a live shared lock sidecar. Never restore new-only keys while the
 predecessor is active. No automatic profile rewrite occurs.
+
+Cooperating profile writers retain their existing locking/revocation behavior;
+arbitrary manual YAML writers can race. The emergency procedure requires
+quiescence and is not a new manual-writer concurrency guarantee.

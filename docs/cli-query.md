@@ -1,4 +1,8 @@
-# Read-only machine queries (Linux)
+# Machine queries (Linux and macOS)
+
+Native macOS acceptance remains pending; Windows retains legacy startup.
+
+## Guarded reads
 
 Opt a saved PostgreSQL profile into `cli_access: row-read`, then use:
 
@@ -22,7 +26,7 @@ Columns have positional `name`, `type_oid`, `encoding: "postgres-text"`. Rows ar
 positional arrays: PostgreSQL text is a JSON string and SQL NULL is JSON null.
 Duplicate aliases remain distinct positions. Numeric precision, JSON source
 text, bytea hex, array bounds and special temporal values are not GUI-decoded.
-Session formats are UTF8, ISO dates, UTC, postgres intervals, hex bytea and
+Initial session formats are UTF8, ISO dates, UTC, postgres intervals, hex bytea and
 extra_float_digits=3. Invalid UTF-8 is rejected.
 
 Rows default to 100; `--max-rows` accepts 1..1000. Exact-limit EOF is complete.
@@ -38,6 +42,98 @@ never silently clips. Invocation/connection/helper/server/cleanup bounds are in
 `cli-contract.md`. No process-memory or immediate remote termination guarantee
 is made. Function/extension authority remains governed by database grants;
 use dedicated restricted roles and approved views, not the AST filter as a sandbox.
+
+## Explicit full access
+
+Configure the saved profile in `connections.yml`:
+
+```yaml
+connections:
+  - name: development
+    driver: postgres
+    host: localhost
+    database: app
+    user: app_operator
+    cli_access: full
+    read_only: false
+    confirm_writes: true
+    confirm_ddl: true
+    cli_history: false
+```
+
+Full includes metadata and guarded reads. `full` plus `read_only: true` always
+uses the guarded SELECT validation and READ ONLY transaction path above, even
+with approval flags. The client never forces a server/DSN read-only default off.
+
+Writable full analyzes all top-level statements before connecting. Approval is
+required if any statement is heuristically classified as DML with
+`confirm_writes`, or DDL with `confirm_ddl`. This deliberately uses the existing
+TUI heuristic: opaque syntax, unknown statements and functions with effects
+can evade classification; false positives are possible. Both confirmation flags
+false deliberately means no approval. This is not a security sandbox.
+
+Without flags, approval lazily acquires the controlling terminal, **not SQL
+stdin, stdout or stderr**. Read the bounded preview (omitted content is labelled),
+type the exact case-sensitive saved name, then lowercase `yes`. SQL may still
+arrive through stdin:
+
+```sh
+cat change.sql | pgsavvy query --connection development --file -
+pgsavvy query --connection development --file change.sql \
+  --approve --confirm-connection development
+```
+
+The second path requires both flags together with the exact name; partial or
+mismatched flags fail without terminal fallback. Explicit flags acknowledge
+caller intent, **not proof of a human**. Neither path elevates policy/privileges
+or persists approval. Each invocation captures its SQL, parameters and selected
+profile once; no shared approval cache exists. Approval completes before
+credential helpers, SSH or database setup and consumes the invocation deadline.
+Cooperating interactive processes share one persistent per-UID OS-local lock,
+independent of XDG/TMPDIR; a competing ceremony fails before reading. Explicit
+flags need no terminal or ceremony lock. Never unlink the live lock inode.
+
+### Native execution and results
+
+Unparameterized SQL is sent **once, unchanged, as one native PostgreSQL batch**;
+analysis never splits execution and there is no application transaction wrapper.
+Parameters are supported for exactly one statement. Streaming `COPY FROM STDIN`
+and `COPY TO STDOUT` are rejected anywhere in a batch; server-side COPY remains
+subject to PostgreSQL privileges. Initial `standard_conforming_strings=on`
+aligns analysis with server scanning, including DSNs requesting off.
+
+PostgreSQL owns implicit batch transactions, explicit COMMIT/ROLLBACK and
+permissions. A standalone VACUUM can work while `SELECT 1; VACUUM ...` fails
+because PostgreSQL prohibits it inside that native batch transaction. CREATE
+DATABASE has similar restrictions and requires the relevant role privilege.
+Configured SET ROLE is not an immutable security boundary: SQL can RESET/SET
+ROLE within the login's grants and change session formatting. Prefer restricted
+logins as well as restricted configured roles.
+
+Writable-full `data.results` is an array of `command_tag`, `columns`, `rows`,
+`truncated` and optional `truncation_reason`; column/value encoding remains
+positional PostgreSQL text. Guarded output remains `data.columns`/`data.rows`.
+The default 100 / maximum 1000 row cap is **aggregate**, with at most 256 retained
+results, 64 KiB per cell and 1 MiB for the complete JSON document. Row/result
+caps can succeed with truncation. Retained-byte exhaustion or invalid output
+cells stop retention, **not execution**: later statements and COMMIT are drained,
+then a bounded resource error returns without partial rows. An 8 MiB protocol
+message ceiling or transport failure can instead abort execution.
+
+Optional full-only top-level `execution` has `status` (`not_started`, `completed`,
+`failed`, `unknown`), `effects_may_have_occurred`, and
+`prepared_transactions_may_remain` when relevant. Possible effects begins at
+SQL dispatch. A failure can follow an earlier COMMIT; command tags and status
+do not prove durability. An unfinished local transaction is rolled back and
+reported as incomplete, never silently committed. Deliberate PREPARE TRANSACTION
+can survive connection close with idle transaction status; inspect
+`pg_prepared_xacts` independently and explicitly COMMIT/ROLLBACK PREPARED only
+the GIDs you own and intend to resolve.
+
+Execution and output delivery are separate: broken stdout or an exhausted outer
+deadline may prevent JSON entirely, even after effects occurred. **Never blindly
+retry SQL** on an error, missing document or timeout. Independently inspect
+database state and prepared transactions before deciding on recovery.
 
 ## Optional shared history
 
@@ -65,17 +161,18 @@ After complete, nonempty UTF-8 SQL has been read, one attempt can be recorded:
   database cleanup completed successfully.
 - **failed:** parameter, credential, connection, backend, timeout/cancellation
   or database-cleanup failure.
-- **blocked:** unsupported SQL or profile policy denial, without execution.
+- **blocked:** unsupported SQL, profile policy or approval denial, without execution.
 
 The event contains only original SQL, profile name, source `cli`, completion
 timestamp, elapsed attempt duration and outcome. Duration starts after SQL input
 completes and ends after database cleanup; it excludes the history append and
-JSON/stdout delivery. A later encoding, broken-pipe or unread-output failure can
+JSON/stdout delivery. Approval time is included. A later encoding, broken-pipe or unread-output failure can
 therefore produce exit 7 while history correctly says `succeeded`.
 
 **Privacy:** raw SQL literals and comments are retained. Bound parameter values,
 returned rows, DSNs, credentials and raw errors are not accepted by the event
-API. Do not enable history for SQL containing secrets you cannot retain locally.
+API. Approval responses, approval flags and parameters are never recorded.
+Do not enable history for SQL containing secrets you cannot retain locally.
 Disabling consent stops future recording; it does not erase existing rows.
 
 Consent and execution use one immutable selected profile snapshot. Revocation
@@ -85,7 +182,11 @@ trusted ownership/path ancestry and a non-group/world-writable profile. Missing,
 duplicate, malformed, insecure or budget-expired metadata means no recording.
 Rejected SQL may read this metadata, but invokes no credential helper, driver
 configuration, SSH or database connection. History consent never grants query
-access: machine execution stays unconditionally read-only with `read_only: false`.
+access: only explicit full plus `read_only: false` permits writable execution.
+
+History is **effects-unverified**. `succeeded`/`failed` is an attempt outcome,
+not commit/rollback evidence; even failed full SQL may have committed effects or
+left prepared transactions. Independently inspect state before replaying.
 
 Recording is synchronous **best effort, not an audit log**. Healthy completion
 within budget exposes one committed event immediately on normal process exit.
@@ -134,7 +235,8 @@ does not undo information previously readable by others.
 
 `HISTORY_UPGRADE_REQUIRED` means a known pending migration could not finish in
 the supplied budget. Open the current/new TUI once to upgrade outside the bounded
-CLI phase, then retry. Unknown-version lock contention, corrupt/unwritable stores
+CLI phase. This does not authorize automatic SQL replay; use a future deliberately
+chosen invocation to check recording. Unknown-version lock contention, corrupt/unwritable stores
 and unsupported future schemas are unavailable instead; inspect/remediate without
 deleting or automatically downgrading the store. See
 [binary rollback](cli-contract.md#binary-rollback) before using a predecessor.

@@ -5,7 +5,7 @@
 
 A vim-style TUI PostgreSQL client built like [lazygit](https://github.com/jesseduffield/lazygit) — fast keyboard navigation, modal panes, and a focused workflow for browsing and querying your database from the terminal.
 
-On Linux, a [JSON CLI](#machine-cli-linux) also supports scripts and LLM tools with connection discovery, schema inspection, and bounded read-only queries.
+On Linux and macOS, a [JSON CLI](#machine-cli-linux-and-macos) supports discovery, schema inspection, guarded reads and explicitly opted-in full SQL. Native macOS acceptance remains pending.
 
 ![pgsavvy demo](docs/demo.gif)
 
@@ -16,7 +16,7 @@ Active development
 ## Table of Contents
 
 - [Features](#features)
-- [Machine CLI](#machine-cli-linux)
+- [Machine CLI](#machine-cli-linux-and-macos)
 - [Configuration](#configuration)
 - [Install](#install)
 - [Updating](#updating)
@@ -140,8 +140,9 @@ Press `?` anywhere to open the auto-generated, tabbed keybinding cheatsheet — 
 
 ## Machine CLI (Linux and macOS)
 
-The machine CLI returns versioned JSON without starting the TUI, interactive
-prompts or persistent logs. History is opt-in per saved profile. Linux and macOS
+The machine CLI returns versioned JSON without starting the TUI or persistent
+logs. Full SQL may require controlling-terminal approval; credentials never
+prompt. History is opt-in per saved profile. Linux and macOS
 use the machine command path; Windows still uses legacy startup. The macOS port
 is introduced in v0.14.0 and awaits native acceptance. Mac binaries from earlier
 versions still use legacy startup. Bare `pgsavvy` still opens the TUI.
@@ -175,6 +176,7 @@ the policy, then Enter to save:
 | `disabled` (also missing/empty) | Offline connection list/show only |
 | `metadata` | Also connection testing and schema inspection |
 | `row-read` | Also bounded read-only queries |
+| `full` | Also arbitrary SQL within PostgreSQL permissions, unless `read_only: true` |
 
 Alternatively, edit the existing profile in
 `$XDG_CONFIG_HOME/pgsavvy/connections.yml` (default
@@ -191,10 +193,46 @@ connections:
     cli_access: row-read
 ```
 
-The separate `read_only` setting is a TUI preference, not CLI permission:
-machine queries always use read-only transactions. Credentials must already
+`row-read` always uses guarded read-only transactions. `full` with
+`read_only: true` uses the same guarded path: approval flags cannot bypass it.
+Writable full access requires `cli_access: full` and `read_only: false`.
+Credentials must already
 work without prompts; SSH connections require pre-existing trusted host keys.
 Keep credentials out of SQL examples and use a restricted database role.
+
+Example explicit full profile (in `connections.yml`, not `config.yml`):
+
+```yaml
+connections:
+  - name: development
+    driver: postgres
+    host: localhost
+    database: app
+    user: app_operator
+    cli_access: full
+    read_only: false
+    confirm_writes: true
+    confirm_ddl: true
+    cli_history: false
+```
+
+For classified writes/DDL with the corresponding confirmation enabled, type the
+exact case-sensitive profile name and then lowercase `yes` on the controlling
+terminal, even with SQL piped on stdin. Automation instead supplies both
+`--approve --confirm-connection development` to `query`; names must match exactly.
+These flags acknowledge caller intent, not human participation, and grant no
+additional permissions. Partial/mismatched flags fail without terminal fallback.
+Approval is invocation-only, never cached or shared.
+
+```sh
+cat change.sql | pgsavvy query --connection development --file -
+pgsavvy query --connection development --file change.sql \
+  --approve --confirm-connection development
+```
+
+Confirmation follows the existing heuristic, not complete mutation detection:
+opaque SQL and side-effectful functions may not prompt. Setting both confirmation
+flags false deliberately disables these prompts. Use restricted database roles.
 
 ### Inspect connections and schemas
 
@@ -260,13 +298,19 @@ into SQL text.
 
 Each machine command writes one JSON document to stdout. Check `ok`, `error`,
 `warnings`, `result_complete` and `truncated`; stderr may contain separate safe
-diagnostics. Query `data.columns` describes each position in `data.rows`.
+diagnostics. Guarded query `data.columns` describes each position in `data.rows`.
+Writable-full `data.results` contains command tags and positional columns/rows
+for each retained result, plus optional top-level `execution` metadata.
 Database values are PostgreSQL-text **strings**, including numbers and booleans;
 SQL NULL becomes JSON `null`. Preserve numeric precision when processing them.
 
-- Queries accept one supported SELECT-family statement, including read-only
+- Guarded queries accept one supported SELECT-family statement, including read-only
   `WITH`. Writes, multiple statements, locking reads and transaction/session
   commands are rejected.
+- Writable full sends the original native batch once, without an application
+  transaction wrapper. Parameters support one statement only; streaming
+  `COPY FROM STDIN` / `COPY TO STDOUT` is unsupported. PostgreSQL permissions and
+  maintenance transaction restrictions still apply.
 - Returned rows default to **100**, maximum **1000** via `--max-rows`.
   A capped preview can exit successfully with `truncated: true`; exit 0 alone
   does not prove completeness. The cap does not bound server work or tail
@@ -274,6 +318,16 @@ SQL NULL becomes JSON `null`. Preserve numeric precision when processing them.
 - SQL and parameter inputs are limited to **1 MiB each**, **256 parameters**,
   **64 KiB per cell**, and **1 MiB total JSON output**. Oversized data fails
   rather than silently clipping values.
+- Full retains at most **256 results** and **1000 aggregate rows**. Retention
+  overflow drains later statements/COMMIT; the **8 MiB protocol message ceiling**
+  or transport failure may instead abort execution with an unknown outcome.
+- `execution.status` (`not_started`, `completed`, `failed`, `unknown`),
+  `effects_may_have_occurred` and `prepared_transactions_may_remain` describe
+  available execution evidence, not guaranteed durability. Failed delivery may
+  produce no JSON at all. Never blindly retry SQL after an error; history is
+  **effects-unverified**, not proof of commit or rollback. Deliberate prepared
+  transactions can survive connection close; inspect and resolve owned work.
+  See the [emergency downgrade procedure](docs/cli-contract.md#binary-rollback).
 - Default invocation/connection/statement limits are **30s / 10s / 10s**.
   Global `--timeout 5s`, for example, lowers the invocation budget;
   `--format json` is the only supported output format.
@@ -406,7 +460,7 @@ pgsavvy          # starts the TUI and opens the connection manager
 On first run, create a connection profile in the connection manager (or edit `~/.config/pgsavvy/connections.yml` directly), then connect. Press `?` for the keybinding cheatsheet; see [docs/keybindings.md](docs/keybindings.md) for the full reference.
 
 For scripts or LLM tools on Linux, start with `pgsavvy capabilities` and follow
-the [CLI setup and examples](#machine-cli-linux).
+the [CLI setup and examples](#machine-cli-linux-and-macos).
 
 ## Development Requirements
 
@@ -449,7 +503,7 @@ task pg:down && task pg:up
 - [docs/INSTALL.md](docs/INSTALL.md) — install & usage guide
 - [docs/keybindings.md](docs/keybindings.md) — full keybinding reference
 - [docs/cli-contract.md](docs/cli-contract.md) — machine CLI JSON, exit codes and deadlines
-- [docs/cli-query.md](docs/cli-query.md) — read-only SQL, parameter inputs and result limits
+- [docs/cli-query.md](docs/cli-query.md) — guarded/full SQL, approvals and outcome limits
 - [docs/cli-schema.md](docs/cli-schema.md) — catalog inspection, paging and visibility
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow for contributors
 - [SECURITY.md](SECURITY.md) — vulnerability disclosure

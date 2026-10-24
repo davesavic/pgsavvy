@@ -48,7 +48,7 @@ jobs:
           uname -sm
           go env GOOS GOARCH
           CGO_ENABLED=0 go test -count=1 -timeout 60s ./internal/machineio -run '^TestMachineIO_'
-      - name: Unix owned fixture and shipping machine CLI tests
+      - name: Unix owned fixture and shipping full SQL, PTY, executor, approval and history tests
         if: runner.os != 'Windows'
         shell: bash
         env:
@@ -95,9 +95,22 @@ jobs:
           cache: true
       - name: Apply disposable fixture
         run: docker exec -i '${{ job.services.postgres.id }}' psql -v ON_ERROR_STOP=1 -U pgsavvy -d pgsavvy_test < docker/postgres/init/01_fixture.sql
+      - name: Enable and verify prepared transactions in owned Docker fixture
+        shell: bash
+        run: |
+          container='${{ job.services.postgres.id }}'
+          docker exec "$container" psql -v ON_ERROR_STOP=1 -U pgsavvy -d pgsavvy_test -c 'ALTER SYSTEM SET max_prepared_transactions = 20'
+          docker restart "$container"
+          for attempt in {1..60}; do
+            if docker exec "$container" pg_isready -U pgsavvy -d pgsavvy_test; then break; fi
+            sleep 1
+          done
+          test "$(docker exec "$container" psql -At -v ON_ERROR_STOP=1 -U pgsavvy -d pgsavvy_test -c 'SHOW max_prepared_transactions')" = 20
       - name: Require reachable fixture
         run: go run ./internal/pgprobe "$PGSAVVY_TEST_PG"
       - name: Build
         run: go build -o bin/pgsavvy .
       - name: Verify machine API and built-binary paths
-        run: go test -race -count=1 -timeout 5m -tags=integration ./pkg/cli ./pkg/drivers/pg ./test/integration -run '^TestMachine(Metadata|Query|Schema|CLIProcess)'
+        env:
+          PGSAVVY_TEST_BINARY: ${{ github.workspace }}/bin/pgsavvy
+        run: go test -race -count=1 -timeout 5m -tags=integration . ./internal/machineio ./pkg/cli ./pkg/drivers/pg ./test/integration -run '^(TestMachine(Metadata|Query|Schema|CLIProcess|CLIFull|FullQueryProcess|Execute|Approval|TerminalApproval)|TestCLIHistory)'

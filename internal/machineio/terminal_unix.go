@@ -71,17 +71,17 @@ func openApprovalLock(dir, name string) (int, error) {
 	if err != nil {
 		return -1, errUnavailable
 	}
-	defer unix.Close(directory)
+	defer func() { _ = unix.Close(directory) }()
 	var parent unix.Stat_t
 	if unix.Fstat(directory, &parent) != nil {
 		return -1, errUnavailable
 	}
 	// Only root's protected namespace or a private owner-controlled fixture.
-	trusted := parent.Uid == 0 && (parent.Mode&0022 == 0 || parent.Mode&unix.S_ISVTX != 0) || parent.Uid == uint32(os.Geteuid()) && parent.Mode&0077 == 0
+	trusted := parent.Uid == 0 && (parent.Mode&0o022 == 0 || parent.Mode&unix.S_ISVTX != 0) || parent.Uid == uint32(os.Geteuid()) && parent.Mode&0o077 == 0
 	if !trusted {
 		return -1, errUnavailable
 	}
-	fd, err := unix.Openat(directory, name, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0600)
+	fd, err := unix.Openat(directory, name, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0o600)
 	if err != nil {
 		return -1, errUnavailable
 	}
@@ -94,5 +94,5 @@ func openApprovalLock(dir, name string) (int, error) {
 }
 
 func safeApprovalLock(info unix.Stat_t) bool {
-	return info.Mode&unix.S_IFMT == unix.S_IFREG && info.Mode&07777 == 0600 && info.Uid == uint32(os.Geteuid()) && info.Nlink == 1
+	return info.Mode&unix.S_IFMT == unix.S_IFREG && info.Mode&0o7777 == 0o600 && info.Uid == uint32(os.Geteuid()) && info.Nlink == 1
 }

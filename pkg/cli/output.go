@@ -90,7 +90,7 @@ func encodeContext(ctx context.Context, envelope Envelope) ([]byte, error) {
 		envelope.Truncated = false
 		envelope.TruncationReason = ""
 	}
-	if envelope.TruncationReason != "" && envelope.TruncationReason != "row_limit" && envelope.TruncationReason != "page_limit" && !(envelope.Execution != nil && envelope.TruncationReason == "result_limit") {
+	if envelope.TruncationReason != "" && envelope.TruncationReason != "row_limit" && envelope.TruncationReason != "page_limit" && (envelope.Execution == nil || envelope.TruncationReason != "result_limit") {
 		return nil, &PublicError{Code: ResourceFailure}
 	}
 	if envelope.Warnings == nil {

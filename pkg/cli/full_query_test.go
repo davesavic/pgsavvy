@@ -171,14 +171,15 @@ func TestMachineFullQuery_OriginalRoutingAndResults(t *testing.T) {
 				return
 			}
 			results := doc["data"].(map[string]any)["results"].([]any)
-			if fixture == "rows" {
+			switch fixture {
+			case "rows":
 				require.Equal(t, "row_limit", doc["truncation_reason"])
 				require.Equal(t, "row_limit", results[0].(map[string]any)["truncation_reason"])
 				require.Equal(t, "row_limit", results[1].(map[string]any)["truncation_reason"])
-			} else if fixture == "results" {
+			case "results":
 				require.Len(t, results, 256)
 				require.Equal(t, "result_limit", doc["truncation_reason"])
-			} else {
+			default:
 				require.Equal(t, script.tags[0], results[0].(map[string]any)["command_tag"])
 			}
 		})
@@ -358,10 +359,14 @@ func TestMachineFullQuery_ExplicitFlagsCannotElevate(t *testing.T) {
 
 func TestMachineFullQuery_ApprovalFlagsQueryOnly(t *testing.T) {
 	for _, route := range [][]string{
-		{"connections", "list"}, {"connections", "show", "dev"}, {"connections", "test", "dev"},
-		{"schema", "list", "--connection=dev"}, {"schema", "tables", "--connection=dev", "--schema=public"},
+		{"connections", "list"},
+		{"connections", "show", "dev"},
+		{"connections", "test", "dev"},
+		{"schema", "list", "--connection=dev"},
+		{"schema", "tables", "--connection=dev", "--schema=public"},
 		{"schema", "describe", "--connection=dev", "--schema=public", "--table=example"},
-		{"schema", "relationships", "--connection=dev", "--schema=public", "--table=example"}, {"capabilities"},
+		{"schema", "relationships", "--connection=dev", "--schema=public", "--table=example"},
+		{"capabilities"},
 	} {
 		for _, flags := range [][]string{{"--approve"}, {"--confirm-connection=dev"}, {"--approve", "--confirm-connection=dev"}} {
 			t.Run(strings.Join(append(append([]string{}, route...), flags...), " "), func(t *testing.T) {
@@ -423,9 +428,14 @@ func TestMachineFullQuery_ApprovalHistory(t *testing.T) {
 
 func TestMachineFullQuery_ApprovalFlags(t *testing.T) {
 	for _, extra := range [][]string{
-		{"--approve"}, {"--confirm-connection=dev"}, {"--approve=false", "--confirm-connection=dev"},
-		{"--approve", "--approve", "--confirm-connection=dev"}, {"--approve", "--confirm-connection=dev", "--confirm-connection=dev"},
-		{"--approve", "--confirm-connection="}, {"--help", "--approve", "--confirm-connection=dev"}, {"--", "--approve", "--confirm-connection=dev"},
+		{"--approve"},
+		{"--confirm-connection=dev"},
+		{"--approve=false", "--confirm-connection=dev"},
+		{"--approve", "--approve", "--confirm-connection=dev"},
+		{"--approve", "--confirm-connection=dev", "--confirm-connection=dev"},
+		{"--approve", "--confirm-connection="},
+		{"--help", "--approve", "--confirm-connection=dev"},
+		{"--", "--approve", "--confirm-connection=dev"},
 	} {
 		t.Run(strings.Join(extra, " "), func(t *testing.T) {
 			service := InvocationService{Load: func() ([]models.Connection, error) { t.Fatal("malformed flags loaded profiles"); return nil, nil }, Approve: func(context.Context, ApprovalRequest) error { t.Fatal("malformed flags prompted"); return nil }}

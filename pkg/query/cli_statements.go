@@ -135,7 +135,7 @@ func (s *cliStatementContext) consume(token cliToken, parens int) (bool, error) 
 		s.routine = s.routine || s.count == 2 && s.prefix[0] == "CREATE" && (s.prefix[1] == "FUNCTION" || s.prefix[1] == "PROCEDURE") ||
 			s.count == 4 && s.prefix[0] == "CREATE" && s.prefix[1] == "OR" && s.prefix[2] == "REPLACE" && (s.prefix[3] == "FUNCTION" || s.prefix[3] == "PROCEDURE")
 	}
-	if s.copy.state != 0 && !(s.count == 1 && token.word == "COPY") {
+	if s.copy.state != 0 && (s.count != 1 || token.word != "COPY") {
 		if err := s.copy.consume(token, parens); err != nil {
 			return false, err
 		}
@@ -228,6 +228,7 @@ type cliLexer struct {
 func cliSpace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == '\v'
 }
+
 func cliIdentStart(b byte) bool {
 	return b >= 0x80 || b == '_' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
