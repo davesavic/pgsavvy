@@ -16,7 +16,7 @@ for pair in "GOOS:$host_os" "GOARCH:$host_arch" "GOHOSTOS:$host_os" "GOHOSTARCH:
 done
 [ "${PGSAVVY_EXPECT_GOOS:-$host_os}" = "$host_os" ]
 [ "${PGSAVVY_EXPECT_GOARCH:-$host_arch}" = "$host_arch" ]
-[ "$(go env GOVERSION)" = go1.26.9 ] || { echo 'Go 1.26.9 required' >&2; exit 1; }
+[ "$(go env GOVERSION)" = go1.26.10 ] || { echo 'Go 1.26.10 required' >&2; exit 1; }
 
 root=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/pgsavvy-native.XXXXXXXX")
 pg="$root/install/bin"

@@ -88,7 +88,7 @@ values and the expected workflow target before provisioning anything.
 
 ## Disposable fixture preflight
 
-Run from the repository root with **Go 1.26.9**. Unix additionally requires
+Run from the repository root with **Go 1.26.10**. Unix additionally requires
 Python 3, curl, tar/bzip2, a native C compiler, make, bison and flex. Windows
 requires native PowerShell 7. Nothing is installed globally. Do not run as root:
 PostgreSQL refuses root-owned clusters.
@@ -172,7 +172,7 @@ TestMachineCLI_BrokenWriter
 
 Windows additionally requires `TestMachineCLI_WindowsPipeDeadlineCapability`,
 which checks deadline support on both directions of the owned test pipe. The
-output fixture uses a duplex server handle so Go 1.26.9 can query completion
+output fixture uses a duplex server handle so Go 1.26.10 can query completion
 notification modes; its peer remains read-only, and the existing unread-output
 cancellation assertions and time limits are unchanged.
 
@@ -267,7 +267,7 @@ Already-nonblocking endpoints retain polling; other owners must not clear their
 
 ## Mac-first verification
 
-On an actual Intel or Apple Silicon Mac with Go 1.26.9:
+On an actual Intel or Apple Silicon Mac with Go 1.26.10:
 
 ```sh
 CGO_ENABLED=0 go build -o bin/pgsavvy .

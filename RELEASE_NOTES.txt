@@ -1,3 +1,13 @@
+pgsavvy v0.15.1
+
+  Build with Go 1.26.10 to address GO-2026-6809 in crypto/x509. Updated CI,
+  release and native-test toolchain pins consistently.
+
+  Enable and verify prepared transactions in the general CI PostgreSQL fixture,
+  matching the full-SQL integration tests' requirements. Added the four llm-help
+  test names to the fixed diagnostic allowlist so native Unix test preflight
+  accepts the committed test inventory without weakening privacy checks.
+
 pgsavvy v0.15.0
 
   Added pgsavvy llm-help: a single offline JSON guide for LLMs and scripts,

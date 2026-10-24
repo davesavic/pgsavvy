@@ -6,7 +6,7 @@ running, the test and lint workflow, and how to propose changes.
 
 ## Prerequisites
 
-- [Go 1.26](https://go.dev/dl/) or newer
+- [Go 1.26.10](https://go.dev/dl/) (project-pinned version)
 - [go-task](https://taskfile.dev) v3 — `go install github.com/go-task/task/v3/cmd/task@latest`
 - [golangci-lint](https://golangci-lint.run) v2 — `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`
 - [Docker Compose](https://docs.docker.com/compose/) — only for the integration-test fixtures
@@ -14,7 +14,7 @@ running, the test and lint workflow, and how to propose changes.
 ## Mise development setup
 
 [mise](https://mise.jdx.dev/getting-started.html) can install the development
-tools for you. The project's `mise.toml` pins Go 1.26.9, go-task 3.39.2, and
+tools for you. The project's `mise.toml` pins Go 1.26.10, go-task 3.39.2, and
 golangci-lint 2.12.2 to match CI. From the repository root:
 
 ```sh

@@ -90,7 +90,7 @@ try {
         if ($LASTEXITCODE -ne 0 -or $value -ne $arch) { throw 'non-native Go toolchain' }
     }
     $goVersion = & go env GOVERSION 2> $null
-    if ($LASTEXITCODE -ne 0 -or $goVersion -ne 'go1.26.9') { throw 'Go 1.26.9 required' }
+    if ($LASTEXITCODE -ne 0 -or $goVersion -ne 'go1.26.10') { throw 'Go 1.26.10 required' }
     if ($env:PGSAVVY_EXPECT_GOOS -and $env:PGSAVVY_EXPECT_GOOS -ne 'windows') { throw 'wrong runner OS' }
     if ($env:PGSAVVY_EXPECT_GOARCH -and $env:PGSAVVY_EXPECT_GOARCH -ne $arch) { throw 'wrong runner architecture' }
 

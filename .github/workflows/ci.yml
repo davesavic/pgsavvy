@@ -22,7 +22,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.26.9'
+          go-version: '1.26.10'
           cache: true
 
       - uses: arduino/setup-task@b91d5d2c96a56797b48ac1e0e89220bf64044611 # v2
@@ -61,7 +61,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.26.9'
+          go-version: '1.26.10'
           cache: true
 
       - uses: arduino/setup-task@b91d5d2c96a56797b48ac1e0e89220bf64044611 # v2
@@ -72,6 +72,18 @@ jobs:
       - name: Wait for postgres
         run: until pg_isready -h localhost -U pgsavvy; do sleep 1; done
         timeout-minutes: 2
+
+      - name: Enable and verify prepared transactions in owned Docker fixture
+        shell: bash
+        run: |
+          container='${{ job.services.postgres.id }}'
+          docker exec "$container" psql -v ON_ERROR_STOP=1 -U pgsavvy -d pgsavvy_test -c 'ALTER SYSTEM SET max_prepared_transactions = 20'
+          docker restart "$container"
+          for attempt in {1..60}; do
+            if docker exec "$container" pg_isready -U pgsavvy -d pgsavvy_test; then break; fi
+            sleep 1
+          done
+          test "$(docker exec "$container" psql -At -v ON_ERROR_STOP=1 -U pgsavvy -d pgsavvy_test -c 'SHOW max_prepared_transactions')" = 20
 
       - name: Apply fixture
         run: |
