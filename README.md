@@ -151,6 +151,21 @@ for a source build, use `./bin/pgsavvy` after `task build`.
 
 ### Discover commands without source code
 
+For LLMs and agent tools, start with one command:
+
+```sh
+pgsavvy llm-help
+```
+
+It returns a self-contained JSON guide: every machine command and its usage,
+global flags, workflow examples, access/approval rules, output formats, limits,
+exit codes and recovery guidance. It is offline and does not read profiles,
+SQL stdin or credentials, contact a database, or create history. Examples use
+placeholder names; select an actual saved profile and obtain authorization
+before changing access or approving writes.
+
+Shorter discovery commands remain available:
+
 ```sh
 pgsavvy --help
 pgsavvy capabilities
@@ -161,8 +176,8 @@ pgsavvy query --help
 
 Help is JSON too. `capabilities` is the machine-readable command catalogue:
 it lists command usage, required profile access, global flags, platform, limits
-and exit codes. Scripts and LLMs can inspect this output instead of guessing
-commands or needing repository access. Re-check the installed binary rather
+and exit codes. Use `llm-help` for the complete guide rather than repeatedly
+probing individual help commands. Re-check the installed binary rather
 than assuming another version supports the same commands.
 
 ### Enable access on a saved profile

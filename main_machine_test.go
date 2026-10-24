@@ -116,12 +116,12 @@ func machineTestDocument(t *testing.T, output []byte, exit int) map[string]any {
 
 func TestMachineCLINative_Discovery(t *testing.T) {
 	root := t.TempDir()
-	for _, args := range [][]string{{"--help"}, {"connections", "--help"}, {"schema", "--help"}, {"query", "--help"}} {
+	for _, args := range [][]string{{"--help"}, {"connections", "--help"}, {"schema", "--help"}, {"query", "--help"}, {"llm-help"}, {"llm-help", "--help"}} {
 		machineTestRun(t, root, "", 0, args...)
 	}
 	doc := machineTestRun(t, root, "", 0, "capabilities")
 	data := doc["data"].(map[string]any)
-	if data["platform"] != runtime.GOOS || len(data["commands"].([]any)) != 9 {
+	if data["platform"] != runtime.GOOS || len(data["commands"].([]any)) != 10 {
 		t.Fatal("capabilities did not match native command registry")
 	}
 	doc = machineTestRun(t, root, "", 0, "connections", "list")
@@ -132,6 +132,7 @@ func TestMachineCLINative_Discovery(t *testing.T) {
 	if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
 		t.Fatal("offline CLI created configuration, logs, history or other state")
 	}
+	t.Run("llm-help", machineTestLLMHelpOffline)
 }
 
 func TestMachineCLINative_ProfilePolicyAndInput(t *testing.T) {

@@ -4,7 +4,7 @@ Linux and macOS share machine CLI dispatch; Windows retains legacy startup.
 The macOS implementation in this source tree awaits native acceptance; a
 cross-build is not evidence that its runtime contract has passed.
 Production dispatch composes the implemented
-connection, catalog, query and capability handlers before legacy startup.
+connection, catalog, query, capability and LLM-guide handlers before legacy startup.
 It never initializes TUI configuration, persistent logs or themes. Explicit state
 exceptions are the persistent approval lock described below and opted-in history:
 a query may append to the shared history
@@ -53,6 +53,15 @@ overflow drains later SQL/COMMIT before returning a resource error; a protocol
 message exceeding 8 MiB or transport failure can abort with unknown outcome.
 `--timeout` may lower the invocation budget; `--format json` is the only format.
 Duplicate/conflicting/unknown flags are errors. Command-specific help is JSON.
+
+`pgsavvy llm-help` (also `pgsavvy llm-help --help`) returns the complete offline
+LLM operating guide in this same envelope. It shares the command catalogue,
+usage strings, global flags, limits, exit codes and query policy with
+`capabilities`, and adds workflow examples, permission/approval guidance,
+result interpretation and recovery rules. Global `--format json` and `--timeout`
+apply normally. It does not read profile configuration or SQL stdin, acquire
+credentials or approval, connect to a database, or create history/log/config
+artifacts. Examples are not permission to change saved policy or approve writes.
 
 The invocation reserves up to four seconds, or 40% of a shorter budget, inside
 its deadline: half for cleanup and half for publication (publication at most two

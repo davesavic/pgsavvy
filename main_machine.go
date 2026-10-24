@@ -39,7 +39,7 @@ func runMachine(args []string) (bool, int) {
 	})
 	defer finishAcquisition()
 	service := cli.InvocationService{Approve: cli.NewTerminalApprovalProvider(machineio.OpenApprovalTerminal)}
-	registry := map[string]cli.Command{"connections": cli.ConnectionsCommand(service), "schema": cli.SchemaCommand(service), "query": cli.QueryCommand(service), "capabilities": cli.CapabilitiesCommand()}
+	registry := map[string]cli.Command{"connections": cli.ConnectionsCommand(service), "schema": cli.SchemaCommand(service), "query": cli.QueryCommand(service), "capabilities": cli.CapabilitiesCommand(), "llm-help": cli.LLMHelpCommand()}
 	var out io.WriteCloser
 	setupFailure := func() (bool, int) {
 		exit, code := cli.ExitResource, cli.ResourceFailure

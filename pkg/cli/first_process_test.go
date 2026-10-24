@@ -442,7 +442,7 @@ func TestMachineCLIProcess_Discovery(t *testing.T) {
 	}
 	doc = f.run(t, 0, "capabilities")
 	commands := doc["data"].(map[string]any)["commands"].([]any)
-	if len(commands) != 9 {
+	if len(commands) != 10 {
 		t.Fatal("capability registry mismatch")
 	}
 	for _, args := range [][]string{{"unknown_SECRET_command"}, {"--version", "unknown_SECRET_command"}, {"query", "--connection", "x", "--file", "-", "--format", "yaml"}, {"connections", "list", "--format", "json", "--format", "json"}} {

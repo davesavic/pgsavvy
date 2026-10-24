@@ -63,7 +63,7 @@ func TestMachineConnections_Capabilities(t *testing.T) {
 	}
 	data := envelope.Data.(map[string]any)
 	commands := data["commands"].([]capabilityCommand)
-	if len(commands) != 9 || data["platform"] != runtime.GOOS || data["catalog_visibility_implies_row_access"] != false {
+	if len(commands) != 10 || data["platform"] != runtime.GOOS || data["catalog_visibility_implies_row_access"] != false {
 		t.Fatal("capabilities do not describe production scope")
 	}
 	seen := map[string]bool{}
@@ -73,7 +73,7 @@ func TestMachineConnections_Capabilities(t *testing.T) {
 		}
 		seen[command.Command] = true
 	}
-	for _, name := range []string{"connections list", "connections show", "connections test", "schema list", "schema tables", "schema describe", "schema relationships", "query", "capabilities"} {
+	for _, name := range []string{"connections list", "connections show", "connections test", "schema list", "schema tables", "schema describe", "schema relationships", "query", "capabilities", "llm-help"} {
 		if !seen[name] {
 			t.Fatal("missing implemented capability")
 		}

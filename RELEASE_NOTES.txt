@@ -1,5 +1,10 @@
 pgsavvy v0.15.0
 
+  Added pgsavvy llm-help: a single offline JSON guide for LLMs and scripts,
+  with all machine commands, usage, workflow examples, permissions, approvals,
+  output formats, limits, exit codes and recovery rules. The guide shares the
+  existing capability catalogue and needs no profile or database access.
+
   Added opt-in full SQL access for the Linux/macOS machine CLI. Set a saved
   profile to cli_access: full and read_only: false to execute writes, DDL and
   maintenance commands within PostgreSQL privileges. Existing CLI policies and
