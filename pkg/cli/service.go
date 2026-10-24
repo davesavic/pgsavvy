@@ -21,6 +21,7 @@ import (
 type InvocationService struct {
 	Load    func() ([]models.Connection, error)
 	Options pg.MachineOptions
+	Approve ApprovalProvider
 
 	// Private seams carry verified consent provenance, never arbitrary Load
 	// output. Production reads trusted saved metadata; tests inject fixtures.
