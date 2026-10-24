@@ -263,6 +263,7 @@ var cliAccessOptions = []models.CLIAccess{
 	models.CLIAccessDisabled,
 	models.CLIAccessMetadata,
 	models.CLIAccessRowRead,
+	models.CLIAccessFull,
 }
 
 func (f *connForm) cycleCLIAccess() {

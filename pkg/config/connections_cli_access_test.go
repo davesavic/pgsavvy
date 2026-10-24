@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -11,8 +12,8 @@ import (
 )
 
 func TestUpdateConnectionWithCLIAccess(t *testing.T) {
-	for _, original := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead} {
-		for _, selected := range []models.CLIAccess{models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead} {
+	for _, original := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead, models.CLIAccessFull} {
+		for _, selected := range []models.CLIAccess{models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead, models.CLIAccessFull} {
 			t.Run(string(original)+"_to_"+string(selected), func(t *testing.T) {
 				fs := newConnectionsTestFs()
 				const path = "/private/connections.yml"
@@ -26,6 +27,71 @@ func TestUpdateConnectionWithCLIAccess(t *testing.T) {
 				got, err := LoadConnections(fs, path)
 				if err != nil || len(got) != 2 || got[0].Name != conn.Name || got[0].Label != conn.Label || got[0].CLIAccess != selected || got[1].CLIAccess != models.CLIAccessMetadata {
 					t.Fatalf("saved profiles = %v, error = %v", got, err)
+				}
+			})
+		}
+	}
+}
+
+func TestUpdateConnectionFullCooperatingRevocation(t *testing.T) {
+	for _, revocation := range []string{"access", "history", "both"} {
+		for _, edit := range []string{"ordinary", "access", "combined"} {
+			t.Run(revocation+"/"+edit, func(t *testing.T) {
+				fs := newConnectionsTestFs()
+				const path = "/private/connections.yml"
+				initial := models.Connection{Name: "dev", CLIAccess: models.CLIAccessFull, CLIHistory: true, ConfirmWrites: true, ConfirmDDL: true}
+				neighbor := models.Connection{Name: "other", CLIAccess: models.CLIAccessMetadata, CLIHistory: true}
+				if err := SaveConnections(fs, path, []models.Connection{initial, neighbor}); err != nil {
+					t.Fatal(err)
+				}
+				// A cooperating save revokes consent after the stale form was opened.
+				revoked := initial
+				if revocation != "history" {
+					revoked.CLIAccess = models.CLIAccessDisabled
+				}
+				if revocation != "access" {
+					revoked.CLIHistory = false
+				}
+				if err := UpdateConnectionWithCLISettings(fs, path, "dev", revoked, &initial.CLIAccess, &initial.CLIHistory); err != nil {
+					t.Fatal(err)
+				}
+				before, err := afero.ReadFile(fs, path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stale := initial
+				stale.Name, stale.Label = "renamed", "edited"
+				var access *models.CLIAccess
+				var history *bool
+				if edit != "ordinary" {
+					access = &initial.CLIAccess
+					stale.CLIAccess = models.CLIAccessMetadata
+				}
+				if edit == "combined" {
+					history = &initial.CLIHistory
+				}
+				err = UpdateConnectionWithCLISettings(fs, path, "dev", stale, access, history)
+				conflict := edit == "combined" || (edit == "access" && revocation != "history")
+				if conflict {
+					if !errors.Is(err, ErrConnectionsChanged) {
+						t.Fatalf("stale explicit edit error = %v", err)
+					}
+					after, readErr := afero.ReadFile(fs, path)
+					if readErr != nil || !bytes.Equal(before, after) {
+						t.Fatal("stale explicit edit changed file")
+					}
+				} else {
+					if err != nil {
+						t.Fatal(err)
+					}
+					revoked.Name, revoked.Label = stale.Name, stale.Label
+					if access != nil {
+						revoked.CLIAccess = stale.CLIAccess
+					}
+				}
+				got, err := LoadConnections(fs, path)
+				if err != nil || len(got) != 2 || !reflect.DeepEqual(got[0], revoked) || !reflect.DeepEqual(got[1], neighbor) {
+					t.Fatalf("revocation or neighboring profile changed: %v, %v", got, err)
 				}
 			})
 		}

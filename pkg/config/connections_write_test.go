@@ -304,7 +304,7 @@ func TestIsInlinePasswordPresent(t *testing.T) {
 }
 
 func TestMachineAccess_RoundTrip(t *testing.T) {
-	for _, policy := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead} {
+	for _, policy := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead, models.CLIAccessFull} {
 		t.Run(string(policy), func(t *testing.T) {
 			fs := newConnectionsTestFs()
 			conns := []models.Connection{{Name: "dev", CLIAccess: policy}}
@@ -339,7 +339,7 @@ func TestMachineAccess_RoundTrip(t *testing.T) {
 
 func TestMachineAccess_FormPreservation(t *testing.T) {
 	for _, renamed := range []bool{false, true} {
-		for _, policy := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead} {
+		for _, policy := range []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead, models.CLIAccessFull} {
 			fs := newConnectionsTestFs()
 			stale := models.Connection{Name: "dev", CLIAccess: models.CLIAccessRowRead}
 			if renamed {
@@ -358,6 +358,26 @@ func TestMachineAccess_FormPreservation(t *testing.T) {
 			}
 			if stale.CLIAccess != models.CLIAccessRowRead {
 				t.Fatal("caller copy mutated")
+			}
+		}
+	}
+}
+
+func TestMachineAccess_FullSafeguardsRoundTrip(t *testing.T) {
+	for _, writes := range []bool{false, true} {
+		for _, ddl := range []bool{false, true} {
+			for _, readOnly := range []bool{false, true} {
+				for _, history := range []bool{false, true} {
+					fs := newConnectionsTestFs()
+					want := models.Connection{Name: "dev", CLIAccess: models.CLIAccessFull, ConfirmWrites: writes, ConfirmDDL: ddl, ReadOnly: readOnly, CLIHistory: history}
+					if err := SaveConnections(fs, "/c.yml", []models.Connection{want}); err != nil {
+						t.Fatal(err)
+					}
+					got, err := LoadConnections(fs, "/c.yml")
+					if err != nil || len(got) != 1 || !reflect.DeepEqual(want, got[0]) {
+						t.Fatalf("full policy safeguards: want %+v, got %v, %v", want, got, err)
+					}
+				}
 			}
 		}
 	}

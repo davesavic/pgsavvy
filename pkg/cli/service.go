@@ -96,8 +96,7 @@ func (s InvocationService) openProfile(ctx context.Context, profile models.Conne
 	if ctx.Err() != nil {
 		return nil, models.Connection{}, &PublicError{Code: Timeout}
 	}
-	access := profile.EffectiveCLIAccess()
-	if access == models.CLIAccessDisabled || (required == models.CLIAccessRowRead && access != models.CLIAccessRowRead) {
+	if !profile.EffectiveCLIAccess().AllowsCLIAccess(required) {
 		return nil, models.Connection{}, &PublicError{Code: PolicyDenied}
 	}
 	options := s.Options

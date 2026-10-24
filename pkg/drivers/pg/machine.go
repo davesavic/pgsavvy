@@ -101,10 +101,7 @@ func watchMachine(ctx context.Context, abort func()) func() {
 
 func OpenMachine(ctx context.Context, profile models.Connection, options MachineOptions) (*MachineClient, error) {
 	access := profile.EffectiveCLIAccess()
-	if access == models.CLIAccessDisabled || (options.RequiredAccess == models.CLIAccessRowRead && access != models.CLIAccessRowRead) {
-		return nil, &MachineError{Code: "POLICY_DENIED"}
-	}
-	if options.RequiredAccess != "" && options.RequiredAccess != models.CLIAccessMetadata && options.RequiredAccess != models.CLIAccessRowRead {
+	if !access.AllowsCLIAccess(options.RequiredAccess) {
 		return nil, &MachineError{Code: "POLICY_DENIED"}
 	}
 	if ctx.Err() != nil {

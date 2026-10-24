@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -21,7 +22,56 @@ import (
 
 	"github.com/davesavic/pgsavvy/pkg/drivers/pg"
 	"github.com/davesavic/pgsavvy/pkg/models"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
+
+func TestMachineFullAccessPolicy_Service(t *testing.T) {
+	requirements := []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead, "full", "invalid", "FULL"}
+	for _, tc := range []struct {
+		access  models.CLIAccess
+		allowed [7]bool
+	}{
+		{"", [7]bool{}},
+		{models.CLIAccessDisabled, [7]bool{}},
+		{models.CLIAccessMetadata, [7]bool{true, false, true}},
+		{models.CLIAccessRowRead, [7]bool{true, false, true, true}},
+		{"full", [7]bool{true, false, true, true, true}},
+		{"invalid", [7]bool{}},
+		{"FULL", [7]bool{}},
+	} {
+		for index, required := range requirements {
+			for flags := range 8 {
+				t.Run(fmt.Sprintf("%s/%s/flags%d", tc.access, required, flags), func(t *testing.T) {
+					profile := models.Connection{Name: "exact", Driver: "postgres", CLIAccess: tc.access, ReadOnly: flags&1 != 0, ConfirmWrites: flags&2 != 0, ConfirmDDL: flags&4 != 0, PasswordCommand: "SECRET helper"}
+					parses, helpers, dials := 0, 0, 0
+					service := InvocationService{Load: func() ([]models.Connection, error) { return []models.Connection{profile}, nil }, Options: pg.MachineOptions{
+						ParseConfig: func(_ context.Context, got models.Connection) (*pgx.ConnConfig, error) {
+							parses++
+							if got.ReadOnly != profile.ReadOnly || got.ConfirmWrites != profile.ConfirmWrites || got.ConfirmDDL != profile.ConfirmDDL || got.CLIAccess != profile.CLIAccess {
+								t.Error("connection safeguards changed")
+							}
+							return nil, errors.New("SECRET parse failure")
+						},
+						Credentials: session.MachineCredentialOptions{Exec: func(context.Context, string) (string, error) { helpers++; return "SECRET", nil }},
+						Dial: func(context.Context, string, string) (net.Conn, error) {
+							dials++
+							return nil, errors.New("SECRET network")
+						},
+					}}
+					client, _, err := service.Open(context.Background(), profile.Name, required)
+					wantCode, wantParses := PolicyDenied, 0
+					if tc.allowed[index] {
+						wantCode, wantParses = ConnectionUnavailable, 1
+					}
+					var safe *PublicError
+					if client != nil || !errors.As(err, &safe) || safe.Code != wantCode || parses != wantParses || helpers != 0 || dials != 0 || strings.Contains(err.Error(), "SECRET") {
+						t.Fatalf("code=%v parses=%d helpers=%d dials=%d", err, parses, helpers, dials)
+					}
+				})
+			}
+		}
+	}
+}
 
 func TestMachineOpen_PolicyOrder(t *testing.T) {
 	for _, tc := range []struct {

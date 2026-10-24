@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -256,6 +257,187 @@ func TestMachineOpen_Initialization(t *testing.T) {
 	}
 	if fixture.startup["client_encoding"] != "UTF8" || fixture.connections.Load() != 1 {
 		t.Fatal("startup defaults/single ownership lost")
+	}
+}
+
+func TestMachineFullAccessPolicy(t *testing.T) {
+	machineTestEnvironment(t)
+	fixture := newMachineWireFixture(t)
+	requirements := []models.CLIAccess{"", models.CLIAccessDisabled, models.CLIAccessMetadata, models.CLIAccessRowRead, "full", "invalid", "FULL"}
+	for _, tc := range []struct {
+		access  models.CLIAccess
+		allowed [7]bool
+	}{
+		{"", [7]bool{}},
+		{models.CLIAccessDisabled, [7]bool{}},
+		{models.CLIAccessMetadata, [7]bool{true, false, true}},
+		{models.CLIAccessRowRead, [7]bool{true, false, true, true}},
+		{"full", [7]bool{true, false, true, true, true}},
+		{"invalid", [7]bool{}},
+		{"FULL", [7]bool{}},
+	} {
+		for index, required := range requirements {
+			for flags := range 8 {
+				t.Run(fmt.Sprintf("%s/%s/flags%d", tc.access, required, flags), func(t *testing.T) {
+					profile := fixture.profile(t)
+					profile.CLIAccess, profile.ReadOnly = tc.access, flags&1 != 0
+					profile.ConfirmWrites, profile.ConfirmDDL = flags&2 != 0, flags&4 != 0
+					profile.Password, profile.PasswordCommand = "", "SECRET helper"
+					parses, helpers, dials := 0, 0, 0
+					client, err := OpenMachine(context.Background(), profile, MachineOptions{
+						RequiredAccess: required,
+						ParseConfig: func(ctx context.Context, got models.Connection) (*pgx.ConnConfig, error) {
+							parses++
+							if got.ReadOnly != profile.ReadOnly || got.ConfirmWrites != profile.ConfirmWrites || got.ConfirmDDL != profile.ConfirmDDL {
+								t.Error("connection safeguards changed")
+							}
+							return session.BuildMachineConfig(ctx, got)
+						},
+						Credentials: session.MachineCredentialOptions{Exec: func(context.Context, string) (string, error) { helpers++; return "synthetic", nil }},
+						Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+							dials++
+							return (&net.Dialer{}).DialContext(ctx, network, addr)
+						},
+					})
+					if !tc.allowed[index] {
+						var safe *MachineError
+						if client != nil || !errors.As(err, &safe) || safe.Code != "POLICY_DENIED" || parses != 0 || helpers != 0 || dials != 0 {
+							t.Fatalf("denied open: err=%v parses=%d helpers=%d dials=%d", err, parses, helpers, dials)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer func() {
+						if err := client.Close(context.Background()); err != nil {
+							t.Error(err)
+						}
+					}()
+					if parses != 1 || helpers != 1 || dials != 1 || client.access != tc.access {
+						t.Fatalf("allowed open: parses=%d helpers=%d dials=%d access=%q", parses, helpers, dials, client.access)
+					}
+					if _, err := client.Inspect(context.Background(), MachineMetadataRequest{Operation: MachineSchemas}); err != nil {
+						t.Fatalf("metadata implied: %v", err)
+					}
+					_, err = client.QueryReadOnly(context.Background(), MachineQuery{SQL: "SELECT 1"})
+					if tc.access == models.CLIAccessMetadata {
+						var safe *MachineError
+						if !errors.As(err, &safe) || safe.Code != "POLICY_DENIED" {
+							t.Fatalf("metadata queried rows: %v", err)
+						}
+					} else if err != nil {
+						t.Fatalf("guarded read implied: %v", err)
+					}
+					for _, sql := range []string{"DELETE FROM secret", "SELECT 1; SELECT 2", "SELECT * FROM secret FOR UPDATE", "WITH changed AS (DELETE FROM secret RETURNING *) SELECT * FROM changed"} {
+						_, err := client.QueryReadOnly(context.Background(), MachineQuery{SQL: sql})
+						want := "UNSUPPORTED_SQL"
+						if tc.access == models.CLIAccessMetadata {
+							want = "POLICY_DENIED"
+						}
+						var safe *MachineError
+						if !errors.As(err, &safe) || safe.Code != want {
+							t.Fatalf("unguarded SQL %q: %v", sql, err)
+						}
+					}
+				})
+			}
+		}
+	}
+	fixture.mu.Lock()
+	defer fixture.mu.Unlock()
+	counts := map[string]int{}
+	for _, sql := range fixture.queries {
+		counts[sql]++
+		if strings.Contains(sql, "secret") || sql == "SET default_transaction_read_only=off" || sql == "COMMIT" {
+			t.Errorf("unguarded execution: %s", sql)
+		}
+	}
+	if counts["SET default_transaction_read_only=on"] != 72 || counts["BEGIN READ ONLY"] != 56 || counts["BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"] != 72 || counts["ROLLBACK"] != 128 {
+		t.Fatalf("read-only transaction invariants changed: %v", counts)
+	}
+}
+
+func TestMachineFullAccessPolicy_Gates(t *testing.T) {
+	for _, tc := range []struct {
+		access                 models.CLIAccess
+		queryCode, inspectCode string
+	}{
+		{"", "POLICY_DENIED", "POLICY_DENIED"},
+		{models.CLIAccessDisabled, "POLICY_DENIED", "POLICY_DENIED"},
+		{models.CLIAccessMetadata, "POLICY_DENIED", "INVALID_INPUT"},
+		{models.CLIAccessRowRead, "UNSUPPORTED_SQL", "INVALID_INPUT"},
+		{models.CLIAccessFull, "UNSUPPORTED_SQL", "INVALID_INPUT"},
+		{"invalid", "POLICY_DENIED", "POLICY_DENIED"},
+		{"FULL", "POLICY_DENIED", "POLICY_DENIED"},
+	} {
+		t.Run(string(tc.access), func(t *testing.T) {
+			client := &MachineClient{access: tc.access}
+			_, err := client.QueryReadOnly(context.Background(), MachineQuery{SQL: "DELETE FROM secret"})
+			var safe *MachineError
+			if !errors.As(err, &safe) || safe.Code != tc.queryCode {
+				t.Fatalf("query boundary: %v", err)
+			}
+			_, err = client.Inspect(context.Background(), MachineMetadataRequest{Operation: "invalid"})
+			if !errors.As(err, &safe) || safe.Code != tc.inspectCode {
+				t.Fatalf("metadata boundary: %v", err)
+			}
+		})
+	}
+}
+
+func TestMachineFullAccessPolicy_Concurrent(t *testing.T) {
+	machineTestEnvironment(t)
+	fixture := newMachineWireFixture(t)
+	var wg sync.WaitGroup
+	for _, access := range []models.CLIAccess{"full", models.CLIAccessMetadata, models.CLIAccessRowRead, "full"} {
+		wg.Go(func() {
+			profile := fixture.profile(t)
+			profile.CLIAccess = access
+			client, err := OpenMachine(context.Background(), profile, MachineOptions{RequiredAccess: access})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if client.access != access {
+				t.Errorf("access leaked between opens: %q != %q", client.access, access)
+			}
+			if _, err := client.Inspect(context.Background(), MachineMetadataRequest{Operation: MachineSchemas}); err != nil {
+				t.Error(err)
+			}
+			_, err = client.QueryReadOnly(context.Background(), MachineQuery{SQL: "SELECT 1"})
+			if access == models.CLIAccessMetadata {
+				var safe *MachineError
+				if !errors.As(err, &safe) || safe.Code != "POLICY_DENIED" {
+					t.Errorf("metadata inherited row access: %v", err)
+				}
+			} else if err != nil {
+				t.Error(err)
+			}
+			if err := client.Close(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	if fixture.connections.Load() != 4 {
+		t.Fatalf("independent opens: connections=%d", fixture.connections.Load())
+	}
+}
+
+func TestMachineFullAccessPolicy_NetworkPrivacy(t *testing.T) {
+	machineTestEnvironment(t)
+	fixture := newMachineWireFixture(t)
+	profile := fixture.profile(t)
+	profile.CLIAccess = "full"
+	dials := 0
+	_, err := OpenMachine(context.Background(), profile, MachineOptions{RequiredAccess: "full", Dial: func(context.Context, string, string) (net.Conn, error) {
+		dials++
+		return nil, errors.New("SECRET DSN HELPER SQL")
+	}})
+	var safe *MachineError
+	if !errors.As(err, &safe) || safe.Code != "CONNECTION_UNAVAILABLE" || strings.Contains(err.Error(), "SECRET") || dials != 1 {
+		t.Fatalf("network privacy: %v dials=%d", err, dials)
 	}
 }
 

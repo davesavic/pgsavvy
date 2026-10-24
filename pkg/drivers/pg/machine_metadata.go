@@ -169,7 +169,7 @@ func (c *MachineClient) catalog(ctx context.Context, sql string, parameters [][]
 }
 
 func (c *MachineClient) Inspect(ctx context.Context, request MachineMetadataRequest) (MachineMetadata, error) {
-	if c.access != models.CLIAccessMetadata && c.access != models.CLIAccessRowRead {
+	if !c.access.AllowsCLIAccess(models.CLIAccessMetadata) {
 		return MachineMetadata{}, &MachineError{Code: "POLICY_DENIED"}
 	}
 	if !metadataText(request.Schema) || !metadataText(request.Table) || !metadataText(request.After) {

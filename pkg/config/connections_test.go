@@ -39,6 +39,19 @@ func TestMachineAccess_Validation(t *testing.T) {
 			t.Fatal("load rewrote file")
 		}
 	}
+	fs := afero.NewMemMapFs()
+	body := []byte("connections:\n  - name: dev\n    cli_access: full\n")
+	if err := afero.WriteFile(fs, "/c.yml", body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadConnections(fs, "/c.yml")
+	if err != nil || len(got) != 1 || got[0].CLIAccess != models.CLIAccessFull || got[0].EffectiveCLIAccess() != models.CLIAccessFull {
+		t.Fatalf("explicit full policy: %v, %v", got, err)
+	}
+	after, err := afero.ReadFile(fs, "/c.yml")
+	if err != nil || !bytes.Equal(body, after) {
+		t.Fatal("loading full policy rewrote file")
+	}
 }
 
 func TestCLIHistoryConsent_StrictYAML(t *testing.T) {

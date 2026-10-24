@@ -126,7 +126,7 @@ func checkMachineAST(ctx context.Context, value reflect.Value, depth int) error 
 
 func (c *MachineClient) QueryReadOnly(ctx context.Context, request MachineQuery) (MachineQueryResult, error) {
 	result := MachineQueryResult{Columns: []MachineColumn{}, Rows: [][]*string{}}
-	if c.access != models.CLIAccessRowRead {
+	if !c.access.AllowsCLIAccess(models.CLIAccessRowRead) {
 		return result, &MachineError{Code: "POLICY_DENIED"}
 	}
 	if err := ValidateMachineQuery(ctx, request.SQL); err != nil {

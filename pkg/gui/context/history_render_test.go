@@ -92,8 +92,8 @@ func TestHistoryDisplay_MetadataAndNarrow(t *testing.T) {
 	defer theme.SetMonochromeForTest(true)()
 	for _, outcome := range []string{"succeeded", "failed", "blocked"} {
 		got := formatHistoryRow(query.HistoryRow{Source: "cli", Outcome: outcome, ConnectionID: "profile", SQL: "SELECT 1"}, time.Now())
-		require.True(t, strings.HasPrefix(got, "[cli "+outcome+"] profile |"))
-		require.Contains(t, string([]rune(got)[:min(32, len([]rune(got)))]), "[cli "+outcome+"] profile")
+		require.True(t, strings.HasPrefix(got, "effects unverified | [cli "+outcome+"] profile |"))
+		require.Contains(t, truncateToWidth(got, 64), "[cli "+outcome+"] profile")
 	}
 	for _, succeeded := range []bool{false, true} {
 		got := formatHistoryRow(query.HistoryRow{Succeeded: succeeded, SQL: "SELECT legacy"}, time.Now())
@@ -125,5 +125,32 @@ func TestHistoryDisplay_DuplicateSQL(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, expected, selected)
 		require.Equal(t, sql, selected.SQL)
+	}
+}
+
+func TestHistoryDisplay_CLIEffectsUnverified(t *testing.T) {
+	for _, mono := range []bool{false, true} {
+		t.Run(fmt.Sprintf("monochrome_%t", mono), func(t *testing.T) {
+			defer theme.SetMonochromeForTest(mono)()
+			for _, outcome := range []string{"succeeded", "failed", "blocked", "unknown", "", strings.Repeat("失", 24)} {
+				for _, succeeded := range []bool{false, true} {
+					row := query.HistoryRow{Source: "cli", Outcome: outcome, Succeeded: succeeded, ConnectionID: strings.Repeat("日", 24), SQL: "SELECT '日本語'\n-- original"}
+					c := newTestHistory([]query.HistoryRow{row}, &captureDriver{})
+					got := formatHistoryBody(c.rows, c.Cursor(), time.Now())
+					require.Contains(t, got, "effects unverified")
+					for _, width := range []int{64, 32} {
+						require.Contains(t, truncateToWidth(sanitizeHistoryText(got), width), "effects unverified", "warning must fit in %d terminal columns before wide metadata", width)
+					}
+					require.Contains(t, got, "日本語")
+					selected, ok := c.Selected()
+					require.True(t, ok)
+					require.Equal(t, row, selected, "warning must not change original SQL or recall data")
+					row.Source = "tui"
+					require.NotContains(t, formatHistoryRow(row, time.Now()), "effects unverified")
+				}
+			}
+			require.Contains(t, formatHistoryRow(query.HistoryRow{Source: "cli"}, time.Now()), "effects unverified")
+			require.Equal(t, historyEmptyLine, formatHistoryBody(nil, 0, time.Now()))
+		})
 	}
 }
