@@ -177,7 +177,7 @@ func formatHistoryBody(rows []query.HistoryRow, cursor int, now time.Time) strin
 	return b.String()
 }
 
-// CLI uncertainty precedes variable-width metadata so narrow layouts retain it. Sanitize
+// Recorded outcomes precede CLI uncertainty so narrow layouts retain the result. Sanitize
 // before highlighting/truncation; original rows remain unchanged for recall.
 func formatHistoryRow(r query.HistoryRow, now time.Time) string {
 	source, outcome := r.Source, r.Outcome
@@ -199,8 +199,8 @@ func formatHistoryRow(r query.HistoryRow, now time.Time) string {
 		effects = "effects unverified | "
 	}
 	return fmt.Sprintf(
-		"%s[%s %s] %s | %s %s %s  %s",
-		effects, truncateHistorySQL(source, 12), truncateHistorySQL(outcome, 12), profile,
+		"[%s %s] %s%s | %s %s %s  %s",
+		truncateHistorySQL(source, 12), truncateHistorySQL(outcome, 12), effects, profile,
 		highlight.Highlight(truncateHistorySQL(r.SQL, historyDisplayWidth)),
 		historyGlyph(outcome == "succeeded"),
 		formatRelativeTime(now, time.UnixMilli(r.ExecutedAt)),

@@ -92,8 +92,8 @@ func TestHistoryDisplay_MetadataAndNarrow(t *testing.T) {
 	defer theme.SetMonochromeForTest(true)()
 	for _, outcome := range []string{"succeeded", "failed", "blocked"} {
 		got := formatHistoryRow(query.HistoryRow{Source: "cli", Outcome: outcome, ConnectionID: "profile", SQL: "SELECT 1"}, time.Now())
-		require.True(t, strings.HasPrefix(got, "effects unverified | [cli "+outcome+"] profile |"))
-		require.Contains(t, truncateToWidth(got, 64), "[cli "+outcome+"] profile")
+		require.True(t, strings.HasPrefix(got, "[cli "+outcome+"] effects unverified | profile |"))
+		require.Contains(t, truncateToWidth(got, 32), "[cli "+outcome+"]")
 	}
 	for _, succeeded := range []bool{false, true} {
 		got := formatHistoryRow(query.HistoryRow{Succeeded: succeeded, SQL: "SELECT legacy"}, time.Now())
@@ -117,7 +117,7 @@ func TestHistoryDisplay_DuplicateSQL(t *testing.T) {
 	c := newTestHistory(rows, &captureDriver{})
 	body := formatHistoryBody(c.rows, 0, time.Now())
 	require.Len(t, strings.Split(body, "\n"), 2)
-	require.Contains(t, body, "[cli blocked] reporting")
+	require.Contains(t, body, "[cli blocked] effects unverified | reporting")
 	require.Contains(t, body, "[tui succeeded] local")
 	for i, expected := range rows {
 		c.SetCursor(i)
@@ -125,6 +125,32 @@ func TestHistoryDisplay_DuplicateSQL(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, expected, selected)
 		require.Equal(t, sql, selected.SQL)
+	}
+}
+
+func TestHistoryDisplay_CLIOutcomeBeforeEffectsWarning(t *testing.T) {
+	defer theme.SetMonochromeForTest(true)()
+	for _, tc := range []struct {
+		name    string
+		sql     string
+		outcome string
+	}{
+		{"select_batch", "BEGIN READ ONLY; SELECT 1; ROLLBACK;", "succeeded"},
+		{"committed_update", "BEGIN; UPDATE user_profiles SET first_name = 'Sarah' WHERE id = 1; COMMIT;", "succeeded"},
+		{"rolled_back_update", "BEGIN; UPDATE user_profiles SET first_name = 'Sarah' WHERE id = 1; ROLLBACK;", "succeeded"},
+		{"failed", "SELECT missing_column;", "failed"},
+		{"blocked", "DELETE FROM user_profiles;", "blocked"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := query.HistoryRow{Source: "cli", Outcome: tc.outcome, ConnectionID: strings.Repeat("日", 24), SQL: tc.sql}
+			c := newTestHistory([]query.HistoryRow{row}, &captureDriver{})
+			got := formatHistoryBody(c.rows, c.Cursor(), time.Now())
+			require.Contains(t, truncateToWidth(got, 32), "[cli "+tc.outcome+"]", "recorded outcome must remain visible in narrow history views")
+			require.Contains(t, truncateToWidth(got, 64), "effects unverified", "execution success must not imply verified effects")
+			selected, ok := c.Selected()
+			require.True(t, ok)
+			require.Equal(t, row, selected, "display ordering must not change SQL recall")
+		})
 	}
 }
 
@@ -138,9 +164,7 @@ func TestHistoryDisplay_CLIEffectsUnverified(t *testing.T) {
 					c := newTestHistory([]query.HistoryRow{row}, &captureDriver{})
 					got := formatHistoryBody(c.rows, c.Cursor(), time.Now())
 					require.Contains(t, got, "effects unverified")
-					for _, width := range []int{64, 32} {
-						require.Contains(t, truncateToWidth(sanitizeHistoryText(got), width), "effects unverified", "warning must fit in %d terminal columns before wide metadata", width)
-					}
+					require.Contains(t, truncateToWidth(sanitizeHistoryText(got), 64), "effects unverified", "warning must precede wide profile metadata")
 					require.Contains(t, got, "日本語")
 					selected, ok := c.Selected()
 					require.True(t, ok)

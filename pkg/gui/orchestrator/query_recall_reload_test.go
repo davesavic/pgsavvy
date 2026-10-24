@@ -59,7 +59,7 @@ func TestQueryRecall_ExternalCLIActivation(t *testing.T) {
 	require.Equal(t, "blocked", selected.Outcome)
 	require.NoError(t, g.RunLayout(80, 24))
 	body := d.GetViewBuffer(string(types.QUERY_EDITOR))
-	require.Contains(t, body, "[cli blocked] cli-profile")
+	require.Contains(t, body, "[cli blocked] effects unverified | cli-profile")
 	require.NotContains(t, body, "retained")
 	require.NoError(t, g.HelperBagForTest().EditorBuffer.ReplaceAll(""))
 	fireHistoryConfirm(t, g)
