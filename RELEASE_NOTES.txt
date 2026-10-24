@@ -1,3 +1,39 @@
+pgsavvy v0.15.0
+
+  Added opt-in full SQL access for the Linux/macOS machine CLI. Set a saved
+  profile to cli_access: full and read_only: false to execute writes, DDL and
+  maintenance commands within PostgreSQL privileges. Existing CLI policies and
+  full profiles with read_only: true retain guarded read-only execution.
+
+  confirm_writes and confirm_ddl can require per-invocation approval before
+  credentials, SSH or database setup. Use the controlling terminal to type the
+  exact connection name and yes, or pass both --approve and
+  --confirm-connection NAME. SQL stdin remains separate. Approval is not cached;
+  classification is heuristic, not a security sandbox or complete effects check.
+
+  Writable full mode sends unparameterized SQL unchanged as one native batch,
+  without an application transaction wrapper. Parameters support one statement;
+  streaming COPY is rejected. JSON data.results retains command tags and
+  positional rows, bounded to 256 results and an aggregate 100 default / 1000
+  maximum rows. Guarded query output keeps its existing shape.
+
+  Full-mode JSON adds execution status and possible-effects/prepared-transaction
+  indicators. Unfinished local transactions are rolled back and reported as
+  incomplete. Earlier commits or prepared transactions can survive a later
+  failure; missing output, timeouts and history outcomes do not prove rollback
+  or durability. Inspect database state before retrying SQL.
+
+  Updated connection forms, JSON help/capabilities and operational/downgrade
+  guidance. Opted-in CLI history records approval denials as blocked attempts.
+  Expanded shipping-binary, terminal-approval and PostgreSQL 17/18 coverage for
+  permissions, transactions, partial effects and bounded output.
+
+  Native macOS acceptance remains pending; Windows machine commands remain
+  unavailable. Before downgrading, stop automation, inspect outstanding effects
+  and prepared transactions, and replace full profile values with supported
+  policies. See docs/cli-query.md and docs/cli-contract.md for safeguards and
+  recovery guidance; docs/cli-testing.md describes required native checks.
+
 pgsavvy v0.14.1
 
   Improved native Unix CI failure diagnostics with provisioning/test stage,
