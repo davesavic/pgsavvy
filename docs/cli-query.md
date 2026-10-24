@@ -185,11 +185,10 @@ configuration, SSH or database connection. History consent never grants query
 access: only explicit full plus `read_only: false` permits writable execution.
 
 History shows the recorded attempt outcome first, for example
-`[cli succeeded] effects unverified | reporting | SELECT ...`, so narrow views
-retain the result. **Effects unverified** is a separate safety warning, not a
-failure status: `succeeded`/`failed` is an attempt outcome, not commit/rollback
-evidence. Even failed full SQL may have committed effects or left prepared
-transactions. Independently inspect state before replaying.
+`[cli succeeded] reporting | SELECT ...`, so narrow views retain the result.
+`succeeded`/`failed` is an attempt outcome, not commit/rollback evidence. Even
+failed full SQL may have committed effects or left prepared transactions.
+Independently inspect state before replaying.
 
 Recording is synchronous **best effort, not an audit log**. Healthy completion
 within budget exposes one committed event immediately on normal process exit.

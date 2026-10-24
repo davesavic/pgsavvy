@@ -92,7 +92,7 @@ func TestHistoryDisplay_MetadataAndNarrow(t *testing.T) {
 	defer theme.SetMonochromeForTest(true)()
 	for _, outcome := range []string{"succeeded", "failed", "blocked"} {
 		got := formatHistoryRow(query.HistoryRow{Source: "cli", Outcome: outcome, ConnectionID: "profile", SQL: "SELECT 1"}, time.Now())
-		require.True(t, strings.HasPrefix(got, "[cli "+outcome+"] effects unverified | profile |"))
+		require.True(t, strings.HasPrefix(got, "[cli "+outcome+"] profile |"))
 		require.Contains(t, truncateToWidth(got, 32), "[cli "+outcome+"]")
 	}
 	for _, succeeded := range []bool{false, true} {
@@ -117,7 +117,7 @@ func TestHistoryDisplay_DuplicateSQL(t *testing.T) {
 	c := newTestHistory(rows, &captureDriver{})
 	body := formatHistoryBody(c.rows, 0, time.Now())
 	require.Len(t, strings.Split(body, "\n"), 2)
-	require.Contains(t, body, "[cli blocked] effects unverified | reporting")
+	require.Contains(t, body, "[cli blocked] reporting")
 	require.Contains(t, body, "[tui succeeded] local")
 	for i, expected := range rows {
 		c.SetCursor(i)
@@ -128,7 +128,7 @@ func TestHistoryDisplay_DuplicateSQL(t *testing.T) {
 	}
 }
 
-func TestHistoryDisplay_CLIOutcomeBeforeEffectsWarning(t *testing.T) {
+func TestHistoryDisplay_CLIOutcomeWithoutEffectsWarning(t *testing.T) {
 	defer theme.SetMonochromeForTest(true)()
 	for _, tc := range []struct {
 		name    string
@@ -146,7 +146,7 @@ func TestHistoryDisplay_CLIOutcomeBeforeEffectsWarning(t *testing.T) {
 			c := newTestHistory([]query.HistoryRow{row}, &captureDriver{})
 			got := formatHistoryBody(c.rows, c.Cursor(), time.Now())
 			require.Contains(t, truncateToWidth(got, 32), "[cli "+tc.outcome+"]", "recorded outcome must remain visible in narrow history views")
-			require.Contains(t, truncateToWidth(got, 64), "effects unverified", "execution success must not imply verified effects")
+			require.NotContains(t, got, "effects unverified", "history rows must not inject a generic effects warning")
 			selected, ok := c.Selected()
 			require.True(t, ok)
 			require.Equal(t, row, selected, "display ordering must not change SQL recall")
@@ -154,7 +154,7 @@ func TestHistoryDisplay_CLIOutcomeBeforeEffectsWarning(t *testing.T) {
 	}
 }
 
-func TestHistoryDisplay_CLIEffectsUnverified(t *testing.T) {
+func TestHistoryDisplay_CLIWithoutEffectsWarning(t *testing.T) {
 	for _, mono := range []bool{false, true} {
 		t.Run(fmt.Sprintf("monochrome_%t", mono), func(t *testing.T) {
 			defer theme.SetMonochromeForTest(mono)()
@@ -163,17 +163,24 @@ func TestHistoryDisplay_CLIEffectsUnverified(t *testing.T) {
 					row := query.HistoryRow{Source: "cli", Outcome: outcome, Succeeded: succeeded, ConnectionID: strings.Repeat("日", 24), SQL: "SELECT '日本語'\n-- original"}
 					c := newTestHistory([]query.HistoryRow{row}, &captureDriver{})
 					got := formatHistoryBody(c.rows, c.Cursor(), time.Now())
-					require.Contains(t, got, "effects unverified")
-					require.Contains(t, truncateToWidth(sanitizeHistoryText(got), 64), "effects unverified", "warning must precede wide profile metadata")
+					require.NotContains(t, got, "effects unverified")
+					wantOutcome := outcome
+					if wantOutcome == "" {
+						wantOutcome = "failed"
+						if succeeded {
+							wantOutcome = "succeeded"
+						}
+					}
+					require.Contains(t, got, "[cli "+truncateHistorySQL(wantOutcome, 12)+"]")
 					require.Contains(t, got, "日本語")
 					selected, ok := c.Selected()
 					require.True(t, ok)
-					require.Equal(t, row, selected, "warning must not change original SQL or recall data")
+					require.Equal(t, row, selected, "display must not change original SQL or recall data")
 					row.Source = "tui"
 					require.NotContains(t, formatHistoryRow(row, time.Now()), "effects unverified")
 				}
 			}
-			require.Contains(t, formatHistoryRow(query.HistoryRow{Source: "cli"}, time.Now()), "effects unverified")
+			require.NotContains(t, formatHistoryRow(query.HistoryRow{Source: "cli"}, time.Now()), "effects unverified")
 			require.Equal(t, historyEmptyLine, formatHistoryBody(nil, 0, time.Now()))
 		})
 	}
