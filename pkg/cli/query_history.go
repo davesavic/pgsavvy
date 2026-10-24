@@ -83,7 +83,8 @@ func (a *queryHistoryAttempt) complete(ctx context.Context, err error) {
 	a.event.Outcome = "succeeded"
 	if err != nil {
 		a.event.Outcome = "failed"
-		if code := safeError(err).Code; code == UnsupportedSQL || code == PolicyDenied {
+		switch safeError(err).Code {
+		case UnsupportedSQL, PolicyDenied, ApprovalRequired, ApprovalMismatch, ApprovalUnavailable, ApprovalCancelled:
 			a.event.Outcome = "blocked"
 		}
 	}

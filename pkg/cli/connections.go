@@ -98,6 +98,17 @@ type capabilityCommand struct {
 	RequiredAccess string `json:"required_cli_access"`
 }
 
+func queryPolicy() map[string]any {
+	return map[string]any{
+		"guarded_access":  "row-read or full with read_only=true: SELECT validation and a READ ONLY transaction; columns/rows payload",
+		"full_access":     "full with read_only=false: original SQL sent once, native PostgreSQL batches and ordered results with command_tag/columns/rows; no automatic retry",
+		"approval":        "configured confirm_writes/confirm_ddl heuristic requires exact typed connection name and yes on controlling terminal, or paired --approve --confirm-connection NAME (exact case and whitespace); flags never elevate access",
+		"approval_limits": "both confirmation settings false means no prompt; heuristic can miss opaque SQL and side effects in functions; explicit flags acknowledge caller intent, not human presence",
+		"sql_limits":      "no streaming COPY FROM STDIN/TO STDOUT; server-side COPY allowed; parameters only for one statement; results are bounded and drained; unclosed transactions are rolled back with an error",
+		"effects":         "errors, history outcomes and command tags do not prove commit or rollback; prepared transactions may survive and require explicit recovery",
+	}
+}
+
 func CapabilitiesCommand() Command {
 	return func(_ context.Context, args []string, _ IO) (Envelope, error) {
 		flags, positional, err := ParseFlags(args, nil, []string{"help"})
@@ -108,9 +119,9 @@ func CapabilitiesCommand() Command {
 		for _, operation := range []string{"list", "tables", "describe", "relationships"} {
 			commands = append(commands, capabilityCommand{"schema " + operation, schemaUsage[operation], "metadata"})
 		}
-		commands = append(commands, capabilityCommand{"query", "query --connection NAME --file PATH|- [--params-file PATH] [--max-rows 1..1000] [--schema NAME]", "row-read"}, capabilityCommand{"capabilities", "capabilities", "none"})
+		commands = append(commands, capabilityCommand{"query", queryUsage, "row-read"}, capabilityCommand{"capabilities", "capabilities", "none"})
 		return Envelope{Command: "capabilities", ResultComplete: true, Data: map[string]any{
-			"platform": runtime.GOOS, "format": "json", "commands": commands, "query_read_only": true, "catalog_visibility_implies_row_access": false,
+			"platform": runtime.GOOS, "format": "json", "commands": commands, "query_read_only": false, "query_policy": queryPolicy(), "catalog_visibility_implies_row_access": false,
 			"global_flags": []string{"--format json", "--timeout DURATION"},
 			"limits":       map[string]any{"sql_bytes": MaxInputBytes, "parameter_bytes": MaxInputBytes, "parameters": MaxParameters, "profile_selector_bytes": MaxProfileBytes, "row_default": DefaultRows, "row_max": MaxRows, "cell_bytes": MaxCellBytes, "encoded_output_bytes": MaxOutputBytes, "metadata_list_default": 100, "metadata_section_max": 1000, "invocation_seconds": 30, "connection_seconds": 10, "helper_seconds": 5, "helper_stdout_bytes": MaxHelperBytes, "statement_seconds": 10, "lock_seconds": 1, "cleanup_seconds": 2, "publication_seconds": 2},
 			"exit_codes":   map[string]int{"success": ExitSuccess, "input": ExitInput, "unavailable": ExitUnavailable, "policy": ExitPolicy, "database": ExitDatabase, "timeout": ExitTimeout, "resource": ExitResource},

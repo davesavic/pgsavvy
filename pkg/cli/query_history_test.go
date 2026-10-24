@@ -433,6 +433,56 @@ func TestCLIHistory_WarningsPreserveExit(t *testing.T) {
 	require.NotContains(t, string(data), string(HistoryUnavailable))
 }
 
+func TestCLIHistory_FullApprovalFlagsPrivacy(t *testing.T) {
+	parameters := filepath.Join(t.TempDir(), "parameters")
+	require.NoError(t, os.WriteFile(parameters, []byte(`["private parameter"]`), 0o600))
+	var events []query.HistoryEvent
+	service := historyService(models.Connection{Name: "dev", CLIAccess: models.CLIAccessFull, CLIHistory: true, ConfirmWrites: true}, func(_ context.Context, _ string, event query.HistoryEvent) error {
+		events = append(events, event)
+		return query.ErrHistoryUpgradeRequired
+	})
+	service.Approve = func(context.Context, ApprovalRequest) error {
+		t.Fatal("mismatched explicit flags prompted")
+		return nil
+	}
+	service.Options.ParseConfig = func(context.Context, models.Connection) (*pgx.ConnConfig, error) {
+		t.Fatal("mismatched explicit flags parsed credentials")
+		return nil, nil
+	}
+	const sql = "UPDATE example SET x=$1 -- original raw literal"
+	exit, output := runHistoryQuery(t, service, sql, "--params-file", parameters, "--approve", "--confirm-connection=Dev")
+	require.Equal(t, ExitPolicy, exit, output)
+	require.Contains(t, output, string(ApprovalMismatch))
+	require.Contains(t, output, string(HistoryUpgradeRequired))
+	require.NotContains(t, output, "private parameter")
+	require.Len(t, events, 1)
+	require.Equal(t, sql, events[0].SQL)
+	require.Equal(t, "blocked", events[0].Outcome)
+}
+
+func TestCLIHistory_FullApprovalCannotEnableConsent(t *testing.T) {
+	script := &historyWireScript{submitted: make(chan string, 2), tags: []string{"UPDATE 1"}}
+	appends, lookups := 0, 0
+	service := fullWireService(t, script, func(context.Context, string, query.HistoryEvent) error { appends++; return nil })
+	profile, err := service.historyLookup(context.Background(), "dev")
+	require.NoError(t, err)
+	profile.CLIHistory, profile.ConfirmWrites = false, true
+	service.historyLookup = func(context.Context, string) (models.Connection, error) { lookups++; return profile, nil }
+	service.Approve = func(context.Context, ApprovalRequest) error { profile.CLIHistory = true; return nil }
+	service.Options.ParseConfig = func(_ context.Context, captured models.Connection) (*pgx.ConnConfig, error) {
+		require.False(t, captured.CLIHistory, "approval-time opt-in changed the captured invocation")
+		return pgx.ParseConfig(captured.DSN)
+	}
+	const sql = "/* history_payload */ UPDATE example SET x=1"
+	exit, output := runHistoryQuery(t, service, sql)
+	require.Equal(t, ExitSuccess, exit, output)
+	require.True(t, profile.CLIHistory, "fixture did not enable consent during approval")
+	require.Equal(t, 1, lookups)
+	require.Zero(t, appends, "later consent authorized earlier SQL history")
+	require.Equal(t, sql, <-script.submitted)
+	require.Empty(t, script.submitted)
+}
+
 func TestCLIHistory_PublicationAndIsolation(t *testing.T) {
 	for _, overflow := range []bool{false, true} {
 		var events []query.HistoryEvent
@@ -501,6 +551,10 @@ type historyWireScript struct {
 	readOnly                     atomic.Bool
 	blocked                      atomic.Pointer[serviceBlockedWrite]
 	executing                    chan struct{}
+	submitted                    chan string
+	parameters                   chan [][]byte
+	tags                         []string
+	disconnect                   bool
 }
 
 // A test-owned protocol peer, not a PostgreSQL fixture or an executed database.
@@ -542,8 +596,20 @@ func historyWireService(t *testing.T, script *historyWireScript, record func(con
 			switch message := message.(type) {
 			case *pgproto3.Parse:
 				statement = message.Query
+				if strings.Contains(statement, "history_payload") && script.submitted != nil {
+					script.submitted <- statement
+				}
 				backend.Send(&pgproto3.ParseComplete{})
 			case *pgproto3.Bind:
+				if payload && script.parameters != nil {
+					parameters := make([][]byte, len(message.Parameters))
+					for i, value := range message.Parameters {
+						if value != nil {
+							parameters[i] = append([]byte{}, value...)
+						}
+					}
+					script.parameters <- parameters
+				}
 				backend.Send(&pgproto3.BindComplete{})
 			case *pgproto3.Describe:
 				if payload {
@@ -577,7 +643,11 @@ func historyWireService(t *testing.T, script *historyWireScript, record func(con
 						status = 'E'
 						backend.Send(&pgproto3.ErrorResponse{Severity: "ERROR", Code: "22012", Message: "backend-secret"})
 					} else {
-						backend.Send(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})
+						tag := "SELECT 1"
+						if len(script.tags) > 0 {
+							tag = script.tags[0]
+						}
+						backend.Send(&pgproto3.CommandComplete{CommandTag: []byte(tag)})
 					}
 				} else if statement == "ROLLBACK" && script.rollbackError {
 					status = 'E'
@@ -587,6 +657,38 @@ func historyWireService(t *testing.T, script *historyWireScript, record func(con
 						status = 'I'
 					}
 					backend.Send(&pgproto3.CommandComplete{CommandTag: []byte("SET")})
+				}
+			case *pgproto3.Query:
+				if script.submitted != nil {
+					script.submitted <- message.String
+				}
+				if script.disconnect {
+					return
+				}
+				if script.executing != nil {
+					close(script.executing)
+				}
+				tags := script.tags
+				if len(tags) == 0 {
+					tags = []string{"SELECT 1"}
+				}
+				for _, tag := range tags {
+					if len(script.rows) > 0 {
+						backend.Send(&pgproto3.RowDescription{Fields: []pgproto3.FieldDescription{{Name: []byte("payload"), DataTypeOID: 25}}})
+						for _, row := range script.rows {
+							backend.Send(&pgproto3.DataRow{Values: [][]byte{[]byte(row)}})
+						}
+					}
+					backend.Send(&pgproto3.CommandComplete{CommandTag: []byte(tag)})
+				}
+				if script.terminalError {
+					backend.Send(&pgproto3.ErrorResponse{Severity: "ERROR", Code: "22012", Message: "backend-secret"})
+				}
+				backend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
+				if script.closeError {
+					if blocked := script.blocked.Load(); blocked != nil {
+						blocked.block.Store(true)
+					}
 				}
 			case *pgproto3.Sync:
 				if statement == "ROLLBACK" && script.closeError {
