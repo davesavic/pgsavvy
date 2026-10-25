@@ -180,6 +180,24 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = terminal.Close() }()
+		gate := os.NewFile(3, "parent-gate")
+		defer func() {
+			if err := gate.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		finish := func() {
+			if err := terminal.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if mode != "closed" {
+				// Keep the session alive until the parent checks the borrowed slave.
+				fmt.Println("CLOSED")
+				if _, err := io.ReadFull(gate, make([]byte, 1)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
 		owned := terminal.(*approvalTerminal)
 		if owned.retryWait != (runtime.GOOS == "darwin") {
 			t.Fatal("incorrect platform terminal wait mode")
@@ -204,16 +222,11 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 			if err := <-done; err != nil || string(got[:]) != "selected\n" {
 				t.Fatalf("idle terminal response: %q %v", got, err)
 			}
+			finish()
 			return
 		}
 		fmt.Println("READY")
 		if mode == "success" {
-			gate := os.NewFile(3, "parent-gate")
-			defer func() {
-				if err := gate.Close(); err != nil {
-					t.Error(err)
-				}
-			}()
 			if _, err := io.ReadFull(gate, make([]byte, 1)); err != nil {
 				t.Fatal(err)
 			}
@@ -230,6 +243,7 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 			if _, err := terminal.Write([]byte("OWNED\n")); err != nil {
 				t.Fatal(err)
 			}
+			finish()
 			return
 		}
 		done := make(chan error, 1)
@@ -268,6 +282,7 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 				t.Fatal("owned read did not join")
 			}
 		}
+		finish()
 		return
 	}
 	t.Run("wait-invalid", func(t *testing.T) {
@@ -337,6 +352,7 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 			}
 			defer func() {
 				if cmd.ProcessState == nil {
+					_ = master.Close()
 					_ = cmd.Process.Kill()
 					_ = cmd.Wait()
 				}
@@ -353,8 +369,10 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 				if _, err := master.WriteString("selected\n"); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := write.WriteString("!"); err != nil {
-					t.Fatal(err)
+				if mode == "success" {
+					if _, err := write.WriteString("!"); err != nil {
+						t.Fatal(err)
+					}
 				}
 			case "signal":
 				if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
@@ -363,6 +381,39 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 			case "closed":
 				_ = master.Close()
 			}
+			if mode == "success" || mode == "idle" {
+				// Darwin drains the controlling terminal before session-leader exit.
+				deadline, _ := ctx.Deadline()
+				if err := master.SetReadDeadline(deadline); err != nil {
+					t.Fatal(err)
+				}
+				var expected []string
+				if termios.Lflag&unix.ECHO != 0 {
+					expected = append(expected, "selected\n")
+				}
+				if mode == "success" {
+					expected = append(expected, "OWNED\n")
+				}
+				terminalReader := bufio.NewReader(master)
+				for _, want := range expected {
+					line, err := terminalReader.ReadString('\n')
+					if err != nil || strings.ReplaceAll(line, "\r\n", "\n") != want {
+						t.Fatalf("terminal output not delivered: %v", err)
+					}
+				}
+			}
+			if mode != "closed" && mode != "no-tty" {
+				line, err := reader.ReadString('\n')
+				if err != nil || line != "CLOSED\n" {
+					t.Fatalf("terminal close handshake: %v", err)
+				}
+				if testFlags(t, slave) != before || !reflect.DeepEqual(termios, testTermios(t, slave)) {
+					t.Fatal("parent flags or termios changed after owned terminal close")
+				}
+				if _, err := write.WriteString("!"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			rest, err := io.ReadAll(reader)
 			if err != nil {
 				t.Fatal(err)
@@ -370,7 +421,7 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 			if err := cmd.Wait(); err != nil {
 				t.Fatalf("child %s: %v %s %s", mode, err, rest, diagnostic.String())
 			}
-			if mode != "closed" && (testFlags(t, slave) != before || !reflect.DeepEqual(termios, testTermios(t, slave))) {
+			if mode != "closed" && (runtime.GOOS != "darwin" || mode == "no-tty") && (testFlags(t, slave) != before || !reflect.DeepEqual(termios, testTermios(t, slave))) {
 				t.Fatal("parent flags or termios changed")
 			}
 			if (mode == "success" || mode == "idle") && strings.Contains(string(rest), "selected") {

@@ -67,6 +67,33 @@ class TestNativeTestStatus(unittest.TestCase):
         self.assertNotIn("private-", json.dumps(report))
         self.assertNotIn("PrivateNameSentinel", json.dumps(report))
 
+    def test_new_history_cases_publish_only_fixed_labels_and_public_sites(self):
+        families = {
+            "TestCLIHistoryProcess_OutputPipes": (("broken_false", "broken_true"), 628),
+            "TestCLIHistoryProcess_PrivacyAndOutput": (("backend_failure_false", "backend_failure_true"), 321),
+        }
+        for top, (labels, number) in families.items():
+            for label in labels:
+                with self.subTest(test=top, case=label):
+                    self.write_events([
+                        {"Action": "run", "Test": top + "/" + label},
+                        {"Action": "output", "Test": top + "/" + label, "Output":
+                         f"    Error Trace:\t/private-path-sentinel/pkg/cli/query_history_process_test.go:{number}\n"
+                         "    private-assertion-sentinel SELECT private_sql PASSWORD_SENTINEL\n"},
+                        {"Action": "fail", "Test": top + "/" + label},
+                        {"Action": "pass", "Test": top + "/" + label},
+                        {"Action": "fail", "Test": top + "/private-case-sentinel"},
+                        {"Action": "output", "Test": top + "/" + label + "/private-nested-sentinel",
+                         "Output": "    query_history_process_test.go:400: private-output-sentinel\n"},
+                    ])
+                    report = cli_test_status.read_status(self.path)
+                    self.assertEqual(report["log_status"], "parsed")
+                    self.assertEqual(report["tests"], [{"test": top, "status": "failed"}])
+                    self.assertEqual(report["cases"], [{"test": top, "case": label, "action": "fail"}])
+                    self.assertEqual(report["locations"], [{"file": "query_history_process_test.go", "line": number}])
+                    for private in ("private-", "SELECT", "private_sql", "PASSWORD_SENTINEL", "pkg/"):
+                        self.assertNotIn(private, json.dumps(report))
+
     def diagnostic_events(self):
         terminal = "TestMachineTerminalApprovalProcess"
         history = "TestCLIHistoryProcess_CancellationAndCleanup"
@@ -134,8 +161,9 @@ class TestNativeTestStatus(unittest.TestCase):
                      "stream_unix.go:058", "private-file-sentinel.go:58",
                      "/private-path-sentinel/stream_unix.go:58",
                      "private-stream_unix.go:58", "SELECT 'stream_unix.go:58'",
-                     "terminal_unix_test.go:382", "io_darwin_test.go:186",
-                     "query_history_process_test.go:9999"):
+                     "query_history_process_test.go:9999",
+                     *(f"{basename}:{last_line + 1}" for basename, (_, last_line)
+                       in cli_test_status.SOURCE_FILES.items())):
             events.append({"Action": "output", "Test": terminal, "Output": "\t" + site + "\n"})
         events.append({"Action": "output", "Test": "TestMachineCLI_Dispatch",
                        "Output": "    stream_unix.go:58: private-unrelated-sentinel\n"})
@@ -181,13 +209,14 @@ class TestNativeTestStatus(unittest.TestCase):
         self.write_events(events * 2)
         report = cli_test_status.read_status(self.path)
         self.assertEqual(len(report["cases"]), sum(map(len, cli_test_status.CASE_NAMES.values())))
+        self.assertEqual(len(report["cases"]), 23)
         self.assertTrue(all(case["action"] == "fail" for case in report["cases"]))
         self.assertEqual(report["locations"], [
             {"file": "stream_unix.go", "line": number}
             for number in range(1, cli_test_status.MAX_LOCATIONS + 1)])
         self.assertLess(len(json.dumps({key: report[key] for key in ("cases", "locations")})), 8192)
 
-    def test_metadata_allowlists_match_public_source(self):
+    def test_source_location_bounds_match_public_source(self):
         repo = pathlib.Path(__file__).resolve().parents[2]
         self.assertEqual({source for source, _ in cli_test_status.SOURCE_FILES.values()}, {
             "internal/machineio/terminal_unix_test.go", "internal/machineio/stream_unix.go",
@@ -195,6 +224,9 @@ class TestNativeTestStatus(unittest.TestCase):
         for basename, (source, last_line) in cli_test_status.SOURCE_FILES.items():
             self.assertEqual(pathlib.PurePosixPath(source).name, basename)
             self.assertEqual(len((repo / source).read_text().splitlines()), last_line)
+
+    def test_metadata_allowlists_match_public_source(self):
+        repo = pathlib.Path(__file__).resolve().parents[2]
         terminal = (repo / "internal/machineio/terminal_unix_test.go").read_text()
         terminal = terminal.split("func TestMachineTerminalApprovalProcess(", 1)[1]
         modes = re.search(r"for _, mode := range \[\]string\{([^}]+)\}", terminal)[1]
@@ -207,6 +239,15 @@ class TestNativeTestStatus(unittest.TestCase):
         fixtures = re.search(r"for _, fixture := range \[\]string\{([^}]+)\}", history)[1]
         self.assertEqual(cli_test_status.CASE_NAMES["TestCLIHistoryProcess_CancellationAndCleanup"],
                          {"interrupt", "terminated", *re.findall(r'"([^"]+)"', fixtures)})
+        source = (repo / "pkg/cli/query_history_process_test.go").read_text()
+        for top, variable, template in (
+                ("TestCLIHistoryProcess_OutputPipes", "broken", "broken_%t"),
+                ("TestCLIHistoryProcess_PrivacyAndOutput", "failure", "backend_failure_%t")):
+            body = source.split("func " + top + "(", 1)[1].split("\nfunc ", 1)[0]
+            self.assertIn("for _, " + variable + " := range []bool{false, true}", body)
+            self.assertIn('t.Run(fmt.Sprintf("' + template + '", ' + variable + ')', body)
+            self.assertEqual(cli_test_status.CASE_NAMES[top],
+                             {template.replace("%t", value) for value in ("false", "true")})
 
     def test_aggregate_output_over_one_mib_keeps_private_failure_status(self):
         name = "TestCLIHistoryProcess_CancellationAndCleanup"

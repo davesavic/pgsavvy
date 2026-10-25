@@ -46,6 +46,20 @@ func historyService(profile models.Connection, record func(context.Context, stri
 	}
 }
 
+func prepareEmptyHistoryFixture(t *testing.T, path string) {
+	t.Helper()
+	require.NoFileExists(t, path)
+	// Cold fixture migrations are setup, not a test of the TUI/CLI's 250 ms budget.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, query.AppendHistory(ctx, path, query.HistoryEvent{SQL: "SELECT history_fixture_setup", Source: "tui", Outcome: "succeeded"}))
+	db, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	_, err = db.ExecContext(ctx, `DELETE FROM history`)
+	require.NoError(t, err)
+}
+
 func TestCLIHistory_MetadataOnlyRejection(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 	var lookups, appends, forbidden atomic.Int32
@@ -220,6 +234,7 @@ func TestCLIHistory_ConsentSnapshotAndExhaustion(t *testing.T) {
 
 func TestCLIHistory_LockedStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareEmptyHistoryFixture(t, path)
 	h, err := query.New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()

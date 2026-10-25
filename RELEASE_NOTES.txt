@@ -17,9 +17,10 @@ pgsavvy v0.15.1
   case labels and source locations help diagnose failures; raw output, dynamic
   test names, private paths and package names remain private.
 
-  Stabilized socket/FIFO resource checks and concurrent CLI-history regression
-  tests while retaining leak detection and best-effort history warning checks.
-  The history recording budget is unchanged.
+  Stabilized socket/FIFO resource, PTY and CLI-history regression fixtures while
+  retaining leak detection, terminal-state and best-effort history warning
+  checks. Healthy fixture setup prewarms cold migrations separately; production
+  history startup and recording budgets are unchanged.
 
 pgsavvy v0.15.0
 

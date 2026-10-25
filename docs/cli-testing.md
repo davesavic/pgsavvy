@@ -215,9 +215,12 @@ parent status. Package failures and unlisted failures expose only
 boolean flags, never their names. The allowlist does not add acceptance tests.
 
 An approved Unix diagnostic exception adds `cases` and `locations` metadata.
-`cases` contains only the 14 fixed case labels of
-`TestMachineTerminalApprovalProcess` and five fixed labels of
-`TestCLIHistoryProcess_CancellationAndCleanup`, never dynamic or nested labels.
+`cases` contains only 23 fixed labels: 14 for
+`TestMachineTerminalApprovalProcess`, five for
+`TestCLIHistoryProcess_CancellationAndCleanup`, `broken_false`/`broken_true` for
+`TestCLIHistoryProcess_OutputPipes`, and
+`backend_failure_false`/`backend_failure_true` for
+`TestCLIHistoryProcess_PrivacyAndOutput`. Dynamic and nested labels stay private.
 Each case records its last lifecycle `action`: `run`, `pass`, `fail` or `skip`;
 failure is sticky. `run` without a terminal action is distinct from an actual
 `skip`, while the existing top-level statuses are unchanged.
@@ -229,7 +232,7 @@ emitted: `terminal_unix_test.go`, `stream_unix.go`, `io_darwin_test.go` and
 PTY/termios setup can block before the child timeout context exists. Line
 numbers must lie within pinned public source bounds, checked against those
 four repository files by regression tests. The reporter recognizes assertion
-and Go panic/timeout stack locations in these two families' output, plus
+and Go panic/timeout stack locations in these four families' output, plus
 package-level output where timeout stacks have no test name. Private path
 prefixes, stack function/argument text, assertion values, SQL, credentials and
 all other raw output remain private. These reported sites are diagnostic clues,

@@ -263,12 +263,14 @@ CASE_NAMES = {
     "TestCLIHistoryProcess_CancellationAndCleanup": frozenset("""
         interrupt terminated short_deadline cleanup_failure output_overflow
     """.split()),
+    "TestCLIHistoryProcess_OutputPipes": frozenset(("broken_false", "broken_true")),
+    "TestCLIHistoryProcess_PrivacyAndOutput": frozenset(("backend_failure_false", "backend_failure_true")),
 }
 SOURCE_FILES = {
-    "terminal_unix_test.go": ("internal/machineio/terminal_unix_test.go", 381),
+    "terminal_unix_test.go": ("internal/machineio/terminal_unix_test.go", 432),
     "stream_unix.go": ("internal/machineio/stream_unix.go", 151),
     "io_darwin_test.go": ("internal/machineio/io_darwin_test.go", 185),
-    "query_history_process_test.go": ("pkg/cli/query_history_process_test.go", 757),
+    "query_history_process_test.go": ("pkg/cli/query_history_process_test.go", 759),
 }
 MAX_LOCATIONS = 32
 LOCATION_PATTERN = re.compile(

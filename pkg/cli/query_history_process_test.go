@@ -317,6 +317,7 @@ func TestCLIHistoryProcess_PrivacyAndOutput(t *testing.T) {
 			profile.Password = "PASSWORD_SENTINEL"
 			f.save(t, profile)
 			require.NoError(t, os.MkdirAll(filepath.Dir(f.store), 0o700))
+			prepareEmptyHistoryFixture(t, f.store)
 			h, err := query.New(f.store)
 			require.NoError(t, err)
 			defer func() { _ = h.Close() }()
@@ -495,9 +496,7 @@ func TestCLIHistoryProcess_StoreFailures(t *testing.T) {
 				t.Skip("native permission-denial fixture requires an unprivileged process")
 			}
 			f := newHistoryProcess(t, historyConsent(true))
-			h, err := query.New(f.store)
-			require.NoError(t, err)
-			require.NoError(t, h.Close())
+			prepareEmptyHistoryFixture(t, f.store)
 			var unlock func()
 			switch fixture {
 			case "locked":
@@ -544,6 +543,7 @@ func TestCLIHistoryProcess_CancellationAndCleanup(t *testing.T) {
 	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGTERM} {
 		t.Run(sig.String(), func(t *testing.T) {
 			f := newHistoryProcess(t, historyConsent(true))
+			prepareEmptyHistoryFixture(t, f.store)
 			started := make(chan struct{})
 			service := historyWireService(t, &historyWireScript{stallTail: true, executing: started}, nil)
 			profile, err := service.historyLookup(context.Background(), "dev")
@@ -576,6 +576,7 @@ func TestCLIHistoryProcess_CancellationAndCleanup(t *testing.T) {
 	for _, fixture := range []string{"short_deadline", "cleanup_failure", "output_overflow"} {
 		t.Run(fixture, func(t *testing.T) {
 			f := newHistoryProcess(t, historyConsent(true))
+			prepareEmptyHistoryFixture(t, f.store)
 			script := &historyWireScript{rollbackError: fixture == "cleanup_failure", stallTail: fixture == "short_deadline"}
 			if fixture == "output_overflow" {
 				for range 17 {
@@ -607,6 +608,7 @@ func TestCLIHistoryProcess_OutputPipes(t *testing.T) {
 	for _, broken := range []bool{false, true} {
 		t.Run(fmt.Sprintf("broken_%t", broken), func(t *testing.T) {
 			f := newHistoryProcess(t, historyConsent(true))
+			prepareEmptyHistoryFixture(t, f.store)
 			script := &historyWireScript{}
 			for range 10 {
 				script.rows = append(script.rows, strings.Repeat("x", 50<<10))
