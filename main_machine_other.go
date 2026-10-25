@@ -3,4 +3,4 @@
 package main
 
 // Other platforms retain the legacy entry path.
-func runMachine([]string) (bool, int) { return false, 0 }
+func runMachine([]string) (bool, int, func()) { return false, 0, nil }

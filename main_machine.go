@@ -15,17 +15,17 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/cli"
 )
 
-func runMachine(args []string) (bool, int) {
+// Signal cleanup belongs to the caller so interception survives until os.Exit.
+func runMachine(args []string) (bool, int, func()) {
 	if handled, exit := machineio.RunHelper(); handled {
-		return true, exit
+		return true, exit, nil
 	}
 	if cli.IsLegacyRoute(args) {
-		return false, 0
+		return false, 0, nil
 	}
 	parent, cancel := context.WithTimeout(context.Background(), cli.InvocationTimeout)
 	defer cancel()
 	interrupted, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	deadline, _ := parent.Deadline()
 	acquisition, cancelAcquisition := context.WithDeadline(parent, deadline.Add(-2*time.Second))
 	defer cancelAcquisition()
@@ -41,7 +41,7 @@ func runMachine(args []string) (bool, int) {
 	service := cli.InvocationService{Approve: cli.NewTerminalApprovalProvider(machineio.OpenApprovalTerminal)}
 	registry := map[string]cli.Command{"connections": cli.ConnectionsCommand(service), "schema": cli.SchemaCommand(service), "query": cli.QueryCommand(service), "capabilities": cli.CapabilitiesCommand(), "llm-help": cli.LLMHelpCommand()}
 	var out io.WriteCloser
-	setupFailure := func() (bool, int) {
+	setupFailure := func() (bool, int, func()) {
 		exit, code := cli.ExitResource, cli.ResourceFailure
 		if acquisition.Err() != nil {
 			exit, code = cli.ExitTimeout, cli.Timeout
@@ -51,7 +51,7 @@ func runMachine(args []string) (bool, int) {
 			defer cancel()
 			_ = cli.WriteJSON(ctx, out, cli.Envelope{Command: "unknown", Error: &cli.PublicError{Code: code}})
 		}
-		return true, exit
+		return true, exit, stop
 	}
 	var err error
 	out, err = machineio.OpenOutput(acquisition, os.Stdout)
@@ -74,5 +74,5 @@ func runMachine(args []string) (bool, int) {
 		streams.Err = diagnostic
 	}
 	_, exit := cli.Dispatch(parent, args, streams, registry)
-	return true, exit
+	return true, exit, stop
 }

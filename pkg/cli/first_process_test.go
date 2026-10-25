@@ -198,6 +198,15 @@ func processExit(err error) int {
 	return -1
 }
 
+func processTerminationSignal(command *exec.Cmd) string {
+	if command.ProcessState != nil {
+		if status, ok := command.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return status.Signal().String()
+		}
+	}
+	return "none"
+}
+
 func processDocument(t *testing.T, output, diagnostics []byte, exit int) map[string]any {
 	t.Helper()
 	if len(output) == 0 || len(output) > MaxOutputBytes || output[len(output)-1] != '\n' {
@@ -722,7 +731,7 @@ func TestMachineCLIProcess_Signals(t *testing.T) {
 			start := time.Now()
 			exit := processExit(command.Wait())
 			if exit != 6 || time.Since(start) > 3*time.Second {
-				t.Fatalf("signal exit%d elapsed%s stderr%q", exit, time.Since(start), stderr.String())
+				t.Fatalf("signal exit%d termination=%s elapsed%s", exit, processTerminationSignal(command), time.Since(start))
 			}
 			doc := processDocument(t, stdout.Bytes(), stderr.Bytes(), exit)
 			if doc["error"].(map[string]any)["code"] != "TIMEOUT" {
@@ -730,8 +739,16 @@ func TestMachineCLIProcess_Signals(t *testing.T) {
 			}
 		})
 	}
-	for _, signal := range []os.Signal{os.Interrupt, syscall.SIGTERM} {
-		t.Run("backend-"+signal.String(), func(t *testing.T) {
+	for _, tc := range []struct {
+		signal os.Signal
+		burst  bool
+	}{{os.Interrupt, false}, {syscall.SIGTERM, false}, {os.Interrupt, true}, {syscall.SIGTERM, true}} {
+		signal := tc.signal
+		name := "backend-" + signal.String()
+		if tc.burst {
+			name += "-burst"
+		}
+		t.Run(name, func(t *testing.T) {
 			f := firstProcess(t, true)
 			f.save(t, f.profile)
 			sql := f.sql(t, "SELECT pg_sleep(20)")
@@ -766,14 +783,33 @@ func TestMachineCLIProcess_Signals(t *testing.T) {
 			if !active {
 				t.Fatal("query never entered PostgreSQL before signal")
 			}
+			if tc.burst {
+				stop, joined := make(chan struct{}), make(chan struct{})
+				go func() {
+					defer close(joined)
+					for {
+						select {
+						case <-stop:
+							return
+						default:
+							_ = command.Process.Signal(signal)
+							runtime.Gosched()
+						}
+					}
+				}()
+				defer func() { close(stop); <-joined }()
+			}
 			_ = command.Process.Signal(signal)
 			_ = command.Process.Signal(signal)
 			start := time.Now()
 			exit := processExit(command.Wait())
 			if exit != 6 || time.Since(start) > 3*time.Second {
-				t.Fatalf("backend signal exit%d elapsed%s", exit, time.Since(start))
+				t.Fatalf("backend signal exit%d termination=%s elapsed%s", exit, processTerminationSignal(command), time.Since(start))
 			}
-			processDocument(t, stdout.Bytes(), stderr.Bytes(), exit)
+			doc := processDocument(t, stdout.Bytes(), stderr.Bytes(), exit)
+			if doc["error"].(map[string]any)["code"] != "TIMEOUT" {
+				t.Fatal("backend signal lost timeout JSON")
+			}
 		})
 	}
 	t.Run("default-wall-time", func(t *testing.T) {

@@ -7,6 +7,11 @@ pgsavvy v0.15.1
   macOS. Bounded nonblocking retries preserve terminal flags, approval locking,
   cancellation and joined cleanup.
 
+  Keep machine-command signal interception active through process exit, so
+  late or repeated SIGINT/SIGTERM do not replace the intended exit status
+  during shutdown. Timeout JSON, joined cleanup and legacy/TUI routing remain
+  unchanged.
+
   Enable and verify prepared transactions in the general CI PostgreSQL fixture,
   matching the full-SQL integration tests' requirements. Added the four llm-help
   test names to the fixed diagnostic allowlist so native Unix test preflight

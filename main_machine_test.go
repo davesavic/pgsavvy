@@ -135,6 +135,53 @@ func TestMachineCLINative_Discovery(t *testing.T) {
 	t.Run("llm-help", machineTestLLMHelpOffline)
 }
 
+func TestMachineCLINative_SignalCleanup(t *testing.T) {
+	if os.Getenv("_PGSAVVY_SIGNAL_CLEANUP") == "1" {
+		output, err := os.CreateTemp(t.TempDir(), "output")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = output.Close() }()
+		stdout, stderr := os.Stdout, os.Stderr
+		os.Stdout, os.Stderr = output, output
+		handled, exit, stop := runMachine([]string{"capabilities"})
+		os.Stdout, os.Stderr = stdout, stderr
+		if !handled || exit != 0 || stop == nil {
+			t.Fatal("machine invocation did not return signal ownership")
+		}
+		defer stop()
+		if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(100 * time.Millisecond)
+		_, _ = os.Stdout.WriteString("signal retained\n")
+		stop()
+		if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+		t.Fatal("explicit signal cleanup did not restore default termination")
+	}
+	for _, args := range [][]string{nil, {"--version"}, {"update", "--check"}} {
+		if handled, exit, stop := runMachine(args); handled || exit != 0 || stop != nil {
+			t.Fatal("legacy route acquired machine signal ownership")
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMachineCLINative_SignalCleanup$")
+	command.Env = append(machineTestEnv(t.TempDir()), "PGSAVVY_TEST_BINARY="+machineTestBinary, "_PGSAVVY_SIGNAL_CLEANUP=1")
+	output, err := command.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("signal cleanup subprocess did not terminate: %v", err)
+	}
+	status, ok := exit.Sys().(syscall.WaitStatus)
+	if !ok || !status.Signaled() || status.Signal() != syscall.SIGINT || string(output) != "signal retained\n" {
+		t.Fatal("signal ownership did not survive return and end at explicit cleanup")
+	}
+}
+
 func TestMachineCLINative_ProfilePolicyAndInput(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "config", "pgsavvy")

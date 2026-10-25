@@ -26,7 +26,12 @@ func init() {
 }
 
 func main() {
-	if handled, exit := runMachine(os.Args[1:]); handled {
+	handled, exit, stopSignals := runMachine(os.Args[1:])
+	if stopSignals != nil {
+		// os.Exit skips this defer, retaining interception until process exit.
+		defer stopSignals()
+	}
+	if handled {
 		os.Exit(exit)
 	}
 	buildInfo := &app.BuildInfo{
