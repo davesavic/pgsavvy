@@ -36,7 +36,7 @@ func openApprovalTerminal(ctx context.Context, dir, name string) (io.ReadWriteCl
 		_ = unix.Close(lock)
 		return nil, errUnavailable
 	}
-	terminal := &approvalTerminal{pollStream: &pollStream{fd: fd, closed: make(chan struct{})}, lock: lock}
+	terminal := &approvalTerminal{pollStream: &pollStream{fd: fd, closed: make(chan struct{}), retryWait: runtime.GOOS == "darwin"}, lock: lock}
 	var info unix.Stat_t
 	_, ttyErr := unix.IoctlGetInt(fd, unix.TIOCGPGRP)
 	if unix.Fstat(fd, &info) != nil || info.Mode&unix.S_IFMT != unix.S_IFCHR || ttyErr != nil || ctx.Err() != nil {

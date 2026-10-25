@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -160,6 +161,8 @@ func TestMachineTerminalApprovalUnsafeNamespace(t *testing.T) {
 
 func TestMachineTerminalApprovalProcess(t *testing.T) {
 	if mode := os.Getenv("PGSAVVY_APPROVAL_CHILD"); mode != "" {
+		timedRetry := strings.HasPrefix(mode, "retry-")
+		mode = strings.TrimPrefix(mode, "retry-")
 		// A disposable PTY hangup must reach Read rather than kill the fixture.
 		signal.Ignore(syscall.SIGHUP)
 		dir := os.Getenv("PGSAVVY_APPROVAL_LOCKDIR")
@@ -177,6 +180,32 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = terminal.Close() }()
+		owned := terminal.(*approvalTerminal)
+		if owned.retryWait != (runtime.GOOS == "darwin") {
+			t.Fatal("incorrect platform terminal wait mode")
+		}
+		if timedRetry {
+			owned.retryWait = true
+		}
+		if mode == "idle" {
+			// The parent sends no input until READY, forcing the idle wait path.
+			if err := owned.wait(unix.POLLIN); err != nil {
+				t.Fatalf("idle terminal wait: %v", err)
+			}
+			var got [9]byte
+			done := make(chan error, 1)
+			go func() { _, err := io.ReadFull(terminal, got[:]); done <- err }()
+			select {
+			case err := <-done:
+				t.Fatalf("idle read completed before input: %v", err)
+			case <-time.After(30 * time.Millisecond):
+			}
+			fmt.Println("READY")
+			if err := <-done; err != nil || string(got[:]) != "selected\n" {
+				t.Fatalf("idle terminal response: %q %v", got, err)
+			}
+			return
+		}
 		fmt.Println("READY")
 		if mode == "success" {
 			gate := os.NewFile(3, "parent-gate")
@@ -221,7 +250,11 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 			}
 		} else {
 			if mode != "close" {
-				<-ctx.Done()
+				select {
+				case err := <-done:
+					t.Fatalf("idle read completed before cancellation: %v", err)
+				case <-ctx.Done():
+				}
 			}
 			if err := terminal.Close(); err != nil {
 				t.Fatal(err)
@@ -237,7 +270,28 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 		}
 		return
 	}
-	for _, mode := range []string{"success", "signal", "deadline", "close", "closed", "no-tty"} {
+	t.Run("wait-invalid", func(t *testing.T) {
+		stream := &pollStream{fd: 1 << 30, closed: make(chan struct{})}
+		if err := stream.wait(unix.POLLIN); err != errUnavailable {
+			t.Fatalf("invalid descriptor poll: %v", err)
+		}
+		stream.retryWait = true
+		started := time.Now()
+		if err := stream.wait(unix.POLLIN); err != nil {
+			t.Fatalf("timed retry polled the descriptor: %v", err)
+		}
+		if time.Since(started) < 5*time.Millisecond {
+			t.Fatal("timed retry did not wait")
+		}
+		if _, err := stream.Read(make([]byte, 1)); err != errUnavailable {
+			t.Fatalf("timed retry ignored invalid I/O: %v", err)
+		}
+		close(stream.closed)
+		if err := stream.wait(unix.POLLIN); err != os.ErrClosed {
+			t.Fatalf("closed timed retry: %v", err)
+		}
+	})
+	for _, mode := range []string{"success", "idle", "signal", "deadline", "close", "closed", "no-tty", "retry-success", "retry-idle", "retry-signal", "retry-deadline", "retry-close", "retry-closed"} {
 		t.Run(mode, func(t *testing.T) {
 			master, slave := testPTY(t)
 			before, termios := testFlags(t, slave), testTermios(t, slave)
@@ -246,6 +300,7 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMachineTerminalApprovalProcess$")
 			childMode := mode
+			mode = strings.TrimPrefix(mode, "retry-")
 			if mode == "no-tty" {
 				childMode = "competitor"
 			}
@@ -294,7 +349,7 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 				}
 			}
 			switch mode {
-			case "success":
+			case "success", "idle":
 				if _, err := master.WriteString("selected\n"); err != nil {
 					t.Fatal(err)
 				}
@@ -318,7 +373,7 @@ func TestMachineTerminalApprovalProcess(t *testing.T) {
 			if mode != "closed" && (testFlags(t, slave) != before || !reflect.DeepEqual(termios, testTermios(t, slave))) {
 				t.Fatal("parent flags or termios changed")
 			}
-			if mode == "success" && strings.Contains(string(rest), "selected") {
+			if (mode == "success" || mode == "idle") && strings.Contains(string(rest), "selected") {
 				t.Fatal("terminal data escaped to stdout")
 			}
 		})

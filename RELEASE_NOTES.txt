@@ -3,6 +3,10 @@ pgsavvy v0.15.1
   Build with Go 1.26.10 to address GO-2026-6809 in crypto/x509. Updated CI,
   release and native-test toolchain pins consistently.
 
+  Avoid unsupported device polling while waiting for interactive approval on
+  macOS. Bounded nonblocking retries preserve terminal flags, approval locking,
+  cancellation and joined cleanup.
+
   Enable and verify prepared transactions in the general CI PostgreSQL fixture,
   matching the full-SQL integration tests' requirements. Added the four llm-help
   test names to the fixed diagnostic allowlist so native Unix test preflight
@@ -14,7 +18,7 @@ pgsavvy v0.15.1
 
   Stabilized socket/FIFO resource checks and concurrent CLI-history regression
   tests while retaining leak detection and best-effort history warning checks.
-  Application behavior and the history recording budget are unchanged.
+  The history recording budget is unchanged.
 
 pgsavvy v0.15.0
 

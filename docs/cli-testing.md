@@ -59,7 +59,9 @@ or alter production bindings. Do not use real user profiles/history for a smoke.
 
 ## Status and scope
 
-Native macOS acceptance and Windows machine CLI activation are **pending**.
+Native macOS acceptance requires the full suite below to pass on both Intel and
+Apple Silicon against PostgreSQL 17 and 18. Windows machine CLI activation
+remains **pending**.
 Linux/macOS now share production commands; Windows remains on legacy dispatch.
 The `native-baseline` job in
 [`cli-integration.yml`](../.github/workflows/cli-integration.yml) prepares six

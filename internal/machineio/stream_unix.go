@@ -15,6 +15,7 @@ import (
 type pollStream struct {
 	fd        int
 	socket    bool
+	retryWait bool
 	mu        sync.Mutex
 	readMu    sync.Mutex
 	writeMu   sync.Mutex
@@ -50,11 +51,15 @@ func (f *pollStream) wait(events int16) error {
 			return os.ErrClosed
 		}
 		fds := []unix.PollFd{{Fd: int32(f.fd), Events: events}}
+		// Darwin's /dev/tty is not pollable; retry its owned nonblocking I/O.
+		if f.retryWait {
+			fds = nil
+		}
 		_, err := unix.Poll(fds, 10)
 		if err == unix.EINTR {
 			continue
 		}
-		if err != nil || fds[0].Revents&unix.POLLNVAL != 0 {
+		if err != nil || len(fds) != 0 && fds[0].Revents&unix.POLLNVAL != 0 {
 			return errUnavailable
 		}
 		// Darwin FIFO writer closure need not produce readiness. Retry the
