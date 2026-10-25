@@ -25,10 +25,11 @@ pgsavvy v0.15.1
   Added repeated native macOS SSH/TLS checks and private failure captures.
   Certificate and server-name verification remain unchanged.
 
-  Stabilized socket/FIFO resource, PTY and CLI-history regression fixtures while
-  retaining leak detection, terminal-state and best-effort history warning
-  checks. Healthy fixture setup prewarms cold migrations separately; production
-  history startup and recording budgets are unchanged.
+  Stabilized resource, PTY, history and connection-lock regression fixtures,
+  retaining leak detection, terminal-state, best-effort history warnings and
+  serialization checks. Healthy fixtures prepare cold migrations separately
+  and retry only temporary lock contention; production timing budgets remain
+  unchanged.
 
 pgsavvy v0.15.0
 

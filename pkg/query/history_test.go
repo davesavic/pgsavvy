@@ -17,10 +17,21 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func prepareHistoryFixture(t *testing.T, path string) {
+	t.Helper()
+	// Healthy-history tests must not spend New's startup budget on cold migrations.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	db, err := openHistoryStore(ctx, path, false)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+}
+
 func TestHistory_RoundTrip(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 
@@ -57,6 +68,7 @@ func TestHistory_RoundTrip(t *testing.T) {
 func TestHistory_MetadataRoundTrip(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = h.Close() })
@@ -141,7 +153,9 @@ func TestHistory_MetadataRoundTrip(t *testing.T) {
 
 func TestHistory_BlockedCompletionExclusion(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
-	h, err := New(filepath.Join(t.TempDir(), "history.sqlite"))
+	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
+	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, h.Close()) }()
 	h.pauseWriter()
@@ -170,6 +184,7 @@ func TestHistory_FTSSearch(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 
@@ -198,6 +213,7 @@ func TestHistory_DropOldestOnOverflow(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 
@@ -229,7 +245,9 @@ func TestHistory_DropOldestOnOverflow(t *testing.T) {
 
 func TestHistory_PauseWaitsForWriter(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
-	h, err := New(filepath.Join(t.TempDir(), "history.sqlite"))
+	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
+	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, h.Close()) }()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -279,6 +297,7 @@ func TestHistory_CloseIdempotent(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 
@@ -290,6 +309,7 @@ func TestHistory_AsSessionRecorder_ForwardsConnID(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 
@@ -347,6 +367,7 @@ func TestHistory_SearchByPrefix_BasicMatch(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -369,6 +390,7 @@ func TestHistory_SearchByPrefix_EmptyPrefixReturnsEmpty(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -390,6 +412,7 @@ func TestHistory_SearchByPrefix_LimitZeroReturnsEmpty(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -410,6 +433,7 @@ func TestHistory_SearchByPrefix_EmptyTableReturnsEmpty(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -423,6 +447,7 @@ func TestHistory_SearchByPrefix_LimitRespected(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -441,6 +466,7 @@ func TestHistory_SearchByPrefix_DedupesAndOrdersByRecency(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -462,6 +488,7 @@ func TestHistory_SearchByPrefix_RejectsFTSOperators(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -481,7 +508,9 @@ func TestHistory_SearchByPrefix_RejectsFTSOperators(t *testing.T) {
 func TestReview_history_literal_prefix(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
-	h, err := New(filepath.Join(t.TempDir(), "history.sqlite"))
+	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
+	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, h.Close()) }()
 
@@ -548,6 +577,7 @@ func TestHistory_SearchByPrefix_StressLatency(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -607,6 +637,7 @@ func TestHistoryRecent_NewestFirst(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -630,6 +661,7 @@ func TestHistoryRecent_SucceededMapping(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -652,6 +684,7 @@ func TestHistoryRecent_LimitZeroOrNegative(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -671,6 +704,7 @@ func TestHistoryRecent_EmptyStore(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -685,6 +719,7 @@ func TestHistoryRecent_LimitExceedsRowCount(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -702,6 +737,7 @@ func TestHistoryRecent_LimitEqualsRowCount(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()
@@ -720,6 +756,7 @@ func TestHistoryRecent_LimitEqualsRowCount(t *testing.T) {
 
 func TestHistory_RecordNonBlockingLatency(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history.sqlite")
+	prepareHistoryFixture(t, path)
 	h, err := New(path)
 	require.NoError(t, err)
 	defer func() { _ = h.Close() }()

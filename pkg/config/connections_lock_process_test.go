@@ -162,22 +162,39 @@ func TestConnectionsWriteLockProcessHelper(t *testing.T) {
 	if _, err := io.Copy(io.Discard, os.Stdin); err != nil {
 		t.Fatal(err)
 	}
-	var err error
-	switch action {
-	case "hold":
-	case "append":
-		err = AppendConnection(fs, path, models.Connection{Name: "new"})
-	case "delete":
-		err = DeleteConnection(fs, path, "delete")
-	case "rename":
-		err = UpdateConnection(fs, path, "rename", models.Connection{Name: "renamed"})
-	case "revoke":
-		err = UpdateConnectionWithCLIAccess(fs, path, "dev", models.Connection{Name: "dev", CLIAccess: models.CLIAccessDisabled}, models.CLIAccessRowRead)
-	default:
-		t.Fatalf("unknown helper action %q", action)
-	}
-	if err != nil {
-		t.Fatal(err)
+	// Fixture writers retry bounded contention; production calls retain their 250ms budget.
+	deadline := time.Now().Add(5 * time.Second)
+	retried := false
+	for {
+		var err error
+		switch action {
+		case "hold":
+		case "append":
+			err = AppendConnection(fs, path, models.Connection{Name: "new"})
+		case "delete":
+			err = DeleteConnection(fs, path, "delete")
+		case "rename":
+			err = UpdateConnection(fs, path, "rename", models.Connection{Name: "renamed"})
+		case "revoke":
+			err = UpdateConnectionWithCLIAccess(fs, path, "dev", models.Connection{Name: "dev", CLIAccess: models.CLIAccessDisabled}, models.CLIAccessRowRead)
+		default:
+			t.Fatalf("unknown helper action %q", action)
+		}
+		if err == nil {
+			return
+		}
+		var lockErr *connectionsLockError
+		if !errors.As(err, &lockErr) || !lockErr.Temporary() || !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("writer %s exhausted contention retries: %v", action, err)
+		}
+		if !retried {
+			fmt.Println("retry")
+			retried = true
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -215,7 +232,6 @@ func TestConnectionsWriteLock_ProcessSerialization(t *testing.T) {
 			t.Fatal("contention changed profile bytes")
 		}
 	}
-	holder.finish(t)
 	var children []*connectionsChild
 	for _, action := range []string{"append", "delete", "rename", "revoke"} {
 		children = append(children, startConnectionsChild(t, path, action))
@@ -230,6 +246,17 @@ func TestConnectionsWriteLock_ProcessSerialization(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Every writer must encounter the held lock before any can commit.
+	for _, child := range children {
+		retry, err := child.output.ReadString('\n')
+		if err != nil || retry != "retry\n" {
+			t.Fatalf("writer did not retry contention: %q, %v", retry, err)
+		}
+	}
+	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(before, after) {
+		t.Fatal("retrying writers changed profile bytes while lock held")
+	}
+	holder.finish(t)
 	for _, child := range children {
 		output, err := io.ReadAll(child.output)
 		if err != nil {

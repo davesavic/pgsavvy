@@ -163,7 +163,16 @@ func TestMachineCLI_Envelope_ParentDeadlineAndInput(t *testing.T) {
 		cleaned = true
 		return Envelope{}, err
 	}})
-	if exit != 6 || !cleaned || time.Since(start) >= 100*time.Millisecond || !strings.Contains(out.String(), `"code":"TIMEOUT"`) {
-		t.Fatalf("input lost reserve: %d %s elapsed %s", exit, out.String(), time.Since(start))
+	if exit != 6 {
+		t.Fatal("input lost reserve: exit status")
+	}
+	if !cleaned {
+		t.Fatal("input lost reserve: cleanup incomplete")
+	}
+	if time.Since(start) >= 100*time.Millisecond {
+		t.Fatal("input lost reserve: parent deadline reached")
+	}
+	if !strings.Contains(out.String(), `"code":"TIMEOUT"`) {
+		t.Fatal("input lost reserve: timeout publication missing")
 	}
 }

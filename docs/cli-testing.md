@@ -237,11 +237,12 @@ failure is sticky. `run` without a terminal action is distinct from an actual
 `locations` retains at most the first 32 distinct approved source sites, sorted
 for publication. Only reconstructed public basenames and line numbers are
 emitted: `terminal_unix_test.go`, `stream_unix.go`, `io_darwin_test.go`,
-`query_history_process_test.go` and `machine_test.go`. The Darwin fixture helper
+`query_history_process_test.go`, `machine_test.go` and `dispatch_test.go`.
+The Darwin fixture helper
 is included because PTY/termios setup can block before the child timeout
 context exists. Line
 numbers must lie within pinned public source bounds, checked against those
-five repository files by regression tests. The reporter recognizes assertion
+six repository files by regression tests. The reporter recognizes assertion
 and Go panic/timeout stack locations in these four families' output, plus
 package-level output where timeout stacks have no test name. Private path
 prefixes, stack function/argument text, assertion values, SQL, credentials and
@@ -249,8 +250,10 @@ all other raw output remain private. These reported sites are diagnostic clues,
 not proof of the root cause or native acceptance.
 
 Source locations also cover the exact top-level
-`TestMachineOpen_TargetSnapshot_SSHTLS` test. No nested case labels, TLS error
-text, server names or certificate contents are published for that test.
+`TestMachineOpen_TargetSnapshot_SSHTLS` and
+`TestMachineCLI_Envelope_ParentDeadlineAndInput` tests. No nested case labels,
+TLS errors, server names, certificate contents, input values or output values
+are published for those tests.
 
 An explicitly approved exception publishes bounded, scrubbed **secret-free
 probe** diagnostics before the real fixture password is generated. The probe
