@@ -94,6 +94,25 @@ class TestNativeTestStatus(unittest.TestCase):
                     for private in ("private-", "SELECT", "private_sql", "PASSWORD_SENTINEL", "pkg/"):
                         self.assertNotIn(private, json.dumps(report))
 
+    def test_tls_snapshot_locations_do_not_publish_errors_or_dynamic_cases(self):
+        top = "TestMachineOpen_TargetSnapshot_SSHTLS"
+        invalid_line = cli_test_status.SOURCE_FILES["machine_test.go"][1] + 1
+        self.write_events([
+            {"Action": "run", "Test": top},
+            {"Action": "output", "Test": top, "Output":
+             "    /private-home-sentinel/pkg/drivers/pg/machine_test.go:934: private-TLS-error-sentinel\n"},
+            {"Action": "output", "Test": top + "/private-case-sentinel", "Output":
+             "    machine_test.go:943: private-SNI-sentinel\n"},
+            {"Action": "output", "Test": top, "Output": f"    machine_test.go:{invalid_line}: private-line-sentinel\n"},
+            {"Action": "fail", "Test": top},
+        ])
+        report = cli_test_status.read_status(self.path)
+        self.assertEqual(report["log_status"], "parsed")
+        self.assertEqual(report["tests"], [{"test": top, "status": "failed"}])
+        self.assertEqual(report["cases"], [])
+        self.assertEqual(report["locations"], [{"file": "machine_test.go", "line": 934}])
+        self.assertNotIn("private-", json.dumps(report))
+
     def diagnostic_events(self):
         terminal = "TestMachineTerminalApprovalProcess"
         history = "TestCLIHistoryProcess_CancellationAndCleanup"
@@ -220,13 +239,17 @@ class TestNativeTestStatus(unittest.TestCase):
         repo = pathlib.Path(__file__).resolve().parents[2]
         self.assertEqual({source for source, _ in cli_test_status.SOURCE_FILES.values()}, {
             "internal/machineio/terminal_unix_test.go", "internal/machineio/stream_unix.go",
-            "internal/machineio/io_darwin_test.go", "pkg/cli/query_history_process_test.go"})
+            "internal/machineio/io_darwin_test.go", "pkg/cli/query_history_process_test.go",
+            "pkg/drivers/pg/machine_test.go"})
         for basename, (source, last_line) in cli_test_status.SOURCE_FILES.items():
             self.assertEqual(pathlib.PurePosixPath(source).name, basename)
             self.assertEqual(len((repo / source).read_text().splitlines()), last_line)
 
     def test_metadata_allowlists_match_public_source(self):
         repo = pathlib.Path(__file__).resolve().parents[2]
+        self.assertEqual(cli_test_status.LOCATION_ONLY_TESTS,
+                         {"TestMachineOpen_TargetSnapshot_SSHTLS"})
+        self.assertLessEqual(cli_test_status.LOCATION_ONLY_TESTS, cli_test_status.TEST_NAMES)
         terminal = (repo / "internal/machineio/terminal_unix_test.go").read_text()
         terminal = terminal.split("func TestMachineTerminalApprovalProcess(", 1)[1]
         modes = re.search(r"for _, mode := range \[\]string\{([^}]+)\}", terminal)[1]

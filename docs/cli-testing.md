@@ -196,6 +196,15 @@ the same private-log reporter and owned cleanup. A passing isolated preflight
 does not replace or skip the later full native inventory, tests or evidence
 checks; it distinguishes an isolated timeout from a full-suite-only failure.
 
+After that preflight passes, Darwin runs only
+`^TestMachineOpen_TargetSnapshot_SSHTLS$` 50 times with `CGO_ENABLED=0` and a
+60-second Go test timeout, still before PostgreSQL provisioning. Failures report
+`stage=ssh-tls-snapshot-probe`; stdout JSON and stderr remain in the private owned
+directory and are deleted by normal cleanup. Only fixed test status and approved
+public source locations may be published, never TLS error text, SNI/server names
+or certificate data. Passing probes continue to the unchanged full native test
+inventory and evidence checks; probe success alone is not native acceptance.
+
 If the six baseline Go tests fail, the failure path may publish only their
 fixed top-level names and `passed`/`failed`/`not_completed` status. The reporter
 on Windows reads at most 1 MiB of UTF-8 JSON; missing, oversized or invalid logs
@@ -227,16 +236,21 @@ failure is sticky. `run` without a terminal action is distinct from an actual
 
 `locations` retains at most the first 32 distinct approved source sites, sorted
 for publication. Only reconstructed public basenames and line numbers are
-emitted: `terminal_unix_test.go`, `stream_unix.go`, `io_darwin_test.go` and
-`query_history_process_test.go`. The Darwin fixture helper is included because
-PTY/termios setup can block before the child timeout context exists. Line
+emitted: `terminal_unix_test.go`, `stream_unix.go`, `io_darwin_test.go`,
+`query_history_process_test.go` and `machine_test.go`. The Darwin fixture helper
+is included because PTY/termios setup can block before the child timeout
+context exists. Line
 numbers must lie within pinned public source bounds, checked against those
-four repository files by regression tests. The reporter recognizes assertion
+five repository files by regression tests. The reporter recognizes assertion
 and Go panic/timeout stack locations in these four families' output, plus
 package-level output where timeout stacks have no test name. Private path
 prefixes, stack function/argument text, assertion values, SQL, credentials and
 all other raw output remain private. These reported sites are diagnostic clues,
 not proof of the root cause or native acceptance.
+
+Source locations also cover the exact top-level
+`TestMachineOpen_TargetSnapshot_SSHTLS` test. No nested case labels, TLS error
+text, server names or certificate contents are published for that test.
 
 An explicitly approved exception publishes bounded, scrubbed **secret-free
 probe** diagnostics before the real fixture password is generated. The probe

@@ -29,8 +29,8 @@ cleanup() {
     # Command text and captured logs can contain the private fixture password.
     printf 'native fixture failed: stage=%s line=%s exit=%s\n' "$stage" "$failure_line" "$result" >&2
     case "$stage" in
-      terminal-process-preflight|baseline-tests|native-tests|evidence)
-        for log in terminal-preflight.jsonl tests.jsonl native-tests.jsonl; do
+      terminal-process-preflight|ssh-tls-snapshot-probe|baseline-tests|native-tests|evidence)
+        for log in terminal-preflight.jsonl ssh-tls-snapshot.jsonl tests.jsonl native-tests.jsonl; do
           python3 "$repo/.github/scripts/cli_test_status.py" "$root/$log" 2>/dev/null || echo 'test status reporter unavailable' >&2
         done
         ;;
@@ -60,6 +60,9 @@ if [ "$host_os" = darwin ]; then
   stage=terminal-process-preflight
   CGO_ENABLED=0 go -C "$repo" test -json -count=1 -timeout 60s ./internal/machineio \
     -run '^TestMachineTerminalApprovalProcess$' >"$root/terminal-preflight.jsonl" 2>"$root/terminal-preflight.err"
+  stage=ssh-tls-snapshot-probe
+  CGO_ENABLED=0 go -C "$repo" test -json -count=50 -timeout 60s ./pkg/drivers/pg \
+    -run '^TestMachineOpen_TargetSnapshot_SSHTLS$' >"$root/ssh-tls-snapshot.jsonl" 2>"$root/ssh-tls-snapshot.err"
 fi
 
 stage=manifest

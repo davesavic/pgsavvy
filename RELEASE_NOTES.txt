@@ -17,6 +17,9 @@ pgsavvy v0.15.1
   case labels and source locations help diagnose failures; raw output, dynamic
   test names, private paths and package names remain private.
 
+  Added repeated native macOS SSH/TLS checks and private failure captures.
+  Certificate and server-name verification remain unchanged.
+
   Stabilized socket/FIFO resource, PTY and CLI-history regression fixtures while
   retaining leak detection, terminal-state and best-effort history warning
   checks. Healthy fixture setup prewarms cold migrations separately; production

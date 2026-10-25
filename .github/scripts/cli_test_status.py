@@ -266,11 +266,13 @@ CASE_NAMES = {
     "TestCLIHistoryProcess_OutputPipes": frozenset(("broken_false", "broken_true")),
     "TestCLIHistoryProcess_PrivacyAndOutput": frozenset(("backend_failure_false", "backend_failure_true")),
 }
+LOCATION_ONLY_TESTS = frozenset(("TestMachineOpen_TargetSnapshot_SSHTLS",))
 SOURCE_FILES = {
     "terminal_unix_test.go": ("internal/machineio/terminal_unix_test.go", 432),
     "stream_unix.go": ("internal/machineio/stream_unix.go", 151),
     "io_darwin_test.go": ("internal/machineio/io_darwin_test.go", 185),
     "query_history_process_test.go": ("pkg/cli/query_history_process_test.go", 759),
+    "machine_test.go": ("pkg/drivers/pg/machine_test.go", 1046),
 }
 MAX_LOCATIONS = 32
 LOCATION_PATTERN = re.compile(
@@ -314,7 +316,7 @@ def read_status(path):
                     if not isinstance(output, str):
                         return report
                     # Timeout stacks may be package output without a Test field.
-                    if name is None or (top in CASE_NAMES and (name == top or public_case)):
+                    if name is None or name in LOCATION_ONLY_TESTS or (top in CASE_NAMES and (name == top or public_case)):
                         for match in LOCATION_PATTERN.finditer(output):
                             if len(locations) >= MAX_LOCATIONS:
                                 break
