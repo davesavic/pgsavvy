@@ -189,24 +189,51 @@ the real initdb command also reports its numeric exit code. Its logs remain
 private and are deleted by owned cleanup.
 Unix failures likewise report the fixed provisioning/test stage, script line and
 original exit code before owned cleanup, without exposing captured private logs.
+Darwin first runs only `^TestMachineTerminalApprovalProcess$` with
+`CGO_ENABLED=0` and a 60-second Go test timeout, before PostgreSQL download or
+source provisioning. Failure reports `stage=terminal-process-preflight` through
+the same private-log reporter and owned cleanup. A passing isolated preflight
+does not replace or skip the later full native inventory, tests or evidence
+checks; it distinguishes an isolated timeout from a full-suite-only failure.
 
 If the six baseline Go tests fail, the failure path may publish only their
 fixed top-level names and `passed`/`failed`/`not_completed` status. The reporter
 on Windows reads at most 1 MiB of UTF-8 JSON; missing, oversized or invalid logs
-report incomplete status. Assertion output, subtest names, package names, credentials,
-environment values and raw test/native logs remain private. This diagnostic
+report incomplete status. Assertion output, unapproved subtest names, package
+names, credentials, environment values and raw test/native logs remain private. This diagnostic
 does not change any test, acceptance gate or failure exit status.
 Unix baseline/native suite failures stream UTF-8 JSON records with a 1 MiB
 per-record limit (including the newline) and a 64 MiB total scan limit, plus at
 most one byte to detect overflow. Aggregate output above 1 MiB can therefore
 still report failures without loading the whole log into memory. Any malformed
-record or exceeded limit discards all statuses and failure flags, including
-earlier valid records; this is diagnostic output, never acceptance evidence.
+record or exceeded limit discards all statuses, diagnostic metadata and failure
+flags, including earlier valid records; this is diagnostic output, never acceptance evidence.
 The reporter's fixed allowlist in `.github/scripts/cli_test_status.py` contains
 source-declared top-level `TestMachine` and `TestCLIHistory` names from the native
-suite's package directories. Subtest failures report only their
-allowlisted parent name. Package failures and unlisted failures expose only
+suite's package directories. Subtest failures still update their allowlisted
+parent status. Package failures and unlisted failures expose only
 boolean flags, never their names. The allowlist does not add acceptance tests.
+
+An approved Unix diagnostic exception adds `cases` and `locations` metadata.
+`cases` contains only the 14 fixed case labels of
+`TestMachineTerminalApprovalProcess` and five fixed labels of
+`TestCLIHistoryProcess_CancellationAndCleanup`, never dynamic or nested labels.
+Each case records its last lifecycle `action`: `run`, `pass`, `fail` or `skip`;
+failure is sticky. `run` without a terminal action is distinct from an actual
+`skip`, while the existing top-level statuses are unchanged.
+
+`locations` retains at most the first 32 distinct approved source sites, sorted
+for publication. Only reconstructed public basenames and line numbers are
+emitted: `terminal_unix_test.go`, `stream_unix.go`, `io_darwin_test.go` and
+`query_history_process_test.go`. The Darwin fixture helper is included because
+PTY/termios setup can block before the child timeout context exists. Line
+numbers must lie within pinned public source bounds, checked against those
+four repository files by regression tests. The reporter recognizes assertion
+and Go panic/timeout stack locations in these two families' output, plus
+package-level output where timeout stacks have no test name. Private path
+prefixes, stack function/argument text, assertion values, SQL, credentials and
+all other raw output remain private. These reported sites are diagnostic clues,
+not proof of the root cause or native acceptance.
 
 An explicitly approved exception publishes bounded, scrubbed **secret-free
 probe** diagnostics before the real fixture password is generated. The probe

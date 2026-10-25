@@ -67,13 +67,158 @@ class TestNativeTestStatus(unittest.TestCase):
         self.assertNotIn("private-", json.dumps(report))
         self.assertNotIn("PrivateNameSentinel", json.dumps(report))
 
+    def diagnostic_events(self):
+        terminal = "TestMachineTerminalApprovalProcess"
+        history = "TestCLIHistoryProcess_CancellationAndCleanup"
+        return [
+            {"Action": "run", "Test": terminal},
+            {"Action": "run", "Test": terminal + "/idle"},
+            {"Action": "output", "Test": terminal + "/idle", "Output":
+             "    terminal_unix_test.go:348: private-output-sentinel SELECT private_sql\n"},
+            {"Action": "output", "Output":
+             "\t/private-path-sentinel/internal/machineio/stream_unix.go:58 +0x123\n"},
+            {"Action": "output", "Output":
+             "panic: private-panic-sentinel\nprivateFunction(private-argument-sentinel)\n"
+             "\t/private-path-sentinel/internal/machineio/io_darwin_test.go:145 +0x123\n"},
+            {"Action": "run", "Test": history},
+            {"Action": "run", "Test": history + "/interrupt"},
+            {"Action": "output", "Test": history + "/interrupt", "Output":
+             "    Error Trace:\t/private-path-sentinel/pkg/cli/query_history_process_test.go:570\n"},
+            {"Action": "fail", "Test": history + "/interrupt"},
+            {"Action": "pass", "Test": history + "/interrupt"},
+            {"Action": "fail", "Test": history},
+        ]
+
+    def test_fixed_cases_and_public_source_locations_diagnose_failure_and_hang(self):
+        self.write_events(self.diagnostic_events())
+        report = cli_test_status.read_status(self.path)
+        self.assertEqual(report["log_status"], "parsed")
+        self.assertEqual(report["cases"], [
+            {"test": "TestCLIHistoryProcess_CancellationAndCleanup", "case": "interrupt", "action": "fail"},
+            {"test": "TestMachineTerminalApprovalProcess", "case": "idle", "action": "run"},
+        ])
+        self.assertEqual(report["locations"], [
+            {"file": "io_darwin_test.go", "line": 145},
+            {"file": "query_history_process_test.go", "line": 570},
+            {"file": "stream_unix.go", "line": 58},
+            {"file": "terminal_unix_test.go", "line": 348},
+        ])
+        self.assertEqual(report["tests"], [
+            {"test": "TestCLIHistoryProcess_CancellationAndCleanup", "status": "failed"},
+            {"test": "TestMachineTerminalApprovalProcess", "status": "not_completed"},
+        ])
+        public = json.dumps(report)
+        for private in ("private-", "private_sql", "SELECT", "+0x123", "internal/", "pkg/"):
+            self.assertNotIn(private, public)
+
+    def test_case_actions_distinguish_running_passing_failing_and_skipped(self):
+        top = "TestMachineTerminalApprovalProcess"
+        actions = {"idle": "run", "success": "pass", "deadline": "fail", "close": "skip"}
+        self.write_events([{"Action": action, "Test": top + "/" + case}
+                           for case, action in actions.items()])
+        report = cli_test_status.read_status(self.path)
+        self.assertEqual(report["cases"], [
+            {"test": top, "case": case, "action": actions[case]} for case in sorted(actions)])
+
+    def test_dynamic_cases_and_invalid_source_sites_stay_private(self):
+        terminal = "TestMachineTerminalApprovalProcess"
+        history = "TestCLIHistoryProcess_CancellationAndCleanup"
+        events = [
+            {"Action": "fail", "Test": terminal + "/private-case-sentinel"},
+            {"Action": "fail", "Test": terminal + "/idle/private-nested-sentinel"},
+            {"Action": "fail", "Test": history + "/interrupt#01"},
+            {"Action": "fail", "Test": "TestMachineCLI_Dispatch/idle"},
+        ]
+        for site in ("stream_unix.go:0", "stream_unix.go:-1", "stream_unix.go:152",
+                     "stream_unix.go:99999999999999", "stream_unix.go:58private-number-sentinel",
+                     "stream_unix.go:058", "private-file-sentinel.go:58",
+                     "/private-path-sentinel/stream_unix.go:58",
+                     "private-stream_unix.go:58", "SELECT 'stream_unix.go:58'",
+                     "terminal_unix_test.go:382", "io_darwin_test.go:186",
+                     "query_history_process_test.go:9999"):
+            events.append({"Action": "output", "Test": terminal, "Output": "\t" + site + "\n"})
+        events.append({"Action": "output", "Test": "TestMachineCLI_Dispatch",
+                       "Output": "    stream_unix.go:58: private-unrelated-sentinel\n"})
+        events.append({"Action": "output", "Test": terminal + "/idle/private-case-sentinel",
+                       "Output": "    stream_unix.go:58: private-dynamic-sentinel\n"})
+        self.write_events(events)
+        report = cli_test_status.read_status(self.path)
+        self.assertEqual(report["log_status"], "parsed")
+        self.assertEqual(report["cases"], [])
+        self.assertEqual(report["locations"], [])
+        self.assertNotIn("private-", json.dumps(report))
+
+    def test_bad_tail_discards_all_diagnostic_metadata(self):
+        for tail, status in ((b"private-malformed-sentinel", "invalid"), (b"\xff", "invalid"),
+                             (b'{"Action":"output","Output":{}}\n', "invalid"),
+                             (b"x" * (cli_test_status.LIMIT + 1), "oversized")):
+            with self.subTest(status=status):
+                self.write_events(self.diagnostic_events() + [
+                    {"Action": "fail"}, {"Action": "fail", "Test": "private-case-sentinel"}])
+                with self.path.open("ab") as log:
+                    log.write(tail)
+                report = cli_test_status.read_status(self.path)
+                self.assertEqual(report["log_status"], status)
+                for field in ("tests", "cases", "locations"):
+                    self.assertEqual(report[field], [])
+                self.assertFalse(report["package_failed"])
+                self.assertFalse(report["unlisted_failure"])
+        self.write_events(self.diagnostic_events())
+        with mock.patch.object(cli_test_status, "MAX_LOG_BYTES", self.path.stat().st_size - 1):
+            report = cli_test_status.read_status(self.path)
+        self.assertEqual(report["log_status"], "oversized")
+        for field in ("tests", "cases", "locations"):
+            self.assertEqual(report[field], [])
+
+    def test_metadata_inventory_and_location_retention_are_bounded(self):
+        events = []
+        for top, labels in cli_test_status.CASE_NAMES.items():
+            for label in labels:
+                for action in ("run", "skip", "pass", "fail", "pass"):
+                    events.append({"Action": action, "Test": top + "/" + label})
+        for number in range(1, cli_test_status.MAX_LOCATIONS + 2):
+            events.append({"Action": "output", "Output": f"\tstream_unix.go:{number} +0x123\n"})
+        self.write_events(events * 2)
+        report = cli_test_status.read_status(self.path)
+        self.assertEqual(len(report["cases"]), sum(map(len, cli_test_status.CASE_NAMES.values())))
+        self.assertTrue(all(case["action"] == "fail" for case in report["cases"]))
+        self.assertEqual(report["locations"], [
+            {"file": "stream_unix.go", "line": number}
+            for number in range(1, cli_test_status.MAX_LOCATIONS + 1)])
+        self.assertLess(len(json.dumps({key: report[key] for key in ("cases", "locations")})), 8192)
+
+    def test_metadata_allowlists_match_public_source(self):
+        repo = pathlib.Path(__file__).resolve().parents[2]
+        self.assertEqual({source for source, _ in cli_test_status.SOURCE_FILES.values()}, {
+            "internal/machineio/terminal_unix_test.go", "internal/machineio/stream_unix.go",
+            "internal/machineio/io_darwin_test.go", "pkg/cli/query_history_process_test.go"})
+        for basename, (source, last_line) in cli_test_status.SOURCE_FILES.items():
+            self.assertEqual(pathlib.PurePosixPath(source).name, basename)
+            self.assertEqual(len((repo / source).read_text().splitlines()), last_line)
+        terminal = (repo / "internal/machineio/terminal_unix_test.go").read_text()
+        terminal = terminal.split("func TestMachineTerminalApprovalProcess(", 1)[1]
+        modes = re.search(r"for _, mode := range \[\]string\{([^}]+)\}", terminal)[1]
+        self.assertEqual(cli_test_status.CASE_NAMES["TestMachineTerminalApprovalProcess"],
+                         {"wait-invalid", *re.findall(r'"([^"]+)"', modes)})
+        history = (repo / "pkg/cli/query_history_process_test.go").read_text()
+        history = history.split("func TestCLIHistoryProcess_CancellationAndCleanup(", 1)[1]
+        history = history.split("\nfunc ", 1)[0]
+        self.assertIn("[]os.Signal{os.Interrupt, syscall.SIGTERM}", history)
+        fixtures = re.search(r"for _, fixture := range \[\]string\{([^}]+)\}", history)[1]
+        self.assertEqual(cli_test_status.CASE_NAMES["TestCLIHistoryProcess_CancellationAndCleanup"],
+                         {"interrupt", "terminated", *re.findall(r'"([^"]+)"', fixtures)})
+
     def test_aggregate_output_over_one_mib_keeps_private_failure_status(self):
-        name = "TestCLIHistoryProcess_OutputPipes"
+        name = "TestCLIHistoryProcess_CancellationAndCleanup"
         output_event = {"Action": "output", "Test": name,
                         "Output": "private-output-sentinel" * 200}
         self.write_events([
             {"Action": "run", "Test": name},
+            {"Action": "run", "Test": name + "/interrupt"},
             *[output_event] * 300,
+            {"Action": "fail", "Test": name + "/interrupt"},
+            {"Action": "output", "Test": name + "/interrupt",
+             "Output": "    query_history_process_test.go:570: private-output-sentinel\n"},
             {"Action": "fail", "Test": name + "/private-subtest-sentinel",
              "Package": "private-package-sentinel"},
             {"Action": "fail", "Test": "TestMachinePrivateNameSentinel"},
@@ -83,6 +228,8 @@ class TestNativeTestStatus(unittest.TestCase):
         report = cli_test_status.read_status(self.path)
         self.assertEqual(report["log_status"], "parsed")
         self.assertEqual(report["tests"], [{"test": name, "status": "failed"}])
+        self.assertEqual(report["cases"], [{"test": name, "case": "interrupt", "action": "fail"}])
+        self.assertEqual(report["locations"], [{"file": "query_history_process_test.go", "line": 570}])
         self.assertTrue(report["package_failed"])
         self.assertTrue(report["unlisted_failure"])
         public = json.dumps(report)
@@ -94,6 +241,8 @@ class TestNativeTestStatus(unittest.TestCase):
         report = cli_test_status.read_status(self.path)
         self.assertEqual(report["log_status"], "invalid")
         self.assertEqual(report["tests"], [])
+        self.assertEqual(report["cases"], [])
+        self.assertEqual(report["locations"], [])
         self.assertFalse(report["package_failed"])
         self.assertFalse(report["unlisted_failure"])
 

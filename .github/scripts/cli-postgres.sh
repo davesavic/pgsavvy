@@ -29,8 +29,8 @@ cleanup() {
     # Command text and captured logs can contain the private fixture password.
     printf 'native fixture failed: stage=%s line=%s exit=%s\n' "$stage" "$failure_line" "$result" >&2
     case "$stage" in
-      baseline-tests|native-tests|evidence)
-        for log in tests.jsonl native-tests.jsonl; do
+      terminal-process-preflight|baseline-tests|native-tests|evidence)
+        for log in terminal-preflight.jsonl tests.jsonl native-tests.jsonl; do
           python3 "$repo/.github/scripts/cli_test_status.py" "$root/$log" 2>/dev/null || echo 'test status reporter unavailable' >&2
         done
         ;;
@@ -56,6 +56,13 @@ trap 'cleanup "$?" "$LINENO"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+if [ "$host_os" = darwin ]; then
+  stage=terminal-process-preflight
+  CGO_ENABLED=0 go -C "$repo" test -json -count=1 -timeout 60s ./internal/machineio \
+    -run '^TestMachineTerminalApprovalProcess$' >"$root/terminal-preflight.jsonl" 2>"$root/terminal-preflight.err"
+fi
+
+stage=manifest
 python3 - "$repo/.github/scripts/cli-postgres-versions.json" "$major" >"$root/pin" <<'PY'
 import json, re, sys
 with open(sys.argv[1], encoding="utf-8") as f:
