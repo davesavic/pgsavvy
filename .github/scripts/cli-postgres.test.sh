@@ -16,6 +16,19 @@ end = source.index(end_marker, start) + len(end_marker)
 pathlib.Path(sys.argv[2]).write_text(source[start:end] + "\n")
 PY
 
+python3 - "$temp/native-tests.jsonl" <<'PY'
+import json, pathlib, sys
+name = "TestMachineIO_DarwinFIFOEOF"
+with pathlib.Path(sys.argv[1]).open("w") as log:
+    log.write(json.dumps({"Action": "run", "Test": name}) + "\n")
+    for _ in range(300):
+        log.write(json.dumps({"Action": "output", "Test": name,
+                              "Output": "private-output-sentinel" * 200}) + "\n")
+    log.write(json.dumps({"Action": "fail", "Test": name + "/private-subtest-sentinel",
+                          "Package": "private-package-sentinel"}) + "\n")
+assert pathlib.Path(sys.argv[1]).stat().st_size > 1024 * 1024
+PY
+
 for stage in initdb baseline-tests native-tests evidence; do
   for stop_result in 0 1; do
     for result in 0 37; do
@@ -31,6 +44,7 @@ SH
       chmod +x "$root/install/bin/pg_ctl"
       export STOP_RESULT="$stop_result" STOP_MARKER="$temp/stopped"
       rm -f "$STOP_MARKER"
+      cp "$temp/native-tests.jsonl" "$root/native-tests.jsonl"
       set +e
       bash -euo pipefail -c '
         root=$1; pg="$root/install/bin"; stage=$2; repo=$5
@@ -47,6 +61,7 @@ SH
         grep -Eq "^native fixture failed: stage=$stage line=[0-9]+ exit=37$" "$temp/public"
         if [ "$stage" != initdb ]; then
           grep -q '"test": "TestMachineCLIProcess_Query", "status": "failed"' "$temp/public"
+          grep -q '"test": "TestMachineIO_DarwinFIFOEOF", "status": "failed"' "$temp/public"
         fi
       fi
       if grep -q 'private-.*-sentinel' "$temp/public"; then

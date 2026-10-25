@@ -3,9 +3,34 @@ import pathlib
 import sys
 
 LIMIT = 1024 * 1024
+MAX_LOG_BYTES = 64 * LIMIT
 
 # Fixed committed-source names, never names supplied only by private test output.
 TEST_NAMES = frozenset("""
+TestCLIHistoryLiveProcessHelper
+TestCLIHistoryProcess_CancellationAndCleanup
+TestCLIHistoryProcess_ConcurrentStartup
+TestCLIHistoryProcess_DefaultNoState
+TestCLIHistoryProcess_ExitPersistence
+TestCLIHistoryProcess_Helper
+TestCLIHistoryProcess_OutputPipes
+TestCLIHistoryProcess_PrivacyAndOutput
+TestCLIHistoryProcess_SQLBoundary
+TestCLIHistoryProcess_StoreFailures
+TestCLIHistory_BudgetLedger
+TestCLIHistory_ConsentSnapshotAndExhaustion
+TestCLIHistory_DefaultNoState
+TestCLIHistory_ExternalCancellation
+TestCLIHistory_FullApprovalCannotEnableConsent
+TestCLIHistory_FullApprovalFlagsPrivacy
+TestCLIHistory_Live
+TestCLIHistory_LockedStore
+TestCLIHistory_MetadataBoundaries
+TestCLIHistory_MetadataOnlyRejection
+TestCLIHistory_PublicationAndIsolation
+TestCLIHistory_QueryOutcomes
+TestCLIHistory_RollbackRehearsal
+TestCLIHistory_WarningsPreserveExit
 TestMachineAgent_DeadlineAndClose
 TestMachineAgent_EndpointPrecedence
 TestMachineAgent_StalledProtocol
@@ -234,38 +259,44 @@ def read_status(path):
               "tests": [], "package_failed": False, "unlisted_failure": False}
     try:
         with pathlib.Path(path).open("rb") as log:
-            raw = log.read(LIMIT + 1)
-        report["log_status"] = "invalid"
-        if len(raw) > LIMIT:
-            report["log_status"] = "oversized"
-            return report
-        if not raw.strip():
-            return report
-        statuses = {}
-        package_failed = unlisted_failure = False
-        for line in raw.decode("utf-8").splitlines():
-            if not line.strip():
-                continue
-            event = json.loads(line)
-            if not isinstance(event, dict) or not isinstance(event.get("Action"), str):
+            report["log_status"] = "invalid"
+            statuses = {}
+            package_failed = unlisted_failure = saw_event = False
+            total = 0
+            while True:
+                # Large suites can exceed one record's budget; never retain the whole log.
+                line = log.readline(min(LIMIT, MAX_LOG_BYTES - total) + 1)
+                if not line:
+                    break
+                total += len(line)
+                if len(line) > LIMIT or total > MAX_LOG_BYTES:
+                    report["log_status"] = "oversized"
+                    return report
+                if not line.strip():
+                    continue
+                event = json.loads(line.decode("utf-8"))
+                if not isinstance(event, dict) or not isinstance(event.get("Action"), str):
+                    return report
+                saw_event = True
+                action, name = event["Action"], event.get("Test")
+                if name is None:
+                    package_failed |= action == "fail"
+                    continue
+                if not isinstance(name, str):
+                    return report
+                top = name.partition("/")[0]
+                if top not in TEST_NAMES:
+                    unlisted_failure |= action == "fail"
+                    continue
+                if action == "fail":
+                    statuses[top] = "failed"
+                elif name == top and statuses.get(top) != "failed":
+                    if action == "pass":
+                        statuses[top] = "passed"
+                    elif action in ("run", "skip"):
+                        statuses[top] = "not_completed"
+            if not saw_event:
                 return report
-            action, name = event["Action"], event.get("Test")
-            if name is None:
-                package_failed |= action == "fail"
-                continue
-            if not isinstance(name, str):
-                return report
-            top = name.partition("/")[0]
-            if top not in TEST_NAMES:
-                unlisted_failure |= action == "fail"
-                continue
-            if action == "fail":
-                statuses[top] = "failed"
-            elif name == top and statuses.get(top) != "failed":
-                if action == "pass":
-                    statuses[top] = "passed"
-                elif action in ("run", "skip"):
-                    statuses[top] = "not_completed"
         report.update(log_status="parsed", package_failed=package_failed,
                       unlisted_failure=unlisted_failure,
                       tests=[{"test": name, "status": statuses[name]} for name in sorted(statuses)])

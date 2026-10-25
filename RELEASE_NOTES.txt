@@ -8,6 +8,14 @@ pgsavvy v0.15.1
   test names to the fixed diagnostic allowlist so native Unix test preflight
   accepts the committed test inventory without weakening privacy checks.
 
+  Report allowlisted native-suite failures from larger private test logs with
+  bounded streaming diagnostics, including CLI-history tests. Raw output,
+  subtest names and package names remain private.
+
+  Stabilized socket/FIFO resource checks and concurrent CLI-history regression
+  tests while retaining leak detection and best-effort history warning checks.
+  Application behavior and the history recording budget are unchanged.
+
 pgsavvy v0.15.0
 
   Added pgsavvy llm-help: a single offline JSON guide for LLMs and scripts,

@@ -378,7 +378,7 @@ func (f *historyProcessFixture) installV1(t *testing.T) {
 }
 
 func TestCLIHistoryProcess_ConcurrentStartup(t *testing.T) {
-	for _, version := range []string{"fresh", "v1", "current"} {
+	for _, version := range []string{"fresh", "v1", "current", "locked"} {
 		t.Run(version, func(t *testing.T) {
 			f := newHistoryProcess(t, historyConsent(true))
 			seeded := 0
@@ -386,19 +386,31 @@ func TestCLIHistoryProcess_ConcurrentStartup(t *testing.T) {
 			case "v1":
 				f.installV1(t)
 				seeded = 1
-			case "current":
+			case "current", "locked":
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
 				require.NoError(t, query.AppendHistory(ctx, f.store, query.HistoryEvent{SQL: "SELECT existing_process", Source: "tui", Outcome: "succeeded"}))
 				seeded = 1
 			}
-			file := f.sql(t, "DELETE FROM concurrently_blocked")
+			if version == "locked" {
+				db, err := sql.Open("sqlite", f.store)
+				require.NoError(t, err)
+				db.SetMaxOpenConns(1)
+				defer func() { _, _ = db.Exec(`ROLLBACK`); _ = db.Close() }()
+				_, err = db.Exec(`BEGIN IMMEDIATE`)
+				require.NoError(t, err)
+			}
 			before, err := os.ReadFile(f.profiles)
 			require.NoError(t, err)
 			var commands []*exec.Cmd
 			var starts []*os.File
 			var outputs []*bytes.Buffer
-			for range 4 {
+			var statements []string
+			for i := range 4 {
+				statement := fmt.Sprintf("DELETE FROM concurrently_blocked -- process %d", i)
+				file := filepath.Join(f.root, fmt.Sprintf("query-%d.sql", i))
+				require.NoError(t, os.WriteFile(file, []byte(statement), 0o600))
+				statements = append(statements, statement)
 				read, write, err := os.Pipe()
 				require.NoError(t, err)
 				command := f.command(t, "query", "--connection=dev", "--file="+file)
@@ -426,17 +438,47 @@ func TestCLIHistoryProcess_ConcurrentStartup(t *testing.T) {
 				require.Equal(t, ExitInput, historyProcessExit(t, command.Wait()), outputs[i].String())
 			}
 			events := readProcessHistory(t, f.store)
-			require.Len(t, events, seeded+4)
+			bySQL := map[string]int{}
 			var cliCount int
 			for _, event := range events {
 				if event.Source == "cli" {
 					cliCount++
+					require.Contains(t, statements, event.SQL)
+					bySQL[event.SQL]++
+					require.Equal(t, "dev", event.ConnectionID)
 					require.Equal(t, "blocked", event.Outcome)
 				}
 			}
-			require.Equal(t, 4, cliCount)
+			require.Len(t, events, seeded+cliCount)
+			for i, output := range outputs {
+				var envelope Envelope
+				decoder := json.NewDecoder(bytes.NewReader(output.Bytes()))
+				require.NoError(t, decoder.Decode(&envelope))
+				require.ErrorIs(t, decoder.Decode(new(any)), io.EOF)
+				require.Equal(t, 1, envelope.SchemaVersion)
+				require.False(t, envelope.OK)
+				require.NotNil(t, envelope.Error)
+				require.Equal(t, UnsupportedSQL, envelope.Error.Code)
+				if version == "locked" {
+					require.Equal(t, []ErrorCode{HistoryUnavailable}, envelope.Warnings)
+					require.Zero(t, bySQL[statements[i]])
+				} else if len(envelope.Warnings) == 0 {
+					require.Equal(t, 1, bySQL[statements[i]], "unwarned append must be committed at exit: %s", output)
+				} else {
+					// Contention may lose best-effort history, never silently or with duplicates.
+					require.Len(t, envelope.Warnings, 1)
+					allowed := []ErrorCode{HistoryUnavailable}
+					if version == "v1" {
+						allowed = append(allowed, HistoryUpgradeRequired)
+					}
+					require.Contains(t, allowed, envelope.Warnings[0])
+					require.LessOrEqual(t, bySQL[statements[i]], 1)
+				}
+			}
 			if version == "v1" {
 				require.Equal(t, query.HistoryEvent{ExecutedAt: 1234, SQL: "SELECT legacy_process", DurationMS: 7, ConnectionID: "old-profile", Source: "tui", Outcome: "succeeded"}, events[0])
+			} else if seeded != 0 {
+				require.Equal(t, query.HistoryEvent{SQL: "SELECT existing_process", Source: "tui", Outcome: "succeeded"}, events[0])
 			}
 			after, err := os.ReadFile(f.profiles)
 			require.NoError(t, err)

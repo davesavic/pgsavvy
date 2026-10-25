@@ -190,13 +190,19 @@ original exit code before owned cleanup, without exposing captured private logs.
 
 If the six baseline Go tests fail, the failure path may publish only their
 fixed top-level names and `passed`/`failed`/`not_completed` status. The reporter
-reads at most 1 MiB of UTF-8 JSON; missing, oversized or invalid logs report
-incomplete status. Assertion output, subtest names, package names, credentials,
+on Windows reads at most 1 MiB of UTF-8 JSON; missing, oversized or invalid logs
+report incomplete status. Assertion output, subtest names, package names, credentials,
 environment values and raw test/native logs remain private. This diagnostic
 does not change any test, acceptance gate or failure exit status.
-Unix baseline/native suite failures use the same bounded, fail-closed policy,
-with a fixed allowlist of source-declared top-level machine test names in
-`.github/scripts/cli_test_status.py`. Subtest failures report only their
+Unix baseline/native suite failures stream UTF-8 JSON records with a 1 MiB
+per-record limit (including the newline) and a 64 MiB total scan limit, plus at
+most one byte to detect overflow. Aggregate output above 1 MiB can therefore
+still report failures without loading the whole log into memory. Any malformed
+record or exceeded limit discards all statuses and failure flags, including
+earlier valid records; this is diagnostic output, never acceptance evidence.
+The reporter's fixed allowlist in `.github/scripts/cli_test_status.py` contains
+source-declared top-level `TestMachine` and `TestCLIHistory` names from the native
+suite's package directories. Subtest failures report only their
 allowlisted parent name. Package failures and unlisted failures expose only
 boolean flags, never their names. The allowlist does not add acceptance tests.
 

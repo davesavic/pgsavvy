@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/goleak"
 	"golang.org/x/sys/unix"
 )
 
@@ -708,16 +709,15 @@ func testSocketResources(t *testing.T) {
 		testJoin(t, done, time.Second)
 	}
 	cycle()
-	fds, goroutines := testDescriptorCount(t), runtime.NumGoroutine()
+	fds := testDescriptorCount(t)
 	for range 20 {
 		cycle()
 	}
 	if got := testDescriptorCount(t); got != fds {
 		t.Fatalf("descriptor leak: %d -> %d", fds, got)
 	}
-	if got := runtime.NumGoroutine(); got != goroutines {
-		t.Fatalf("operation goroutine leak: %d -> %d", goroutines, got)
-	}
+	// A done signal precedes goroutine exit; check for survivors, not a transient count.
+	goleak.VerifyNone(t)
 }
 
 func TestMachineIO_DarwinFIFOEOF(t *testing.T) {
@@ -823,16 +823,14 @@ func TestMachineIO_FIFOResources(t *testing.T) {
 		testJoin(t, done, time.Second)
 	}
 	cycle()
-	fds, goroutines := testDescriptorCount(t), runtime.NumGoroutine()
+	fds := testDescriptorCount(t)
 	for range 20 {
 		cycle()
 	}
 	if got := testDescriptorCount(t); got != fds {
 		t.Fatalf("FIFO descriptor leak %d -> %d", fds, got)
 	}
-	if got := runtime.NumGoroutine(); got != goroutines {
-		t.Fatalf("FIFO operation leak %d -> %d", goroutines, got)
-	}
+	goleak.VerifyNone(t)
 }
 
 func testDescriptorCount(t *testing.T) int {
