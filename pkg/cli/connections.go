@@ -128,7 +128,7 @@ func capabilityData() map[string]any {
 	return map[string]any{
 		"platform": runtime.GOOS, "format": "json", "commands": commands, "query_read_only": false, "query_policy": queryPolicy(), "catalog_visibility_implies_row_access": false,
 		"global_flags": []string{"--format json", "--timeout DURATION"},
-		"limits":       map[string]any{"sql_bytes": MaxInputBytes, "parameter_bytes": MaxInputBytes, "parameters": MaxParameters, "profile_selector_bytes": MaxProfileBytes, "row_default": DefaultRows, "row_max": MaxRows, "cell_bytes": MaxCellBytes, "encoded_output_bytes": MaxOutputBytes, "metadata_list_default": 100, "metadata_section_max": 1000, "invocation_seconds": 30, "connection_seconds": 10, "helper_seconds": 5, "helper_stdout_bytes": MaxHelperBytes, "statement_seconds": 10, "lock_seconds": 1, "cleanup_seconds": 2, "publication_seconds": 2},
+		"limits":       map[string]any{"sql_bytes": MaxInputBytes, "parameter_bytes": MaxInputBytes, "parameters": MaxParameters, "profile_selector_bytes": MaxProfileBytes, "row_default": DefaultRows, "row_max": MaxRows, "cell_bytes": MaxCellBytes, "encoded_output_bytes": MaxOutputBytes, "metadata_list_default": 100, "metadata_section_max": 1000, "invocation_seconds": 30, "timeout_max_ms": MaxInvocationTimeout.Milliseconds(), "connection_seconds": 10, "helper_seconds": 5, "helper_stdout_bytes": MaxHelperBytes, "statement_seconds": 10, "lock_seconds": 1, "cleanup_seconds": 2, "publication_seconds": 2},
 		"exit_codes":   map[string]int{"success": ExitSuccess, "input": ExitInput, "unavailable": ExitUnavailable, "policy": ExitPolicy, "database": ExitDatabase, "timeout": ExitTimeout, "resource": ExitResource},
 	}
 }

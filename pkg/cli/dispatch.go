@@ -13,12 +13,14 @@ import (
 
 const (
 	InvocationTimeout = 30 * time.Second
-	ConnectionTimeout = 10 * time.Second
-	HelperTimeout     = 5 * time.Second
-	StatementTimeout  = 10 * time.Second
-	LockTimeout       = time.Second
-	CleanupTimeout    = 2 * time.Second
-	MaxHelperBytes    = 32 << 10
+	// PostgreSQL represents statement_timeout as a signed 32-bit millisecond count.
+	MaxInvocationTimeout = (1<<31 - 1) * time.Millisecond
+	ConnectionTimeout    = 10 * time.Second
+	HelperTimeout        = 5 * time.Second
+	StatementTimeout     = 10 * time.Second
+	LockTimeout          = time.Second
+	CleanupTimeout       = 2 * time.Second
+	MaxHelperBytes       = 32 << 10
 )
 
 // IO handles belong to one invocation. Close must interrupt concurrent I/O.
@@ -33,6 +35,12 @@ type IO struct {
 type Command func(context.Context, []string, IO) (Envelope, error)
 
 type cleanupBudgetKey struct{}
+
+type statementTimeoutKey struct{}
+
+type invocationOptions struct {
+	timeout, statementTimeout time.Duration
+}
 
 type commandFinalizationKey struct{}
 
@@ -83,17 +91,18 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	if IsLegacyRoute(args) {
 		return false, ExitSuccess
 	}
-	rest, timeout, flagErr := invocationFlags(args[1:])
+	rest, options, flagErr := invocationFlags(args[1:])
 	if flagErr != nil {
-		timeout = InvocationTimeout
+		options = invocationOptions{timeout: InvocationTimeout, statementTimeout: StatementTimeout}
 	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
+	ctx, cancel := context.WithTimeout(parent, options.timeout)
 	defer cancel()
 	deadline, _ := ctx.Deadline()
 	remaining := max(time.Duration(0), time.Until(deadline))
 	reserve := min(2*CleanupTimeout, remaining*2/5)
 	finalization := &commandFinalization{}
 	workBase := context.WithValue(context.WithValue(ctx, cleanupBudgetKey{}, reserve/2), commandFinalizationKey{}, finalization)
+	workBase = context.WithValue(workBase, statementTimeoutKey{}, options.statementTimeout)
 	workCtx, cancelWork := context.WithDeadline(workBase, deadline.Add(-reserve))
 	defer cancelWork()
 	closeInput := sync.OnceFunc(func() {
@@ -277,10 +286,21 @@ func ParseFlags(args []string, values, switches []string) (map[string]string, []
 	return flags, positional, nil
 }
 
-func invocationFlags(args []string) ([]string, time.Duration, error) {
+// InvocationBudget includes stream acquisition in the same budget as Dispatch.
+// Invalid flags retain the default budget so Dispatch can publish their error.
+func InvocationBudget(args []string) time.Duration {
+	if len(args) > 0 {
+		if _, options, err := invocationFlags(args[1:]); err == nil {
+			return options.timeout
+		}
+	}
+	return InvocationTimeout
+}
+
+func invocationFlags(args []string) ([]string, invocationOptions, error) {
 	rest := make([]string, 0, len(args))
 	seen := map[string]bool{}
-	timeout := InvocationTimeout
+	options := invocationOptions{timeout: InvocationTimeout, statementTimeout: StatementTimeout}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -294,7 +314,7 @@ func invocationFlags(args []string) ([]string, time.Duration, error) {
 		parts := strings.SplitN(arg, "=", 2)
 		key := parts[0]
 		if seen[key] {
-			return nil, 0, &PublicError{Code: InvalidInput}
+			return nil, options, &PublicError{Code: InvalidInput}
 		}
 		seen[key] = true
 		if key != "--timeout" && key != "--format" {
@@ -307,21 +327,22 @@ func invocationFlags(args []string) ([]string, time.Duration, error) {
 		} else {
 			i++
 			if i >= len(args) {
-				return nil, 0, &PublicError{Code: InvalidInput}
+				return nil, options, &PublicError{Code: InvalidInput}
 			}
 			value = args[i]
 		}
 		if key == "--format" {
 			if value != "json" {
-				return nil, 0, &PublicError{Code: InvalidInput}
+				return nil, options, &PublicError{Code: InvalidInput}
 			}
 		} else {
 			var err error
-			timeout, err = time.ParseDuration(value)
-			if err != nil || timeout <= 0 || timeout > InvocationTimeout {
-				return nil, 0, &PublicError{Code: InvalidInput}
+			options.timeout, err = time.ParseDuration(value)
+			if err != nil || options.timeout <= 0 || options.timeout > MaxInvocationTimeout {
+				return nil, options, &PublicError{Code: InvalidInput}
 			}
+			options.statementTimeout = options.timeout
 		}
 	}
-	return rest, timeout, nil
+	return rest, options, nil
 }

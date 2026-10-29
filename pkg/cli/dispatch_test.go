@@ -29,7 +29,7 @@ func TestMachineCLI_Dispatch(t *testing.T) {
 			t.Fatalf("legacy %v was handled", args)
 		}
 	}
-	for _, args := range [][]string{{"unknown-secret"}, {"--bad"}, {"test", "--format", "yaml"}, {"test", "--timeout", "0s"}, {"test", "--timeout", "31s"}, {"test", "--timeout"}, {"test", "--x=1", "--x", "2"}, {"test", "--format=json", "--format=json"}} {
+	for _, args := range [][]string{{"unknown-secret"}, {"--bad"}, {"test", "--format", "yaml"}, {"test", "--timeout", "0s"}, {"test", "--timeout", "2147483648ms"}, {"test", "--timeout"}, {"test", "--x=1", "--x", "2"}, {"test", "--format=json", "--format=json"}} {
 		called := false
 		streams, out, diag := testStreams()
 		handled, exit := Dispatch(context.Background(), args, streams, map[string]Command{"test": func(context.Context, []string, IO) (Envelope, error) { called = true; return Envelope{}, nil }})
@@ -155,7 +155,7 @@ func TestMachineCLI_Envelope_ParentDeadlineAndInput(t *testing.T) {
 	defer cancel()
 	start := time.Now()
 	cleaned := false
-	_, exit := Dispatch(ctx, []string{"test"}, streams, map[string]Command{"test": func(ctx context.Context, _ []string, streams IO) (Envelope, error) {
+	_, exit := Dispatch(ctx, []string{"test", "--timeout=2m"}, streams, map[string]Command{"test": func(ctx context.Context, _ []string, streams IO) (Envelope, error) {
 		if CleanupBudget(ctx) > 20*time.Millisecond {
 			t.Errorf("parent deadline reserve exceeds effective budget: %s", CleanupBudget(ctx))
 		}
@@ -174,5 +174,38 @@ func TestMachineCLI_Envelope_ParentDeadlineAndInput(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"code":"TIMEOUT"`) {
 		t.Fatal("input lost reserve: timeout publication missing")
+	}
+}
+
+func TestMachineCLI_TimeoutBounds(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want time.Duration
+	}{
+		{"1ns", time.Nanosecond},
+		{"500us", 500 * time.Microsecond},
+		{"31s", 31 * time.Second},
+		{"2m", 2 * time.Minute},
+		{"2147483647ms", MaxInvocationTimeout},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			args := []string{"test", "--timeout=" + tc.raw}
+			_, options, err := invocationFlags(args[1:])
+			if err != nil || options.timeout != tc.want || options.statementTimeout != tc.want || InvocationBudget(args) != tc.want {
+				t.Fatalf("timeout %q: options=%+v, err=%v", tc.raw, options, err)
+			}
+		})
+	}
+	for _, raw := range []string{"0", "-1s", "bad", "2147483647.000001ms", "2147483648ms", "999999999999999999999h"} {
+		args := []string{"test", "--timeout=" + raw}
+		if _, _, err := invocationFlags(args[1:]); err == nil || InvocationBudget(args) != InvocationTimeout {
+			t.Fatalf("invalid timeout %q accepted", raw)
+		}
+	}
+	if _, options, err := invocationFlags(nil); err != nil || options.timeout != InvocationTimeout || options.statementTimeout != StatementTimeout {
+		t.Fatalf("defaults changed: %+v, %v", options, err)
+	}
+	if InvocationBudget(nil) != InvocationTimeout || InvocationBudget([]string{"test", "--timeout=2m", "--timeout=1m"}) != InvocationTimeout {
+		t.Fatal("invalid invocation lost default error-publication budget")
 	}
 }

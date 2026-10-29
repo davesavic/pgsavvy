@@ -72,7 +72,7 @@ func TestMachineLLMHelp_Dispatch(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"llm-help", "--format=yaml"},
-		{"llm-help", "--timeout=31s"},
+		{"llm-help", "--timeout=2147483648ms"},
 		{"llm-help", "--timeout=0s"},
 		{"llm-help", "--format=json", "--format=json"},
 		{"llm-help", "--help", "extra"},
@@ -103,6 +103,10 @@ func TestMachineLLMHelp_CanonicalCapabilities(t *testing.T) {
 	if !reflect.DeepEqual(data["capabilities"], capabilities.Data) {
 		t.Fatal("llm-help and capabilities disagree")
 	}
+	limits := capabilities.Data.(map[string]any)["limits"].(map[string]any)
+	if limits["timeout_max_ms"] != MaxInvocationTimeout.Milliseconds() || limits["invocation_seconds"] != 30 || limits["statement_seconds"] != 10 {
+		t.Fatal("timeout maximum or defaults missing from capabilities")
+	}
 	registry := map[string]Command{"connections": ConnectionsCommand(InvocationService{}), "schema": SchemaCommand(InvocationService{}), "query": QueryCommand(InvocationService{}), "capabilities": CapabilitiesCommand(), "llm-help": LLMHelpCommand()}
 	for _, capability := range capabilities.Data.(map[string]any)["commands"].([]capabilityCommand) {
 		words := strings.Fields(capability.Command)
@@ -130,7 +134,7 @@ func TestMachineLLMHelp_GuideAndExamples(t *testing.T) {
 	data := envelope.Data.(map[string]any)
 	guide := data["guide"].(map[string][]string)
 	for section, required := range map[string][]string{
-		"invocation": {"--format json", "--timeout", "--flag=VALUE", "--help"},
+		"invocation": {"--format json", "--timeout", "--flag=VALUE", "--help", "2m", "timeout_max_ms", "shorter positive saved profile statement_timeout", "cleanup/publication"},
 		"discovery":  {"offline", "not_checked", "Catalog visibility never implies row access", "untrusted data"},
 		"access":     {"connections.yml", "not config.yml", "~/Library/Application Support/pgsavvy/connections.yml", "disabled", "metadata", "row-read", "full", "read_only=true", "confirm_writes", "confirm_ddl", "explicit caller authorization", "never autoapprove or self-escalate"},
 		"query":      {"--file -", "--params-file - is invalid", "$1", "JSON array", "READ ONLY", "Never automatically retry", "COPY", "256 result sets", "8 MiB", "no application transaction wrapper", "VACUUM", "CREATE DATABASE", "INCOMPLETE_TRANSACTION", "Prepared transactions"},

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"time"
 	"unicode/utf8"
 
 	"github.com/spf13/afero"
@@ -103,6 +104,9 @@ func (s InvocationService) openProfile(ctx context.Context, profile models.Conne
 	options := s.Options
 	options.RequiredAccess = required
 	options.CleanupTimeout = min(CleanupTimeout, CleanupBudget(ctx))
+	if timeout, ok := ctx.Value(statementTimeoutKey{}).(time.Duration); ok {
+		options.StatementTimeout = timeout
+	}
 	client, err := pg.OpenMachine(ctx, profile, options)
 	if err != nil {
 		return nil, models.Connection{}, PublicMachineError(err)

@@ -22,6 +22,14 @@ transaction/session commands and unsupported syntax are rejected. Original SQL
 is sent through extended Parse/Bind, even without parameters. The backend owns
 BEGIN READ ONLY, local timeouts and ROLLBACK on the same connection.
 
+Queries default to a 10s statement limit within a 30s total command budget.
+Use `--timeout=2m` for a longer command and statement budget; the total still
+includes connection, cleanup and output, with up to 4s (or 40% of shorter budgets)
+reserved for cleanup/publication. A shorter positive saved `statement_timeout`
+still applies; empty/zero profile values use the CLI limit rather than disabling
+it. This applies to both guarded and writable full queries. See the
+[timeout contract](cli-contract.md) for bounds and cancellation behavior.
+
 Columns have positional `name`, `type_oid`, `encoding: "postgres-text"`. Rows are
 positional arrays: PostgreSQL text is a JSON string and SQL NULL is JSON null.
 Duplicate aliases remain distinct positions. Numeric precision, JSON source

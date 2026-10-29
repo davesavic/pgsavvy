@@ -21,10 +21,11 @@ type MachineError struct {
 func (e *MachineError) Error() string { return e.Code }
 
 type MachineOptions struct {
-	RequiredAccess models.CLIAccess
-	Credentials    session.MachineCredentialOptions
-	ParseConfig    func(context.Context, models.Connection) (*pgx.ConnConfig, error)
-	Dial           func(context.Context, string, string) (net.Conn, error)
-	ConnectTimeout time.Duration
-	CleanupTimeout time.Duration
+	RequiredAccess   models.CLIAccess
+	Credentials      session.MachineCredentialOptions
+	ParseConfig      func(context.Context, models.Connection) (*pgx.ConnConfig, error)
+	Dial             func(context.Context, string, string) (net.Conn, error)
+	ConnectTimeout   time.Duration
+	StatementTimeout time.Duration
+	CleanupTimeout   time.Duration
 }

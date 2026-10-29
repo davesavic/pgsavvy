@@ -1,5 +1,24 @@
 # Machine CLI native verification
 
+## Query timeout regression
+
+With a designated disposable `PGSAVVY_TEST_PG` (never a user-owned database):
+
+```sh
+go test -count=1 -v . -run '^TestMachineCLINative_QueryTimeout$'
+```
+
+This builds and runs the shipping binary (or uses `PGSAVVY_TEST_BINARY`). Guarded
+row-read, full read-only and writable full profiles each exercise `pg_sleep(11)`
+with `--timeout=2m`, the unchanged default 10s cancellation, short explicit
+cancellation and a shorter saved profile limit. `pg_sleep(31)` verifies the
+production invocation can exceed the former 30s cap; a maximum-duration request
+also verifies PostgreSQL accepts the server representation. Cases run in parallel
+using private HOME/XDG profiles and only SELECTs, including parameterized queries
+and a writable-full native batch. No configured fixture means a
+skip, not live evidence. Wire tests independently assert startup/session/transaction
+agreement, defaults, profile precedence, millisecond rounding and overflow rejection.
+
 ## Opt-in query-history verification
 
 Fixture-independent Linux subprocess coverage runs without the integration tag:

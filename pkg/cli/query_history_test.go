@@ -558,6 +558,8 @@ func (historyBrokenOutput) Write([]byte) (int, error) { return 0, io.ErrClosedPi
 func (historyBrokenOutput) Close() error              { return nil }
 
 type historyWireScript struct {
+	startup                      chan map[string]string
+	statements                   chan string
 	rows                         []string
 	terminalError, rollbackError bool
 	stallTail                    bool
@@ -591,8 +593,12 @@ func historyWireService(t *testing.T, script *historyWireScript, record func(con
 		mu.Unlock()
 		defer func() { _ = server.Close() }()
 		backend := pgproto3.NewBackend(server, server)
-		if _, err := backend.ReceiveStartupMessage(); err != nil {
+		startup, err := backend.ReceiveStartupMessage()
+		if err != nil {
 			return
+		}
+		if script.startup != nil {
+			script.startup <- startup.(*pgproto3.StartupMessage).Parameters
 		}
 		backend.Send(&pgproto3.AuthenticationOk{})
 		backend.Send(&pgproto3.ParameterStatus{Name: "server_version", Value: "17.0"})
@@ -611,6 +617,9 @@ func historyWireService(t *testing.T, script *historyWireScript, record func(con
 			switch message := message.(type) {
 			case *pgproto3.Parse:
 				statement = message.Query
+				if script.statements != nil {
+					script.statements <- statement
+				}
 				if strings.Contains(statement, "history_payload") && script.submitted != nil {
 					script.submitted <- statement
 				}

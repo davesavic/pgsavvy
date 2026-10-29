@@ -121,7 +121,13 @@ func OpenMachine(ctx context.Context, profile models.Connection, options Machine
 	if options.CleanupTimeout == 0 {
 		options.CleanupTimeout = 2 * time.Second
 	}
+	if options.StatementTimeout == 0 {
+		options.StatementTimeout = 10 * time.Second
+	}
 	if options.ConnectTimeout <= 0 || options.ConnectTimeout > 10*time.Second || options.CleanupTimeout <= 0 || options.CleanupTimeout > 2*time.Second {
+		return nil, &MachineError{Code: "INVALID_INPUT"}
+	}
+	if options.StatementTimeout <= 0 || options.StatementTimeout > (1<<31-1)*time.Millisecond {
 		return nil, &MachineError{Code: "INVALID_INPUT"}
 	}
 	connectCtx, cancel := context.WithTimeout(ctx, options.ConnectTimeout)
@@ -138,12 +144,18 @@ func OpenMachine(ctx context.Context, profile models.Connection, options Machine
 		return nil, &MachineError{Code: "CONNECTION_UNAVAILABLE"}
 	}
 	cfg = cfg.Copy()
+	// Round up so a positive sub-millisecond budget never disables the server limit.
+	statementMS := session.MachineStatementMilliseconds(profile.StatementTimeout, int((options.StatementTimeout+time.Millisecond-1)/time.Millisecond))
+	if cfg.RuntimeParams == nil {
+		cfg.RuntimeParams = make(map[string]string)
+	}
+	cfg.RuntimeParams["statement_timeout"] = strconv.Itoa(statementMS)
 	password, err := session.ResolveMachinePassword(connectCtx, profile, &cfg.Config, options.Credentials)
 	if err != nil {
 		return nil, machineFailure(connectCtx, err, "CREDENTIALS_UNAVAILABLE")
 	}
 	cfg.Password = password
-	client := &MachineClient{access: access, readOnly: profile.ReadOnly, statementMS: session.MachineStatementMilliseconds(profile.StatementTimeout), cleanup: options.CleanupTimeout, dialAllowed: true}
+	client := &MachineClient{access: access, readOnly: profile.ReadOnly, statementMS: statementMS, cleanup: options.CleanupTimeout, dialAllowed: true}
 	client.stop = watchMachine(ctx, client.Abort)
 	failed := true
 	defer func() {

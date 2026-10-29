@@ -23,11 +23,12 @@ func runMachine(args []string) (bool, int, func()) {
 	if cli.IsLegacyRoute(args) {
 		return false, 0, nil
 	}
-	parent, cancel := context.WithTimeout(context.Background(), cli.InvocationTimeout)
+	parent, cancel := context.WithTimeout(context.Background(), cli.InvocationBudget(args))
 	defer cancel()
 	interrupted, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	deadline, _ := parent.Deadline()
-	acquisition, cancelAcquisition := context.WithDeadline(parent, deadline.Add(-2*time.Second))
+	reserve := min(2*time.Second, time.Until(deadline)*2/5)
+	acquisition, cancelAcquisition := context.WithDeadline(parent, deadline.Add(-reserve))
 	defer cancelAcquisition()
 	joined := make(chan struct{})
 	stopAcquisition := context.AfterFunc(interrupted, func() { cancelAcquisition(); close(joined) })

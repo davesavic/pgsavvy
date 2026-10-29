@@ -44,7 +44,7 @@ func TestMachineOpen_TargetSnapshot(t *testing.T) {
 		}
 	}
 	for raw, want := range map[string]int{"": 10000, "0": 10000, "0ms": 10000, "1ms": 1, "5s": 5000, "30s": 10000, "99d": 10000, "99999999999999999999999s": 10000} {
-		if got := MachineStatementMilliseconds(raw); got != want {
+		if got := MachineStatementMilliseconds(raw, 10000); got != want {
 			t.Fatalf("timeout %s: %d want%d", raw, got, want)
 		}
 	}
@@ -121,4 +121,28 @@ func TestMachineConfig_TargetSelection(t *testing.T) {
 			t.Fatal("parsed user settings or fallback copies share mutable state")
 		}
 	})
+}
+
+func TestMachineStatementMilliseconds_Ceiling(t *testing.T) {
+	for _, tc := range []struct {
+		raw     string
+		ceiling int
+		want    int
+	}{
+		{"", 120000, 120000},
+		{"0", 120000, 120000},
+		{"0ms", 120000, 120000},
+		{"5s", 120000, 5000},
+		{"30s", 120000, 30000},
+		{"3min", 120000, 120000},
+		{"1d", 2147483647, 86400000},
+		{"25d", 2147483647, 2147483647},
+		{"2147483647ms", 2147483647, 2147483647},
+		{"99999999999999999999999s", 2147483647, 2147483647},
+		{"18446744073709551615d", 2147483647, 2147483647},
+	} {
+		if got := MachineStatementMilliseconds(tc.raw, tc.ceiling); got != tc.want {
+			t.Errorf("%q ceiling %d: got %d want %d", tc.raw, tc.ceiling, got, tc.want)
+		}
+	}
 }

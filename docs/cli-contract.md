@@ -46,12 +46,27 @@ bounded by the invocation deadline, not only a pipe whose reader has closed.
 
 Limits: SQL and parameter input each 1 MiB; 256 parameters; profile name 256
 bytes; rows default 100, maximum 1000; PostgreSQL-text cell 64 KiB; invocation
-30 seconds; connection 10 seconds; helper 5 seconds and 32 KiB stdout;
-statement 10 seconds; lock 1 second; fresh cleanup at most 2 seconds.
+defaults to 30 seconds; connection 10 seconds; helper 5 seconds and 32 KiB stdout;
+statement defaults to 10 seconds; lock 1 second; fresh cleanup at most 2 seconds.
 Writable full retains at most 256 results and 1000 aggregate rows. Retention
 overflow drains later SQL/COMMIT before returning a resource error; a protocol
 message exceeding 8 MiB or transport failure can abort with unknown outcome.
-`--timeout` may lower the invocation budget; `--format json` is the only format.
+Explicit `--timeout DURATION` sets both the total invocation budget and the
+statement ceiling, for example `pgsavvy query --connection dev --file slow.sql
+--timeout=2m`. It accepts a positive Go duration up to `2147483647ms`, PostgreSQL's
+signed 32-bit millisecond limit (`capabilities.limits.timeout_max_ms`). Zero,
+negative, malformed and larger durations are errors. Positive sub-millisecond
+values round up to 1ms for PostgreSQL only; the invocation keeps its exact duration.
+A shorter positive saved profile `statement_timeout` remains authoritative.
+An empty/zero saved limit uses the CLI ceiling, not an unlimited query. Startup,
+session and guarded transaction settings use that same effective statement limit.
+With no flag, the existing 30s invocation and 10s statement defaults remain.
+`invocation_seconds` and `statement_seconds` in capabilities describe these
+defaults, not hard maxima. The total budget includes stream acquisition, input,
+approval, connection, queries, cleanup and publication; it is not a promise of
+that much SQL execution time (see the reserve below). Earlier caller cancellation
+still wins. Connection/helper/lock/cleanup limits and TUI settings are unchanged.
+`--format json` is the only format.
 Duplicate/conflicting/unknown flags are errors. Command-specific help is JSON.
 
 `pgsavvy llm-help` (also `pgsavvy llm-help --help`) returns the complete offline
