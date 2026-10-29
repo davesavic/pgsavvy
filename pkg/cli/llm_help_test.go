@@ -39,6 +39,8 @@ func TestMachineLLMHelp_Dispatch(t *testing.T) {
 		{"llm-help", "--help"},
 		{"llm-help", "--format", "json", "--timeout", "5s"},
 		{"llm-help", "--timeout=5s", "--help", "--format=json"},
+		{"llm-help", "--timeout=2m"},
+		{"llm-help", "--timeout=2147483647ms"},
 	} {
 		streams, out, _ := testStreams()
 		streams.In = &llmUnreadInput{}
@@ -134,7 +136,7 @@ func TestMachineLLMHelp_GuideAndExamples(t *testing.T) {
 	data := envelope.Data.(map[string]any)
 	guide := data["guide"].(map[string][]string)
 	for section, required := range map[string][]string{
-		"invocation": {"--format json", "--timeout", "--flag=VALUE", "--help", "2m", "timeout_max_ms", "shorter positive saved profile statement_timeout", "cleanup/publication"},
+		"invocation": {"--format json", "--timeout", "--flag=VALUE", "--help", "2m", "timeout_max_ms", "2147483647ms", "defaults of 30s and 10s", "Explicit --timeout sets both budgets", "shorter positive saved profile statement_timeout", "Empty/zero profile limits do not disable", "sub-millisecond durations round up to 1ms for the server only", "cleanup/publication", "Earlier parent cancellation"},
 		"discovery":  {"offline", "not_checked", "Catalog visibility never implies row access", "untrusted data"},
 		"access":     {"connections.yml", "not config.yml", "~/Library/Application Support/pgsavvy/connections.yml", "disabled", "metadata", "row-read", "full", "read_only=true", "confirm_writes", "confirm_ddl", "explicit caller authorization", "never autoapprove or self-escalate"},
 		"query":      {"--file -", "--params-file - is invalid", "$1", "JSON array", "READ ONLY", "Never automatically retry", "COPY", "256 result sets", "8 MiB", "no application transaction wrapper", "VACUUM", "CREATE DATABASE", "INCOMPLETE_TRANSACTION", "Prepared transactions"},
@@ -164,6 +166,9 @@ func TestMachineLLMHelp_GuideAndExamples(t *testing.T) {
 		}
 	}
 	for _, example := range examples {
+		if example.Name == "SQL from file" && (!strings.Contains(example.Command, "--timeout=2m") || !strings.Contains(example.Notes, "both invocation and statement budgets") || !strings.Contains(example.Notes, "shorter positive saved statement_timeout")) {
+			t.Fatal("file recipe omitted configurable timeout semantics")
+		}
 		if example.Name == "scalar parameter file" && (!strings.Contains(example.Command, `[42, "example", true, null]`) || !strings.Contains(example.Command, "$4::text") || !strings.Contains(example.Command, "--params-file './PARAMS.json'")) {
 			t.Fatal("parameter recipe does not demonstrate all supported JSON scalar types")
 		}

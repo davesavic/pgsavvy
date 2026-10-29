@@ -343,8 +343,18 @@ SQL NULL becomes JSON `null`. Preserve numeric precision when processing them.
   **effects-unverified**, not proof of commit or rollback. Deliberate prepared
   transactions can survive connection close; inspect and resolve owned work.
   See the [emergency downgrade procedure](docs/cli-contract.md#binary-rollback).
-- Default invocation/connection/statement limits are **30s / 10s / 10s**.
-  Global `--timeout 5s`, for example, lowers the invocation budget;
+- With `--timeout` omitted, invocation/connection/statement limits are
+  **30s / 10s / 10s**. Explicit `--timeout DURATION` sets both invocation and
+  statement budgets: `--timeout=2m` extends both beyond the defaults, while
+  `--timeout=5s` lowers both. Use a positive Go duration up to **2147483647ms**;
+  zero, negative, malformed and larger values are invalid. The invocation includes
+  input, approval, connection, queries, cleanup and output, reserving up to **4s**
+  (or **40%** of a shorter effective deadline) for cleanup/publication. Earlier
+  parent deadlines/cancellation and shorter positive saved `statement_timeout`
+  limits still win; empty/zero saved limits do not disable the CLI budget.
+  Connection/helper/lock limits are unchanged. Capabilities' `invocation_seconds`
+  and `statement_seconds` describe defaults, not maxima. See the
+  [timeout contract](docs/cli-contract.md) for details.
   `--format json` is the only supported output format.
 - Exit codes: **0** success, **2** invalid input, **3** unavailable connection,
   credentials or SSH trust, **4** policy denied, **5** database error,

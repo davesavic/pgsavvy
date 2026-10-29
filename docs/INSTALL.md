@@ -211,6 +211,11 @@ Useful per-profile options include `read_only`, `confirm_writes`,
 `confirm_ddl`, `statement_timeout`, `hidden_schemas`, `role`, and presentation
 fields (`label`, `color`, `icon`, `tags`).
 
+For machine queries, a shorter positive saved `statement_timeout` takes precedence
+over the CLI statement budget (10s by default, or the explicit `--timeout`
+duration). Empty/zero saved values do not disable that budget. See the
+[timeout contract](cli-contract.md) for invocation limits and cleanup reserves.
+
 `icon` is a free-form glyph rendered as a prefix beside the connection in the
 picker, title bars, and commit dialog. Any string works — an emoji, a Nerd Font
 glyph, or a plain symbol:

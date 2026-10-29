@@ -52,8 +52,13 @@ Writable full retains at most 256 results and 1000 aggregate rows. Retention
 overflow drains later SQL/COMMIT before returning a resource error; a protocol
 message exceeding 8 MiB or transport failure can abort with unknown outcome.
 Explicit `--timeout DURATION` sets both the total invocation budget and the
-statement ceiling, for example `pgsavvy query --connection dev --file slow.sql
---timeout=2m`. It accepts a positive Go duration up to `2147483647ms`, PostgreSQL's
+statement ceiling, for example:
+
+```sh
+pgsavvy query --connection dev --file slow.sql --timeout=2m
+```
+
+It accepts a positive Go duration up to `2147483647ms`, PostgreSQL's
 signed 32-bit millisecond limit (`capabilities.limits.timeout_max_ms`). Zero,
 negative, malformed and larger durations are errors. Positive sub-millisecond
 values round up to 1ms for PostgreSQL only; the invocation keeps its exact duration.
