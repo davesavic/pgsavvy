@@ -1,4 +1,4 @@
-//go:build integration && (linux || darwin)
+//go:build integration && nativefixture && (linux || darwin)
 
 package main
 

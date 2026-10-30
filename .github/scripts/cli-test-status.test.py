@@ -55,17 +55,20 @@ class TestNativeTestStatus(unittest.TestCase):
         ])
 
     def test_temporary_failure_publishes_only_fixed_name_and_source_location(self):
-        top = "TestTemporaryCLIIntegration"
-        self.write_events([
-            {"Action": "output", "Test": top + "/private-case-sentinel", "Output":
-             "    /private-path-sentinel/pkg/cli/temporary_query_integration_test.go:171: private-password-sentinel SELECT private_sql\n"},
-            {"Action": "fail", "Test": top + "/private-case-sentinel"},
-        ])
-        report = cli_test_status.read_status(self.path)
-        self.assertEqual(report["tests"], [{"test": top, "status": "failed"}])
-        self.assertEqual(report["cases"], [])
-        self.assertEqual(report["locations"], [{"file": "temporary_query_integration_test.go", "line": 171}])
-        self.assertNotIn("private-", json.dumps(report))
+        for top, source, line in (
+            ("TestTemporaryCLIIntegration", "pkg/cli/temporary_query_integration_test.go", 171),
+            ("TestTemporaryCLIObserverOwnership", "pkg/cli/temporary_observer_integration_test.go", 96),
+        ):
+            self.write_events([
+                {"Action": "output", "Test": top + "/private-case-sentinel", "Output":
+                 f"    /private-path-sentinel/{source}:{line}: private-password-sentinel SELECT private_sql\n"},
+                {"Action": "fail", "Test": top + "/private-case-sentinel"},
+            ])
+            report = cli_test_status.read_status(self.path)
+            self.assertEqual(report["tests"], [{"test": top, "status": "failed"}])
+            self.assertEqual(report["cases"], [])
+            self.assertEqual(report["locations"], [{"file": pathlib.PurePosixPath(source).name, "line": line}])
+            self.assertNotIn("private-", json.dumps(report))
 
     def test_history_failure_reports_only_fixed_parent_name(self):
         name = "TestCLIHistoryProcess_OutputPipes"
@@ -276,7 +279,8 @@ class TestNativeTestStatus(unittest.TestCase):
             "internal/machineio/terminal_unix_test.go", "internal/machineio/stream_unix.go",
             "internal/machineio/io_darwin_test.go", "pkg/cli/query_history_process_test.go",
             "pkg/drivers/pg/machine_test.go", "pkg/cli/dispatch_test.go",
-            "pkg/cli/temporary_query_integration_test.go", "temporary_query_process_test.go"})
+            "pkg/cli/temporary_query_integration_test.go", "temporary_query_process_test.go",
+            "pkg/cli/temporary_observer_integration_test.go"})
         for basename, (source, last_line) in cli_test_status.SOURCE_FILES.items():
             self.assertEqual(pathlib.PurePosixPath(source).name, basename)
             self.assertEqual(len((repo / source).read_text().splitlines()), last_line)
@@ -452,6 +456,34 @@ class TestNativeTestStatus(unittest.TestCase):
             with self.subTest(mode=mode):
                 result = subprocess.run([sys.executable, "-c", script, str(root)], cwd=repo / ".github/scripts", capture_output=True, text=True)
                 self.assertEqual(result.returncode == 0, mode == "pass", result.stderr)
+
+    def test_owned_native_tests_require_explicit_selection(self):
+        repo = pathlib.Path(__file__).resolve().parents[2]
+        native_only = {
+            "TestTemporaryCLIIntegration", "TestTemporaryCLILexicalPostgres",
+            "TestTemporaryCLIProcessIsolation", "TestTemporaryCLIProcessCommitInterruption",
+            "TestTemporaryCLIProcessBrokenStdout",
+        }
+        for target in ("linux", "darwin"):
+            environment = {**os.environ, "GOOS": target, "GOARCH": "amd64", "CGO_ENABLED": "0"}
+            for tags in ("integration", "integration,nativefixture"):
+                with self.subTest(target=target, tags=tags):
+                    result = subprocess.run(
+                        ["go", "list", "-json", "-tags=" + tags, ".", "./pkg/cli"],
+                        cwd=repo, env=environment, capture_output=True, text=True, timeout=60)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    remaining, names = result.stdout, set()
+                    while remaining.strip():
+                        package, end = json.JSONDecoder().raw_decode(remaining.lstrip())
+                        remaining = remaining.lstrip()[end:]
+                        for filename in package.get("TestGoFiles", []) + package.get("XTestGoFiles", []):
+                            source = (pathlib.Path(package["Dir"]) / filename).read_text()
+                            names.update(re.findall(r"^func (Test\w+)\(", source, re.MULTILINE))
+                    self.assertEqual(names & native_only, native_only if "nativefixture" in tags else set())
+                    self.assertIn("TestTemporaryCLIObserverOwnership", names)
+        runner = (repo / ".github/scripts/cli-postgres.sh").read_text()
+        self.assertIn('go test -json -list "$native_selector" -tags=integration,nativefixture', runner)
+        self.assertIn('go test -json -count=1 -timeout 10m -tags=integration,nativefixture', runner)
 
     def test_owned_observer_metadata_is_private_and_binds_endpoint_and_cluster(self):
         repo = pathlib.Path(__file__).resolve().parents[2]

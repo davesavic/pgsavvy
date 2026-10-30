@@ -324,10 +324,11 @@ SOURCE_FILES = {
     "terminal_unix_test.go": ("internal/machineio/terminal_unix_test.go", 432),
     "stream_unix.go": ("internal/machineio/stream_unix.go", 151),
     "io_darwin_test.go": ("internal/machineio/io_darwin_test.go", 185),
-    "query_history_process_test.go": ("pkg/cli/query_history_process_test.go", 759),
+    "query_history_process_test.go": ("pkg/cli/query_history_process_test.go", 959),
     "machine_test.go": ("pkg/drivers/pg/machine_test.go", 1046),
     "dispatch_test.go": ("pkg/cli/dispatch_test.go", 211),
-    "temporary_query_integration_test.go": ("pkg/cli/temporary_query_integration_test.go", 445),
+    "temporary_query_integration_test.go": ("pkg/cli/temporary_query_integration_test.go", 348),
+    "temporary_observer_integration_test.go": ("pkg/cli/temporary_observer_integration_test.go", 120),
     "temporary_query_process_test.go": ("temporary_query_process_test.go", 603),
 }
 MAX_LOCATIONS = 32

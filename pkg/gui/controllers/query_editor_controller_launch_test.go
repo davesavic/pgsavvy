@@ -1238,8 +1238,13 @@ func TestQueryRunSignalRunSQLSetsAndClears(t *testing.T) {
 func TestQueryRunSignalCancelPathClearsAtFinishScope(t *testing.T) {
 	sess := &launchInner{}
 	gate := make(chan struct{})
+	release := sync.OnceFunc(func() { close(gate) })
 	sess.stage(gate)
 	b := newAsyncBag(sess)
+	t.Cleanup(func() {
+		_ = b.runner.Cancel()
+		release()
+	})
 	slot := tapQueryRunSignal(b)
 	ctrl := b.controller(&fakeEditorBuffer{Text: "SELECT 1;", Off: 3})
 	reg := commands.NewRegistry()
@@ -1249,8 +1254,9 @@ func TestQueryRunSignalCancelPathClearsAtFinishScope(t *testing.T) {
 		t.Fatalf("Run handler err = %v", err)
 	}
 
-	// The launch is parked inside Stream; the start bracket is already
-	// recorded (the proceed closure ran synchronously in the handler).
+	b.pump.pumpUntil(t, 2*time.Second, "Stream entered", func() bool {
+		return countSuffix(sess.snapshot(), ":start") == 1
+	})
 	ids := startedRunIDs(b.notice.snapshot())
 	if len(ids) != 1 {
 		t.Fatalf("started runIDs = %v before cancel, want exactly 1", ids)
@@ -1261,6 +1267,9 @@ func TestQueryRunSignalCancelPathClearsAtFinishScope(t *testing.T) {
 	if err := cancelCmd.Handler(commands.ExecCtx{}); err != nil {
 		t.Fatalf("Cancel handler err = %v", err)
 	}
+	// Stream runs detached from the sentinel; finish the fake operation so
+	// the abandoned handle can be disposed and its canceled ack delivered.
+	release()
 	b.pump.pumpUntil(t, 2*time.Second, "canceled run settled", func() bool {
 		return noticeHas(b.notice, "end:"+runID)
 	})

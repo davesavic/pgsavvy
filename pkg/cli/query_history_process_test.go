@@ -9,12 +9,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -76,15 +78,192 @@ func runHistoryProcess() int {
 		return ExitInput
 	}
 	service := InvocationService{}
+	var trace *historyProcessTrace
+	if os.Getenv("PGSAVVY_HISTORY_PROCESS_TRACE") == "1" {
+		trace = &historyProcessTrace{started: time.Now()}
+		service.historyLookup = func(ctx context.Context, name string) (models.Connection, error) {
+			trace.mark("metadata_start", ctx)
+			profile, err := historyProfileMetadata(ctx, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "pgsavvy", "connections.yml"), name)
+			trace.mark("metadata_end", ctx)
+			return profile, err
+		}
+		service.historyAppend = func(ctx context.Context, path string, event query.HistoryEvent) error {
+			trace.mark("history_start", ctx)
+			err := query.AppendHistory(ctx, path, event)
+			trace.mark("history_end", ctx)
+			return err
+		}
+		service.Options.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+			trace.mark("dial_start", ctx)
+			conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
+			trace.mark("dial_end", ctx)
+			if err != nil {
+				return nil, err
+			}
+			return &historyProcessTraceConn{Conn: conn, trace: trace}, nil
+		}
+	}
 	registry := map[string]Command{"query": QueryCommand(service), "connections": ConnectionsCommand(service), "schema": SchemaCommand(service), "capabilities": CapabilitiesCommand()}
-	_, exit := Dispatch(ctx, args, IO{In: input, Out: output, Err: diagnostic, Cancel: interrupted.Done()}, registry)
+	out := output
+	if trace != nil {
+		command := registry["query"]
+		registry["query"] = func(ctx context.Context, args []string, streams IO) (Envelope, error) {
+			trace.mark("command_start", ctx)
+			envelope, err := command(ctx, args, streams)
+			trace.mark("command_end", ctx)
+			if slot, ok := ctx.Value(commandFinalizationKey{}).(*commandFinalization); ok && slot.run != nil {
+				finalize := slot.run
+				slot.run = func(cutoff time.Time) []ErrorCode {
+					trace.mark("finalization_start", nil)
+					warnings := finalize(cutoff)
+					trace.mark("finalization_end", nil)
+					return warnings
+				}
+			}
+			return envelope, err
+		}
+		out = &historyProcessTraceOutput{WriteCloser: output, trace: trace}
+		trace.mark("dispatch_start", nil)
+	}
+	_, exit := Dispatch(ctx, args, IO{In: input, Out: out, Err: diagnostic, Cancel: interrupted.Done()}, registry)
+	if trace != nil {
+		trace.mark("dispatch_end", nil)
+		// Write after Dispatch joins its workers, outside the invocation budget.
+		data, _ := json.Marshal(trace.phases)
+		_ = os.WriteFile("phase-trace.json", data, 0o600)
+	}
 	return exit
+}
+
+// Test-only fixed labels and timings: never capture SQL, profiles, or I/O bytes.
+type historyProcessPhase struct {
+	Phase       string `json:"phase"`
+	ElapsedUS   int64  `json:"elapsed_us"`
+	RemainingUS int64  `json:"remaining_us,omitempty"`
+	Cancelled   bool   `json:"cancelled,omitempty"`
+}
+
+type historyProcessTrace struct {
+	started time.Time
+	mu      sync.Mutex
+	phases  []historyProcessPhase
+}
+
+func (trace *historyProcessTrace) mark(phase string, ctx context.Context) {
+	trace.mu.Lock()
+	defer trace.mu.Unlock()
+	if len(trace.phases) == 64 {
+		return
+	}
+	event := historyProcessPhase{Phase: phase, ElapsedUS: time.Since(trace.started).Microseconds()}
+	if ctx != nil {
+		if deadline, ok := ctx.Deadline(); ok {
+			event.RemainingUS = time.Until(deadline).Microseconds()
+		}
+		event.Cancelled = ctx.Err() != nil
+	}
+	trace.phases = append(trace.phases, event)
+}
+
+type historyProcessTraceConn struct {
+	net.Conn
+	trace *historyProcessTrace
+}
+
+func (conn *historyProcessTraceConn) Read(data []byte) (int, error) {
+	n, err := conn.Conn.Read(data)
+	if err != nil {
+		conn.trace.mark("transport_read_error", nil)
+	}
+	return n, err
+}
+
+func (conn *historyProcessTraceConn) Close() error {
+	conn.trace.mark("transport_close_start", nil)
+	err := conn.Conn.Close()
+	conn.trace.mark("transport_close_end", nil)
+	return err
+}
+
+type historyProcessTraceOutput struct {
+	io.WriteCloser
+	trace *historyProcessTrace
+}
+
+func (output *historyProcessTraceOutput) Write(data []byte) (int, error) {
+	output.trace.mark("output_start", nil)
+	n, err := output.WriteCloser.Write(data)
+	output.trace.mark("output_end", nil)
+	return n, err
+}
+
+func (output *historyProcessTraceOutput) Close() error {
+	output.trace.mark("output_close", nil)
+	return output.WriteCloser.Close()
+}
+
+func readHistoryProcessTrace(path string) ([]historyProcessPhase, string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "unavailable"
+	}
+	var phases []historyProcessPhase
+	if json.Unmarshal(data, &phases) != nil {
+		return nil, "invalid"
+	}
+	return phases, "available"
+}
+
+func TestHistoryProcessPhaseTrace(t *testing.T) {
+	trace := &historyProcessTrace{started: time.Now()}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancel()
+	trace.mark("command_end", ctx)
+	require.True(t, trace.phases[0].Cancelled)
+	require.Negative(t, trace.phases[0].RemainingUS)
+	output := &testOutput{}
+	writer := &historyProcessTraceOutput{WriteCloser: output, trace: trace}
+	const private = "SQL_PASSWORD_RESULT_SENTINEL"
+	n, err := writer.Write([]byte(private))
+	require.NoError(t, err)
+	require.Equal(t, len(private), n)
+	require.Equal(t, private, output.String())
+	require.NoError(t, writer.Close())
+	server, client := net.Pipe()
+	require.NoError(t, server.Close())
+	conn := &historyProcessTraceConn{Conn: client, trace: trace}
+	_, err = conn.Read(make([]byte, 1))
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, conn.Close())
+	for range 100 {
+		trace.mark("dispatch_end", nil)
+	}
+	require.Len(t, trace.phases, 64)
+	data, err := json.Marshal(trace.phases)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), private)
+	var phases []historyProcessPhase
+	require.NoError(t, json.Unmarshal(data, &phases))
+	require.Equal(t, trace.phases, phases)
+	path := filepath.Join(t.TempDir(), "phase-trace.json")
+	loaded, status := readHistoryProcessTrace(path)
+	require.Nil(t, loaded)
+	require.Equal(t, "unavailable", status)
+	require.NoError(t, os.WriteFile(path, []byte(`[{"phase":"`+private+`"},`), 0o600))
+	loaded, status = readHistoryProcessTrace(path)
+	require.Nil(t, loaded, "partial invalid diagnostics must not escape")
+	require.Equal(t, "invalid", status)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	loaded, status = readHistoryProcessTrace(path)
+	require.Equal(t, trace.phases, loaded)
+	require.Equal(t, "available", status)
 }
 
 type historyProcessFixture struct {
 	root, profiles, store string
 	environment           []string
 	consent               *bool
+	executing             <-chan struct{}
 }
 
 func historyConsent(enabled bool) *bool { return &enabled }
@@ -149,13 +328,30 @@ func (f *historyProcessFixture) run(t *testing.T, args ...string) (int, map[stri
 	t.Helper()
 	before, beforeErr := os.ReadFile(f.profiles)
 	command := f.command(t, args...)
+	for _, arg := range args {
+		if arg == "--timeout=500ms" {
+			command.Env = append(command.Env, "PGSAVVY_HISTORY_PROCESS_TRACE=1")
+		}
+	}
 	var diagnostic bytes.Buffer
 	command.Stderr = &diagnostic
 	output, err := command.Output()
 	exit := historyProcessExit(t, err)
 	var document map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(output))
-	require.NoError(t, decoder.Decode(&document), "exit=%d diagnostic=%q", exit, diagnostic.String())
+	decodeErr := decoder.Decode(&document)
+	var phases []historyProcessPhase
+	phaseStatus := "not_requested"
+	if decodeErr != nil {
+		phases, phaseStatus = readHistoryProcessTrace(filepath.Join(f.root, "phase-trace.json"))
+	}
+	accepted := false
+	select {
+	case <-f.executing:
+		accepted = true
+	default:
+	}
+	require.NoError(t, decodeErr, "exit=%d diagnostic=%q accepted=%t phase_trace=%s phases=%+v", exit, diagnostic.String(), accepted, phaseStatus, phases)
 	require.ErrorIs(t, decoder.Decode(new(any)), io.EOF)
 	require.EqualValues(t, 1, document["schema_version"])
 	require.Equal(t, exit == 0, document["ok"])
@@ -578,6 +774,10 @@ func TestCLIHistoryProcess_CancellationAndCleanup(t *testing.T) {
 			f := newHistoryProcess(t, historyConsent(true))
 			prepareEmptyHistoryFixture(t, f.store)
 			script := &historyWireScript{rollbackError: fixture == "cleanup_failure", stallTail: fixture == "short_deadline"}
+			if fixture == "short_deadline" {
+				script.executing = make(chan struct{})
+				f.executing = script.executing
+			}
 			if fixture == "output_overflow" {
 				for range 17 {
 					script.rows = append(script.rows, strings.Repeat("x", 64<<10))

@@ -247,10 +247,10 @@ stage=native-tests
 # Inventory the platform's compiled tests, including every history/approval/
 # executor regression. Evidence must show each actually passed, never skipped.
 native_selector='^(TestMachine|TestCLIHistory|TestTemporary)'
-go test -json -list "$native_selector" -tags=integration \
+go test -json -list "$native_selector" -tags=integration,nativefixture \
   . ./internal/machineio ./pkg/cli ./pkg/drivers/pg ./pkg/session ./pkg/session/sshtunnel ./test/integration \
   >"$root/native-inventory.jsonl" 2>"$root/native-inventory.err"
-go test -json -count=1 -timeout 10m -tags=integration \
+go test -json -count=1 -timeout 10m -tags=integration,nativefixture \
   . ./internal/machineio ./pkg/cli ./pkg/drivers/pg ./pkg/session ./pkg/session/sshtunnel ./test/integration \
   -run "$native_selector" >"$root/native-tests.jsonl" 2>"$root/native-tests.err"
 stage=evidence

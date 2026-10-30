@@ -24,11 +24,17 @@ A timeout is incomplete evidence, not a pass. No dependencies, generation,
 migration or permission repair is needed for this verification.
 
 The Unix runner inventories and executes `^(TestMachine|TestCLIHistory|TestTemporary)`
-with integration tags against its newly built exact CGO-disabled shipping binary.
+with `integration,nativefixture` tags against its newly built exact CGO-disabled shipping binary.
 Every compiled top-level inventory entry must pass, and **any** skipped/failed
 event rejects acceptance. New top-level tests must be included in the diagnostic
 name allowlist; its source-comparison regression enforces that inventory. New
 subcases under existing tests remain in executed pass-event counts.
+
+The `nativefixture` tag selects temporary CLI observers that require the native
+runner's ownership manifest, restricted role, passfile and socket. Generic Docker
+`task test:integration` does not select those tests; it retains the shared CLI
+observer authorization helpers and their negative tests. Native selection never
+skips missing or invalid ownership: authorization still fails before dialing.
 
 `TestMachineLLMHelp_CanonicalCapabilities` compares canonical operation usage,
 temporary command/flag availability, read-only/write opt-in, password-source-only
