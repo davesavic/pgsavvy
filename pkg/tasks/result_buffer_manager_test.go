@@ -639,38 +639,54 @@ func TestNewQueryTaskStopBeforeStreamFnStillClosesStream(t *testing.T) {
 // fires. A's onDone must fire before B's streamFn is called.
 func TestNewQueryTaskPreemption(t *testing.T) {
 	h := newTestHarness()
+	t.Cleanup(func() {
+		h.mgr.Stop()
+		h.workersWG.Wait()
+		h.stopUI()
+	})
 
 	streamA := newStubRowStream(10000)
 	streamB := newStubRowStream(10)
 
+	startedA := make(chan struct{})
 	doneA := make(chan struct{})
-	streamBOpened := make(chan struct{})
+	streamBOpened := make(chan bool, 1)
 
 	if err := h.mgr.NewQueryTask(
 		"A",
 		func(_ context.Context) (drivers.RowStream, error) { return streamA, nil },
-		func(_ []models.Row) {},
+		func(_ []models.Row) { close(startedA) },
 		50,
 		func(error) { close(doneA) },
 	); err != nil {
 		t.Fatalf("NewQueryTask(A): %v", err)
 	}
 
-	// Give A's worker time to actually start and enter the chan
-	// loop. Without this the preempt path may not exercise the
-	// in-flight stop branch.
-	time.Sleep(30 * time.Millisecond)
+	select {
+	case <-startedA:
+	case <-time.After(time.Second):
+		t.Fatal("A's initial fill did not complete within 1s")
+	}
 
 	// Concurrently fire B. NewQueryTask is allowed to block until A
 	// has been preempted (it calls priorStop synchronously), so
 	// kick it off on a goroutine so we can observe the ordering
 	// from the test goroutine.
 	bStarted := make(chan struct{})
+	// Join the launcher before stopping B or waiting for its worker.
+	t.Cleanup(func() { <-bStarted })
+	var bErr error
 	go func() {
-		_ = h.mgr.NewQueryTask(
+		bErr = h.mgr.NewQueryTask(
 			"B",
 			func(_ context.Context) (drivers.RowStream, error) {
-				close(streamBOpened)
+				// Record the order here, not by selecting between two ready events later.
+				select {
+				case <-doneA:
+					streamBOpened <- true
+				default:
+					streamBOpened <- false
+				}
 				return streamB, nil
 			},
 			func(_ []models.Row) {},
@@ -680,27 +696,26 @@ func TestNewQueryTaskPreemption(t *testing.T) {
 		close(bStarted)
 	}()
 
-	// A's onDone must fire before B's streamFn opens.
+	// Deliberately observe after A has completed; B may already have opened too.
 	select {
 	case <-doneA:
-		// good
-	case <-streamBOpened:
-		t.Fatal("B's streamFn opened before A's onDone fired (preemption ordering violated)")
 	case <-time.After(time.Second):
 		t.Fatal("A's onDone did not fire within 1s of preempting NewQueryTask(B)")
 	}
 
-	// Now sanity-check streamBOpened fires too.
 	select {
-	case <-streamBOpened:
+	case ordered := <-streamBOpened:
+		if !ordered {
+			t.Fatal("B's streamFn opened before A's onDone fired (preemption ordering violated)")
+		}
 	case <-time.After(time.Second):
 		t.Fatal("B's streamFn never opened after preempt completed")
 	}
 
 	<-bStarted
-	h.mgr.Stop()
-	h.workersWG.Wait()
-	h.stopUI()
+	if bErr != nil {
+		t.Fatalf("NewQueryTask(B): %v", bErr)
+	}
 }
 
 // TestNewQueryTaskAppendRowsAlwaysOnUIThread — instrumented via
