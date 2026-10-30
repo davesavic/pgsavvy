@@ -305,6 +305,9 @@ TestTemporaryTarget_Validation
 """.split())
 
 CASE_NAMES = {
+    "TestMachineCLIFullApprovalProcess": frozenset("""
+        no-tty flag-mismatch mismatch refusal signal deadline approved busy
+    """.split()),
     "TestMachineTerminalApprovalProcess": frozenset("""
         wait-invalid success idle signal deadline close closed no-tty
         retry-success retry-idle retry-signal retry-deadline retry-close retry-closed
@@ -330,11 +333,15 @@ SOURCE_FILES = {
     "temporary_query_integration_test.go": ("pkg/cli/temporary_query_integration_test.go", 348),
     "temporary_observer_integration_test.go": ("pkg/cli/temporary_observer_integration_test.go", 120),
     "temporary_query_process_test.go": ("temporary_query_process_test.go", 603),
+    "main_machine_full_test.go": ("main_machine_full_test.go", 273),
 }
 MAX_LOCATIONS = 32
 LOCATION_PATTERN = re.compile(
     r"^[ \t]*(?:Error Trace:[ \t]*)?(?P<path>[^ \t\r\n:]+\.go):"
     r"(?P<line>[1-9][0-9]{0,3})(?=[: \t\r\n]|$)", re.MULTILINE)
+APPROVAL_PHASES = frozenset(("start", "prompt", "completion", "terminal-state"))
+APPROVAL_PHASE_PATTERN = re.compile(
+    r"^[ \t]*(?:Messages:[ \t]*)?PGSAVVY_APPROVAL_PHASE=(?P<phase>[a-z-]+)\r?$", re.MULTILINE)
 
 
 def read_status(path):
@@ -345,7 +352,7 @@ def read_status(path):
         with pathlib.Path(path).open("rb") as log:
             report["log_status"] = "invalid"
             statuses = {}
-            cases, locations = {}, set()
+            cases, locations, phases = {}, set(), {}
             package_failed = unlisted_failure = saw_event = False
             total = 0
             while True:
@@ -372,6 +379,11 @@ def read_status(path):
                     output = event.get("Output")
                     if not isinstance(output, str):
                         return report
+                    if top == "TestMachineCLIFullApprovalProcess" and public_case:
+                        for match in APPROVAL_PHASE_PATTERN.finditer(output):
+                            if match["phase"] in APPROVAL_PHASES:
+                                phases.setdefault((top, case), match["phase"])
+                                break
                     # Timeout stacks may be package output without a Test field.
                     if (name is None or name in LOCATION_ONLY_TESTS
                             or (top.startswith("TestTemporary") and top in TEST_NAMES)
@@ -410,6 +422,10 @@ def read_status(path):
                               for top, case in sorted(cases)],
                        locations=[{"file": basename, "line": number}
                                   for basename, number in sorted(locations)])
+        for case in report["cases"]:
+            phase = phases.get((case["test"], case["case"]))
+            if phase is not None:
+                case["phase"] = phase
     except (OSError, UnicodeError, ValueError, TypeError, RecursionError):
         pass
     return report

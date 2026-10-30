@@ -312,7 +312,8 @@ parent status. Package failures and unlisted failures expose only
 boolean flags, never their names. The allowlist does not add acceptance tests.
 
 An approved Unix diagnostic exception adds `cases` and `locations` metadata.
-`cases` contains only 23 fixed labels: 14 for
+`cases` contains only 31 fixed labels: eight for
+`TestMachineCLIFullApprovalProcess`, 14 for
 `TestMachineTerminalApprovalProcess`, five for
 `TestCLIHistoryProcess_CancellationAndCleanup`, `broken_false`/`broken_true` for
 `TestCLIHistoryProcess_OutputPipes`, and
@@ -321,18 +322,30 @@ An approved Unix diagnostic exception adds `cases` and `locations` metadata.
 Each case records its last lifecycle `action`: `run`, `pass`, `fail` or `skip`;
 failure is sticky. `run` without a terminal action is distinct from an actual
 `skip`, while the existing top-level statuses are unchanged.
+The eight full-approval cases are `no-tty`, `flag-mismatch`, `mismatch`,
+`refusal`, `signal`, `deadline`, `approved` and `busy`. Their Python failures all
+reach one Go assertion, so an optional `phase` on these case records distinguishes
+only `start`, `prompt`, `completion` and `terminal-state`. The adapter emits a
+fixed `PGSAVVY_APPROVAL_PHASE=` marker when its child-process ceremony raises;
+the reporter accepts only an exact marker line (optionally with testify's
+`Messages:` prefix), an allowlisted value and one of those eight exact cases.
+Unknown values, suffix payloads, nested/private cases and unrelated output are
+discarded. Only the first recognized phase per case is retained. PTY setup before
+the ceremony, cleanup failures and a parent-killed Python process may have no phase marker; no raw
+traceback, child stdout/stderr, SQL, DSN or credential is published.
 
 `locations` retains at most the first 32 distinct approved source sites, sorted
 for publication. Only reconstructed public basenames and line numbers are
 emitted: `terminal_unix_test.go`, `stream_unix.go`, `io_darwin_test.go`,
 `query_history_process_test.go`, `machine_test.go`, `dispatch_test.go`,
-`temporary_query_integration_test.go` and `temporary_query_process_test.go`.
+`temporary_query_integration_test.go`, `temporary_observer_integration_test.go`,
+`temporary_query_process_test.go` and `main_machine_full_test.go`.
 The Darwin fixture helper
 is included because PTY/termios setup can block before the child timeout
 context exists. Line
 numbers must lie within pinned public source bounds, checked against those
-eight repository files by regression tests. The reporter recognizes assertion
-and Go panic/timeout stack locations in the four fixed-case families' output,
+ten repository files by regression tests. The reporter recognizes assertion
+and Go panic/timeout stack locations in the five fixed-case families' output,
 any allowlisted `TestTemporary` test or its subtests, the exact tests noted below,
 and package-level output where timeout stacks have no test name. Private path
 prefixes, stack function/argument text, assertion values, SQL, credentials and

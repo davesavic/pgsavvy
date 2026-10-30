@@ -37,6 +37,8 @@ os.setsid()
 fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 children = []
 def start(extra=(), alternate=False):
+    global phase
+    phase = 'start'
     env = os.environ.copy()
     if alternate:
         env['XDG_STATE_HOME'] = root + '/different-state'
@@ -47,6 +49,8 @@ def start(extra=(), alternate=False):
     p.stdin.write(b'UPDATE approval_target SET value=1'); p.stdin.close(); p.stdin = None
     return p
 def prompt(text):
+    global phase
+    phase = 'prompt'
     output = b''; end = time.monotonic() + 3
     while text not in output:
         remaining = end - time.monotonic()
@@ -54,6 +58,8 @@ def prompt(text):
             raise RuntimeError('approval prompt unavailable')
         output += os.read(master, 8192)
 def finish(p):
+    global phase
+    phase = 'completion'
     out, err = p.communicate(timeout=6)
     return {'exit':p.returncode, 'stdout':out.decode(), 'stderr':err.decode()}
 try:
@@ -65,6 +71,7 @@ try:
         results.append(finish(second))
         explicit = [start(('--approve','--confirm-connection=Exact.Profile')) for _ in range(2)]
         results.extend(finish(p) for p in explicit)
+    phase = 'prompt'
     if mode == 'signal':
         first.send_signal(signal.SIGINT)
     elif mode != 'deadline':
@@ -73,9 +80,13 @@ try:
             prompt(b'Type yes to approve this invocation: ')
             os.write(master, b'no\n' if mode in ('refusal','busy') else b'yes\n')
     results.append(finish(first))
+    phase = 'terminal-state'
     if termios.tcgetattr(slave) != before or fcntl.fcntl(slave, fcntl.F_GETFL) != flags:
         raise RuntimeError('borrowed terminal flags changed')
     print(json.dumps(results))
+except Exception:
+    print('PGSAVVY_APPROVAL_PHASE=' + phase, file=sys.stderr)
+    raise
 finally:
     for p in children:
         if p.poll() is None: p.kill(); p.wait()

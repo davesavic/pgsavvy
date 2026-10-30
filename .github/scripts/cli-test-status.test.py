@@ -132,6 +132,94 @@ class TestNativeTestStatus(unittest.TestCase):
         self.assertEqual(report["locations"], [{"file": "machine_test.go", "line": 934}])
         self.assertNotIn("private-", json.dumps(report))
 
+    def test_full_approval_cases_publish_only_fixed_labels_and_bounded_locations(self):
+        top = "TestMachineCLIFullApprovalProcess"
+        basename = "main_machine_full_test.go"
+        last_line = cli_test_status.SOURCE_FILES[basename][1]
+        for label in cli_test_status.CASE_NAMES[top]:
+            with self.subTest(case=label):
+                events = [
+                    {"Action": "run", "Test": top + "/" + label},
+                    {"Action": "output", "Test": top + "/" + label, "Output":
+                     f"    Error Trace:\t/private-path-sentinel/{basename}:{last_line}\n"
+                     "    private-assertion-sentinel SELECT private_sql postgres://user:private-password@private-host/db\n"},
+                    {"Action": "fail", "Test": top + "/" + label},
+                    {"Action": "pass", "Test": top + "/" + label},
+                    {"Action": "fail", "Test": top + "/private-case-sentinel"},
+                    {"Action": "output", "Test": top + "/" + label + "/private-nested-sentinel",
+                     "Output": f"    {basename}:1: private-output-sentinel\n"},
+                ]
+                for number in (0, -1, last_line + 1, "01", "1private-number-sentinel", "999999999999"):
+                    events.append({"Action": "output", "Test": top + "/" + label,
+                                   "Output": f"    {basename}:{number}: private-output-sentinel\n"})
+                self.write_events(events)
+                report = cli_test_status.read_status(self.path)
+                self.assertEqual(report["tests"], [{"test": top, "status": "failed"}])
+                self.assertEqual(report["cases"], [{"test": top, "case": label, "action": "fail"}])
+                self.assertEqual(report["locations"], [{"file": basename, "line": last_line}])
+                for private in ("private-", "SELECT", "private_sql", "postgres://"):
+                    self.assertNotIn(private, json.dumps(report))
+
+    def test_full_approval_phases_publish_only_fixed_values(self):
+        top = "TestMachineCLIFullApprovalProcess"
+        for phase in cli_test_status.APPROVAL_PHASES:
+            for prefix in ("", "    Messages:\t"):
+                with self.subTest(phase=phase, prefix=prefix):
+                    self.write_events([
+                        {"Action": "run", "Test": top + "/busy"},
+                        {"Action": "output", "Test": top + "/busy", "Output":
+                         prefix + "PGSAVVY_APPROVAL_PHASE=" + phase + "\n"
+                         "private-stderr-sentinel SELECT private_sql postgres://user:private-password@private-host/db\n"},
+                        {"Action": "output", "Test": top + "/busy", "Output": "PGSAVVY_APPROVAL_PHASE=start\n"},
+                        {"Action": "fail", "Test": top + "/busy"},
+                    ])
+                    report = cli_test_status.read_status(self.path)
+                    self.assertEqual(report["cases"], [{"test": top, "case": "busy", "action": "fail", "phase": phase}])
+                    self.assertNotIn("private-", json.dumps(report))
+                    self.assertNotIn("SELECT", json.dumps(report))
+                    self.assertNotIn("postgres://", json.dumps(report))
+
+    def test_unknown_or_unscoped_approval_markers_stay_private(self):
+        top = "TestMachineCLIFullApprovalProcess"
+        events = [{"Action": "run", "Test": top + "/busy"}]
+        for marker in ("private-phase-sentinel", "prompt private-payload-sentinel", "prompt\tprivate-payload-sentinel",
+                       "prompt=private-payload-sentinel", "prompt\x1b[31m", "prompt\rprivate-payload-sentinel", "prompt "):
+            events.append({"Action": "output", "Test": top + "/busy",
+                           "Output": "PGSAVVY_APPROVAL_PHASE=" + marker + "\n"})
+        events.append({"Action": "output", "Test": top + "/busy",
+                       "Output": "private-prefix-sentinel PGSAVVY_APPROVAL_PHASE=prompt\n"})
+        for name in (None, top, top + "/private-case-sentinel", top + "/busy/private-nested-sentinel",
+                     "TestMachineTerminalApprovalProcess/success"):
+            events.append({"Action": "output", "Test": name, "Output": "PGSAVVY_APPROVAL_PHASE=prompt\n"})
+        self.write_events(events)
+        report = cli_test_status.read_status(self.path)
+        self.assertEqual(report["cases"], [{"test": top, "case": "busy", "action": "run"}])
+        self.assertNotIn("private-", json.dumps(report))
+
+    def test_bad_tail_discards_approval_cases_locations_and_phases(self):
+        top = "TestMachineCLIFullApprovalProcess"
+        events = [
+            {"Action": "run", "Test": top + "/busy"},
+            {"Action": "output", "Test": top + "/busy", "Output":
+             "    main_machine_full_test.go:1: private-output-sentinel\nPGSAVVY_APPROVAL_PHASE=prompt\n"},
+            {"Action": "fail", "Test": top + "/busy"},
+        ]
+        for tail, status in ((b"private-malformed-sentinel", "invalid"),
+                             (b"x" * (cli_test_status.LIMIT + 1), "oversized")):
+            self.write_events(events)
+            self.assertEqual(cli_test_status.read_status(self.path)["cases"][0]["phase"], "prompt")
+            with self.path.open("ab") as log:
+                log.write(tail)
+            report = cli_test_status.read_status(self.path)
+            self.assertEqual(report["log_status"], status)
+            for field in ("tests", "cases", "locations"):
+                self.assertEqual(report[field], [])
+        self.write_events(events)
+        with mock.patch.object(cli_test_status, "MAX_LOG_BYTES", self.path.stat().st_size - 1):
+            report = cli_test_status.read_status(self.path)
+        self.assertEqual(report["log_status"], "oversized")
+        self.assertEqual(report["cases"], [])
+
     def test_deadline_locations_keep_values_and_dynamic_cases_private(self):
         top = "TestMachineCLI_Envelope_ParentDeadlineAndInput"
         invalid_line = cli_test_status.SOURCE_FILES["dispatch_test.go"][1] + 1
@@ -266,7 +354,7 @@ class TestNativeTestStatus(unittest.TestCase):
         self.write_events(events * 2)
         report = cli_test_status.read_status(self.path)
         self.assertEqual(len(report["cases"]), sum(map(len, cli_test_status.CASE_NAMES.values())))
-        self.assertEqual(len(report["cases"]), 23)
+        self.assertEqual(len(report["cases"]), 31)
         self.assertTrue(all(case["action"] == "fail" for case in report["cases"]))
         self.assertEqual(report["locations"], [
             {"file": "stream_unix.go", "line": number}
@@ -280,7 +368,7 @@ class TestNativeTestStatus(unittest.TestCase):
             "internal/machineio/io_darwin_test.go", "pkg/cli/query_history_process_test.go",
             "pkg/drivers/pg/machine_test.go", "pkg/cli/dispatch_test.go",
             "pkg/cli/temporary_query_integration_test.go", "temporary_query_process_test.go",
-            "pkg/cli/temporary_observer_integration_test.go"})
+            "pkg/cli/temporary_observer_integration_test.go", "main_machine_full_test.go"})
         for basename, (source, last_line) in cli_test_status.SOURCE_FILES.items():
             self.assertEqual(pathlib.PurePosixPath(source).name, basename)
             self.assertEqual(len((repo / source).read_text().splitlines()), last_line)
@@ -291,6 +379,13 @@ class TestNativeTestStatus(unittest.TestCase):
                          {"TestMachineCLI_Envelope_ParentDeadlineAndInput",
                           "TestMachineOpen_TargetSnapshot_SSHTLS"})
         self.assertLessEqual(cli_test_status.LOCATION_ONLY_TESTS, cli_test_status.TEST_NAMES)
+        approval = (repo / "main_machine_full_test.go").read_text()
+        modes = re.search(r"for _, mode := range \[\]string\{([^}]+)\}", approval)[1]
+        self.assertEqual(cli_test_status.CASE_NAMES["TestMachineCLIFullApprovalProcess"],
+                         set(re.findall(r'"([^"]+)"', modes)))
+        adapter = approval.split("const machineFullPTY = `\n", 1)[1].split("\n`", 1)[0]
+        self.assertEqual(cli_test_status.APPROVAL_PHASES, set(re.findall(r"phase = '([^']+)'", adapter)))
+        self.assertIn("print('PGSAVVY_APPROVAL_PHASE=' + phase, file=sys.stderr)", adapter)
         terminal = (repo / "internal/machineio/terminal_unix_test.go").read_text()
         terminal = terminal.split("func TestMachineTerminalApprovalProcess(", 1)[1]
         modes = re.search(r"for _, mode := range \[\]string\{([^}]+)\}", terminal)[1]
