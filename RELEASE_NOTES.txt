@@ -1,3 +1,35 @@
+pgsavvy v0.16.0
+
+  Added temporary local targets for machine queries, schema inspection and
+  connection testing without saved profiles. Use --temporary with explicit
+  --port, --database, --username and protected --passfile; TCP defaults to
+  loopback, with local Unix sockets also supported. Remote/SSH targets, mixed
+  saved selectors and nonempty PostgreSQL configuration environment settings
+  are rejected. No profiles, credentials or query history are saved.
+
+  Temporary queries are read-only by default. --allow-write enables supported
+  SELECT/INSERT/UPDATE/DELETE scripts within one owned transaction. The whole
+  script is validated before dispatch; unsupported syntax, DDL and caller
+  transaction controls are rejected. Precommit SQL/result/encoding failures
+  prevent commit; requested row truncation remains success and permits commit.
+  Saved-connection permissions, approvals and full-SQL semantics are unchanged.
+
+  JSON reports sanitized target and available transaction-outcome evidence.
+  Use an externally provisioned restricted login: validation is not a sandbox
+  for server-side code. Sequence consumption and permitted external effects
+  are not rolled back. Interrupted COMMIT can be unknown; cleanup/output failure
+  can occur after commit. Never automatically retry.
+
+  Explicit --timeout now controls the total invocation budget and statement
+  ceiling, allowing longer queries while retaining shorter positive saved
+  statement limits. Defaults remain 30s total and 10s per statement; the total
+  budget includes setup, cleanup and output.
+
+  Updated CLI help/contracts and owned PostgreSQL 17/18 coverage. Stabilized
+  query-preemption regression ordering without changing production behavior.
+  Native macOS acceptance remains pending; Windows machine commands remain
+  unavailable. See docs/cli-query.md, docs/cli-contract.md and docs/cli-testing.md.
+
 pgsavvy v0.15.1
 
   Build with Go 1.26.10 to address GO-2026-6809 in crypto/x509. Updated CI,
