@@ -14,10 +14,10 @@ import (
 )
 
 var schemaUsage = map[string]string{
-	"list":          "schema list --connection NAME [--limit 1..1000] [--after NAME] [--include-system]",
-	"tables":        "schema tables --connection NAME --schema NAME [--limit 1..1000] [--after NAME]",
-	"describe":      "schema describe --connection NAME --schema NAME --table NAME",
-	"relationships": "schema relationships --connection NAME --schema NAME --table NAME",
+	"list":          "schema list " + targetUsage + " [--limit 1..1000] [--after NAME] [--include-system]",
+	"tables":        "schema tables " + targetUsage + " --schema NAME [--limit 1..1000] [--after NAME]",
+	"describe":      "schema describe " + targetUsage + " --schema NAME --table NAME",
+	"relationships": "schema relationships " + targetUsage + " --schema NAME --table NAME",
 }
 
 func SchemaCommand(service InvocationService) Command {
@@ -35,7 +35,7 @@ func SchemaCommand(service InvocationService) Command {
 			return Envelope{}, bad
 		}
 		base := Envelope{Command: "schema " + operation}
-		values, switches := []string{"connection"}, []string{"help"}
+		values, switches := append([]string{"connection"}, temporaryTargetFlags...), []string{"help", "temporary"}
 		switch operation {
 		case "list":
 			values = append(values, "limit", "after")
@@ -58,8 +58,15 @@ func SchemaCommand(service InvocationService) Command {
 			return base, nil
 		}
 		name := flags["connection"]
-		if name == "" {
+		target, err := selectTemporaryTarget(flags, false)
+		if err != nil {
+			return base, err
+		}
+		if target == nil && name == "" {
 			return base, bad
+		}
+		if target != nil {
+			base.Target = publicTemporaryTarget(*target, true)
 		}
 		for _, key := range []string{"schema", "table", "after"} {
 			if value := flags[key]; !utf8.ValidString(value) || strings.ContainsRune(value, 0) || len(value) > 64<<10 {
@@ -93,7 +100,13 @@ func SchemaCommand(service InvocationService) Command {
 				}
 			}
 		}
-		client, profile, err := service.Open(ctx, name, models.CLIAccessMetadata)
+		var client temporaryMachine
+		var profile models.Connection
+		if target != nil {
+			client, err = service.openTemporaryTarget(ctx, *target)
+		} else {
+			client, profile, err = service.Open(ctx, name, models.CLIAccessMetadata)
+		}
 		if err != nil {
 			return base, err
 		}

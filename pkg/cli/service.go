@@ -17,12 +17,14 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/env"
 	"github.com/davesavic/pgsavvy/pkg/models"
 	"github.com/davesavic/pgsavvy/pkg/query"
+	"github.com/davesavic/pgsavvy/pkg/session"
 )
 
 type InvocationService struct {
-	Load    func() ([]models.Connection, error)
-	Options pg.MachineOptions
-	Approve ApprovalProvider
+	Load          func() ([]models.Connection, error)
+	Options       pg.MachineOptions
+	Approve       ApprovalProvider
+	openTemporary func(context.Context, session.TemporaryTarget, pg.MachineOptions) (temporaryMachine, error)
 
 	// Private seams carry verified consent provenance, never arbitrary Load
 	// output. Production reads trusted saved metadata; tests inject fixtures.
@@ -125,7 +127,7 @@ func PublicMachineError(err error) *PublicError {
 	return safeError(err)
 }
 
-func CloseMachine(ctx context.Context, client *pg.MachineClient) error {
+func CloseMachine(ctx context.Context, client interface{ Close(context.Context) error }) error {
 	cleanup, cancel := context.WithTimeout(context.Background(), min(CleanupTimeout, CleanupBudget(ctx)))
 	defer cancel()
 	if err := client.Close(cleanup); err != nil {

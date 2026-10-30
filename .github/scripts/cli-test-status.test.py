@@ -1,8 +1,11 @@
 import contextlib
 import io
 import json
+import os
 import pathlib
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -50,6 +53,19 @@ class TestNativeTestStatus(unittest.TestCase):
             {"test": "TestMachineCLI_Dispatch", "status": "passed"},
             {"test": "TestMachineCLI_Envelope", "status": "not_completed"},
         ])
+
+    def test_temporary_failure_publishes_only_fixed_name_and_source_location(self):
+        top = "TestTemporaryCLIIntegration"
+        self.write_events([
+            {"Action": "output", "Test": top + "/private-case-sentinel", "Output":
+             "    /private-path-sentinel/pkg/cli/temporary_query_integration_test.go:171: private-password-sentinel SELECT private_sql\n"},
+            {"Action": "fail", "Test": top + "/private-case-sentinel"},
+        ])
+        report = cli_test_status.read_status(self.path)
+        self.assertEqual(report["tests"], [{"test": top, "status": "failed"}])
+        self.assertEqual(report["cases"], [])
+        self.assertEqual(report["locations"], [{"file": "temporary_query_integration_test.go", "line": 171}])
+        self.assertNotIn("private-", json.dumps(report))
 
     def test_history_failure_reports_only_fixed_parent_name(self):
         name = "TestCLIHistoryProcess_OutputPipes"
@@ -259,7 +275,8 @@ class TestNativeTestStatus(unittest.TestCase):
         self.assertEqual({source for source, _ in cli_test_status.SOURCE_FILES.values()}, {
             "internal/machineio/terminal_unix_test.go", "internal/machineio/stream_unix.go",
             "internal/machineio/io_darwin_test.go", "pkg/cli/query_history_process_test.go",
-            "pkg/drivers/pg/machine_test.go", "pkg/cli/dispatch_test.go"})
+            "pkg/drivers/pg/machine_test.go", "pkg/cli/dispatch_test.go",
+            "pkg/cli/temporary_query_integration_test.go", "temporary_query_process_test.go"})
         for basename, (source, last_line) in cli_test_status.SOURCE_FILES.items():
             self.assertEqual(pathlib.PurePosixPath(source).name, basename)
             self.assertEqual(len((repo / source).read_text().splitlines()), last_line)
@@ -384,9 +401,75 @@ class TestNativeTestStatus(unittest.TestCase):
         for directory in (".", "internal/machineio", "pkg/cli", "pkg/drivers/pg",
                           "pkg/session", "pkg/session/sshtunnel", "test/integration"):
             for path in (repo / directory).glob("*_test.go"):
-                names.update(re.findall(r"^func ((?:TestMachine|TestCLIHistory)\w*)\(",
+                names.update(re.findall(r"^func ((?:TestMachine|TestCLIHistory|TestTemporary)\w*)\(",
                                         path.read_text(), re.MULTILINE))
         self.assertEqual(cli_test_status.TEST_NAMES, names)
+
+    def test_temporary_inventory_is_required_and_skip_is_not_a_live_pass(self):
+        repo = pathlib.Path(__file__).resolve().parents[2]
+        source = (repo / ".github/scripts/cli-postgres.sh").read_text()
+        self.assertIn("native_selector='^(TestMachine|TestCLIHistory|TestTemporary)'", source)
+        evidence = source.split('from cli_test_status import TEST_NAMES\n', 1)[1]
+        evidence = evidence.split('binary = root / "pgsavvy"', 1)[0]
+        # Execute the shipping acceptance logic, not a reimplementation. This
+        # fragment stops before binary hashing/platform reporting.
+        script = "import json, pathlib, re, sys\nfrom cli_test_status import TEST_NAMES\n" + evidence
+        required = set(re.findall(r'"(Test\w+)"', evidence.split("inventory = set()", 1)[0]))
+        temporary = {
+            "TestTemporaryAtomicPostgres", "TestTemporaryCLIIntegration", "TestTemporaryCLILexicalPostgres",
+            "TestTemporaryCLIProcessIsolation", "TestTemporaryCLIProcessCommitInterruption",
+            "TestTemporaryCLIProcessBrokenStdout",
+            "TestTemporaryCLIObserverOwnership", "TestTemporaryCLIProcessObserverOwnership",
+        }
+        self.assertLessEqual(temporary, required)
+        baseline = {"TestMachineCLI_" + name for name in (
+            "Dispatch", "ExitCodes", "Envelope", "Envelope_ParentDeadlineAndInput", "OutputLimit", "BrokenWriter")}
+        required |= baseline | {"TestMachineApprovalCeremony", "TestCLIHistory_DefaultNoState"}
+        package = "github.com/davesavic/pgsavvy/pkg/cli"
+        events = [{"Action": "pass", "Test": name, "Package": package} for name in sorted(required)]
+        events += [
+            {"Action": "output", "Test": "TestTemporaryCLIProcessCommitInterruption", "Output": "interrupted COMMIT attempts=1, reported=unknown, eventual observer rows=0 (not prescribed)"},
+            {"Action": "output", "Test": "TestTemporaryCLIProcessBrokenStdout", "Output": "broken stdout exit=7; independent observer durable rows=1 attempts=1"},
+        ]
+        events += [{"Action": "output", "Test": "TestTemporaryCLIIntegration/fixed-case",
+                    "Output": f"rollback proof: id={number} marker_attempts=1 backend_terminated=true rows=0"}
+                   for number in range(1010, 1015)]
+        root = pathlib.Path(self.directory.name)
+        def write(name, records):
+            (root / name).write_text("".join(json.dumps(record) + "\n" for record in records))
+        write("tests.jsonl", [{"Action": "pass", "Test": name, "Package": package} for name in baseline])
+        write("native-inventory.jsonl", [{"Action": "output", "Output": name + "\n", "Package": package} for name in required])
+        for mode in ("pass", "skip-subtest", "missing-compiled-test", "missing-required-test"):
+            records = list(events)
+            if mode == "skip-subtest":
+                records.append({"Action": "skip", "Test": "TestTemporaryCLIIntegration/private-case", "Package": package})
+            if mode == "missing-compiled-test":
+                write("native-inventory.jsonl", [{"Action": "output", "Output": name + "\n", "Package": package} for name in required | {"TestTemporaryTarget_Validation"}])
+            if mode == "missing-required-test":
+                write("native-inventory.jsonl", [{"Action": "output", "Output": name + "\n", "Package": package} for name in required])
+                records = [event for event in records if event["Test"] != "TestTemporaryAtomicPostgres"]
+            write("native-tests.jsonl", records)
+            with self.subTest(mode=mode):
+                result = subprocess.run([sys.executable, "-c", script, str(root)], cwd=repo / ".github/scripts", capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, mode == "pass", result.stderr)
+
+    def test_owned_observer_metadata_is_private_and_binds_endpoint_and_cluster(self):
+        repo = pathlib.Path(__file__).resolve().parents[2]
+        source = (repo / ".github/scripts/cli-postgres.sh").read_text()
+        writer = source.split("stage=temporary-ownership\n", 1)[1].split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+        root = pathlib.Path(self.directory.name) / "pgsavvy-native.metadata"
+        (root / "data").mkdir(parents=True)
+        (root / "temporary-identity").write_text(f"1234567890123456789|{root / 'data'}\n")
+        dsn = "postgres://pgsavvy:private-fixture@127.0.0.1:65432/pgsavvy_test?sslmode=disable"
+        environment = {**os.environ, "PGSAVVY_TEMP_FIXTURE_TOKEN": "private-token", "PGSAVVY_TEST_PG": dsn}
+        result = subprocess.run([sys.executable, "-c", writer, str(root)], env=environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        path = root / "temporary-owner"
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(json.loads(path.read_text()), {
+            "token": "private-token", "observer_dsn": dsn,
+            "system_identifier": "1234567890123456789", "data_directory": str((root / "data").resolve())})
 
 
 if __name__ == "__main__":

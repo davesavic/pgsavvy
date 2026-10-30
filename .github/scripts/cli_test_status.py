@@ -49,6 +49,7 @@ TestMachineCLINative_Discovery
 TestMachineCLINative_GroupSignal
 TestMachineCLINative_HelperExecutable
 TestMachineCLINative_InvalidInputHandle
+TestMachineCLINative_QueryTimeout
 TestMachineCLINative_ProfilePolicyAndInput
 TestMachineCLINative_ShellPipe
 TestMachineCLINative_SignalCleanup
@@ -68,6 +69,8 @@ TestMachineCLI_Envelope
 TestMachineCLI_EnvelopeLegacyBytes
 TestMachineCLI_Envelope_ParentDeadlineAndInput
 TestMachineCLI_ExitCodes
+TestMachineCLI_ExplicitTimeout
+TestMachineCLI_TimeoutBounds
 TestMachineCLI_OutputLimit
 TestMachineCLI_WindowsPipeDeadlineCapability
 TestMachineConfig_IsolatedEnvironment
@@ -185,6 +188,7 @@ TestMachineMetadata_Relationships
 TestMachineMetadata_Relationships_Live
 TestMachineMetadata_TargetSelection_Live
 TestMachineOpen_Initialization
+TestMachineOpen_StatementTimeoutBounds
 TestMachineOpen_Lifecycle
 TestMachineOpen_Lifecycle_ClosePublication
 TestMachineOpen_Lifecycle_Concurrent
@@ -222,6 +226,8 @@ TestMachineQuery_TerminalErrors
 TestMachineQuery_TerminalErrors_Live
 TestMachineQuery_TextValues
 TestMachineQuery_TextValues_Live
+TestMachineQuery_TimeoutPropagation
+TestMachineStatementMilliseconds_Ceiling
 TestMachineSSH_AgentCancellation
 TestMachineSSH_Auth
 TestMachineSSH_Auth_AgentThenIdentity
@@ -253,6 +259,49 @@ TestMachineWindowsHelper_Descendants
 TestMachineWindowsHelper_EnvironmentBlock
 TestMachineWindowsHelper_IndependentInvocations
 TestMachineWindowsHelper_InvalidSetup
+TestTemporaryAtomicCancellationAndSetup
+TestTemporaryAtomicCommitOutcomes
+TestTemporaryAtomicEncoderBudgetBoundary
+TestTemporaryAtomicExactDispatchAndTruncation
+TestTemporaryAtomicPostgres
+TestTemporaryAtomicPrecommitFailures
+TestTemporaryAtomicPreflight
+TestTemporaryAtomicResourceBoundaries
+TestTemporaryCLIIntegration
+TestTemporaryCLIObserverOwnership
+TestTemporaryCLILexicalPostgres
+TestTemporaryCLIProcessBrokenStdout
+TestTemporaryCLIProcessCommitInterruption
+TestTemporaryCLIProcessIsolation
+TestTemporaryCLIProcessObserverOwnership
+TestTemporaryConfig_IsolatedCanonicalBootstrap
+TestTemporaryEnvironment_RejectedBeforeAcquisition
+TestTemporaryMetadataErrorsKeepTarget
+TestTemporaryOpen_CredentialFailuresNeverDial
+TestTemporaryOpen_IsolatedSourcesAndReadOnlyHelpers
+TestTemporaryOpen_LifecycleDeadlineAndCleanup
+TestTemporaryOpen_RejectsBeforeCredentialAndDial
+TestTemporaryOpen_SocketTarget
+TestTemporaryPassfile_Conventions
+TestTemporaryPassfile_GrowingFileAndCheckpointCancellation
+TestTemporaryPassfile_ProtectionAndBound
+TestTemporaryPassfile_SameHandleAndCancellation
+TestTemporaryQueryCachedPublication
+TestTemporaryQueryErrorEvidence
+TestTemporaryQueryInputCompatibility
+TestTemporaryQueryNoPublicationReplay
+TestTemporaryQueryWireDispatch
+TestTemporaryRealOpenerBypassesSavedSources
+TestTemporaryRoutingWithoutSavedAccess
+TestTemporaryScriptAccepted
+TestTemporaryScriptBoundsAndContext
+TestTemporaryScriptLexicalBoundary
+TestTemporaryScriptNestedTraversal
+TestTemporaryScriptOriginalRangesAndParameters
+TestTemporaryScriptUnsupportedEverywhere
+TestTemporaryTargetFlagMatrix
+TestTemporaryTargetOutputAllowlist
+TestTemporaryTarget_Validation
 """.split())
 
 CASE_NAMES = {
@@ -277,7 +326,9 @@ SOURCE_FILES = {
     "io_darwin_test.go": ("internal/machineio/io_darwin_test.go", 185),
     "query_history_process_test.go": ("pkg/cli/query_history_process_test.go", 759),
     "machine_test.go": ("pkg/drivers/pg/machine_test.go", 1046),
-    "dispatch_test.go": ("pkg/cli/dispatch_test.go", 178),
+    "dispatch_test.go": ("pkg/cli/dispatch_test.go", 211),
+    "temporary_query_integration_test.go": ("pkg/cli/temporary_query_integration_test.go", 445),
+    "temporary_query_process_test.go": ("temporary_query_process_test.go", 603),
 }
 MAX_LOCATIONS = 32
 LOCATION_PATTERN = re.compile(
@@ -321,7 +372,9 @@ def read_status(path):
                     if not isinstance(output, str):
                         return report
                     # Timeout stacks may be package output without a Test field.
-                    if name is None or name in LOCATION_ONLY_TESTS or (top in CASE_NAMES and (name == top or public_case)):
+                    if (name is None or name in LOCATION_ONLY_TESTS
+                            or (top.startswith("TestTemporary") and top in TEST_NAMES)
+                            or (top in CASE_NAMES and (name == top or public_case))):
                         for match in LOCATION_PATTERN.finditer(output):
                             if len(locations) >= MAX_LOCATIONS:
                                 break

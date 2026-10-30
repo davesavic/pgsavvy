@@ -143,6 +143,89 @@ deadline may prevent JSON entirely, even after effects occurred. **Never blindly
 retry SQL** on an error, missing document or timeout. Independently inspect
 database state and prepared transactions before deciding on recovery.
 
+## Temporary atomic queries
+
+No saved profile or `cli_access` is needed. First provision a dedicated restricted
+login, local database and protected passfile **outside** the CLI. Clear nonempty
+PostgreSQL configuration environment settings listed in
+[the temporary target contract](cli-contract.md#temporary-local-targets).
+Uppercase strings below are placeholders, not provisioned fixtures:
+
+```sh
+printf '%s\n' 'SELECT 1;' | pgsavvy query --temporary --port 55432 \
+  --database DB_NAME --username RESTRICTED_USER --passfile /ABSOLUTE/PASSFILE --file -
+pgsavvy query --temporary --port 55432 --database DB_NAME \
+  --username RESTRICTED_USER --passfile /ABSOLUTE/PASSFILE \
+  --file ./REVIEWED_CRUD.sql --allow-write
+pgsavvy connections test --temporary --port 55432 --database DB_NAME \
+  --username RESTRICTED_USER --passfile /ABSOLUTE/PASSFILE
+```
+
+The second command is only for caller-authorized writes. Every invocation is
+read-only unless `query --allow-write` is supplied; this switch never overrides
+server read-only policy or grants. No approval ceremony, saved selector or history
+consent applies. Existing `--file`, `--params-file`, `--schema`, `--max-rows` and
+`--timeout` constraints remain; parameters still support only one statement.
+
+### Conservative supported grammar
+
+- Parser-supported SELECT/WITH/VALUES/TABLE, recursive read CTEs, subqueries,
+  joins and UNION/INTERSECT/EXCEPT.
+- Ordinary INSERT (including DEFAULT VALUES, INSERT SELECT and parser-supported
+  ON CONFLICT), UPDATE including FROM, DELETE **without USING**, and RETURNING.
+- Multiple supported statements and fully traversed modifying CTEs; any detected
+  write anywhere requires `--allow-write`.
+
+The entire script is validated before dispatching **any submitted SQL**. Reject
+unsupported syntax anywhere, including transaction controls and aliases
+(BEGIN/START TRANSACTION/END/ABORT/COMMIT/ROLLBACK), chaining, savepoints and
+prepared transactions; DDL/TRUNCATE, DO/CALL, all COPY, EXPLAIN, SET/RESET,
+PREPARE/EXECUTE, SELECT INTO, row locks and unknown statement/table nodes.
+DELETE USING, UPDATE/DELETE ORDER BY or LIMIT, dialect UPSERT, RETURNING NOTHING,
+bracketed sources, index/join hints and AS OF SYSTEM TIME are unsupported.
+This pinned parser subset is **not PostgreSQL grammar equivalence**; accepted
+syntax/types/names still must be accepted by the server.
+
+Lexical restrictions also reject bare CR ending a `--` comment (CRLF is allowed),
+vertical tab outside literals/comments, adjacent quoted continuation across
+whitespace, U& Unicode escapes and N/B/X-prefixed literals, unsupported E-string
+escapes, unquoted identifiers changed by Unicode normalization, and unquoted
+`experimental_`/`testing_` aliases. Ordinary strings with doubled quotes,
+dollar-quoted strings and supported E strings remain available. E escapes are
+restricted to the shared spelling set: backslash, single/double quote,
+`b f n r t x u U`, and octal digits `0..7`; decoded text must remain valid UTF-8
+without NUL. Quoted names and strings do not become SQL keywords. These guards
+are conservative compatibility restrictions, not a function sandbox.
+
+### Owned transaction and limits
+
+Each temporary query owns one transaction (BEGIN READ ONLY by default, BEGIN
+with opt-in). Original unparameterized SQL is sent once, unchanged, in one
+simple-query message, not separately by statement. Parameters use the existing
+single-statement binding path. Every result is drained and validated, including
+omitted rows. Precommit SQL, result-resource/format or exact success-envelope
+encoding errors prevent commit and cause rollback/disposal. Requested row
+truncation is normal success and **permits commit**; it limits retained output,
+not database effects or work.
+
+At most 256 submitted statements are accepted. Aggregate rows default to 100,
+maximum 1000; SQL/parameter input and output each cap at 1 MiB, with 256 parameters,
+64 KiB cells and an 8 MiB protocol-message ceiling. Unlike saved full execution,
+hard result/encoding failures are precommit failures, not a reason to drain and
+commit. Success uses `data.results` even for reads, the same positional
+PostgreSQL-text values as full mode. Top-level `target`, `execution` and
+`transaction_outcome` retain available evidence. See the
+[outcome table](cli-contract.md#transaction-and-output-contract).
+
+`committed` means acknowledged COMMIT, not guaranteed output delivery. Cleanup
+or stdout failure can produce a nonzero exit after commit; an interrupted COMMIT
+can be `unknown`. Never automatically retry. Rollback covers transactional row
+changes, **not sequence consumption or permitted external effects**. Functions,
+SECURITY DEFINER routines, triggers, extensions, memberships and grants remain
+the externally provisioned login's responsibility. CRUD can delete all accessible
+rows. No automatic database-object/fixture cleanup or worktree ownership proof
+is promised; saved full semantics above are unchanged.
+
 ## Optional shared history
 
 History is **off by default**, independently of `cli_access` and saved

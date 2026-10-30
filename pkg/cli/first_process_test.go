@@ -46,8 +46,28 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	conn, err := pgx.Connect(ctx, firstProcessDSN)
+	// The owned temporary suite must authorize even this bootstrap observer;
+	// legacy designated fixtures without temporary metadata keep their path.
+	root, token := os.Getenv("PGSAVVY_TEMP_FIXTURE_ROOT"), os.Getenv("PGSAVVY_TEMP_FIXTURE_TOKEN")
+	var conn *pgx.Conn
+	var err error
+	if root != "" || token != "" {
+		var owner temporaryLiveOwnership
+		var cfg *pgx.ConnConfig
+		cfg, owner, err = temporaryLiveObserverConfig(root, token, firstProcessDSN)
+		if err == nil {
+			conn, err = pgx.ConnectConfig(ctx, cfg)
+		}
+		if err == nil {
+			err = temporaryLiveVerifyObserver(ctx, conn, owner)
+		}
+	} else {
+		conn, err = pgx.Connect(ctx, firstProcessDSN)
+	}
 	if err != nil {
+		if conn != nil {
+			_ = conn.Close(ctx)
+		}
 		cancel()
 		fmt.Fprintln(os.Stderr, "machine process fixture unreachable")
 		os.Exit(1)

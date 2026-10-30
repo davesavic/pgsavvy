@@ -41,6 +41,7 @@ type MachineClient struct {
 	dialStops       []func()
 	currentDialStop func()
 	restartTunnel   bool
+	temporary       bool
 }
 
 type (
@@ -156,6 +157,13 @@ func OpenMachine(ctx context.Context, profile models.Connection, options Machine
 	}
 	cfg.Password = password
 	client := &MachineClient{access: access, readOnly: profile.ReadOnly, statementMS: statementMS, cleanup: options.CleanupTimeout, dialAllowed: true}
+	return connectMachine(ctx, connectCtx, profile, options, cfg, client)
+}
+
+// connectMachine shares transport ownership, cancellation and cleanup, not target
+// selection or credential acquisition, between saved and temporary opening.
+func connectMachine(ctx, connectCtx context.Context, profile models.Connection, options MachineOptions, cfg *pgx.ConnConfig, client *MachineClient) (*MachineClient, error) {
+	var err error
 	client.stop = watchMachine(ctx, client.Abort)
 	failed := true
 	defer func() {
@@ -337,7 +345,7 @@ func (c *MachineClient) initialize(ctx context.Context, profile models.Connectio
 			return err
 		}
 	}
-	if c.access != models.CLIAccessFull || c.readOnly {
+	if !c.temporary && (c.access != models.CLIAccessFull || c.readOnly) {
 		if err := c.exec(ctx, "SET default_transaction_read_only=on"); err != nil {
 			return err
 		}

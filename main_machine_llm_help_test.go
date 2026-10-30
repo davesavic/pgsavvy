@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -69,6 +70,66 @@ func machineTestLLMHelpOffline(t *testing.T) {
 			doc := machineTestDocument(t, output.Bytes(), 0)
 			if doc["command"] != "llm-help" || doc["result_complete"] != true || doc["truncated"] != false {
 				t.Fatal("guide did not return a complete machine envelope")
+			}
+			guide := doc["data"].(map[string]any)
+			sourceGuide, err := cli.LLMHelpCommand()(context.Background(), nil, cli.IO{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			guideJSON, err := json.Marshal(sourceGuide.Data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var expectedGuide map[string]any
+			if err := json.Unmarshal(guideJSON, &expectedGuide); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(guide, expectedGuide) {
+				t.Fatal("shipping guide differs from canonical source guide")
+			}
+			canonical, err := cli.CapabilitiesCommand()(context.Background(), nil, cli.IO{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(canonical.Data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var expected map[string]any
+			if err := json.Unmarshal(encoded, &expected); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(guide["capabilities"], expected) || guide["guide"].(map[string]any)["temporary"] == nil {
+				t.Fatal("shipping guide differs from source capabilities or omits temporary contract")
+			}
+			commands := [][]string{{"capabilities"}, {"--help"}, {"connections", "--help"}, {"schema", "--help"}}
+			for _, item := range expected["commands"].([]any) {
+				words := strings.Fields(item.(map[string]any)["command"].(string))
+				commands = append(commands, append(words, "--help"))
+			}
+			for _, args := range commands {
+				t.Run(strings.Join(args, " "), func(t *testing.T) {
+					command := exec.CommandContext(ctx, machineTestBinary, args...)
+					command.Env, command.Stdin = machineTestEnv(root), input
+					var stdout, stderr bytes.Buffer
+					command.Stdout, command.Stderr = &stdout, &stderr
+					if err := command.Run(); err != nil {
+						t.Fatalf("offline discovery failed: %v, stderr=%q", err, stderr.String())
+					}
+					result := machineTestDocument(t, stdout.Bytes(), 0)
+					if result["command"] == "capabilities" && !reflect.DeepEqual(result["data"], expected) {
+						t.Fatal("shipping capability output differs from canonical source")
+					}
+					for _, item := range expected["commands"].([]any) {
+						capability := item.(map[string]any)
+						if capability["command"] == result["command"] && (args[0] == "query" || args[0] == "schema" && len(args) == 3 || args[0] == "connections" && len(args) == 3) && result["data"].(map[string]any)["usage"] != capability["usage"] {
+							t.Fatal("shipping operation help differs from canonical capability usage")
+						}
+					}
+					if !reflect.DeepEqual(before, snapshot()) {
+						t.Fatal("offline help/capabilities created artifacts")
+					}
+				})
 			}
 			if !reflect.DeepEqual(before, snapshot()) {
 				t.Fatal("guide created configuration, logs, history or other artifacts")

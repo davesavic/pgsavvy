@@ -49,6 +49,8 @@ root = pathlib.Path(sys.argv[1])
 if root.is_symlink() or not root.name.startswith("pgsavvy-native."):
     raise SystemExit("refusing unexpected cleanup target")
 shutil.rmtree(root)
+assert not root.exists(), "owned fixture survived cleanup"
+print('{"scope":"owned-native-cleanup","cluster_stopped":true,"root_removed":true,"socket_removed":true}')
 PY
   exit "$result"
 }
@@ -146,9 +148,11 @@ PY
 cat >>"$root/data/postgresql.conf" <<EOF
 listen_addresses = '127.0.0.1'
 port = $port
-unix_socket_directories = ''
+unix_socket_directories = '$root/socket'
+unix_socket_permissions = 0700
 max_prepared_transactions = 20
 EOF
+mkdir -m 700 "$root/socket"
 stage=server-start
 "$pg/pg_ctl" -D "$root/data" -l "$root/server.log" -w -t 30 start >"$root/start.log" 2>&1
 export PGPASSWORD="$password"
@@ -157,6 +161,44 @@ stage=createdb
 psql=("$pg/psql" -X -w -h 127.0.0.1 -p "$port" -U pgsavvy -d pgsavvy_test -v ON_ERROR_STOP=1)
 stage=fixture
 "${psql[@]}" -f "$repo/docker/postgres/init/01_fixture.sql" >"$root/fixture.log" 2>&1
+stage=temporary-fixture
+temporary_password=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+# Only this invocation's disposable cluster is provisioned; the shipping CLI
+# receives an unprivileged login, never the observer/admin credential.
+{
+printf "CREATE ROLE pgsavvy_temporary LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '%s';\n" "$temporary_password"
+cat <<'SQL'
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+REVOKE TEMP ON DATABASE pgsavvy_test FROM PUBLIC;
+CREATE SCHEMA temporary_cli;
+CREATE TABLE temporary_cli.effects(id integer PRIMARY KEY, value text);
+CREATE TABLE temporary_cli.deferred(id integer UNIQUE DEFERRABLE INITIALLY DEFERRED);
+CREATE TABLE temporary_cli.children(id integer PRIMARY KEY, parent integer REFERENCES temporary_cli.effects(id));
+CREATE SEQUENCE temporary_cli.attempts;
+CREATE SEQUENCE temporary_cli.dispatch_guard;
+CREATE SEQUENCE temporary_cli.rollback_attempts;
+GRANT USAGE ON SCHEMA temporary_cli TO pgsavvy_temporary;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA temporary_cli TO pgsavvy_temporary;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA temporary_cli TO pgsavvy_temporary;
+SQL
+} | "${psql[@]}" >"$root/temporary-fixture.log" 2>&1
+printf '127.0.0.1:%s:pgsavvy_test:pgsavvy_temporary:%s\nlocalhost:%s:pgsavvy_test:pgsavvy_temporary:%s\n' \
+  "$port" "$temporary_password" "$port" "$temporary_password" >"$root/temporary.pass"
+chmod 600 "$root/temporary.pass"
+export PGSAVVY_TEMP_FIXTURE_ROOT="$root" PGSAVVY_TEMP_FIXTURE_PASSFILE="$root/temporary.pass"
+export PGSAVVY_TEMP_FIXTURE_SOCKET="$root/socket"
+export PGSAVVY_TEMP_FIXTURE_TOKEN=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+# Prove SCRAM over both owned transports, including socket password rejection.
+for endpoint in 127.0.0.1 "$root/socket"; do
+  PGPASSWORD="$temporary_password" "$pg/psql" -X -w -h "$endpoint" -p "$port" -U pgsavvy_temporary -d pgsavvy_test \
+    -v ON_ERROR_STOP=1 -Atc 'SELECT 1' >"$root/temporary-ready" 2>"$root/temporary-ready.err"
+  [ "$(cat "$root/temporary-ready")" = 1 ]
+  if PGPASSWORD=deliberately-wrong "$pg/psql" -X -w -h "$endpoint" -p "$port" -U pgsavvy_temporary -d pgsavvy_test \
+    -Atc 'SELECT 1' >"$root/temporary-wrong" 2>"$root/temporary-wrong.err"; then
+    echo 'temporary wrong password accepted' >&2; exit 1
+  fi
+  grep -q 'password authentication failed' "$root/temporary-wrong.err"
+done
 stage=readiness
 "${psql[@]}" -Atc 'SELECT 1' >"$root/ready" 2>"$root/ready.err"
 [ "$(cat "$root/ready")" = 1 ]
@@ -173,6 +215,20 @@ if [ "$((server / 10000))" != "$major" ] || [ "$encoding" != UTF8 ] || [ "$fixtu
   echo 'fixture version/auth/encoding mismatch' >&2; exit 1
 fi
 export PGSAVVY_TEST_PG="postgres://pgsavvy:$password@127.0.0.1:$port/pgsavvy_test?sslmode=disable"
+stage=temporary-ownership
+"${psql[@]}" -Atc "SELECT system_identifier::text, current_setting('data_directory') FROM pg_control_system()" >"$root/temporary-identity" 2>"$root/temporary-identity.err"
+python3 - "$root" <<'PY'
+import json, os, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+identifier, directory = (root / "temporary-identity").read_text().strip().split("|")
+assert identifier.isdecimal() and int(identifier) > 0
+assert pathlib.Path(directory).resolve() == (root / "data").resolve()
+metadata = {"token": os.environ["PGSAVVY_TEMP_FIXTURE_TOKEN"], "observer_dsn": os.environ["PGSAVVY_TEST_PG"],
+            "system_identifier": identifier, "data_directory": str((root / "data").resolve())}
+fd = os.open(root / "temporary-owner", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+with os.fdopen(fd, "w") as owned:
+    json.dump(metadata, owned)
+PY
 export CGO_ENABLED=0
 cd "$repo"
 stage=probe
@@ -190,7 +246,7 @@ go test -json -count=1 -timeout 5m ./pkg/cli -run "$selector" >"$root/tests.json
 stage=native-tests
 # Inventory the platform's compiled tests, including every history/approval/
 # executor regression. Evidence must show each actually passed, never skipped.
-native_selector='^(TestMachine|TestCLIHistory)'
+native_selector='^(TestMachine|TestCLIHistory|TestTemporary)'
 go test -json -list "$native_selector" -tags=integration \
   . ./internal/machineio ./pkg/cli ./pkg/drivers/pg ./pkg/session ./pkg/session/sshtunnel ./test/integration \
   >"$root/native-inventory.jsonl" 2>"$root/native-inventory.err"
@@ -199,7 +255,7 @@ go test -json -count=1 -timeout 10m -tags=integration \
   -run "$native_selector" >"$root/native-tests.jsonl" 2>"$root/native-tests.err"
 stage=evidence
 PYTHONDONTWRITEBYTECODE=1 python3 - "$root" "$host_os" "$host_arch" "$version" "$server" "$repo" <<'PY'
-import hashlib, json, pathlib, subprocess, sys
+import hashlib, json, pathlib, re, subprocess, sys
 sys.path.insert(0, str(pathlib.Path(sys.argv[6]) / ".github/scripts"))
 from cli_test_status import TEST_NAMES
 root = pathlib.Path(sys.argv[1])
@@ -242,34 +298,64 @@ required_native = {
     "TestMachineCLIBatchAnalysisPostgresDifferential",
     "TestMachineExecutePostgresTransactions", "TestMachineExecutePostgresLimits",
     "TestMachineExecutePostgresPolicyAndMaintenance", "TestMachineExecutePostgresCancelCommit",
+    "TestTemporaryAtomicPostgres", "TestTemporaryCLIIntegration", "TestTemporaryCLILexicalPostgres",
+    "TestTemporaryCLIProcessIsolation", "TestTemporaryCLIProcessCommitInterruption",
+    "TestTemporaryCLIProcessBrokenStdout",
+    "TestTemporaryCLIObserverOwnership", "TestTemporaryCLIProcessObserverOwnership",
 }
 inventory = set()
 for line in (root / "native-inventory.jsonl").read_text().splitlines():
     event = json.loads(line)
     name = event.get("Output", "").strip()
-    if event["Action"] == "output" and name.startswith(("TestMachine", "TestCLIHistory")) and "/" not in name:
+    if event["Action"] == "output" and name.startswith(("TestMachine", "TestCLIHistory", "TestTemporary")) and "/" not in name:
         inventory.add(event["Package"] + "::" + name)
-for prefix in ("TestMachineExecute", "TestMachineApproval", "TestCLIHistory"):
+for prefix in ("TestMachineExecute", "TestMachineApproval", "TestCLIHistory", "TestTemporary"):
     if not any(item.split("::", 1)[1].startswith(prefix) for item in inventory):
         raise SystemExit("required test family missing: " + prefix)
 native_passed, native_names = set(), set()
+native_pass_events = 0
+interrupted_rows = broken_stdout_exit = None
+rollback_observations = set()
 for line in (root / "native-tests.jsonl").read_text().splitlines():
     event = json.loads(line)
     if event["Action"] in ("skip", "fail"):
         raise SystemExit("native machine suite contains skipped/failed tests")
     if event["Action"] == "pass" and "Test" in event:
+        native_pass_events += 1
         native_names.add(event["Test"])
         native_passed.add(event["Package"] + "::" + event["Test"])
+    if event["Action"] == "output" and event.get("Test") == "TestTemporaryCLIProcessCommitInterruption":
+        match = re.search(r"interrupted COMMIT attempts=1, reported=unknown, eventual observer rows=([01]) \(not prescribed\)", event.get("Output", ""))
+        if match:
+            interrupted_rows = int(match[1])
+    if event["Action"] == "output" and event.get("Test") == "TestTemporaryCLIProcessBrokenStdout":
+        match = re.search(r"broken stdout exit=([1-9][0-9]*); independent observer durable rows=1 attempts=1", event.get("Output", ""))
+        if match:
+            broken_stdout_exit = int(match[1])
+    if event["Action"] == "output" and event.get("Test", "").startswith("TestTemporaryCLIIntegration/"):
+        match = re.search(r"rollback proof: id=(101[0-4]) marker_attempts=1 backend_terminated=true rows=0", event.get("Output", ""))
+        if match:
+            rollback_observations.add(int(match[1]))
 if not required_native <= native_names:
     raise SystemExit("required native machine tests missing")
 if not inventory <= native_passed:
     raise SystemExit("compiled native/history inventory not fully passed")
+if interrupted_rows is None or broken_stdout_exit is None:
+    raise SystemExit("temporary interruption/publication observations missing")
+if rollback_observations != set(range(1010, 1015)):
+    raise SystemExit("temporary independent rollback observations missing")
 binary = root / "pgsavvy"
 print(json.dumps({"scope": "machine-cli-linux-darwin", "goos": sys.argv[2], "goarch": sys.argv[3],
     "go_version": subprocess.check_output(["go", "version"], text=True).strip(), "cgo_enabled": "0",
     "binary": str(binary), "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
     "postgres_tools": sys.argv[4], "postgres_tools_arch": sys.argv[3], "server_version_num": sys.argv[5], "fixture_version": 2,
     "wrong_password_rejected": True, "max_prepared_transactions": 20,
-    "native_selector": "^(TestMachine|TestCLIHistory)", "required_inventory": public_names(inventory),
+    "temporary_scram_tcp_socket": True, "temporary_passfile_mode": "0600",
+    "temporary_observer_ownership": "exact-dsn-and-cluster-identity",
+    "native_pass_events": native_pass_events, "native_skip_events": 0, "native_fail_events": 0,
+    "temporary_independent_rollback_scenarios": len(rollback_observations),
+    "interrupted_commit_attempts": 1, "interrupted_commit_outcome": "unknown", "interrupted_eventual_rows": interrupted_rows,
+    "broken_stdout_exit": broken_stdout_exit, "broken_stdout_durable_rows": 1, "broken_stdout_attempts": 1,
+    "native_selector": "^(TestMachine|TestCLIHistory|TestTemporary)", "required_inventory": public_names(inventory),
     "tests_passed": public_names(baseline_passed), "native_tests_passed": public_names(native_passed)}))
 PY

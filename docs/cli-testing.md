@@ -1,5 +1,68 @@
 # Machine CLI native verification
 
+## Temporary-target release verification
+
+Temporary CLI targets are covered by the existing owned native Linux/macOS
+fixture, not an ambient database. Run final evidence **after** all shipping
+help/capability/test changes:
+
+```sh
+go test -count=1 ./pkg/cli -run '^TestMachineLLMHelp'
+go test -count=1 . -run '^TestMachineCLINative_Discovery$'
+python3 .github/scripts/cli-test-status.test.py
+task test
+task test:race
+task lint
+task build
+task test:cli:native PG_MAJOR=17
+task test:cli:native PG_MAJOR=18
+```
+
+Use a sufficiently long outer command budget: race subprocess suites can exceed
+120 seconds and each pinned PostgreSQL source build can take several minutes.
+A timeout is incomplete evidence, not a pass. No dependencies, generation,
+migration or permission repair is needed for this verification.
+
+The Unix runner inventories and executes `^(TestMachine|TestCLIHistory|TestTemporary)`
+with integration tags against its newly built exact CGO-disabled shipping binary.
+Every compiled top-level inventory entry must pass, and **any** skipped/failed
+event rejects acceptance. New top-level tests must be included in the diagnostic
+name allowlist; its source-comparison regression enforces that inventory. New
+subcases under existing tests remain in executed pass-event counts.
+
+`TestMachineLLMHelp_CanonicalCapabilities` compares canonical operation usage,
+temporary command/flag availability, read-only/write opt-in, password-source-only
+and outcome metadata. `TestMachineLLMHelp_GuideAndExamples` checks the new contract
+and read/write/socket examples without dropping saved guidance assertions.
+`TestMachineCLINative_Discovery/llm-help` runs the shipping guide, capabilities
+and every operation's help with missing, malformed and FIFO profile files and an
+open unread stdin pipe. It compares binary capabilities to source and embedded
+guide, checks operation usage equality and unchanged private roots/profile bytes:
+offline discovery must create zero artifacts and never wait for configuration
+or SQL input. Existing top-level test names are retained, not replaced.
+
+Live temporary coverage includes `TestTemporaryAtomicPostgres`,
+`TestTemporaryCLIIntegration`, `TestTemporaryCLILexicalPostgres`,
+`TestTemporaryCLIProcessIsolation`, `TestTemporaryCLIProcessCommitInterruption`
+and `TestTemporaryCLIProcessBrokenStdout`, plus observer-ownership tests. The
+fixture provisions separate restricted SCRAM TCP/socket access and a 0600
+passfile. Destructive observers must verify the exact designated DSN **and**
+cluster identity before network/SQL; only owned sessions/objects are affected.
+Independent observers prove five rollback/disposal scenarios, exactly one
+interrupted COMMIT attempt with reported `unknown` (eventual rows observed, not
+prescribed), and a broken-stdout nonzero exit after one durable write attempt.
+These outcomes deliberately do not equate nonzero exit with rollback.
+
+Retain final binary/source hashes, complete required/executed inventories,
+pass/skip/fail counts, actual tool/server versions, observer facts and
+`owned-native-cleanup` evidence. Both the owned root and socket directory must
+be removed after the owned cluster stops; incomplete cleanup fails acceptance.
+Refresh both PG17/PG18 runs whenever a shipping artifact/help/test inventory
+changes; prior T5 evidence is not evidence for a newly built T6 binary. Review
+the final shared-artifact diff and scoped `p/default` security evidence, including
+scan completion and manual triage of partial parsing, before release. Linux
+evidence does not establish native Darwin support or Windows activation.
+
 ## Query timeout regression
 
 With a designated disposable `PGSAVVY_TEST_PG` (never a user-owned database):
@@ -237,8 +300,8 @@ still report failures without loading the whole log into memory. Any malformed
 record or exceeded limit discards all statuses, diagnostic metadata and failure
 flags, including earlier valid records; this is diagnostic output, never acceptance evidence.
 The reporter's fixed allowlist in `.github/scripts/cli_test_status.py` contains
-source-declared top-level `TestMachine` and `TestCLIHistory` names from the native
-suite's package directories. Subtest failures still update their allowlisted
+source-declared top-level `TestMachine`, `TestCLIHistory` and `TestTemporary` names
+from the native suite's package directories. Subtest failures still update their allowlisted
 parent status. Package failures and unlisted failures expose only
 boolean flags, never their names. The allowlist does not add acceptance tests.
 
@@ -256,14 +319,16 @@ failure is sticky. `run` without a terminal action is distinct from an actual
 `locations` retains at most the first 32 distinct approved source sites, sorted
 for publication. Only reconstructed public basenames and line numbers are
 emitted: `terminal_unix_test.go`, `stream_unix.go`, `io_darwin_test.go`,
-`query_history_process_test.go`, `machine_test.go` and `dispatch_test.go`.
+`query_history_process_test.go`, `machine_test.go`, `dispatch_test.go`,
+`temporary_query_integration_test.go` and `temporary_query_process_test.go`.
 The Darwin fixture helper
 is included because PTY/termios setup can block before the child timeout
 context exists. Line
 numbers must lie within pinned public source bounds, checked against those
-six repository files by regression tests. The reporter recognizes assertion
-and Go panic/timeout stack locations in these four families' output, plus
-package-level output where timeout stacks have no test name. Private path
+eight repository files by regression tests. The reporter recognizes assertion
+and Go panic/timeout stack locations in the four fixed-case families' output,
+any allowlisted `TestTemporary` test or its subtests, the exact tests noted below,
+and package-level output where timeout stacks have no test name. Private path
 prefixes, stack function/argument text, assertion values, SQL, credentials and
 all other raw output remain private. These reported sites are diagnostic clues,
 not proof of the root cause or native acceptance.

@@ -23,7 +23,9 @@ Writable-full queries can additionally expose `execution.status`
 and `prepared_transactions_may_remain`. Possible effects begins at SQL dispatch;
 these fields preserve available evidence, not commit/rollback guarantees.
 Error responses contain no partial result rows. A connection is a selected
-profile name, never an endpoint. Backend work and cleanup finish before encoding.
+profile name, never an endpoint. In saved mode, backend work and cleanup finish
+before encoding. Temporary queries validate success encoding before COMMIT and
+publish the cached result only after acknowledged commit and successful cleanup.
 Error messages and remediation are allowlisted; raw backend errors are private.
 Diagnostic stderr is best-effort and follows the stdout publication attempt;
 its safe outcome code reflects that attempt. A failed diagnostic sink does not
@@ -154,6 +156,105 @@ transactions roll back with an explicit error. Deliberate PREPARE TRANSACTION
 can leave durable prepared work despite idle state/connection close; inspect
 and resolve owned GIDs explicitly. Configured SET ROLE is not an immutable
 security boundary within the login's grants. See [execution details](cli-query.md#native-execution-and-results).
+
+## Temporary local targets
+
+Temporary selection is separate from saved profiles and is available for `query`,
+all four `schema` operations and `connections test`:
+
+```text
+--temporary --port PORT --database DB --username USER --passfile PATH
+  [--host LOOPBACK_IP | --socket-dir ABSOLUTE_DIRECTORY]
+```
+
+For query/schema, replace `--connection NAME` with these flags; for connection
+testing, replace the positional saved name. Port is explicit decimal 1..65535,
+including sockets. Host defaults to `127.0.0.1`; explicit numeric loopback IPv4/IPv6
+only (IPv4-mapped addresses are canonicalized). DNS names including `localhost`,
+zones, multihost, remote addresses and built-in SSH are rejected. An explicit
+socket directory must be absolute and already clean (no trailing slash except
+root, `.` or `..` components), and cannot accompany an explicit host. Database,
+username and passfile must be nonempty UTF-8 without control characters.
+
+Saved selectors/positional names, `--approve` and `--confirm-connection` are invalid
+in temporary mode. Temporary fields without `--temporary` are invalid in saved
+mode; `--allow-write` is query-only and temporary-only. No DSN, service or saved
+target fallback is accepted. No temporary profile, credential, password or query
+history is persisted; saved configuration/history consent is not consulted.
+
+### Explicit passfile and environment
+
+`--passfile PATH` is mandatory; a relative path is relative to the invocation's
+working directory. No implicit `~/.pgpass`, helper, keyring, profile password,
+password argument or alternate credential source is used. The file is opened
+once nonblocking/no-follow, and checked on that same handle: regular, owned by
+the effective user, no group/other permission bits (0600 recommended; owner
+execute bits are permitted), at most 1 MiB. Final-component symlinks are rejected;
+this is not a blanket ban on symlinked ancestors. The CLI never repairs or edits it.
+
+Entries use `host:port:database:username:password`; the first match wins, including
+`*` wildcards, backslash escaping and CRLF support. TCP matches the canonical
+numeric host; sockets match `localhost`, not the socket path. Missing, insecure,
+oversized, unmatched or empty-password cases fail before dialing. Public errors
+never disclose passfile path/content/password or raw OS errors. **This is a
+password-source-only guarantee**: server authentication policy is external;
+the CLI does not prove that the server required or checked the supplied password.
+
+Before acquisition/dialing, reject each **nonempty** recognized pgx PostgreSQL
+configuration environment setting below, even if it equals an explicit flag:
+
+```text
+PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD PGPASSFILE PGAPPNAME
+PGCONNECT_TIMEOUT PGSSLMODE PGSSLKEY PGSSLCERT PGSSLSNI PGSSLROOTCERT
+PGSSLPASSWORD PGSSLNEGOTIATION PGTARGETSESSIONATTRS PGSERVICE PGSERVICEFILE
+PGTZ PGOPTIONS PGMINPROTOCOLVERSION PGMAXPROTOCOLVERSION
+```
+
+Unset or empty values are accepted; this is not a rejection of every `PG*` name.
+The process environment is never mutated. A canonical explicit configuration
+disables TLS, uses no service or fallback endpoint, and sets controlled startup
+and lexical settings. pgx may still stat default filesystem paths; preventing
+ambient configuration/credential influence does not promise zero filesystem
+checks. Filesystem syscalls on pathological mounts are not universally interruptible.
+
+### Transaction and output contract
+
+Temporary queries are READ ONLY by default; each writable invocation requires
+`--allow-write`. It does not elevate grants or turn off server read-only policy.
+The [temporary grammar and execution contract](cli-query.md#temporary-atomic-queries)
+is deliberately narrower than saved full access. One invocation owns one
+transaction; whole-script validation precedes any submitted SQL. Precommit SQL,
+result-validation or success-encoding failure prevents commit and rolls back or
+disposes the connection. Requested row truncation is success and permits commit.
+No automatic write retries occur.
+
+Temporary envelopes omit saved `connection` and expose only sanitized `target`:
+`source="temporary"`, `transport="tcp"|"unix"`, `host` or `socket_dir`, `port`,
+`database`, `username`, `read_only`. This is not endpoint anonymity. Temporary
+query data is always `results`, including reads, and includes available
+`execution` and top-level `transaction_outcome`:
+
+| Outcome | Evidence |
+| --- | --- |
+| `not_started` | Before BEGIN |
+| `rolled_back` | Positively acknowledged terminal rollback |
+| `disposed` | No COMMIT attempted; transport discarded without rollback acknowledgement |
+| `committed` | Terminal COMMIT acknowledgement |
+| `unknown` | COMMIT attempted without definitive terminal evidence |
+
+Success JSON is validated before COMMIT and published only after acknowledged
+commit and successful cleanup. Cleanup/publication can fail **after commit**;
+commit interruption may be unknown. Nonzero exit or absent output never proves
+rollback. Sequence consumption and permitted external effects are not rolled
+back. Independently inspect state before deciding recovery; never blindly retry.
+
+Provision a dedicated restricted login externally. Effective memberships,
+SECURITY DEFINER functions, triggers and extensions remain trusted authority:
+validation is **not a server-code sandbox**. CRUD can delete all accessible rows.
+The CLI does not provision roles/grants, discover worktrees, prove ownership or
+promise automatic cleanup of database objects/fixtures. A loopback endpoint or
+local socket may itself forward remotely. Reverting the binary does not undo
+committed database changes; temporary mode introduces no profile migration.
 
 ## Binary rollback
 

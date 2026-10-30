@@ -15,11 +15,11 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/query"
 )
 
-const queryUsage = "query --connection NAME --file PATH|- [--params-file PATH] [--max-rows 1..1000] [--schema NAME] [--approve --confirm-connection NAME]"
+const queryUsage = "query " + targetUsage + " --file PATH|- [--params-file PATH] [--max-rows 1..1000] [--schema NAME] [--approve --confirm-connection NAME (saved only)] [--allow-write (temporary only)]"
 
 func QueryCommand(service InvocationService) Command {
 	return func(ctx context.Context, args []string, streams IO) (envelope Envelope, resultErr error) {
-		flags, positional, err := ParseFlags(args, []string{"connection", "file", "params-file", "max-rows", "schema", "confirm-connection"}, []string{"help", "approve"})
+		flags, positional, err := ParseFlags(args, append([]string{"connection", "file", "params-file", "max-rows", "schema", "confirm-connection"}, temporaryTargetFlags...), []string{"help", "approve", "temporary", "allow-write"})
 		if err != nil || len(positional) != 0 {
 			return Envelope{}, &PublicError{Code: InvalidInput}
 		}
@@ -29,24 +29,35 @@ func QueryCommand(service InvocationService) Command {
 			}
 			return Envelope{Command: "query", Data: map[string]any{"usage": queryUsage, "read_only": false, "policy": queryPolicy()}, ResultComplete: true}, nil
 		}
+		target, err := selectTemporaryTarget(flags, true)
+		if err != nil {
+			return Envelope{}, err
+		}
+		if target != nil {
+			_, allowWrite := flags["allow-write"]
+			envelope = Envelope{Command: "query", Target: publicTemporaryTarget(*target, !allowWrite), Execution: &executionMetadata{Status: "not_started"}, TransactionOutcome: "not_started"}
+		}
 		_, approved := flags["approve"]
 		_, confirmed := flags["confirm-connection"]
 		if approved != confirmed {
 			return Envelope{}, &PublicError{Code: InvalidInput}
 		}
 		name, file := flags["connection"], flags["file"]
-		if name == "" || file == "" {
-			return Envelope{}, &PublicError{Code: InvalidInput}
+		if target == nil && name == "" || file == "" {
+			return envelope, &PublicError{Code: InvalidInput}
 		}
 		if len(flags["schema"]) > MaxInputBytes || !utf8.ValidString(flags["schema"]) || strings.IndexByte(flags["schema"], 0) >= 0 {
-			return Envelope{}, &PublicError{Code: InvalidInput}
+			return envelope, &PublicError{Code: InvalidInput}
 		}
 		rows := DefaultRows
 		if raw, ok := flags["max-rows"]; ok {
 			rows, err = strconv.Atoi(raw)
 			if err != nil || rows < 1 || rows > MaxRows {
-				return Envelope{}, &PublicError{Code: InvalidInput}
+				return envelope, &PublicError{Code: InvalidInput}
 			}
+		}
+		if target != nil {
+			return queryTemporary(ctx, service, *target, flags, rows, streams)
 		}
 		sql, err := ReadSQL(ctx, file, streams.In)
 		if err != nil {

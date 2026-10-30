@@ -184,15 +184,19 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	exit := ExitSuccess
 	if err != nil {
 		public := safeError(err)
-		envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: public, Warnings: envelope.Warnings, Execution: envelope.Execution}
+		envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: public, Warnings: envelope.Warnings, Execution: envelope.Execution, Target: envelope.Target, TransactionOutcome: envelope.TransactionOutcome}
 		exit = public.description().exit
 	} else {
 		envelope.OK = true
 	}
-	data, encodingErr := encodeWithOptionalHistoryWarnings(ctx, envelope)
+	data := envelope.cachedJSON
+	var encodingErr error
+	if err != nil || len(data) == 0 {
+		data, encodingErr = encodeWithOptionalHistoryWarnings(ctx, envelope)
+	}
 	if encodingErr != nil {
 		public := safeError(encodingErr)
-		envelope = Envelope{Command: label, Error: public, Warnings: envelope.Warnings, Execution: envelope.Execution}
+		envelope = Envelope{Command: label, Error: public, Warnings: envelope.Warnings, Execution: envelope.Execution, Target: envelope.Target, TransactionOutcome: envelope.TransactionOutcome}
 		exit = public.description().exit
 		data, encodingErr = encodeWithOptionalHistoryWarnings(ctx, envelope)
 		if encodingErr != nil {
@@ -204,7 +208,7 @@ func Dispatch(parent context.Context, args []string, streams IO, registry map[st
 	select {
 	case <-streams.Cancel:
 		if exit != ExitTimeout {
-			envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: &PublicError{Code: Timeout}, Warnings: envelope.Warnings, Execution: envelope.Execution}
+			envelope = Envelope{Command: envelope.Command, Connection: envelope.Connection, Error: &PublicError{Code: Timeout}, Warnings: envelope.Warnings, Execution: envelope.Execution, Target: envelope.Target, TransactionOutcome: envelope.TransactionOutcome}
 			data, encodingErr = encodeWithOptionalHistoryWarnings(ctx, envelope)
 			if encodingErr != nil {
 				return true, ExitTimeout

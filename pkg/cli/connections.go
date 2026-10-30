@@ -10,7 +10,7 @@ import (
 	"github.com/davesavic/pgsavvy/pkg/models"
 )
 
-var connectionUsage = map[string]string{"list": "connections list", "show": "connections show NAME", "test": "connections test NAME"}
+var connectionUsage = map[string]string{"list": "connections list", "show": "connections show NAME", "test": "connections test (NAME | " + temporaryTargetUsage + ")"}
 
 func ConnectionsCommand(service InvocationService) Command {
 	return func(ctx context.Context, args []string, _ IO) (Envelope, error) {
@@ -27,7 +27,12 @@ func ConnectionsCommand(service InvocationService) Command {
 			return Envelope{}, bad
 		}
 		base := Envelope{Command: "connections " + operation}
-		flags, positional, err := ParseFlags(args[1:], nil, []string{"help"})
+		values, switches := []string{}, []string{"help"}
+		if operation == "test" {
+			values = temporaryTargetFlags
+			switches = append(switches, "temporary")
+		}
+		flags, positional, err := ParseFlags(args[1:], values, switches)
 		if err != nil {
 			return base, bad
 		}
@@ -52,6 +57,31 @@ func ConnectionsCommand(service InvocationService) Command {
 				items = append(items, PublicConnection(profile))
 			}
 			base.Data = items
+			base.ResultComplete = true
+			return base, nil
+		}
+		target, err := selectTemporaryTarget(flags, false)
+		if err != nil {
+			return base, err
+		}
+		if target != nil {
+			if len(positional) != 0 {
+				return base, bad
+			}
+			base.Target = publicTemporaryTarget(*target, true)
+			client, err := service.openTemporaryTarget(ctx, *target)
+			if err != nil {
+				return base, err
+			}
+			pingErr := client.Ping(ctx)
+			closeErr := CloseMachine(ctx, client)
+			if pingErr != nil {
+				return base, PublicMachineError(pingErr)
+			}
+			if closeErr != nil {
+				return base, closeErr
+			}
+			base.Data = map[string]any{"connected": true, "read_only": true}
 			base.ResultComplete = true
 			return base, nil
 		}
@@ -128,7 +158,13 @@ func capabilityData() map[string]any {
 	return map[string]any{
 		"platform": runtime.GOOS, "format": "json", "commands": commands, "query_read_only": false, "query_policy": queryPolicy(), "catalog_visibility_implies_row_access": false,
 		"global_flags": []string{"--format json", "--timeout DURATION"},
-		"limits":       map[string]any{"sql_bytes": MaxInputBytes, "parameter_bytes": MaxInputBytes, "parameters": MaxParameters, "profile_selector_bytes": MaxProfileBytes, "row_default": DefaultRows, "row_max": MaxRows, "cell_bytes": MaxCellBytes, "encoded_output_bytes": MaxOutputBytes, "metadata_list_default": 100, "metadata_section_max": 1000, "invocation_seconds": 30, "timeout_max_ms": MaxInvocationTimeout.Milliseconds(), "connection_seconds": 10, "helper_seconds": 5, "helper_stdout_bytes": MaxHelperBytes, "statement_seconds": 10, "lock_seconds": 1, "cleanup_seconds": 2, "publication_seconds": 2},
-		"exit_codes":   map[string]int{"success": ExitSuccess, "input": ExitInput, "unavailable": ExitUnavailable, "policy": ExitPolicy, "database": ExitDatabase, "timeout": ExitTimeout, "resource": ExitResource},
+		"temporary_target": map[string]any{
+			"usage": temporaryTargetUsage, "commands": []string{"query", "schema list", "schema tables", "schema describe", "schema relationships", "connections test"},
+			"saved_cli_access_required": false, "read_only_default": true, "write_opt_in": "--allow-write (query only)",
+			"password_source": "explicit protected --passfile only; server authentication policy is external", "history": false, "persistence": false,
+			"transaction_outcomes": []string{"not_started", "rolled_back", "disposed", "committed", "unknown"},
+		},
+		"limits":     map[string]any{"sql_bytes": MaxInputBytes, "parameter_bytes": MaxInputBytes, "parameters": MaxParameters, "profile_selector_bytes": MaxProfileBytes, "row_default": DefaultRows, "row_max": MaxRows, "cell_bytes": MaxCellBytes, "encoded_output_bytes": MaxOutputBytes, "metadata_list_default": 100, "metadata_section_max": 1000, "invocation_seconds": 30, "timeout_max_ms": MaxInvocationTimeout.Milliseconds(), "connection_seconds": 10, "helper_seconds": 5, "helper_stdout_bytes": MaxHelperBytes, "statement_seconds": 10, "lock_seconds": 1, "cleanup_seconds": 2, "publication_seconds": 2},
+		"exit_codes": map[string]int{"success": ExitSuccess, "input": ExitInput, "unavailable": ExitUnavailable, "policy": ExitPolicy, "database": ExitDatabase, "timeout": ExitTimeout, "resource": ExitResource},
 	}
 }

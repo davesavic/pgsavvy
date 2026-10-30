@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/netip"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -29,18 +32,51 @@ type executionMetadata struct {
 	PreparedTransactionsMayRemain bool   `json:"prepared_transactions_may_remain,omitempty"`
 }
 
+type temporaryTargetMetadata struct {
+	Source    string `json:"source"`
+	Transport string `json:"transport"`
+	Host      string `json:"host,omitempty"`
+	SocketDir string `json:"socket_dir,omitempty"`
+	Port      uint16 `json:"port"`
+	Database  string `json:"database"`
+	Username  string `json:"username"`
+	ReadOnly  bool   `json:"read_only"`
+}
+
+func (t temporaryTargetMetadata) valid() bool {
+	selector := func(s string) bool {
+		return s != "" && len(s) <= MaxInputBytes && utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl)
+	}
+	if t.Source != "temporary" || t.Port == 0 || !selector(t.Database) || !selector(t.Username) {
+		return false
+	}
+	switch t.Transport {
+	case "tcp":
+		address, err := netip.ParseAddr(t.Host)
+		return err == nil && address.Zone() == "" && address.IsLoopback() && address.Unmap().String() == t.Host && t.SocketDir == ""
+	case "unix":
+		return t.Host == "" && selector(t.SocketDir) && filepath.IsAbs(t.SocketDir) && filepath.Clean(t.SocketDir) == t.SocketDir
+	default:
+		return false
+	}
+}
+
 type Envelope struct {
-	SchemaVersion    int                `json:"schema_version"`
-	OK               bool               `json:"ok"`
-	Command          string             `json:"command"`
-	Connection       string             `json:"connection,omitempty"`
-	Data             any                `json:"data,omitempty"`
-	Error            *PublicError       `json:"error,omitempty"`
-	Warnings         []ErrorCode        `json:"warnings"`
-	ResultComplete   bool               `json:"result_complete"`
-	Truncated        bool               `json:"truncated"`
-	TruncationReason string             `json:"truncation_reason,omitempty"`
-	Execution        *executionMetadata `json:"execution,omitempty"`
+	SchemaVersion      int                      `json:"schema_version"`
+	OK                 bool                     `json:"ok"`
+	Command            string                   `json:"command"`
+	Connection         string                   `json:"connection,omitempty"`
+	Data               any                      `json:"data,omitempty"`
+	Error              *PublicError             `json:"error,omitempty"`
+	Warnings           []ErrorCode              `json:"warnings"`
+	ResultComplete     bool                     `json:"result_complete"`
+	Truncated          bool                     `json:"truncated"`
+	TruncationReason   string                   `json:"truncation_reason,omitempty"`
+	Execution          *executionMetadata       `json:"execution,omitempty"`
+	Target             *temporaryTargetMetadata `json:"target,omitempty"`
+	TransactionOutcome string                   `json:"transaction_outcome,omitempty"`
+	// Only temporary execution may supply bytes validated before COMMIT.
+	cachedJSON []byte
 }
 
 type limitedBuffer struct {
@@ -65,6 +101,19 @@ func encode(envelope Envelope) ([]byte, error) {
 
 func encodeContext(ctx context.Context, envelope Envelope) ([]byte, error) {
 	envelope.SchemaVersion = 1
+	if envelope.Target != nil && (!envelope.Target.valid() || envelope.Connection != "") {
+		return nil, &PublicError{Code: ResourceFailure}
+	}
+	if envelope.TransactionOutcome != "" {
+		if envelope.Target == nil {
+			return nil, &PublicError{Code: ResourceFailure}
+		}
+		switch envelope.TransactionOutcome {
+		case "not_started", "rolled_back", "disposed", "committed", "unknown":
+		default:
+			return nil, &PublicError{Code: ResourceFailure}
+		}
+	}
 	if envelope.Execution != nil {
 		metadata := *envelope.Execution
 		switch metadata.Status {
