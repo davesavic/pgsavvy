@@ -139,7 +139,14 @@ tasks:
   release:
     desc: Cut a release via goreleaser (requires a tag at HEAD + GITHUB_TOKEN).
     cmds:
-      - goreleaser release --clean
+      - |
+        set -eu
+        notes_file=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/pgsavvy-release-notes.XXXXXX")
+        trap 'rm -f "$notes_file"' EXIT
+        tag=$(git describe --tags --exact-match HEAD)
+        go run ./internal/releasenotes --print "$tag" > "$notes_file"
+        test -s "$notes_file"
+        GORELEASER_CURRENT_TAG="$tag" goreleaser release --clean --release-notes "$notes_file"
 
   release:snapshot:
     desc: Build a local snapshot release via goreleaser (no publish; for verification).

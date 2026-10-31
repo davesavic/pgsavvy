@@ -21,7 +21,10 @@ jobs:
           cache: true
 
       - name: Validate release notes
-        run: go run ./internal/releasenotes "$GITHUB_REF_NAME"
+        run: |
+          set -euo pipefail
+          go run ./internal/releasenotes --print "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.txt"
+          test -s "$RUNNER_TEMP/release-notes.txt"
 
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
@@ -56,6 +59,6 @@ jobs:
           fi
 
       - name: Release
-        run: goreleaser release --clean
+        run: GORELEASER_CURRENT_TAG="$GITHUB_REF_NAME" goreleaser release --clean --release-notes "$RUNNER_TEMP/release-notes.txt"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
