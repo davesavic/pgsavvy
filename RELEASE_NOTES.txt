@@ -25,9 +25,14 @@ pgsavvy v0.16.0
   statement limits. Defaults remain 30s total and 10s per statement; the total
   budget includes setup, cleanup and output.
 
-  Updated CLI help/contracts and owned PostgreSQL 17/18 coverage. Stabilized
-  query-preemption regression ordering without changing production behavior.
-  Native macOS acceptance remains pending; Windows machine commands remain
+  Updated CLI help/contracts and owned PostgreSQL 17/18 coverage. Isolated native
+  fixture selection, synchronized cancellation/query-preemption regression tests
+  and added bounded, sanitized history/approval failure diagnostics. These test
+  and diagnostic changes do not alter production behavior or timing budgets.
+
+  Known limitation: native Intel macOS PostgreSQL 17/18 CI fails discovery tests,
+  plus the query-timeout test on PostgreSQL 17. Causes remain unproven; native
+  Intel macOS acceptance is incomplete. Windows machine commands remain
   unavailable. See docs/cli-query.md, docs/cli-contract.md and docs/cli-testing.md.
 
 pgsavvy v0.15.1
